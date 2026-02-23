@@ -15,9 +15,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 from cyberscript.template_vars import build_instance_data, resolve_template
 
+from cms.experiments.ecs import start_experiment_task
 from cms.experiments.models import (
     Experiment,
     ExperimentRun,
@@ -29,6 +31,7 @@ from cms.experiments.schemas import (
     RunStatus,
     ScriptType,
 )
+from engine import create_range as engine_create_range
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +327,13 @@ class ExperimentOrchestrator:
         run: ExperimentRun,
         provisioned_instances: dict[str, Any],
     ) -> RunExecutionPlan:
-        """Build an execution plan from experiment scripts and provisioned data."""
+        """Build an execution plan from experiment scripts and provisioned data.
+
+        Raises:
+            ExecutionPlanError: If required instances are missing from provisioned data.
+        """
+        from cms.experiments.exceptions import ExecutionPlanError
+
         instance_data = build_instance_data(provisioned_instances)
         scripts = (
             ExperimentScript.objects.filter(
@@ -335,6 +344,7 @@ class ExperimentOrchestrator:
         )
 
         plan = RunExecutionPlan(run_id=run.pk)
+        missing_instances: list[str] = []
 
         for script_assignment in scripts:
             instance_name = script_assignment.instance_name
@@ -347,6 +357,7 @@ class ExperimentOrchestrator:
                     instance_name,
                     run.pk,
                 )
+                missing_instances.append(instance_name)
                 continue
 
             if script_assignment.script_type == ScriptType.PYTHON.value:
@@ -376,6 +387,12 @@ class ExperimentOrchestrator:
             else:
                 plan.attacker_commands.append(cmd)
 
+        # Fail fast if instances are missing
+        if missing_instances:
+            raise ExecutionPlanError(
+                f"Cannot build execution plan for run {run.pk}: missing instances {missing_instances}"
+            )
+
         return plan
 
     def _build_python_command(self, s3_key: str, instance_name: str) -> str:
@@ -389,11 +406,23 @@ class ExperimentOrchestrator:
     def _build_claude_command(self, resolved_prompt: str) -> str:
         """Build Claude Code invocation command.
 
-        Security note: The resolved prompt may contain shell metacharacters
-        (backticks, $(), |, etc.) from user-provided Claude prompt text.
-        Only single quotes are escaped. This is intentional — only staff users
-        can create experiments, and commands execute in isolated ECS tasks
-        within the user's own range. Users need flexibility for complex prompts.
+        Security model:
+        - Only staff users can create experiments (enforced at API layer)
+        - Commands execute in isolated ECS Fargate tasks (network isolation)
+        - Tasks run in the user's own range (no cross-user access)
+        - Single-quote POSIX escaping (replace ' with '\\'' per POSIX.1-2008)
+
+        Intentional design decision: Minimal escaping for user flexibility.
+        The resolved prompt may contain shell metacharacters (backticks, $(), |, etc.)
+        from template variables. This is acceptable because:
+        1. Staff-only access boundary (malicious staff = bigger problems)
+        2. Isolated execution environment (ECS task, user's own infrastructure)
+        3. Scientific use case requires complex command composition
+
+        Alternative approaches (not used):
+        - Full shell escaping: Breaks legitimate use cases (piping, command substitution)
+        - Base64 encoding: Obscures debugging, breaks readability
+        - Python subprocess: Would require shipping Python to range instances
         """
         escaped_prompt = resolved_prompt.replace("'", "'\\''")
         return (
@@ -406,25 +435,295 @@ class ExperimentOrchestrator:
     def _request_range_provisioning(self, run: ExperimentRun) -> None:
         """Request range provisioning for a run via the engine.
 
-        This will trigger CMS→Engine range creation via ECS.
+        Follows the same hydrate → RequestSpec → engine pattern as
+        cms.services.create_range, adapted for experiment runs:
+        - No "active range" guard (experiments provision many ranges)
+        - Agent comes from experiment.agent rather than per-request input
+        - request_id is stored on ExperimentRun for event correlation
+
+        On failure the run is transitioned to FAILED with an error message
+        and the method returns (does not raise).
+
+        Args:
+            run: The ExperimentRun to provision a range for. Must already be
+                in PROVISIONING status.
         """
+        from cms.exceptions import CMSError
+        from cms.models import AgentConfig, RangeInstance, Request
+        from cms.scenarios.hydrator import hydrate_scenario
+        from shared.enums import RequestType
+        from shared.schemas import RequestSpec
+
+        experiment = self.experiment
+        scenario_id: str = experiment.scenario_id
+        user = experiment.user
+
         logger.info(
-            "_request_range_provisioning: requesting range for run %s (experiment=%s)",
+            "_request_range_provisioning: run=%d experiment=%d scenario=%s user=%d",
+            run.pk,
+            self.experiment_id,
+            scenario_id,
+            user.pk,
+        )
+
+        # --- Build agents dict from experiment's agent ---
+        agent: AgentConfig | None = experiment.agent
+        agents: dict[str, AgentConfig] = {}
+
+        if agent is not None:
+            if agent.deleted_at is not None:
+                msg = f"Agent '{agent.name}' (id={agent.pk}) has been deleted"
+                logger.error(
+                    "_request_range_provisioning: %s (run=%d)",
+                    msg,
+                    run.pk,
+                )
+                run.error_message = msg
+                run.save(update_fields=["error_message"])
+                run.transition_to(RunStatus.FAILED)
+                return
+
+            os_key = "windows" if agent.os.slug.lower() == "windows" else "linux"
+            agents[os_key] = agent
+
+        # --- Hydrate scenario ---
+        try:
+            range_spec = hydrate_scenario(scenario_id, user.pk, agents)
+        except (CMSError, ValueError) as exc:
+            msg = f"Scenario hydration failed for '{scenario_id}': {exc}"
+            logger.error(
+                "_request_range_provisioning: %s (run=%d)",
+                msg,
+                run.pk,
+            )
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        # --- Create CMS Request record ---
+        request_id = uuid4()
+        cms_request = Request.objects.create(
+            request_id=request_id,
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+
+        # --- Store request_id on run for event correlation ---
+        run.request_id = request_id
+        run.save(update_fields=["request_id"])
+
+        logger.info(
+            "_request_range_provisioning: created Request %s for run=%d",
+            request_id,
+            run.pk,
+        )
+
+        # --- Wrap RangeSpec in RequestSpec and call engine ---
+        request_spec = RequestSpec(
+            request_id=request_id,
+            user_id=user.pk,
+            items=[range_spec],
+        )
+
+        try:
+            engine_create_range(request_spec)
+        except Exception as exc:
+            msg = f"Engine create_range failed: {exc}"
+            logger.exception(
+                "_request_range_provisioning: %s (run=%d, request_id=%s)",
+                msg,
+                run.pk,
+                request_id,
+            )
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        # --- Create RangeInstance tracking record ---
+        RangeInstance.objects.create(
+            request=cms_request,
+            scenario_id=scenario_id,
+            user_id=user.pk,
+            agent=agent,
+            range_spec=range_spec.model_dump(mode="json"),
+        )
+
+        logger.info(
+            "_request_range_provisioning: provisioning triggered for run=%d request_id=%s scenario=%s",
+            run.pk,
+            request_id,
+            scenario_id,
+        )
+
+    def _dispatch_commands(self, run: ExperimentRun, commands: list[ScriptCommand]) -> None:
+        """Dispatch script commands for execution via ECS task.
+
+        Serializes the commands as a JSON payload and starts an ECS Fargate
+        task to execute them on the provisioned range instances via SSM.
+
+        On success the ECS task ARN is stored in run.metadata. On failure
+        (ECS not configured or API error) the run transitions to FAILED.
+
+        Idempotency: If a task ARN already exists in metadata, logs a warning
+        and returns without dispatching to prevent duplicate task submissions
+        on retries or duplicate events.
+
+        Args:
+            run: The ExperimentRun being executed. Must have request_id set.
+            commands: List of resolved ScriptCommand objects to execute.
+        """
+        from dataclasses import asdict
+
+        # Idempotency check: Don't dispatch if already dispatched
+        existing_arn = (run.metadata or {}).get("dispatch_task_arn")
+        if existing_arn:
+            logger.warning(
+                "_dispatch_commands: run %d already has dispatch_task_arn=%s, skipping duplicate dispatch",
+                run.pk,
+                existing_arn,
+            )
+            return
+
+        logger.info(
+            "_dispatch_commands: dispatching %d commands for run=%d (experiment=%d)",
+            len(commands),
             run.pk,
             self.experiment_id,
         )
 
-    def _dispatch_commands(self, run: ExperimentRun, commands: list[ScriptCommand]) -> None:
-        """Dispatch script commands for execution via ECS task."""
+        payload = {
+            "commands": [asdict(cmd) for cmd in commands],
+        }
+
+        if run.request_id is None:
+            msg = "ExperimentRun has no request_id — cannot dispatch commands"
+            logger.error("_dispatch_commands: %s (run=%d)", msg, run.pk)
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        try:
+            task_arn = start_experiment_task(
+                experiment_id=self.experiment_id,
+                run_id=run.pk,
+                request_id=run.request_id,
+                command="execute",
+                payload=payload,
+            )
+        except Exception as exc:
+            msg = f"Failed to start execution ECS task: {exc}"
+            logger.exception(
+                "_dispatch_commands: %s (run=%d)",
+                msg,
+                run.pk,
+            )
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        if task_arn is None:
+            msg = "ECS not configured — cannot dispatch experiment commands"
+            logger.error("_dispatch_commands: %s (run=%d)", msg, run.pk)
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        # Store task ARN in metadata for debugging/correlation
+        metadata = run.metadata or {}
+        metadata["dispatch_task_arn"] = task_arn
+        run.metadata = metadata
+        run.save(update_fields=["metadata"])
+
         logger.info(
-            "_dispatch_commands: dispatching %d commands for run %s",
-            len(commands),
+            "_dispatch_commands: started ECS task=%s for run=%d",
+            task_arn,
             run.pk,
         )
 
     def _collect_artifacts(self, run: ExperimentRun) -> None:
-        """Trigger artifact collection from range instances via ECS task."""
-        logger.info("_collect_artifacts: collecting for run %s", run.pk)
+        """Trigger artifact collection from range instances via ECS task.
+
+        Starts an ECS Fargate task that copies output files from range
+        instances to S3 and creates RunArtifact/ExperimentArtifact records.
+
+        On success the ECS task ARN is stored in run.metadata. On failure
+        the run transitions to FAILED.
+
+        Idempotency: If a collection task ARN already exists in metadata, logs
+        a warning and returns without dispatching to prevent duplicate task
+        submissions on retries or duplicate events.
+
+        Args:
+            run: The ExperimentRun to collect artifacts for.
+                Must have request_id set.
+        """
+        # Idempotency check: Don't collect if already started
+        existing_arn = (run.metadata or {}).get("collect_task_arn")
+        if existing_arn:
+            logger.warning(
+                "_collect_artifacts: run %d already has collect_task_arn=%s, skipping duplicate collection",
+                run.pk,
+                existing_arn,
+            )
+            return
+
+        logger.info(
+            "_collect_artifacts: collecting for run=%d (experiment=%d)",
+            run.pk,
+            self.experiment_id,
+        )
+
+        if run.request_id is None:
+            msg = "ExperimentRun has no request_id — cannot collect artifacts"
+            logger.error("_collect_artifacts: %s (run=%d)", msg, run.pk)
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        try:
+            task_arn = start_experiment_task(
+                experiment_id=self.experiment_id,
+                run_id=run.pk,
+                request_id=run.request_id,
+                command="collect",
+            )
+        except Exception as exc:
+            msg = f"Failed to start collection ECS task: {exc}"
+            logger.exception(
+                "_collect_artifacts: %s (run=%d)",
+                msg,
+                run.pk,
+            )
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        if task_arn is None:
+            msg = "ECS not configured — cannot collect experiment artifacts"
+            logger.error("_collect_artifacts: %s (run=%d)", msg, run.pk)
+            run.error_message = msg
+            run.save(update_fields=["error_message"])
+            run.transition_to(RunStatus.FAILED)
+            return
+
+        # Store task ARN in metadata for debugging/correlation
+        metadata = run.metadata or {}
+        metadata["collect_task_arn"] = task_arn
+        run.metadata = metadata
+        run.save(update_fields=["metadata"])
+
+        logger.info(
+            "_collect_artifacts: started ECS task=%s for run=%d",
+            task_arn,
+            run.pk,
+        )
 
     def _check_experiment_completion(self) -> None:
         """Check if all runs are terminal and update experiment status."""

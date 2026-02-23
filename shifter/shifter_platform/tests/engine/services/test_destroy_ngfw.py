@@ -23,7 +23,7 @@ def mock_ngfw_instance():
     instance = Mock(spec=Instance)
     instance.id = 1
     instance.role = "ngfw"
-    instance.status = "active"
+    instance.status = "ready"
     return instance
 
 

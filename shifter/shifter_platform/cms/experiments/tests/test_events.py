@@ -21,12 +21,12 @@ class PublishExperimentEventTest(TestCase):
     """Tests for publish_experiment_event function."""
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": "https://sqs.us-east-2.amazonaws.com/123/experiments"}},
+        SQS_QUEUE_CONFIG={"cms": {"url": "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"}},
         AWS_REGION="us-east-2",
     )
     @patch("cms.experiments.events.boto3.client")
     def test_publishes_successfully(self, mock_boto_client: MagicMock) -> None:
-        """Successfully publishes event to configured SQS queue."""
+        """Successfully publishes event to configured CMS SQS queue."""
         mock_sqs = MagicMock()
         mock_boto_client.return_value = mock_sqs
 
@@ -38,34 +38,36 @@ class PublishExperimentEventTest(TestCase):
 
         mock_sqs.send_message.assert_called_once()
         call_kwargs = mock_sqs.send_message.call_args[1]
-        assert call_kwargs["QueueUrl"] == "https://sqs.us-east-2.amazonaws.com/123/experiments"
+        assert call_kwargs["QueueUrl"] == "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"
 
     @override_settings(
         SQS_QUEUE_CONFIG={},
         AWS_REGION="us-east-2",
     )
-    def test_returns_gracefully_when_not_configured(self) -> None:
-        """Returns without error when SQS queue is not configured."""
-        # Should not raise — graceful return for unconfigured queue
-        publish_experiment_event(
-            event_type="test.event",
-            payload={"data": "value"},
-        )
+    def test_raises_when_not_configured(self) -> None:
+        """Raises ExperimentEventError when SQS queue is not configured."""
+        with self.assertRaises(ExperimentEventError) as ctx:
+            publish_experiment_event(
+                event_type="test.event",
+                payload={"data": "value"},
+            )
+        assert "SQS_CMS_URL not configured" in str(ctx.exception)
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": ""}},
+        SQS_QUEUE_CONFIG={"cms": {"url": ""}},
         AWS_REGION="us-east-2",
     )
-    def test_returns_gracefully_when_url_empty(self) -> None:
-        """Returns without error when queue URL is empty string."""
-        # Should not raise — graceful return for empty URL
-        publish_experiment_event(
-            event_type="test.event",
-            payload={"data": "value"},
-        )
+    def test_raises_when_url_empty(self) -> None:
+        """Raises ExperimentEventError when queue URL is empty string."""
+        with self.assertRaises(ExperimentEventError) as ctx:
+            publish_experiment_event(
+                event_type="test.event",
+                payload={"data": "value"},
+            )
+        assert "SQS_CMS_URL not configured" in str(ctx.exception)
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": "https://sqs.us-east-2.amazonaws.com/123/experiments"}},
+        SQS_QUEUE_CONFIG={"cms": {"url": "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"}},
         AWS_REGION="us-east-2",
     )
     @patch("cms.experiments.events.boto3.client")
@@ -93,7 +95,7 @@ class PublishExperimentEventTest(TestCase):
         assert ctx.exception.__cause__ is sqs_error
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": "https://sqs.us-east-2.amazonaws.com/123/experiments"}},
+        SQS_QUEUE_CONFIG={"cms": {"url": "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"}},
         AWS_REGION="",
     )
     def test_raises_on_missing_region(self) -> None:
@@ -109,7 +111,7 @@ class PublishExperimentEventTest(TestCase):
         assert "AWS_REGION" in str(ctx.exception.__cause__)
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": "https://sqs.us-east-2.amazonaws.com/123/experiments"}},
+        SQS_QUEUE_CONFIG={"cms": {"url": "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"}},
         AWS_REGION="us-east-2",
     )
     @patch("cms.experiments.events.boto3.client")
@@ -133,7 +135,7 @@ class PublishRangeProvisionedTest(TestCase):
     """Tests for publish_range_provisioned_for_experiment wrapper function."""
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": "https://sqs.us-east-2.amazonaws.com/123/experiments"}},
+        SQS_QUEUE_CONFIG={"cms": {"url": "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"}},
         AWS_REGION="us-east-2",
     )
     @patch("cms.experiments.events.boto3.client")
@@ -166,7 +168,7 @@ class PublishRangeProvisionedTest(TestCase):
         assert message_body["provisioned_instances"] == provisioned_instances
 
     @override_settings(
-        SQS_QUEUE_CONFIG={"experiments": {"url": "https://sqs.us-east-2.amazonaws.com/123/experiments"}},
+        SQS_QUEUE_CONFIG={"cms": {"url": "https://sqs.us-east-2.amazonaws.com/123/cms-tasks"}},
         AWS_REGION="us-east-2",
     )
     @patch("cms.experiments.events.boto3.client")

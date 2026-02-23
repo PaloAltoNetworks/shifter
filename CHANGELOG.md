@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] - 2026-02-22
+
+### Fixed
+- Experiment runner integration fixes
+
+## [2.2.8] - 2026-02-22
+
+### Changed
+- Finish experiment runner integration
+
 ## [2.2.7] - 2026-02-21
 
 ### Added

@@ -136,8 +136,10 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Risk Register</span>
                 </a>
             </div>
+            {% endif %}
 
-            {# Scenario Editor - Staff only #}
+            {# Scenario Editor - Staff or Threat Research group #}
+            {% if can_access_threat_research %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'scenarios' %}active-top-item{% endif %}">
                 <a href="{% url 'scenario_editor:list' %}"
                    class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'scenarios' %}active-link{% endif %}">
@@ -149,10 +151,8 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Scenarios</span>
                 </a>
             </div>
-            {% endif %}
 
-            {# Experiments - Staff only #}
-            {% if user.is_staff %}
+            {# Experiments - Staff or Threat Research group #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'experiments' %}active-top-item{% endif %}">
                 <a href="{% url 'experiments:experiment_list' %}"
                    class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'experiments' %}active-link{% endif %}">

@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any
 
+from cms.experiments import handlers as experiment_handlers
 from cms.experiments.events import publish_range_provisioned_for_experiment
 from cms.models import App, Instance, RangeInstance
 from shared.enums import ResourceStatus
@@ -37,6 +38,9 @@ def process_event(message: str | dict) -> None:
     elif event_type.startswith("ngfw."):
         logger.debug("Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id)
         process_ngfw_event(message)
+    elif event_type.startswith("experiment."):
+        logger.debug("Routing to experiment handler: event_type=%s event_id=%s", event_type, event_id)
+        experiment_handlers.process_event(message)
     else:
         logger.debug("Ignoring unknown event_type=%s event_id=%s", event_type, event_id)
 

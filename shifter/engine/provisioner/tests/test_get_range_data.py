@@ -71,10 +71,10 @@ class TestGetRangeDataNGFWLookup:
 
         assert result["ngfw_instance_id"] == 597
 
-    def test_finds_ngfw_in_stopped_state(self):
-        """NGFW in 'stopped' state should still be found.
+    def test_finds_ngfw_in_paused_state(self):
+        """NGFW in 'paused' state should still be found.
 
-        When an NGFW is paused (stopped), subsequent range operations
+        When an NGFW is paused, subsequent range operations
         need its instance ID to manage resume/cascade correctly.
         """
         from main import get_range_data_by_request_id
@@ -84,9 +84,9 @@ class TestGetRangeDataNGFWLookup:
         with patch("main.get_db_connection", return_value=mock_conn):
             result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
-        # Verify the SQL includes stopped/stopping statuses
+        # Verify the SQL includes paused/pausing statuses
         sql_executed = mock_cursor.execute.call_args_list[1][0][0]
-        assert "stopped" in sql_executed.lower()
+        assert "paused" in sql_executed.lower()
         assert result["ngfw_instance_id"] == 597
 
     def test_ngfw_query_checks_data_eni_not_service_name(self):

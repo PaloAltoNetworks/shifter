@@ -14,6 +14,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from cms.assets.s3 import S3Error
+from cms.experiments.events import publish_experiment_event
 from cms.experiments.exceptions import (
     ArtifactError,
     ExperimentError,
@@ -469,6 +470,21 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
 
             # Transition to queued
             experiment.transition_to(ExperimentStatus.QUEUED)
+
+        # Publish event to trigger orchestration (outside transaction)
+        try:
+            publish_experiment_event(
+                event_type="experiment.start",
+                payload={"experiment_id": experiment.pk},
+            )
+        except Exception as e:
+            logger.error(
+                "start_experiment: failed to publish start event for experiment_id=%s: %s",
+                experiment_id,
+                e,
+            )
+            # Best-effort: don't fail the start operation if event publishing fails
+            # The orchestrator can be manually triggered if needed
 
         logger.info(
             "start_experiment: queued experiment_id=%s user_id=%s total_runs=%d",

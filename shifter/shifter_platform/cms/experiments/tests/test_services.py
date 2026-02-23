@@ -254,6 +254,42 @@ class StartExperimentTest(TestCase):
         with pytest.raises(ExperimentError, match="not found"):
             services.start_experiment(self.user, 99999)
 
+    @patch("cms.experiments.services.publish_experiment_event")
+    def test_start_publishes_event(self, mock_publish):
+        """Verify that starting an experiment publishes experiment.start event."""
+        exp = Experiment.objects.create(
+            user=self.user,
+            name="Event Test",
+            scenario_id="basic",
+            total_runs=1,
+        )
+        services.start_experiment(self.user, exp.pk)
+
+        # Verify event was published with correct type and payload
+        mock_publish.assert_called_once_with(
+            event_type="experiment.start",
+            payload={"experiment_id": exp.pk},
+        )
+
+    @patch("cms.experiments.services.publish_experiment_event")
+    def test_start_continues_if_event_fails(self, mock_publish):
+        """Verify that experiment start succeeds even if event publishing fails."""
+        mock_publish.side_effect = Exception("SQS unavailable")
+
+        exp = Experiment.objects.create(
+            user=self.user,
+            name="Event Failure Test",
+            scenario_id="basic",
+            total_runs=1,
+        )
+
+        # Should not raise despite event publishing failure
+        result = services.start_experiment(self.user, exp.pk)
+
+        # Experiment should still be queued with runs created
+        assert result.status == ExperimentStatus.QUEUED.value
+        assert ExperimentRun.objects.filter(experiment=exp).count() == 1
+
 
 class CancelExperimentTest(TestCase):
     @classmethod

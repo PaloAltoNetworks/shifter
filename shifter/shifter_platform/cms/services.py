@@ -21,6 +21,8 @@ from engine import create_range as engine_create_range
 from engine import destroy_range_by_request as engine_destroy_range_by_request
 from engine import pause_range as engine_pause_range
 from engine import resume_range as engine_resume_range
+from risk_register.models import AuditLog
+from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
 
@@ -584,6 +586,19 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
             user.id,
         )
 
+        # Audit log - never include secrets
+        audit_log(
+            entity_type=AuditLog.EntityType.CREDENTIAL,
+            entity_id=credential.id,
+            action=AuditLog.Action.CREATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={
+                "credential_type": credential_type_slug,
+                "name": name,
+            },
+        )
+
         # Return minimal CredentialRef (no secrets exposed)
         return CredentialRef(
             credential_id=credential.id,
@@ -687,9 +702,25 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
             )
             raise CMSError(f"Credential {credential_id} not found") from None
 
+        # Capture state before deletion for audit
+        previous_state = {
+            "credential_type": credential.credential_type.slug,
+            "name": credential.name,
+        }
+
         # Soft delete
         credential.deleted_at = timezone.now()
         credential.save(update_fields=["deleted_at"])
+
+        # Audit log
+        audit_log(
+            entity_type=AuditLog.EntityType.CREDENTIAL,
+            entity_id=credential_id,
+            action=AuditLog.Action.DELETE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state=previous_state,
+        )
 
         logger.debug(
             "delete_credential completed for credential_id=%s, user_id=%s",
@@ -1557,6 +1588,22 @@ def create_range(
             range_spec=range_spec.model_dump(mode="json"),
         )
 
+        # Audit log range provisioning request
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=0,  # Range ID not yet assigned
+            action=AuditLog.Action.PROVISION,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={
+                "request_id": str(request_id),
+                "scenario": scenario,
+                "agents": {os_type: a.name for os_type, a in agents.items()},
+                "ngfw_enabled": ngfw_enabled,
+            },
+            request_id=str(request_id),
+        )
+
         logger.debug(
             "create_range completed: request_id=%s, scenario=%s, user_id=%s",
             request_id,
@@ -1707,6 +1754,20 @@ def destroy_range(user: User, range_id: int) -> None:
             raise CMSError(f"Range {range_id} has no associated request")
 
         engine_destroy_range_by_request(request_id)
+
+        # Audit log range destruction
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.DEPROVISION,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": ResourceStatus.DESTROYING.value,
+                "scenario": instance.scenario_id,
+            },
+            request_id=str(request_id),
+        )
 
         logger.debug(
             "destroy_range completed for range_id=%s request_id=%s user_id=%s",
@@ -1912,6 +1973,20 @@ def destroy_range_by_request_id(user: User, request_id: str) -> None:
 
         # Call Engine with request_id directly
         engine_destroy_range_by_request(instance.request.request_id)
+
+        # Audit log range destruction
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.range_id or 0,
+            action=AuditLog.Action.DEPROVISION,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": ResourceStatus.DESTROYING.value,
+                "scenario": instance.scenario_id,
+            },
+            request_id=str(request_id),
+        )
 
         logger.debug(
             "destroy_range_by_request_id completed: request_id=%s user_id=%s",
@@ -2123,6 +2198,16 @@ def pause_range(user: User, range_id: int) -> None:
             )
             raise CMSError("Range cannot be paused in current state")
 
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.PAUSE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.PAUSING.value},
+            request_id=str(request_id),
+        )
+
         logger.info(
             "pause_range completed: range_id=%s user_id=%s",
             range_id,
@@ -2212,6 +2297,16 @@ def pause_range_by_request_id(user: User, request_id: str) -> None:
                 request_id,
             )
             raise CMSError("Range cannot be paused in current state")
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.range_id or 0,
+            action=AuditLog.Action.PAUSE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.PAUSING.value},
+            request_id=str(instance.request.request_id),
+        )
 
         logger.info(
             "pause_range_by_request_id completed: request_id=%s user_id=%s",
@@ -2340,6 +2435,16 @@ def resume_range(user: User, range_id: int) -> None:
             )
             raise CMSError("Range cannot be resumed in current state")
 
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.RESUME,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.RESUMING.value},
+            request_id=str(request_id),
+        )
+
         logger.info(
             "resume_range completed: range_id=%s user_id=%s",
             range_id,
@@ -2429,6 +2534,16 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
                 request_id,
             )
             raise CMSError("Range cannot be resumed in current state")
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.range_id or 0,
+            action=AuditLog.Action.RESUME,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.RESUMING.value},
+            request_id=str(instance.request.request_id),
+        )
 
         logger.info(
             "resume_range_by_request_id completed: request_id=%s user_id=%s",
@@ -3378,6 +3493,22 @@ def create_ngfw(
 
     engine_create_ngfw(request_spec)
 
+    # Audit log NGFW provisioning request
+    audit_log(
+        entity_type=AuditLog.EntityType.NGFW,
+        entity_id=0,
+        action=AuditLog.Action.PROVISION,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={
+            "app_uuid": str(app.id),
+            "name": name,
+            "registration_method": registration_method,
+            "request_id": str(request_id),
+        },
+        request_id=str(request_id),
+    )
+
     return NGFWAppRef(
         app_id=app.id,
         instance_id=instance.id,
@@ -3454,6 +3585,21 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
     instance.status = ResourceStatus.DESTROYING.value
     instance.deleted_at = now
     instance.save(update_fields=["status", "deleted_at"])
+
+    # Audit log NGFW destruction
+    audit_log(
+        entity_type=AuditLog.EntityType.NGFW,
+        entity_id=0,
+        action=AuditLog.Action.DEPROVISION,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        previous_state={
+            "app_uuid": str(app.id),
+            "name": app.name,
+            "status": ResourceStatus.DESTROYING.value,
+        },
+        request_id=str(request_id),
+    )
 
     logger.info(
         "destroy_ngfw: started deprovisioning App id=%s, request_id=%s",

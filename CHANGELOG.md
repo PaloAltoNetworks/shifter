@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-02-24
+
+### Added
+- CyberScript DSL language reference documentation (`documentation/docs/cyberscript/`)
+- Schema validators: unique instance names, `dc_config` required when `domain_controller: true`
+
+### Fixed
+- Threat Research RBAC sidebar visibility and auth redirect
+
 ## [2.3.0] - 2026-02-24
 
 ### Added
@@ -20,11 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - audit_log() now swallows exceptions instead of re-raising (never breaks the application)
 - Stale self.range_id references in SSH consumer after refactor
 - Migrated agent events from deprecated ActivityLog to AuditLog
-
-## [2.2.11] - 2026-02-23
-
-### Fixed
-- Threat Research RBAC sidebar visibility and auth redirect
 
 ## [2.2.10] - 2026-02-23
 

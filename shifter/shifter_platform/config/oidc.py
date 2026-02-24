@@ -128,10 +128,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         user_agent = ""
         if request:
             xff = request.META.get("HTTP_X_FORWARDED_FOR")
-            if xff:
-                source_ip = xff.split(",")[0].strip()
-            else:
-                source_ip = request.META.get("REMOTE_ADDR")
+            source_ip = xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR")
             user_agent = request.META.get("HTTP_USER_AGENT", "")[:500]
 
         if user:
@@ -140,8 +137,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
                 action=AuditLog.Action.LOGIN,
                 user_id=user.id,
                 email=user.email,
-                cognito_sub=getattr(user, "userprofile", None)
-                and getattr(user.userprofile, "cognito_sub", "") or "",
+                cognito_sub=(getattr(user, "userprofile", None) and getattr(user.userprofile, "cognito_sub", "")) or "",
                 source_ip=source_ip,
                 user_agent=user_agent,
             )

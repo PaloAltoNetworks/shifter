@@ -4,7 +4,10 @@ import time
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import Client
+
+from shared.auth import THREAT_RESEARCH_GROUP
 
 User = get_user_model()
 
@@ -30,6 +33,19 @@ def regular_user(db):
 
 
 @pytest.fixture
+def threat_research_user(db):
+    user = User.objects.create_user(
+        username="threat@example.com",
+        email="threat@example.com",
+        password="testpass",
+        is_staff=False,
+    )
+    group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
+    user.groups.add(group)
+    return user
+
+
+@pytest.fixture
 def staff_client(staff_user):
     client = Client()
     client.force_login(staff_user)
@@ -43,6 +59,16 @@ def staff_client(staff_user):
 def regular_client(regular_user):
     client = Client()
     client.force_login(regular_user)
+    session = client.session
+    session["oidc_id_token_expiration"] = time.time() + 3600
+    session.save()
+    return client
+
+
+@pytest.fixture
+def threat_research_client(threat_research_user):
+    client = Client()
+    client.force_login(threat_research_user)
     session = client.session
     session["oidc_id_token_expiration"] = time.time() + 3600
     session.save()

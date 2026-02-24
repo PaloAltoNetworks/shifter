@@ -6,44 +6,87 @@ No real S3 or infrastructure calls.
 
 from unittest.mock import patch
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
 
 from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.schemas import ExperimentStatus
+from shared.auth import THREAT_RESEARCH_GROUP
 
 # Test password constant for all test users
 TEST_PASSWORD = "test"  # nosec B105
 
 
 class StaffAccessTest(TestCase):
-    """Verify all views require staff access."""
+    """Verify all views require staff or Threat Research group access."""
 
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="view_user", password=TEST_PASSWORD, is_staff=False)
         cls.staff = User.objects.create_user(username="view_staff", password=TEST_PASSWORD, is_staff=True)
 
-    def test_experiment_list_requires_staff(self):
+    def test_experiment_list_requires_authorization(self):
         self.client.login(username="view_user", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:experiment_list"))
-        assert resp.status_code == 302  # Redirected to login/admin
+        assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
     def test_experiment_list_staff_ok(self):
         self.client.login(username="view_staff", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:experiment_list"))
         assert resp.status_code == 200
 
-    def test_script_list_requires_staff(self):
+    def test_script_list_requires_authorization(self):
         self.client.login(username="view_user", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:script_list"))
         assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
     def test_script_list_staff_ok(self):
         self.client.login(username="view_staff", password=TEST_PASSWORD)
         resp = self.client.get(reverse("experiments:script_list"))
         assert resp.status_code == 200
+
+    def test_unauthorized_user_sees_permission_denied_message(self):
+        self.client.login(username="view_user", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:experiment_list"), follow=True)
+        assert resp.status_code == 200
+        msgs = list(resp.context["messages"])
+        assert any("permission" in str(m).lower() for m in msgs)
+
+
+class ThreatResearchAccessTest(TestCase):
+    """Threat Research group members have the same access as staff."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.regular_user = User.objects.create_user(username="tr_regular", password=TEST_PASSWORD, is_staff=False)
+        cls.threat_user = User.objects.create_user(username="tr_threat", password=TEST_PASSWORD, is_staff=False)
+        group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
+        cls.threat_user.groups.add(group)
+
+    def test_threat_research_can_access_experiment_list(self):
+        self.client.login(username="tr_threat", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:experiment_list"))
+        assert resp.status_code == 200
+
+    def test_threat_research_can_access_script_list(self):
+        self.client.login(username="tr_threat", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:script_list"))
+        assert resp.status_code == 200
+
+    def test_regular_user_still_blocked_from_experiment_list(self):
+        self.client.login(username="tr_regular", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:experiment_list"))
+        assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
+
+    def test_regular_user_still_blocked_from_script_list(self):
+        self.client.login(username="tr_regular", password=TEST_PASSWORD)
+        resp = self.client.get(reverse("experiments:script_list"))
+        assert resp.status_code == 302
+        assert resp.url == reverse("mission_control:dashboard")
 
 
 class ExperimentListViewTest(TestCase):

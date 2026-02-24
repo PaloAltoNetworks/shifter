@@ -15,8 +15,6 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from shared.auth import threat_research_required
-
 from cms.scenario_editor.services import (
     ScenarioEditorError,
     clone_scenario,
@@ -32,6 +30,7 @@ from cms.scenarios.registry import (
     is_default_scenario,
     list_all_scenarios,
 )
+from shared.auth import threat_research_required
 
 logger = logging.getLogger(__name__)
 

@@ -44,6 +44,13 @@ class InstanceConfig(BaseModel):
     join_domain: bool = False
     dc_config: DCConfig | None = None
 
+    @model_validator(mode="after")
+    def validate_dc_config(self) -> InstanceConfig:
+        """Validate dc_config is provided when domain_controller is True."""
+        if self.domain_controller and self.dc_config is None:
+            raise ValueError("dc_config is required when domain_controller is true")
+        return self
+
 
 class SubnetConfig(BaseModel):
     """Subnet definition in a scenario template.
@@ -95,6 +102,17 @@ class ScenarioTemplate(BaseModel):
         if not v:
             raise ValueError("instances must not be empty")
         return v
+
+    @model_validator(mode="after")
+    def validate_unique_instance_names(self) -> ScenarioTemplate:
+        """Validate all instance names are unique."""
+        names = [i.name for i in self.instances]
+        seen: set[str] = set()
+        for name in names:
+            if name in seen:
+                raise ValueError(f"Duplicate instance name '{name}'")
+            seen.add(name)
+        return self
 
     @model_validator(mode="after")
     def validate_subnet_instances(self) -> ScenarioTemplate:

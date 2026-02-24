@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 
-from risk_register.models import APIKey, Comment, Risk, StrideCategory
+from risk_register.models import APIKey, AuditLog, Comment, Risk, StrideCategory
 
 
 class RiskSerializer(serializers.ModelSerializer):
@@ -200,3 +200,26 @@ class APIKeyCreatedSerializer(serializers.Serializer):
     name = serializers.CharField()
     key = serializers.CharField()
     prefix = serializers.CharField()
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """Serializer for AuditLog model (read-only)."""
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            "id",
+            "entity_type",
+            "entity_id",
+            "action",
+            "actor_type",
+            "actor_id",
+            "timestamp",
+            "previous_state",
+            "new_state",
+            "context",
+            "source_ip",
+            "user_agent",
+            "request_id",
+        ]
+        read_only_fields = fields

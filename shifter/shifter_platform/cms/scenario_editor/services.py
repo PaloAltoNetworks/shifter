@@ -18,6 +18,8 @@ from pydantic import ValidationError as PydanticValidationError
 from cms.models import Scenario, ScenarioMetadata
 from cms.scenarios.registry import is_default_scenario
 from cms.scenarios.schema import ScenarioTemplate
+from risk_register.models import AuditLog
+from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.exceptions import CMSError
 
@@ -225,6 +227,14 @@ def create_scenario(
         )
         raise
 
+    audit_log(
+        entity_type=AuditLog.EntityType.SCENARIO,
+        entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
+        action=AuditLog.Action.CREATE,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={"scenario_id": scenario_id, "name": name},
+    )
     logger.info(
         "Scenario created: scenario_id=%s by user_id=%s",
         scenario_id,
@@ -332,6 +342,14 @@ def update_scenario(
         )
         raise
 
+    audit_log(
+        entity_type=AuditLog.EntityType.SCENARIO,
+        entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
+        action=AuditLog.Action.UPDATE,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={"scenario_id": scenario_id, "name": scenario.name},
+    )
     logger.info(
         "Scenario updated: scenario_id=%s by user_id=%s",
         scenario_id,
@@ -401,6 +419,14 @@ def delete_scenario(user: User, scenario_id: str) -> None:
         )
         raise
 
+    audit_log(
+        entity_type=AuditLog.EntityType.SCENARIO,
+        entity_id=0,  # Scenario PK is UUID; use 0 and store scenario_id in state
+        action=AuditLog.Action.DELETE,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        previous_state={"scenario_id": scenario_id, "name": scenario.name},
+    )
     logger.info(
         "Scenario deleted: scenario_id=%s by user_id=%s",
         scenario_id,
@@ -484,6 +510,14 @@ def update_metadata(
         )
         raise
 
+    audit_log(
+        entity_type=AuditLog.EntityType.SCENARIO,
+        entity_id=0,  # ScenarioMetadata PK is auto-int but use 0 for consistency
+        action=AuditLog.Action.UPDATE,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={"scenario_id": scenario_id, "enabled": metadata.enabled, "staff_only": metadata.staff_only},
+    )
     logger.info(
         "Scenario metadata updated: scenario_id=%s, enabled=%s, staff_only=%s by user_id=%s",
         scenario_id,

@@ -5,6 +5,7 @@ import json
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
+from django.urls import reverse
 
 from cms.models import Scenario
 
@@ -35,13 +36,54 @@ class TestScenarioListView:
 
     def test_non_staff_redirected(self, regular_client):
         response = regular_client.get(VIEW_BASE)
-        # staff_member_required redirects non-staff
+        # threat_research_required redirects unauthorized users to dashboard
         assert response.status_code == 302
+        assert response.url == reverse("mission_control:dashboard")
 
     def test_unauthenticated_redirected(self):
         client = Client()
         response = client.get(VIEW_BASE)
         assert response.status_code == 302
+
+    def test_threat_research_user_can_access(self, threat_research_client):
+        response = threat_research_client.get(VIEW_BASE)
+        assert response.status_code == 200
+
+
+class TestThreatResearchGroupAccess:
+    """Threat Research group members have the same access as staff for
+    scenario editor and experiment runner views."""
+
+    def test_threat_research_can_access_scenario_list(self, threat_research_client):
+        response = threat_research_client.get(VIEW_BASE)
+        assert response.status_code == 200
+
+    def test_threat_research_can_access_create_form(self, threat_research_client):
+        response = threat_research_client.get(f"{VIEW_BASE}create/")
+        assert response.status_code == 200
+
+    def test_threat_research_can_access_yaml_create(self, threat_research_client):
+        response = threat_research_client.get(f"{VIEW_BASE}create/yaml/")
+        assert response.status_code == 200
+
+    def test_threat_research_can_access_clone(self, threat_research_client):
+        response = threat_research_client.get(f"{VIEW_BASE}basic/clone/")
+        assert response.status_code == 200
+
+    def test_threat_research_can_access_export(self, threat_research_client):
+        response = threat_research_client.get(f"{VIEW_BASE}basic/export/")
+        assert response.status_code == 200
+
+    def test_regular_user_still_blocked(self, regular_client):
+        response = regular_client.get(VIEW_BASE)
+        assert response.status_code == 302
+        assert response.url == reverse("mission_control:dashboard")
+
+    def test_regular_user_sees_permission_denied_message(self, regular_client):
+        response = regular_client.get(VIEW_BASE, follow=True)
+        assert response.status_code == 200
+        msgs = list(response.context["messages"])
+        assert any("permission" in str(m).lower() for m in msgs)
 
 
 class TestScenarioDetailView:

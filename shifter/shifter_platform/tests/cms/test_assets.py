@@ -14,7 +14,7 @@ from cms.assets.services import (
     get_storage_used,
 )
 from cms.models import AgentConfig, OperatingSystem
-from management.models import ActivityLog
+from risk_register.models import AuditLog
 
 User = get_user_model()
 
@@ -200,7 +200,7 @@ class TestCreateAgent:
         assert agent.os == linux_os
 
     def test_logs_activity(self, user):
-        """Should create an activity log entry."""
+        """Should create an audit log entry for agent creation."""
         agent = create_agent(
             user=user,
             name="Logged Agent",
@@ -211,17 +211,18 @@ class TestCreateAgent:
             sha256="loggedhash",
         )
 
-        log_entry = ActivityLog.objects.filter(
-            user=user,
-            action="agent_uploaded",
+        log_entry = AuditLog.objects.filter(
+            entity_type=AuditLog.EntityType.AGENT,
+            action=AuditLog.Action.CREATE,
+            entity_id=agent.id,
         ).first()
         assert log_entry is not None
-        assert log_entry.metadata["agent_id"] == agent.id
-        assert log_entry.metadata["agent_name"] == "Logged Agent"
-        assert log_entry.metadata["filename"] == "logged.msi"
+        assert log_entry.new_state["name"] == "Logged Agent"
+        assert log_entry.new_state["filename"] == "logged.msi"
+        assert log_entry.actor_id == user.id
 
     def test_logs_upload_method_when_provided(self, user):
-        """Should include upload_method in log when provided."""
+        """Should include upload_method in audit log when provided."""
         create_agent(
             user=user,
             name="Presigned Agent",
@@ -233,11 +234,11 @@ class TestCreateAgent:
             upload_method="presigned",
         )
 
-        log_entry = ActivityLog.objects.filter(
-            user=user,
-            action="agent_uploaded",
+        log_entry = AuditLog.objects.filter(
+            entity_type=AuditLog.EntityType.AGENT,
+            action=AuditLog.Action.CREATE,
         ).first()
-        assert log_entry.metadata["upload_method"] == "presigned"
+        assert log_entry.new_state["upload_method"] == "presigned"
 
     def test_raises_for_invalid_os_slug(self, user):
         """Should raise AssetError for invalid OS slug."""
@@ -312,18 +313,19 @@ class TestDeleteAgent:
 
     @patch("cms.assets.services.s3_delete")
     def test_logs_activity(self, mock_s3_delete, user, windows_agent):
-        """Should create an activity log entry."""
+        """Should create an audit log entry for agent deletion."""
         mock_s3_delete.return_value = None
 
         delete_agent(windows_agent)
 
-        log_entry = ActivityLog.objects.filter(
-            user=user,
-            action="agent_deleted",
+        log_entry = AuditLog.objects.filter(
+            entity_type=AuditLog.EntityType.AGENT,
+            action=AuditLog.Action.DELETE,
+            entity_id=windows_agent.id,
         ).first()
         assert log_entry is not None
-        assert log_entry.metadata["agent_id"] == windows_agent.id
-        assert log_entry.metadata["agent_name"] == windows_agent.name
+        assert log_entry.previous_state["name"] == windows_agent.name
+        assert log_entry.actor_id == user.id
 
     @patch("cms.assets.services.s3_delete")
     def test_raises_if_s3_delete_fails(self, mock_s3_delete, windows_agent):

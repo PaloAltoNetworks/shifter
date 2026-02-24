@@ -1,8 +1,13 @@
 """API Key authentication backend for Django REST Framework."""
 
+import logging
+
 from rest_framework import authentication, exceptions
 
-from risk_register.models import APIKey
+from risk_register.models import APIKey, AuditLog
+from risk_register.services import audit_log, get_client_ip
+
+logger = logging.getLogger(__name__)
 
 
 class APIKeyAuthentication(authentication.BaseAuthentication):
@@ -29,11 +34,42 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         authenticated_key = APIKey.authenticate(api_key)
 
+        # Get request context for audit logging
+        source_ip = get_client_ip(request)
+        user_agent = request.META.get("HTTP_USER_AGENT", "")[:500]
+        endpoint = request.path
+
         if not authenticated_key:
+            # Log failed authentication attempt
+            # Extract prefix if possible for debugging
+            key_prefix = api_key[:8] if api_key and len(api_key) >= 8 else "invalid"
+            audit_log(
+                entity_type=AuditLog.EntityType.APIKEY,
+                entity_id=0,
+                action=AuditLog.Action.LOGIN_FAILED,
+                actor_type=AuditLog.ActorType.APIKEY,
+                actor_id=None,
+                new_state={"key_prefix": key_prefix, "endpoint": endpoint},
+                context="Invalid or expired API key",
+                source_ip=source_ip,
+                user_agent=user_agent,
+            )
             raise exceptions.AuthenticationFailed("Invalid or expired API key")
 
         # Update last_used_at
         authenticated_key.update_last_used()
+
+        # Log successful authentication
+        audit_log(
+            entity_type=AuditLog.EntityType.APIKEY,
+            entity_id=authenticated_key.id,
+            action=AuditLog.Action.LOGIN,
+            actor_type=AuditLog.ActorType.APIKEY,
+            actor_id=authenticated_key.id,
+            new_state={"key_prefix": authenticated_key.prefix, "endpoint": endpoint},
+            source_ip=source_ip,
+            user_agent=user_agent,
+        )
 
         # Return (user, auth) - user is None for API key auth
         # The api_key is accessible via request.auth

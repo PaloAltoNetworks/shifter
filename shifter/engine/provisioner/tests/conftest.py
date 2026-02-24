@@ -295,6 +295,7 @@ def sample_instance_config_attacker():
     """Sample InstanceConfig for an attacker (Kali) instance."""
     return InstanceConfig(
         uuid="inst-uuid-attacker",
+        name="attacker-kali",
         role="attacker",
         os_type="kali",
         instance_type="t3.small",
@@ -306,10 +307,10 @@ def sample_instance_config_victim():
     """Sample InstanceConfig for a Linux victim instance."""
     return InstanceConfig(
         uuid="inst-uuid-victim",
+        name="target-ubuntu",
         role="victim",
         os_type="ubuntu",
         instance_type="t3.micro",
-        agent_id=1,
         agent_s3_key="agents/xdr-agent.tar.gz",
         agent_presigned_url="https://s3.example.com/agents/xdr-agent.tar.gz?signed",
     )
@@ -320,10 +321,10 @@ def sample_instance_config_windows():
     """Sample InstanceConfig for a Windows victim instance."""
     return InstanceConfig(
         uuid="inst-uuid-windows",
+        name="target-windows",
         role="victim",
         os_type="windows",
         instance_type="t3.medium",
-        agent_id=2,
         agent_s3_key="agents/xdr-agent.msi",
         agent_presigned_url="https://s3.example.com/agents/xdr-agent.msi?signed",
     )
@@ -363,8 +364,6 @@ def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target
         vpc_id="vpc-12345",
         vpc_cidr="10.1.0.0/16",
         route_table_id="rtb-12345",
-        kali_security_group_id="sg-kali",
-        victim_security_group_id="sg-victim",
         instance_profile_name="range-instance-profile",
         kali_ami_id="ami-kali123",
         victim_ami_id="ami-ubuntu123",
@@ -372,7 +371,7 @@ def sample_range_config(sample_subnet_config_attack, sample_subnet_config_target
         dc_ami_id="ami-dc-test",
         agent_s3_bucket="shifter-agents",
         availability_zone="us-east-2a",
-        gwlb_service_name="",
+        ngfw_data_eni_id="",
     )
 
 
@@ -391,6 +390,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-001",
+                        name="attacker-kali",
                         role="attacker",
                         os_type="kali",
                         instance_type="t3.small",
@@ -404,6 +404,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-002",
+                        name="target-ubuntu",
                         role="victim",
                         os_type="ubuntu",
                         instance_type="t3.micro",
@@ -419,6 +420,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-003",
+                        name="target-windows",
                         role="victim",
                         os_type="windows",
                         instance_type="t3.medium",
@@ -434,6 +436,7 @@ def sample_range_config_multi_subnet():
                 instances=[
                     InstanceConfig(
                         uuid="inst-uuid-004",
+                        name="dc-windows",
                         role="dc",
                         os_type="windows",
                         instance_type="t3.large",
@@ -445,8 +448,6 @@ def sample_range_config_multi_subnet():
         vpc_id="vpc-prod",
         vpc_cidr="10.2.0.0/16",
         route_table_id="rtb-prod",
-        kali_security_group_id="sg-kali-prod",
-        victim_security_group_id="sg-victim-prod",
         instance_profile_name="prod-instance-profile",
         kali_ami_id="ami-kali-prod",
         victim_ami_id="ami-ubuntu-prod",
@@ -454,7 +455,7 @@ def sample_range_config_multi_subnet():
         dc_ami_id="ami-dc-prod",
         agent_s3_bucket="shifter-agents-prod",
         availability_zone="us-east-2b",
-        gwlb_service_name="com.amazonaws.vpce.us-east-2.vpce-svc-ngfw123",
+        ngfw_data_eni_id="eni-ngfw123456789",
     )
 
 
@@ -647,7 +648,7 @@ def sample_db_range_row():
     """Sample database row for a range with subnets (new format).
 
     Returns tuple matching get_range_from_db query:
-    (id, user_id, uuid, range_config, gwlb_endpoint_id)
+    (id, user_id, uuid, range_config)
     """
     return (
         42,  # id
@@ -676,18 +677,18 @@ def sample_db_range_row():
                 },
             ]
         },
-        None,  # gwlb_endpoint_id (no NGFW)
     )
 
 
 @pytest.fixture
 def sample_db_range_row_with_ngfw():
-    """Sample database row for a range with NGFW enabled (has gwlb_endpoint_id)."""
+    """Sample database row for a range with NGFW enabled (ngfw: true in range_config)."""
     return (
         42,  # id
         1,  # user_id
         "request-uuid-ngfw-12345",  # uuid
         {  # range_config
+            "ngfw": True,  # Indicates NGFW scenario
             "subnets": [
                 {
                     "name": "attack",
@@ -701,9 +702,8 @@ def sample_db_range_row_with_ngfw():
                     "instances": [{"uuid": "inst-uuid-002", "role": "victim", "os_type": "ubuntu"}],
                     "connected_to": [],
                 },
-            ]
+            ],
         },
-        "gwlbe-12345678901234567",  # gwlb_endpoint_id (indicates NGFW)
     )
 
 
@@ -730,7 +730,6 @@ def sample_db_range_row_no_agent():
                 },
             ]
         },
-        None,  # gwlb_endpoint_id (no NGFW)
     )
 
 
@@ -742,6 +741,7 @@ def sample_db_range_row_multi_subnet():
         3,  # user_id
         "request-uuid-multi-subnet",  # uuid
         {  # range_config
+            "ngfw": True,  # Indicates NGFW scenario
             "subnets": [
                 {
                     "name": "attack",
@@ -791,9 +791,8 @@ def sample_db_range_row_multi_subnet():
                     ],
                     "connected_to": [],
                 },
-            ]
+            ],
         },
-        "gwlbe-multi-subnet12345",  # gwlb_endpoint_id (indicates NGFW)
     )
 
 
@@ -825,6 +824,7 @@ def mock_pulumi_config(mocker):
         "dcSecurityGroupId": "sg-dc-test",
         "rangeInstanceProfileName": "test-profile",
         "portalVpcCidr": "10.0.0.0/16",
+        "portalVpcPeeringId": "pcx-test123",
     }.get(key)
 
     mocker.patch("pulumi.Config", return_value=mock_config)

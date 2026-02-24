@@ -31,7 +31,7 @@ def audit_log(
     source_ip: str | None = None,
     user_agent: str = "",
     request_id: str = "",
-) -> AuditLog:
+) -> AuditLog | None:
     """Record an audit event.
 
     Called by all platform apps for auditable operations.
@@ -83,7 +83,7 @@ def audit_log(
             entity_type,
             entity_id,
         )
-        raise
+        return None
 
 
 def get_client_ip(request: HttpRequest) -> str | None:
@@ -165,7 +165,7 @@ def audit_log_from_request(
     previous_state: dict[str, Any] | None = None,
     new_state: dict[str, Any] | None = None,
     context: str = "",
-) -> AuditLog:
+) -> AuditLog | None:
     """Record audit event with HTTP request context.
 
     Extracts user/apikey, source IP, user agent, and request ID from the
@@ -181,7 +181,7 @@ def audit_log_from_request(
         context: Additional context or reason
 
     Returns:
-        The created AuditLog entry
+        The created AuditLog entry, or None on failure
     """
     actor_type, actor_id = get_actor_from_request(request)
 
@@ -210,7 +210,7 @@ def audit_log_system_event(
     new_state: dict[str, Any] | None = None,
     context: str = "",
     request_id: str = "",
-) -> AuditLog:
+) -> AuditLog | None:
     """Record system-initiated audit event.
 
     For provisioner, event handlers, scheduled tasks, and other background
@@ -254,7 +254,7 @@ def audit_auth_event(
     user_agent: str = "",
     context: str = "",
     actor_type: str = AuditLog.ActorType.COGNITO,
-) -> AuditLog:
+) -> AuditLog | None:
     """Record authentication event.
 
     Args:
@@ -299,7 +299,7 @@ def audit_session_event(
     target_ip: str = "",
     source_ip: str | None = None,
     context: str = "",
-) -> AuditLog:
+) -> AuditLog | None:
     """Record session event (terminal/RDP connect/disconnect).
 
     Args:

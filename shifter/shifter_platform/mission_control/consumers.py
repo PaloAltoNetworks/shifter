@@ -31,7 +31,6 @@ class SSHConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.instance_uuid: str | None = None
-        self.range_id: int | None = None
         self.ssh_conn: Any = None
         self._read_task: asyncio.Task[None] | None = None
         self.session_id: str = str(uuid.uuid4())[:8]
@@ -46,8 +45,10 @@ class SSHConsumer(AsyncWebsocketConsumer):
             await self.close(code=WebSocketCloseCode.SERVER_ERROR)
 
     async def _do_connect(self):
-        """Authenticate, verify ownership, establish SSH connection."""
-        from cms import get_active_range
+        """Authenticate and establish SSH connection.
+
+        Engine handles all validation: ownership, range status, instance lookup.
+        """
         from engine import connect_terminal
 
         # Get client IP for audit logging
@@ -77,50 +78,14 @@ class SSHConsumer(AsyncWebsocketConsumer):
             self.instance_uuid,
         )
 
-        # 3. Get user's active range via CMS
-        range_ctx = await sync_to_async(get_active_range)(user)
-        if not range_ctx:
-            logger.warning(
-                "Terminal connection denied - no active range: user_id=%s",
-                user.id,
-            )
-            await self.close(code=WebSocketCloseCode.NOT_FOUND)
-            return
-
-        # 4. Verify range is ready
-        if not range_ctx.is_ready:
-            logger.warning(
-                "Terminal connection denied - range not ready: range_id=%s status=%s",
-                range_ctx.range_id,
-                range_ctx.status,
-            )
-            await self.close(code=WebSocketCloseCode.NOT_FOUND)
-            return
-
-        self.range_id = range_ctx.range_id
-
-        # 5. Verify instance exists in this range
-        instance = next(
-            (i for i in range_ctx.instances if i.uuid == self.instance_uuid),
-            None,
-        )
-        if not instance:
-            logger.warning(
-                "Terminal connection denied - instance not found: range_id=%s uuid=%s",
-                self.range_id,
-                self.instance_uuid,
-            )
-            await self.close(code=WebSocketCloseCode.NOT_FOUND)
-            return
-
-        # 6. Establish SSH connection via engine
+        # 3. Establish SSH connection via engine
+        # Engine looks up Range by instance_uuid and validates ownership/status
         try:
-            self.ssh_conn = await sync_to_async(connect_terminal)(user, self.range_id, self.instance_uuid)
+            self.ssh_conn = await sync_to_async(connect_terminal)(user, self.instance_uuid)
             await self.ssh_conn.connect()
         except PermissionError:
             logger.warning(
-                "Terminal connection denied - permission error: range_id=%s uuid=%s",
-                self.range_id,
+                "Terminal connection denied - permission error: uuid=%s",
                 self.instance_uuid,
             )
             # Audit log access denied
@@ -128,24 +93,31 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 action="access_denied",
                 user_id=user.id,
                 session_id=self.session_id,
-                range_id=self.range_id,
+                range_id=None,
                 session_type="terminal",
                 source_ip=client_ip,
                 context=f"Permission denied for instance {self.instance_uuid}",
             )
             await self.close(code=WebSocketCloseCode.PERMISSION_DENIED)
             return
+        except ValueError as e:
+            logger.warning(
+                "Terminal connection denied: uuid=%s error=%s",
+                self.instance_uuid,
+                str(e),
+            )
+            await self.close(code=WebSocketCloseCode.NOT_FOUND)
+            return
         except Exception as e:
             logger.exception(
-                "SSH connection failed: range_id=%s uuid=%s error=%s",
-                self.range_id,
+                "SSH connection failed: uuid=%s error=%s",
                 self.instance_uuid,
                 str(e),
             )
             await self.close(code=WebSocketCloseCode.SSH_CONNECTION_FAILED)
             return
 
-        # 7. Accept WebSocket and start reading SSH output
+        # 4. Accept WebSocket and start reading SSH output
         await self.accept()
 
         # Audit log successful connection
@@ -153,16 +125,15 @@ class SSHConsumer(AsyncWebsocketConsumer):
             action="connect",
             user_id=user.id,
             session_id=self.session_id,
-            range_id=self.range_id,
+            range_id=None,
             session_type="terminal",
             target_ip=self.instance_uuid,
             source_ip=client_ip,
         )
 
         logger.info(
-            "Terminal connected: user_id=%s range_id=%s uuid=%s",
+            "Terminal connected: user_id=%s uuid=%s",
             user.id,
-            self.range_id,
             self.instance_uuid,
         )
 
@@ -208,12 +179,11 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 logger.exception("Error closing SSH connection: uuid=%s", self.instance_uuid)
 
         # Audit log disconnection if we had a valid session
-        if self._user_id and self.range_id:
+        if self._user_id:
             await sync_to_async(audit_session_event)(
                 action="disconnect",
                 user_id=self._user_id,
                 session_id=self.session_id,
-                range_id=self.range_id,
                 session_type="terminal",
                 context=f"close_code={close_code}",
             )
@@ -422,6 +392,7 @@ class NGFWStatusConsumer(AsyncWebsocketConsumer):
                     "app_id": event.get("app_id"),
                     "status": event.get("status"),
                     "state": event.get("state"),
+                    "serial_number": event.get("serial_number"),
                 }
             )
         )

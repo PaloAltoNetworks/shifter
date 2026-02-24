@@ -192,6 +192,7 @@ class Range(models.Model):
         PENDING = "pending", "Pending"
         PROVISIONING = "provisioning", "Provisioning"
         READY = "ready", "Ready"
+        PAUSING = "pausing", "Pausing"
         PAUSED = "paused", "Paused"
         RESUMING = "resuming", "Resuming"
         DESTROYING = "destroying", "Destroying"
@@ -219,13 +220,19 @@ class Range(models.Model):
         blank=True,
         help_text="User ID from CMS (may differ from Django user.id)",
     )
-    # NOTE: Range.ngfw FK removed - Engine NGFW model is standalone
-    # GWLB endpoint linking is done via gwlb_endpoint_id below
+    ngfw_instance = models.ForeignKey(
+        "Instance",
+        on_delete=models.SET_NULL,
+        related_name="attached_ranges",
+        null=True,
+        blank=True,
+        help_text="NGFW Instance this range is attached to (for egress filtering)",
+    )
     gwlb_endpoint_id = models.CharField(
         max_length=32,
         blank=True,
         default="",
-        help_text="GWLB endpoint ID for this range's NGFW",
+        help_text="GWLB endpoint ID for this range's NGFW (AWS resource ID)",
     )
     status = models.CharField(
         max_length=20,
@@ -321,8 +328,8 @@ class Range(models.Model):
         return f"Range {self.id} ({scenario}) - {self.status}"
 
     @property
-    def is_active(self):
-        """Return True if range is in an active/usable state."""
+    def is_usable(self):
+        """Return True if range is in a usable state (operational and connectable)."""
         return self.status in (self.Status.READY, self.Status.PAUSED)
 
     @property
@@ -375,10 +382,10 @@ class Range(models.Model):
         ).first()
 
     # Subnet index allocation constants
-    # Range VPC uses 10.1.0.0/16, each range gets 10.1.{index}.0/24
-    # Reserve index 0 (network) and 255 (broadcast), use 1-254
+    # Range VPC uses 10.1.0.0/16 with /28 subnets (16 IPs each)
+    # Capacity: 253 third octets (2-254) x 16 /28 blocks = 4048 subnets
     SUBNET_INDEX_MIN = 1
-    SUBNET_INDEX_MAX = 254
+    SUBNET_INDEX_MAX = 4048
 
     @classmethod
     def allocate_subnet_index(cls) -> int:
@@ -389,10 +396,10 @@ class Range(models.Model):
         ranges are being created concurrently.
 
         Returns:
-            int: The allocated subnet index (1-254)
+            int: The allocated subnet index (1-4048)
 
         Raises:
-            ValueError: If no subnet indices are available (254 active ranges)
+            ValueError: If no subnet indices are available (4048 active ranges)
         """
         with transaction.atomic():
             # Lock rows to prevent race conditions

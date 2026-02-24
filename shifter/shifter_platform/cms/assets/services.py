@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from cms.assets.s3 import S3Error
 from cms.assets.s3 import delete_agent as s3_delete
-from cms.models import AgentConfig, OperatingSystem
+from cms.models import AgentConfig, AgentType, OperatingSystem
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.exceptions import AssetError
@@ -51,6 +51,7 @@ def create_agent(
     file_size: int,
     sha256: str = "",
     upload_method: str | None = None,
+    agent_type: str = AgentType.XDR,
 ) -> AgentConfig:
     """Create a new agent record.
 
@@ -63,20 +64,28 @@ def create_agent(
         file_size: Size of the agent file in bytes
         sha256: SHA256 hash of the agent file (optional, for future server-side compute)
         upload_method: Optional upload method for logging (e.g., 'presigned')
+        agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
 
     Returns:
         AgentConfig: The newly created agent record
 
     Raises:
-        AssetError: If the operating system is not found
+        AssetError: If the operating system is not found or agent_type is invalid
     """
     logger.debug(
-        "create_agent: user_id=%s name=%s os_slug=%s file_size=%d",
+        "create_agent: user_id=%s name=%s os_slug=%s file_size=%d agent_type=%s",
         user.id,
         name,
         os_slug,
         file_size,
+        agent_type,
     )
+
+    # Validate agent_type
+    valid_types = {choice[0] for choice in AgentType.choices}
+    if agent_type not in valid_types:
+        logger.error("create_agent: Invalid agent_type=%s", agent_type)
+        raise AssetError(f"Invalid agent type '{agent_type}'")
 
     # Look up OS
     os_obj = OperatingSystem.objects.filter(slug=os_slug).first()
@@ -93,6 +102,7 @@ def create_agent(
         original_filename=filename,
         file_size_bytes=file_size,
         sha256_hash=sha256,
+        agent_type=agent_type,
     )
 
     # Audit log agent creation
@@ -101,6 +111,7 @@ def create_agent(
         "os": os_slug,
         "filename": filename,
         "file_size": file_size,
+        "agent_type": agent_type,
     }
     if upload_method:
         new_state["upload_method"] = upload_method

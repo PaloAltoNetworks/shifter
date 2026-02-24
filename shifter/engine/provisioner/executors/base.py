@@ -14,11 +14,13 @@ class CommandResult:
 
     Attributes:
         success: Whether the command completed successfully (exit code 0).
+        exit_code: The exit code from the command (-1 if not available).
         stdout: Standard output from the command.
         stderr: Standard error output from the command.
     """
 
     success: bool
+    exit_code: int
     stdout: str
     stderr: str
 

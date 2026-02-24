@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal
 from cms.exceptions import CMSError
 from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, SubnetSpec
 
-from .loader import load_scenario
+from .registry import load_scenario_template as load_scenario
 
 if TYPE_CHECKING:
     from cms.models import AgentConfig, App, Credential, Instance, Request
@@ -108,6 +108,7 @@ def hydrate_scenario(
         scenario_id=scenario_id,
         user_id=user_id,
         subnets=subnets,
+        ngfw=template.ngfw,
     )
 
 
@@ -168,7 +169,7 @@ def hydrate_ngfw(
         scm_pin_value = scm_data.get("scm_pin_value")
         sls_region = scm_data.get("sls_region")
 
-        if not all([scm_folder_name, scm_pin_id, scm_pin_value]):
+        if not all([scm_pin_id, scm_pin_value]):
             logger.error(
                 "hydrate_ngfw: scm_credential id=%s missing required fields",
                 scm_credential.id,

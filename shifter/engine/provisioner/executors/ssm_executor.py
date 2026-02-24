@@ -12,11 +12,12 @@ The setup logic is handled by SetupPlan implementations.
 
 import logging
 import time
-from dataclasses import dataclass
 from typing import ClassVar
 
 import boto3
 from botocore.exceptions import ClientError
+
+from executors.base import CommandResult
 
 # Logger for timing info - useful for tuning timeouts
 logger = logging.getLogger(__name__)
@@ -54,16 +55,6 @@ class InstanceTerminatedError(SSMExecutorError):
     """Raised when the instance is terminated."""
 
     pass
-
-
-@dataclass
-class CommandResult:
-    """Result of a command execution."""
-
-    success: bool
-    exit_code: int
-    stdout: str
-    stderr: str
 
 
 class SSMExecutor:
@@ -203,10 +194,18 @@ class SSMExecutor:
                     # Check if it's an instance termination
                     if "not in a valid state" in stderr.lower():
                         raise InstanceTerminatedError(f"Instance {instance_id} is not in a valid state")
+                    # Include both stdout and stderr - PowerShell Write-Host goes to stdout
+                    # SSM often returns generic errors in stderr, so always include stdout
+                    error_parts = []
+                    if stdout:
+                        error_parts.append(f"stdout={stdout[:2000]}")
+                    if stderr:
+                        error_parts.append(f"stderr={stderr[:500]}")
+                    error_details = " | ".join(error_parts) if error_parts else "no output"
                     raise CommandError(
                         f"Command failed on {instance_id}",
                         exit_code=exit_code,
-                        stderr=stderr,
+                        stderr=error_details,
                     )
 
             time.sleep(self._poll_interval)

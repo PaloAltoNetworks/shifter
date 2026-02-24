@@ -11,45 +11,31 @@ TEST_REQUEST_ID = UUID("550e8400-e29b-41d4-a716-446655440000")
 class TestIsLocalProvisionerEnabled:
     """Tests for _is_local_provisioner_enabled() function."""
 
-    def test_returns_true_when_subprocess_mode(self, settings):
-        """Returns True when LOCAL_PROVISIONER is 'subprocess'."""
+    def test_returns_true_for_valid_modes(self, settings):
+        """Returns True for valid LOCAL_PROVISIONER modes."""
         from engine.ecs import _is_local_provisioner_enabled
 
         settings.LOCAL_PROVISIONER = "subprocess"
-
         assert _is_local_provisioner_enabled() is True
-
-    def test_returns_true_when_docker_mode(self, settings):
-        """Returns True when LOCAL_PROVISIONER is 'docker'."""
-        from engine.ecs import _is_local_provisioner_enabled
 
         settings.LOCAL_PROVISIONER = "docker"
-
         assert _is_local_provisioner_enabled() is True
 
-    def test_returns_false_when_not_set(self, settings):
-        """Returns False when LOCAL_PROVISIONER is not set."""
+    def test_returns_false_for_invalid_or_missing(self, settings):
+        """Returns False when LOCAL_PROVISIONER is not set, empty, or invalid."""
         from engine.ecs import _is_local_provisioner_enabled
 
+        # Not set
         if hasattr(settings, "LOCAL_PROVISIONER"):
             delattr(settings, "LOCAL_PROVISIONER")
-
         assert _is_local_provisioner_enabled() is False
 
-    def test_returns_false_when_empty(self, settings):
-        """Returns False when LOCAL_PROVISIONER is empty string."""
-        from engine.ecs import _is_local_provisioner_enabled
-
+        # Empty string
         settings.LOCAL_PROVISIONER = ""
-
         assert _is_local_provisioner_enabled() is False
 
-    def test_returns_false_when_invalid_value(self, settings):
-        """Returns False when LOCAL_PROVISIONER has invalid value."""
-        from engine.ecs import _is_local_provisioner_enabled
-
+        # Invalid value
         settings.LOCAL_PROVISIONER = "invalid"
-
         assert _is_local_provisioner_enabled() is False
 
 

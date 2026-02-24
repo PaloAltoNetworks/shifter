@@ -64,6 +64,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "config.middleware.HealthCheckMiddleware",  # Must be first to bypass ALLOWED_HOSTS for ALB
+    "config.middleware.RequestIDMiddleware",  # Request ID for audit logging correlation
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",

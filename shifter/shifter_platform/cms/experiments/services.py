@@ -45,6 +45,8 @@ from cms.experiments.schemas import (
     ScriptUploadInput,
 )
 from cms.scenarios.loader import load_scenario
+from risk_register.models import AuditLog
+from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 
 if TYPE_CHECKING:
@@ -214,6 +216,14 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             raise ScriptUploadError(f"Validation failed: {e}") from e
         script.save()
 
+        audit_log(
+            entity_type=AuditLog.EntityType.SCRIPT,
+            entity_id=script.pk,
+            action=AuditLog.Action.CREATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"name": payload["name"], "filename": payload["filename"], "s3_key": s3_key},
+        )
         logger.info(
             "complete_script_upload: created script_id=%s user_id=%s s3_key=%s",
             script.pk,
@@ -250,6 +260,14 @@ def delete_script(user: User, script_id: int) -> None:
 
         script.deleted_at = timezone.now()
         script.save(update_fields=["deleted_at"])
+        audit_log(
+            entity_type=AuditLog.EntityType.SCRIPT,
+            entity_id=script_id,
+            action=AuditLog.Action.DELETE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={"name": script.name},
+        )
         logger.info("delete_script: soft-deleted script_id=%s user_id=%s", script_id, user.pk)
     except (TypeError, ValueError, ExperimentError):
         raise
@@ -411,6 +429,14 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
                     raise ExperimentValidationError(f"Script validation failed: {e}") from e
                 es.save()
 
+        audit_log(
+            entity_type=AuditLog.EntityType.EXPERIMENT,
+            entity_id=experiment.pk,
+            action=AuditLog.Action.CREATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"name": data.name, "scenario_id": data.scenario_id, "total_runs": data.total_runs},
+        )
         logger.info(
             "create_experiment: created experiment_id=%s user_id=%s scenario=%s runs=%d",
             experiment.pk,
@@ -486,6 +512,14 @@ def start_experiment(user: User, experiment_id: int) -> Experiment:
             # Best-effort: don't fail the start operation if event publishing fails
             # The orchestrator can be manually triggered if needed
 
+        audit_log(
+            entity_type=AuditLog.EntityType.EXPERIMENT,
+            entity_id=experiment.pk,
+            action=AuditLog.Action.PROVISION,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"total_runs": experiment.total_runs, "max_parallel_runs": experiment.max_parallel_runs},
+        )
         logger.info(
             "start_experiment: queued experiment_id=%s user_id=%s total_runs=%d",
             experiment_id,
@@ -527,6 +561,13 @@ def cancel_experiment(user: User, experiment_id: int) -> Experiment:
             raise ExperimentStateError(f"Cannot cancel experiment in {experiment.status} state")
 
         experiment.transition_to(ExperimentStatus.CANCELLED)
+        audit_log(
+            entity_type=AuditLog.EntityType.EXPERIMENT,
+            entity_id=experiment.pk,
+            action=AuditLog.Action.CANCEL,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+        )
         logger.info("cancel_experiment: cancelled experiment_id=%s user_id=%s", experiment_id, user.pk)
         return experiment
     except (TypeError, ValueError, ExperimentError):

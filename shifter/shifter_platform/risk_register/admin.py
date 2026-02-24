@@ -97,18 +97,29 @@ class APIKeyAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
-    """Admin interface for AuditLog model."""
+    """Admin interface for AuditLog model.
+
+    Read-only interface for viewing audit logs. No add/change/delete permitted.
+    """
 
     list_display = [
+        "timestamp",
+        "action",
         "entity_type",
         "entity_id",
-        "action",
         "actor_type",
         "actor_id",
+        "source_ip_display",
+        "request_id_display",
+    ]
+    list_filter = [
+        "action",
+        "entity_type",
+        "actor_type",
+        ("source_ip", admin.EmptyFieldListFilter),
         "timestamp",
     ]
-    list_filter = ["entity_type", "action", "actor_type", "timestamp"]
-    search_fields = ["context"]
+    search_fields = ["context", "request_id", "source_ip"]
     readonly_fields = [
         "entity_type",
         "entity_id",
@@ -119,8 +130,51 @@ class AuditLogAdmin(admin.ModelAdmin):
         "previous_state",
         "new_state",
         "context",
+        "source_ip",
+        "user_agent",
+        "request_id",
     ]
     date_hierarchy = "timestamp"
+    list_per_page = 50
+
+    fieldsets = [
+        (
+            "Event",
+            {
+                "fields": ["action", "entity_type", "entity_id", "timestamp"],
+            },
+        ),
+        (
+            "Actor",
+            {
+                "fields": ["actor_type", "actor_id"],
+            },
+        ),
+        (
+            "State",
+            {
+                "fields": ["previous_state", "new_state", "context"],
+                "classes": ["collapse"],
+            },
+        ),
+        (
+            "Request Context",
+            {
+                "fields": ["source_ip", "user_agent", "request_id"],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    @admin.display(description="Source IP")
+    def source_ip_display(self, obj):
+        return obj.source_ip or "-"
+
+    @admin.display(description="Request ID")
+    def request_id_display(self, obj):
+        if obj.request_id:
+            return obj.request_id[:12] + "..." if len(obj.request_id) > 12 else obj.request_id
+        return "-"
 
     def has_add_permission(self, request):
         """Prevent manual creation of audit logs."""

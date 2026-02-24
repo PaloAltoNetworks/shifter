@@ -16,7 +16,7 @@ class NGFWWizardManager {
             name: '',
             deployment_profile_id: null,
             deployment_profile_name: '',
-            registration_method: 'otp',
+            registration_method: 'pin',  // Default to PIN (OTP hidden in UI for now)
             scm_credential_id: null,
             scm_credential_name: '',
             otp_value: '',
@@ -164,11 +164,8 @@ class NGFWWizardManager {
     }
 
     setInitialState() {
-        // Set OTP as the initial selected method
-        const otpOption = document.querySelector('.radio-option[data-method="otp"]');
-        if (otpOption) {
-            otpOption.classList.add('selected');
-        }
+        // PIN is the default method (set in HTML as selected/checked)
+        // Nothing extra needed here since OTP option is hidden
     }
 
     goToStep(step) {
@@ -312,14 +309,14 @@ class NGFWWizardManager {
                 const data = JSON.parse(event.data);
                 console.log('NGFW status update:', data);
 
-                if (data.status === 'ready' || data.status === 'active') {
+                if (data.status === 'ready') {
                     this.showSuccess();
                     this.ws.close();
                 } else if (data.status === 'failed') {
                     alert('Provisioning failed: ' + (data.error || 'Unknown error'));
                     window.location.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
                 }
-                // For other statuses (pending, provisioning), just wait for next message
+                // For other statuses (pending, provisioning, stopped), just wait for next message
             } catch (err) {
                 console.error('Error parsing WebSocket message:', err);
             }

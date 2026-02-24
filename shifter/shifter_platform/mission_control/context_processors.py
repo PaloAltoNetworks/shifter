@@ -2,7 +2,7 @@
 
 import logging
 
-from cms.services import get_active_range
+from cms.services import get_active_range, get_scenario
 from mission_control.utils import build_connection_urls
 from shared.schemas import RangeContext
 
@@ -24,6 +24,7 @@ def active_range(request):
             "has_active_range": False,
             "active_range": None,
             "connection_urls": [],
+            "scenario_name": None,
         }
 
     user_id = request.user.id
@@ -41,6 +42,7 @@ def active_range(request):
                 "has_active_range": False,
                 "active_range": None,
                 "connection_urls": [],
+                "scenario_name": None,
             }
 
         if range_context is not None:
@@ -53,6 +55,19 @@ def active_range(request):
             )
             has_ready_range = is_ready
             connection_urls = build_connection_urls(range_context.instances)
+
+            # Look up scenario name for display
+            scenario_name = None
+            if range_context.scenario_id:
+                try:
+                    scenario = get_scenario(range_context.scenario_id)
+                    scenario_name = scenario.get("name", range_context.scenario_id)
+                except Exception:
+                    logger.warning(
+                        "Could not look up scenario name for scenario_id=%s",
+                        range_context.scenario_id,
+                    )
+                    scenario_name = range_context.scenario_id
         else:
             logger.info(
                 "active_range context processor: no active range for user_id=%s",
@@ -60,11 +75,13 @@ def active_range(request):
             )
             has_ready_range = False
             connection_urls = []
+            scenario_name = None
 
         return {
             "has_active_range": has_ready_range,
             "active_range": range_context,
             "connection_urls": connection_urls,
+            "scenario_name": scenario_name,
         }
 
     except Exception:
@@ -76,4 +93,5 @@ def active_range(request):
             "has_active_range": False,
             "active_range": None,
             "connection_urls": [],
+            "scenario_name": None,
         }

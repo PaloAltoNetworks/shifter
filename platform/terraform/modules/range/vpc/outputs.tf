@@ -35,29 +35,6 @@ output "public_route_table_id" {
   value       = aws_route_table.private.id
 }
 
-# ------------------------------------------------------------------------------
-# Security Groups
-# ------------------------------------------------------------------------------
-
-output "victim_security_group_id" {
-  description = "ID of the security group for victim EC2 instances"
-  value       = aws_security_group.victim.id
-}
-
-output "kali_security_group_id" {
-  description = "ID of the security group for Kali attack instances"
-  value       = aws_security_group.kali.id
-}
-
-output "dc_security_group_id" {
-  description = "ID of the security group for Domain Controller instances"
-  value       = var.enable_dc_security_group ? aws_security_group.dc[0].id : null
-}
-
-output "ngfw_security_group_id" {
-  description = "ID of the security group for VM-Series NGFW instances (null if NGFW disabled)"
-  value       = var.vm_series_ami_id != "" ? aws_security_group.ngfw[0].id : null
-}
 
 output "vm_series_ami_id" {
   description = "VM-Series AMI ID (empty string if NGFW disabled)"
@@ -167,4 +144,13 @@ output "ngfw_instance_profile_name" {
 output "ngfw_capacity_sns_topic_arn" {
   description = "ARN of the SNS topic for NGFW capacity alerts (null if NGFW infrastructure disabled)"
   value       = var.enable_ngfw_infrastructure ? aws_sns_topic.ngfw_capacity[0].arn : null
+}
+
+# ------------------------------------------------------------------------------
+# SSM/Bedrock Endpoints
+# ------------------------------------------------------------------------------
+
+output "ssm_endpoints_subnet_cidr" {
+  description = "CIDR block of the SSM/Bedrock endpoints subnet (for NGFW routing)"
+  value       = aws_subnet.ssm_endpoints.cidr_block
 }

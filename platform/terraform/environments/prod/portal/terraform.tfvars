@@ -74,7 +74,7 @@ user_storage_bucket = "shifter-user-storage-7a3f9c2e"
 # See shifter/packer/ for AMI build configuration
 
 victim_instance_type = "t3.large"
-kali_instance_type   = "t3.medium"
+kali_instance_type   = "t3.large"
 
 # ------------------------------------------------------------------------------
 # Autoscaling
@@ -91,7 +91,7 @@ scale_down_threshold = 30
 # Redis
 # ------------------------------------------------------------------------------
 
-redis_node_type          = "cache.t3.micro"
+redis_node_type          = "cache.t3.medium"
 redis_engine_version     = "7.1"
 redis_enable_replication = true
 
@@ -127,7 +127,7 @@ pulumi_container_tag = "latest"
 
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
+dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
 # Guacamole

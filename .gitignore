@@ -381,8 +381,14 @@ temp/
 
 risks/
 
+# UAT test files
+uat/large.py
+
 # GitHub Runner
 platform/terraform/global/github-runner/*.zip
 
 # Central test coverage directory
 coverage/
+
+# Serena Claude Code code understanding plugin
+.serena/

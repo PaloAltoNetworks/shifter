@@ -159,6 +159,10 @@ module "redis" {
   engine_version      = var.redis_engine_version
   enable_replication  = var.redis_enable_replication
 
+  # CloudWatch Alarms
+  enable_alarms = var.alarm_email != ""
+  alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alerts.arn] : []
+
   tags = var.tags
 }
 
@@ -255,10 +259,10 @@ module "ssm" {
   s3_bucket_name = var.user_storage_bucket
 
   # Pulumi provisioner configuration
-  pulumi_ecs_cluster_arn       = module.pulumi_provisioner.ecs_cluster_arn
-  pulumi_task_definition_arn   = module.pulumi_provisioner.task_definition_arn
-  pulumi_ecs_security_group_id = module.pulumi_provisioner.ecs_security_group_id
-  pulumi_private_subnet_ids    = join(",", module.vpc.private_subnet_ids)
+  pulumi_ecs_cluster_arn        = module.pulumi_provisioner.ecs_cluster_arn
+  pulumi_task_definition_family = module.pulumi_provisioner.task_definition_family
+  pulumi_ecs_security_group_id  = module.pulumi_provisioner.ecs_security_group_id
+  pulumi_private_subnet_ids     = join(",", module.vpc.private_subnet_ids)
 
   # Messaging configuration
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
@@ -460,9 +464,6 @@ module "pulumi_provisioner" {
   range_vpc_cidr              = data.terraform_remote_state.range.outputs.vpc_cidr
   range_route_table_id        = data.terraform_remote_state.range.outputs.private_route_table_id
   range_availability_zone     = data.terraform_remote_state.range.outputs.availability_zone
-  victim_security_group_id    = data.terraform_remote_state.range.outputs.victim_security_group_id
-  kali_security_group_id      = data.terraform_remote_state.range.outputs.kali_security_group_id
-  dc_security_group_id        = data.terraform_remote_state.range.outputs.dc_security_group_id
   range_instance_profile_arn  = data.terraform_remote_state.range.outputs.range_instance_profile_arn
   range_instance_profile_name = data.terraform_remote_state.range.outputs.range_instance_profile_name
   range_instance_role_arn     = data.terraform_remote_state.range.outputs.range_instance_role_arn
@@ -482,9 +483,15 @@ module "pulumi_provisioner" {
   victim_instance_type = var.victim_instance_type
 
   # S3
-  agent_s3_bucket     = module.s3.bucket_name
-  agent_s3_bucket_arn = module.s3.bucket_arn
-  s3_endpoint_id      = data.terraform_remote_state.range.outputs.s3_endpoint_id
+  agent_s3_bucket           = module.s3.bucket_name
+  agent_s3_bucket_arn       = module.s3.bucket_arn
+  s3_endpoint_id            = try(data.terraform_remote_state.range.outputs.s3_endpoint_id, "")
+  firewall_endpoint_id      = data.terraform_remote_state.range.outputs.firewall_endpoint_id != null ? data.terraform_remote_state.range.outputs.firewall_endpoint_id : ""
+  ssm_endpoints_subnet_cidr = try(data.terraform_remote_state.range.outputs.ssm_endpoints_subnet_cidr, "")
+
+  # Portal VPC configuration (for terminal SSH routing)
+  portal_vpc_cidr       = module.vpc.vpc_cidr
+  portal_vpc_peering_id = aws_vpc_peering_connection.portal_to_range.id
 
   # NGFW (VM-Series) - from Range VPC outputs
   ngfw_mgmt_security_group_id = data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id != null ? data.terraform_remote_state.range.outputs.ngfw_mgmt_security_group_id : ""
@@ -492,6 +499,7 @@ module "pulumi_provisioner" {
   ngfw_ami_id                 = data.terraform_remote_state.range.outputs.vm_series_ami_id
   ngfw_instance_type          = data.terraform_remote_state.range.outputs.vm_series_instance_type
   ngfw_subnet_id              = data.terraform_remote_state.range.outputs.ngfw_subnet_id != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_id : ""
+  ngfw_subnet_cidr            = data.terraform_remote_state.range.outputs.ngfw_subnet_cidr != null ? data.terraform_remote_state.range.outputs.ngfw_subnet_cidr : ""
   ngfw_instance_profile_name  = data.terraform_remote_state.range.outputs.ngfw_instance_profile_name != null ? data.terraform_remote_state.range.outputs.ngfw_instance_profile_name : ""
   ngfw_instance_role_arn      = data.terraform_remote_state.range.outputs.ngfw_instance_role_arn != null ? data.terraform_remote_state.range.outputs.ngfw_instance_role_arn : ""
 

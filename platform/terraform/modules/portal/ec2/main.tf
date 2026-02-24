@@ -137,6 +137,27 @@ resource "aws_iam_role_policy" "range_ssh_keys" {
   })
 }
 
+# IAM policy for reading NGFW SSH keys from Secrets Manager
+# SSH keys are stored at: shifter/{env}/ngfw/{instance_uuid}/ssh-key
+# Required for NGFW CLI access feature via Guacamole SSH
+resource "aws_iam_role_policy" "ngfw_ssh_keys" {
+  name = "ngfw-ssh-keys-read"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/*/ngfw/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "s3_access" {
   name = "s3-access"
   role = aws_iam_role.this.id
@@ -226,6 +247,24 @@ resource "aws_iam_role_policy" "sqs_consume" {
           "sqs:GetQueueAttributes",
           "sqs:GetQueueUrl",
           "sqs:ChangeMessageVisibility"
+        ]
+        Resource = var.sqs_queue_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "sqs_publish" {
+  name = "sqs-publish"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage"
         ]
         Resource = var.sqs_queue_arns
       }

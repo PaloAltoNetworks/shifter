@@ -148,6 +148,7 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Action = [
           "ec2:CreateNetworkInterface",
           "ec2:DeleteNetworkInterface",
+          "ec2:DetachNetworkInterface",
           "ec2:ModifyNetworkInterfaceAttribute"
         ]
         Resource = "*"
@@ -490,6 +491,16 @@ resource "aws_iam_role_policy" "ssm_parameters" {
           "ssm:RemoveTagsFromResource"
         ]
         Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/${var.environment}/range/*"
+      },
+      {
+        # Read-only access to AMI parameters (set by Packer builds)
+        Sid    = "SSMReadAMIParameters"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/ami/*"
       },
       {
         # DescribeParameters required by Pulumi/Terraform for metadata lookup

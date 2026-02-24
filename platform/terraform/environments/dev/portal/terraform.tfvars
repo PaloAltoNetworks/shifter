@@ -75,13 +75,13 @@ user_storage_bucket = "shifter-dev-user-storage-e3462f0c"
 # See shifter/packer/ for AMI build configuration
 
 victim_instance_type = "t3.large"
-kali_instance_type   = "t3.medium"
+kali_instance_type   = "t3.large"
 
 # ------------------------------------------------------------------------------
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-enable_autoscaling   = true
+enable_autoscaling   = false
 asg_min_size         = 2
 asg_max_size         = 5
 asg_desired_capacity = 2
@@ -128,7 +128,7 @@ pulumi_container_tag = "latest"
 
 dc_domain_name = "internal.shifter"
 # nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2024!" # pragma: allowlist secret
+dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
 
 # ------------------------------------------------------------------------------
 # Guacamole

@@ -7,6 +7,250 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-02-24
+
+### Added
+- Unified platform audit logging system
+- Audit coverage for range pause/resume, experiments, scenario editor
+- AuditLog entity types: experiment, scenario, script
+- AuditLog actions: pause, resume, cancel
+- Audit service tests (16 tests)
+
+### Fixed
+- audit_log() now swallows exceptions instead of re-raising (never breaks the application)
+- Stale self.range_id references in SSH consumer after refactor
+- Migrated agent events from deprecated ActivityLog to AuditLog
+
+## [2.2.11] - 2026-02-23
+
+### Fixed
+- Threat Research RBAC sidebar visibility and auth redirect
+
+## [2.2.10] - 2026-02-23
+
+### Added
+- Threat Research RBAC group
+- Threat Research access to Experiment Manager and Scenario Editor
+
+## [2.2.9] - 2026-02-22
+
+### Fixed
+- Experiment runner integration fixes
+
+## [2.2.8] - 2026-02-22
+
+### Changed
+- Finish experiment runner integration
+
+## [2.2.7] - 2026-02-21
+
+### Added
+- Scenario Editor UAT plans
+
+### Fixed
+- Role enum validation for ScenarioTemplate
+
+## [2.2.6] - 2026-02-21
+
+### Changed
+- Range pause/unpause uses Ready instead of Active status
+
+## [2.2.5] - 2026-02-21
+
+### Added
+- MCP tools for SSM tunnel testing: start_portal_test_tunnel, stop_portal_test_tunnel
+- localhost to ALLOWED_HOSTS in dev for tunnel access
+
+## [2.2.4] - 2026-02-21
+
+### Changed
+- Enable dev_login in deployed dev environment for programmatic testing via SSM tunnel
+
+## [2.2.3] - 2026-02-21
+
+### Fixed
+- Broken migration chain causes Django crash loop
+
+## [2.2.2] - 2026-02-17
+
+### Fixed
+- Deploy script SSM waiter timeout - increased max attempts from 20 to 60 (15 minutes)
+
+## [2.2.1] - 2026-02-16
+
+### Changed
+- Centralized script variable sanitization in Pydantic contexts for consistent and secure variable handling.
+- Moved experiment template variable logic to shared `cyberscript` library to enable cross-layer reuse and validation.
+- Hardened `ExperimentOrchestrator` with comprehensive exception handling and debug logging to ensure unexpected failures mark runs as FAILED rather than hanging.
+- Standardized `ExperimentManager` services and views to match CMS defensive coding patterns, including uniform user validation and ORM result type checking.
+- Refactored experiment creation flow to enforce model-level validation within atomic transactions.
+
+## [2.2.0] - 2026-02-16
+
+### Add
+- Direct NGFW access for users
+
+## [2.1.7] - 2026-02-16
+
+### Added
+- Cortex Broken Bank AMI
+
+## [2.1.6] - 2026-02-16
+
+### Added
+- Add XDR Collector and Cloud Identity Engine agents to CMS
+-
+## [2.1.5] - 2026-02-15
+
+### Changed
+- Merged MCP-Shifter and MCP-NGFW into MCP-Ops
+- MCP-Ops has range reconciliation tool to find and destroy orphaned instances
+- Add better parsing for AWS to SonarQube
+
+## [2.1.4] - 2026-02-15
+
+### Fixed
+- Shifter DB MCP no longer leaks connections to RDS
+
+## [2.1.3] - 2026-02-15
+
+### Fixed
+- Failed ranges do not always get destroyed
+
+## [2.1.2] - 2026-02-14
+
+### Fixed
+- Restrictive Egress rules in Network Firewall loosened to match XSIAM docs recommendations
+
+## [2.1.1] - 2026-02-10
+
+### Fixed
+- Subnet `connected_to` semantics corrected: Terraform now creates security group rules on target subnet allowing traffic from source (was reversed)
+- Range provisioning now reads NGFW data ENI ID from database instead of non-existent environment variable
+
+### Changed
+- Updated `connected_to` documentation to clarify unidirectional semantics (both subnets must list each other for bidirectional traffic)
+- Updated basic_ngfw scenario template to have bidirectional subnet connectivity
+
+## [2.1.0] - 2026-02-08
+
+### Added
+- Experiment Manager for creating and managing experiments
+
+## [2.0.0] - 2026-02-07
+
+### Added
+- Scenario Editor for creating and editing CyberScript
+
+## [1.1.3] - 2026-02-07
+
+### Added
+- Certipy to Kali AMI
+
+## [1.1.2] - 2026-02-07
+
+### Added
+- Credentials details page
+
+## [1.1.1] - 2026-02-07
+
+### Changed
+- Increased number of possible user subnets by decreasing subnet size
+
+## [1.1.0] - 2026-02-06
+
+### Changed
+- Range pause/resume flow and UI updates
+
+### Fixed
+- Guacamole ECS service not deploying correctly
+
+## [1.0.9] - 2026-02-02
+
+### Fixed
+- Claude errors due to using wrong small model
+- Handle NGFW "starting" state correctly
+
+## [1.0.8] - 2026-02-02
+
+### Fixed
+- Fix logic error handling non-NGFW scenarios
+
+## [1.0.7] - 2026-02-01
+
+### Fixed
+- Refine Internet egress domains and CIDR to Palo Alto Networks published IPs instead of overbroad GCP IPs
+
+## [1.0.6] - 2026-01-28
+
+### Added
+- MCP servers for Shifter DB, NGFW, and AWS ops
+### Fixed
+- NGFW destroy flow does not remove EC2 instances
+- NGFW commands not piped to SSH as required
+- Provisioner missing permission for deleting NGFW resources
+
+## [1.0.5] - 2026-01-28
+
+### Changed
+- Updated SSH connection validation to handle difference between SSH being up and management plane being fully up
+
+## [1.0.4] - 2026-01-28
+
+### Fixed
+- Hydrator no longer rejects empty folder fields for SCM creds
+
+## [1.0.3] - 2026-01-27
+
+### Fixed
+- Some range boxes have unexpected Internet access
+
+
+## [1.0.2] - 2026-01-25
+
+### Added
+- Range pause/resume flow and UI updates
+
+## [1.0.1] - 2026-01-25
+
+### Changed
+- Migrated range and NGFW provisioning to Terraform
+
+## [1.0.0] - 2026-01-21
+
+### Added
+- Cortex BYOT scenario (automation except for CIE and XDR collector)
+- Cortex Deployment Experience scenario
+
+### Changed
+- Dashboard renamed to Ranges
+- Ranges view uses multiple tiles for launch and active ranges
+- NGFW flow handles prompting user to associate NGFW to SCM and XDR
+- Removed legacy Terraform-based range provisioning
+- Ubuntu box supports RDP/desktop access
+- Users can set MFA to remember devices
+
+### Fixed
+- Django build does not include cyberscript shared library
+- Extend and streamline NGFW stand up plan
+- Dynamic subnet creation for ranges misses Shifter Platform creation
+- Missing VPC route for kali
+- VPC Internet egress not enforcing drop rule
+- Kali RDP not working due to permissions on logs
+- XDR not deployed on BYOT scenario DC
+- Race condition in DC readiness and target attempt to join domain
+
+## [0.10.7] - 2026-01-12
+
+### Changed
+- Extract all Cyberscript related code to shared library for reuse in Provisioner and Engine
+-
+## [0.10.6] - 2026-01-13
+
+### Fixed
+- Type conflict causes NGFW provisioning to fail
+- CMS parses legacy and new range_spec formats for consumers
+
 ## [0.10.5] - 2026-01-12
 
 ### Fixed
@@ -41,6 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Draft Cortex BYOT scenario template
 - venv enforcer hook for Claude Code
 - Guacamole RDP for Range instances
+- User (not just technical) docs in Shifter
 
 ### Changed
 - NGFW models and services refactored to use schemas
@@ -51,6 +296,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AaC gate (service layer boundary violations at code or model level) fails will now block PRs
 - AWS assets tagged to requests for cost tracking and cleanup
 - Patched vulnerable urllib3, now on 2.6.3
+- Update technical docs
 
 ### Fixed
 - Dashboard range status updates and styling
@@ -59,6 +305,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tmux now used for Terminal UI sessions
 - RDP copy/paste not working
 - Packer does not clean up EC2 instance after build
+- tmux Terminal UI sessions not allowing mouse scrolling
 
 ## [0.10.6] - 2025-01-09
 

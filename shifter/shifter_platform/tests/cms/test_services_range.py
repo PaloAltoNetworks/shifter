@@ -1140,23 +1140,391 @@ class TestCancelRange:
 class TestPauseRange:
     """Tests for pause_range() service function.
 
-    Per plan: Deferred - should remain as NotImplementedError.
+    Tests SERVICE behavior with mocked dependencies:
+    - Validates ownership via RangeInstance lookup
+    - Delegates to engine.pause_range correctly
+    - Raises CMSError when engine returns False
     """
 
-    def test_raises_not_implemented_error(self, user):
-        """Service raises NotImplementedError (deferred feature)."""
-        with pytest.raises(NotImplementedError):
+    def test_gets_range_to_verify_ownership(self, user):
+        """Service fetches RangeInstance and verifies ownership."""
+        from cms.models import RangeInstance
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range) as mock_get,
+            patch("cms.services.engine_pause_range", return_value=True),
+        ):
             services.pause_range(user, 42)
+            mock_get.assert_called_once_with(range_id=42)
+
+    def test_calls_engine_pause_with_request_id(self, user):
+        """Service passes request_id to engine.pause_range."""
+        from uuid import UUID
+
+        from cms.models import RangeInstance
+
+        mock_request = make_mock_request()
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_pause_range", return_value=True) as mock_pause,
+        ):
+            services.pause_range(user, 42)
+
+            mock_pause.assert_called_once()
+            call_arg = mock_pause.call_args[0][0]
+            assert isinstance(call_arg, UUID)
+            assert call_arg == mock_request.request_id
+
+    def test_raises_cms_error_when_engine_returns_false(self, user):
+        """Service raises CMSError when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_pause_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be paused"),
+        ):
+            services.pause_range(user, 42)
+
+    def test_raises_cms_error_when_range_not_found(self, user):
+        """Service raises CMSError when range doesn't exist."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        with (
+            patch("cms.services.RangeInstance.objects.get", side_effect=RangeInstance.DoesNotExist),
+            pytest.raises(CMSError, match="not found"),
+        ):
+            services.pause_range(user, 42)
+
+    def test_raises_cms_error_when_not_owner(self, user):
+        """Service raises CMSError when user doesn't own the range."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id + 1)  # Different user
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            pytest.raises(CMSError, match="not found"),
+        ):
+            services.pause_range(user, 42)
+
+    def test_sets_status_to_pausing_before_engine_call(self, user):
+        """Service sets CMS status to PAUSING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        statuses_at_engine_call = []
+
+        def capture_status(request_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_pause_range", side_effect=capture_status),
+        ):
+            services.pause_range(user, 42)
+
+        assert statuses_at_engine_call == [ResourceStatus.PAUSING.value]
+
+    def test_reverts_status_to_ready_when_engine_returns_false(self, user):
+        """Service reverts CMS status to READY when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_pause_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be paused"),
+        ):
+            services.pause_range(user, 42)
+
+        assert mock_range.status == ResourceStatus.READY.value
 
 
 @pytest.mark.django_db
 class TestResumeRange:
     """Tests for resume_range() service function.
 
-    Per plan: Deferred - should remain as NotImplementedError.
+    Tests SERVICE behavior with mocked dependencies:
+    - Validates ownership via RangeInstance lookup
+    - Delegates to engine.resume_range correctly
+    - Raises CMSError when engine returns False
     """
 
-    def test_raises_not_implemented_error(self, user):
-        """Service raises NotImplementedError (deferred feature)."""
-        with pytest.raises(NotImplementedError):
+    def test_gets_range_to_verify_ownership(self, user):
+        """Service fetches RangeInstance and verifies ownership."""
+        from cms.models import RangeInstance
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range) as mock_get,
+            patch("cms.services.engine_resume_range", return_value=True),
+        ):
             services.resume_range(user, 42)
+            mock_get.assert_called_once_with(range_id=42)
+
+    def test_calls_engine_resume_with_request_id(self, user):
+        """Service passes request_id to engine.resume_range."""
+        from uuid import UUID
+
+        from cms.models import RangeInstance
+
+        mock_request = make_mock_request()
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_resume_range", return_value=True) as mock_resume,
+        ):
+            services.resume_range(user, 42)
+
+            mock_resume.assert_called_once()
+            call_arg = mock_resume.call_args[0][0]
+            assert isinstance(call_arg, UUID)
+            assert call_arg == mock_request.request_id
+
+    def test_raises_cms_error_when_engine_returns_false(self, user):
+        """Service raises CMSError when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_resume_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be resumed"),
+        ):
+            services.resume_range(user, 42)
+
+    def test_raises_cms_error_when_range_not_found(self, user):
+        """Service raises CMSError when range doesn't exist."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        with (
+            patch("cms.services.RangeInstance.objects.get", side_effect=RangeInstance.DoesNotExist),
+            pytest.raises(CMSError, match="not found"),
+        ):
+            services.resume_range(user, 42)
+
+    def test_raises_cms_error_when_not_owner(self, user):
+        """Service raises CMSError when user doesn't own the range."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id + 1)  # Different user
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            pytest.raises(CMSError, match="not found"),
+        ):
+            services.resume_range(user, 42)
+
+    def test_sets_status_to_resuming_before_engine_call(self, user):
+        """Service sets CMS status to RESUMING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        statuses_at_engine_call = []
+
+        def capture_status(request_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_resume_range", side_effect=capture_status),
+        ):
+            services.resume_range(user, 42)
+
+        assert statuses_at_engine_call == [ResourceStatus.RESUMING.value]
+
+    def test_reverts_status_to_paused_when_engine_returns_false(self, user):
+        """Service reverts CMS status to PAUSED when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=user.id)
+        mock_range.request = make_mock_request()
+        with (
+            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
+            patch("cms.services.engine_resume_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be resumed"),
+        ):
+            services.resume_range(user, 42)
+
+        assert mock_range.status == ResourceStatus.PAUSED.value
+
+
+@pytest.mark.django_db
+class TestPauseRangeByRequestId:
+    """Tests for pause_range_by_request_id() service function."""
+
+    def test_calls_engine_with_request_id(self, user):
+        """Service passes request_id to engine.pause_range."""
+        from cms.models import RangeInstance
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_pause_range", return_value=True) as mock_pause,
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.pause_range_by_request_id(user, str(request_id))
+
+            mock_pause.assert_called_once_with(request_id)
+
+    def test_sets_status_to_pausing_before_engine_call(self, user):
+        """Service sets CMS status to PAUSING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        statuses_at_engine_call = []
+
+        def capture_status(req_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_pause_range", side_effect=capture_status),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.pause_range_by_request_id(user, str(request_id))
+
+        assert statuses_at_engine_call == [ResourceStatus.PAUSING.value]
+
+    def test_reverts_status_to_ready_when_engine_returns_false(self, user):
+        """Service reverts CMS status to READY when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_pause_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be paused"),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.pause_range_by_request_id(user, str(request_id))
+
+        assert mock_range.status == ResourceStatus.READY.value
+
+    def test_raises_cms_error_when_not_found(self, user):
+        """Service raises CMSError when range not found."""
+        from cms.exceptions import CMSError
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            pytest.raises(CMSError, match="not found"),
+        ):
+            mock_filter.return_value.first.return_value = None
+            services.pause_range_by_request_id(user, str(uuid4()))
+
+
+@pytest.mark.django_db
+class TestResumeRangeByRequestId:
+    """Tests for resume_range_by_request_id() service function."""
+
+    def test_calls_engine_with_request_id(self, user):
+        """Service passes request_id to engine.resume_range."""
+        from cms.models import RangeInstance
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_resume_range", return_value=True) as mock_resume,
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.resume_range_by_request_id(user, str(request_id))
+
+            mock_resume.assert_called_once_with(request_id)
+
+    def test_sets_status_to_resuming_before_engine_call(self, user):
+        """Service sets CMS status to RESUMING before calling engine."""
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        statuses_at_engine_call = []
+
+        def capture_status(req_id):
+            statuses_at_engine_call.append(mock_range.status)
+            return True
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_resume_range", side_effect=capture_status),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.resume_range_by_request_id(user, str(request_id))
+
+        assert statuses_at_engine_call == [ResourceStatus.RESUMING.value]
+
+    def test_reverts_status_to_paused_when_engine_returns_false(self, user):
+        """Service reverts CMS status to PAUSED when engine returns False."""
+        from cms.exceptions import CMSError
+        from cms.models import RangeInstance
+        from shared.enums import ResourceStatus
+
+        request_id = uuid4()
+        mock_request = make_mock_request(request_id)
+        mock_range = Mock(spec=RangeInstance, user_id=user.id)
+        mock_range.request = mock_request
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            patch("cms.services.engine_resume_range", return_value=False),
+            pytest.raises(CMSError, match="cannot be resumed"),
+        ):
+            mock_filter.return_value.first.return_value = mock_range
+            services.resume_range_by_request_id(user, str(request_id))
+
+        assert mock_range.status == ResourceStatus.PAUSED.value
+
+    def test_raises_cms_error_when_not_found(self, user):
+        """Service raises CMSError when range not found."""
+        from cms.exceptions import CMSError
+
+        with (
+            patch("cms.services.RangeInstance.objects.filter") as mock_filter,
+            pytest.raises(CMSError, match="not found"),
+        ):
+            mock_filter.return_value.first.return_value = None
+            services.resume_range_by_request_id(user, str(uuid4()))

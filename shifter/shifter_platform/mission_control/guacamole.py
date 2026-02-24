@@ -112,6 +112,8 @@ def create_rdp_connection_params(
     password: str | None = None,
     ignore_cert: bool = True,
     security: str = "any",
+    sftp_root_directory: str | None = None,
+    sftp_private_key: str | None = None,
 ) -> dict[str, str]:
     """Create RDP connection parameters for Guacamole.
 
@@ -122,6 +124,8 @@ def create_rdp_connection_params(
         password: Optional RDP password
         ignore_cert: Whether to ignore certificate errors
         security: Security mode ('any', 'nla', 'tls', 'rdp')
+        sftp_root_directory: Root directory for SFTP file transfers
+        sftp_private_key: PEM-encoded private key for SFTP (used instead of password)
 
     Returns:
         Dictionary of RDP parameters for Guacamole
@@ -135,11 +139,6 @@ def create_rdp_connection_params(
         # Clipboard support
         "disable-copy": "false",
         "disable-paste": "false",
-        # Drive/file transfer support (drag and drop)
-        "enable-drive": "true",
-        "drive-name": "Shared",
-        "drive-path": "/var/lib/guacamole/drive",
-        "create-drive-path": "true",
         # Performance optimizations - reduce bandwidth and server-side rendering load
         "color-depth": "16",
         "disable-audio": "true",
@@ -150,6 +149,23 @@ def create_rdp_connection_params(
         "enable-desktop-composition": "false",
         "enable-menu-animations": "false",
     }
+
+    # SFTP file transfer - works reliably for both Windows and Linux (xrdp)
+    # Uses SSH connection for file transfers via Guacamole menu (Ctrl+Alt+Shift)
+    if username and (password or sftp_private_key):
+        params["enable-sftp"] = "true"
+        params["sftp-hostname"] = hostname
+        params["sftp-port"] = "22"
+        params["sftp-username"] = username
+        # Prefer key-based auth (required for Windows OpenSSH)
+        if sftp_private_key:
+            params["sftp-private-key"] = sftp_private_key
+        elif password:
+            params["sftp-password"] = password
+        if sftp_root_directory:
+            params["sftp-root-directory"] = sftp_root_directory
+            # sftp-directory is the upload destination for drag-and-drop transfers
+            params["sftp-directory"] = sftp_root_directory
 
     if username:
         params["username"] = username
@@ -206,6 +222,8 @@ def create_guacamole_rdp_url(
     rdp_username: str | None = None,
     rdp_password: str | None = None,
     api_base_url: str | None = None,
+    sftp_root_directory: str | None = None,
+    sftp_private_key: str | None = None,
 ) -> str:
     """Create a signed Guacamole URL for RDP access.
 
@@ -222,9 +240,11 @@ def create_guacamole_rdp_url(
         hostname: Target host IP for RDP
         port: RDP port (default 3389)
         expires_minutes: Minutes until URL expires
-        rdp_username: Windows username for RDP login
-        rdp_password: Windows password for RDP login
+        rdp_username: Username for RDP login
+        rdp_password: Password for RDP login
         api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
+        sftp_root_directory: Root directory for SFTP file transfers
+        sftp_private_key: PEM-encoded private key for SFTP (used instead of password)
 
     Returns:
         Full Guacamole URL with auth token that auto-connects to RDP
@@ -236,7 +256,116 @@ def create_guacamole_rdp_url(
     connections = {
         connection_name: {
             "protocol": "rdp",
-            "parameters": create_rdp_connection_params(hostname, port, username=rdp_username, password=rdp_password),
+            "parameters": create_rdp_connection_params(
+                hostname,
+                port,
+                username=rdp_username,
+                password=rdp_password,
+                sftp_root_directory=sftp_root_directory,
+                sftp_private_key=sftp_private_key,
+            ),
+        }
+    }
+
+    # Create and sign payload
+    payload = create_guacamole_auth_payload(username, connections, expires_minutes)
+    encrypted_data = sign_and_encrypt_payload(payload, secret_key)
+
+    # Get auth token from Guacamole API (use internal URL if provided)
+    api_url = (api_base_url or base_url).rstrip("/")
+    auth_token = get_guacamole_auth_token(api_url, encrypted_data)
+
+    # Build client identifier: connection_name + NULL + "c" + NULL + "json"
+    # This tells Guacamole to auto-connect to the specified connection from JSON auth
+    client_id = base64.b64encode(f"{connection_name}\0c\0json".encode()).decode().rstrip("=")
+
+    # Return public URL for browser
+    base_url = base_url.rstrip("/")
+    return f"{base_url}/#/client/{client_id}?token={auth_token}"
+
+
+def create_ssh_connection_params(
+    username: str,
+    hostname: str,
+    port: int = 22,
+    ssh_private_key: str | None = None,
+) -> dict[str, str]:
+    """Create SSH connection parameters for Guacamole.
+
+    Args:
+        username: SSH username for login
+        hostname: Target host IP or hostname
+        port: SSH port (default 22)
+        ssh_private_key: PEM-encoded private key for authentication
+
+    Returns:
+        Dictionary of SSH parameters for Guacamole
+    """
+    params: dict[str, str] = {
+        "hostname": hostname,
+        "port": str(port),
+        "username": username,
+        # Terminal settings
+        "color-scheme": "green-black",
+        "font-name": "monospace",
+        "font-size": "12",
+        # Clipboard support
+        "enable-clipboard": "true",
+    }
+
+    if ssh_private_key:
+        params["private-key"] = ssh_private_key
+
+    return params
+
+
+def create_guacamole_ssh_url(
+    base_url: str,
+    secret_key: str,
+    username: str,
+    connection_name: str,
+    hostname: str,
+    port: int = 22,
+    ssh_username: str = "admin",
+    ssh_private_key: str | None = None,
+    expires_minutes: int = 5,
+    api_base_url: str | None = None,
+) -> str:
+    """Create a signed Guacamole URL for SSH access.
+
+    This function:
+    1. Creates an encrypted JSON payload with connection details
+    2. POSTs to Guacamole's /api/tokens to get an auth token
+    3. Returns a URL that auto-connects to the SSH session
+
+    Args:
+        base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
+        secret_key: 32-character hex string (128-bit key)
+        username: User's email/username for Guacamole session
+        connection_name: Identifier for this connection
+        hostname: Target host IP for SSH
+        port: SSH port (default 22)
+        ssh_username: Username for SSH login (default 'admin')
+        ssh_private_key: PEM-encoded private key for authentication
+        expires_minutes: Minutes until URL expires (default 5)
+        api_base_url: Internal URL for server-to-server API calls (defaults to base_url)
+
+    Returns:
+        Full Guacamole URL with auth token that auto-connects to SSH
+
+    Raises:
+        ValueError: If secret key is invalid or token request fails
+    """
+    # Create connection definition
+    connections = {
+        connection_name: {
+            "protocol": "ssh",
+            "parameters": create_ssh_connection_params(
+                username=ssh_username,
+                hostname=hostname,
+                port=port,
+                ssh_private_key=ssh_private_key,
+            ),
         }
     }
 

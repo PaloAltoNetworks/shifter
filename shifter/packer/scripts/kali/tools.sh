@@ -23,4 +23,12 @@ apt-get install -y \
   wget \
   tmux
 
+# Configure tmux for mouse scrolling (enables xterm.js scrollbar in web terminal)
+cat > /etc/tmux.conf << 'EOF'
+set -g mouse on
+EOF
+
+echo "=== Installing Certipy for AD Certificate Services testing ==="
+pip3 install --break-system-packages certipy-ad
+
 echo "=== Tools setup complete ==="

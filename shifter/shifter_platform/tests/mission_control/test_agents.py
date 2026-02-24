@@ -9,7 +9,7 @@ from django.test import Client
 from django.urls import reverse
 
 from cms.models import AgentConfig, OperatingSystem
-from management.models import ActivityLog
+from risk_register.models import AuditLog
 
 User = get_user_model()
 
@@ -113,8 +113,12 @@ class TestDeleteAgent:
         # Verify S3 delete was called
         mock_delete.assert_called_once_with(agent.s3_key)
 
-        # Verify activity was logged
-        log = ActivityLog.objects.filter(action="agent_deleted").first()
+        # Verify audit log entry was created
+        log = AuditLog.objects.filter(
+            entity_type=AuditLog.EntityType.AGENT,
+            action=AuditLog.Action.DELETE,
+            entity_id=agent.id,
+        ).first()
         assert log is not None
 
     def test_cannot_delete_other_users_agent(self, user, agent):

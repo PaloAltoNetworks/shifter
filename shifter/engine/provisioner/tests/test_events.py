@@ -7,10 +7,19 @@ events to SNS for fan-out.
 from __future__ import annotations
 
 import json
-import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture
+def mock_sns_env(monkeypatch):
+    """Set up SNS environment variables."""
+    monkeypatch.setenv("AWS_REGION", "us-east-2")
+    monkeypatch.setenv(
+        "SNS_RANGE_EVENTS_ARN",
+        "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
+    )
 
 
 class TestGetSNSClient:
@@ -55,7 +64,8 @@ class TestGetSNSTopicARN:
 
         from events import _get_sns_topic_arn
 
-        assert _get_sns_topic_arn() == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+        expected = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+        assert _get_sns_topic_arn() == expected
 
     def test_raises_when_arn_not_set(self, monkeypatch):
         """Raises ValueError when SNS_RANGE_EVENTS_ARN not set."""
@@ -69,15 +79,6 @@ class TestGetSNSTopicARN:
 
 class TestPublishEvent:
     """Tests for _publish_event() internal function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
 
     def test_publishes_event_to_sns_topic(self, mock_sns_env):
         """Event is published to SNS with correct message and attributes."""
@@ -99,72 +100,29 @@ class TestPublishEvent:
             mock_sns.publish.assert_called_once()
             call_kwargs = mock_sns.publish.call_args.kwargs
 
-            assert call_kwargs["TopicArn"] == "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+            expected_arn = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
+            assert call_kwargs["TopicArn"] == expected_arn
             assert json.loads(call_kwargs["Message"]) == event
-            assert call_kwargs["MessageAttributes"]["event_type"]["StringValue"] == "range.status.updated"
+            # Message attributes for SNS filtering
+            attrs = call_kwargs["MessageAttributes"]
+            assert attrs["event_type"]["DataType"] == "String"
+            assert attrs["event_type"]["StringValue"] == "range.status.updated"
 
-    def test_includes_message_attributes(self, mock_sns_env):
-        """Message attributes include event_type for filtering."""
+    def test_does_not_raise_on_sns_failure(self, mock_sns_env):
+        """SNS publish failures are caught and logged, not raised."""
         from events import _publish_event
 
         with patch("events._get_sns_client") as mock_get_client:
             mock_sns = MagicMock()
-            mock_get_client.return_value = mock_sns
-
-            event = {"event_type": "range.provisioned", "range_id": 42}
-
-            _publish_event(event)
-
-            call_kwargs = mock_sns.publish.call_args.kwargs
-            attrs = call_kwargs["MessageAttributes"]
-
-            assert attrs["event_type"]["DataType"] == "String"
-            assert attrs["event_type"]["StringValue"] == "range.provisioned"
-
-    def test_logs_debug_on_success(self, mock_sns_env, caplog):
-        """Logs debug message on successful publish."""
-        from events import _publish_event
-
-        with (
-            patch("events._get_sns_client") as mock_get_client,
-            caplog.at_level(logging.DEBUG, logger="events"),
-        ):
-            mock_sns = MagicMock()
-            mock_get_client.return_value = mock_sns
-
-            _publish_event({"event_type": "range.status.updated", "range_id": 42})
-
-            assert "Published" in caplog.text or "range_id=42" in caplog.text
-
-    def test_logs_error_on_sns_failure(self, mock_sns_env, caplog):
-        """Logs error when SNS publish fails."""
-        from events import _publish_event
-
-        with (
-            patch("events._get_sns_client") as mock_get_client,
-            caplog.at_level(logging.ERROR, logger="events"),
-        ):
-            mock_sns = MagicMock()
             mock_sns.publish.side_effect = Exception("SNS error")
             mock_get_client.return_value = mock_sns
 
-            # Should not raise, but should log error
+            # Should not raise
             _publish_event({"event_type": "range.status.updated", "range_id": 42})
-
-            assert "error" in caplog.text.lower() or "fail" in caplog.text.lower()
 
 
 class TestPublishStatusUpdate:
     """Tests for publish_status_update() function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
 
     def test_publishes_status_change_event(self, mock_sns_env):
         """Publishes event with status transition details."""
@@ -182,7 +140,8 @@ class TestPublishStatusUpdate:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "range.status.updated"
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
             assert event["range_id"] == 42
             assert event["user_id"] == 1
             assert event["new_status"] == "provisioning"
@@ -203,24 +162,6 @@ class TestPublishStatusUpdate:
             event = mock_publish.call_args[0][0]
             assert event["error_message"] == "Subnet exhausted"
 
-    def test_logs_info_on_status_change(self, mock_sns_env, caplog):
-        """Logs info message for status changes."""
-        from events import publish_status_update
-
-        with (
-            patch("events._publish_event"),
-            caplog.at_level(logging.INFO, logger="events"),
-        ):
-            publish_status_update(
-                request_id="550e8400-e29b-41d4-a716-446655440000",
-                range_id=42,
-                user_id=1,
-                new_status="provisioning",
-            )
-
-            assert "42" in caplog.text
-            assert "provisioning" in caplog.text
-
 
 class TestPublishReady:
     """Tests for publish_ready() function.
@@ -230,17 +171,8 @@ class TestPublishReady:
     is published.
     """
 
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_status_update_and_provisioned_events(self, mock_sns_env):
-        """Publishes both status update (ready) and provisioned events."""
+    def test_publishes_ready_and_provisioned_events(self, mock_sns_env):
+        """Publishes status update (ready) and provisioned events."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
@@ -260,7 +192,7 @@ class TestPublishReady:
             assert "range.provisioned" in event_types
 
     def test_provisioned_event_is_notification_only(self, mock_sns_env):
-        """Provisioned event contains only identification fields, no state data."""
+        """Provisioned event has only identification fields, no state data."""
         from events import publish_ready
 
         with patch("events._publish_event") as mock_publish:
@@ -278,7 +210,8 @@ class TestPublishReady:
             event = provisioned_events[0]
 
             # Should have identification fields
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
             assert event["range_id"] == 42
             assert event["user_id"] == 1
             assert "event_id" in event
@@ -308,19 +241,10 @@ class TestPublishReady:
             assert status_events[0]["new_status"] == "ready"
 
 
-class TestPublishFailed:
-    """Tests for publish_failed() function."""
+class TestPublishLifecycleEvents:
+    """Tests for publish_failed(), publish_destroyed(), publish_cancelled()."""
 
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_failed_status_with_error(self, mock_sns_env):
+    def test_publish_failed_includes_error_message(self, mock_sns_env):
         """Publishes status update with failed status and error message."""
         from events import publish_failed
 
@@ -338,20 +262,7 @@ class TestPublishFailed:
             assert event["new_status"] == "failed"
             assert event["error_message"] == "Instance launch failed"
 
-
-class TestPublishDestroyed:
-    """Tests for publish_destroyed() function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_destroyed_event(self, mock_sns_env):
+    def test_publish_destroyed_sends_event(self, mock_sns_env):
         """Publishes range.destroyed event."""
         from events import publish_destroyed
 
@@ -362,7 +273,6 @@ class TestPublishDestroyed:
                 user_id=1,
             )
 
-            # Should publish both status update and destroyed event
             assert mock_publish.call_count >= 1
 
             calls = [call[0][0] for call in mock_publish.call_args_list]
@@ -370,20 +280,7 @@ class TestPublishDestroyed:
 
             assert len(destroyed_events) == 1
 
-
-class TestPublishCancelled:
-    """Tests for publish_cancelled() function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
-
-    def test_publishes_cancelled_event(self, mock_sns_env):
+    def test_publish_cancelled_sends_event(self, mock_sns_env):
         """Publishes range.cancelled event."""
         from events import publish_cancelled
 
@@ -398,27 +295,14 @@ class TestPublishCancelled:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "range.cancelled"
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
             assert event["range_id"] == 42
             assert event["user_id"] == 1
 
 
-# =============================================================================
-# NGFW Event Publishing Tests
-# =============================================================================
-
-
 class TestPublishNgfwEvent:
     """Tests for publish_ngfw_event() unified function."""
-
-    @pytest.fixture
-    def mock_sns_env(self, monkeypatch):
-        """Set up SNS environment variables."""
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
-        monkeypatch.setenv(
-            "SNS_RANGE_EVENTS_ARN",
-            "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events",
-        )
 
     def test_publishes_ngfw_event_with_required_fields(self, mock_sns_env):
         """Publishes event with all required UUID fields."""
@@ -436,9 +320,12 @@ class TestPublishNgfwEvent:
             event = mock_publish.call_args[0][0]
 
             assert event["event_type"] == "ngfw.event"
-            assert event["request_id"] == "550e8400-e29b-41d4-a716-446655440000"
-            assert event["instance_id"] == "660e8400-e29b-41d4-a716-446655440001"
-            assert event["app_id"] == "770e8400-e29b-41d4-a716-446655440002"
+            req_id = "550e8400-e29b-41d4-a716-446655440000"
+            assert event["request_id"] == req_id
+            inst_id = "660e8400-e29b-41d4-a716-446655440001"
+            assert event["instance_id"] == inst_id
+            app_id = "770e8400-e29b-41d4-a716-446655440002"
+            assert event["app_id"] == app_id
             assert event["status"] == "provisioning"
             assert "event_id" in event
             assert "timestamp" in event

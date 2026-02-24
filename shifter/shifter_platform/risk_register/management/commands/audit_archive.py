@@ -59,7 +59,7 @@ class Command(BaseCommand):
 
         cutoff_date = timezone.now() - timedelta(days=retention_days)
 
-        self.stdout.write(f"Audit log archive started")
+        self.stdout.write("Audit log archive started")
         self.stdout.write(f"  Retention: {retention_days} days")
         self.stdout.write(f"  Cutoff date: {cutoff_date.isoformat()}")
         self.stdout.write(f"  Dry run: {dry_run}")
@@ -81,8 +81,7 @@ class Command(BaseCommand):
             self.stdout.write("\nSample records that would be archived:")
             for record in sample:
                 self.stdout.write(
-                    f"  - {record.timestamp.isoformat()} | "
-                    f"{record.action} {record.entity_type} {record.entity_id}"
+                    f"  - {record.timestamp.isoformat()} | {record.action} {record.entity_type} {record.entity_id}"
                 )
             self.stdout.write(self.style.WARNING("\nDry run - no changes made"))
             return
@@ -99,10 +98,7 @@ class Command(BaseCommand):
 
         if not bucket_name:
             self.stdout.write(
-                self.style.ERROR(
-                    "LOGS_BUCKET_NAME not configured. "
-                    "Set via Terraform log-aggregation module output."
-                )
+                self.style.ERROR("LOGS_BUCKET_NAME not configured. Set via Terraform log-aggregation module output.")
             )
             return
 
@@ -112,9 +108,7 @@ class Command(BaseCommand):
 
             s3_client = boto3.client("s3")
         except ImportError:
-            self.stdout.write(
-                self.style.ERROR("boto3 not installed. Install with: pip install boto3")
-            )
+            self.stdout.write(self.style.ERROR("boto3 not installed. Install with: pip install boto3"))
             return
 
         # Process in batches
@@ -177,13 +171,9 @@ class Command(BaseCommand):
                     ContentEncoding="gzip",
                 )
                 archived_count += len(batch)
-                self.stdout.write(
-                    f"  Batch {batch_num}: Uploaded {len(batch)} records to s3://{bucket_name}/{s3_key}"
-                )
+                self.stdout.write(f"  Batch {batch_num}: Uploaded {len(batch)} records to s3://{bucket_name}/{s3_key}")
             except ClientError as e:
-                self.stdout.write(
-                    self.style.ERROR(f"  Batch {batch_num}: S3 upload failed: {e}")
-                )
+                self.stdout.write(self.style.ERROR(f"  Batch {batch_num}: S3 upload failed: {e}"))
                 break
 
             # Delete from database if not --no-delete
@@ -194,6 +184,6 @@ class Command(BaseCommand):
 
         # Summary
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS(f"Archive complete:"))
+        self.stdout.write(self.style.SUCCESS("Archive complete:"))
         self.stdout.write(f"  Records archived: {archived_count}")
         self.stdout.write(f"  Records deleted: {deleted_count}")

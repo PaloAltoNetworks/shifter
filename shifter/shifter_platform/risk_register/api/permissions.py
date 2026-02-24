@@ -112,5 +112,7 @@ class IsOwnerOrAdmin(AuditedPermissionMixin, permissions.BasePermission):
                 return True
 
         # Log access denied
-        self._log_permission_denied(request, view, f"Not owner of object {type(obj).__name__}:{getattr(obj, 'id', 'unknown')}")
+        obj_name = type(obj).__name__
+        obj_id = getattr(obj, "id", "unknown")
+        self._log_permission_denied(request, view, f"Not owner of object {obj_name}:{obj_id}")
         return False

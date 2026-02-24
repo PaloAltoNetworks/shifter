@@ -16,8 +16,6 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from shared.auth import threat_research_required
-
 from cms.experiments import services
 from cms.experiments.exceptions import (
     ArtifactError,
@@ -27,6 +25,7 @@ from cms.experiments.exceptions import (
     ScriptUploadError,
 )
 from cms.experiments.schemas import ExperimentCreateInput
+from shared.auth import threat_research_required
 from shared.exceptions import CMSError
 
 if TYPE_CHECKING:

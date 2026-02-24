@@ -320,6 +320,9 @@ class AuditLog(models.Model):
         DEPROVISION = "deprovision", "Deprovision"
         READY = "ready", "Ready"
         FAILED = "failed", "Failed"
+        PAUSE = "pause", "Pause"
+        RESUME = "resume", "Resume"
+        CANCEL = "cancel", "Cancel"
 
     class EntityType(models.TextChoices):
         # Risk Register entities
@@ -334,6 +337,9 @@ class AuditLog(models.Model):
         SESSION = "session", "Session"
         NGFW = "ngfw", "NGFW"
         CONFIG = "config", "Configuration"
+        EXPERIMENT = "experiment", "Experiment"
+        SCENARIO = "scenario", "Scenario"
+        SCRIPT = "script", "Script"
 
     class ActorType(models.TextChoices):
         USER = "user", "User"

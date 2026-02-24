@@ -625,8 +625,16 @@ class Subnet(EntityBase):
 # -----------------------------------------------------------------------------
 
 
+class AgentType(models.TextChoices):
+    """Types of agents that can be uploaded."""
+
+    XDR = "xdr", "XDR/XSIAM Agent"
+    XDR_COLLECTOR = "xdr_collector", "XDR Collector"
+    CLOUD_IDENTITY_ENGINE = "cloud_identity_engine", "Cloud Identity Engine"
+
+
 class AgentConfig(FileAsset):
-    """XDR/XSIAM agent installer uploaded by a user.
+    """Agent installer uploaded by a user.
 
     Inherits from FileAsset:
     - name, created_at, deleted_at, is_deleted from Asset
@@ -635,6 +643,7 @@ class AgentConfig(FileAsset):
     AgentConfig-specific:
     - user: Owner of this agent (with related_name="cms_agents")
     - os: Operating system this agent is for
+    - agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
     """
 
     user = models.ForeignKey(
@@ -646,6 +655,12 @@ class AgentConfig(FileAsset):
         OperatingSystem,
         on_delete=models.PROTECT,
         related_name="cms_agents",
+    )
+    agent_type = models.CharField(
+        max_length=30,
+        choices=AgentType.choices,
+        default=AgentType.XDR,
+        help_text="Type of agent (XDR, XDR Collector, Cloud Identity Engine)",
     )
 
     class Meta:
@@ -701,6 +716,160 @@ class Request(models.Model):
     def is_deleted(self):
         """Return True if this request has been soft-deleted."""
         return self.deleted_at is not None
+
+
+# -----------------------------------------------------------------------------
+# Scenario Models
+# -----------------------------------------------------------------------------
+
+
+class Scenario(models.Model):
+    """Staff-created scenario template stored in the database.
+
+    Default scenarios ship as YAML in cms/scenarios/templates/ and are
+    not stored here. This model is for custom scenarios created by staff
+    through the scenario editor.
+
+    The definition field holds the structural parts of the scenario
+    (instances, subnets, ngfw flag) as JSON. It is validated against
+    ScenarioTemplate on save.
+
+    Attributes:
+        id: UUID primary key.
+        scenario_id: URL-safe unique identifier (e.g., 'my-custom-lab').
+        name: Human-readable display name.
+        description: User-facing description.
+        definition: JSON with instances, subnets, ngfw fields.
+        created_by: Staff user who created this scenario.
+        updated_by: Staff user who last updated this scenario.
+        created_at: Creation timestamp.
+        updated_at: Last modification timestamp.
+        deleted_at: Soft delete timestamp (None = active).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    scenario_id = models.SlugField(
+        max_length=100,
+        help_text="URL-safe unique identifier (e.g., 'my-custom-lab')",
+    )
+    name = models.CharField(max_length=200, help_text="Display name")
+    description = models.TextField(help_text="User-facing description")
+    definition = models.JSONField(
+        help_text="Scenario structure: instances, subnets, ngfw flag",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_scenarios",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_scenarios",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Scenario"
+        verbose_name_plural = "Scenarios"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scenario_id"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="unique_active_scenario_id",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.scenario_id})"
+
+    def save(self, *args, **kwargs):
+        """Save with definition validation."""
+        if not self.is_deleted:
+            self.validate_definition()
+        super().save(*args, **kwargs)
+
+    @property
+    def is_deleted(self):
+        """Return True if this scenario has been soft-deleted."""
+        return self.deleted_at is not None
+
+    def to_template(self):
+        """Convert to a ScenarioTemplate for validation and hydration.
+
+        Returns:
+            ScenarioTemplate instance built from model fields + definition.
+        """
+        from cms.scenarios.schema import ScenarioTemplate
+
+        return ScenarioTemplate(
+            id=self.scenario_id,
+            name=self.name,
+            description=self.description,
+            enabled=True,
+            ngfw=self.definition.get("ngfw", False),
+            instances=self.definition.get("instances", []),
+            subnets=self.definition.get("subnets", []),
+        )
+
+    def validate_definition(self):
+        """Validate definition against ScenarioTemplate schema.
+
+        Raises:
+            pydantic.ValidationError: If definition is invalid.
+        """
+        self.to_template()
+
+
+class ScenarioMetadata(models.Model):
+    """Staff-configurable overlay for any scenario (default or custom).
+
+    Stores enabled/disabled state and access restrictions. If no metadata
+    row exists for a scenario, defaults apply (enabled=True, staff_only=False).
+
+    This model uses scenario_id (string) rather than a FK so it can
+    reference both YAML-based defaults and database-stored custom scenarios.
+
+    Attributes:
+        scenario_id: Matches the id field of a YAML or DB scenario.
+        enabled: Whether the scenario appears in scenario listings.
+        staff_only: If True, only staff users can see/use this scenario.
+        updated_by: Staff user who last changed this metadata.
+        updated_at: Last modification timestamp.
+    """
+
+    scenario_id = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Scenario ID (matches YAML or DB scenario id)",
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text="Whether this scenario is available for use",
+    )
+    staff_only = models.BooleanField(
+        default=False,
+        help_text="If True, only staff users can see/use this scenario",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["scenario_id"]
+        verbose_name = "Scenario Metadata"
+        verbose_name_plural = "Scenario Metadata"
+
+    def __str__(self):
+        status = "enabled" if self.enabled else "disabled"
+        access = "staff-only" if self.staff_only else "all users"
+        return f"{self.scenario_id}: {status}, {access}"
 
 
 # -----------------------------------------------------------------------------

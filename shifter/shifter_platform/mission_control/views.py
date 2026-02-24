@@ -29,6 +29,13 @@ from cms import list_agents as cms_list_agents
 from cms import list_credentials as cms_list_credentials
 from cms import list_ngfws as cms_list_ngfws
 from cms import list_scenarios as cms_list_scenarios
+from cms.experiments.exceptions import ScriptUploadError
+from cms.experiments.services import (
+    complete_script_upload,
+    delete_script,
+    initiate_script_upload,
+    list_scripts,
+)
 from cms.services import create_ngfw as cms_create_ngfw
 from cms.services import destroy_ngfw as cms_destroy_ngfw
 from cms.services import get_ngfw as cms_get_ngfw
@@ -54,10 +61,10 @@ def _get_user(request: HttpRequest) -> User:
 @login_required
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
-    """Main dashboard - launch and manage ranges."""
+    """Ranges page - launch and manage cyber ranges."""
     context = {
-        "page_title": "Dashboard",
-        "active_nav": "dashboard",
+        "page_title": "Ranges",
+        "active_nav": "ranges",
         "provisioning_timeout_ms": django_settings.PROVISIONING_TIMEOUT_MS,
     }
     return render(request, "mission_control/dashboard.html", context)
@@ -144,7 +151,7 @@ def guacamole_rdp_url(request):
     Security:
         - User must have an active range in READY status
         - URL is signed with HMAC-SHA256 and expires in 5 minutes
-        - Only works for instances with GUI (kali, windows)
+        - Only works for instances with GUI (kali, ubuntu, windows)
     """
     from engine.services import get_rdp_connection_info
     from mission_control.guacamole import create_guacamole_rdp_url
@@ -174,7 +181,28 @@ def guacamole_rdp_url(request):
     guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
+    # Log whether SFTP key is available (do not log key contents)
+    logger.info(
+        "Guac RDP request: user=%s instance_uuid=%s os=%s sftp_key=%s",
+        request.user.email,
+        instance_uuid,
+        conn_info.get("os_type"),
+        "yes" if conn_info.get("ssh_key") else "no",
+    )
+
     # Generate signed URL
+    # Set SFTP root directory based on OS type for file transfers
+    # Note: SFTP paths use forward slashes even on Windows
+    os_type = conn_info.get("os_type")
+    if os_type == "kali":
+        sftp_root_directory = "/home/kali"
+    elif os_type == "ubuntu":
+        sftp_root_directory = "/home/ubuntu"
+    elif os_type == "windows":
+        sftp_root_directory = "/C:/Users/Administrator/Downloads"
+    else:
+        sftp_root_directory = None
+
     try:
         url = create_guacamole_rdp_url(
             base_url=guacamole_base_url,
@@ -186,6 +214,8 @@ def guacamole_rdp_url(request):
             rdp_username=conn_info.get("rdp_username"),
             rdp_password=conn_info.get("rdp_password"),
             api_base_url=guacamole_api_url,
+            sftp_root_directory=sftp_root_directory,
+            sftp_private_key=conn_info.get("ssh_key"),
         )
     except ValueError as e:
         logger.error(f"Failed to generate Guacamole URL: {e}")
@@ -195,6 +225,96 @@ def guacamole_rdp_url(request):
         "Guacamole RDP URL generated: user=%s instance_uuid=%s",
         request.user.email,
         instance_uuid,
+    )
+
+    return JsonResponse({"url": url})
+
+
+@login_required
+@require_POST
+def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
+    """Generate Guacamole SSH URL for NGFW CLI access.
+
+    POST /mc/ngfw/<app_id>/ssh-url/
+
+    Args:
+        request: HTTP request
+        app_id: NGFW UUID
+
+    Returns:
+        JsonResponse with {"url": "https://..."}
+
+    Error Responses:
+        400: NGFW not found, not accessible, or permission denied
+        500: Internal error
+
+    Security:
+        - User must own the NGFW (validated via Request chain)
+        - NGFW must be in ready status
+        - URL is signed with HMAC-SHA256 and expires in 5 minutes
+    """
+    from engine.services import connect_ngfw_terminal
+    from mission_control.guacamole import create_guacamole_ssh_url
+
+    user = _get_user(request)
+
+    # Get connection details from engine service
+    try:
+        ssh_conn = connect_ngfw_terminal(user, app_id)
+    except ValueError as e:
+        logger.error(
+            "NGFW SSH access denied (ValueError): user=%s ngfw_uuid=%s error=%s",
+            user.email,
+            app_id,
+            e,
+        )
+        return JsonResponse({"error": str(e)}, status=400)
+    except PermissionError as e:
+        logger.error("NGFW SSH access denied (PermissionError): user=%s ngfw_uuid=%s", user.email, app_id)
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception:
+        logger.exception(
+            "Unexpected error getting NGFW SSH connection: user=%s ngfw_uuid=%s",
+            user.email,
+            app_id,
+        )
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+    # Get Guacamole secret key from settings
+    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not secret_key:
+        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        return JsonResponse({"error": "SSH service not configured"}, status=503)
+
+    # Get Guacamole URLs from settings
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
+
+    # Generate Guacamole SSH URL
+    try:
+        url = create_guacamole_ssh_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=user.email,
+            connection_name=f"ngfw-{app_id}",
+            hostname=ssh_conn.host,
+            port=ssh_conn.port,
+            ssh_username=ssh_conn.username,
+            ssh_private_key=ssh_conn.private_key,
+            expires_minutes=5,
+            api_base_url=guacamole_api_url,
+        )
+    except ValueError as e:
+        logger.error("Failed to generate NGFW SSH URL: user=%s ngfw_uuid=%s error=%s", user.email, app_id, e)
+        return JsonResponse({"error": "Failed to generate SSH URL"}, status=500)
+    except Exception:
+        logger.exception("Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s", user.email, app_id)
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+    logger.info(
+        "Guacamole SSH URL generated for NGFW: user=%s ngfw_uuid=%s",
+        user.email,
+        app_id,
     )
 
     return JsonResponse({"url": url})
@@ -227,6 +347,8 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
         - name: Agent name (required)
         - filename: Original filename (required)
         - file_size: File size in bytes (required)
+        - agent_type: Type of agent (optional, defaults to 'xdr')
+            Valid values: 'xdr', 'xdr_collector', 'cloud_identity_engine'
 
     Response (JSON):
         - presigned_url: URL for PUT request to S3
@@ -248,6 +370,7 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     name = data.get("name", "").strip()
     filename = data.get("filename", "").strip()
     file_size = data.get("file_size", 0)
+    agent_type = data.get("agent_type", "xdr").strip()
 
     # Basic input validation
     if not name:
@@ -257,12 +380,18 @@ def initiate_upload(request: HttpRequest) -> JsonResponse:
     if not isinstance(file_size, int) or file_size <= 0:
         return JsonResponse({"error": "Valid file size is required"}, status=400)
 
+    # Validate agent_type
+    valid_agent_types = {"xdr", "xdr_collector", "cloud_identity_engine"}
+    if agent_type not in valid_agent_types:
+        err_msg = f"Invalid agent type. Must be one of: {', '.join(valid_agent_types)}"
+        return JsonResponse({"error": err_msg}, status=400)
+
     # Sanitize filename
     filename = os.path.basename(filename)
 
     user = _get_user(request)
     try:
-        result = cms_initiate_upload(user, name, filename, file_size)
+        result = cms_initiate_upload(user, name, filename, file_size, agent_type)
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -547,6 +676,88 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@require_POST
+def pause_range(request: HttpRequest) -> JsonResponse:
+    """
+    Pause an active range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to pause (legacy, deprecated)
+
+    Sets status to PAUSING and triggers async instance stop.
+    """
+    from cms import pause_range as cms_pause_range_by_id
+    from cms.services import pause_range_by_request_id as cms_pause_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_pause_range_by_request(user, request_id)
+            logger.info("Range paused: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_pause_range_by_id(user, range_id)
+            logger.info("Range paused: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def resume_range(request: HttpRequest) -> JsonResponse:
+    """
+    Resume a paused range.
+
+    Request body (JSON):
+        - request_id: UUID of the request (preferred)
+        - range_id: ID of range to resume (legacy, deprecated)
+
+    Sets status to RESUMING and triggers async instance start.
+    """
+    from cms import resume_range as cms_resume_range_by_id
+    from cms.services import resume_range_by_request_id as cms_resume_range_by_request
+
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Support both new (request_id) and legacy (range_id) formats
+    request_id = data.get("request_id")
+    range_id = data.get("range_id")
+
+    if not request_id and not range_id:
+        return JsonResponse({"error": "request_id or range_id is required"}, status=400)
+
+    try:
+        if request_id:
+            cms_resume_range_by_request(user, request_id)
+            logger.info("Range resumed: user=%s request_id=%s", user.email, request_id)
+        else:
+            cms_resume_range_by_id(user, range_id)
+            logger.info("Range resumed: user=%s range_id=%s", user.email, range_id)
+    except CMSError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})
+
+
+@login_required
 @require_GET
 def list_agents(request: HttpRequest) -> JsonResponse:
     """
@@ -597,16 +808,29 @@ def ngfw_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     """View NGFW details."""
+    from engine.models import Range
+
     user = _get_user(request)
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found (may have failed and been cleaned up)
+        # Redirect to list page instead of showing 404
+        messages.warning(request, "NGFW not found. It may have failed during provisioning.")
+        return redirect("mission_control:ngfw_list")
+
+    # Get ranges linked to this NGFW (via ngfw_instance_id)
+    linked_ranges = Range.objects.filter(
+        ngfw_instance_id=int(ngfw.instance_id),
+        user=user,
+        destroyed_at__isnull=True,
+    ).order_by("-created_at")
 
     context = {
         "page_title": ngfw.name,
         "active_nav": "ngfw",
         "ngfw": ngfw,
+        "linked_ranges": linked_ranges,
     }
     return render(request, "mission_control/ngfw/detail.html", context)
 
@@ -638,7 +862,9 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     try:
         ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
-        raise Http404(_NGFW_NOT_FOUND) from None
+        # NGFW not found - redirect to list page
+        messages.warning(request, "NGFW not found.")
+        return redirect("mission_control:ngfw_list")
 
     context = {
         "page_title": f"Deprovision {ngfw.name}",
@@ -899,3 +1125,121 @@ def api_credential_delete(request: HttpRequest, credential_id: int) -> JsonRespo
     )
 
     return JsonResponse({"success": True})
+
+
+# -----------------------------------------------------------------------------
+# Files (Scripts) Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def files(request: HttpRequest) -> HttpResponse:
+    """File management - upload and manage script files."""
+    scripts = list_scripts(_get_user(request))
+    context = {
+        "page_title": "Files",
+        "active_nav": "files",
+        "scripts": scripts,
+    }
+    return render(request, "mission_control/files.html", context)
+
+
+@login_required
+@require_POST
+def file_upload(request: HttpRequest) -> JsonResponse:
+    """Script file upload — two-step presigned URL flow (JSON API).
+
+    Step 1: POST with {name, filename, file_size} → returns {presigned_url, upload_token}
+    Step 2: POST with {upload_token} → returns {success, script_id}
+    """
+    user = _get_user(request)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    upload_token = data.get("upload_token")
+
+    if upload_token:
+        # Step 2: Complete upload
+        try:
+            script = complete_script_upload(user, upload_token)
+        except ScriptUploadError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+        logger.info("Script upload completed: user=%s script_id=%s", user.email, script.pk)
+        return JsonResponse(
+            {
+                "success": True,
+                "script_id": script.pk,
+                "message": f"Script '{script.name}' uploaded successfully.",
+            }
+        )
+
+    # Step 1: Initiate upload
+    name = data.get("name", "").strip()
+    filename = data.get("filename", "").strip()
+    file_size = data.get("file_size", 0)
+
+    if not name:
+        return JsonResponse({"error": "Script name is required"}, status=400)
+    if not filename:
+        return JsonResponse({"error": "Filename is required"}, status=400)
+    if not isinstance(file_size, int) or file_size <= 0:
+        return JsonResponse({"error": "Valid file size is required"}, status=400)
+
+    filename = os.path.basename(filename)
+
+    try:
+        result = initiate_script_upload(user, name, filename, file_size)
+    except ScriptUploadError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    logger.info(
+        "Script upload initiated: user=%s filename=%s size=%d",
+        user.email,
+        filename,
+        file_size,
+    )
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def file_delete(request: HttpRequest, script_id: int) -> HttpResponse:
+    """Delete a script file (soft delete)."""
+    user = _get_user(request)
+    try:
+        delete_script(user, script_id)
+        messages.success(request, "Script deleted.")
+        logger.info("Script deleted: user=%s script_id=%s", user.email, script_id)
+    except ScriptUploadError as e:
+        messages.error(request, str(e))
+        logger.error(
+            "Script delete error: user=%s script_id=%s error=%s",
+            user.email,
+            script_id,
+            str(e),
+        )
+
+    return redirect("mission_control:files")
+
+
+@login_required
+@require_GET
+def api_list_scripts(request: HttpRequest) -> JsonResponse:
+    """JSON endpoint for listing scripts (used by experiment create form)."""
+    scripts = list_scripts(_get_user(request))
+    return JsonResponse(
+        {
+            "scripts": [
+                {
+                    "id": s.pk,
+                    "name": s.name,
+                    "filename": s.original_filename,
+                }
+                for s in scripts
+            ]
+        }
+    )

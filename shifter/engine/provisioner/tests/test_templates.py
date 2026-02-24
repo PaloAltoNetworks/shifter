@@ -4,8 +4,8 @@ Tests for:
 - Domain Controller PowerShell template (dc_windows.ps1.j2)
 - NGFW init-cfg.txt template (ngfw_init_cfg.txt.j2)
 
-NOTE: The DC template is now a minimal bootstrap script (hostname, SSH).
-AD DS installation is handled via SSM Run Command orchestration.
+NOTE: The DC template is now a minimal bootstrap script.
+AD DS installation is handled via SSM plans.
 See test_dc_setup_plan.py for AD DS setup tests.
 """
 
@@ -31,11 +31,10 @@ class TestDCTemplateRendering:
     """Tests for DC user_data template rendering.
 
     ARCHITECTURE NOTE: DC user_data is intentionally minimal.
-    All setup (hostname, SSH, AD DS) is handled via SSM Run Command orchestration:
-    - BootstrapPlan: hostname + SSH + reboot
-    - DCSetupPlan: AD DS install + promote
+    All setup (hostname, SSH, AD DS) is handled via SSM plans:
+    - DCSetupPlan: hostname, SSH, AD DS install + promote
 
-    See test_bootstrap_plan.py and test_dc_setup_plan.py for setup tests.
+    See test_dc_setup_plan.py for AD DS setup tests.
     """
 
     @pytest.fixture
@@ -48,14 +47,17 @@ class TestDCTemplateRendering:
 
     @pytest.fixture
     def dc_template_context(self):
-        """Standard context for DC template tests (may be empty - template is minimal)."""
-        return {}
+        """Standard context for DC template tests."""
+        return {
+            "public_key": "ssh-rsa test-key",
+            "admin_password": "TestPassword123!",
+        }
 
     def test_dc_template_renders_without_error(self, dc_template, dc_template_context):
         """DC template should render successfully."""
         result = dc_template.render(**dc_template_context)
 
-        # Template is minimal - just logs that SSM will handle setup
+        # Template should mention SSM orchestration
         assert "SSM" in result, "Template should mention SSM orchestration"
         assert "<powershell>" in result, "Template should have PowerShell tags"
 
@@ -74,21 +76,18 @@ class TestDCTemplateRendering:
         # Minimal logging - just indicates SSM will take over
         assert "Out-File" in result or "Write-Host" in result, "Template should log startup"
 
-    def test_dc_template_no_setup_logic(self, dc_template, dc_template_context):
-        """DC template should NOT do any setup (SSM handles everything)."""
+    def test_dc_template_no_ad_setup_logic(self, dc_template, dc_template_context):
+        """DC template should NOT do AD DS setup (SSM handles AD)."""
         result = dc_template.render(**dc_template_context)
 
-        # Setup is via SSM orchestration, not user data
-        assert "Rename-Computer" not in result, "Hostname set via SSM BootstrapPlan"
-        assert "Start-Service sshd" not in result, "SSH configured via SSM BootstrapPlan"
+        # AD DS setup is via SSM orchestration, not user data
         assert "Install-WindowsFeature" not in result, "AD DS installed via SSM DCSetupPlan"
         assert "Install-ADDSForest" not in result, "DC promotion via SSM DCSetupPlan"
 
-    def test_dc_template_no_template_variables(self, dc_template, dc_template_context):
-        """DC template should not require any template variables (minimal bootstrap)."""
-        # Template should render with empty context
-        result = dc_template.render()
-        assert result, "Template should render with no context"
+    def test_dc_template_no_unrendered_variables(self, dc_template, dc_template_context):
+        """DC template should render without unexpanded variables."""
+        result = dc_template.render(**dc_template_context)
+        assert result, "Template should render with context"
         assert "{{" not in result, "No unrendered template variables"
 
 

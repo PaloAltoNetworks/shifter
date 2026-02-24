@@ -88,8 +88,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:${{ env.GUACAMOLE_VERSION }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-guacd
-          cache-to: type=local,dest=/tmp/.buildx-cache-guacd-new,mode=max
+          no-cache: true
       - name: Build and push guacamole-client image (with OIDC extension)
         uses: docker/build-push-action@v5
         with:
@@ -100,13 +99,7 @@ jobs:
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:${{ env.GUACAMOLE_VERSION }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-guacamole
-          cache-to: type=local,dest=/tmp/.buildx-cache-guacamole-new,mode=max
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache-guacd /tmp/.buildx-cache-guacamole
-          mv /tmp/.buildx-cache-guacd-new /tmp/.buildx-cache-guacd || true
-          mv /tmp/.buildx-cache-guacamole-new /tmp/.buildx-cache-guacamole || true
+          no-cache: true
 
   apply:
     name: Apply (${{ inputs.environment }})
@@ -240,17 +233,13 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./shifter/shifter_platform
+          context: ./shifter
+          file: ./shifter/shifter_platform/Dockerfile
           push: true
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.sha.outputs.short }}
-          cache-from: type=local,src=/tmp/.buildx-cache-portal
-          cache-to: type=local,dest=/tmp/.buildx-cache-portal-new,mode=max
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache-portal
-          mv /tmp/.buildx-cache-portal-new /tmp/.buildx-cache-portal || true
+          no-cache: true
 
   deploy:
     name: Deploy (${{ inputs.environment }})
@@ -371,7 +360,14 @@ jobs:
           [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
           [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
           [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
-          COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
+          # Add localhost to ALLOWED_HOSTS for dev (enables SSM tunnel testing)
+          # PS_PREFIX comes from Parameter Store, not user input - safe to use
+          if [[ "$PS_PREFIX" == *"/dev/"* ]]; then
+            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME,localhost,127.0.0.1"
+          else
+            COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
+          fi
+          COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
           COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
           COMMON_ENV="$COMMON_ENV -e PULUMI_TASK_DEFINITION_ARN=$PULUMI_TASK_DEFINITION_ARN"
           COMMON_ENV="$COMMON_ENV -e PULUMI_ECS_SECURITY_GROUP_ID=$PULUMI_ECS_SECURITY_GROUP_ID"
@@ -394,16 +390,40 @@ jobs:
           # Substitute PS_PREFIX
           DEPLOY_SCRIPT="${DEPLOY_SCRIPT//__PS_PREFIX__/${PS_PREFIX}}"
 
-          # Run deploy via SSM
+          # Run deploy via SSM using temp file to avoid quoting issues
+          PARAMS_FILE=$(mktemp)
+          cat > "$PARAMS_FILE" << EOF
+          {
+            "commands": [$(echo "$DEPLOY_SCRIPT" | jq -Rs .)]
+          }
+          EOF
+
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$INSTANCE_ID" \
-            --parameters "commands=[\"$DEPLOY_SCRIPT\"]" \
+            --parameters "file://$PARAMS_FILE" \
             --timeout-seconds 600 \
             --query "Command.CommandId" --output text)
 
+          rm -f "$PARAMS_FILE"
+
           echo "SSM Command ID: $COMMAND_ID"
-          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          echo "Waiting for deployment (timeout: 15 minutes)..."
+          SECONDS_WAITED=0
+          TIMEOUT=900
+          while true; do
+            aws ssm wait command-executed \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --cli-read-timeout 30 \
+              --cli-connect-timeout 30 && break
+            SECONDS_WAITED=$((SECONDS_WAITED + 100))
+            if [ $SECONDS_WAITED -ge $TIMEOUT ]; then
+              echo "Waiter timed out after ${TIMEOUT}s"
+              break
+            fi
+            echo "Still waiting... (~${SECONDS_WAITED}s elapsed)"
+          done
           STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
           if [ "$STATUS" != "Success" ]; then
             echo "Deployment failed!"

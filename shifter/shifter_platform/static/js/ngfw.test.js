@@ -62,6 +62,7 @@ describe('NGFWWizardManager', () => {
         global.alert = jest.fn();
         global.fetch = jest.fn();
 
+
         wizard = new window.NGFWWizardManager({
             csrfToken: 'test-csrf',
             provisionUrl: '/api/ngfw/provision/',
@@ -79,7 +80,7 @@ describe('NGFWWizardManager', () => {
         test('initializes with default form data', () => {
             expect(wizard.formData.name).toBe('');
             expect(wizard.formData.deployment_profile_id).toBeNull();
-            expect(wizard.formData.registration_method).toBe('otp');
+            expect(wizard.formData.registration_method).toBe('pin');
             expect(wizard.formData.sls_region).toBe('americas');
         });
 
@@ -265,11 +266,11 @@ describe('NGFWWizardManager', () => {
             expect(mockWebSocket.close).toHaveBeenCalled();
         });
 
-        test('WebSocket onmessage shows success on active status', () => {
+        test('WebSocket onmessage shows success on ready status', () => {
             wizard.ngfwId = 42;
             wizard.connectWebSocket();
 
-            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'active' }) });
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'ready' }) });
 
             expect(document.getElementById('success-state').style.display).toBe('block');
         });
@@ -278,15 +279,15 @@ describe('NGFWWizardManager', () => {
             wizard.ngfwId = 42;
             wizard.connectWebSocket();
 
-            // Note: JSDOM doesn't support navigation, so we only test the alert
-            // The actual redirect to detailUrlTemplate happens but throws in JSDOM
-            try {
-                mockWebSocket.onmessage({ data: JSON.stringify({ status: 'failed', error: 'Test error' }) });
-            } catch {
-                // JSDOM navigation error expected
-            }
+            // Suppress JSDOM navigation error
+            const originalError = console.error;
+            console.error = jest.fn();
+
+            mockWebSocket.onmessage({ data: JSON.stringify({ status: 'failed', error: 'Test error' }) });
 
             expect(global.alert).toHaveBeenCalledWith('Provisioning failed: Test error');
+
+            console.error = originalError;
         });
     });
 

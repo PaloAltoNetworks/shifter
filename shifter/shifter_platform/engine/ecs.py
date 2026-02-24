@@ -307,8 +307,9 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         raise TypeError("request_id cannot be None")
     if not isinstance(request_id, UUIDType):
         raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
-    if command not in ("provision", "destroy"):
-        raise ValueError(f"Invalid command: {command}. Must be 'provision' or 'destroy'.")
+    valid_commands = ("provision", "destroy", "pause", "resume")
+    if command not in valid_commands:
+        raise ValueError(f"Invalid command: {command}. Must be one of {valid_commands}.")
 
     # Check for local provisioner mode first
     if _is_local_provisioner_enabled():
@@ -412,6 +413,33 @@ def start_range_teardown(request_id: UUID) -> str | None:
         ClientError: If ECS task fails to start
     """
     return _start_range_ecs_task(request_id, "destroy")
+
+
+def start_range_operation(request_id: UUID, operation: str) -> str | None:
+    """Start a range runtime operation (pause/resume) via ECS Fargate.
+
+    Args:
+        request_id: UUID of the Request containing the Range.
+        operation: Operation to perform ('pause' or 'resume').
+
+    Returns:
+        ECS task ARN if successful, None if ECS is not configured.
+
+    Raises:
+        TypeError: If request_id is None or not a UUID
+        ValueError: If operation is not 'pause' or 'resume'
+        ClientError: If ECS task fails to start
+    """
+    from uuid import UUID as UUIDType
+
+    if request_id is None:
+        raise TypeError("request_id cannot be None")
+    if not isinstance(request_id, UUIDType):
+        raise TypeError(f"request_id must be a UUID, got {type(request_id).__name__}")
+    if operation not in ("pause", "resume"):
+        raise ValueError(f"Invalid operation: {operation}. Must be 'pause' or 'resume'.")
+
+    return _start_range_ecs_task(request_id, operation)
 
 
 def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:

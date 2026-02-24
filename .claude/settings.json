@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:blackhat.com)",
+      "Read(//home/atomik/src/aptl/src/aptl/**)",
+      "Read(//home/atomik/src/aptl/**)",
+      "Read(//home/atomik/src/aptl/mcp/mcp-red/src/**)"
+    ]
+  }
+}

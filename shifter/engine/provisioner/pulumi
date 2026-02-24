@@ -67,16 +67,12 @@ def mock_stack_output():
 
 def mock_ngfw_output():
     """Return mock stack outputs for NGFW provisioning."""
-    hex17 = uuid.uuid4().hex[:17]
-    hex6 = uuid.uuid4().hex[:6]
     outputs = {
         "ec2_instance_id": f"i-{uuid.uuid4().hex[:17]}",
         "management_ip": "10.0.1.100",
         "dataplane_ip": "10.0.2.100",
-        "service_name": f"com.amazonaws.vpce.us-east-2.vpce-svc-{hex17}",
-        "gwlb_arn": f"arn:aws:elasticloadbalancing:us-east-2:123456789:loadbalancer/gwy/mock-gwlb/{hex17}",
-        "target_group_arn": f"arn:aws:elasticloadbalancing:us-east-2:123456789:targetgroup/mock-tg/{hex17}",
-        "ssh_key_secret_arn": f"arn:aws:secretsmanager:us-east-2:123456789:secret:mock-ssh-key-{hex6}",
+        "data_eni_id": f"eni-{uuid.uuid4().hex[:17]}",
+        "ssh_key_secret_arn": f"arn:aws:secretsmanager:us-east-2:123456789:secret:mock-ssh-key-{uuid.uuid4().hex[:6]}",
     }
     print(json.dumps(outputs))
 

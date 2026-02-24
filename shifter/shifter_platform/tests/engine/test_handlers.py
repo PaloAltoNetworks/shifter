@@ -98,12 +98,6 @@ class TestProcessEvent:
             mock_range_handler.assert_not_called()
             mock_ngfw_handler.assert_not_called()
 
-    def test_dispatcher_is_callable(self):
-        """Dispatcher is a callable function."""
-        from engine.handlers import process_event
-
-        assert callable(process_event)
-
 
 @pytest.mark.django_db
 class TestParseSnsMessage:
@@ -466,45 +460,8 @@ class TestProcessRangeEvent:
         assert log_contains(caplog, "range.destroyed")
 
     # ---------------------------------------------------------------------
-    # Handler is callable
+    # Edge cases
     # ---------------------------------------------------------------------
-
-    def test_handler_is_callable(self):
-        """Handler is a callable function."""
-        from engine.handlers import process_range_event
-
-        assert callable(process_range_event)
-
-    # ---------------------------------------------------------------------
-    # Minimum required input
-    # ---------------------------------------------------------------------
-
-    def test_succeeds_with_minimum_required_input(self, user):
-        """Handler works with minimal event fields."""
-        from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PENDING.value,
-        )
-
-        # Minimal SNS message - no error_message
-        message = {
-            "Message": json.dumps(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
-                    "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": user.id,
-                }
-            )
-        }
-
-        process_range_event(message)
-
-        range_obj.refresh_from_db()
-        assert range_obj.status == ResourceStatus.PROVISIONING.value
 
     def test_failed_without_error_message(self, user):
         """Handler handles FAILED status even without error_message."""

@@ -19,6 +19,8 @@ from cms.models import AgentConfig, RangeInstance
 from engine import cancel_range_by_request as engine_cancel_range_by_request
 from engine import create_range as engine_create_range
 from engine import destroy_range_by_request as engine_destroy_range_by_request
+from engine import pause_range as engine_pause_range
+from engine import resume_range as engine_resume_range
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
@@ -214,7 +216,8 @@ def list_agents(user: User) -> list[dict[str, Any]]:
         user: User whose agents to retrieve
 
     Returns:
-        List of agent dicts with keys: id, name, os_name, os_slug, file_size_mb
+        List of agent dicts with keys: id, name, os_name, os_slug, file_size_mb,
+        original_filename, created_at, agent_type, agent_type_display
 
     Raises:
         TypeError: If user is None or invalid type
@@ -272,6 +275,8 @@ def list_agents(user: User) -> list[dict[str, Any]]:
                 "file_size_mb": agent.file_size_mb,
                 "original_filename": agent.original_filename,
                 "created_at": agent.created_at,
+                "agent_type": agent.agent_type,
+                "agent_type_display": agent.get_agent_type_display(),
             }
 
             # Validate dict values are non-empty and correct types
@@ -558,7 +563,7 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
 
         # Apply defaults for SCM credentials
         if credential_type_slug == "scm" and not kwargs.get("scm_folder_name"):
-            kwargs["scm_folder_name"] = "All Firewalls"
+            kwargs["scm_folder_name"] = ""
 
         # Remaining kwargs go into the data JSON field
         data = kwargs
@@ -1254,17 +1259,34 @@ def get_active_range(user: User) -> RangeContext | None:
         from shared.schemas import InstanceContext
 
         # Get instance data from stored range_spec
+        # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
+        # Legacy format: instances directly at range_spec["instances"]
         instance_contexts = []
-        if instance.range_spec and "instances" in instance.range_spec:
-            instance_contexts = [
-                InstanceContext(
-                    uuid=spec.get("uuid"),
-                    role=spec["role"],
-                    os_type=spec["os_type"],
-                    join_domain=spec.get("join_domain", False),
-                )
-                for spec in instance.range_spec["instances"]
-            ]
+        if instance.range_spec:
+            if "subnets" in instance.range_spec:
+                for subnet in instance.range_spec["subnets"]:
+                    for spec in subnet.get("instances", []):
+                        instance_contexts.append(
+                            InstanceContext(
+                                uuid=spec.get("uuid"),
+                                name=spec.get("name", ""),
+                                role=spec["role"],
+                                os_type=spec["os_type"],
+                                join_domain=spec.get("join_domain", False),
+                            )
+                        )
+            elif "instances" in instance.range_spec:
+                # Legacy flat format for backward compatibility with existing prod data
+                for spec in instance.range_spec["instances"]:
+                    instance_contexts.append(
+                        InstanceContext(
+                            uuid=spec.get("uuid"),
+                            name=spec.get("name", ""),
+                            role=spec["role"],
+                            os_type=spec["os_type"],
+                            join_domain=spec.get("join_domain", False),
+                        )
+                    )
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
@@ -1357,17 +1379,34 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         raise CMSError("Range has no associated request")
 
     # Build instance contexts from range_spec
+    # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
+    # Legacy format: instances directly at range_spec["instances"]
     instance_contexts = []
-    if instance.range_spec and "instances" in instance.range_spec:
-        instance_contexts = [
-            InstanceContext(
-                uuid=spec.get("uuid"),
-                role=spec["role"],
-                os_type=spec["os_type"],
-                join_domain=spec.get("join_domain", False),
-            )
-            for spec in instance.range_spec["instances"]
-        ]
+    if instance.range_spec:
+        if "subnets" in instance.range_spec:
+            for subnet in instance.range_spec["subnets"]:
+                for spec in subnet.get("instances", []):
+                    instance_contexts.append(
+                        InstanceContext(
+                            uuid=spec.get("uuid"),
+                            name=spec.get("name", ""),
+                            role=spec["role"],
+                            os_type=spec["os_type"],
+                            join_domain=spec.get("join_domain", False),
+                        )
+                    )
+        elif "instances" in instance.range_spec:
+            # Legacy flat format for backward compatibility with existing prod data
+            for spec in instance.range_spec["instances"]:
+                instance_contexts.append(
+                    InstanceContext(
+                        uuid=spec.get("uuid"),
+                        name=spec.get("name", ""),
+                        role=spec["role"],
+                        os_type=spec["os_type"],
+                        join_domain=spec.get("join_domain", False),
+                    )
+                )
 
     # Get agent_name from FK if exists
     agent_name = instance.agent.name if instance.agent else None
@@ -1414,7 +1453,7 @@ def create_range(
     from cms.exceptions import CMSError
     from cms.models import RangeInstance
     from cms.scenarios.hydrator import hydrate_scenario
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import load_scenario_template as load_scenario
 
     # Input validation - user
     if user is None:
@@ -1581,6 +1620,7 @@ def create_range(
         instance_contexts = [
             InstanceContext(
                 uuid=spec.uuid,
+                name=spec.name or "",
                 role=spec.role,
                 os_type=spec.os_type,
                 join_domain=spec.join_domain,
@@ -2048,19 +2088,477 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
 
 
 def pause_range(user: User, range_id: int) -> None:
-    """Pause range.
+    """Pause a running range.
 
-    Note: Deferred feature - not implemented in current scope.
+    Fetches RangeInstance, verifies ownership, updates CMS status to PAUSING,
+    then delegates to engine.services.pause_range.
+
+    Args:
+        user: User requesting pause
+        range_id: ID of the range to pause
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found, not owned by user, or not in pausable state
     """
-    raise NotImplementedError("pause_range is not yet implemented")
+    # Input validation - user
+    if user is None:
+        logger.error("pause_range called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "pause_range called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if user.id is None:
+        logger.error("pause_range called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error(
+            "pause_range called with None range_id for user_id=%s",
+            user.id,
+        )
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error(
+            "pause_range called with invalid range_id type: %s",
+            type(range_id).__name__,
+        )
+        msg = f"range_id must be an int, got {type(range_id).__name__}"
+        raise TypeError(msg)
+
+    if range_id < 0:
+        logger.error(
+            "pause_range called with negative range_id=%s for user_id=%s",
+            range_id,
+            user.id,
+        )
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug(
+        "pause_range called for user_id=%s, range_id=%s",
+        user.id,
+        range_id,
+    )
+
+    # Fetch range instance directly and verify ownership
+    try:
+        instance = RangeInstance.objects.get(range_id=range_id)
+    except RangeInstance.DoesNotExist:
+        logger.warning(
+            "pause_range: range not found for user_id=%s, range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise CMSError(f"Range {range_id} not found") from None
+
+    # Verify ownership
+    if instance.user_id != user.id:
+        logger.error(
+            "pause_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+            range_id,
+            instance.user_id,
+            user.id,
+        )
+        raise CMSError(f"Range {range_id} not found")
+
+    try:
+        # Get request_id from request FK and call Engine
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            logger.error(
+                "pause_range: no request_id for range_id=%s, cannot pause",
+                range_id,
+            )
+            raise CMSError("Range has no associated request")
+
+        # Update CMS status to PAUSING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.PAUSING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
+        if not engine_pause_range(request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.READY.value
+            instance.save(update_fields=["status"])
+            logger.warning(
+                "pause_range: engine returned False for range_id=%s",
+                range_id,
+            )
+            raise CMSError("Range cannot be paused in current state")
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.PAUSE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.PAUSING.value},
+            request_id=str(request_id),
+        )
+
+        logger.info(
+            "pause_range completed: range_id=%s user_id=%s",
+            range_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in pause_range: user_id=%s range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise
+
+
+def pause_range_by_request_id(user: User, request_id: str) -> None:
+    """Pause a running range by request_id.
+
+    Fetches RangeInstance by request_id, verifies ownership, then delegates
+    to engine.services.pause_range.
+
+    Args:
+        user: User requesting pause
+        request_id: UUID string of the request
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found, not owned by user, or not in pausable state
+    """
+    # Input validation
+    if user is None:
+        logger.error("pause_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "pause_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("pause_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "pause_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Fetch range instance by request_id
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "pause_range_by_request_id: not found: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    try:
+        # Update CMS status to PAUSING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.PAUSING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
+        if not engine_pause_range(instance.request.request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.READY.value
+            instance.save(update_fields=["status"])
+            logger.warning(
+                "pause_range_by_request_id: engine returned False for request_id=%s",
+                request_id,
+            )
+            raise CMSError("Range cannot be paused in current state")
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.range_id or 0,
+            action=AuditLog.Action.PAUSE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.PAUSING.value},
+            request_id=str(instance.request.request_id),
+        )
+
+        logger.info(
+            "pause_range_by_request_id completed: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in pause_range_by_request_id: user_id=%s request_id=%s",
+            user.id,
+            request_id,
+        )
+        raise
 
 
 def resume_range(user: User, range_id: int) -> None:
-    """Resume range.
+    """Resume a paused range.
 
-    Note: Deferred feature - not implemented in current scope.
+    Fetches RangeInstance, verifies ownership, updates CMS status to RESUMING,
+    then delegates to engine.services.resume_range.
+
+    Args:
+        user: User requesting resume
+        range_id: ID of the range to resume
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None, invalid type, or range_id is invalid type
+        ValueError: If user has no ID (unsaved) or range_id is invalid
+        CMSError: If range not found, not owned by user, or not in resumable state
     """
-    raise NotImplementedError("resume_range is not yet implemented")
+    # Input validation - user
+    if user is None:
+        logger.error("resume_range called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "resume_range called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if user.id is None:
+        logger.error("resume_range called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+    # Input validation - range_id
+    if range_id is None:
+        logger.error(
+            "resume_range called with None range_id for user_id=%s",
+            user.id,
+        )
+        raise TypeError("range_id cannot be None")
+
+    if not isinstance(range_id, int):
+        logger.error(
+            "resume_range called with invalid range_id type: %s",
+            type(range_id).__name__,
+        )
+        msg = f"range_id must be an int, got {type(range_id).__name__}"
+        raise TypeError(msg)
+
+    if range_id < 0:
+        logger.error(
+            "resume_range called with negative range_id=%s for user_id=%s",
+            range_id,
+            user.id,
+        )
+        raise ValueError("range_id must be non-negative")
+
+    logger.debug(
+        "resume_range called for user_id=%s, range_id=%s",
+        user.id,
+        range_id,
+    )
+
+    # Fetch range instance directly and verify ownership
+    try:
+        instance = RangeInstance.objects.get(range_id=range_id)
+    except RangeInstance.DoesNotExist:
+        logger.warning(
+            "resume_range: range not found for user_id=%s, range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise CMSError(f"Range {range_id} not found") from None
+
+    # Verify ownership
+    if instance.user_id != user.id:
+        logger.error(
+            "resume_range: access denied - range_id=%s owned by user_id=%s, requested by user_id=%s",
+            range_id,
+            instance.user_id,
+            user.id,
+        )
+        raise CMSError(f"Range {range_id} not found")
+
+    try:
+        # Get request_id from request FK and call Engine
+        request_id = instance.request.request_id if instance.request else None
+        if request_id is None:
+            logger.error(
+                "resume_range: no request_id for range_id=%s, cannot resume",
+                range_id,
+            )
+            raise CMSError("Range has no associated request")
+
+        # Update CMS status to RESUMING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.RESUMING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
+        if not engine_resume_range(request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.PAUSED.value
+            instance.save(update_fields=["status"])
+            logger.warning(
+                "resume_range: engine returned False for range_id=%s",
+                range_id,
+            )
+            raise CMSError("Range cannot be resumed in current state")
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.RESUME,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.RESUMING.value},
+            request_id=str(request_id),
+        )
+
+        logger.info(
+            "resume_range completed: range_id=%s user_id=%s",
+            range_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in resume_range: user_id=%s range_id=%s",
+            user.id,
+            range_id,
+        )
+        raise
+
+
+def resume_range_by_request_id(user: User, request_id: str) -> None:
+    """Resume a paused range by request_id.
+
+    Fetches RangeInstance by request_id, verifies ownership, then delegates
+    to engine.services.resume_range.
+
+    Args:
+        user: User requesting resume
+        request_id: UUID string of the request
+
+    Returns:
+        None
+
+    Raises:
+        TypeError: If user is None or invalid type
+        CMSError: If range not found, not owned by user, or not in resumable state
+    """
+    # Input validation
+    if user is None:
+        logger.error("resume_range_by_request_id called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+
+    if not hasattr(user, "id"):
+        logger.error(
+            "resume_range_by_request_id called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+
+    if not request_id:
+        logger.error("resume_range_by_request_id called with empty request_id")
+        raise CMSError("request_id is required")
+
+    logger.debug(
+        "resume_range_by_request_id called: user_id=%s request_id=%s",
+        user.id,
+        request_id,
+    )
+
+    # Fetch range instance by request_id
+    instance = RangeInstance.objects.filter(
+        request__request_id=request_id,
+        user_id=user.id,
+    ).first()
+
+    if not instance:
+        logger.warning(
+            "resume_range_by_request_id: not found: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+        raise CMSError("Range not found")
+
+    # The filter guarantees instance.request exists
+    if instance.request is None:
+        raise CMSError("Range has no associated request")
+
+    try:
+        # Update CMS status to RESUMING before calling engine (keeps models in sync)
+        instance.status = ResourceStatus.RESUMING.value
+        instance.save(update_fields=["status"])
+
+        # Call engine - it will update Engine Range status and trigger ECS task
+        if not engine_resume_range(instance.request.request_id):
+            # Revert CMS status on failure
+            instance.status = ResourceStatus.PAUSED.value
+            instance.save(update_fields=["status"])
+            logger.warning(
+                "resume_range_by_request_id: engine returned False for request_id=%s",
+                request_id,
+            )
+            raise CMSError("Range cannot be resumed in current state")
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.range_id or 0,
+            action=AuditLog.Action.RESUME,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            new_state={"status": ResourceStatus.RESUMING.value},
+            request_id=str(instance.request.request_id),
+        )
+
+        logger.info(
+            "resume_range_by_request_id completed: request_id=%s user_id=%s",
+            request_id,
+            user.id,
+        )
+    except (TypeError, ValueError, CMSError):
+        raise
+    except Exception:
+        logger.exception(
+            "Error in resume_range_by_request_id: user_id=%s request_id=%s",
+            user.id,
+            request_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -2068,7 +2566,13 @@ def resume_range(user: User, range_id: int) -> None:
 # =============================================================================
 
 
-def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dict[str, Any]:
+def initiate_upload(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+    agent_type: str = "xdr",
+) -> dict[str, Any]:
     """Validate and generate presigned URL for direct S3 upload.
 
     Validates user quota, file extension, and generates all components needed
@@ -2079,6 +2583,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
         name: Display name for the agent
         filename: Original filename (used for extension validation)
         file_size: Expected file size in bytes
+        agent_type: Type of agent (xdr, xdr_collector, cloud_identity_engine)
 
     Returns:
         Dict containing:
@@ -2235,6 +2740,7 @@ def initiate_upload(user: User, name: str, filename: str, file_size: int) -> dic
             filename=filename,
             os_slug=file_format.os_slug,
             file_size=file_size,
+            agent_type=agent_type,
         )
 
         logger.debug(
@@ -2367,6 +2873,7 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
             os_slug=payload["os_slug"],
             file_size=expected_size,
             upload_method="presigned",
+            agent_type=payload.get("agent_type", "xdr"),
         )
 
         logger.debug(
@@ -2548,18 +3055,21 @@ def get_storage_used(user: User) -> int:
 def list_scenarios(user: User) -> list[dict[str, Any]]:
     """Get available scenarios with metadata.
 
+    Uses the scenario registry to combine YAML defaults and DB customs,
+    applying metadata overlays and access filtering.
+
     Args:
         user: User requesting scenarios
 
     Returns:
         List of scenario dictionaries with id, name, description,
-        requirements, and instances fields.
+        requirements, instances, is_default, enabled, staff_only fields.
 
     Raises:
         TypeError: If user is None or invalid type
         ValueError: If user is unsaved
     """
-    from cms.scenarios.loader import get_all_scenarios
+    from cms.scenarios.registry import list_all_scenarios
 
     # Input validation - user
     if user is None:
@@ -2581,15 +3091,7 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
     logger.debug("list_scenarios called for user_id=%s", user.id)
 
     try:
-        scenarios = get_all_scenarios()
-
-        # Filter to enabled scenarios and convert to dicts with agent requirements
-        result = []
-        for scenario in scenarios:
-            if scenario.enabled:
-                data = scenario.model_dump()
-                data["agent_requirements"] = scenario.get_agent_requirements()
-                result.append(data)
+        result = list_all_scenarios(user=user)
 
         logger.debug(
             "list_scenarios returning %d scenarios for user_id=%s",
@@ -2609,23 +3111,25 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
 def get_scenario(scenario_id: str) -> dict[str, Any]:
     """Get a single scenario template by ID.
 
+    Uses the scenario registry to check DB first, then YAML.
+
     Args:
         scenario_id: Unique scenario identifier
 
     Returns:
-        Scenario dictionary with id, name, description, requirements, instances
+        Scenario dictionary with id, name, description, requirements,
+        instances, is_default, enabled, staff_only fields.
 
     Raises:
         CMSError: If scenario not found
     """
     from cms.exceptions import CMSError
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import get_scenario_detail
 
     logger.debug("get_scenario called for scenario_id=%s", scenario_id)
 
     try:
-        scenario = load_scenario(scenario_id)
-        return scenario.model_dump()
+        return get_scenario_detail(scenario_id)
 
     except ValueError as e:
         logger.error("get_scenario: scenario '%s' not found", scenario_id)
@@ -2652,7 +3156,7 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
         CMSError: If validation fails (agent missing, wrong OS, etc.)
     """
     from cms.exceptions import CMSError
-    from cms.scenarios.loader import load_scenario
+    from cms.scenarios.registry import load_scenario_template
 
     logger.debug(
         "validate_scenario_requirements called for scenario_id=%s",
@@ -2660,7 +3164,7 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
     )
 
     try:
-        scenario = load_scenario(scenario_id)
+        scenario = load_scenario_template(scenario_id)
     except ValueError as e:
         logger.error(
             "validate_scenario_requirements: scenario '%s' not found",
@@ -2840,10 +3344,29 @@ def create_ngfw(
         ValueError: If required fields missing or invalid values
         CMSError: If credential validation fails
     """
-    from cms.models import Credential
+    from cms.models import App, Credential
+    from shared.enums import ResourceStatus
     from shared.schemas.app import NGFWAppRef
 
     _validate_ngfw_user(user)
+
+    # Check user doesn't already have an active NGFW
+    existing_ngfw = (
+        App.objects.filter(
+            instance__request__user=user,
+            app_type__slug="panw-ngfw",
+            deleted_at__isnull=True,
+        )
+        .exclude(status=ResourceStatus.DESTROYING.value)
+        .first()
+    )
+    if existing_ngfw:
+        logger.warning(
+            "create_ngfw: user_id=%s already has active NGFW app_id=%s",
+            user.id,
+            existing_ngfw.id,
+        )
+        raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
 
     # Validate name
     if not name or not name.strip():
@@ -2897,10 +3420,10 @@ def create_ngfw(
 
     from uuid import uuid4
 
-    from cms.models import App, AppType, Instance, InstanceType, Request
+    from cms.models import AppType, Instance, InstanceType, Request
     from cms.scenarios.hydrator import hydrate_ngfw
     from engine import create_ngfw as engine_create_ngfw
-    from shared.enums import RequestType, ResourceStatus
+    from shared.enums import RequestType
     from shared.schemas import RequestSpec
 
     # Create Request record first
@@ -2973,11 +3496,12 @@ def create_ngfw(
     # Audit log NGFW provisioning request
     audit_log(
         entity_type=AuditLog.EntityType.NGFW,
-        entity_id=app.id,
+        entity_id=0,
         action=AuditLog.Action.PROVISION,
         actor_type=AuditLog.ActorType.USER,
         actor_id=user.id,
         new_state={
+            "app_uuid": str(app.id),
             "name": name,
             "registration_method": registration_method,
             "request_id": str(request_id),
@@ -3041,30 +3565,36 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         )
         raise ValueError("Name confirmation does not match")
 
+    instance = app.instance
+    assert instance is not None, "App must have an instance"
+    request_id = instance.request.request_id
+
+    # Call engine to tear down infrastructure BEFORE status changes
+    # Engine validates no attached ranges exist
+    try:
+        engine_services.destroy_ngfw(request_id)
+    except engine_services.EngineError as e:
+        raise CMSError(str(e)) from e
+
     # Update status to deprovisioning for both App and Instance
     now = timezone.now()
     app.status = ResourceStatus.DESTROYING.value
     app.deleted_at = now
     app.save(update_fields=["status", "deleted_at"])
 
-    instance = app.instance
-    assert instance is not None, "App must have an instance"
     instance.status = ResourceStatus.DESTROYING.value
     instance.deleted_at = now
     instance.save(update_fields=["status", "deleted_at"])
 
-    # Call engine to tear down infrastructure using request_id
-    request_id = instance.request.request_id
-    engine_services.destroy_ngfw(request_id)
-
     # Audit log NGFW destruction
     audit_log(
         entity_type=AuditLog.EntityType.NGFW,
-        entity_id=app.id,
+        entity_id=0,
         action=AuditLog.Action.DEPROVISION,
         actor_type=AuditLog.ActorType.USER,
         actor_id=user.id,
         previous_state={
+            "app_uuid": str(app.id),
             "name": app.name,
             "status": ResourceStatus.DESTROYING.value,
         },

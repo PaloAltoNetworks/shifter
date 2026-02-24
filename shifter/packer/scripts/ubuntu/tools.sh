@@ -23,4 +23,9 @@ apt-get install -y \
   netcat-openbsd \
   tmux
 
+# Configure tmux for mouse scrolling (enables xterm.js scrollbar in web terminal)
+cat > /etc/tmux.conf << 'EOF'
+set -g mouse on
+EOF
+
 echo "=== Tools setup complete ==="

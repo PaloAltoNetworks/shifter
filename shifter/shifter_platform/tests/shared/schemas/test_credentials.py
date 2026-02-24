@@ -17,12 +17,6 @@ from pydantic import ValidationError
 class TestCredentialSpecBase:
     """Tests for CredentialSpecBase Pydantic model."""
 
-    def test_import_credential_spec_base(self):
-        """CredentialSpecBase can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import CredentialSpecBase
-
-        assert CredentialSpecBase is not None
-
     def test_create_with_required_fields(self):
         """CredentialSpecBase can be created with required fields."""
         from shared.schemas.credentials import CredentialSpecBase
@@ -84,12 +78,6 @@ class TestCredentialSpecBase:
 
 class TestSCMCredentialSpec:
     """Tests for SCMCredentialSpec Pydantic model."""
-
-    def test_import_scm_credential_spec(self):
-        """SCMCredentialSpec can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import SCMCredentialSpec
-
-        assert SCMCredentialSpec is not None
 
     def test_create_scm_credential(self):
         """SCMCredentialSpec can be created with all fields."""
@@ -235,12 +223,6 @@ class TestSCMCredentialSpec:
 class TestDeploymentProfileSpec:
     """Tests for DeploymentProfileSpec Pydantic model."""
 
-    def test_import_deployment_profile_spec(self):
-        """DeploymentProfileSpec can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import DeploymentProfileSpec
-
-        assert DeploymentProfileSpec is not None
-
     def test_create_deployment_profile(self):
         """DeploymentProfileSpec can be created with all fields."""
         from shared.schemas.credentials import DeploymentProfileSpec
@@ -298,12 +280,6 @@ class TestDeploymentProfileSpec:
 
 class TestCredentialContextBase:
     """Tests for CredentialContextBase Pydantic model (base projection)."""
-
-    def test_import_credential_context_base(self):
-        """CredentialContextBase can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        assert CredentialContextBase is not None
 
     def test_credential_id_must_be_positive(self):
         """CredentialContextBase rejects zero or negative credential_id."""
@@ -451,12 +427,6 @@ class TestCredentialContextBase:
 class TestSCMCredentialContext:
     """Tests for SCMCredentialContext Pydantic model."""
 
-    def test_import_scm_credential_context(self):
-        """SCMCredentialContext can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import SCMCredentialContext
-
-        assert SCMCredentialContext is not None
-
     def test_create_scm_context(self):
         """SCMCredentialContext can be created with all fields."""
         from shared.schemas.credentials import SCMCredentialContext
@@ -542,12 +512,6 @@ class TestSCMCredentialContext:
 class TestDeploymentProfileContext:
     """Tests for DeploymentProfileContext Pydantic model."""
 
-    def test_import_deployment_profile_context(self):
-        """DeploymentProfileContext can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import DeploymentProfileContext
-
-        assert DeploymentProfileContext is not None
-
     def test_create_deployment_profile_context(self):
         """DeploymentProfileContext can be created with all fields."""
         from shared.schemas.credentials import DeploymentProfileContext
@@ -605,12 +569,6 @@ class TestDeploymentProfileContext:
 
 class TestCredentialContextDiscriminatedUnion:
     """Tests for CredentialContext discriminated union."""
-
-    def test_import_credential_context(self):
-        """CredentialContext can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import CredentialContext
-
-        assert CredentialContext is not None
 
     def test_validate_routes_to_scm_context(self):
         """model_validate routes to SCMCredentialContext based on credential_type."""
@@ -682,12 +640,6 @@ class TestCredentialContextDiscriminatedUnion:
 
 class TestCredentialRef:
     """Tests for CredentialRef Pydantic model (minimal reference projection)."""
-
-    def test_import_credential_ref(self):
-        """CredentialRef can be imported from shared.schemas.credentials."""
-        from shared.schemas.credentials import CredentialRef
-
-        assert CredentialRef is not None
 
     def test_create_with_required_fields(self):
         """CredentialRef can be created with required fields."""

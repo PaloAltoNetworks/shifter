@@ -7,17 +7,11 @@ connect, receive input, send output, disconnect.
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
 
-from shared.enums import ResourceStatus, WebSocketCloseCode
-from shared.schemas import InstanceContext, RangeContext
-
-# Test UUID for request_id
-TEST_REQUEST_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-TEST_REQUEST_UUID = UUID(TEST_REQUEST_ID)
+from shared.enums import WebSocketCloseCode
 
 
 @pytest.fixture
@@ -56,19 +50,6 @@ def unauthenticated_scope():
     }
 
 
-@pytest.fixture
-def ready_range_context():
-    """RangeContext with READY status and matching instance."""
-    return RangeContext(
-        request_id=TEST_REQUEST_UUID,
-        range_id=42,
-        scenario_id="test-scenario",
-        user_id=1,
-        status=ResourceStatus.READY,
-        instances=[InstanceContext(uuid="test-uuid-1234", role="attacker", os_type="kali")],
-    )
-
-
 class TestSSHConsumerConnect:
     """Tests for connect() and _do_connect() behavior."""
 
@@ -96,74 +77,48 @@ class TestSSHConsumerConnect:
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.INVALID_REQUEST)
 
     @pytest.mark.asyncio
-    async def test_rejects_when_no_active_range(self, consumer, authenticated_scope):
-        """No active range returns NOT_FOUND."""
+    async def test_rejects_on_value_error(self, consumer, authenticated_scope):
+        """ValueError from connect_terminal returns NOT_FOUND.
+
+        Engine raises ValueError for: no active range, range not ready,
+        instance not in range, etc.
+        """
         consumer.scope = authenticated_scope
 
-        with patch("cms.get_active_range", return_value=None):
+        with patch("engine.connect_terminal", side_effect=ValueError("Instance not found")):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
 
     @pytest.mark.asyncio
-    async def test_rejects_when_range_not_ready(self, consumer, authenticated_scope):
-        """Range not in READY status returns NOT_FOUND."""
+    async def test_rejects_on_permission_error(self, consumer, authenticated_scope):
+        """PermissionError from connect_terminal returns PERMISSION_DENIED."""
         consumer.scope = authenticated_scope
-        not_ready = RangeContext(
-            request_id=TEST_REQUEST_UUID,
-            range_id=42,
-            scenario_id="test",
-            user_id=1,
-            status=ResourceStatus.PROVISIONING,
-            instances=[],
-        )
 
-        with patch("cms.get_active_range", return_value=not_ready):
+        with patch("engine.connect_terminal", side_effect=PermissionError("Not authorized")):
             await consumer.connect()
 
-        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
+        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.PERMISSION_DENIED)
 
     @pytest.mark.asyncio
-    async def test_rejects_when_instance_not_in_range(self, consumer, authenticated_scope):
-        """Instance UUID not in range returns NOT_FOUND."""
-        consumer.scope = authenticated_scope
-        range_ctx = RangeContext(
-            request_id=TEST_REQUEST_UUID,
-            range_id=42,
-            scenario_id="test",
-            user_id=1,
-            status=ResourceStatus.READY,
-            instances=[InstanceContext(uuid="different-uuid", role="attacker", os_type="kali")],
-        )
-
-        with patch("cms.get_active_range", return_value=range_ctx):
-            await consumer.connect()
-
-        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
-
-    @pytest.mark.asyncio
-    async def test_rejects_on_ssh_connection_failure(self, consumer, authenticated_scope, ready_range_context):
+    async def test_rejects_on_ssh_connection_failure(self, consumer, authenticated_scope):
         """SSH connection failure returns SSH_CONNECTION_FAILED."""
         consumer.scope = authenticated_scope
         mock_ssh = AsyncMock()
         mock_ssh.connect.side_effect = ConnectionError("SSH failed")
 
-        with (
-            patch("cms.get_active_range", return_value=ready_range_context),
-            patch("engine.connect_terminal", return_value=mock_ssh),
-        ):
+        with patch("engine.connect_terminal", return_value=mock_ssh):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.SSH_CONNECTION_FAILED)
 
     @pytest.mark.asyncio
-    async def test_accepts_on_successful_connect(self, consumer, authenticated_scope, ready_range_context):
+    async def test_accepts_on_successful_connect(self, consumer, authenticated_scope):
         """Successful connection accepts WebSocket and starts read task."""
         consumer.scope = authenticated_scope
         mock_ssh = AsyncMock()
 
         with (
-            patch("cms.get_active_range", return_value=ready_range_context),
             patch("engine.connect_terminal", return_value=mock_ssh),
             patch("asyncio.create_task") as mock_create_task,
         ):

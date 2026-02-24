@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
+      "WebFetch(domain:blackhat.com)",
       "WebFetch(domain:arxiv.org)",
+      "Read(//home/atomik/src/aptl/src/aptl/**)",
+      "Read(//home/atomik/src/aptl/**)",
+      "Read(//home/atomik/src/aptl/mcp/mcp-red/src/**)",
       "Bash(curl:*)"
     ]
   }

@@ -95,6 +95,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "mission_control.context_processors.active_range",
+                "shared.context_processors.user_permissions",
             ],
         },
     },

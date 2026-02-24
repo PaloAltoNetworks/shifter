@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.12] - 2026-02-24
+
+### Added
+- CyberScript DSL language reference documentation (`documentation/docs/cyberscript/`)
+- Schema validators: unique instance names, `dc_config` required when `domain_controller: true`
+
 ## [2.2.11] - 2026-02-23
 
 ### Fixed

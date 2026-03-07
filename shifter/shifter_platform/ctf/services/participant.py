@@ -359,3 +359,105 @@ def list_participants_for_event(event_id: UUID) -> QuerySet[CTFParticipant]:
         .select_related("team", "user")
         .order_by("name")
     )
+
+
+def get_participant(participant_id: UUID) -> CTFParticipant:
+    """Get a participant by ID.
+
+    Args:
+        participant_id: UUID of the participant.
+
+    Returns:
+        The CTFParticipant instance.
+
+    Raises:
+        CTFNotFoundError: If participant doesn't exist.
+    """
+    try:
+        return CTFParticipant.objects.select_related("event", "team", "user").get(
+            pk=participant_id
+        )
+    except CTFParticipant.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Participant {participant_id} not found",
+            details={"participant_id": str(participant_id)},
+        )
+
+
+def delete_participant(participant_id: UUID) -> bool:
+    """Soft delete a participant.
+
+    Args:
+        participant_id: UUID of the participant.
+
+    Returns:
+        True if deleted successfully.
+
+    Raises:
+        CTFNotFoundError: If participant doesn't exist.
+    """
+    logger.info("Deleting participant %s", participant_id)
+
+    try:
+        participant = CTFParticipant.objects.get(pk=participant_id)
+    except CTFParticipant.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Participant {participant_id} not found",
+            details={"participant_id": str(participant_id)},
+        )
+
+    participant.delete(soft=True)
+    logger.info("Deleted participant %s", participant_id)
+
+    return True
+
+
+def resend_invite(participant_id: UUID) -> CTFParticipant:
+    """Resend invitation to a participant and refresh the token.
+
+    Args:
+        participant_id: UUID of the participant.
+
+    Returns:
+        The updated CTFParticipant instance.
+
+    Raises:
+        CTFNotFoundError: If participant doesn't exist.
+        CTFStateError: If participant is already registered.
+    """
+    import secrets
+    from datetime import timedelta
+
+    logger.info("Resending invite for participant %s", participant_id)
+
+    try:
+        participant = CTFParticipant.objects.select_related("event").get(
+            pk=participant_id
+        )
+    except CTFParticipant.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Participant {participant_id} not found",
+            details={"participant_id": str(participant_id)},
+        )
+
+    if participant.is_registered:
+        raise CTFStateError(
+            "Cannot resend invite to already registered participant",
+            details={"participant_id": str(participant_id)},
+        )
+
+    # Generate new token with fresh expiry
+    now = timezone.now()
+    default_expiry = now + timedelta(days=7)
+    token_expires = min(default_expiry, participant.event.event_end)
+
+    participant.invite_token = secrets.token_urlsafe(32)
+    participant.invite_token_expires = token_expires
+    participant.invited_at = now
+    participant.save(
+        update_fields=["invite_token", "invite_token_expires", "invited_at", "updated_at"]
+    )
+
+    logger.info("Resent invite for participant %s", participant_id)
+
+    return participant

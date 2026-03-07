@@ -11,6 +11,16 @@ This package contains service modules for CTF business logic:
 - scheduler: Scheduled task management
 """
 
+from ctf.services.challenge import (
+    create_challenge,
+    delete_challenge,
+    get_available_challenges,
+    get_challenge,
+    hash_flag,
+    list_challenges_for_event,
+    update_challenge,
+    verify_flag,
+)
 from ctf.services.event import (
     EventNotModifiableError,
     activate_event,
@@ -44,4 +54,13 @@ __all__ = [
     "end_event",
     "get_event_stats",
     "EventNotModifiableError",
+    # Challenge services
+    "create_challenge",
+    "update_challenge",
+    "delete_challenge",
+    "get_challenge",
+    "list_challenges_for_event",
+    "get_available_challenges",
+    "hash_flag",
+    "verify_flag",
 ]

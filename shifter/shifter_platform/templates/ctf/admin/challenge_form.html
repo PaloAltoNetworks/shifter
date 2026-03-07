@@ -1,7 +1,165 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF Admin{% endblock %}
+{% block ctf_title %}{% if is_edit %}Edit Challenge{% else %}Create Challenge{% endif %}{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">{% if is_edit %}Edit Challenge: {{ challenge.name }}{% else %}Create New Challenge{% endif %}</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" novalidate>
+                        {% csrf_token %}
+
+                        {% if form.non_field_errors %}
+                        <div class="alert alert-danger">
+                            {% for error in form.non_field_errors %}
+                            <p class="mb-0">{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Basic Info -->
+                        <h6 class="text-muted mb-3">Basic Information</h6>
+
+                        <div class="mb-3">
+                            <label for="{{ form.name.id_for_label }}" class="form-label">Challenge Name <span class="text-danger">*</span></label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                            <div class="invalid-feedback d-block">{{ form.name.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.description.id_for_label }}" class="form-label">Description <span class="text-danger">*</span></label>
+                            {{ form.description }}
+                            <div class="form-text">Supports Markdown formatting</div>
+                            {% if form.description.errors %}
+                            <div class="invalid-feedback d-block">{{ form.description.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.category.id_for_label }}" class="form-label">Category <span class="text-danger">*</span></label>
+                                {{ form.category }}
+                                {% if form.category.errors %}
+                                <div class="invalid-feedback d-block">{{ form.category.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.difficulty.id_for_label }}" class="form-label">Difficulty <span class="text-danger">*</span></label>
+                                {{ form.difficulty }}
+                                {% if form.difficulty.errors %}
+                                <div class="invalid-feedback d-block">{{ form.difficulty.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.points.id_for_label }}" class="form-label">Points <span class="text-danger">*</span></label>
+                                {{ form.points }}
+                                {% if form.points.errors %}
+                                <div class="invalid-feedback d-block">{{ form.points.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.order.id_for_label }}" class="form-label">Display Order</label>
+                                {{ form.order }}
+                                <div class="form-text">Order within category (lower = first)</div>
+                                {% if form.order.errors %}
+                                <div class="invalid-feedback d-block">{{ form.order.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Flag Settings -->
+                        <h6 class="text-muted mb-3 mt-4">Flag Settings</h6>
+
+                        <div class="mb-3">
+                            <label for="{{ form.flag.id_for_label }}" class="form-label">
+                                Flag {% if not is_edit %}<span class="text-danger">*</span>{% endif %}
+                            </label>
+                            {{ form.flag }}
+                            <div class="form-text">
+                                {% if is_edit %}
+                                Leave blank to keep existing flag
+                                {% else %}
+                                Enter the flag value (will be hashed for secure storage)
+                                {% endif %}
+                            </div>
+                            {% if form.flag.errors %}
+                            <div class="invalid-feedback d-block">{{ form.flag.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.flag_format.id_for_label }}" class="form-label">Flag Format Hint</label>
+                            {{ form.flag_format }}
+                            <div class="form-text">Optional format hint shown to participants (e.g., "FLAG{...}")</div>
+                            {% if form.flag_format.errors %}
+                            <div class="invalid-feedback d-block">{{ form.flag_format.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.max_attempts.id_for_label }}" class="form-label">Max Attempts</label>
+                            {{ form.max_attempts }}
+                            <div class="form-text">0 = unlimited attempts</div>
+                            {% if form.max_attempts.errors %}
+                            <div class="invalid-feedback d-block">{{ form.max_attempts.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Hint Settings -->
+                        <h6 class="text-muted mb-3 mt-4">Hint Settings</h6>
+
+                        <div class="mb-3">
+                            <label for="{{ form.hint.id_for_label }}" class="form-label">Hint</label>
+                            {{ form.hint }}
+                            <div class="form-text">Optional hint for participants</div>
+                            {% if form.hint.errors %}
+                            <div class="invalid-feedback d-block">{{ form.hint.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.hint_penalty.id_for_label }}" class="form-label">Hint Penalty (%)</label>
+                            {{ form.hint_penalty }}
+                            <div class="form-text">Percentage of points deducted when hint is used (0-100)</div>
+                            {% if form.hint_penalty.errors %}
+                            <div class="invalid-feedback d-block">{{ form.hint_penalty.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Release Settings -->
+                        <h6 class="text-muted mb-3 mt-4">Release Settings</h6>
+
+                        <div class="mb-3">
+                            <label for="{{ form.release_time.id_for_label }}" class="form-label">Release Time</label>
+                            {{ form.release_time }}
+                            <div class="form-text">Leave empty to release immediately when event starts</div>
+                            {% if form.release_time.errors %}
+                            <div class="invalid-feedback d-block">{{ form.release_time.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="d-flex justify-content-between mt-4 pt-3 border-top">
+                            <a href="{% if is_edit %}{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}{% else %}{% url 'ctf:admin_challenge_list' event_id=event.pk %}{% endif %}" class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                {% if is_edit %}Save Changes{% else %}Create Challenge{% endif %}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

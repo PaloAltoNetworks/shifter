@@ -1,7 +1,192 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF Admin{% endblock %}
+{% block ctf_title %}{{ challenge.name }}{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-2">
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}">Challenges</a></li>
+                    <li class="breadcrumb-item active">{{ challenge.name }}</li>
+                </ol>
+            </nav>
+            <h1 class="h3 mb-0">{{ challenge.name }}</h1>
+            <div class="mt-2">
+                <span class="badge bg-primary fs-6">{{ challenge.category|title }}</span>
+                {% if challenge.difficulty == 'easy' %}
+                <span class="badge bg-success fs-6 ms-1">Easy</span>
+                {% elif challenge.difficulty == 'medium' %}
+                <span class="badge bg-warning fs-6 ms-1">Medium</span>
+                {% elif challenge.difficulty == 'hard' %}
+                <span class="badge bg-danger fs-6 ms-1">Hard</span>
+                {% elif challenge.difficulty == 'expert' %}
+                <span class="badge bg-dark fs-6 ms-1">Expert</span>
+                {% endif %}
+                <span class="badge bg-secondary fs-6 ms-1">{{ challenge.points }} pts</span>
+            </div>
+        </div>
+        <div class="btn-group">
+            {% if event.is_modifiable %}
+            <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}" class="btn btn-outline-primary">
+                <i class="bi bi-pencil"></i> Edit
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Main Info -->
+        <div class="col-lg-8">
+            <!-- Description -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Description</h5>
+                </div>
+                <div class="card-body">
+                    <div class="challenge-description">{{ challenge.description|linebreaks }}</div>
+                </div>
+            </div>
+
+            <!-- Hint -->
+            {% if challenge.hint %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Hint</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-1">{{ challenge.hint }}</p>
+                    <small class="text-muted">Penalty: {{ challenge.hint_penalty }}% of points</small>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Recent Submissions -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Submissions</h5>
+                </div>
+                <div class="card-body p-0">
+                    {% if recent_submissions %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Participant</th>
+                                    <th>Time</th>
+                                    <th>Result</th>
+                                    <th>Points</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for sub in recent_submissions %}
+                                <tr>
+                                    <td>{{ sub.participant.name }}</td>
+                                    <td>{{ sub.submitted_at|date:"M d, H:i:s" }}</td>
+                                    <td>
+                                        {% if sub.is_correct %}
+                                        <span class="badge bg-success">Correct</span>
+                                        {% else %}
+                                        <span class="badge bg-danger">Incorrect</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ sub.points_awarded }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="p-4 text-center text-muted">
+                        No submissions yet.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Stats -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Total Submissions:</span>
+                        <strong>{{ total_submissions }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Correct Submissions:</span>
+                        <strong>{{ correct_submissions }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Solve Rate:</span>
+                        <strong>
+                            {% if total_submissions > 0 %}
+                            {{ correct_submissions|floatformat:0 }}%
+                            {% else %}
+                            N/A
+                            {% endif %}
+                        </strong>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>First Blood:</span>
+                        <strong>
+                            {% if first_blood %}
+                            {{ first_blood.participant.name }}
+                            {% else %}
+                            None yet
+                            {% endif %}
+                        </strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Category:</span>
+                        <strong>{{ challenge.category|title }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Points:</span>
+                        <strong>{{ challenge.points }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Difficulty:</span>
+                        <strong>{{ challenge.difficulty|title }}</strong>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Flag Format:</span>
+                        <strong>{% if challenge.flag_format %}{{ challenge.flag_format }}{% else %}<em class="text-muted">Not set</em>{% endif %}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Max Attempts:</span>
+                        <strong>{% if challenge.max_attempts %}{{ challenge.max_attempts }}{% else %}Unlimited{% endif %}</strong>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Release Time:</span>
+                        <strong>{% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}{% else %}Immediate{% endif %}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Display Order:</span>
+                        <strong>{{ challenge.order }}</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

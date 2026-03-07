@@ -455,15 +455,45 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
 def admin_challenge_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Challenge list for an event.
 
+    Shows all challenges for the event with category grouping.
+
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement challenge list
-    return render(
-        request,
-        "ctf/admin/challenge_list.html",
-        {"placeholder": True, "event_id": event_id},
-    )
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event, list_challenges_for_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    challenges = list_challenges_for_event(event_id)
+
+    # Group challenges by category
+    from collections import defaultdict
+
+    challenges_by_category = defaultdict(list)
+    for challenge in challenges:
+        challenges_by_category[challenge.category].append(challenge)
+
+    # Calculate stats
+    total_points = sum(c.points for c in challenges)
+
+    context = {
+        "event": event,
+        "challenges": challenges,
+        "challenges_by_category": dict(challenges_by_category),
+        "total_points": total_points,
+    }
+
+    return render(request, "ctf/admin/challenge_list.html", context)
 
 
 @login_required
@@ -472,15 +502,59 @@ def admin_challenge_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
 def admin_challenge_create(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Create new challenge.
 
+    GET: Show creation form.
+    POST: Process creation.
+
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement challenge creation
-    return render(
-        request,
-        "ctf/admin/challenge_form.html",
-        {"placeholder": True, "event_id": event_id},
-    )
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.forms import CTFChallengeForm
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    # Check if event is modifiable
+    if not event.is_modifiable:
+        logger.warning(
+            "User %s attempted to add challenge to non-modifiable event %s",
+            request.user.email,
+            event.pk,
+        )
+        return redirect("ctf:admin_challenge_list", event_id=event.pk)
+
+    if request.method == "POST":
+        form = CTFChallengeForm(request.POST, event=event)
+        if form.is_valid():
+            challenge = form.save()
+            logger.info(
+                "User %s created challenge %s: %s for event %s",
+                request.user.email,
+                challenge.pk,
+                challenge.name,
+                event.pk,
+            )
+            return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
+    else:
+        form = CTFChallengeForm(event=event)
+
+    context = {
+        "form": form,
+        "event": event,
+        "is_edit": False,
+    }
+
+    return render(request, "ctf/admin/challenge_form.html", context)
 
 
 @login_required
@@ -488,15 +562,46 @@ def admin_challenge_create(request: HttpRequest, event_id: UUID) -> HttpResponse
 def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     """Challenge detail view.
 
+    Shows challenge information, solve statistics, and recent submissions.
+
     Args:
         challenge_id: UUID of the challenge.
     """
-    # TODO: Implement challenge detail
-    return render(
-        request,
-        "ctf/admin/challenge_detail.html",
-        {"placeholder": True, "challenge_id": challenge_id},
-    )
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        raise Http404("Challenge not found")
+
+    # Check permission
+    if challenge.event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this challenge", status=403)
+
+    # Get submission stats
+    from ctf.models import CTFSubmission
+
+    submissions = CTFSubmission.objects.filter(challenge=challenge).order_by("-submitted_at")
+    total_submissions = submissions.count()
+    correct_submissions = submissions.filter(is_correct=True).count()
+    recent_submissions = submissions[:10]
+
+    # Get first blood if any
+    first_blood = challenge.first_blood
+
+    context = {
+        "challenge": challenge,
+        "event": challenge.event,
+        "total_submissions": total_submissions,
+        "correct_submissions": correct_submissions,
+        "recent_submissions": recent_submissions,
+        "first_blood": first_blood,
+    }
+
+    return render(request, "ctf/admin/challenge_detail.html", context)
 
 
 @login_required
@@ -505,15 +610,62 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
 def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     """Edit challenge.
 
+    GET: Show edit form.
+    POST: Process update.
+
     Args:
         challenge_id: UUID of the challenge.
     """
-    # TODO: Implement challenge edit
-    return render(
-        request,
-        "ctf/admin/challenge_form.html",
-        {"placeholder": True, "challenge_id": challenge_id},
-    )
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.forms import CTFChallengeForm
+    from ctf.services import get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        raise Http404("Challenge not found")
+
+    event = challenge.event
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this challenge", status=403)
+
+    # Check if event is modifiable
+    if not event.is_modifiable:
+        logger.warning(
+            "User %s attempted to edit challenge %s in non-modifiable event %s",
+            request.user.email,
+            challenge.pk,
+            event.pk,
+        )
+        return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
+
+    if request.method == "POST":
+        form = CTFChallengeForm(request.POST, instance=challenge, event=event)
+        if form.is_valid():
+            form.save()
+            logger.info(
+                "User %s updated challenge %s: %s",
+                request.user.email,
+                challenge.pk,
+                challenge.name,
+            )
+            return redirect("ctf:admin_challenge_detail", challenge_id=challenge.pk)
+    else:
+        form = CTFChallengeForm(instance=challenge, event=event)
+
+    context = {
+        "form": form,
+        "event": event,
+        "challenge": challenge,
+        "is_edit": True,
+    }
+
+    return render(request, "ctf/admin/challenge_form.html", context)
 
 
 @login_required

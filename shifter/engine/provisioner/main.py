@@ -2581,7 +2581,12 @@ def _run_terraform_destroy(
 
     terraform_succeeded = False
     try:
-        range_terraform_runner.destroy_range(request_id, range_terraform_runner.RANGE_MODULE_PATH)
+        tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
+        range_terraform_runner.destroy_range(
+            request_id,
+            range_terraform_runner.RANGE_MODULE_PATH,
+            variables=tf_variables,
+        )
         terraform_succeeded = True
 
         logger.info("Cleaning up Terraform state...")

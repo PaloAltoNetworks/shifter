@@ -80,6 +80,11 @@ admin_patterns = [
         name="admin_participant_import",
     ),
     path(
+        "admin/events/<uuid:event_id>/participants/add/",
+        views.admin_participant_add,
+        name="admin_participant_add",
+    ),
+    path(
         "admin/participants/<uuid:participant_id>/",
         views.admin_participant_detail,
         name="admin_participant_detail",
@@ -158,6 +163,11 @@ api_patterns = [
         "api/participants/<uuid:participant_id>/",
         views.api_participant_detail,
         name="api_participant_detail",
+    ),
+    path(
+        "api/participants/<uuid:participant_id>/resend-invite/",
+        views.api_participant_resend_invite,
+        name="api_participant_resend_invite",
     ),
     # Range APIs
     path("api/range/status/", views.api_range_status, name="api_range_status"),

@@ -1,7 +1,222 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF Admin{% endblock %}
+{% block ctf_title %}{{ participant.name }} - {{ event.name }}{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1">
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
+                    <li class="breadcrumb-item active">{{ participant.name }}</li>
+                </ol>
+            </nav>
+            <h1 class="h3 mb-0">{{ participant.name }}</h1>
+        </div>
+        <div class="btn-group">
+            {% if participant.status == 'invited' %}
+            <button type="button" class="btn btn-outline-primary" onclick="resendInvite('{{ participant.pk }}')">
+                <i class="bi bi-envelope"></i> Resend Invite
+            </button>
+            {% endif %}
+            {% if participant.status not in 'disqualified,completed' %}
+            <button type="button" class="btn btn-outline-danger" onclick="disqualifyParticipant('{{ participant.pk }}')">
+                <i class="bi bi-x-circle"></i> Disqualify
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Profile Card -->
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Profile</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Email</dt>
+                        <dd class="col-sm-8">{{ participant.email }}</dd>
+
+                        <dt class="col-sm-4">Status</dt>
+                        <dd class="col-sm-8">
+                            {% if participant.status == 'invited' %}
+                            <span class="badge bg-warning">Invited</span>
+                            {% elif participant.status == 'registered' %}
+                            <span class="badge bg-info">Registered</span>
+                            {% elif participant.status == 'active' %}
+                            <span class="badge bg-success">Active</span>
+                            {% elif participant.status == 'completed' %}
+                            <span class="badge bg-secondary">Completed</span>
+                            {% elif participant.status == 'disqualified' %}
+                            <span class="badge bg-danger">Disqualified</span>
+                            {% endif %}
+                        </dd>
+
+                        {% if event.team_mode %}
+                        <dt class="col-sm-4">Team</dt>
+                        <dd class="col-sm-8">
+                            {% if participant.team %}
+                            {{ participant.team.name }}
+                            {% else %}
+                            <span class="text-muted">No team</span>
+                            {% endif %}
+                        </dd>
+                        {% endif %}
+
+                        <dt class="col-sm-4">Invited</dt>
+                        <dd class="col-sm-8">
+                            {% if participant.invited_at %}
+                            {{ participant.invited_at|date:"M d, Y H:i" }}
+                            {% else %}
+                            <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-sm-4">Registered</dt>
+                        <dd class="col-sm-8">
+                            {% if participant.registered_at %}
+                            {{ participant.registered_at|date:"M d, Y H:i" }}
+                            {% else %}
+                            <span class="text-muted">Not registered</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-sm-4">Last Active</dt>
+                        <dd class="col-sm-8">
+                            {% if participant.last_active_at %}
+                            {{ participant.last_active_at|date:"M d, Y H:i" }}
+                            {% else %}
+                            <span class="text-muted">Never</span>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Stats Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <div class="h3 mb-0 text-primary">{{ total_score }}</div>
+                            <div class="small text-muted">Score</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="h3 mb-0 text-success">{{ solved_count }}</div>
+                            <div class="small text-muted">Solved</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="h3 mb-0 text-secondary">{{ total_attempts }}</div>
+                            <div class="small text-muted">Attempts</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Submission History -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Submission History</h5>
+                </div>
+                <div class="card-body p-0">
+                    {% if submissions %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Challenge</th>
+                                    <th>Result</th>
+                                    <th>Points</th>
+                                    <th>Attempt</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for submission in submissions %}
+                                <tr>
+                                    <td>
+                                        <a href="{% url 'ctf:admin_challenge_detail' challenge_id=submission.challenge.pk %}">
+                                            {{ submission.challenge.name }}
+                                        </a>
+                                        <span class="badge bg-secondary ms-1">{{ submission.challenge.category }}</span>
+                                    </td>
+                                    <td>
+                                        {% if submission.is_correct %}
+                                        <span class="badge bg-success">Correct</span>
+                                        {% if submission.hint_used %}
+                                        <span class="badge bg-warning ms-1">Hint Used</span>
+                                        {% endif %}
+                                        {% else %}
+                                        <span class="badge bg-danger">Incorrect</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if submission.is_correct %}
+                                        +{{ submission.points_awarded }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td>#{{ submission.attempt_number }}</td>
+                                    <td>{{ submission.submitted_at|date:"M d, H:i:s" }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="p-4 text-center text-muted">
+                        <p class="mb-0">No submissions yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function resendInvite(participantId) {
+    if (!confirm('Resend invitation email to this participant?')) return;
+
+    fetch(`/ctf/api/participants/${participantId}/resend-invite/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Invitation resent successfully.');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to resend invite'));
+        }
+    })
+    .catch(err => {
+        alert('Error resending invite: ' + err.message);
+    });
+}
+
+function disqualifyParticipant(participantId) {
+    if (!confirm('Are you sure you want to disqualify this participant? This action cannot be undone.')) return;
+
+    // This would call a disqualify API endpoint (to be implemented)
+    alert('Disqualify functionality not yet implemented via API.');
+}
+</script>
 {% endblock %}

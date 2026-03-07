@@ -673,15 +673,59 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
 def admin_participant_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Participant list for an event.
 
+    Shows all participants with filtering by status and statistics.
+
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement participant list
-    return render(
-        request,
-        "ctf/admin/participant_list.html",
-        {"placeholder": True, "event_id": event_id},
-    )
+    from django.http import Http404
+
+    from ctf.enums import ParticipantStatus
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event, list_participants_for_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission - organizers can only access their own events
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    # Get participants with optional status filter
+    participants = list_participants_for_event(event_id)
+    status_filter = request.GET.get("status")
+
+    if status_filter:
+        participants = participants.filter(status=status_filter)
+
+    # Calculate statistics
+    all_participants = list_participants_for_event(event_id)
+    total_count = all_participants.count()
+    invited_count = all_participants.filter(status=ParticipantStatus.INVITED.value).count()
+    registered_count = all_participants.filter(
+        status__in=[
+            ParticipantStatus.REGISTERED.value,
+            ParticipantStatus.ACTIVE.value,
+            ParticipantStatus.COMPLETED.value,
+        ]
+    ).count()
+
+    # Get status choices for filter dropdown
+    status_choices = ParticipantStatus.choices()
+
+    context = {
+        "event": event,
+        "participants": participants,
+        "status_filter": status_filter,
+        "status_choices": status_choices,
+        "total_count": total_count,
+        "invited_count": invited_count,
+        "registered_count": registered_count,
+    }
+
+    return render(request, "ctf/admin/participant_list.html", context)
 
 
 @login_required
@@ -690,15 +734,65 @@ def admin_participant_list(request: HttpRequest, event_id: UUID) -> HttpResponse
 def admin_participant_import(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Import participants from CSV.
 
+    GET: Show import form.
+    POST: Process CSV file and create participants.
+
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement participant import
-    return render(
-        request,
-        "ctf/admin/participant_import.html",
-        {"placeholder": True, "event_id": event_id},
-    )
+    from django.contrib import messages
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.forms import CTFParticipantImportForm
+    from ctf.services import bulk_import_participants, get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    errors = None
+    imported_count = 0
+
+    if request.method == "POST":
+        form = CTFParticipantImportForm(request.POST, request.FILES)
+        if form.is_valid():
+            csv_file = request.FILES["csv_file"]
+            try:
+                csv_content = csv_file.read().decode("utf-8")
+                participants = bulk_import_participants(event_id, csv_content)
+                imported_count = len(participants)
+                logger.info(
+                    "User %s imported %d participants to event %s",
+                    request.user.email,
+                    imported_count,
+                    event_id,
+                )
+                messages.success(request, f"Successfully imported {imported_count} participants.")
+                return redirect("ctf:admin_participant_list", event_id=event_id)
+            except CTFValidationError as e:
+                errors = e.details.get("errors") or e.details.get("existing") or [str(e)]
+                if e.details.get("duplicates"):
+                    errors = [f"Duplicate emails: {', '.join(e.details['duplicates'])}"]
+                if e.details.get("existing"):
+                    errors = [f"Already exists: {', '.join(e.details['existing'])}"]
+    else:
+        form = CTFParticipantImportForm()
+
+    context = {
+        "event": event,
+        "form": form,
+        "errors": errors,
+        "imported_count": imported_count,
+    }
+
+    return render(request, "ctf/admin/participant_import.html", context)
 
 
 @login_required
@@ -706,15 +800,110 @@ def admin_participant_import(request: HttpRequest, event_id: UUID) -> HttpRespon
 def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> HttpResponse:
     """Participant detail view.
 
+    Shows participant profile, submission history, and actions.
+
     Args:
         participant_id: UUID of the participant.
     """
-    # TODO: Implement participant detail
-    return render(
-        request,
-        "ctf/admin/participant_detail.html",
-        {"placeholder": True, "participant_id": participant_id},
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.models import CTFSubmission
+    from ctf.services import get_participant
+
+    try:
+        participant = get_participant(participant_id)
+    except CTFNotFoundError:
+        raise Http404("Participant not found")
+
+    # Check permission - organizers can only access their own events' participants
+    if participant.event.created_by_id != request.user.pk:
+        return HttpResponse(
+            "Forbidden: You do not have access to this participant", status=403
+        )
+
+    # Get submission history
+    submissions = (
+        CTFSubmission.objects.filter(participant=participant)
+        .select_related("challenge")
+        .order_by("-submitted_at")
     )
+
+    # Calculate statistics
+    total_score = participant.total_score
+    solved_count = submissions.filter(is_correct=True).count()
+    total_attempts = submissions.count()
+
+    context = {
+        "participant": participant,
+        "event": participant.event,
+        "submissions": submissions,
+        "total_score": total_score,
+        "solved_count": solved_count,
+        "total_attempts": total_attempts,
+    }
+
+    return render(request, "ctf/admin/participant_detail.html", context)
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def admin_participant_add(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """Add a single participant to an event.
+
+    GET: Show add participant form.
+    POST: Create participant and optionally send invite.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from django.contrib import messages
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.forms import CTFParticipantForm
+    from ctf.services import get_event, invite_participant
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found")
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    if request.method == "POST":
+        form = CTFParticipantForm(request.POST, event=event)
+        if form.is_valid():
+            try:
+                participant = invite_participant(
+                    event_id=event_id,
+                    email=form.cleaned_data["email"],
+                    name=form.cleaned_data["name"],
+                )
+                logger.info(
+                    "User %s added participant %s to event %s",
+                    request.user.email,
+                    participant.email,
+                    event_id,
+                )
+                messages.success(request, f"Participant {participant.name} added successfully.")
+                return redirect("ctf:admin_participant_list", event_id=event_id)
+            except CTFValidationError as e:
+                form.add_error(None, str(e))
+    else:
+        form = CTFParticipantForm(event=event)
+
+    context = {
+        "event": event,
+        "form": form,
+        "is_add": True,
+    }
+
+    return render(request, "ctf/admin/participant_form.html", context)
 
 
 @login_required
@@ -913,26 +1102,139 @@ def api_submissions(request: HttpRequest) -> JsonResponse:
 def api_participant_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """API: List participants or add new participant.
 
+    GET: Return JSON list of participants.
+    POST: Create a new participant.
+
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement participant list/create API
-    return JsonResponse(
-        {"placeholder": True, "event_id": str(event_id), "method": request.method}
-    )
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.services import get_event, invite_participant, list_participants_for_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    if request.method == "GET":
+        participants = list_participants_for_event(event_id)
+        status_filter = request.GET.get("status")
+        if status_filter:
+            participants = participants.filter(status=status_filter)
+
+        data = [
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "email": p.email,
+                "status": p.status,
+                "team_name": p.team.name if p.team else None,
+                "registered_at": p.registered_at.isoformat() if p.registered_at else None,
+                "total_score": p.total_score,
+            }
+            for p in participants
+        ]
+        return JsonResponse({"participants": data, "total": len(data)})
+
+    elif request.method == "POST":
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        name = body.get("name")
+        email = body.get("email")
+
+        if not name or not email:
+            return JsonResponse(
+                {"error": "name and email are required"}, status=400
+            )
+
+        try:
+            participant = invite_participant(event_id, email, name)
+            return JsonResponse(
+                {
+                    "id": str(participant.id),
+                    "name": participant.name,
+                    "email": participant.email,
+                    "status": participant.status,
+                    "invite_token": participant.invite_token,
+                },
+                status=201,
+            )
+        except CTFValidationError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
 @login_required
 @ctf_organizer_required
 @require_POST
 def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse:
-    """API: Bulk import participants.
+    """API: Bulk import participants from JSON.
+
+    Expects JSON body with "participants" array containing objects with
+    "name" and "email" fields.
 
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement participant import API
-    return JsonResponse({"placeholder": True, "event_id": str(event_id)})
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.services import get_event, invite_participant
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    # Check permission
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    participants_data = body.get("participants", [])
+    if not isinstance(participants_data, list):
+        return JsonResponse({"error": "participants must be an array"}, status=400)
+
+    imported = []
+    errors = []
+
+    for idx, p_data in enumerate(participants_data):
+        name = p_data.get("name")
+        email = p_data.get("email")
+
+        if not name or not email:
+            errors.append({"index": idx, "error": "name and email are required"})
+            continue
+
+        try:
+            participant = invite_participant(event_id, email, name)
+            imported.append({
+                "id": str(participant.id),
+                "name": participant.name,
+                "email": participant.email,
+            })
+        except CTFValidationError as e:
+            errors.append({"index": idx, "email": email, "error": str(e)})
+
+    return JsonResponse({
+        "imported": len(imported),
+        "participants": imported,
+        "errors": errors,
+    })
 
 
 @login_required
@@ -941,13 +1243,88 @@ def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse
 def api_participant_detail(request: HttpRequest, participant_id: UUID) -> JsonResponse:
     """API: Get or remove participant.
 
+    GET: Return participant details as JSON.
+    DELETE: Soft-delete the participant.
+
     Args:
         participant_id: UUID of the participant.
     """
-    # TODO: Implement participant detail API
-    return JsonResponse(
-        {"placeholder": True, "participant_id": str(participant_id), "method": request.method}
-    )
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.models import CTFSubmission
+    from ctf.services import delete_participant, get_participant
+
+    try:
+        participant = get_participant(participant_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    # Check permission
+    if participant.event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    if request.method == "GET":
+        # Get submission stats
+        submissions = CTFSubmission.objects.filter(participant=participant)
+        correct_submissions = submissions.filter(is_correct=True)
+
+        return JsonResponse({
+            "id": str(participant.id),
+            "name": participant.name,
+            "email": participant.email,
+            "status": participant.status,
+            "team_name": participant.team.name if participant.team else None,
+            "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
+            "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
+            "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
+            "total_score": participant.total_score,
+            "solved_count": correct_submissions.count(),
+            "attempt_count": submissions.count(),
+            "event_id": str(participant.event_id),
+        })
+
+    elif request.method == "DELETE":
+        try:
+            delete_participant(participant_id)
+            return JsonResponse({"deleted": True, "id": str(participant_id)})
+        except CTFNotFoundError:
+            return JsonResponse({"error": "Participant not found"}, status=404)
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) -> JsonResponse:
+    """API: Resend invitation to a participant.
+
+    Regenerates the invite token and updates expiry.
+
+    Args:
+        participant_id: UUID of the participant.
+    """
+    from ctf.exceptions import CTFNotFoundError, CTFStateError
+    from ctf.services import get_participant, resend_invite
+
+    try:
+        participant = get_participant(participant_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    # Check permission
+    if participant.event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        updated = resend_invite(participant_id)
+        return JsonResponse({
+            "success": True,
+            "id": str(updated.id),
+            "invite_token": updated.invite_token,
+            "invite_token_expires": updated.invite_token_expires.isoformat(),
+        })
+    except CTFStateError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required

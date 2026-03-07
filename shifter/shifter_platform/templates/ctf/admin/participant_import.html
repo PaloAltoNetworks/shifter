@@ -1,7 +1,113 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF Admin{% endblock %}
+{% block ctf_title %}Import Participants - {{ event.name }}{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="mb-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
+                <li class="breadcrumb-item active">Import</li>
+            </ol>
+        </nav>
+        <h1 class="h3 mb-0">Import Participants</h1>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Import Form -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Upload CSV File</h5>
+                </div>
+                <div class="card-body">
+                    {% if errors %}
+                    <div class="alert alert-danger">
+                        <h6 class="alert-heading">Import Errors</h6>
+                        <ul class="mb-0">
+                            {% for error in errors %}
+                            <li>{{ error }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="csv_file" class="form-label">CSV File</label>
+                            {{ form.csv_file }}
+                            {% if form.csv_file.help_text %}
+                            <div class="form-text">{{ form.csv_file.help_text }}</div>
+                            {% endif %}
+                            {% if form.csv_file.errors %}
+                            <div class="text-danger small">
+                                {% for error in form.csv_file.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-upload"></i> Import
+                            </button>
+                            <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <!-- Instructions -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">CSV Format</h5>
+                </div>
+                <div class="card-body">
+                    <p>Upload a CSV file with participant data. The file should have two columns:</p>
+                    <ol>
+                        <li><strong>Name</strong> - Participant display name</li>
+                        <li><strong>Email</strong> - Participant email address</li>
+                    </ol>
+
+                    <h6>Example:</h6>
+                    <pre class="bg-dark text-light p-2 rounded"><code>Alice Smith,alice@example.com
+Bob Jones,bob@example.com
+Carol Wilson,carol@example.com</code></pre>
+
+                    <div class="alert alert-info small mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Note:</strong> The first row should contain data, not headers. Emails must be unique within the event.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Stats -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Current Status</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong>Event:</strong> {{ event.name }}
+                    </p>
+                    <p class="mb-2">
+                        <strong>Current Participants:</strong> {{ event.participant_count }}
+                    </p>
+                    {% if event.max_participants %}
+                    <p class="mb-0">
+                        <strong>Maximum:</strong> {{ event.max_participants }}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

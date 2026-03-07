@@ -390,8 +390,8 @@ class SSMExecutor:
                                 if remaining_time > 0:
                                     return self.verify_agent_ready(
                                         instance_id,
-                                        timeout_seconds=min(30, int(remaining_time)),
-                                        max_attempts=3,
+                                        timeout_seconds=min(60, int(remaining_time)),
+                                        max_attempts=6,
                                         document_name=document_name,
                                     )
                                 return True  # No time left for probe, hope for the best

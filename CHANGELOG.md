@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2026-03-08
 
+### Added
+- Consolidate Guacamole database onto shared Postgres instance for Docker deployment
+
 ### Changed
 - Disable ASG autoscaling, Redis replication, and RDS Multi-AZ for single-tenant deployment
 

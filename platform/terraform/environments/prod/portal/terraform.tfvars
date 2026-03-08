@@ -30,7 +30,7 @@ db_engine_version        = "16"
 db_instance_class        = "db.t3.large"
 db_allocated_storage     = 20
 db_max_allocated_storage = 100
-db_multi_az              = true
+db_multi_az              = false
 db_backup_retention_days = 7
 db_deletion_protection   = true
 db_skip_final_snapshot   = false
@@ -80,7 +80,7 @@ kali_instance_type   = "t3.large"
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-enable_autoscaling   = true
+enable_autoscaling   = false
 asg_min_size         = 2
 asg_max_size         = 5
 asg_desired_capacity = 2
@@ -93,7 +93,7 @@ scale_down_threshold = 30
 
 redis_node_type          = "cache.t3.micro"
 redis_engine_version     = "7.1"
-redis_enable_replication = true
+redis_enable_replication = false
 
 # ------------------------------------------------------------------------------
 # Logging

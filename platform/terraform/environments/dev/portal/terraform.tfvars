@@ -30,7 +30,7 @@ db_engine_version        = "16"
 db_instance_class        = "db.t3.micro"
 db_allocated_storage     = 20
 db_max_allocated_storage = 50
-db_multi_az              = true
+db_multi_az              = false
 db_backup_retention_days = 1
 db_deletion_protection   = false
 db_skip_final_snapshot   = true
@@ -94,7 +94,7 @@ scale_down_threshold = 30
 
 redis_node_type          = "cache.t3.micro"
 redis_engine_version     = "7.1"
-redis_enable_replication = true
+redis_enable_replication = false
 
 # ------------------------------------------------------------------------------
 # Logging

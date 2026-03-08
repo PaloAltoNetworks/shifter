@@ -61,6 +61,9 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_ENDPOINT_URL: http://localstack:4566
+      GUACAMOLE_JSON_AUTH_SECRET: ${GUACAMOLE_JSON_AUTH_SECRET}
+      GUACAMOLE_BASE_URL: http://localhost:8080/guacamole
+      GUACAMOLE_API_BASE_URL: http://guacamole:8080/guacamole
     depends_on:
       db:
         condition: service_healthy
@@ -72,6 +75,47 @@ services:
       - .:/app
       - /app/.venv
       - ../engine/provisioner:/engine/provisioner
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  guacamole:
+    build:
+      context: ../engine/guacamole
+    env_file:
+      - .env
+    environment:
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: "4822"
+      POSTGRESQL_HOSTNAME: db
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_DATABASE: ${GUACAMOLE_DB_NAME:-guacamole}
+      POSTGRESQL_USER: ${GUACAMOLE_DB_USER:-guacamole_admin}
+      POSTGRESQL_PASSWORD: ${GUACAMOLE_DB_PASSWORD:-guacamole}
+      POSTGRESQL_AUTO_CREATE_ACCOUNTS: "true"
+      JSON_ENABLED: "true"
+      JSON_SECRET_KEY: ${GUACAMOLE_JSON_AUTH_SECRET}
+      OPENID_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      guacd:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/guacamole/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
 
   # ------------------------------------------------------------------------------
   # SQS Workers

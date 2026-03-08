@@ -48,6 +48,9 @@ testpaths = ["tests"]
 pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 addopts = "--cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov-report=term-missing --cov-report=xml:coverage.xml"
 env = ["TESTING=1"]
+markers = [
+    "integration: requires running Docker Compose stack (deselected by default)",
+]
 
 [tool.coverage.run]
 omit = [
@@ -117,6 +120,7 @@ exclude = [
     "migrations/",
     ".venv/",
     "tests/",
+    "ctf/",
 ]
 # Start permissive, tighten over time
 ignore_missing_imports = true
@@ -128,6 +132,10 @@ show_error_codes = true
 module = "cms.services"
 disallow_untyped_defs = true
 warn_return_any = true
+
+[[tool.mypy.overrides]]
+module = "ctf.*"
+ignore_errors = true
 
 [tool.django-stubs]
 django_settings_module = "config.settings"

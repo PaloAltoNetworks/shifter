@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-03-09
+
+### Changed
+- Provisioner modules fully integrated as Django app — all imports use `engine.provisioner.` prefix
+- Raw SQL replaced with Django ORM across `main.py` (12 functions) and `operations/range_ops.py` (5 functions)
+- NGFW terraform runner imports refactored from standalone to Django module paths
+- Subnet allocation extracted from Pulumi `components/network.py` into `utils/network.py` using Django `connection.cursor()` for advisory locks
+- All executor, orchestrator, and plan imports updated from flat to Django-qualified paths
+
+### Added
+- 9 entry-point wrapper functions in `main.py` (`run_range_provision`, `run_range_destroy`, `run_range_pause`, `run_range_resume`, `run_ngfw_provision`, `run_ngfw_deprovision`, `run_ngfw_start`, `run_ngfw_stop`, `run_ngfw_complete_setup`)
+- `engine/provisioner/utils/network.py` — subnet CIDR allocation with PostgreSQL advisory locks via Django
+- `_validate_provisioned_outputs()` function for Terraform output validation
+
+### Removed
+- `get_db_connection()` — raw psycopg connection helper (replaced by Django ORM)
+- Pulumi dead code from `config.py` (`load_config()`, `get_range_from_db()`, pulumi imports)
+- Standalone `__main__` CLI entrypoint from `main.py` (now invoked via Celery tasks)
+- `psycopg` import dependency from all provisioner modules
+
+## [2.1.0] - 2026-03-08
+
+### Added
+- Celery + Redis for async task processing (replaces ECS Fargate + SNS/SQS dispatch)
+- Django signals for cross-app event notification (engine, cms, mission_control)
+- Celery worker Dockerfile with Terraform CLI for provisioning tasks
+- Provisioner code moved into Django engine app (`engine/provisioner/`)
+- Celery tasks for all provisioning operations (range CRUD, NGFW CRUD, pause/resume)
+- Signal receivers in CMS and Mission Control replacing SQS worker handlers
+
+### Changed
+- Engine services dispatch via `task.delay()` instead of ECS `run_task()`
+- LocalStack reduced to S3-only (SNS/SQS no longer needed)
+- Docker Compose: single `celery-worker` replaces three SQS worker containers
+
+### Removed
+- `engine/ecs.py` — ECS Fargate task orchestration (replaced by Celery tasks)
+- SQS worker containers (`worker-cms`, `worker-engine`, `worker-mc`)
+- `shared/management/commands/run_worker.py` — SQS polling command
+- SNS/SQS infrastructure from LocalStack init script
+- `SQS_QUEUE_CONFIG`, `SNS_RANGE_EVENTS_ARN` settings
+
 ## [2.0.0] - 2026-03-08
 
 ### Added

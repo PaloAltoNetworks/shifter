@@ -49,7 +49,7 @@ class TestDestroyNGFW:
             patch.object(Request.objects, "get", return_value=mock_request),
             patch.object(Instance.objects, "filter", return_value=mock_instance_filter),
             patch.object(Range.objects, "filter", return_value=mock_range_filter),
-            patch("engine.ecs.start_ngfw_teardown", return_value="arn:aws:ecs:task/123"),
+            patch("engine.tasks.deprovision_ngfw"),
         ):
             result = destroy_ngfw(mock_request.request_id)
             assert result is True
@@ -124,7 +124,7 @@ class TestDestroyNGFW:
             patch.object(Request.objects, "get", return_value=mock_request),
             patch.object(Instance.objects, "filter", return_value=mock_instance_filter),
             patch.object(Range.objects, "filter") as mock_filter,
-            patch("engine.ecs.start_ngfw_teardown", return_value="arn:aws:ecs:task/123"),
+            patch("engine.tasks.deprovision_ngfw"),
         ):
             mock_filter.return_value = Mock(exists=Mock(return_value=False))
 
@@ -144,11 +144,11 @@ class TestDestroyNGFW:
             assert Range.Status.FAILED not in statuses
 
     # -------------------------------------------------------------------------
-    # ECS teardown
+    # Celery task dispatch
     # -------------------------------------------------------------------------
 
-    def test_calls_start_ngfw_teardown_with_request_id(self, mock_request, mock_ngfw_instance):
-        """Service calls start_ngfw_teardown with the request_id."""
+    def test_dispatches_celery_deprovision_task_with_request_id(self, mock_request, mock_ngfw_instance):
+        """Service dispatches deprovision_ngfw Celery task with the request_id."""
         mock_instance_filter = Mock(first=Mock(return_value=mock_ngfw_instance))
         mock_range_filter = Mock(exists=Mock(return_value=False))
 
@@ -156,22 +156,8 @@ class TestDestroyNGFW:
             patch.object(Request.objects, "get", return_value=mock_request),
             patch.object(Instance.objects, "filter", return_value=mock_instance_filter),
             patch.object(Range.objects, "filter", return_value=mock_range_filter),
-            patch("engine.ecs.start_ngfw_teardown", return_value="arn") as mock_teardown,
+            patch("engine.tasks.deprovision_ngfw") as mock_deprovision_task,
         ):
             destroy_ngfw(mock_request.request_id)
 
-            mock_teardown.assert_called_once_with(mock_request.request_id)
-
-    def test_returns_false_when_teardown_returns_none(self, mock_request, mock_ngfw_instance):
-        """Service returns False when start_ngfw_teardown returns None."""
-        mock_instance_filter = Mock(first=Mock(return_value=mock_ngfw_instance))
-        mock_range_filter = Mock(exists=Mock(return_value=False))
-
-        with (
-            patch.object(Request.objects, "get", return_value=mock_request),
-            patch.object(Instance.objects, "filter", return_value=mock_instance_filter),
-            patch.object(Range.objects, "filter", return_value=mock_range_filter),
-            patch("engine.ecs.start_ngfw_teardown", return_value=None),
-        ):
-            result = destroy_ngfw(mock_request.request_id)
-            assert result is False
+            mock_deprovision_task.delay.assert_called_once_with(str(mock_request.request_id))

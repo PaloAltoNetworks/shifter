@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+node_modules
+.git
+.pytest_cache
+.mypy_cache
+.ruff_cache
+coverage.xml
+db.sqlite3
+staticfiles
+cyberscript/.venv
+cyberscript/__pycache__

@@ -1,7 +1,7 @@
 """Integration tests for range lifecycle operations.
 
 Tests engine service functions with real database operations.
-AWS services (ECS, Secrets Manager) are mocked as they require infrastructure.
+Celery tasks and AWS services (Secrets Manager) are mocked as they require infrastructure.
 """
 
 import uuid
@@ -193,7 +193,7 @@ class TestDestroyRangeIntegration:
         )
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("engine.ecs.start_teardown", lambda *args: None)
+            mp.setattr("engine.tasks.destroy_range.delay", lambda *args: None)
             result = destroy_range(context)
 
         assert result is True
@@ -259,7 +259,7 @@ class TestDestroyRangeIntegration:
         )
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("engine.ecs.start_range_teardown", lambda *args: None)
+            mp.setattr("engine.tasks.destroy_range.delay", lambda *args: None)
             result = destroy_range(context)
 
         assert result is True
@@ -578,7 +578,7 @@ class TestDestroyRangeByRequestIntegration:
         request_id = range_ready.request.request_id
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("engine.ecs.start_range_teardown", lambda *args: None)
+            mp.setattr("engine.tasks.destroy_range.delay", lambda *args: None)
             result = destroy_range_by_request(request_id)
 
         assert result is True

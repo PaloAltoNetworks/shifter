@@ -50,9 +50,9 @@ def create_range(request_spec: RequestSpec) -> UUID:
     """
     from django.contrib.auth import get_user_model
 
-    from engine.ecs import start_range_provisioning
     from engine.interpreter import interpret
     from engine.models import Range
+    from engine.tasks import provision_range as provision_range_task
 
     User = get_user_model()
 
@@ -148,14 +148,9 @@ def create_range(request_spec: RequestSpec) -> UUID:
             range_obj.id,
         )
 
-    # Transaction committed - safe to trigger external systems
-    # Trigger ECS provisioning using request_id (matches NGFW pattern)
-    task_arn = start_range_provisioning(request_spec.request_id)
-
-    if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
-        logger.info("create_range: started ECS task=%s", task_arn)
+    # Transaction committed - safe to trigger async task
+    provision_range_task.delay(str(request_spec.request_id))
+    logger.info("create_range: dispatched Celery task for request_id=%s", request_spec.request_id)
 
     return request_spec.request_id
 
@@ -177,8 +172,8 @@ def destroy_range(request: RangeContext) -> bool:
         True if range exists and destruction initiated (or already in progress).
         False if range not found, already destroyed, or both IDs are None.
     """
-    from engine.ecs import start_teardown
     from engine.models import Range
+    from engine.tasks import destroy_range as destroy_range_task
 
     # Try request_id first (new pattern) when range_id is None
     if request.range_id is None:
@@ -211,12 +206,10 @@ def destroy_range(request: RangeContext) -> bool:
 
     logger.info("destroy_range: set status to DESTROYING range_id=%s", request.range_id)
 
-    task_arn = start_teardown(request.range_id, request.user_id)
-
-    if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
-        logger.info("destroy_range: started ECS task=%s", task_arn)
+    # Find request_id for this range and dispatch Celery task
+    if range_obj.request and range_obj.request.request_id:
+        destroy_range_task.delay(str(range_obj.request.request_id))
+        logger.info("destroy_range: dispatched Celery task for range_id=%s", request.range_id)
 
     return True
 
@@ -324,8 +317,8 @@ def destroy_range_by_request(request_id: UUID) -> bool:
         True if teardown initiated or already in progress.
         False if not found or already destroyed.
     """
-    from engine.ecs import start_range_teardown
     from engine.models import Range
+    from engine.tasks import destroy_range as destroy_range_task
 
     logger.debug("destroy_range_by_request: request_id=%s", request_id)
 
@@ -360,12 +353,8 @@ def destroy_range_by_request(request_id: UUID) -> bool:
         range_obj.id,
     )
 
-    task_arn = start_range_teardown(request_id)
-
-    if task_arn:
-        range_obj.step_function_execution_arn = task_arn
-        range_obj.save(update_fields=["step_function_execution_arn"])
-        logger.info("destroy_range_by_request: started ECS task=%s", task_arn)
+    destroy_range_task.delay(str(request_id))
+    logger.info("destroy_range_by_request: dispatched Celery task request_id=%s", request_id)
 
     return True
 
@@ -452,8 +441,8 @@ def pause_range(request_id: UUID) -> bool:
         True if pause initiated or already paused.
         False if range not found or not in pausable state.
     """
-    from engine.ecs import start_range_operation
     from engine.models import Range
+    from engine.tasks import pause_range as pause_range_task
 
     logger.debug("pause_range: request_id=%s", request_id)
 
@@ -480,12 +469,8 @@ def pause_range(request_id: UUID) -> bool:
     range_obj.status = ResourceStatus.PAUSING.value
     range_obj.save(update_fields=["status", "updated_at"])
 
-    # Invoke ECS task
-    task_arn = start_range_operation(request_id, "pause")
-    if task_arn:
-        logger.info("pause_range: started ECS task=%s request_id=%s", task_arn, request_id)
-    else:
-        logger.warning("pause_range: ECS not configured, task not started request_id=%s", request_id)
+    pause_range_task.delay(str(request_id))
+    logger.info("pause_range: dispatched Celery task request_id=%s", request_id)
 
     return True
 
@@ -503,8 +488,8 @@ def resume_range(request_id: UUID) -> bool:
         True if resume initiated or already ready.
         False if range not found or not in resumable state.
     """
-    from engine.ecs import start_range_operation
     from engine.models import Range
+    from engine.tasks import resume_range as resume_range_task
 
     logger.debug("resume_range: request_id=%s", request_id)
 
@@ -531,12 +516,8 @@ def resume_range(request_id: UUID) -> bool:
     range_obj.status = ResourceStatus.RESUMING.value
     range_obj.save(update_fields=["status", "updated_at"])
 
-    # Invoke ECS task
-    task_arn = start_range_operation(request_id, "resume")
-    if task_arn:
-        logger.info("resume_range: started ECS task=%s request_id=%s", task_arn, request_id)
-    else:
-        logger.warning("resume_range: ECS not configured, task not started request_id=%s", request_id)
+    resume_range_task.delay(str(request_id))
+    logger.info("resume_range: dispatched Celery task request_id=%s", request_id)
 
     return True
 
@@ -761,8 +742,8 @@ def create_ngfw(request_spec: RequestSpec) -> UUID:
         ValueError: If request_spec or its NGFW item is invalid.
         User.DoesNotExist: If user_id doesn't map to a Django user.
     """
-    from engine.ecs import start_ngfw_provisioning
     from engine.interpreter import interpret
+    from engine.tasks import provision_ngfw as provision_ngfw_task
 
     # Validate NGFW-specific requirements before interpreting
     ngfw_spec: InstanceSpec | None = None
@@ -790,15 +771,8 @@ def create_ngfw(request_spec: RequestSpec) -> UUID:
     ngfw_instance = request.instance_instantiations.filter(role="ngfw").first()
 
     if ngfw_instance:
-        # Trigger ECS provisioning with Request UUID
-        task_arn = start_ngfw_provisioning(request.request_id)
-
-        if task_arn:
-            logger.info(
-                "create_ngfw: started ECS task=%s for request=%s",
-                task_arn,
-                request.request_id,
-            )
+        provision_ngfw_task.delay(str(request.request_id))
+        logger.info("create_ngfw: dispatched Celery task for request=%s", request.request_id)
 
     return request.request_id
 
@@ -817,8 +791,8 @@ def destroy_ngfw(request_id: UUID) -> bool:
     Raises:
         EngineError: If ranges are still attached to this NGFW.
     """
-    from engine.ecs import start_ngfw_teardown
     from engine.models import Instance, Range, Request
+    from engine.tasks import deprovision_ngfw as deprovision_ngfw_task
 
     logger.debug("destroy_ngfw: request_id=%s", request_id)
 
@@ -852,16 +826,10 @@ def destroy_ngfw(request_id: UUID) -> bool:
             f"Cannot delete NGFW: {count} range(s) are still attached. Delete these ranges first: {range_ids}"
         )
 
-    task_arn = start_ngfw_teardown(request_id)
+    deprovision_ngfw_task.delay(str(request_id))
+    logger.info("destroy_ngfw: dispatched Celery task for request=%s", request_id)
 
-    if task_arn:
-        logger.info(
-            "destroy_ngfw: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
+    return True
 
 
 def start_ngfw(request_id: UUID) -> bool:
@@ -877,8 +845,8 @@ def start_ngfw(request_id: UUID) -> bool:
         True if start initiated, False if request/instance not found
         or invalid status.
     """
-    from engine.ecs import start_ngfw_operation
     from engine.models import Instance, Request
+    from engine.tasks import start_ngfw as start_ngfw_task
 
     logger.debug("start_ngfw: request_id=%s", request_id)
 
@@ -905,16 +873,10 @@ def start_ngfw(request_id: UUID) -> bool:
         )
         return False
 
-    task_arn = start_ngfw_operation(request_id, "start")
+    start_ngfw_task.delay(str(request_id))
+    logger.info("start_ngfw: dispatched Celery task for request=%s", request_id)
 
-    if task_arn:
-        logger.info(
-            "start_ngfw: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
+    return True
 
 
 def stop_ngfw(request_id: UUID) -> bool:
@@ -930,8 +892,8 @@ def stop_ngfw(request_id: UUID) -> bool:
         True if stop initiated, False if request/instance not found
         or invalid status.
     """
-    from engine.ecs import start_ngfw_operation
     from engine.models import Instance, Request
+    from engine.tasks import stop_ngfw as stop_ngfw_task
 
     logger.debug("stop_ngfw: request_id=%s", request_id)
 
@@ -955,16 +917,10 @@ def stop_ngfw(request_id: UUID) -> bool:
         )
         return False
 
-    task_arn = start_ngfw_operation(request_id, "stop")
+    stop_ngfw_task.delay(str(request_id))
+    logger.info("stop_ngfw: dispatched Celery task for request=%s", request_id)
 
-    if task_arn:
-        logger.info(
-            "stop_ngfw: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
+    return True
 
 
 def complete_ngfw_setup(request_id: UUID) -> bool:
@@ -989,8 +945,8 @@ def complete_ngfw_setup(request_id: UUID) -> bool:
     Raises:
         EngineError: If NGFW is not in a valid status for setup completion.
     """
-    from engine.ecs import start_ngfw_operation
     from engine.models import Instance, Request
+    from engine.tasks import complete_ngfw_setup as complete_ngfw_setup_task
 
     logger.debug("complete_ngfw_setup: request_id=%s", request_id)
 
@@ -1017,13 +973,7 @@ def complete_ngfw_setup(request_id: UUID) -> bool:
             f"Expected one of: awaiting_association, stopped"
         )
 
-    task_arn = start_ngfw_operation(request_id, "complete-setup")
+    complete_ngfw_setup_task.delay(str(request_id))
+    logger.info("complete_ngfw_setup: dispatched Celery task for request=%s", request_id)
 
-    if task_arn:
-        logger.info(
-            "complete_ngfw_setup: started ECS task=%s for request=%s",
-            task_arn,
-            request_id,
-        )
-
-    return task_arn is not None
+    return True

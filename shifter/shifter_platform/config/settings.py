@@ -304,18 +304,21 @@ AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", 
 AWS_REGION = AWS_S3_REGION  # Alias for consistency
 AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
 
-# SNS Topic for publishing events (provisioner -> workers)
-SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
+# ------------------------------------------------------------------------------
+# Celery Configuration (async task processing)
+# ------------------------------------------------------------------------------
+# Redis DB 1 for Celery (DB 0 used by Django Channels)
+_celery_redis_host = REDIS_HOST or "localhost"
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", f"redis://{_celery_redis_host}:6379/1")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", f"redis://{_celery_redis_host}:6379/1")
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TIMEZONE = "UTC"
 
-# Shifter Engine (ECS Fargate)
-PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
-PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
-PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
-
-# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
-LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
-PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
+# Run tasks synchronously in test mode
+CELERY_TASK_ALWAYS_EAGER = os.environ.get("TESTING") == "1"
+CELERY_TASK_EAGER_PROPAGATES = os.environ.get("TESTING") == "1"
 
 # Agent upload limits
 AGENT_MAX_FILE_SIZE_MB = 2048  # 2GB max per file
@@ -333,26 +336,6 @@ GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
 # Internal URL for server-to-server API calls (defaults to base URL if not set)
 GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMOLE_BASE_URL
 
-# ------------------------------------------------------------------------------
-# SQS Worker Configuration
-# ------------------------------------------------------------------------------
-# Queue URLs are passed via environment variables by the deployment workflow.
-# Each worker polls one queue and dispatches to the corresponding handler.
-
-SQS_QUEUE_CONFIG = {
-    "cms": {
-        "url": os.environ.get("SQS_CMS_URL", ""),
-        "handler": "cms.handlers.process_event",
-    },
-    "engine": {
-        "url": os.environ.get("SQS_ENGINE_URL", ""),
-        "handler": "engine.handlers.process_event",
-    },
-    "mc": {
-        "url": os.environ.get("SQS_MC_URL", ""),
-        "handler": "mission_control.handlers.process_event",
-    },
-}
 
 # ------------------------------------------------------------------------------
 # Django REST Framework Configuration

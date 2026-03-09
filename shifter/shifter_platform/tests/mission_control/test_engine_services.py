@@ -270,7 +270,7 @@ class TestCreateRange:
     - Validates request parameter (RequestSpec)
     - Creates Range record with PROVISIONING status
     - Allocates subnet index
-    - Starts ECS provisioning task
+    - Dispatches Celery provisioning task
     - Returns the request_id UUID
     - Logs all errors from downstream
     """
@@ -340,7 +340,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(valid_request_spec)
@@ -365,14 +365,14 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5) as mock_allocate,
-            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(valid_request_spec)
             mock_allocate.assert_called_once()
 
-    def test_starts_ecs_provisioning(self, valid_request_spec):
-        """Service calls start_range_provisioning with request_id."""
+    def test_dispatches_celery_provision_task(self, valid_request_spec):
+        """Service dispatches provision_range Celery task with request_id."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
@@ -388,11 +388,11 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test") as mock_start,
+            patch("engine.tasks.provision_range") as mock_provision_task,
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(valid_request_spec)
-            mock_start.assert_called_once_with(valid_request_spec.request_id)
+            mock_provision_task.delay.assert_called_once_with(str(valid_request_spec.request_id))
 
     # -------------------------------------------------------------------------
     # Service returns request_id UUID
@@ -415,7 +415,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             result = create_range(valid_request_spec)
@@ -442,7 +442,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
@@ -467,7 +467,7 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch("engine.ecs.start_range_provisioning", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
             caplog.at_level(logging.INFO, logger="engine"),
         ):
@@ -523,9 +523,8 @@ class TestCreateRange:
         ):
             create_range(valid_request_spec)
 
-    def test_propagates_ecs_client_error(self, valid_request_spec):
-        """Service propagates ClientError from ECS."""
-        from botocore.exceptions import ClientError
+    def test_propagates_celery_task_error(self, valid_request_spec):
+        """Service propagates errors from Celery task dispatch."""
         from django.contrib.auth import get_user_model
 
         from engine import create_range
@@ -541,16 +540,11 @@ class TestCreateRange:
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(Range.objects, "create", return_value=mock_range),
             patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch(
-                "engine.ecs.start_range_provisioning",
-                side_effect=ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
-                    "RunTask",
-                ),
-            ),
+            patch("engine.tasks.provision_range") as mock_provision_task,
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-            pytest.raises(ClientError),
+            pytest.raises(ConnectionError),
         ):
+            mock_provision_task.delay.side_effect = ConnectionError("Broker unavailable")
             create_range(valid_request_spec)
 
     # -------------------------------------------------------------------------
@@ -587,7 +581,7 @@ class TestDestroyRange:
     - Takes RangeContext parameter
     - Fetches Range and verifies it's in destroyable state
     - Updates Range status to DESTROYING
-    - Starts ECS teardown task
+    - Dispatches Celery teardown task
     - Returns bool indicating success
     """
 
@@ -622,11 +616,12 @@ class TestDestroyRange:
         from engine.models import Range
         from shared.enums import ResourceStatus
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_request = Mock(request_id=range_context.request_id)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, request=mock_request)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.destroy_range"),
         ):
             destroy_range(range_context)
             assert mock_range.status == ResourceStatus.DESTROYING.value
@@ -637,39 +632,42 @@ class TestDestroyRange:
         from engine import destroy_range
         from engine.models import Range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_request = Mock(request_id=range_context.request_id)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, request=mock_request)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range) as mock_get,
-            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.destroy_range"),
         ):
             destroy_range(range_context)
             mock_get.assert_called_once_with(id=42)
 
-    def test_starts_ecs_teardown(self, range_context):
-        """Service calls start_teardown with range_id and user_id."""
+    def test_dispatches_celery_destroy_task(self, range_context):
+        """Service dispatches destroy_range Celery task with request_id."""
         from engine import destroy_range
         from engine.models import Range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_request = Mock(request_id=range_context.request_id)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, request=mock_request)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test") as mock_teardown,
+            patch("engine.tasks.destroy_range") as mock_destroy_task,
         ):
             destroy_range(range_context)
-            mock_teardown.assert_called_once_with(42, 1)
+            mock_destroy_task.delay.assert_called_once_with(str(range_context.request_id))
 
     def test_returns_true_on_success(self, range_context):
         """Service returns True on success."""
         from engine import destroy_range
         from engine.models import Range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_request = Mock(request_id=range_context.request_id)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, request=mock_request)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.destroy_range"),
         ):
             result = destroy_range(range_context)
             assert result is True
@@ -683,11 +681,12 @@ class TestDestroyRange:
         from engine import destroy_range
         from engine.models import Range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_request = Mock(request_id=range_context.request_id)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, request=mock_request)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch("engine.ecs.start_teardown", return_value="arn:aws:ecs:test"),
+            patch("engine.tasks.destroy_range"),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             destroy_range(range_context)
@@ -747,26 +746,20 @@ class TestDestroyRange:
     # Error propagation
     # -------------------------------------------------------------------------
 
-    def test_propagates_ecs_client_error(self, range_context):
-        """Service propagates ClientError from ECS."""
-        from botocore.exceptions import ClientError
-
+    def test_propagates_celery_task_error(self, range_context):
+        """Service propagates errors from Celery task dispatch."""
         from engine import destroy_range
         from engine.models import Range
 
-        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY)
+        mock_request = Mock(request_id=range_context.request_id)
+        mock_range = Mock(spec=Range, id=42, status=Range.Status.READY, request=mock_request)
 
         with (
             patch.object(Range.objects, "get", return_value=mock_range),
-            patch(
-                "engine.ecs.start_teardown",
-                side_effect=ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
-                    "RunTask",
-                ),
-            ),
-            pytest.raises(ClientError),
+            patch("engine.tasks.destroy_range") as mock_destroy_task,
+            pytest.raises(ConnectionError),
         ):
+            mock_destroy_task.delay.side_effect = ConnectionError("Broker unavailable")
             destroy_range(range_context)
 
 

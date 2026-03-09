@@ -9,3 +9,6 @@ class CMSConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "cms"
     verbose_name = "Shifter CMS"
+
+    def ready(self):
+        import cms.receivers  # noqa: F401

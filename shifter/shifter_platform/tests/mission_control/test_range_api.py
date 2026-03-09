@@ -43,13 +43,11 @@ def test_agent(db, django_user_model, windows_os):
 
 @pytest.fixture
 def mock_provisioner():
-    """Mock the engine service to avoid AWS calls."""
+    """Mock the engine Celery tasks to avoid AWS calls."""
     with (
-        patch("engine.ecs.start_provisioning") as mock_provision,
-        patch("engine.ecs.start_teardown") as mock_teardown,
+        patch("engine.tasks.provision_range") as mock_provision,
+        patch("engine.tasks.destroy_range") as mock_teardown,
     ):
-        mock_provision.return_value = None  # No ARN in test mode
-        mock_teardown.return_value = None
         yield {"provision": mock_provision, "teardown": mock_teardown}
 
 
@@ -173,6 +171,11 @@ class TestGetRange:
 
 @pytest.mark.django_db
 class TestLaunchRange:
+    @pytest.fixture(autouse=True)
+    def _mock_provision_task(self):
+        with patch("engine.tasks.provision_range.delay") as self.mock_provision_delay:
+            yield
+
     def test_requires_login(self, client):
         response = client.post(reverse("mission_control:launch_range"))
         assert response.status_code == 302
@@ -198,9 +201,6 @@ class TestLaunchRange:
         assert response.status_code == 400
 
     def test_successful_launch(self, client, test_agent, settings):
-        # Ensure ECS is not configured (local dev mode)
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-
         client.force_login(test_agent.user)
         response = client.post(
             reverse("mission_control:launch_range"),
@@ -213,58 +213,31 @@ class TestLaunchRange:
         assert data["success"] is True
         assert data["range"]["status"] == "provisioning"
         assert data["range"]["agent_name"] == test_agent.name
+        self.mock_provision_delay.assert_called_once()
 
-    def test_successful_launch_with_ecs(self, client, test_agent):
-        """Test launch with mocked ECS."""
+    def test_successful_launch_dispatches_celery_task(self, client, test_agent, settings):
+        """Test launch dispatches Celery provisioning task."""
         from uuid import UUID
 
-        mock_path = "engine.ecs._get_ecs_client"
-        with patch(mock_path) as mock_client:
-            task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
-            mock_client.return_value.run_task.return_value = {
-                "tasks": [{"taskArn": task_arn}],
-                "failures": [],
-            }
+        settings.PULUMI_ECS_CLUSTER_ARN = ""
 
-            client.force_login(test_agent.user)
-            from django.conf import settings
+        client.force_login(test_agent.user)
 
-            # Set ECS config
-            orig_local_provisioner = getattr(settings, "LOCAL_PROVISIONER", None)
-            orig_cluster = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
-            orig_task_def = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
-            orig_sg = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
-            orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+        with patch("engine.tasks.provision_range") as mock_provision_task:
+            response = client.post(
+                reverse("mission_control:launch_range"),
+                data={"agent_id": test_agent.id},
+                content_type="application/json",
+            )
 
-            settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
-            settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
-            settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
-            settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-            settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-abc123"
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["range"]["status"] == "provisioning"
 
-            try:
-                response = client.post(
-                    reverse("mission_control:launch_range"),
-                    data={"agent_id": test_agent.id},
-                    content_type="application/json",
-                )
-
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] is True
-                assert data["range"]["status"] == "provisioning"
-
-                # Verify task ARN was stored
-                # Range is linked via Request FK, use request_id from response
-                request_id = UUID(data["range"]["request_id"])
-                range_obj = Range.objects.get(request__request_id=request_id)
-                assert range_obj.step_function_execution_arn == task_arn
-            finally:
-                settings.LOCAL_PROVISIONER = orig_local_provisioner
-                settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
-                settings.PULUMI_TASK_DEFINITION_ARN = orig_task_def
-                settings.PULUMI_ECS_SECURITY_GROUP_ID = orig_sg
-                settings.PULUMI_PRIVATE_SUBNET_IDS = orig_subnets
+            # Verify Celery task was dispatched with request_id
+            request_id = UUID(data["range"]["request_id"])
+            mock_provision_task.delay.assert_called_once_with(str(request_id))
 
     def test_rejects_when_range_exists(self, client, test_agent, settings):
         from cms.models import RangeInstance
@@ -668,6 +641,11 @@ class TestDestroyRange:
 class TestLaunchRangeWhileDestroying:
     """Test that users CAN launch while a range is being destroyed."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_provision_task(self):
+        with patch("engine.tasks.provision_range.delay"):
+            yield
+
     def test_can_launch_while_destroying(self, client, test_agent, settings):
         """User can launch a new range while old one is being cleaned up."""
         settings.PULUMI_ECS_CLUSTER_ARN = ""
@@ -725,6 +703,11 @@ class TestListAgents:
 @pytest.mark.django_db
 class TestSubnetIndexAllocation:
     """Tests for subnet_index allocation in Range model."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_provision_task(self):
+        with patch("engine.tasks.provision_range.delay"):
+            yield
 
     def test_allocates_index_on_launch(self, client, test_agent, settings):
         """Launch should allocate a subnet_index."""

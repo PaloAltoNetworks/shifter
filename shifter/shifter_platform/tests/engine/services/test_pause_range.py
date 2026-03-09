@@ -16,7 +16,7 @@ class TestPauseRange:
     Tests the service contract:
     - Inputs: request_id (UUID)
     - Outputs: bool (True if pause initiated or already paused, False otherwise)
-    - Side effects: sets status to PAUSING, triggers ECS operation
+    - Side effects: sets status to PAUSING, dispatches Celery pause task
     - Errors: none raised (returns False for not found/invalid state)
     - Logging: DEBUG on entry, INFO on status change, WARNING for not found/invalid state
     """
@@ -35,7 +35,7 @@ class TestPauseRange:
 
         with (
             patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None),
+            patch("engine.tasks.pause_range"),
         ):
             result = pause_range(request_id)
             assert result is True
@@ -88,7 +88,7 @@ class TestPauseRange:
             assert result is False
 
     # -------------------------------------------------------------------------
-    # Side effects - status update and ECS operation
+    # Side effects - status update and Celery task dispatch
     # -------------------------------------------------------------------------
 
     def test_sets_status_to_pausing(self):
@@ -101,15 +101,15 @@ class TestPauseRange:
 
         with (
             patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None),
+            patch("engine.tasks.pause_range"),
         ):
             pause_range(request_id)
 
             assert mock_range.status == ResourceStatus.PAUSING.value
             mock_range.save.assert_called_once()
 
-    def test_calls_start_range_operation_with_pause(self):
-        """Service calls start_range_operation with 'pause' operation."""
+    def test_dispatches_celery_pause_task(self):
+        """Service dispatches pause_range Celery task with request_id."""
         from engine.models import Range
         from engine.services import pause_range
 
@@ -118,11 +118,11 @@ class TestPauseRange:
 
         with (
             patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None) as mock_operation,
+            patch("engine.tasks.pause_range") as mock_pause_task,
         ):
             pause_range(request_id)
 
-            mock_operation.assert_called_once_with(request_id, "pause")
+            mock_pause_task.delay.assert_called_once_with(str(request_id))
 
     def test_does_not_modify_range_when_already_paused(self):
         """Service does not modify range when already PAUSED."""
@@ -137,8 +137,8 @@ class TestPauseRange:
 
             mock_range.save.assert_not_called()
 
-    def test_does_not_call_operation_when_already_paused(self):
-        """Service does not call start_range_operation when already PAUSED."""
+    def test_does_not_dispatch_task_when_already_paused(self):
+        """Service does not dispatch Celery task when already PAUSED."""
         from engine.models import Range
         from engine.services import pause_range
 
@@ -147,11 +147,11 @@ class TestPauseRange:
 
         with (
             patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation") as mock_operation,
+            patch("engine.tasks.pause_range") as mock_pause_task,
         ):
             pause_range(request_id)
 
-            mock_operation.assert_not_called()
+            mock_pause_task.delay.assert_not_called()
 
     # -------------------------------------------------------------------------
     # Logging
@@ -167,7 +167,7 @@ class TestPauseRange:
 
         with (
             patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=None),
+            patch("engine.tasks.pause_range"),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
             pause_range(request_id)
@@ -205,20 +205,19 @@ class TestPauseRange:
 
         assert str(request_id) in caplog.text
 
-    def test_logs_info_when_status_changed(self, caplog):
-        """Service logs info when ECS task started."""
+    def test_logs_info_when_celery_task_dispatched(self, caplog):
+        """Service logs info when Celery task is dispatched."""
         from engine.models import Range
         from engine.services import pause_range
 
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.READY.value)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-id"
 
         with (
             patch.object(Range.objects, "filter", return_value=Mock(first=Mock(return_value=mock_range))),
-            patch("engine.ecs.start_range_operation", return_value=task_arn),
+            patch("engine.tasks.pause_range"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             pause_range(request_id)
 
-        assert task_arn in caplog.text or str(request_id) in caplog.text
+        assert "celery" in caplog.text.lower() or str(request_id) in caplog.text

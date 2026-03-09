@@ -20,7 +20,7 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
         # Exclude: tests (check key format strings) + crypto.py (key generation module, not leaked secrets)
-        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py)
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py|shifter/shifter_platform/engine/provisioner/utils/crypto\.py)
 
   # Python - Ruff (linting + formatting)
   # Note: Ruff handles import sorting via "I" rules - no separate isort needed

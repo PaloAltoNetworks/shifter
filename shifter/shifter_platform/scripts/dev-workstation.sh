@@ -236,6 +236,14 @@ cmd_sync() {
             "$REPO_DIR/engine/" ec2-user@"$IP":~/engine/
     fi
 
+    # Sync cyberscript shared library (cyberscript/ -> ~/shifter/cyberscript/)
+    # Required for Docker image build (pip install /cyberscript)
+    if [[ -d "$REPO_DIR/cyberscript" ]]; then
+        echo "Syncing cyberscript to workstation..."
+        rsync -az --delete "${RSYNC_EXCLUDES[@]}" "${RSYNC_SSH[@]}" \
+            "$REPO_DIR/cyberscript/" ec2-user@"$IP":~/shifter/cyberscript/
+    fi
+
     echo "Synced."
 }
 

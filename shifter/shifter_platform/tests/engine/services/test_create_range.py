@@ -44,9 +44,9 @@ class TestCreateRange:
     Tests the service contract:
     - Inputs: request_spec (required RequestSpec containing RangeSpec)
     - Outputs: UUID (request_id for correlation with CMS)
-    - Side effects: interprets spec, looks up User, allocates subnet, creates Range, triggers ECS
+    - Side effects: interprets spec, looks up User, allocates subnet, creates Range, dispatches Celery task
     - Errors: TypeError (wrong type), ValueError (missing RangeSpec/subnet exhausted), User.DoesNotExist
-    - Logging: DEBUG on entry, INFO on range creation, INFO on ECS task start
+    - Logging: DEBUG on entry, INFO on range creation, INFO on Celery task dispatch
     """
 
     # -------------------------------------------------------------------------
@@ -70,7 +70,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),
         ):
             result = create_range(request_spec)
@@ -99,7 +99,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user) as mock_get,
             patch.object(Range, "allocate_subnet_index", return_value=1),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
@@ -127,7 +127,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=15) as mock_allocate,
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
@@ -155,7 +155,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=87),
             patch.object(Range.objects, "create", return_value=mock_range) as mock_create,
-            patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),
         ):
             create_range(request_spec)
@@ -169,11 +169,11 @@ class TestCreateRange:
             assert call_kwargs["request"] == mock_request
 
     # -------------------------------------------------------------------------
-    # Side effects - ECS provisioning
+    # Side effects - Celery task dispatch
     # -------------------------------------------------------------------------
 
-    def test_triggers_ecs_provisioning_with_request_id(self):
-        """Service calls start_range_provisioning with request_id."""
+    def test_dispatches_celery_provision_task_with_request_id(self):
+        """Service dispatches provision_range Celery task with request_id."""
         from engine import create_range
         from engine.models import Range
 
@@ -189,64 +189,12 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning") as mock_start,
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            mock_start.return_value = None
-
-            create_range(request_spec)
-
-            mock_start.assert_called_once_with(request_spec.request_id)
-
-    def test_stores_task_arn_when_provisioning_returns_one(self):
-        """Service stores ECS task ARN when start_provisioning returns one."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/provisioner-task-123"
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=task_arn),
+            patch("engine.tasks.provision_range") as mock_provision_task,
             patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
         ):
             create_range(request_spec)
 
-            assert mock_range.step_function_execution_arn == task_arn
-            mock_range.save.assert_called_once_with(update_fields=["step_function_execution_arn"])
-
-    def test_does_not_store_task_arn_when_provisioning_returns_none(self):
-        """Service does not save ARN field when start_provisioning returns None."""
-        from engine import create_range
-        from engine.models import Range
-
-        User = get_user_model()
-
-        request_spec = make_request_spec(user_id=1)
-        mock_user = Mock(id=1)
-        mock_range = Mock(spec=Range, id=1)
-        mock_request = Mock(request_id=request_spec.request_id)
-
-        with (
-            patch("engine.interpreter.interpret", return_value=mock_request),
-            patch.object(User.objects, "get", return_value=mock_user),
-            patch.object(Range, "allocate_subnet_index", return_value=5),
-            patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
-            patch("engine.models.Subnet"),  # Mock Subnet.objects.filter().update()
-        ):
-            create_range(request_spec)
-
-            mock_range.save.assert_not_called()
+            mock_provision_task.delay.assert_called_once_with(str(request_spec.request_id))
 
     # -------------------------------------------------------------------------
     # Input validation - request_spec parameter
@@ -375,7 +323,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),
             caplog.at_level(logging.DEBUG, logger="engine"),
         ):
@@ -405,7 +353,7 @@ class TestCreateRange:
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=123),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=None),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
@@ -415,11 +363,11 @@ class TestCreateRange:
         assert "123" in caplog.text
 
     # -------------------------------------------------------------------------
-    # Logging - INFO when ECS task started
+    # Logging - INFO when Celery task dispatched
     # -------------------------------------------------------------------------
 
-    def test_logs_info_when_ecs_task_started(self, caplog):
-        """Service logs info when ECS task is started."""
+    def test_logs_info_when_celery_task_dispatched(self, caplog):
+        """Service logs info when Celery task is dispatched."""
         from engine import create_range
         from engine.models import Range
 
@@ -429,17 +377,16 @@ class TestCreateRange:
         mock_user = Mock(id=1)
         mock_range = Mock(spec=Range, id=1)
         mock_request = Mock(request_id=request_spec.request_id)
-        task_arn = "arn:aws:ecs:us-east-2:123456789:task/cluster/task-abc123"
 
         with (
             patch("engine.interpreter.interpret", return_value=mock_request),
             patch.object(User.objects, "get", return_value=mock_user),
             patch.object(Range, "allocate_subnet_index", return_value=5),
             patch.object(Range.objects, "create", return_value=mock_range),
-            patch("engine.ecs.start_range_provisioning", return_value=task_arn),
+            patch("engine.tasks.provision_range"),
             patch("engine.models.Subnet"),
             caplog.at_level(logging.INFO, logger="engine"),
         ):
             create_range(request_spec)
 
-        assert task_arn in caplog.text or "task" in caplog.text.lower()
+        assert "celery" in caplog.text.lower() or "task" in caplog.text.lower()

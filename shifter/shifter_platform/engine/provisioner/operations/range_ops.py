@@ -1,0 +1,675 @@
+"""Range pause/resume operations.
+
+Handles stopping and starting all EC2 instances in a range.
+"""
+
+from __future__ import annotations
+
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from django.utils import timezone
+
+from engine.provisioner.events import publish_ngfw_event, publish_status_update
+from engine.provisioner.executors.aws_executor import AWSExecutor
+from engine.provisioner.main import get_range_data_by_request_id, update_range_status
+from engine.provisioner.orchestrators.ops_orchestrator import OpsOrchestrator
+from engine.provisioner.plans.ngfw_start import NGFWStartPlan
+from engine.provisioner.plans.ngfw_stop import NGFWStopPlan
+from engine.provisioner.plans.range_pause import RangePausePlan
+from engine.provisioner.plans.range_resume import RangeResumePlan
+
+logger = logging.getLogger(__name__)
+
+
+def get_range_instance_ids(request_id: str) -> list[dict]:
+    """Get all EC2 instance IDs for a range via Django ORM.
+
+    Args:
+        request_id: UUID string of the Request.
+
+    Returns:
+        List of dicts with 'uuid', 'aws_instance_id', 'role'.
+
+    Raises:
+        ValueError: If no instances found or missing AWS instance IDs.
+    """
+    from engine.models import Instance
+
+    logger.info("get_range_instance_ids: request_id=%s", request_id)
+
+    qs = Instance.objects.filter(
+        request__request_id=request_id,
+        status__in=["ready", "paused"],
+    ).values("uuid", "state", "role")
+
+    rows = list(qs)
+    if not rows:
+        raise ValueError(f"No instances found for request: {request_id}")
+
+    instances = []
+    for row in rows:
+        state_dict = row["state"] if isinstance(row["state"], dict) else {}
+        aws_instance_id = state_dict.get("aws_instance_id")
+
+        if not aws_instance_id:
+            logger.warning(
+                "Instance %s (role=%s) missing aws_instance_id in state, skipping",
+                row["uuid"],
+                row["role"],
+            )
+            continue
+
+        instances.append(
+            {
+                "uuid": str(row["uuid"]),
+                "aws_instance_id": aws_instance_id,
+                "role": row["role"],
+            }
+        )
+
+    if not instances:
+        raise ValueError(f"No instances with AWS instance IDs found for request: {request_id}")
+
+    logger.info(
+        "get_range_instance_ids: found %d instances for request_id=%s",
+        len(instances),
+        request_id,
+    )
+    return instances
+
+
+def get_range_ngfw_info(request_id: str) -> dict | None:
+    """Get NGFW instance information for a range.
+
+    Queries the range's attached NGFW (via ngfw_instance FK) and returns
+    the NGFW's EC2 instance ID, status, and related identifiers.
+
+    Args:
+        request_id: UUID string of the Range's Request.
+
+    Returns:
+        Dict with NGFW info if attached, None otherwise:
+        - ngfw_instance_id: DB ID of the NGFW Instance record
+        - ngfw_request_id: UUID string of the NGFW's Request
+        - ec2_instance_id: AWS EC2 instance ID (e.g., "i-abc123")
+        - instance_uuid: UUID of the NGFW Instance
+        - status: Current NGFW status (e.g., "active", "stopped")
+        - app_id: UUID of the NGFW App (may be None)
+        - range_id: DB ID of the Range
+    """
+    from engine.models import App, Range
+
+    logger.debug("get_range_ngfw_info: request_id=%s", request_id)
+
+    range_obj = (
+        Range.objects.filter(request__request_id=request_id)
+        .select_related("ngfw_instance", "ngfw_instance__request")
+        .first()
+    )
+
+    if not range_obj or not range_obj.ngfw_instance:
+        logger.debug("get_range_ngfw_info: no NGFW attached request_id=%s", request_id)
+        return None
+
+    ngfw = range_obj.ngfw_instance
+    ngfw_state = ngfw.state or {}
+    app = App.objects.filter(instance=ngfw).first()
+
+    assert ngfw.request is not None  # guaranteed by select_related("ngfw_instance__request")
+    result = {
+        "ngfw_instance_id": ngfw.id,
+        "ngfw_request_id": str(ngfw.request.request_id),
+        "ec2_instance_id": ngfw_state.get("ec2_instance_id"),
+        "instance_uuid": str(ngfw.uuid),
+        "status": ngfw.status,
+        "app_id": str(app.uuid) if app else None,
+        "range_id": range_obj.id,
+    }
+    logger.debug(
+        "get_range_ngfw_info: found NGFW status=%s ec2=%s request_id=%s",
+        result["status"],
+        result["ec2_instance_id"],
+        request_id,
+    )
+    return result
+
+
+def should_pause_ngfw(ngfw_instance_id: int, exclude_range_id: int) -> bool:
+    """Check if NGFW should be paused (no other ranges READY or RESUMING).
+
+    Args:
+        ngfw_instance_id: DB ID of the NGFW Instance.
+        exclude_range_id: Range ID to exclude (the range being paused).
+
+    Returns:
+        True if NGFW can be safely paused, False if other ranges need it.
+    """
+    from django.db.models import Count
+
+    from engine.models import Range
+
+    logger.debug(
+        "should_pause_ngfw: ngfw_instance_id=%s exclude_range_id=%s",
+        ngfw_instance_id,
+        exclude_range_id,
+    )
+
+    counts_qs = (
+        Range.objects.filter(ngfw_instance_id=ngfw_instance_id)
+        .exclude(id=exclude_range_id)
+        .exclude(status__in=["destroyed", "failed"])
+        .values("status")
+        .annotate(count=Count("id"))
+    )
+    counts = {row["status"]: row["count"] for row in counts_qs}
+    logger.debug("should_pause_ngfw: other range counts=%s", counts)
+
+    # RESUMING wins - don't pause if any range is resuming
+    if counts.get("resuming", 0) > 0:
+        logger.info(
+            "should_pause_ngfw: False - %d ranges resuming",
+            counts["resuming"],
+        )
+        return False
+
+    # Don't pause if any range is ready
+    if counts.get("ready", 0) > 0:
+        logger.info(
+            "should_pause_ngfw: False - %d ranges ready",
+            counts["ready"],
+        )
+        return False
+
+    logger.info("should_pause_ngfw: True - no other active ranges")
+    return True
+
+
+def _update_ngfw_status(ngfw_instance_id: int, status: str) -> None:
+    """Update NGFW Instance and App status in database.
+
+    Args:
+        ngfw_instance_id: DB ID of the NGFW Instance.
+        status: New status value (e.g., "stopping", "stopped", "starting").
+    """
+    from engine.models import App, Instance
+
+    now = timezone.now()
+    Instance.objects.filter(id=ngfw_instance_id).update(status=status, updated_at=now)
+    App.objects.filter(instance_id=ngfw_instance_id).update(status=status, updated_at=now)
+
+    logger.debug(
+        "_update_ngfw_status: updated ngfw_instance_id=%s status=%s",
+        ngfw_instance_id,
+        status,
+    )
+
+
+def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
+    """Pause NGFW if no other ranges need it.
+
+    Called after a range is paused. Checks if any other ranges are using
+    the same NGFW - if not, stops the NGFW EC2 instance.
+
+    Idempotent: safe to call even if NGFW is already stopped.
+
+    Args:
+        request_id: UUID string of the Range's Request.
+        range_data: Dict from get_range_data_by_request_id() with range_id.
+    """
+    logger.info("pause_ngfw_for_range: starting request_id=%s", request_id)
+
+    # Get NGFW info
+    ngfw_info = get_range_ngfw_info(request_id)
+    if not ngfw_info:
+        logger.info("pause_ngfw_for_range: no NGFW attached, skipping")
+        return
+
+    # Idempotent: already stopped or stopping
+    if ngfw_info["status"] in ("stopped", "stopping"):
+        logger.info(
+            "pause_ngfw_for_range: NGFW already %s, skipping",
+            ngfw_info["status"],
+        )
+        return
+
+    # Check if other ranges need the NGFW
+    if not should_pause_ngfw(ngfw_info["ngfw_instance_id"], ngfw_info["range_id"]):
+        logger.info("pause_ngfw_for_range: other ranges need NGFW, skipping")
+        return
+
+    # Update status to stopping
+    _update_ngfw_status(ngfw_info["ngfw_instance_id"], "stopping")
+
+    # Publish event
+    publish_ngfw_event(
+        request_id=ngfw_info["ngfw_request_id"],
+        instance_id=ngfw_info["instance_uuid"],
+        app_id=ngfw_info["app_id"],
+        status="stopping",
+    )
+
+    # Execute stop plan
+    executor = AWSExecutor()
+    orchestrator = OpsOrchestrator(executor)
+    plan = NGFWStopPlan()
+
+    # Create a simple object with instance_id attribute for get_context
+    class InstanceRef:
+        def __init__(self, instance_id: str):
+            self.instance_id = instance_id
+
+    context = plan.get_context(InstanceRef(ngfw_info["ec2_instance_id"]))
+    result = orchestrator.orchestrate(ngfw_info["ec2_instance_id"], plan, context)
+
+    if not result.success:
+        error_msg = result.error or "NGFW stop failed"
+        logger.error("pause_ngfw_for_range: %s", error_msg)
+        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "failed")
+        publish_ngfw_event(
+            request_id=ngfw_info["ngfw_request_id"],
+            instance_id=ngfw_info["instance_uuid"],
+            app_id=ngfw_info["app_id"],
+            status="failed",
+        )
+        raise RuntimeError(error_msg)
+
+    # Update status to stopped
+    _update_ngfw_status(ngfw_info["ngfw_instance_id"], "stopped")
+
+    # Publish success event
+    publish_ngfw_event(
+        request_id=ngfw_info["ngfw_request_id"],
+        instance_id=ngfw_info["instance_uuid"],
+        app_id=ngfw_info["app_id"],
+        status="stopped",
+    )
+
+    logger.info(
+        "pause_ngfw_for_range: NGFW stopped ec2=%s request_id=%s",
+        ngfw_info["ec2_instance_id"],
+        request_id,
+    )
+
+
+def ensure_ngfw_running(request_id: str) -> None:
+    """Ensure NGFW is running before resuming range instances.
+
+    Checks if the range's attached NGFW is stopped and starts it if needed.
+    Blocks until the NGFW is in running state.
+
+    Args:
+        request_id: UUID string of the Range's Request.
+
+    Raises:
+        RuntimeError: If NGFW is in failed state or fails to start.
+    """
+    logger.info("ensure_ngfw_running: starting request_id=%s", request_id)
+
+    # Get NGFW info
+    ngfw_info = get_range_ngfw_info(request_id)
+    if not ngfw_info:
+        logger.info("ensure_ngfw_running: no NGFW attached, skipping")
+        return
+
+    status = ngfw_info["status"]
+
+    # Already running
+    if status == "active":
+        logger.info("ensure_ngfw_running: NGFW already active, skipping")
+        return
+
+    # Failed state - cannot proceed
+    if status == "failed":
+        raise RuntimeError("NGFW is in failed state, cannot resume range")
+
+    # Starting - wait for it (another resume may have started it)
+    if status == "starting":
+        logger.info("ensure_ngfw_running: NGFW is starting, waiting...")
+        # For now, proceed with the start operation which will wait
+        # The AWSExecutor.wait_for_running will handle this
+
+    # Stopped or stopping - need to start
+    if status in ("stopped", "stopping", "starting"):
+        # Update status to starting
+        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "starting")
+
+        # Publish event
+        publish_ngfw_event(
+            request_id=ngfw_info["ngfw_request_id"],
+            instance_id=ngfw_info["instance_uuid"],
+            app_id=ngfw_info["app_id"],
+            status="starting",
+        )
+
+        # Execute start plan
+        executor = AWSExecutor()
+        orchestrator = OpsOrchestrator(executor)
+        plan = NGFWStartPlan()
+
+        # Create a simple object with instance_id attribute for get_context
+        class InstanceRef:
+            def __init__(self, instance_id: str):
+                self.instance_id = instance_id
+
+        context = plan.get_context(InstanceRef(ngfw_info["ec2_instance_id"]))
+        result = orchestrator.orchestrate(ngfw_info["ec2_instance_id"], plan, context)
+
+        if not result.success:
+            error_msg = result.error or "NGFW start failed"
+            logger.error("ensure_ngfw_running: %s", error_msg)
+            _update_ngfw_status(ngfw_info["ngfw_instance_id"], "failed")
+            publish_ngfw_event(
+                request_id=ngfw_info["ngfw_request_id"],
+                instance_id=ngfw_info["instance_uuid"],
+                app_id=ngfw_info["app_id"],
+                status="failed",
+            )
+            raise RuntimeError(error_msg)
+
+        # Update status to active
+        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "active")
+
+        # Publish success event
+        publish_ngfw_event(
+            request_id=ngfw_info["ngfw_request_id"],
+            instance_id=ngfw_info["instance_uuid"],
+            app_id=ngfw_info["app_id"],
+            status="active",
+        )
+
+        logger.info(
+            "ensure_ngfw_running: NGFW started ec2=%s request_id=%s",
+            ngfw_info["ec2_instance_id"],
+            request_id,
+        )
+
+
+def _execute_instance_operation(
+    executor: AWSExecutor,
+    orchestrator: OpsOrchestrator,
+    plan: RangePausePlan | RangeResumePlan,
+    instance: dict,
+) -> tuple[str, bool, str | None]:
+    """Execute pause/resume operation on a single instance.
+
+    Args:
+        executor: AWSExecutor instance.
+        orchestrator: OpsOrchestrator instance.
+        plan: Plan to execute (RangePausePlan or RangeResumePlan).
+        instance: Dict with uuid, aws_instance_id, role.
+
+    Returns:
+        Tuple of (uuid, success, error_message).
+    """
+    aws_instance_id = instance["aws_instance_id"]
+    uuid = instance["uuid"]
+
+    try:
+        context = plan.get_context(aws_instance_id)
+        result = orchestrator.orchestrate(aws_instance_id, plan, context)
+
+        if result.success:
+            logger.info(
+                "Operation succeeded for instance %s (uuid=%s)",
+                aws_instance_id,
+                uuid,
+            )
+            return (uuid, True, None)
+        else:
+            error_msg = f"Operation failed: {result.error}"
+            logger.error(
+                "Operation failed for instance %s (uuid=%s): %s",
+                aws_instance_id,
+                uuid,
+                result.error,
+            )
+            return (uuid, False, error_msg)
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.exception(
+            "Exception during operation for instance %s (uuid=%s)",
+            aws_instance_id,
+            uuid,
+        )
+        return (uuid, False, error_msg)
+
+
+def run_range_pause(request_id: str) -> None:
+    """Pause all instances in a range.
+
+    Stops all EC2 instances belonging to the range in parallel,
+    waits for them to reach stopped state, then updates the range status.
+
+    Args:
+        request_id: UUID string of the Request.
+
+    Raises:
+        ValueError: If request not found or no instances.
+        Exception: If pause operation fails.
+    """
+    logger.info("run_range_pause: starting request_id=%s", request_id)
+
+    # Get range data for status updates and events
+    range_data = get_range_data_by_request_id(request_id)
+    range_id = range_data["range_id"]
+    user_id = range_data["user_id"]
+    current_status = range_data["status"]
+
+    # Idempotent: if already paused, return success
+    if current_status == "paused":
+        logger.info("run_range_pause: range already paused, no-op request_id=%s", request_id)
+        return
+
+    # Get all instances to pause
+    instances = get_range_instance_ids(request_id)
+
+    # Create executor and orchestrator
+    executor = AWSExecutor()
+    orchestrator = OpsOrchestrator(executor)
+    plan = RangePausePlan()
+
+    # Execute stop operations in parallel
+    results = []
+    with ThreadPoolExecutor(max_workers=len(instances)) as pool:
+        futures = {
+            pool.submit(
+                _execute_instance_operation,
+                executor,
+                orchestrator,
+                plan,
+                instance,
+            ): instance
+            for instance in instances
+        }
+
+        for future in as_completed(futures):
+            instance = futures[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                logger.exception(
+                    "Unexpected error stopping instance %s",
+                    instance["aws_instance_id"],
+                )
+                results.append((instance["uuid"], False, str(e)))
+
+    # Check for failures
+    failures = [(uuid, err) for uuid, success, err in results if not success]
+
+    if failures:
+        error_msg = f"Failed to pause {len(failures)}/{len(instances)} instances"
+        logger.error("run_range_pause: %s", error_msg)
+
+        # Update status to failed
+        update_range_status(range_id, "failed", error_message=error_msg)
+        publish_status_update(
+            request_id=request_id,
+            range_id=range_id,
+            user_id=user_id,
+            new_status="failed",
+            error_message=error_msg,
+        )
+        raise RuntimeError(error_msg)
+
+    # Update instance statuses in database
+    _update_instance_statuses(request_id, "paused")
+
+    # Update range status to paused
+    update_range_status(range_id, "paused", paused_at="NOW()")
+    publish_status_update(
+        request_id=request_id,
+        range_id=range_id,
+        user_id=user_id,
+        new_status="paused",
+    )
+
+    # Cascade: pause NGFW if no other ranges need it
+    try:
+        pause_ngfw_for_range(request_id, range_data)
+    except Exception as e:
+        # Non-fatal: log and continue - range is already paused
+        logger.warning(
+            "run_range_pause: NGFW pause failed (non-fatal): %s request_id=%s",
+            str(e),
+            request_id,
+        )
+
+    logger.info(
+        "run_range_pause: completed request_id=%s, paused %d instances",
+        request_id,
+        len(instances),
+    )
+
+
+def run_range_resume(request_id: str) -> None:
+    """Resume all instances in a range.
+
+    Starts all EC2 instances belonging to the range in parallel,
+    waits for them to reach running state, then updates the range status.
+
+    Args:
+        request_id: UUID string of the Request.
+
+    Raises:
+        ValueError: If request not found or no instances.
+        Exception: If resume operation fails.
+    """
+    logger.info("run_range_resume: starting request_id=%s", request_id)
+
+    # Get range data for status updates and events
+    range_data = get_range_data_by_request_id(request_id)
+    range_id = range_data["range_id"]
+    user_id = range_data["user_id"]
+    current_status = range_data["status"]
+
+    # Idempotent: if already ready, return success
+    if current_status == "ready":
+        logger.info("run_range_resume: range already ready, no-op request_id=%s", request_id)
+        return
+
+    # Cascade: ensure NGFW is running before resuming range instances
+    try:
+        ensure_ngfw_running(request_id)
+    except Exception as e:
+        # Fatal: range cannot resume without NGFW
+        error_msg = f"Failed to start NGFW: {e}"
+        logger.error("run_range_resume: %s request_id=%s", error_msg, request_id)
+        update_range_status(range_id, "failed", error_message=error_msg)
+        publish_status_update(
+            request_id=request_id,
+            range_id=range_id,
+            user_id=user_id,
+            new_status="failed",
+            error_message=error_msg,
+        )
+        raise RuntimeError(error_msg) from e
+
+    # Get all instances to resume
+    instances = get_range_instance_ids(request_id)
+
+    # Create executor and orchestrator
+    executor = AWSExecutor()
+    orchestrator = OpsOrchestrator(executor)
+    plan = RangeResumePlan()
+
+    # Execute start operations in parallel
+    results = []
+    with ThreadPoolExecutor(max_workers=len(instances)) as pool:
+        futures = {
+            pool.submit(
+                _execute_instance_operation,
+                executor,
+                orchestrator,
+                plan,
+                instance,
+            ): instance
+            for instance in instances
+        }
+
+        for future in as_completed(futures):
+            instance = futures[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                logger.exception(
+                    "Unexpected error starting instance %s",
+                    instance["aws_instance_id"],
+                )
+                results.append((instance["uuid"], False, str(e)))
+
+    # Check for failures
+    failures = [(uuid, err) for uuid, success, err in results if not success]
+
+    if failures:
+        error_msg = f"Failed to resume {len(failures)}/{len(instances)} instances"
+        logger.error("run_range_resume: %s", error_msg)
+
+        # Update status to failed
+        update_range_status(range_id, "failed", error_message=error_msg)
+        publish_status_update(
+            request_id=request_id,
+            range_id=range_id,
+            user_id=user_id,
+            new_status="failed",
+            error_message=error_msg,
+        )
+        raise RuntimeError(error_msg)
+
+    # Update instance statuses in database
+    _update_instance_statuses(request_id, "ready")
+
+    # Update range status to ready
+    update_range_status(range_id, "ready", ready_at="NOW()")
+    publish_status_update(
+        request_id=request_id,
+        range_id=range_id,
+        user_id=user_id,
+        new_status="ready",
+    )
+
+    logger.info(
+        "run_range_resume: completed request_id=%s, resumed %d instances",
+        request_id,
+        len(instances),
+    )
+
+
+def _update_instance_statuses(request_id: str, status: str) -> None:
+    """Update status for all instances in a range.
+
+    Args:
+        request_id: UUID string of the Request.
+        status: New status value ('paused' or 'ready').
+    """
+    from engine.models import Instance
+
+    updated = Instance.objects.filter(request__request_id=request_id).update(status=status)
+    logger.debug(
+        "_update_instance_statuses: updated %d instances to status=%s",
+        updated,
+        status,
+    )

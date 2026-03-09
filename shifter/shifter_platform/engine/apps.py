@@ -9,3 +9,6 @@ class EngineConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "engine"
     verbose_name = "Shifter Engine"
+
+    def ready(self):
+        import engine.receivers  # noqa: F401

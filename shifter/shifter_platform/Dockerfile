@@ -9,7 +9,7 @@ WORKDIR /app
 COPY cyberscript /cyberscript
 
 # Copy dependency files
-COPY shifter_platform/pyproject.toml shifter_platform/uv.lock ./
+COPY pyproject.toml uv.lock ./
 
 # Export requirements and install dependencies into system Python
 # Install cyberscript as a local package
@@ -33,10 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/daphne /usr/local/bin/django-admin /usr/local/bin/
+COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/daphne /usr/local/bin/django-admin /usr/local/bin/celery /usr/local/bin/
 
-# Copy application code (context is now shifter/, so path is shifter_platform)
-COPY --chown=appuser:appgroup shifter_platform .
+# Copy application code
+COPY --chown=appuser:appgroup . .
 
 # Create staticfiles directory for collectstatic
 RUN mkdir -p /app/staticfiles && chown appuser:appgroup /app/staticfiles

@@ -7,6 +7,7 @@ dependencies = [
     "asyncssh",
     "bleach>=6.3.0",
     "boto3",
+    "celery[redis]>=5.4.0",
     "channels",
     "channels-redis",
     "daphne",
@@ -39,6 +40,7 @@ dev = [
     "types-requests>=2.32.0",
     "types-bleach>=6.2.0",
     "types-Markdown>=3.7.0",
+    "types-paramiko>=4.0.0",
 ]
 
 [tool.pytest.ini_options]
@@ -46,7 +48,7 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
 pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
-addopts = "--cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov-report=term-missing --cov-report=xml:coverage.xml"
+addopts = "--cov=config --cov=mission_control --cov=documentation --cov=cms --cov=engine --cov=shared --cov-report=term-missing --cov-report=xml:coverage.xml"
 env = ["TESTING=1"]
 markers = [
     "integration: requires running Docker Compose stack (deselected by default)",

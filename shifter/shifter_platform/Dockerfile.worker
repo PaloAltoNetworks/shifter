@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+
+# Celery worker image — same as web image plus Terraform CLI
+# Used for running provisioning tasks that invoke Terraform
+
+# ---- Builder stage (identical to web Dockerfile) ----
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
+
+WORKDIR /app
+
+COPY cyberscript /cyberscript
+COPY pyproject.toml uv.lock ./
+
+RUN uv export --no-hashes --no-emit-project --frozen > requirements.txt && \
+    uv pip install --system --no-cache -r requirements.txt && \
+    uv pip install --system --no-cache /cyberscript
+
+# ---- Production stage ----
+FROM python:3.12-slim-trixie AS production
+
+WORKDIR /app
+
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --shell /bin/bash appuser
+
+# Install runtime dependencies + Terraform CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    unzip \
+    && curl -fsSL https://releases.hashicorp.com/terraform/1.14.3/terraform_1.14.3_linux_amd64.zip -o /tmp/terraform.zip \
+    && unzip /tmp/terraform.zip -d /usr/local/bin/ \
+    && rm /tmp/terraform.zip \
+    && terraform version \
+    && apt-get purge -y curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/daphne /usr/local/bin/django-admin /usr/local/bin/celery /usr/local/bin/
+
+COPY --chown=appuser:appgroup . .
+
+RUN mkdir -p /app/staticfiles && chown appuser:appgroup /app/staticfiles
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+USER appuser
+
+# Default command: run Celery worker
+CMD ["celery", "-A", "config", "worker", "-l", "info"]

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-03-09
+
+### Added
+- Production-mode Docker Compose profile (`docker-compose.deploy.yml`)
+  - Disables LocalStack via `profiles: ["dev-only"]`
+  - Removes bind-mount volumes (uses baked-in image code)
+  - Overrides env vars for production (real AWS, Cognito OIDC, TLS)
+  - Removes exposed dev ports on `db` and `redis`
+- Production environment template (`.env.deploy.example`) with secret generation commands
+- Deployment script (`scripts/deploy.sh`) with env validation, self-signed cert generation, and health check
+- `make deploy` target for production compose command
+
 ## [2.3.0] - 2026-03-09
 
 ### Added

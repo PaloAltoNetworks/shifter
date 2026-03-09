@@ -1,4 +1,4 @@
-.PHONY: up down build logs shell migrate makemigrations createsuperuser test test-js test-js-coverage clean init
+.PHONY: up down build logs shell migrate makemigrations createsuperuser test test-js test-js-coverage clean init deploy
 
 # First-time setup
 init: up
@@ -65,3 +65,7 @@ restart:
 # Database shell
 dbshell:
 	docker compose exec db psql -U postgres -d shifter
+
+# Production deploy
+deploy:
+	docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build

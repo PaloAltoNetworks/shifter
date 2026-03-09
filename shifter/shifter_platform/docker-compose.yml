@@ -49,8 +49,8 @@ services:
 
   web:
     build: .
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     env_file:
       - .env
     environment:
@@ -61,7 +61,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       AWS_ENDPOINT_URL: http://localstack:4566
       GUACAMOLE_JSON_AUTH_SECRET: ${GUACAMOLE_JSON_AUTH_SECRET}
-      GUACAMOLE_BASE_URL: http://localhost:8080/guacamole
+      GUACAMOLE_BASE_URL: /guacamole
       GUACAMOLE_API_BASE_URL: http://guacamole:8080/guacamole
     depends_on:
       db:
@@ -131,8 +131,8 @@ services:
       JSON_ENABLED: "true"
       JSON_SECRET_KEY: ${GUACAMOLE_JSON_AUTH_SECRET}
       OPENID_ENABLED: "false"
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     depends_on:
       db:
         condition: service_healthy
@@ -145,6 +145,20 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./staticfiles:/app/staticfiles:ro
+      - ${TLS_CERT_DIR:-./nginx/ssl}:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+      - guacamole
+    restart: unless-stopped
 
 volumes:
   postgres_data:

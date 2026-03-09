@@ -1,1 +1,4 @@
 db.sqlite3
+
+# Nginx TLS certs (generated, not committed)
+nginx/ssl/*.pem

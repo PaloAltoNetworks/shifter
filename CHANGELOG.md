@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-03-09
+
+### Added
+- Nginx reverse proxy for TLS termination and unified routing in Docker deployments
+- Self-signed TLS certificate generation script (`nginx/generate-self-signed-cert.sh`)
+- HTTPS (443) and HTTP (80) with redirect to HTTPS
+- Nginx serves static files directly from `/app/staticfiles/`
+- WebSocket-aware proxying for both Django Channels and Guacamole
+
+### Changed
+- `web` and `guacamole` services no longer expose ports to host (nginx is the single entry point)
+- `GUACAMOLE_BASE_URL` changed to relative path `/guacamole` (nginx handles routing)
+- Added `TLS_CERT_DIR` and `DOMAIN_NAME` to `.env.example`
+
 ## [2.2.0] - 2026-03-09
 
 ### Changed

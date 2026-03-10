@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import pytest
 from django.urls import reverse
 from django.utils import timezone
 
@@ -22,9 +21,7 @@ from ctf.models import CTFParticipant
 class TestAdminParticipantListView:
     """Tests for the admin_participant_list view."""
 
-    def test_lists_participants_for_event(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_lists_participants_for_event(self, authenticated_organizer_client, ctf_event):
         """View returns list of participants for the event."""
         # Create some participants
         CTFParticipant.objects.create(
@@ -50,9 +47,7 @@ class TestAdminParticipantListView:
         assert "Alice" in response.content.decode()
         assert "Bob" in response.content.decode()
 
-    def test_filters_participants_by_status(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_filters_participants_by_status(self, authenticated_organizer_client, ctf_event):
         """View filters participants by status query parameter."""
         CTFParticipant.objects.create(
             event=ctf_event,
@@ -78,9 +73,7 @@ class TestAdminParticipantListView:
         # Registered user should not appear when filtering by invited
         assert "Registered User" not in content
 
-    def test_shows_participant_stats(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_shows_participant_stats(self, authenticated_organizer_client, ctf_event):
         """View shows participant statistics (total, invited, registered counts)."""
         CTFParticipant.objects.create(
             event=ctf_event,
@@ -113,9 +106,7 @@ class TestAdminParticipantListView:
         assert response.context["invited_count"] == 2
         assert response.context["registered_count"] == 1
 
-    def test_denies_access_to_other_organizer_event(
-        self, client, ctf_event, second_organizer_user
-    ):
+    def test_denies_access_to_other_organizer_event(self, client, ctf_event, second_organizer_user):
         """View denies access to events owned by other organizers."""
         client.force_login(second_organizer_user)
 
@@ -124,9 +115,7 @@ class TestAdminParticipantListView:
 
         assert response.status_code == 403
 
-    def test_returns_404_for_nonexistent_event(
-        self, authenticated_organizer_client
-    ):
+    def test_returns_404_for_nonexistent_event(self, authenticated_organizer_client):
         """View returns 404 for non-existent event."""
         import uuid
 
@@ -144,11 +133,9 @@ class TestAdminParticipantListView:
         response = client.get(url)
 
         assert response.status_code == 302
-        assert "/login/" in response.url
+        assert "login" in response.url
 
-    def test_requires_organizer_role(
-        self, authenticated_participant_client, ctf_event
-    ):
+    def test_requires_organizer_role(self, authenticated_participant_client, ctf_event):
         """View requires organizer role, not participant."""
         url = reverse("ctf:admin_participant_list", kwargs={"event_id": ctf_event.id})
         response = authenticated_participant_client.get(url)
@@ -159,29 +146,19 @@ class TestAdminParticipantListView:
 class TestAdminParticipantImportView:
     """Tests for the admin_participant_import view."""
 
-    def test_get_shows_import_form(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_get_shows_import_form(self, authenticated_organizer_client, ctf_event):
         """GET request shows the CSV import form."""
-        url = reverse(
-            "ctf:admin_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
         response = authenticated_organizer_client.get(url)
 
         assert response.status_code == 200
         assert "form" in response.context
 
-    def test_imports_participants_from_csv(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_imports_participants_from_csv(self, authenticated_organizer_client, ctf_event):
         """POST with valid CSV creates participants."""
-        url = reverse(
-            "ctf:admin_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
 
         csv_content = "Alice Smith,alice@example.com\nBob Jones,bob@example.com"
-
-        from io import BytesIO
 
         from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -197,20 +174,12 @@ class TestAdminParticipantImportView:
         assert response.status_code == 302
 
         # Participants should be created
-        assert CTFParticipant.objects.filter(
-            event=ctf_event, email="alice@example.com"
-        ).exists()
-        assert CTFParticipant.objects.filter(
-            event=ctf_event, email="bob@example.com"
-        ).exists()
+        assert CTFParticipant.objects.filter(event=ctf_event, email="alice@example.com").exists()
+        assert CTFParticipant.objects.filter(event=ctf_event, email="bob@example.com").exists()
 
-    def test_rejects_invalid_csv_format(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_rejects_invalid_csv_format(self, authenticated_organizer_client, ctf_event):
         """POST with invalid CSV shows errors."""
-        url = reverse(
-            "ctf:admin_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
 
         # Missing email column
         csv_content = "Just Name\nAnother Name"
@@ -229,13 +198,9 @@ class TestAdminParticipantImportView:
         assert response.status_code == 200
         assert "errors" in response.context or "error" in response.content.decode().lower()
 
-    def test_rejects_duplicate_emails_in_csv(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_rejects_duplicate_emails_in_csv(self, authenticated_organizer_client, ctf_event):
         """POST with duplicate emails in CSV shows error."""
-        url = reverse(
-            "ctf:admin_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
 
         csv_content = "Alice,alice@example.com\nAlice Copy,alice@example.com"
 
@@ -251,13 +216,9 @@ class TestAdminParticipantImportView:
 
         assert response.status_code == 200
         # No participants should be created
-        assert not CTFParticipant.objects.filter(
-            event=ctf_event, email="alice@example.com"
-        ).exists()
+        assert not CTFParticipant.objects.filter(event=ctf_event, email="alice@example.com").exists()
 
-    def test_rejects_existing_participant_email(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_rejects_existing_participant_email(self, authenticated_organizer_client, ctf_event):
         """POST with email of existing participant shows error."""
         # Create existing participant
         CTFParticipant.objects.create(
@@ -268,9 +229,7 @@ class TestAdminParticipantImportView:
             invited_at=timezone.now(),
         )
 
-        url = reverse(
-            "ctf:admin_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
 
         csv_content = "Existing User,existing@example.com\nNew User,new@example.com"
 
@@ -286,19 +245,13 @@ class TestAdminParticipantImportView:
 
         assert response.status_code == 200
         # New user should not be created either (atomic failure)
-        assert not CTFParticipant.objects.filter(
-            event=ctf_event, email="new@example.com"
-        ).exists()
+        assert not CTFParticipant.objects.filter(event=ctf_event, email="new@example.com").exists()
 
-    def test_denies_access_to_other_organizer_event(
-        self, client, ctf_event, second_organizer_user
-    ):
+    def test_denies_access_to_other_organizer_event(self, client, ctf_event, second_organizer_user):
         """View denies access to events owned by other organizers."""
         client.force_login(second_organizer_user)
 
-        url = reverse(
-            "ctf:admin_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_import", kwargs={"event_id": ctf_event.id})
         response = client.get(url)
 
         assert response.status_code == 403
@@ -307,9 +260,7 @@ class TestAdminParticipantImportView:
 class TestAdminParticipantDetailView:
     """Tests for the admin_participant_detail view."""
 
-    def test_shows_participant_details(
-        self, authenticated_organizer_client, ctf_event, ctf_participant
-    ):
+    def test_shows_participant_details(self, authenticated_organizer_client, ctf_event, ctf_participant):
         """View shows participant profile and statistics."""
         url = reverse(
             "ctf:admin_participant_detail",
@@ -358,9 +309,7 @@ class TestAdminParticipantDetailView:
         assert response.status_code == 200
         assert response.context["total_score"] == ctf_challenge.points
 
-    def test_returns_404_for_nonexistent_participant(
-        self, authenticated_organizer_client
-    ):
+    def test_returns_404_for_nonexistent_participant(self, authenticated_organizer_client):
         """View returns 404 for non-existent participant."""
         import uuid
 
@@ -372,9 +321,7 @@ class TestAdminParticipantDetailView:
 
         assert response.status_code == 404
 
-    def test_denies_access_to_other_organizer_participant(
-        self, client, ctf_participant, second_organizer_user
-    ):
+    def test_denies_access_to_other_organizer_participant(self, client, ctf_participant, second_organizer_user):
         """View denies access to participants in other organizers' events."""
         client.force_login(second_organizer_user)
 
@@ -390,25 +337,17 @@ class TestAdminParticipantDetailView:
 class TestAdminParticipantAddView:
     """Tests for adding a single participant."""
 
-    def test_get_shows_add_form(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_get_shows_add_form(self, authenticated_organizer_client, ctf_event):
         """GET request shows the add participant form."""
-        url = reverse(
-            "ctf:admin_participant_add", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_add", kwargs={"event_id": ctf_event.id})
         response = authenticated_organizer_client.get(url)
 
         assert response.status_code == 200
         assert "form" in response.context
 
-    def test_post_creates_participant(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_post_creates_participant(self, authenticated_organizer_client, ctf_event):
         """POST with valid data creates a participant."""
-        url = reverse(
-            "ctf:admin_participant_add", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_add", kwargs={"event_id": ctf_event.id})
 
         response = authenticated_organizer_client.post(
             url,
@@ -422,15 +361,11 @@ class TestAdminParticipantAddView:
         assert response.status_code == 302
 
         # Participant should be created
-        participant = CTFParticipant.objects.get(
-            event=ctf_event, email="new@example.com"
-        )
+        participant = CTFParticipant.objects.get(event=ctf_event, email="new@example.com")
         assert participant.name == "New Participant"
         assert participant.status == ParticipantStatus.INVITED.value
 
-    def test_rejects_duplicate_email(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_rejects_duplicate_email(self, authenticated_organizer_client, ctf_event):
         """POST with duplicate email shows error."""
         # Create existing participant
         CTFParticipant.objects.create(
@@ -441,9 +376,7 @@ class TestAdminParticipantAddView:
             invited_at=timezone.now(),
         )
 
-        url = reverse(
-            "ctf:admin_participant_add", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:admin_participant_add", kwargs={"event_id": ctf_event.id})
 
         response = authenticated_organizer_client.post(
             url,
@@ -460,9 +393,7 @@ class TestAdminParticipantAddView:
 class TestAPIParticipantList:
     """Tests for the api_participant_list endpoint."""
 
-    def test_get_returns_participants_json(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_get_returns_participants_json(self, authenticated_organizer_client, ctf_event):
         """GET returns JSON list of participants."""
         CTFParticipant.objects.create(
             event=ctf_event,
@@ -481,9 +412,7 @@ class TestAPIParticipantList:
         assert len(data["participants"]) == 1
         assert data["participants"][0]["email"] == "test@example.com"
 
-    def test_post_creates_participant(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_post_creates_participant(self, authenticated_organizer_client, ctf_event):
         """POST creates a new participant."""
         url = reverse("ctf:api_participant_list", kwargs={"event_id": ctf_event.id})
 
@@ -500,17 +429,13 @@ class TestAPIParticipantList:
         assert data["email"] == "api@example.com"
 
         # Verify created in DB
-        assert CTFParticipant.objects.filter(
-            event=ctf_event, email="api@example.com"
-        ).exists()
+        assert CTFParticipant.objects.filter(event=ctf_event, email="api@example.com").exists()
 
 
 class TestAPIParticipantDetail:
     """Tests for the api_participant_detail endpoint."""
 
-    def test_get_returns_participant_json(
-        self, authenticated_organizer_client, ctf_participant
-    ):
+    def test_get_returns_participant_json(self, authenticated_organizer_client, ctf_participant):
         """GET returns participant details as JSON."""
         url = reverse(
             "ctf:api_participant_detail",
@@ -523,9 +448,7 @@ class TestAPIParticipantDetail:
         assert data["id"] == str(ctf_participant.id)
         assert data["email"] == ctf_participant.email
 
-    def test_delete_soft_deletes_participant(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_delete_soft_deletes_participant(self, authenticated_organizer_client, ctf_event):
         """DELETE soft-deletes the participant."""
         participant = CTFParticipant.objects.create(
             event=ctf_event,
@@ -552,24 +475,22 @@ class TestAPIParticipantDetail:
 class TestAPIParticipantImport:
     """Tests for the api_participant_import endpoint."""
 
-    def test_imports_from_json_array(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_imports_from_json_array(self, authenticated_organizer_client, ctf_event):
         """POST imports participants from JSON array."""
-        url = reverse(
-            "ctf:api_participant_import", kwargs={"event_id": ctf_event.id}
-        )
+        url = reverse("ctf:api_participant_import", kwargs={"event_id": ctf_event.id})
 
         import json
 
         response = authenticated_organizer_client.post(
             url,
-            data=json.dumps({
-                "participants": [
-                    {"name": "User One", "email": "one@example.com"},
-                    {"name": "User Two", "email": "two@example.com"},
-                ]
-            }),
+            data=json.dumps(
+                {
+                    "participants": [
+                        {"name": "User One", "email": "one@example.com"},
+                        {"name": "User Two", "email": "two@example.com"},
+                    ]
+                }
+            ),
             content_type="application/json",
         )
 
@@ -578,20 +499,14 @@ class TestAPIParticipantImport:
         assert data["imported"] == 2
 
         # Verify created
-        assert CTFParticipant.objects.filter(
-            event=ctf_event, email="one@example.com"
-        ).exists()
-        assert CTFParticipant.objects.filter(
-            event=ctf_event, email="two@example.com"
-        ).exists()
+        assert CTFParticipant.objects.filter(event=ctf_event, email="one@example.com").exists()
+        assert CTFParticipant.objects.filter(event=ctf_event, email="two@example.com").exists()
 
 
 class TestAPIParticipantResendInvite:
     """Tests for resending participant invites."""
 
-    def test_resend_regenerates_token(
-        self, authenticated_organizer_client, ctf_event
-    ):
+    def test_resend_regenerates_token(self, authenticated_organizer_client, ctf_event):
         """Resend invite generates new token and updates expiry."""
         participant = CTFParticipant.objects.create(
             event=ctf_event,
@@ -613,9 +528,7 @@ class TestAPIParticipantResendInvite:
         participant.refresh_from_db()
         assert participant.invite_token != old_token
 
-    def test_resend_fails_for_registered_participant(
-        self, authenticated_organizer_client, ctf_participant
-    ):
+    def test_resend_fails_for_registered_participant(self, authenticated_organizer_client, ctf_participant):
         """Cannot resend invite to already registered participant."""
         # ctf_participant fixture has user linked (registered)
         url = reverse(

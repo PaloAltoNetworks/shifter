@@ -1,7 +1,83 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF{% endblock %}
+{% block ctf_title %}{{ event.name }}{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">{{ event.name }}</h1>
+        {% if event.status == 'active' %}
+        <span class="badge bg-success">Active</span>
+        {% elif event.status == 'scheduled' %}
+        <span class="badge bg-info">Upcoming</span>
+        {% elif event.status == 'completed' %}
+        <span class="badge bg-secondary">Ended</span>
+        {% elif event.status == 'draft' %}
+        <span class="badge bg-warning">Draft</span>
+        {% elif event.status == 'cancelled' %}
+        <span class="badge bg-danger">Cancelled</span>
+        {% endif %}
+    </div>
+
+    <div class="row">
+        <!-- Event Details -->
+        <div class="col-md-8 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Event Details</h5>
+                </div>
+                <div class="card-body">
+                    {% if event.description %}
+                    <div class="mb-4">
+                        {{ event.description|linebreaksbr }}
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No description provided.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar Info -->
+        <div class="col-md-4 mb-4">
+            <!-- Schedule -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Schedule</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Start</strong><br>
+                        {{ event.event_start|date:"M d, Y H:i" }}
+                    </div>
+                    <div>
+                        <strong>End</strong><br>
+                        {{ event.event_end|date:"M d, Y H:i" }}
+                    </div>
+                </div>
+            </div>
+
+            {% if event.team_mode %}
+            <!-- Team Info -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Team Mode</h5>
+                </div>
+                <div class="card-body">
+                    <p>This is a team-based competition.</p>
+                    {% if event.team_size_limit %}
+                    <p class="mb-2">Max team size: <strong>{{ event.team_size_limit }}</strong></p>
+                    {% endif %}
+                    {% if participant.team %}
+                    <p class="mb-2">Your team: <strong>{{ participant.team.name }}</strong></p>
+                    <a href="{% url 'ctf:participant_team' %}" class="btn btn-sm btn-outline-primary">View Team</a>
+                    {% else %}
+                    <p class="text-muted mb-2">You are not on a team yet.</p>
+                    <a href="{% url 'ctf:team_join' %}" class="btn btn-sm btn-primary">Join a Team</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
 </div>
 {% endblock %}

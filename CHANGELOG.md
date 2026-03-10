@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-03-09
+
+### Added
+- CTF Participant Portal views and API endpoints (Phase 6)
+  - Participant dashboard with score, rank, and challenge progress
+  - Event detail view for participants
+  - Challenge list with category filtering and solve status tracking
+  - Challenge detail with submission history, attempt tracking, and hint usage
+  - Range status view showing provisioning state and instance info
+  - Scoreboard view with individual and team mode support
+  - Team view with member list and team score
+  - Team join via invite code with full validation (full team, already member)
+  - Flag submission API with rate limit and state error handling (429/400 responses)
+  - Hint usage API returning hint text and penalty info
+  - Submissions list API for current participant
+  - Scoreboard API with team/individual mode detection
+  - `_get_client_ip` helper for extracting client IP from X-Forwarded-For or REMOTE_ADDR
+
 ## [2.4.0] - 2026-03-09
 
 ### Added
@@ -179,9 +197,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better AaC checking in check_layer_imports script
 - Sticky sesesions on Linux terminals: keep history, scrollback, etc when reconnecting
 - tmux now used for Terminal UI sessions
+- tmux Terminal UI sessions not allowing mouse scrolling
 - RDP copy/paste not working
 - Packer does not clean up EC2 instance after build
-- tmux Terminal UI sessions not allowing mouse scrolling
 
 ## [0.10.6] - 2025-01-09
 
@@ -280,7 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Portal NGFW Management UI (#416)
   - NGFW list view at `/mission-control/assets/ngfw/`
   - NGFW detail view with AWS resources, PAN-OS info, linked ranges
-  - 5-step setup wizard (Name & Credentials → Registration → Confirm → Provisioning → Complete)
+  - 5-step setup wizard (Name & Credentials > Registration > Confirm > Provisioning > Complete)
   - Deprovision confirmation view with linked ranges warning
   - API endpoints:
     - `GET /api/ngfw/list/` - List user's NGFWs
@@ -359,7 +377,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Engine architecture refactor (#413)
   - Executors moved to `executors/` (ssm_executor, ssh_executor)
   - Orchestrators moved to `orchestrators/` (setup_orchestrator)
-  - Plans moved to `plans/` (setup_plan.py → base.py)
+  - Plans moved to `plans/` (setup_plan.py > base.py)
   - RangeStack moved to `stacks/`
   - New: `AWSExecutor`, `OpsOrchestrator` stubs
   - New: Base protocols for executors and orchestrators
@@ -704,7 +722,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed Cognito agentchat client
   - Removed openwebui_db Secrets Manager secret
   - Removed agentchat documentation
-  - Removed migrations for victim_mcp_user and kali_mcp_user rename
 - Entire MCP directory (`mcp/`) including aptl-mcp-common and mcp-red
 
 ### Changed
@@ -828,7 +845,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Dev environment (`terraform/environments/dev/`)
-- Branch-based deployments: `dev` branch → dev, `main` branch → prod
+- Branch-based deployments: `dev` branch > dev, `main` branch > prod
 - Bootstrap script for new AWS accounts (`scripts/bootstrap-dev.sh`)
 
 ### Changed
@@ -901,7 +918,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs/maintenance.md: RDS maintenance window reference
 
 ### Fixed
-- Lambda DB queries: `agent_config_id` → `agent_id`, `os_type_id` → `os_id` (Django FK naming)
+- Lambda DB queries: `agent_config_id` > `agent_id`, `os_type_id` > `os_id` (Django FK naming)
 - Lambda handlers: `range_id[:8]` slice on integer (range_id is int, not UUID)
 - db-connect.sh: Added autocommit for INSERT/UPDATE queries
 - IAM policy: Fix `ec2:CreateSubnet` permission (unsupported `ec2:Vpc` condition key)

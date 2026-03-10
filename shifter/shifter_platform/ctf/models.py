@@ -12,7 +12,6 @@ This module defines all database models for CTF event management including:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import secrets
 from typing import TYPE_CHECKING
@@ -108,7 +107,7 @@ class CTFBaseModel(models.Model):
     )
 
     objects = SoftDeleteManager()
-    all_objects = models.Manager()
+    all_objects = models.Manager()  # noqa: DJ012
 
     class Meta:
         abstract = True
@@ -304,22 +303,15 @@ class CTFEvent(CTFBaseModel):
 
         # Validate event times (only if both are set)
         if self.event_start and self.event_end and self.event_end <= self.event_start:
-            errors.setdefault("event_end", []).append(
-                "Event end must be after event start."
-            )
+            errors.setdefault("event_end", []).append("Event end must be after event start.")
 
         # Validate registration deadline
-        if self.registration_deadline and self.event_start:
-            if self.registration_deadline > self.event_start:
-                errors.setdefault("registration_deadline", []).append(
-                    "Registration deadline must be before event start."
-                )
+        if self.registration_deadline and self.event_start and self.registration_deadline > self.event_start:
+            errors.setdefault("registration_deadline", []).append("Registration deadline must be before event start.")
 
         # Validate team settings
         if self.team_mode and not self.team_size_limit:
-            errors.setdefault("team_size_limit", []).append(
-                "Team size limit is required when team mode is enabled."
-            )
+            errors.setdefault("team_size_limit", []).append("Team size limit is required when team mode is enabled.")
         if not self.team_mode and self.team_size_limit:
             errors.setdefault("team_size_limit", []).append(
                 "Team size limit should only be set when team mode is enabled."
@@ -336,16 +328,25 @@ class CTFEvent(CTFBaseModel):
     @property
     def is_upcoming(self) -> bool:
         """Return True if event is scheduled but not started."""
-        return (
-            self.status == EventStatus.SCHEDULED.value
-            and self.event_start > timezone.now()
-        )
+        return self.status == EventStatus.SCHEDULED.value and self.event_start > timezone.now()
 
     @property
     def is_modifiable(self) -> bool:
         """Return True if event can be modified."""
         try:
             return EventStatus(self.status) not in EVENT_TERMINAL_STATUSES
+        except ValueError:
+            return False
+
+    @property
+    def is_content_modifiable(self) -> bool:
+        """Return True if event content (challenges, etc.) can be modified.
+
+        Content is only modifiable in DRAFT and SCHEDULED states.
+        Active events should not have their challenges changed.
+        """
+        try:
+            return EventStatus(self.status) in {EventStatus.DRAFT, EventStatus.SCHEDULED}
         except ValueError:
             return False
 
@@ -487,20 +488,14 @@ class CTFChallenge(CTFBaseModel):
 
         # Validate hint penalty
         if self.hint_penalty > 0 and not self.hint:
-            errors.setdefault("hint_penalty", []).append(
-                "Hint penalty requires a hint to be set."
-            )
+            errors.setdefault("hint_penalty", []).append("Hint penalty requires a hint to be set.")
 
         # Validate release time
         if self.release_time and hasattr(self, "event") and self.event_id:
             if self.release_time < self.event.event_start:
-                errors.setdefault("release_time", []).append(
-                    "Release time cannot be before event start."
-                )
+                errors.setdefault("release_time", []).append("Release time cannot be before event start.")
             if self.release_time > self.event.event_end:
-                errors.setdefault("release_time", []).append(
-                    "Release time cannot be after event end."
-                )
+                errors.setdefault("release_time", []).append("Release time cannot be after event end.")
 
         if errors:
             raise ValidationError(errors)
@@ -520,9 +515,7 @@ class CTFChallenge(CTFBaseModel):
     @property
     def first_blood(self) -> CTFSubmission | None:
         """Return first correct submission, if any."""
-        return (
-            self.submissions.filter(is_correct=True).order_by("submitted_at").first()
-        )
+        return self.submissions.filter(is_correct=True).order_by("submitted_at").first()
 
     def calculate_points_with_penalty(self, hint_used: bool) -> int:
         """Calculate points after hint penalty.
@@ -674,7 +667,7 @@ class CTFParticipant(CTFBaseModel):
         related_name="members",
         help_text="Team membership (for team-based events)",
     )
-    cognito_sub = models.CharField(
+    cognito_sub = models.CharField(  # noqa: DJ001
         max_length=36,
         null=True,
         blank=True,
@@ -767,13 +760,9 @@ class CTFParticipant(CTFBaseModel):
         # Validate team membership
         if self.team:
             if not self.event.team_mode:
-                errors.setdefault("team", []).append(
-                    "Cannot join a team in non-team-mode event."
-                )
+                errors.setdefault("team", []).append("Cannot join a team in non-team-mode event.")
             elif self.team.event_id != self.event_id:
-                errors.setdefault("team", []).append(
-                    "Team must belong to the same event."
-                )
+                errors.setdefault("team", []).append("Team must belong to the same event.")
 
         if errors:
             raise ValidationError(errors)
@@ -786,17 +775,12 @@ class CTFParticipant(CTFBaseModel):
     @property
     def is_invite_valid(self) -> bool:
         """Return True if invite token is still valid."""
-        return (
-            self.invite_token_expires is not None
-            and timezone.now() < self.invite_token_expires
-        )
+        return self.invite_token_expires is not None and timezone.now() < self.invite_token_expires
 
     @property
     def total_score(self) -> int:
         """Calculate participant's total score."""
-        result = self.submissions.filter(is_correct=True).aggregate(
-            total=Sum("points_awarded")
-        )
+        result = self.submissions.filter(is_correct=True).aggregate(total=Sum("points_awarded"))
         return result["total"] or 0
 
     @property
@@ -892,11 +876,12 @@ class CTFSubmission(CTFBaseModel):
         errors: dict[str, list[str]] = {}
 
         # Validate participant and challenge belong to same event
-        if hasattr(self, "participant") and hasattr(self, "challenge"):
-            if self.participant.event_id != self.challenge.event_id:
-                errors.setdefault("challenge", []).append(
-                    "Challenge must belong to participant's event."
-                )
+        if (
+            hasattr(self, "participant")
+            and hasattr(self, "challenge")
+            and self.participant.event_id != self.challenge.event_id
+        ):
+            errors.setdefault("challenge", []).append("Challenge must belong to participant's event.")
 
         if errors:
             raise ValidationError(errors)
@@ -1075,10 +1060,7 @@ class CTFScheduledTask(CTFBaseModel):
     @property
     def is_due(self) -> bool:
         """Return True if task is ready to execute."""
-        return (
-            self.status == ScheduledTaskStatus.PENDING.value
-            and timezone.now() >= self.scheduled_for
-        )
+        return self.status == ScheduledTaskStatus.PENDING.value and timezone.now() >= self.scheduled_for
 
     def mark_running(self) -> None:
         """Mark task as running."""

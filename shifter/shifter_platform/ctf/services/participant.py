@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import transaction
@@ -54,7 +54,7 @@ def invite_participant(
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     # Check max participants
     if event.max_participants:
@@ -82,7 +82,7 @@ def invite_participant(
             raise CTFNotFoundError(
                 f"Team {team_id} not found in event {event_id}",
                 details={"team_id": str(team_id), "event_id": str(event_id)},
-            )
+            ) from None
 
     with transaction.atomic():
         participant = CTFParticipant.objects.create(
@@ -131,7 +131,7 @@ def bulk_import_participants(
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     # Parse CSV
     reader = csv.reader(io.StringIO(csv_content))
@@ -169,7 +169,7 @@ def bulk_import_participants(
     # Check for duplicates within the import
     seen_emails: set[str] = set()
     duplicates: list[str] = []
-    for name, email in participants_data:
+    for _name, email in participants_data:
         if email in seen_emails:
             duplicates.append(email)
         seen_emails.add(email)
@@ -259,7 +259,7 @@ def register_participant(
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     if participant.user is not None:
         raise CTFStateError(
@@ -331,7 +331,7 @@ def disqualify_participant(participant_id: UUID, reason: str | None = None) -> C
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     participant.status = ParticipantStatus.DISQUALIFIED.value
     participant.save(update_fields=["status", "updated_at"])
@@ -354,11 +354,7 @@ def list_participants_for_event(event_id: UUID) -> QuerySet[CTFParticipant]:
     Returns:
         QuerySet of CTFParticipant instances.
     """
-    return (
-        CTFParticipant.objects.filter(event_id=event_id)
-        .select_related("team", "user")
-        .order_by("name")
-    )
+    return CTFParticipant.objects.filter(event_id=event_id).select_related("team", "user").order_by("name")
 
 
 def get_participant(participant_id: UUID) -> CTFParticipant:
@@ -374,14 +370,12 @@ def get_participant(participant_id: UUID) -> CTFParticipant:
         CTFNotFoundError: If participant doesn't exist.
     """
     try:
-        return CTFParticipant.objects.select_related("event", "team", "user").get(
-            pk=participant_id
-        )
+        return CTFParticipant.objects.select_related("event", "team", "user").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
 
 def delete_participant(participant_id: UUID) -> bool:
@@ -404,7 +398,7 @@ def delete_participant(participant_id: UUID) -> bool:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     participant.delete(soft=True)
     logger.info("Deleted participant %s", participant_id)
@@ -431,14 +425,12 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
     logger.info("Resending invite for participant %s", participant_id)
 
     try:
-        participant = CTFParticipant.objects.select_related("event").get(
-            pk=participant_id
-        )
+        participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     if participant.is_registered:
         raise CTFStateError(
@@ -454,9 +446,7 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
     participant.invite_token = secrets.token_urlsafe(32)
     participant.invite_token_expires = token_expires
     participant.invited_at = now
-    participant.save(
-        update_fields=["invite_token", "invite_token_expires", "invited_at", "updated_at"]
-    )
+    participant.save(update_fields=["invite_token", "invite_token_expires", "invited_at", "updated_at"])
 
     logger.info("Resent invite for participant %s", participant_id)
 

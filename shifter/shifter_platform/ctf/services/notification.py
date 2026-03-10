@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from ctf.enums import NotificationStatus, NotificationType
-from ctf.exceptions import CTFNotFoundError, CTFNotificationError
+from ctf.exceptions import CTFNotFoundError
 from ctf.models import CTFEvent, CTFNotification, CTFParticipant
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     # TODO: Implement actual email sending
     # This will use Django's email backend (configured for SES)
@@ -83,7 +83,7 @@ def send_credentials(event_id: UUID) -> dict[str, Any]:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     # TODO: Implement credential email sending
     participants = CTFParticipant.objects.filter(
@@ -126,7 +126,7 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     # TODO: Implement reminder email sending
     participants = CTFParticipant.objects.filter(
@@ -177,7 +177,7 @@ def send_announcement(
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     notification = CTFNotification.objects.create(
         event=event,
@@ -217,7 +217,7 @@ def schedule_notification(
         raise CTFNotFoundError(
             f"Notification {notification_id} not found",
             details={"notification_id": str(notification_id)},
-        )
+        ) from None
 
     notification.scheduled_at = scheduled_at
     notification.status = NotificationStatus.SCHEDULED.value

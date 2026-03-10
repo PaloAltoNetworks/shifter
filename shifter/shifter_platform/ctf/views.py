@@ -77,6 +77,19 @@ def ctf_participant_required(view_func):
 
 
 # -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+
+def _get_client_ip(request):
+    """Extract client IP from request headers."""
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
+# -----------------------------------------------------------------------------
 # Participant Views (CTF Competitors)
 # -----------------------------------------------------------------------------
 
@@ -125,8 +138,29 @@ def participant_dashboard(request: HttpRequest) -> HttpResponse:
 
     Shows event overview, challenge progress, and quick links.
     """
-    # TODO: Implement participant dashboard
-    return render(request, "ctf/participant/dashboard.html", {"placeholder": True})
+    from ctf.services.challenge import get_available_challenges
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.scoring import calculate_score, get_participant_rank
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/dashboard.html", {})
+
+    event = participant.event
+    score = calculate_score(participant.id)
+    rank = get_participant_rank(participant.id)
+    solved_count = participant.solved_challenge_count
+    total_challenges = get_available_challenges(event.id).count()
+
+    context = {
+        "participant": participant,
+        "event": event,
+        "score": score,
+        "rank": rank,
+        "solved_count": solved_count,
+        "total_challenges": total_challenges,
+    }
+    return render(request, "ctf/participant/dashboard.html", context)
 
 
 @login_required
@@ -136,8 +170,19 @@ def participant_event(request: HttpRequest) -> HttpResponse:
 
     Shows current event information and status.
     """
-    # TODO: Implement event detail view
-    return render(request, "ctf/participant/event.html", {"placeholder": True})
+    from ctf.services.participant import get_participant_by_user
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/event.html", {})
+
+    event = participant.event
+
+    context = {
+        "participant": participant,
+        "event": event,
+    }
+    return render(request, "ctf/participant/event.html", context)
 
 
 @login_required
@@ -147,8 +192,51 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
 
     Shows available challenges with solve status.
     """
-    # TODO: Implement challenges list
-    return render(request, "ctf/participant/challenges.html", {"placeholder": True})
+    from collections import defaultdict
+
+    from ctf.services.challenge import get_available_challenges
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.submission import get_participant_submissions
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/challenges.html", {})
+
+    event = participant.event
+    challenges = get_available_challenges(event.id)
+
+    # Apply category filter if provided
+    category_filter = request.GET.get("category")
+    if category_filter:
+        challenges = challenges.filter(category=category_filter)
+
+    # Build set of solved challenge IDs
+    correct_submissions = get_participant_submissions(participant.id).filter(is_correct=True)
+    solved_ids = set(correct_submissions.values_list("challenge_id", flat=True))
+
+    # Annotate challenges with solve status
+    challenge_list = []
+    for challenge in challenges:
+        challenge.is_solved = challenge.id in solved_ids
+        challenge_list.append(challenge)
+
+    # Group by category
+    challenges_by_category = defaultdict(list)
+    for challenge in challenge_list:
+        challenges_by_category[challenge.category].append(challenge)
+
+    from ctf.enums import ChallengeCategory
+
+    context = {
+        "participant": participant,
+        "event": event,
+        "challenges": challenge_list,
+        "challenges_by_category": dict(challenges_by_category),
+        "category_filter": category_filter,
+        "categories": ChallengeCategory,
+        "solved_ids": solved_ids,
+    }
+    return render(request, "ctf/participant/challenges.html", context)
 
 
 @login_required
@@ -159,12 +247,44 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     Args:
         challenge_id: UUID of the challenge.
     """
-    # TODO: Implement challenge detail view
-    return render(
-        request,
-        "ctf/participant/challenge_detail.html",
-        {"placeholder": True, "challenge_id": challenge_id},
-    )
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services.challenge import get_challenge
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.submission import get_participant_submissions
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/challenge_detail.html", {})
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        raise Http404("Challenge not found") from None
+
+    # Validate challenge belongs to participant's event
+    if challenge.event_id != participant.event_id:
+        return HttpResponse("Forbidden", status=403)
+
+    # Get participant's submissions for this challenge
+    submissions = get_participant_submissions(participant.id, challenge_id=challenge_id)
+    is_solved = submissions.filter(is_correct=True).exists()
+    attempt_count = submissions.count()
+    hint_used = submissions.filter(hint_used=True).exists()
+
+    context = {
+        "participant": participant,
+        "challenge": challenge,
+        "event": participant.event,
+        "submissions": submissions,
+        "is_solved": is_solved,
+        "attempt_count": attempt_count,
+        "hint_used": hint_used,
+        "max_attempts": challenge.max_attempts,
+        "attempts_remaining": (challenge.max_attempts - attempt_count) if challenge.max_attempts else None,
+    }
+    return render(request, "ctf/participant/challenge_detail.html", context)
 
 
 @login_required
@@ -174,8 +294,19 @@ def participant_range(request: HttpRequest) -> HttpResponse:
 
     Shows range provisioning status and access URLs.
     """
-    # TODO: Implement range view
-    return render(request, "ctf/participant/range.html", {"placeholder": True})
+    from ctf.services.participant import get_participant_by_user
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/range.html", {})
+
+    context = {
+        "participant": participant,
+        "event": participant.event,
+        "range_instance_id": participant.range_instance_id,
+        "range_status": participant.range_status,
+    }
+    return render(request, "ctf/participant/range.html", context)
 
 
 @login_required
@@ -185,8 +316,24 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
 
     Shows rankings for current event.
     """
-    # TODO: Implement scoreboard view
-    return render(request, "ctf/participant/scoreboard.html", {"placeholder": True})
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.scoring import get_scoreboard, get_team_scoreboard
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/scoreboard.html", {})
+
+    event = participant.event
+
+    rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
+
+    context = {
+        "participant": participant,
+        "event": event,
+        "rankings": rankings,
+        "team_mode": event.team_mode,
+    }
+    return render(request, "ctf/participant/scoreboard.html", context)
 
 
 @login_required
@@ -196,20 +343,80 @@ def participant_team(request: HttpRequest) -> HttpResponse:
 
     Shows team members and team-specific information.
     """
-    # TODO: Implement team view
-    return render(request, "ctf/participant/team.html", {"placeholder": True})
+    from ctf.services.participant import get_participant_by_user
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/team.html", {})
+
+    team = participant.team
+    members = []
+    team_score = 0
+
+    if team:
+        members = list(team.members.select_related("user"))
+        team_score = team.total_score
+
+    context = {
+        "participant": participant,
+        "event": participant.event,
+        "team": team,
+        "members": members,
+        "team_score": team_score,
+    }
+    return render(request, "ctf/participant/team.html", context)
 
 
 @login_required
 @ctf_participant_required
+@require_http_methods(["GET", "POST"])
 def team_join(request: HttpRequest) -> HttpResponse:
     """Join a team using invite code.
 
     GET: Show join form.
     POST: Process join request.
     """
-    # TODO: Implement team join
-    return render(request, "ctf/participant/team_join.html", {"placeholder": True})
+    from django.shortcuts import redirect
+
+    from ctf.models import CTFTeam
+    from ctf.services.participant import get_participant_by_user
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return render(request, "ctf/participant/team_join.html", {})
+
+    event = participant.event
+    error = None
+
+    if request.method == "POST":
+        invite_code = request.POST.get("invite_code", "").strip()
+        if not invite_code:
+            error = "Invite code is required."
+        else:
+            team = CTFTeam.objects.filter(event=event, invite_code=invite_code).first()
+            if not team:
+                error = "Invalid invite code."
+            elif team.is_full:
+                error = "This team is full."
+            elif participant.team_id == team.id:
+                error = "You are already on this team."
+            else:
+                participant.team = team
+                participant.save(update_fields=["team", "updated_at"])
+                logger.info(
+                    "Participant %s joined team %s in event %s",
+                    participant.id,
+                    team.id,
+                    event.id,
+                )
+                return redirect("ctf:participant_team")
+
+    context = {
+        "participant": participant,
+        "event": event,
+        "error": error,
+    }
+    return render(request, "ctf/participant/team_join.html", context)
 
 
 def ctf_help(request: HttpRequest) -> HttpResponse:
@@ -349,7 +556,7 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission - organizers can only access their own events
     if event.created_by_id != request.user.pk:
@@ -412,7 +619,7 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission - organizers can only access their own events
     if event.created_by_id != request.user.pk:
@@ -468,7 +675,7 @@ def admin_challenge_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission
     if event.created_by_id != request.user.pk:
@@ -518,14 +725,14 @@ def admin_challenge_create(request: HttpRequest, event_id: UUID) -> HttpResponse
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission
     if event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
-    # Check if event is modifiable
-    if not event.is_modifiable:
+    # Check if event content is modifiable (challenges can't be changed in active/terminal events)
+    if not event.is_content_modifiable:
         logger.warning(
             "User %s attempted to add challenge to non-modifiable event %s",
             request.user.email,
@@ -575,7 +782,7 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
     try:
         challenge = get_challenge(challenge_id)
     except CTFNotFoundError:
-        raise Http404("Challenge not found")
+        raise Http404("Challenge not found") from None
 
     # Check permission
     if challenge.event.created_by_id != request.user.pk:
@@ -626,7 +833,7 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
     try:
         challenge = get_challenge(challenge_id)
     except CTFNotFoundError:
-        raise Http404("Challenge not found")
+        raise Http404("Challenge not found") from None
 
     event = challenge.event
 
@@ -634,8 +841,8 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
     if event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden: You do not have access to this challenge", status=403)
 
-    # Check if event is modifiable
-    if not event.is_modifiable:
+    # Check if event content is modifiable
+    if not event.is_content_modifiable:
         logger.warning(
             "User %s attempted to edit challenge %s in non-modifiable event %s",
             request.user.email,
@@ -687,7 +894,7 @@ def admin_participant_list(request: HttpRequest, event_id: UUID) -> HttpResponse
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission - organizers can only access their own events
     if event.created_by_id != request.user.pk:
@@ -751,7 +958,7 @@ def admin_participant_import(request: HttpRequest, event_id: UUID) -> HttpRespon
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission
     if event.created_by_id != request.user.pk:
@@ -814,19 +1021,15 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
     try:
         participant = get_participant(participant_id)
     except CTFNotFoundError:
-        raise Http404("Participant not found")
+        raise Http404("Participant not found") from None
 
     # Check permission - organizers can only access their own events' participants
     if participant.event.created_by_id != request.user.pk:
-        return HttpResponse(
-            "Forbidden: You do not have access to this participant", status=403
-        )
+        return HttpResponse("Forbidden: You do not have access to this participant", status=403)
 
     # Get submission history
     submissions = (
-        CTFSubmission.objects.filter(participant=participant)
-        .select_related("challenge")
-        .order_by("-submitted_at")
+        CTFSubmission.objects.filter(participant=participant).select_related("challenge").order_by("-submitted_at")
     )
 
     # Calculate statistics
@@ -869,7 +1072,7 @@ def admin_participant_add(request: HttpRequest, event_id: UUID) -> HttpResponse:
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        raise Http404("Event not found")
+        raise Http404("Event not found") from None
 
     # Check permission
     if event.created_by_id != request.user.pk:
@@ -1031,9 +1234,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
         event_id: UUID of the event.
     """
     # TODO: Implement event detail API
-    return JsonResponse(
-        {"placeholder": True, "event_id": str(event_id), "method": request.method}
-    )
+    return JsonResponse({"placeholder": True, "event_id": str(event_id), "method": request.method})
 
 
 @login_required
@@ -1045,9 +1246,7 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
         event_id: UUID of the event.
     """
     # TODO: Implement challenge list/create API
-    return JsonResponse(
-        {"placeholder": True, "event_id": str(event_id), "method": request.method}
-    )
+    return JsonResponse({"placeholder": True, "event_id": str(event_id), "method": request.method})
 
 
 @login_required
@@ -1059,9 +1258,7 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
         challenge_id: UUID of the challenge.
     """
     # TODO: Implement challenge detail API
-    return JsonResponse(
-        {"placeholder": True, "challenge_id": str(challenge_id), "method": request.method}
-    )
+    return JsonResponse({"placeholder": True, "challenge_id": str(challenge_id), "method": request.method})
 
 
 @login_required
@@ -1072,8 +1269,51 @@ def api_submit_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     Args:
         challenge_id: UUID of the challenge.
     """
-    # TODO: Implement flag submission API
-    return JsonResponse({"placeholder": True, "challenge_id": str(challenge_id)})
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.scoring import calculate_score, get_participant_rank
+    from ctf.services.submission import submit_flag
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    flag = body.get("flag", "").strip()
+    if not flag:
+        return JsonResponse({"error": "Flag is required"}, status=400)
+
+    ip_address = _get_client_ip(request)
+
+    try:
+        submission = submit_flag(participant.id, challenge_id, flag, ip_address=ip_address)
+        score = calculate_score(participant.id)
+        rank = get_participant_rank(participant.id)
+
+        return JsonResponse(
+            {
+                "correct": submission.is_correct,
+                "points_awarded": submission.points_awarded,
+                "attempt_number": submission.attempt_number,
+                "score": score,
+                "rank": rank,
+                "message": "Correct!" if submission.is_correct else "Incorrect flag.",
+            }
+        )
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except CTFRateLimitError as e:
+        return JsonResponse({"error": str(e)}, status=429)
+    except CTFStateError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required
@@ -1084,16 +1324,56 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     Args:
         challenge_id: UUID of the challenge.
     """
-    # TODO: Implement hint usage API
-    return JsonResponse({"placeholder": True, "challenge_id": str(challenge_id)})
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.services.challenge import get_challenge
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.submission import use_hint
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    try:
+        hint_text = use_hint(participant.id, challenge_id)
+        challenge = get_challenge(challenge_id)
+        return JsonResponse(
+            {
+                "hint": hint_text,
+                "penalty": challenge.hint_penalty,
+            }
+        )
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required
 @require_GET
 def api_submissions(request: HttpRequest) -> JsonResponse:
     """API: Get submissions for current user."""
-    # TODO: Implement submissions list API
-    return JsonResponse({"placeholder": True, "submissions": []})
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.submission import get_participant_submissions
+
+    participant = get_participant_by_user(request.user)
+    if not participant:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    submissions = get_participant_submissions(participant.id)
+    data = [
+        {
+            "id": str(s.id),
+            "challenge_id": str(s.challenge_id),
+            "challenge_name": s.challenge.name,
+            "is_correct": s.is_correct,
+            "points_awarded": s.points_awarded,
+            "hint_used": s.hint_used,
+            "attempt_number": s.attempt_number,
+            "submitted_at": s.submitted_at.isoformat() if s.submitted_at else None,
+        }
+        for s in submissions.select_related("challenge")
+    ]
+    return JsonResponse({"submissions": data, "total": len(data)})
 
 
 @login_required
@@ -1152,9 +1432,7 @@ def api_participant_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
         email = body.get("email")
 
         if not name or not email:
-            return JsonResponse(
-                {"error": "name and email are required"}, status=400
-            )
+            return JsonResponse({"error": "name and email are required"}, status=400)
 
         try:
             participant = invite_participant(event_id, email, name)
@@ -1222,19 +1500,23 @@ def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse
 
         try:
             participant = invite_participant(event_id, email, name)
-            imported.append({
-                "id": str(participant.id),
-                "name": participant.name,
-                "email": participant.email,
-            })
+            imported.append(
+                {
+                    "id": str(participant.id),
+                    "name": participant.name,
+                    "email": participant.email,
+                }
+            )
         except CTFValidationError as e:
             errors.append({"index": idx, "email": email, "error": str(e)})
 
-    return JsonResponse({
-        "imported": len(imported),
-        "participants": imported,
-        "errors": errors,
-    })
+    return JsonResponse(
+        {
+            "imported": len(imported),
+            "participants": imported,
+            "errors": errors,
+        }
+    )
 
 
 @login_required
@@ -1267,20 +1549,22 @@ def api_participant_detail(request: HttpRequest, participant_id: UUID) -> JsonRe
         submissions = CTFSubmission.objects.filter(participant=participant)
         correct_submissions = submissions.filter(is_correct=True)
 
-        return JsonResponse({
-            "id": str(participant.id),
-            "name": participant.name,
-            "email": participant.email,
-            "status": participant.status,
-            "team_name": participant.team.name if participant.team else None,
-            "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
-            "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
-            "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
-            "total_score": participant.total_score,
-            "solved_count": correct_submissions.count(),
-            "attempt_count": submissions.count(),
-            "event_id": str(participant.event_id),
-        })
+        return JsonResponse(
+            {
+                "id": str(participant.id),
+                "name": participant.name,
+                "email": participant.email,
+                "status": participant.status,
+                "team_name": participant.team.name if participant.team else None,
+                "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
+                "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
+                "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
+                "total_score": participant.total_score,
+                "solved_count": correct_submissions.count(),
+                "attempt_count": submissions.count(),
+                "event_id": str(participant.event_id),
+            }
+        )
 
     elif request.method == "DELETE":
         try:
@@ -1317,12 +1601,14 @@ def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) ->
 
     try:
         updated = resend_invite(participant_id)
-        return JsonResponse({
-            "success": True,
-            "id": str(updated.id),
-            "invite_token": updated.invite_token,
-            "invite_token_expires": updated.invite_token_expires.isoformat(),
-        })
+        return JsonResponse(
+            {
+                "success": True,
+                "id": str(updated.id),
+                "invite_token": updated.invite_token,
+                "invite_token_expires": updated.invite_token_expires.isoformat(),
+            }
+        )
     except CTFStateError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -1351,8 +1637,24 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement scoreboard API
-    return JsonResponse({"placeholder": True, "event_id": str(event_id), "rankings": []})
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+    from ctf.services.scoring import get_scoreboard, get_team_scoreboard
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
+
+    return JsonResponse(
+        {
+            "event_id": str(event.id),
+            "team_mode": event.team_mode,
+            "rankings": rankings,
+        }
+    )
 
 
 @login_required
@@ -1365,9 +1667,7 @@ def api_notification_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
         event_id: UUID of the event.
     """
     # TODO: Implement notification list/create API
-    return JsonResponse(
-        {"placeholder": True, "event_id": str(event_id), "method": request.method}
-    )
+    return JsonResponse({"placeholder": True, "event_id": str(event_id), "method": request.method})
 
 
 @login_required

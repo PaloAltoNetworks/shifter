@@ -23,9 +23,7 @@ from ctf.enums import (
 from ctf.models import (
     CTFChallenge,
     CTFEvent,
-    CTFNotification,
     CTFParticipant,
-    CTFScheduledTask,
     CTFSubmission,
     CTFTeam,
 )
@@ -50,7 +48,7 @@ def organizer_user(db) -> User:
     user = User.objects.create_user(
         username="organizer@test.com",
         email="organizer@test.com",
-        password="testpass123",
+        password="testpass123",  # noqa: S106  # nosec B106
         first_name="Test",
         last_name="Organizer",
     )
@@ -68,7 +66,7 @@ def participant_user(db) -> User:
     user = User.objects.create_user(
         username="participant@test.com",
         email="participant@test.com",
-        password="testpass123",
+        password="testpass123",  # noqa: S106  # nosec B106
         first_name="Test",
         last_name="Participant",
     )
@@ -86,7 +84,7 @@ def second_participant_user(db) -> User:
     user = User.objects.create_user(
         username="participant2@test.com",
         email="participant2@test.com",
-        password="testpass123",
+        password="testpass123",  # noqa: S106  # nosec B106
         first_name="Second",
         last_name="Participant",
     )
@@ -102,7 +100,7 @@ def standard_user(db) -> User:
     user = User.objects.create_user(
         username="standard@test.com",
         email="standard@test.com",
-        password="testpass123",
+        password="testpass123",  # noqa: S106  # nosec B106
         first_name="Standard",
         last_name="User",
     )
@@ -116,7 +114,7 @@ def admin_user(db) -> User:
     user = User.objects.create_superuser(
         username="admin@test.com",
         email="admin@test.com",
-        password="adminpass123",
+        password="adminpass123",  # noqa: S106  # nosec B106
     )
     return user
 
@@ -370,7 +368,7 @@ def second_organizer_user(db) -> User:
     user = User.objects.create_user(
         username="organizer2@test.com",
         email="organizer2@test.com",
-        password="testpass123",
+        password="testpass123",  # noqa: S106  # nosec B106
         first_name="Second",
         last_name="Organizer",
     )

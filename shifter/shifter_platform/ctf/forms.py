@@ -18,7 +18,7 @@ from django.core.exceptions import ValidationError
 from ctf.models import CTFChallenge, CTFEvent, CTFNotification, CTFParticipant
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import User
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class CTFEventForm(forms.ModelForm):
                 ]
 
         # Add CSS classes for styling
-        for field_name, field in self.fields.items():
+        for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
             field.widget.attrs["class"] = f"{existing_classes} form-control".strip()
 
@@ -96,20 +96,18 @@ class CTFEventForm(forms.ModelForm):
         team_size_limit = cleaned_data.get("team_size_limit")
 
         # Validate event times
-        if event_start and event_end:
-            if event_end <= event_start:
-                self.add_error(
-                    "event_end",
-                    "Event end must be after event start.",
-                )
+        if event_start and event_end and event_end <= event_start:
+            self.add_error(
+                "event_end",
+                "Event end must be after event start.",
+            )
 
         # Validate registration deadline
-        if registration_deadline and event_start:
-            if registration_deadline > event_start:
-                self.add_error(
-                    "registration_deadline",
-                    "Registration deadline must be before event start.",
-                )
+        if registration_deadline and event_start and registration_deadline > event_start:
+            self.add_error(
+                "registration_deadline",
+                "Registration deadline must be before event start.",
+            )
 
         # Validate team settings
         if team_mode:
@@ -185,13 +183,13 @@ class CTFChallengeForm(forms.ModelForm):
             ]
 
         # Flag is required for new challenges
-        if not self.instance.pk:
+        if self.instance._state.adding:
             self.fields["flag"].required = True
         else:
             self.fields["flag"].help_text = "Leave blank to keep existing flag"
 
         # Add CSS classes
-        for field_name, field in self.fields.items():
+        for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
             field.widget.attrs["class"] = f"{existing_classes} form-control".strip()
 
@@ -274,7 +272,7 @@ class CTFParticipantForm(forms.ModelForm):
         self.event = event
 
         # Add CSS classes
-        for field_name, field in self.fields.items():
+        for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
             field.widget.attrs["class"] = f"{existing_classes} form-control".strip()
 
@@ -361,7 +359,7 @@ class CTFNotificationForm(forms.ModelForm):
             ]
 
         # Add CSS classes
-        for field_name, field in self.fields.items():
+        for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
             field.widget.attrs["class"] = f"{existing_classes} form-control".strip()
 

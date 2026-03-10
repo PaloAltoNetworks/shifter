@@ -14,7 +14,6 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import QuerySet
 
-from ctf.enums import EventStatus
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFChallenge, CTFEvent
 
@@ -49,7 +48,7 @@ def hash_flag(flag: str) -> str:
     else:
         # Fallback: SHA256 with salt (less secure than bcrypt)
         salt = secrets.token_hex(16)
-        hash_value = hashlib.sha256(f"{salt}:{flag}".encode("utf-8")).hexdigest()
+        hash_value = hashlib.sha256(f"{salt}:{flag}".encode()).hexdigest()
         return f"sha256:{salt}:{hash_value}"
 
 
@@ -82,7 +81,7 @@ def verify_flag(challenge: CTFChallenge, submitted_flag: str) -> bool:
             logger.error("Invalid hash format for challenge %s", challenge.id)
             return False
         _, salt, expected_hash = parts
-        actual_hash = hashlib.sha256(f"{salt}:{submitted_flag}".encode("utf-8")).hexdigest()
+        actual_hash = hashlib.sha256(f"{salt}:{submitted_flag}".encode()).hexdigest()
         return secrets.compare_digest(actual_hash, expected_hash)
     else:
         logger.error("Unknown hash format for challenge %s", challenge.id)
@@ -114,9 +113,9 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any]) -> CTFChall
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
-    if not event.is_modifiable:
+    if not event.is_content_modifiable:
         raise CTFStateError(
             f"Cannot add challenges to event in {event.status} state",
             details={"event_id": str(event_id), "status": event.status},
@@ -173,9 +172,9 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any]) -> CTFC
         raise CTFNotFoundError(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
-        )
+        ) from None
 
-    if not challenge.event.is_modifiable:
+    if not challenge.event.is_content_modifiable:
         raise CTFStateError(
             f"Cannot modify challenge in event with status {challenge.event.status}",
             details={
@@ -219,9 +218,9 @@ def delete_challenge(challenge_id: UUID) -> None:
         raise CTFNotFoundError(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
-        )
+        ) from None
 
-    if not challenge.event.is_modifiable:
+    if not challenge.event.is_content_modifiable:
         raise CTFStateError(
             f"Cannot delete challenge in event with status {challenge.event.status}",
             details={
@@ -252,7 +251,7 @@ def get_challenge(challenge_id: UUID) -> CTFChallenge:
         raise CTFNotFoundError(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
-        )
+        ) from None
 
 
 def get_available_challenges(event_id: UUID, include_unreleased: bool = False) -> QuerySet[CTFChallenge]:
@@ -265,8 +264,8 @@ def get_available_challenges(event_id: UUID, include_unreleased: bool = False) -
     Returns:
         QuerySet of CTFChallenge instances.
     """
-    from django.utils import timezone
     from django.db.models import Q
+    from django.utils import timezone
 
     qs = CTFChallenge.objects.filter(event_id=event_id)
 

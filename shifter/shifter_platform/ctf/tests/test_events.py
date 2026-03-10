@@ -19,11 +19,10 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
-from ctf.enums import EVENT_MODIFIABLE_STATUSES, EventStatus
+from ctf.enums import EventStatus
 from ctf.models import CTFEvent
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import User
     from django.test import Client
 
 
@@ -177,9 +176,7 @@ class TestEventListView:
         response = authenticated_standard_client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 403
 
-    def test_event_list_shows_organizer_events(
-        self, authenticated_organizer_client: Client, ctf_event, organizer_user
-    ):
+    def test_event_list_shows_organizer_events(self, authenticated_organizer_client: Client, ctf_event, organizer_user):
         """Organizer should see their own events."""
         response = authenticated_organizer_client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 200
@@ -189,9 +186,7 @@ class TestEventListView:
         self, authenticated_organizer_client: Client, ctf_event, ctf_event_draft, organizer_user
     ):
         """Event list should filter by status."""
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_list") + "?status=draft"
-        )
+        response = authenticated_organizer_client.get(reverse("ctf:admin_event_list") + "?status=draft")
         assert response.status_code == 200
         content = response.content.decode()
         assert ctf_event_draft.name in content
@@ -264,9 +259,7 @@ class TestEventCreateView:
             "range_spinup_minutes": 30,
             "team_mode": False,
         }
-        response = authenticated_organizer_client.post(
-            reverse("ctf:admin_event_create"), data=data
-        )
+        response = authenticated_organizer_client.post(reverse("ctf:admin_event_create"), data=data)
         # Should redirect to event detail on success
         assert response.status_code == 302
 
@@ -288,9 +281,7 @@ class TestEventCreateView:
             "range_spinup_minutes": 30,
             "team_mode": False,
         }
-        response = authenticated_organizer_client.post(
-            reverse("ctf:admin_event_create"), data=data
-        )
+        response = authenticated_organizer_client.post(reverse("ctf:admin_event_create"), data=data)
         assert response.status_code == 200  # Re-renders form with errors
         assert "form" in response.context
         assert response.context["form"].errors
@@ -307,23 +298,17 @@ class TestEventDetailView:
 
     def test_detail_view_requires_login(self, client: Client, ctf_event):
         """Detail view should require authentication."""
-        response = client.get(
-            reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk})
-        )
+        response = client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk}))
         assert response.status_code == 302
 
-    def test_detail_view_requires_organizer(
-        self, authenticated_standard_client: Client, ctf_event
-    ):
+    def test_detail_view_requires_organizer(self, authenticated_standard_client: Client, ctf_event):
         """Detail view should require organizer role."""
         response = authenticated_standard_client.get(
             reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk})
         )
         assert response.status_code == 403
 
-    def test_detail_view_shows_event(
-        self, authenticated_organizer_client: Client, ctf_event
-    ):
+    def test_detail_view_shows_event(self, authenticated_organizer_client: Client, ctf_event):
         """Detail view should show event information."""
         response = authenticated_organizer_client.get(
             reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk})
@@ -346,9 +331,7 @@ class TestEventDetailView:
         """Detail view should 404 for nonexistent event."""
         from uuid import uuid4
 
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_detail", kwargs={"event_id": uuid4()})
-        )
+        response = authenticated_organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": uuid4()}))
         assert response.status_code == 404
 
     def test_detail_view_403_for_other_organizer_event(
@@ -381,23 +364,15 @@ class TestEventEditView:
 
     def test_edit_view_requires_login(self, client: Client, ctf_event):
         """Edit view should require authentication."""
-        response = client.get(
-            reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event.pk})
-        )
+        response = client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event.pk}))
         assert response.status_code == 302
 
-    def test_edit_view_requires_organizer(
-        self, authenticated_standard_client: Client, ctf_event
-    ):
+    def test_edit_view_requires_organizer(self, authenticated_standard_client: Client, ctf_event):
         """Edit view should require organizer role."""
-        response = authenticated_standard_client.get(
-            reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event.pk})
-        )
+        response = authenticated_standard_client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event.pk}))
         assert response.status_code == 403
 
-    def test_edit_view_renders_form_with_data(
-        self, authenticated_organizer_client: Client, ctf_event_draft
-    ):
+    def test_edit_view_renders_form_with_data(self, authenticated_organizer_client: Client, ctf_event_draft):
         """Edit view should render form with existing data."""
         response = authenticated_organizer_client.get(
             reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event_draft.pk})
@@ -406,9 +381,7 @@ class TestEventEditView:
         assert "form" in response.context
         assert response.context["form"].instance == ctf_event_draft
 
-    def test_edit_event_success(
-        self, authenticated_organizer_client: Client, ctf_event_draft
-    ):
+    def test_edit_event_success(self, authenticated_organizer_client: Client, ctf_event_draft):
         """Editing a draft event should succeed."""
         data = {
             "name": "Updated Event Name",
@@ -430,9 +403,7 @@ class TestEventEditView:
         ctf_event_draft.refresh_from_db()
         assert ctf_event_draft.name == "Updated Event Name"
 
-    def test_edit_completed_event_blocked(
-        self, authenticated_organizer_client: Client, organizer_user, db
-    ):
+    def test_edit_completed_event_blocked(self, authenticated_organizer_client: Client, organizer_user, db):
         """Editing a completed event should be blocked."""
         completed_event = CTFEvent.objects.create(
             name="Completed Event",
@@ -459,9 +430,7 @@ class TestEventEditView:
 class TestEventStatusTransitions:
     """Test event status transitions via API."""
 
-    def test_schedule_draft_event(
-        self, authenticated_organizer_client: Client, ctf_event_draft
-    ):
+    def test_schedule_draft_event(self, authenticated_organizer_client: Client, ctf_event_draft):
         """Should be able to schedule a draft event."""
         from ctf.services import schedule_event
 
@@ -470,9 +439,7 @@ class TestEventStatusTransitions:
         ctf_event_draft.refresh_from_db()
         assert ctf_event_draft.status == EventStatus.SCHEDULED.value
 
-    def test_activate_scheduled_event(
-        self, authenticated_organizer_client: Client, ctf_event
-    ):
+    def test_activate_scheduled_event(self, authenticated_organizer_client: Client, ctf_event):
         """Should be able to activate a scheduled event."""
         from ctf.services import activate_event
 
@@ -481,9 +448,7 @@ class TestEventStatusTransitions:
         ctf_event.refresh_from_db()
         assert ctf_event.status == EventStatus.ACTIVE.value
 
-    def test_complete_active_event(
-        self, authenticated_organizer_client: Client, ctf_event_active
-    ):
+    def test_complete_active_event(self, authenticated_organizer_client: Client, ctf_event_active):
         """Should be able to complete an active event."""
         from ctf.services import complete_event
 
@@ -492,9 +457,7 @@ class TestEventStatusTransitions:
         ctf_event_active.refresh_from_db()
         assert ctf_event_active.status == EventStatus.COMPLETED.value
 
-    def test_cancel_draft_event(
-        self, authenticated_organizer_client: Client, ctf_event_draft
-    ):
+    def test_cancel_draft_event(self, authenticated_organizer_client: Client, ctf_event_draft):
         """Should be able to cancel a draft event."""
         from ctf.services import cancel_event
 
@@ -503,9 +466,7 @@ class TestEventStatusTransitions:
         ctf_event_draft.refresh_from_db()
         assert ctf_event_draft.status == EventStatus.CANCELLED.value
 
-    def test_cancel_scheduled_event(
-        self, authenticated_organizer_client: Client, ctf_event
-    ):
+    def test_cancel_scheduled_event(self, authenticated_organizer_client: Client, ctf_event):
         """Should be able to cancel a scheduled event."""
         from ctf.services import cancel_event
 
@@ -514,9 +475,7 @@ class TestEventStatusTransitions:
         ctf_event.refresh_from_db()
         assert ctf_event.status == EventStatus.CANCELLED.value
 
-    def test_cannot_activate_draft_event(
-        self, authenticated_organizer_client: Client, ctf_event_draft
-    ):
+    def test_cannot_activate_draft_event(self, authenticated_organizer_client: Client, ctf_event_draft):
         """Should not be able to activate a draft event directly."""
         from ctf.services import activate_event
 
@@ -525,18 +484,14 @@ class TestEventStatusTransitions:
         ctf_event_draft.refresh_from_db()
         assert ctf_event_draft.status == EventStatus.DRAFT.value
 
-    def test_cannot_schedule_active_event(
-        self, authenticated_organizer_client: Client, ctf_event_active
-    ):
+    def test_cannot_schedule_active_event(self, authenticated_organizer_client: Client, ctf_event_active):
         """Should not be able to schedule an active event."""
         from ctf.services import schedule_event
 
         result = schedule_event(ctf_event_active)
         assert result is False
 
-    def test_cannot_modify_completed_event(
-        self, authenticated_organizer_client: Client, organizer_user, db
-    ):
+    def test_cannot_modify_completed_event(self, authenticated_organizer_client: Client, organizer_user, db):
         """Completed events should not be modifiable."""
         completed_event = CTFEvent.objects.create(
             name="Completed",
@@ -583,9 +538,7 @@ class TestEventServices:
         assert ctf_event in events
         assert ctf_event_draft in events
 
-    def test_get_organizer_events_excludes_others(
-        self, organizer_user, second_organizer_user, ctf_event, db
-    ):
+    def test_get_organizer_events_excludes_others(self, organizer_user, second_organizer_user, ctf_event, db):
         """get_organizer_events should exclude other organizers' events."""
         from ctf.services import get_organizer_events
 

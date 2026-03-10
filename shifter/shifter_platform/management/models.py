@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import models
 
 if TYPE_CHECKING:
-    from ctf.models import CTFEvent
+    pass
 
 
 class UserProfile(models.Model):

@@ -1,7 +1,155 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF{% endblock %}
+{% block ctf_title %}Scoreboard{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">Scoreboard</h1>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-btn" onclick="refreshScoreboard()">
+            Auto-Refresh: Off
+        </button>
+    </div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            {% if scoreboard %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="scoreboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Name</th>
+                            {% if event.team_mode %}
+                            <th>Team</th>
+                            {% endif %}
+                            <th>Score</th>
+                            <th>Solves</th>
+                            <th>Last Solve</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scoreboard-body">
+                        {% for entry in scoreboard %}
+                        <tr {% if entry.participant_id == participant_id %}class="table-active"{% endif %}>
+                            <td>
+                                {% if entry.rank == 1 %}
+                                <strong>1</strong>
+                                {% elif entry.rank == 2 %}
+                                <strong>2</strong>
+                                {% elif entry.rank == 3 %}
+                                <strong>3</strong>
+                                {% else %}
+                                {{ entry.rank }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ entry.name }}</strong>
+                                {% if entry.participant_id == participant_id %}
+                                <span class="badge bg-primary ms-1">You</span>
+                                {% endif %}
+                            </td>
+                            {% if event.team_mode %}
+                            <td>{{ entry.team_name|default:"-" }}</td>
+                            {% endif %}
+                            <td><strong>{{ entry.score }}</strong></td>
+                            <td>{{ entry.solves }}</td>
+                            <td>{{ entry.last_solve|default:"-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <p class="mb-0">No scores yet. Be the first to solve a challenge!</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var autoRefreshInterval = null;
+
+function refreshScoreboard() {
+    var btn = document.getElementById('refresh-btn');
+
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+        btn.textContent = 'Auto-Refresh: Off';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+        return;
+    }
+
+    btn.textContent = 'Auto-Refresh: On';
+    btn.classList.remove('btn-outline-primary');
+    btn.classList.add('btn-primary');
+
+    autoRefreshInterval = setInterval(function() {
+        fetchScoreboard();
+    }, 15000);
+
+    fetchScoreboard();
+}
+
+function fetchScoreboard() {
+    fetch("{% url 'ctf:api_scoreboard' event_id=event.pk %}")
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.scoreboard) {
+            updateScoreboardTable(data.scoreboard);
+        }
+    })
+    .catch(function(err) {
+        console.error('Failed to refresh scoreboard:', err);
+    });
+}
+
+function updateScoreboardTable(scoreboard) {
+    var tbody = document.getElementById('scoreboard-body');
+    if (!tbody) return;
+
+    var participantId = "{{ participant_id }}";
+    var teamMode = {{ event.team_mode|yesno:"true,false" }};
+    var html = '';
+
+    for (var i = 0; i < scoreboard.length; i++) {
+        var entry = scoreboard[i];
+        var isCurrentUser = (String(entry.participant_id) === String(participantId));
+        var rowClass = isCurrentUser ? ' class="table-active"' : '';
+
+        html += '<tr' + rowClass + '>';
+        html += '<td>';
+        if (entry.rank <= 3) {
+            html += '<strong>' + entry.rank + '</strong>';
+        } else {
+            html += entry.rank;
+        }
+        html += '</td>';
+        html += '<td><strong>' + escapeHtml(entry.name) + '</strong>';
+        if (isCurrentUser) {
+            html += ' <span class="badge bg-primary ms-1">You</span>';
+        }
+        html += '</td>';
+        if (teamMode) {
+            html += '<td>' + escapeHtml(entry.team_name || '-') + '</td>';
+        }
+        html += '<td><strong>' + entry.score + '</strong></td>';
+        html += '<td>' + entry.solves + '</td>';
+        html += '<td>' + (entry.last_solve || '-') + '</td>';
+        html += '</tr>';
+    }
+
+    tbody.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+</script>
 {% endblock %}

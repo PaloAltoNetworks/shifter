@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import TYPE_CHECKING
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, override_settings
@@ -21,7 +22,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ctf.enums import EventStatus
-from ctf.models import CTFEvent, CTFParticipant
+from ctf.models import CTFEvent
 from management.models import UserProfile
 
 if TYPE_CHECKING:
@@ -59,7 +60,7 @@ def standard_profile(db) -> UserProfile:
     user = User.objects.create_user(
         username="standard@test.com",
         email="standard@test.com",
-        password="testpass123",
+        password="testpass123",  # noqa: S106  # nosec B106
     )
     profile, _ = UserProfile.objects.get_or_create(user=user)
     profile.user_type = "standard"
@@ -92,7 +93,7 @@ class TestOIDCBackendCTFUserType:
         user = User.objects.create_user(
             username="newctf@test.com",
             email="newctf@test.com",
-            password="testpass123",
+            password="testpass123",  # noqa: S106  # nosec B106
         )
         claims = {
             "sub": "cognito-sub-123",
@@ -241,7 +242,7 @@ class TestDashboardRouting:
         user = User.objects.create_user(
             username="noprofile@test.com",
             email="noprofile@test.com",
-            password="testpass123",
+            password="testpass123",  # noqa: S106  # nosec B106
         )
         client.force_login(user)
         response = client.get(reverse("dashboard_router"))
@@ -311,16 +312,12 @@ class TestCTFLoginView:
 
     def test_login_page_with_event_param(self, client, ctf_event):
         """CTF login page should accept event_id query param."""
-        response = client.get(
-            reverse("ctf:ctf_login") + f"?event={ctf_event.id}"
-        )
+        response = client.get(reverse("ctf:ctf_login") + f"?event={ctf_event.id}")
         assert response.status_code == 200
 
     def test_login_page_with_invite_token(self, client, ctf_participant_invited):
         """CTF login page should accept invite token query param."""
-        response = client.get(
-            reverse("ctf:ctf_login") + f"?token={ctf_participant_invited.invite_token}"
-        )
+        response = client.get(reverse("ctf:ctf_login") + f"?token={ctf_participant_invited.invite_token}")
         assert response.status_code == 200
 
     @override_settings(DEBUG=True)

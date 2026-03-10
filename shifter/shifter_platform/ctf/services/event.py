@@ -11,9 +11,8 @@ from uuid import UUID
 
 from django.db import transaction
 from django.db.models import QuerySet
-from django.utils import timezone
 
-from ctf.enums import EVENT_MODIFIABLE_STATUSES, EventStatus
+from ctf.enums import EventStatus
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFEvent
 
@@ -100,7 +99,7 @@ def update_event(event_id: UUID, event_data: dict[str, Any]) -> CTFEvent:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     # Check if event is modifiable
     if not event.is_modifiable:
@@ -120,9 +119,7 @@ def update_event(event_id: UUID, event_data: dict[str, Any]) -> CTFEvent:
 
     with transaction.atomic():
         # Track if we need to reschedule tasks
-        schedule_changed = (
-            "event_start" in event_data and event_data["event_start"] != event.event_start
-        ) or (
+        schedule_changed = ("event_start" in event_data and event_data["event_start"] != event.event_start) or (
             "event_end" in event_data and event_data["event_end"] != event.event_end
         )
 
@@ -157,7 +154,7 @@ def delete_event(event_id: UUID) -> None:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     with transaction.atomic():
         # Cancel any scheduled tasks
@@ -187,7 +184,7 @@ def get_event(event_id: UUID) -> CTFEvent:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
 
 def list_events_for_organizer(user: User) -> QuerySet[CTFEvent]:
@@ -387,14 +384,10 @@ def get_event_stats(event: CTFEvent) -> dict:
                 ParticipantStatus.COMPLETED.value,
             ]
         ).count(),
-        "invited_count": event.participants.filter(
-            status=ParticipantStatus.INVITED.value
-        ).count(),
+        "invited_count": event.participants.filter(status=ParticipantStatus.INVITED.value).count(),
         "challenge_count": event.challenges.count(),
         "team_count": event.teams.count() if event.team_mode else 0,
-        "total_submissions": CTFSubmission.objects.filter(
-            participant__event=event
-        ).count(),
+        "total_submissions": CTFSubmission.objects.filter(participant__event=event).count(),
         "correct_submissions": CTFSubmission.objects.filter(
             participant__event=event,
             is_correct=True,
@@ -484,8 +477,8 @@ def _cancel_event_tasks(event: CTFEvent) -> None:
     Args:
         event: The CTFEvent to cancel tasks for.
     """
-    from ctf.models import CTFScheduledTask
     from ctf.enums import ScheduledTaskStatus
+    from ctf.models import CTFScheduledTask
 
     pending_tasks = CTFScheduledTask.objects.filter(
         event=event,

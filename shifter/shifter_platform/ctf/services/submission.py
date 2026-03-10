@@ -11,7 +11,6 @@ from uuid import UUID
 
 from django.db import transaction
 from django.db.models import QuerySet
-from django.utils import timezone
 
 from ctf.enums import EventStatus
 from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
@@ -60,7 +59,7 @@ def submit_flag(
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     try:
         challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
@@ -68,7 +67,7 @@ def submit_flag(
         raise CTFNotFoundError(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
-        )
+        ) from None
 
     # Validate event state
     if challenge.event_id != participant.event_id:
@@ -211,12 +210,12 @@ def use_hint(participant_id: UUID, challenge_id: UUID) -> str:
     )
 
     try:
-        participant = CTFParticipant.objects.get(pk=participant_id)
+        CTFParticipant.objects.get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     try:
         challenge = CTFChallenge.objects.get(pk=challenge_id)
@@ -224,7 +223,7 @@ def use_hint(participant_id: UUID, challenge_id: UUID) -> str:
         raise CTFNotFoundError(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
-        )
+        ) from None
 
     if not challenge.hint:
         raise CTFValidationError(
@@ -275,9 +274,7 @@ def get_challenge_submissions(challenge_id: UUID) -> QuerySet[CTFSubmission]:
         QuerySet of CTFSubmission instances.
     """
     return (
-        CTFSubmission.objects.filter(challenge_id=challenge_id)
-        .select_related("participant")
-        .order_by("-submitted_at")
+        CTFSubmission.objects.filter(challenge_id=challenge_id).select_related("participant").order_by("-submitted_at")
     )
 
 

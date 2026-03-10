@@ -36,12 +36,12 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
     logger.info("Provisioning range for participant %s", participant_id)
 
     try:
-        participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
+        CTFParticipant.objects.select_related("event").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     # TODO: Implement actual range provisioning via CMS
     # This will call cms.services.create_range() with appropriate RequestSpec
@@ -77,7 +77,7 @@ def provision_event_ranges(event_id: UUID) -> dict[str, Any]:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     participants = CTFParticipant.objects.filter(
         event=event,
@@ -120,7 +120,7 @@ def get_range_status(participant_id: UUID) -> dict[str, Any]:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     if not participant.range_instance_id:
         return {
@@ -162,7 +162,7 @@ def get_range_access_url(
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
-        )
+        ) from None
 
     if not participant.range_instance_id:
         raise CTFRangeError(
@@ -208,7 +208,7 @@ def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:
         raise CTFNotFoundError(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
-        )
+        ) from None
 
     participants = CTFParticipant.objects.filter(
         event=event,

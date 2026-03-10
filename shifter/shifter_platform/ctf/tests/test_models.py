@@ -21,7 +21,6 @@ from ctf.enums import (
 from ctf.models import (
     CTFChallenge,
     CTFEvent,
-    CTFNotification,
     CTFParticipant,
     CTFScheduledTask,
     CTFSubmission,
@@ -29,11 +28,8 @@ from ctf.models import (
 )
 from ctf.tests.factories import (
     create_challenge_model_data,
-    create_event_data,
-    create_participant_data,
     create_submission_data,
 )
-
 
 # -----------------------------------------------------------------------------
 # CTFEvent Model Tests
@@ -88,7 +84,7 @@ class TestCTFEventModel:
 
     def test_event_duration_hours(self, ctf_event):
         """Test duration_hours calculation."""
-        assert ctf_event.duration_hours == 8.0
+        assert ctf_event.duration_hours == pytest.approx(8.0)
 
     def test_event_participant_count(self, ctf_event, ctf_participant):
         """Test participant_count property."""
@@ -233,9 +229,9 @@ class TestCTFChallengeModel:
 
     def test_challenge_unique_name_per_event(self, ctf_event, ctf_challenge):
         """Test unique constraint on challenge name per event."""
-        from django.db import IntegrityError
+        from django.core.exceptions import ValidationError
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(ValidationError):
             CTFChallenge.objects.create(
                 event=ctf_event,
                 name=ctf_challenge.name,  # Same name
@@ -330,9 +326,9 @@ class TestCTFTeamModel:
 
     def test_team_unique_name_per_event(self, ctf_event_team, ctf_team):
         """Test unique constraint on team name per event."""
-        from django.db import IntegrityError
+        from django.core.exceptions import ValidationError
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(ValidationError):
             CTFTeam.objects.create(
                 event=ctf_event_team,
                 name=ctf_team.name,  # Same name
@@ -392,9 +388,7 @@ class TestCTFParticipantModel:
         """Test total_score property."""
         assert ctf_participant.total_score == 100
 
-    def test_participant_solved_challenge_count(
-        self, ctf_participant, ctf_challenge, ctf_submission_correct
-    ):
+    def test_participant_solved_challenge_count(self, ctf_participant, ctf_challenge, ctf_submission_correct):
         """Test solved_challenge_count property."""
         assert ctf_participant.solved_challenge_count == 1
 
@@ -413,9 +407,9 @@ class TestCTFParticipantModel:
 
     def test_participant_unique_email_per_event(self, ctf_event, ctf_participant):
         """Test unique constraint on email per event."""
-        from django.db import IntegrityError
+        from django.core.exceptions import ValidationError
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(ValidationError):
             CTFParticipant.objects.create(
                 event=ctf_event,
                 email=ctf_participant.email,  # Same email
@@ -457,9 +451,7 @@ class TestCTFSubmissionModel:
         assert "Test Challenge" in str(ctf_submission_correct)
         assert "correct" in str(ctf_submission_correct)
 
-    def test_submission_validation_mismatched_event(
-        self, ctf_event, ctf_event_draft, ctf_participant, organizer_user
-    ):
+    def test_submission_validation_mismatched_event(self, ctf_event, ctf_event_draft, ctf_participant, organizer_user):
         """Test validation rejects challenge from different event."""
         other_challenge = CTFChallenge.objects.create(
             event=ctf_event_draft,  # Different event

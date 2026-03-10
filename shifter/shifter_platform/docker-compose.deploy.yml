@@ -1,0 +1,51 @@
+# Production override — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d
+#
+# Disables LocalStack, removes bind mounts, sets production env vars.
+# Requires a .env file with production values (see .env.deploy.example).
+
+services:
+  localstack:
+    profiles: ["dev-only"]
+
+  db:
+    ports: !override []
+
+  redis:
+    ports: !override []
+
+  web:
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: ${DOMAIN_NAME}
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://${DOMAIN_NAME}
+      SITE_URL: https://${DOMAIN_NAME}
+      AWS_ENDPOINT_URL: ""
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-}
+      OIDC_RP_CLIENT_ID: ${OIDC_RP_CLIENT_ID:-}
+      OIDC_RP_CLIENT_SECRET: ${OIDC_RP_CLIENT_SECRET:-}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_AUTH_DOMAIN: ${OIDC_AUTH_DOMAIN:-}
+    depends_on: !override
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes: !override
+      - /app/.venv
+
+  celery-worker:
+    environment:
+      DJANGO_DEBUG: "false"
+      AWS_ENDPOINT_URL: ""
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-}
+    volumes: !override
+      - /app/.venv

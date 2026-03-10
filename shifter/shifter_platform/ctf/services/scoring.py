@@ -16,7 +16,7 @@ from ctf.enums import ParticipantStatus
 from ctf.models import CTFParticipant, CTFSubmission, CTFTeam
 
 if TYPE_CHECKING:
-    from django.db.models import QuerySet
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -96,15 +96,17 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
         if p.total_score != last_score or p.last_solve_time != last_time:
             current_rank = i + 1
 
-        scoreboard.append({
-            "rank": current_rank,
-            "participant_id": str(p.id),
-            "name": p.name,
-            "team_name": p.team.name if p.team else None,
-            "score": p.total_score,
-            "solve_count": p.solve_count,
-            "last_solve": p.last_solve_time.isoformat() if p.last_solve_time else None,
-        })
+        scoreboard.append(
+            {
+                "rank": current_rank,
+                "participant_id": str(p.id),
+                "name": p.name,
+                "team_name": p.team.name if p.team else None,
+                "score": p.total_score,
+                "solve_count": p.solve_count,
+                "last_solve": p.last_solve_time.isoformat() if p.last_solve_time else None,
+            }
+        )
 
         last_score = p.total_score
         last_time = p.last_solve_time
@@ -163,15 +165,17 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
         if t.total_score != last_score or t.last_solve_time != last_time:
             current_rank = i + 1
 
-        scoreboard.append({
-            "rank": current_rank,
-            "team_id": str(t.id),
-            "name": t.name,
-            "score": t.total_score,
-            "solve_count": t.solve_count,
-            "member_count": t.member_count,
-            "last_solve": t.last_solve_time.isoformat() if t.last_solve_time else None,
-        })
+        scoreboard.append(
+            {
+                "rank": current_rank,
+                "team_id": str(t.id),
+                "name": t.name,
+                "score": t.total_score,
+                "solve_count": t.solve_count,
+                "member_count": t.member_count,
+                "last_solve": t.last_solve_time.isoformat() if t.last_solve_time else None,
+            }
+        )
 
         last_score = t.total_score
         last_time = t.last_solve_time
@@ -231,11 +235,11 @@ def get_challenge_statistics(challenge_id: UUID) -> dict[str, Any]:
         "first_blood": {
             "participant_name": first_blood.participant.name,
             "time": first_blood.submitted_at.isoformat(),
-        } if first_blood else None,
+        }
+        if first_blood
+        else None,
         "solve_rate": (
-            correct.count() / submissions.values("participant").distinct().count()
-            if submissions.exists()
-            else 0
+            correct.count() / submissions.values("participant").distinct().count() if submissions.exists() else 0
         ),
     }
 
@@ -269,7 +273,7 @@ def get_event_statistics(event_id: UUID) -> dict[str, Any]:
         "challenge_count": challenges.count(),
         "total_submissions": submissions.count(),
         "correct_submissions": submissions.filter(is_correct=True).count(),
-        "total_points_awarded": submissions.filter(is_correct=True).aggregate(
-            total=Coalesce(Sum("points_awarded"), 0)
-        )["total"],
+        "total_points_awarded": submissions.filter(is_correct=True).aggregate(total=Coalesce(Sum("points_awarded"), 0))[
+            "total"
+        ],
     }

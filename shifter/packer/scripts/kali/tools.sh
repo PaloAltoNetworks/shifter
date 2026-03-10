@@ -4,6 +4,13 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Wait for any background apt/dpkg processes to finish
+echo "=== Waiting for dpkg lock ==="
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  echo "Waiting for dpkg lock to be released..."
+  sleep 5
+done
+
 echo "=== Installing Kali metapackage (this takes a while) ==="
 apt-get install -y kali-linux-headless
 

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
 
+from risk_register.models import AuditLog
+from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE
 
 from .models import ActivityLog, UserProfile
@@ -22,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 def log_activity(action: str, user: User | None, **metadata: Any) -> None:
     """Log an activity for audit trail.
+
+    DEPRECATED: Use risk_register.services.audit_log() instead.
+    This function is retained for backward compatibility only.
 
     Args:
         action: Action identifier (e.g., "range_launched", "agent_uploaded")
@@ -79,13 +84,14 @@ def get_user_profile(user: User) -> UserProfile:
         raise
 
 
-def mark_user_deleted(user: User) -> None:
+def mark_user_deleted(user: User, admin_user: User | None = None) -> None:
     """Soft delete a user by setting deleted_at timestamp.
 
     Creates profile if it doesn't exist.
 
     Args:
         user: The user to mark as deleted
+        admin_user: The admin user performing the deletion (for audit)
 
     Raises:
         TypeError: If user is None
@@ -99,6 +105,17 @@ def mark_user_deleted(user: User) -> None:
     try:
         profile.deleted_at = timezone.now()
         profile.save(update_fields=["deleted_at"])
+
+        # Audit log user deletion
+        audit_log(
+            entity_type=AuditLog.EntityType.USER,
+            entity_id=user.id,
+            action=AuditLog.Action.DELETE,
+            actor_type=AuditLog.ActorType.USER if admin_user else AuditLog.ActorType.SYSTEM,
+            actor_id=admin_user.id if admin_user else None,
+            previous_state={"email": user.email},
+        )
+
         logger.debug("Marked user %s as deleted", user.email)
     except Exception:
         logger.error("Failed to mark user %s as deleted", user.email)

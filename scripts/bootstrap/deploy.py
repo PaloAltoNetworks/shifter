@@ -885,6 +885,9 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
 
+    # Set AWS_PROFILE for Terraform (only affects this process and its children)
+    os.environ["AWS_PROFILE"] = profile
+
     components = [
         ("core", "ECR repositories"),
         ("range", "Range VPC + Pulumi state"),

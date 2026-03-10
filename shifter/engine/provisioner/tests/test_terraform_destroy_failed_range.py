@@ -33,17 +33,19 @@ class TestRunTerraformDestroySkipsOnlyDestroyed:
 
     @patch("main.mark_range_instances_destroyed")
     @patch("main.publish_destroyed")
+    @patch("main._build_range_terraform_variables")
     @patch("main.range_terraform_runner")
     @patch("main.remove_ngfw_subnets")
     @patch("main.get_range_data_by_request_id")
     def test_does_not_skip_failed_status(
-        self, mock_get_data, mock_remove_ngfw, mock_tf_runner, mock_publish, mock_mark
+        self, mock_get_data, mock_remove_ngfw, mock_tf_runner, mock_build_vars, mock_publish, mock_mark
     ):
         """Failed ranges should NOT be skipped - they may have orphaned resources."""
         from main import _run_terraform_destroy
 
         mock_get_data.return_value = {"status": "failed"}
         mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
+        mock_build_vars.return_value = {}
 
         _run_terraform_destroy("req-1", 80, 20, {})
 
@@ -52,19 +54,61 @@ class TestRunTerraformDestroySkipsOnlyDestroyed:
 
     @patch("main.mark_range_instances_destroyed")
     @patch("main.publish_destroyed")
+    @patch("main._build_range_terraform_variables")
     @patch("main.range_terraform_runner")
     @patch("main.remove_ngfw_subnets")
     @patch("main.get_range_data_by_request_id")
-    def test_proceeds_for_ready_status(self, mock_get_data, mock_remove_ngfw, mock_tf_runner, mock_publish, mock_mark):
+    def test_proceeds_for_ready_status(
+        self,
+        mock_get_data,
+        mock_remove_ngfw,
+        mock_tf_runner,
+        mock_build_vars,
+        mock_publish,
+        mock_mark,
+    ):
         """Ready (active) ranges should proceed with destroy."""
         from main import _run_terraform_destroy
 
         mock_get_data.return_value = {"status": "ready"}
         mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
+        mock_build_vars.return_value = {}
 
         _run_terraform_destroy("req-1", 80, 20, {})
 
         mock_tf_runner.destroy_range.assert_called_once()
+
+    @patch("main.publish_destroyed")
+    @patch("main._build_range_terraform_variables")
+    @patch("main.mark_range_instances_destroyed")
+    @patch("main.range_terraform_runner")
+    @patch("main.remove_ngfw_subnets")
+    @patch("main.get_range_data_by_request_id")
+    def test_destroy_passes_variables_to_destroy_range(
+        self,
+        mock_get_data,
+        mock_remove_ngfw,
+        mock_tf_runner,
+        mock_mark,
+        mock_build_vars,
+        mock_publish,
+    ):
+        """_run_terraform_destroy must pass variables to destroy_range."""
+        from main import _run_terraform_destroy
+
+        mock_get_data.return_value = {"status": "ready"}
+        mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
+        fake_vars = {"range_id": 80, "user_id": 20, "request_uuid": "req-1", "vpc_id": "vpc-123"}
+        mock_build_vars.return_value = fake_vars
+        range_spec = {"subnets": []}
+
+        _run_terraform_destroy("req-1", 80, 20, range_spec)
+
+        mock_tf_runner.destroy_range.assert_called_once_with(
+            "req-1",
+            mock_tf_runner.RANGE_MODULE_PATH,
+            variables=fake_vars,
+        )
 
 
 class TestAutoCleanupPassesVariables:

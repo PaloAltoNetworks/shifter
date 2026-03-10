@@ -777,6 +777,63 @@ provider "aws" {{
     # Update terraform_remote_state bucket references in portal/main.tf
     _update_remote_state_references(env, bucket, region, dry_run)
 
+    # Update global module backend configs and hardcoded bucket references
+    _update_global_backend_configs(env, bucket, table, region, dry_run)
+
+
+def _update_global_backend_configs(env: str, bucket: str, table: str, region: str, dry_run: bool = False) -> None:
+    """Update .tfbackend files and hardcoded bucket refs under global/."""
+    repo_root = get_repo_root()
+    global_dir = repo_root / "platform" / "terraform" / "global"
+
+    if not global_dir.exists():
+        return
+
+    subheader("Update Global Module Backend Configs")
+    print("Scanning global/ for .tfbackend files and hardcoded bucket references")
+    print("that need to match the new state backend.\n")
+
+    updated_files = []
+
+    # Pattern to match old shifter bucket names with UUIDs
+    bucket_pattern = re.compile(r"shifter-(?:\w+-)?infra-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+    table_pattern = re.compile(r"shifter-(?:\w+-)?terraform-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+    for tf_file in sorted(global_dir.rglob(f"{env}.s3.tfbackend")):
+        content = tf_file.read_text()
+        new_content = bucket_pattern.sub(bucket, content)
+        new_content = table_pattern.sub(table, new_content)
+        if new_content != content:
+            rel_path = tf_file.relative_to(repo_root)
+            updated_files.append((tf_file, rel_path, new_content))
+
+    for tf_file in sorted(global_dir.rglob("*.tf")):
+        content = tf_file.read_text()
+        new_content = bucket_pattern.sub(bucket, content)
+        if new_content != content:
+            rel_path = tf_file.relative_to(repo_root)
+            updated_files.append((tf_file, rel_path, new_content))
+
+    if not updated_files:
+        info("No global backend configs need updating")
+        return
+
+    for _, rel_path, _ in updated_files:
+        info(f"  Will update: {rel_path}")
+
+    if not dry_run:
+        if confirm(f"Update {len(updated_files)} global backend config(s)?"):
+            for tf_file, rel_path, new_content in updated_files:
+                try:
+                    tf_file.write_text(new_content)
+                    success(f"Updated {rel_path}")
+                except Exception as e:
+                    error(f"Failed to update {rel_path}: {e}")
+        else:
+            warn("Skipping global backend updates - you'll need to update them manually")
+    else:
+        info(f"[DRY-RUN] Would update {len(updated_files)} file(s)")
+
 
 def _update_remote_state_references(env: str, bucket: str, region: str, dry_run: bool = False) -> None:
     """Update terraform_remote_state bucket references in portal/main.tf."""
@@ -827,6 +884,9 @@ def _update_remote_state_references(env: str, bucket: str, region: str, dry_run:
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
+
+    # Set AWS_PROFILE for Terraform (only affects this process and its children)
+    os.environ["AWS_PROFILE"] = profile
 
     components = [
         ("core", "ECR repositories"),

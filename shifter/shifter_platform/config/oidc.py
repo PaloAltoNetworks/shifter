@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
 from management.services import update_cognito_sub
+from risk_register.models import AuditLog
+from risk_register.services import audit_auth_event
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +100,57 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         """Create user and populate cognito_sub from claims."""
         user = super().create_user(claims)
         self._update_cognito_sub(user, claims)
+
+        # Audit log: new user created via OIDC
+        cognito_sub = claims.get("sub", "")
+        audit_auth_event(
+            action=AuditLog.Action.CREATE,
+            user_id=user.id,
+            email=user.email,
+            cognito_sub=cognito_sub,
+            context="User created via OIDC first login",
+        )
+
         return user
 
     def update_user(self, user, claims):
         """Update user and ensure cognito_sub is set."""
         user = super().update_user(user, claims)
         self._update_cognito_sub(user, claims)
+        return user
+
+    def authenticate(self, request, **kwargs):
+        """Authenticate and log the event."""
+        user = super().authenticate(request, **kwargs)
+
+        # Get request context for audit logging
+        source_ip = None
+        user_agent = ""
+        if request:
+            xff = request.META.get("HTTP_X_FORWARDED_FOR")
+            source_ip = xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR")
+            user_agent = request.META.get("HTTP_USER_AGENT", "")[:500]
+
+        if user:
+            # Successful authentication
+            audit_auth_event(
+                action=AuditLog.Action.LOGIN,
+                user_id=user.id,
+                email=user.email,
+                cognito_sub=(getattr(user, "userprofile", None) and getattr(user.userprofile, "cognito_sub", "")) or "",
+                source_ip=source_ip,
+                user_agent=user_agent,
+            )
+        else:
+            # Failed authentication - log without user details
+            # Note: We can't get email here as auth failed
+            audit_auth_event(
+                action=AuditLog.Action.LOGIN_FAILED,
+                source_ip=source_ip,
+                user_agent=user_agent,
+                context="OIDC authentication failed",
+            )
+
         return user
 
     def _update_cognito_sub(self, user, claims):

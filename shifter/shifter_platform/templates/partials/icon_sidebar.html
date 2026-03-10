@@ -221,12 +221,15 @@
                     </div>
                 </button>
                 <div class="nav-user-menu" id="userMenu">
-                    <a href="{% url 'oidc_logout' %}" class="nav-user-menu-item">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path fill="currentColor" d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.58L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z"/>
-                        </svg>
-                        <span>Sign out</span>
-                    </a>
+                    <form method="post" action="{% url 'oidc_logout' %}" style="margin:0">
+                        {% csrf_token %}
+                        <button type="submit" class="nav-user-menu-item">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path fill="currentColor" d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.58L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z"/>
+                            </svg>
+                            <span>Sign out</span>
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>

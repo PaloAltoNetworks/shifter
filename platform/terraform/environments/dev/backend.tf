@@ -1,9 +1,9 @@
 terraform {
   backend "s3" {
-    bucket         = "shifter-dev-infra-efff7706-a361-4618-8a92-8f942aa55d0e"
+    bucket         = "shifter-dev-infra-2080ea59-c141-4021-9ddd-11c77cd0574d"
     key            = "shifter/dev/terraform.tfstate"
     region         = "us-east-2"
-    dynamodb_table = "shifter-dev-terraform-efff7706-a361-4618-8a92-8f942aa55d0e"
+    dynamodb_table = "shifter-dev-terraform-2080ea59-c141-4021-9ddd-11c77cd0574d"
     encrypt        = true
   }
 

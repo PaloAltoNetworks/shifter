@@ -18,7 +18,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket  = "shifter-dev-infra-e3462f0c-c5b5-4b47-836b-efe3f657858c"
+    bucket  = "shifter-dev-infra-2080ea59-c141-4021-9ddd-11c77cd0574d"
     key     = "global/dev-box/terraform.tfstate"
     region  = "us-east-2"
     encrypt = true

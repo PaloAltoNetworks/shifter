@@ -6,12 +6,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import uuid
 from typing import Any
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import AnonymousUser
 
+from risk_register.services import audit_session_event
 from shared.enums import WebSocketCloseCode
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,8 @@ class SSHConsumer(AsyncWebsocketConsumer):
         self.instance_uuid: str | None = None
         self.ssh_conn: Any = None
         self._read_task: asyncio.Task[None] | None = None
+        self.session_id: str = str(uuid.uuid4())[:8]
+        self._user_id: int | None = None
 
     async def connect(self):
         """Handle WebSocket connection request."""
@@ -47,12 +51,19 @@ class SSHConsumer(AsyncWebsocketConsumer):
         """
         from engine import connect_terminal
 
+        # Get client IP for audit logging
+        headers = dict(self.scope.get("headers", []))
+        xff = headers.get(b"x-forwarded-for", b"").decode()
+        client_ip = xff.split(",")[0].strip() if xff else None
+
         # 1. Verify authentication
         user = self.scope.get("user")
         if not user or isinstance(user, AnonymousUser):
             logger.warning("Unauthenticated terminal connection attempt")
             await self.close(code=WebSocketCloseCode.NOT_AUTHENTICATED)
             return
+
+        self._user_id = user.id
 
         # 2. Extract instance UUID from URL
         self.instance_uuid = self.scope["url_route"]["kwargs"].get("instance_uuid")
@@ -77,6 +88,16 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 "Terminal connection denied - permission error: uuid=%s",
                 self.instance_uuid,
             )
+            # Audit log access denied
+            await sync_to_async(audit_session_event)(
+                action="access_denied",
+                user_id=user.id,
+                session_id=self.session_id,
+                range_id=None,
+                session_type="terminal",
+                source_ip=client_ip,
+                context=f"Permission denied for instance {self.instance_uuid}",
+            )
             await self.close(code=WebSocketCloseCode.PERMISSION_DENIED)
             return
         except ValueError as e:
@@ -98,6 +119,18 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
         # 4. Accept WebSocket and start reading SSH output
         await self.accept()
+
+        # Audit log successful connection
+        await sync_to_async(audit_session_event)(
+            action="connect",
+            user_id=user.id,
+            session_id=self.session_id,
+            range_id=None,
+            session_type="terminal",
+            target_ip=self.instance_uuid,
+            source_ip=client_ip,
+        )
+
         logger.info(
             "Terminal connected: user_id=%s uuid=%s",
             user.id,
@@ -144,6 +177,16 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 await self.ssh_conn.disconnect()
             except Exception:
                 logger.exception("Error closing SSH connection: uuid=%s", self.instance_uuid)
+
+        # Audit log disconnection if we had a valid session
+        if self._user_id:
+            await sync_to_async(audit_session_event)(
+                action="disconnect",
+                user_id=self._user_id,
+                session_id=self.session_id,
+                session_type="terminal",
+                context=f"close_code={close_code}",
+            )
 
     async def receive(self, text_data=None, bytes_data=None):
         """Handle incoming WebSocket messages - forward to SSH."""

@@ -32,6 +32,8 @@ from cms.experiments.schemas import (
     ScriptType,
 )
 from engine import create_range as engine_create_range
+from risk_register.models import AuditLog
+from risk_register.services import audit_log_system_event
 
 logger = logging.getLogger(__name__)
 
@@ -751,8 +753,22 @@ class ExperimentOrchestrator:
                 experiment.error_message = f"All {failed_count} runs failed"
                 experiment.save(update_fields=["error_message"])
                 experiment.transition_to(ExperimentStatus.FAILED)
+                audit_log_system_event(
+                    entity_type=AuditLog.EntityType.EXPERIMENT,
+                    entity_id=self.experiment_id,
+                    action=AuditLog.Action.FAILED,
+                    source="experiments.orchestrator",
+                    context=experiment.error_message or "",
+                )
             else:
                 experiment.transition_to(ExperimentStatus.COMPLETED)
+                audit_log_system_event(
+                    entity_type=AuditLog.EntityType.EXPERIMENT,
+                    entity_id=self.experiment_id,
+                    action=AuditLog.Action.READY,
+                    source="experiments.orchestrator",
+                    new_state={"completed_runs": completed_count, "failed_runs": failed_count},
+                )
 
             logger.info(
                 "_check_experiment_completion: experiment %s finished (%d/%d succeeded)",

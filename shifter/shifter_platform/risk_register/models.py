@@ -293,36 +293,76 @@ class APIKey(models.Model):
 
 
 class AuditLog(models.Model):
-    """Record of state changes for auditing."""
+    """Record of state changes for auditing.
+
+    Central audit log for all platform operations. Immutable - records cannot
+    be modified or deleted through the application.
+    """
 
     class Action(models.TextChoices):
+        # Entity lifecycle
         CREATE = "create", "Create"
         UPDATE = "update", "Update"
         DELETE = "delete", "Delete"
         RESTORE = "restore", "Restore"
         CLOSE = "close", "Close"
         REOPEN = "reopen", "Reopen"
+        # Authentication
+        LOGIN = "login", "Login"
+        LOGOUT = "logout", "Logout"
+        LOGIN_FAILED = "login_failed", "Login Failed"
+        ACCESS_DENIED = "access_denied", "Access Denied"
+        # Sessions
+        CONNECT = "connect", "Connect"
+        DISCONNECT = "disconnect", "Disconnect"
+        # Resource lifecycle
+        PROVISION = "provision", "Provision"
+        DEPROVISION = "deprovision", "Deprovision"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+        PAUSE = "pause", "Pause"
+        RESUME = "resume", "Resume"
+        CANCEL = "cancel", "Cancel"
 
     class EntityType(models.TextChoices):
+        # Risk Register entities
         RISK = "risk", "Risk"
         COMMENT = "comment", "Comment"
         APIKEY = "apikey", "API Key"
+        # Platform entities
+        RANGE = "range", "Range"
+        CREDENTIAL = "credential", "Credential"
+        AGENT = "agent", "Agent"
+        USER = "user", "User"
+        SESSION = "session", "Session"
+        NGFW = "ngfw", "NGFW"
+        CONFIG = "config", "Configuration"
+        EXPERIMENT = "experiment", "Experiment"
+        SCENARIO = "scenario", "Scenario"
+        SCRIPT = "script", "Script"
 
     class ActorType(models.TextChoices):
         USER = "user", "User"
         APIKEY = "apikey", "API Key"
+        SYSTEM = "system", "System"
+        COGNITO = "cognito", "Cognito"
 
     entity_type = models.CharField(max_length=20, choices=EntityType.choices)
     entity_id = models.PositiveIntegerField()
     action = models.CharField(max_length=20, choices=Action.choices)
 
     actor_type = models.CharField(max_length=10, choices=ActorType.choices)
-    actor_id = models.PositiveIntegerField()
+    actor_id = models.PositiveIntegerField(null=True, blank=True)
 
     timestamp = models.DateTimeField(auto_now_add=True)
     previous_state = models.JSONField(null=True, blank=True)
     new_state = models.JSONField(null=True, blank=True)
     context = models.TextField(blank=True, help_text="Optional reason or notes")
+
+    # Request context for tracing
+    source_ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=500, blank=True)
+    request_id = models.CharField(max_length=64, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-timestamp"]
@@ -332,6 +372,7 @@ class AuditLog(models.Model):
             models.Index(fields=["entity_type", "entity_id"]),
             models.Index(fields=["actor_type", "actor_id"]),
             models.Index(fields=["timestamp"]),
+            models.Index(fields=["action"]),
         ]
 
     def __str__(self):
@@ -344,10 +385,13 @@ class AuditLog(models.Model):
         entity_id: int,
         action: str,
         actor_type: str,
-        actor_id: int,
+        actor_id: int | None = None,
         previous_state: dict[str, Any] | None = None,
         new_state: dict[str, Any] | None = None,
         context: str = "",
+        source_ip: str | None = None,
+        user_agent: str = "",
+        request_id: str = "",
     ) -> "AuditLog":
         """Create an audit log entry."""
         return cls.objects.create(
@@ -359,4 +403,7 @@ class AuditLog(models.Model):
             previous_state=previous_state,
             new_state=new_state,
             context=context,
+            source_ip=source_ip,
+            user_agent=user_agent,
+            request_id=request_id,
         )

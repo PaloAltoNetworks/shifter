@@ -16,6 +16,10 @@ import {
   buildInstanceFilters,
   RISK_TABLES,
   buildUpdateSet,
+  getSsmDocument,
+  MAX_S3_READ_SIZE,
+  isBinaryContentType,
+  validateManageCommand,
 } from "./lib.js";
 
 const { Pool } = pg;
@@ -41,6 +45,13 @@ function aws(profile, args) {
 function awsText(profile, args) {
   const cmd = `aws ${args} --profile "${profile}" --region "${REGION}"`;
   return execSync(cmd, { encoding: "utf-8", timeout: 60000 }).trim();
+}
+
+function getInstancePlatform(profile, instanceId) {
+  return awsText(
+    profile,
+    `ec2 describe-instances --instance-ids "${instanceId}" --query "Reservations[0].Instances[0].PlatformDetails"`,
+  );
 }
 
 function ok(text) {
@@ -571,6 +582,95 @@ server.tool(
   }
 );
 
+server.tool(
+  "describe_ecs_service",
+  "Describe an ECS service: task counts, deployment status, load balancers, and recent events.",
+  {
+    env: EnvSchema,
+    service: SafeName.describe("ECS service name"),
+    cluster: SafeName.optional().describe(
+      "ECS cluster name (defaults to {env}-portal)",
+    ),
+  },
+  async ({ env, service, cluster }) => {
+    try {
+      const profile = getProfile(env);
+      const clusterName = cluster || `${env}-portal`;
+      const result = aws(
+        profile,
+        `ecs describe-services --cluster "${clusterName}" --services "${service}"`,
+      );
+      const svc = result.services?.[0];
+      if (!svc) return ok(`Service "${service}" not found in cluster ${clusterName}.`);
+      const summary = {
+        name: svc.serviceName,
+        status: svc.status,
+        desired: svc.desiredCount,
+        running: svc.runningCount,
+        pending: svc.pendingCount,
+        launch_type: svc.launchType,
+        deployments: (svc.deployments || []).map((d) => ({
+          id: d.id,
+          status: d.status,
+          desired: d.desiredCount,
+          running: d.runningCount,
+          pending: d.pendingCount,
+          rollout_state: d.rolloutState,
+          created: d.createdAt,
+          updated: d.updatedAt,
+        })),
+        load_balancers: svc.loadBalancers || [],
+        events: (svc.events || []).slice(0, 10).map((e) => ({
+          at: e.createdAt,
+          message: e.message,
+        })),
+      };
+      return ok(JSON.stringify(summary, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "restart_ecs_service",
+  "Force a new deployment of an ECS service (rolls all tasks).",
+  {
+    env: EnvSchema,
+    service: SafeName.describe("ECS service name"),
+    cluster: SafeName.optional().describe(
+      "ECS cluster name (defaults to {env}-portal)",
+    ),
+  },
+  async ({ env, service, cluster }) => {
+    try {
+      const profile = getProfile(env);
+      const clusterName = cluster || `${env}-portal`;
+      const result = aws(
+        profile,
+        `ecs update-service --cluster "${clusterName}" --service "${service}" --force-new-deployment`,
+      );
+      const svc = result.service;
+      const deployment = svc.deployments?.find((d) => d.status === "PRIMARY");
+      return ok(
+        JSON.stringify(
+          {
+            service: svc.serviceName,
+            status: svc.status,
+            deployment_id: deployment?.id,
+            rollout_state: deployment?.rolloutState,
+            desired: svc.desiredCount,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
 // ==========================================================================
 // Secrets Manager
 // ==========================================================================
@@ -621,23 +721,25 @@ server.tool(
 
 server.tool(
   "ssm_send_command",
-  "Run a shell command on an EC2 instance via SSM",
+  "Run a command on an EC2 instance via SSM. Auto-detects OS to use the correct shell (bash for Linux, PowerShell for Windows).",
   {
     env: EnvSchema,
     instance_id: Ec2Id.describe("EC2 instance ID"),
-    command: z.string().describe("Shell command to execute"),
+    command: z.string().describe("Command to execute (shell for Linux, PowerShell for Windows)"),
   },
   async ({ env, instance_id, command }) => {
     try {
       const profile = getProfile(env);
+      const platform = getInstancePlatform(profile, instance_id);
+      const docName = getSsmDocument(platform);
       const params = JSON.stringify({ commands: [command] });
       const result = aws(
         profile,
-        `ssm send-command --instance-ids "${instance_id}" --document-name AWS-RunShellScript --parameters '${params}'`
+        `ssm send-command --instance-ids "${instance_id}" --document-name ${docName} --parameters '${params}'`
       );
       const cmdId = result.Command.CommandId;
       return ok(
-        `Command sent. ID: ${cmdId}\nUse ssm_get_command_output to check results.`
+        `Command sent (${docName}). ID: ${cmdId}\nUse ssm_get_command_output to check results.`
       );
     } catch (e) {
       return err(e);
@@ -2025,6 +2127,391 @@ server.tool(
       return err(e);
     }
   }
+);
+
+// ==========================================================================
+// S3
+// ==========================================================================
+
+server.tool(
+  "list_s3_buckets",
+  "List S3 buckets in the account, optionally filtered by name pattern.",
+  {
+    env: EnvSchema,
+    name_filter: z
+      .string()
+      .optional()
+      .describe("Substring filter for bucket names"),
+  },
+  async ({ env, name_filter }) => {
+    try {
+      const profile = getProfile(env);
+      const result = aws(profile, "s3api list-buckets");
+      let buckets = (result.Buckets || []).map((b) => ({
+        name: b.Name,
+        created: b.CreationDate,
+      }));
+      if (name_filter) {
+        const lower = name_filter.toLowerCase();
+        buckets = buckets.filter((b) => b.name.toLowerCase().includes(lower));
+      }
+      if (buckets.length === 0) return ok("No buckets found.");
+      return ok(JSON.stringify(buckets, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "list_s3_objects",
+  "List objects in an S3 bucket with optional prefix filter. Returns key, size, and last modified.",
+  {
+    env: EnvSchema,
+    bucket: z.string().describe("S3 bucket name"),
+    prefix: z.string().optional().describe("Key prefix filter"),
+    max_keys: z
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .default(100)
+      .describe("Maximum number of objects to return (default 100, max 1000)"),
+  },
+  async ({ env, bucket, prefix, max_keys }) => {
+    try {
+      const profile = getProfile(env);
+      let args = `s3api list-objects-v2 --bucket "${bucket}" --max-items ${max_keys}`;
+      if (prefix) args += ` --prefix "${prefix}"`;
+      const result = aws(profile, args);
+      const objects = (result.Contents || []).map((o) => ({
+        key: o.Key,
+        size: o.Size,
+        last_modified: o.LastModified,
+      }));
+      if (objects.length === 0) return ok("No objects found.");
+      return ok(JSON.stringify(objects, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "get_s3_object",
+  "Read the contents of an S3 object. Returns text content for text files, metadata only for binary files. 1MB size limit.",
+  {
+    env: EnvSchema,
+    bucket: z.string().describe("S3 bucket name"),
+    key: z.string().describe("S3 object key"),
+  },
+  async ({ env, bucket, key }) => {
+    try {
+      const profile = getProfile(env);
+      // Check size first
+      const head = aws(
+        profile,
+        `s3api head-object --bucket "${bucket}" --key "${key}"`,
+      );
+      const size = head.ContentLength;
+      const contentType = head.ContentType || "";
+
+      if (size > MAX_S3_READ_SIZE) {
+        return ok(
+          JSON.stringify(
+            {
+              error: "Object too large to read inline",
+              size,
+              max_size: MAX_S3_READ_SIZE,
+              content_type: contentType,
+              last_modified: head.LastModified,
+            },
+            null,
+            2,
+          ),
+        );
+      }
+
+      if (isBinaryContentType(contentType)) {
+        return ok(
+          JSON.stringify(
+            {
+              message: "Binary file — metadata only",
+              size,
+              content_type: contentType,
+              last_modified: head.LastModified,
+            },
+            null,
+            2,
+          ),
+        );
+      }
+
+      const content = awsText(
+        profile,
+        `s3 cp "s3://${bucket}/${key}" -`,
+      );
+      return ok(content);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Infrastructure State
+// ==========================================================================
+
+server.tool(
+  "describe_stacks",
+  "List CloudFormation stacks with status, last updated time, and drift detection status.",
+  {
+    env: EnvSchema,
+    name_filter: z
+      .string()
+      .optional()
+      .describe("Substring filter for stack names"),
+  },
+  async ({ env, name_filter }) => {
+    try {
+      const profile = getProfile(env);
+      const result = aws(profile, "cloudformation describe-stacks");
+      let stacks = (result.Stacks || []).map((s) => ({
+        name: s.StackName,
+        status: s.StackStatus,
+        drift_status: s.DriftInformation?.StackDriftStatus || "NOT_CHECKED",
+        last_updated: s.LastUpdatedTime || s.CreationTime,
+        description: s.Description || "",
+      }));
+      if (name_filter) {
+        const lower = name_filter.toLowerCase();
+        stacks = stacks.filter((s) => s.name.toLowerCase().includes(lower));
+      }
+      if (stacks.length === 0) return ok("No stacks found.");
+      return ok(JSON.stringify(stacks, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "terraform_state",
+  "List resources from a Terraform state file stored in S3. Shows resource types, names, and modules.",
+  {
+    env: EnvSchema,
+    bucket: z.string().optional().describe(
+      "S3 bucket containing TF state (auto-detected from env if omitted)",
+    ),
+    key: z.string().optional().describe(
+      "S3 key for the state file (auto-detected from env if omitted)",
+    ),
+  },
+  async ({ env, bucket, key }) => {
+    try {
+      const profile = getProfile(env);
+      const stateBuckets = {
+        dev: {
+          bucket: "shifter-dev-infra-2080ea59-c141-4021-9ddd-11c77cd0574d",
+          key: "global/github-runner/terraform.tfstate",
+        },
+        prod: {
+          bucket: "shifter-infra-9f7d1dc4-7f0c-495b-9c03-624dfd5a8795",
+          key: "shifter/prod/terraform.tfstate",
+        },
+      };
+      const defaults = stateBuckets[env] || {};
+      const b = bucket || defaults.bucket;
+      const k = key || defaults.key;
+      if (!b || !k) {
+        return err(new Error("Could not determine state bucket/key. Provide bucket and key explicitly."));
+      }
+      const content = awsText(profile, `s3 cp "s3://${b}/${k}" -`);
+      const state = JSON.parse(content);
+      const resources = (state.resources || []).map((r) => ({
+        module: r.module || "(root)",
+        type: r.type,
+        name: r.name,
+        provider: r.provider,
+        instances: r.instances?.length || 0,
+      }));
+      return ok(
+        JSON.stringify(
+          {
+            terraform_version: state.terraform_version,
+            serial: state.serial,
+            total_resources: resources.length,
+            resources,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Cost & Billing
+// ==========================================================================
+
+server.tool(
+  "cost_summary",
+  "Get AWS cost summary for a date range, broken down by service. Defaults to last 30 days.",
+  {
+    env: EnvSchema,
+    start_date: z
+      .string()
+      .optional()
+      .describe("Start date YYYY-MM-DD (defaults to 30 days ago)"),
+    end_date: z
+      .string()
+      .optional()
+      .describe("End date YYYY-MM-DD (defaults to today)"),
+  },
+  async ({ env, start_date, end_date }) => {
+    try {
+      const profile = getProfile(env);
+      const end = end_date || new Date().toISOString().slice(0, 10);
+      const start =
+        start_date ||
+        new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const result = aws(
+        profile,
+        `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity MONTHLY --metrics BlendedCost --group-by Type=DIMENSION,Key=SERVICE`,
+      );
+      const periods = result.ResultsByTime || [];
+      let total = 0;
+      const services = {};
+      for (const period of periods) {
+        for (const group of period.Groups || []) {
+          const svc = group.Keys[0];
+          const amount = parseFloat(group.Metrics.BlendedCost.Amount);
+          total += amount;
+          services[svc] = (services[svc] || 0) + amount;
+        }
+      }
+      const sorted = Object.entries(services)
+        .map(([name, amount]) => ({ service: name, amount: `$${amount.toFixed(2)}` }))
+        .sort((a, b) => parseFloat(b.amount.slice(1)) - parseFloat(a.amount.slice(1)));
+      return ok(
+        JSON.stringify(
+          { period: { start, end }, total: `$${total.toFixed(2)}`, by_service: sorted },
+          null,
+          2,
+        ),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "daily_spend",
+  "Show daily AWS spend for the last N days. Useful for spotting spikes.",
+  {
+    env: EnvSchema,
+    days: z
+      .number()
+      .int()
+      .min(1)
+      .max(90)
+      .default(7)
+      .describe("Number of days to show (default 7, max 90)"),
+  },
+  async ({ env, days }) => {
+    try {
+      const profile = getProfile(env);
+      const end = new Date().toISOString().slice(0, 10);
+      const start = new Date(Date.now() - days * 86400000)
+        .toISOString()
+        .slice(0, 10);
+      const result = aws(
+        profile,
+        `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity DAILY --metrics BlendedCost`,
+      );
+      const dataPoints = (result.ResultsByTime || []).map((p) => {
+        const amount = parseFloat(p.Total.BlendedCost.Amount);
+        return {
+          date: p.TimePeriod.Start,
+          amount: `$${amount.toFixed(2)}`,
+        };
+      });
+      const amounts = dataPoints.map((d) => parseFloat(d.amount.slice(1)));
+      const avg = amounts.length > 0 ? amounts.reduce((a, b) => a + b, 0) / amounts.length : 0;
+      const total = amounts.reduce((a, b) => a + b, 0);
+      return ok(
+        JSON.stringify(
+          {
+            period: { start, end, days },
+            total: `$${total.toFixed(2)}`,
+            daily_average: `$${avg.toFixed(2)}`,
+            daily: dataPoints,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Django Management Commands
+// ==========================================================================
+
+server.tool(
+  "run_manage_command",
+  "Run a Django manage.py command on the portal container via SSM. Only whitelisted read-only commands are allowed: check, showmigrations, diffsettings, inspectdb, dbshell, clearsessions, collectstatic, show_urls.",
+  {
+    env: EnvSchema,
+    command: z
+      .string()
+      .describe("Management command and arguments (e.g. 'showmigrations', 'check --deploy')"),
+    instance_id: Ec2Id.optional().describe(
+      "Portal EC2 instance ID (auto-detected if omitted)",
+    ),
+  },
+  async ({ env, command, instance_id }) => {
+    try {
+      validateManageCommand(command);
+      const profile = getProfile(env);
+
+      // Auto-detect portal instance if not provided
+      let targetId = instance_id;
+      if (!targetId) {
+        const instances = aws(
+          profile,
+          `ec2 describe-instances --filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text`,
+        );
+        targetId = typeof instances === "string" ? instances : awsText(
+          profile,
+          `ec2 describe-instances --filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId"`,
+        );
+        if (!targetId || targetId === "None") {
+          return err(new Error(`No running portal instance found in ${env}`));
+        }
+      }
+
+      const dockerCmd = `docker exec portal python manage.py ${command}`;
+      const params = JSON.stringify({ commands: [dockerCmd] });
+      const result = aws(
+        profile,
+        `ssm send-command --instance-ids "${targetId}" --document-name AWS-RunShellScript --parameters '${params}'`,
+      );
+      const cmdId = result.Command.CommandId;
+      return ok(
+        `Command sent: manage.py ${command}\nInstance: ${targetId}\nCommand ID: ${cmdId}\nUse ssm_get_command_output to check results.`,
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
 );
 
 // ==========================================================================

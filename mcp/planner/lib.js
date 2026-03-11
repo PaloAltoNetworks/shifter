@@ -225,7 +225,7 @@ function findStep(plan, stepId) {
   throw new Error(`Step not found: ${stepId}`);
 }
 
-function addStep(planId, phaseId, name, description = "", acceptanceCriteria = []) {
+function addStep(planId, phaseId, name, description = "", acceptanceCriteria = [], references = []) {
   const plan = loadPlan(resolvePlanId(planId));
   const phase = findPhase(plan, phaseId);
   const step = {
@@ -235,6 +235,7 @@ function addStep(planId, phaseId, name, description = "", acceptanceCriteria = [
     status: "pending",
     notes: "",
     acceptance_criteria: acceptanceCriteria,
+    references,
     order: phase.steps.length + 1,
     created: now(),
     updated: now(),
@@ -247,7 +248,7 @@ function addStep(planId, phaseId, name, description = "", acceptanceCriteria = [
 function updateStep(planId, stepId, updates) {
   const plan = loadPlan(resolvePlanId(planId));
   const { phase, step } = findStep(plan, stepId);
-  for (const key of ["name", "description", "status", "notes", "acceptance_criteria"]) {
+  for (const key of ["name", "description", "status", "notes", "acceptance_criteria", "references"]) {
     if (updates[key] !== undefined) step[key] = updates[key];
   }
   step.updated = now();
@@ -275,6 +276,30 @@ function getStep(planId, stepId) {
     phase: { id: phase.id, name: phase.name },
     step,
   };
+}
+
+function addSteps(planId, phaseId, steps) {
+  const plan = loadPlan(resolvePlanId(planId));
+  const phase = findPhase(plan, phaseId);
+  const created = [];
+  for (const s of steps) {
+    const step = {
+      id: shortId(),
+      name: s.name,
+      description: s.description || "",
+      status: "pending",
+      notes: "",
+      acceptance_criteria: s.acceptance_criteria || [],
+      references: s.references || [],
+      order: phase.steps.length + 1,
+      created: now(),
+      updated: now(),
+    };
+    phase.steps.push(step);
+    created.push(step);
+  }
+  savePlan(plan);
+  return { phase: { id: phase.id, name: phase.name }, steps: created };
 }
 
 function completeStep(planId, stepId, notes = "") {
@@ -388,6 +413,7 @@ export {
   removePhase,
   getPhase,
   addStep,
+  addSteps,
   updateStep,
   removeStep,
   getStep,

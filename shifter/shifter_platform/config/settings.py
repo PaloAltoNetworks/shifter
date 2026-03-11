@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
     "cms.experiments.apps.ExperimentsConfig",
+    "ctf.apps.CtfConfig",
 ]
 
 MIDDLEWARE = [
@@ -97,6 +98,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "mission_control.context_processors.active_range",
                 "shared.context_processors.user_permissions",
+                "ctf.context_processors.ctf_navigation",
             ],
         },
     },
@@ -244,7 +246,8 @@ OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_SCOPES = "openid email profile"
 
 # Redirect after login/logout
-LOGIN_REDIRECT_URL = "/mission-control/"
+# Uses the dashboard router to redirect users based on their user type
+LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Login URL - dev bypass in DEBUG, OIDC in production
@@ -265,6 +268,8 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
+    "/ctf/login/",  # CTF login page (with invite token)
+    "/ctf/help/",  # CTF help page
 ]
 
 # ------------------------------------------------------------------------------
@@ -365,6 +370,19 @@ SQS_QUEUE_CONFIG = {
 }
 
 # ------------------------------------------------------------------------------
+# CTF Configuration
+# ------------------------------------------------------------------------------
+
+CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", SHIFTER_SUPPORT_EMAIL)
+CTF_DEFAULT_RANGE_SPINUP_MINUTES = int(os.environ.get("CTF_DEFAULT_RANGE_SPINUP_MINUTES", "30"))
+CTF_DEFAULT_CLEANUP_DELAY_HOURS = int(os.environ.get("CTF_DEFAULT_CLEANUP_DELAY_HOURS", "24"))
+
+# Email - SES
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django_ses.SESBackend")
+AWS_SES_REGION_NAME = "us-east-2"
+AWS_SES_REGION_ENDPOINT = "email.us-east-2.amazonaws.com"
+
+# ------------------------------------------------------------------------------
 # Django REST Framework Configuration
 # ------------------------------------------------------------------------------
 
@@ -456,6 +474,11 @@ LOGGING = {
             "propagate": False,
         },
         "config": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "ctf": {
             "handlers": ["console"],
             "level": LOG_LEVEL,
             "propagate": False,

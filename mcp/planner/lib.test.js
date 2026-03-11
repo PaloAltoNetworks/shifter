@@ -18,6 +18,7 @@ const {
   removePhase,
   getPhase,
   addStep,
+  addSteps,
   updateStep,
   removeStep,
   getStep,
@@ -213,6 +214,112 @@ describe("Step operations", () => {
 
   it("throws on missing step", () => {
     assert.throws(() => getStep(null, "nonexistent"), /Step not found/);
+  });
+});
+
+// -------------------------------------------------------------------------
+// Batch addSteps
+// -------------------------------------------------------------------------
+
+describe("addSteps (batch)", () => {
+  let phaseId;
+
+  beforeEach(() => {
+    cleanDir();
+    createPlan("Batch Test");
+    phaseId = addPhase(null, "P1").id;
+  });
+
+  it("creates multiple steps in order", () => {
+    const result = addSteps(null, phaseId, [
+      { name: "Step A", description: "First" },
+      { name: "Step B", description: "Second" },
+      { name: "Step C" },
+    ]);
+    assert.equal(result.steps.length, 3);
+    assert.equal(result.steps[0].name, "Step A");
+    assert.equal(result.steps[0].order, 1);
+    assert.equal(result.steps[1].name, "Step B");
+    assert.equal(result.steps[1].order, 2);
+    assert.equal(result.steps[2].name, "Step C");
+    assert.equal(result.steps[2].order, 3);
+  });
+
+  it("returns phase context", () => {
+    const result = addSteps(null, phaseId, [{ name: "S1" }]);
+    assert.equal(result.phase.id, phaseId);
+    assert.equal(result.phase.name, "P1");
+  });
+
+  it("appends to existing steps", () => {
+    addStep(null, phaseId, "Existing");
+    const result = addSteps(null, phaseId, [{ name: "New" }]);
+    assert.equal(result.steps[0].order, 2);
+    const phase = getPhase(null, phaseId);
+    assert.equal(phase.phase.steps.length, 2);
+  });
+
+  it("supports acceptance criteria", () => {
+    const result = addSteps(null, phaseId, [
+      { name: "S1", acceptance_criteria: ["Works", "No bugs"] },
+    ]);
+    assert.deepEqual(result.steps[0].acceptance_criteria, ["Works", "No bugs"]);
+  });
+
+  it("supports references", () => {
+    const result = addSteps(null, phaseId, [
+      { name: "S1", references: [{ label: "Issue", url: "https://github.com/org/repo/issues/1" }] },
+    ]);
+    assert.equal(result.steps[0].references.length, 1);
+    assert.equal(result.steps[0].references[0].label, "Issue");
+  });
+
+  it("all steps start as pending", () => {
+    const result = addSteps(null, phaseId, [{ name: "A" }, { name: "B" }]);
+    for (const step of result.steps) {
+      assert.equal(step.status, "pending");
+    }
+  });
+});
+
+// -------------------------------------------------------------------------
+// External references
+// -------------------------------------------------------------------------
+
+describe("External references", () => {
+  let phaseId;
+
+  beforeEach(() => {
+    cleanDir();
+    createPlan("Refs Test");
+    phaseId = addPhase(null, "P1").id;
+  });
+
+  it("addStep creates step with references", () => {
+    const refs = [{ label: "GH Issue", url: "https://github.com/org/repo/issues/42" }];
+    const { step } = addStep(null, phaseId, "With ref", "", [], refs);
+    assert.deepEqual(step.references, refs);
+  });
+
+  it("addStep defaults references to empty array", () => {
+    const { step } = addStep(null, phaseId, "No ref");
+    assert.deepEqual(step.references, []);
+  });
+
+  it("updateStep can set references", () => {
+    const { step } = addStep(null, phaseId, "Update me");
+    const refs = [{ label: "PR", url: "https://github.com/org/repo/pull/10" }];
+    updateStep(null, step.id, { references: refs });
+    const result = getStep(null, step.id);
+    assert.deepEqual(result.step.references, refs);
+  });
+
+  it("updateStep can clear references", () => {
+    const refs = [{ label: "Doc", url: "https://example.com/doc" }];
+    const { step } = addStep(null, phaseId, "Clear me", "", [], refs);
+    updateStep(null, step.id, { references: [] });
+    const result = getStep(null, step.id);
+    assert.deepEqual(result.step.references, []);
   });
 });
 

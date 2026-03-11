@@ -14,6 +14,7 @@ import {
   removePhase,
   getPhase,
   addStep,
+  addSteps,
   updateStep,
   removeStep,
   getStep,
@@ -203,13 +204,43 @@ server.tool(
       .array(z.string())
       .optional()
       .describe("List of acceptance criteria"),
+    references: z
+      .array(z.object({ label: z.string(), url: z.string() }))
+      .optional()
+      .describe("External references (e.g. GH issues, PRs, docs)"),
     plan_id: z.string().optional().describe("Plan ID (defaults to current plan)"),
   },
-  async ({ phase_id, name, description, acceptance_criteria, plan_id }) => {
+  async ({ phase_id, name, description, acceptance_criteria, references, plan_id }) => {
     try {
       return ok(
-        JSON.stringify(addStep(plan_id, phase_id, name, description, acceptance_criteria), null, 2),
+        JSON.stringify(addStep(plan_id, phase_id, name, description, acceptance_criteria, references), null, 2),
       );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "add_steps",
+  "Add multiple steps to a phase in one call. Reduces tool call overhead when populating plans.",
+  {
+    phase_id: z.string().describe("Phase ID to add steps to"),
+    steps: z
+      .array(
+        z.object({
+          name: z.string().describe("Step name"),
+          description: z.string().optional().describe("Step description"),
+          acceptance_criteria: z.array(z.string()).optional().describe("Acceptance criteria"),
+          references: z.array(z.object({ label: z.string(), url: z.string() })).optional().describe("External references"),
+        }),
+      )
+      .describe("Array of steps to create"),
+    plan_id: z.string().optional().describe("Plan ID (defaults to current plan)"),
+  },
+  async ({ phase_id, steps, plan_id }) => {
+    try {
+      return ok(JSON.stringify(addSteps(plan_id, phase_id, steps), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -229,9 +260,10 @@ server.tool(
       .describe("New status: pending, in_progress, completed, skipped, blocked"),
     notes: z.string().optional().describe("Implementation notes or context"),
     acceptance_criteria: z.array(z.string()).optional().describe("Updated acceptance criteria"),
+    references: z.array(z.object({ label: z.string(), url: z.string() })).optional().describe("External references"),
     plan_id: z.string().optional().describe("Plan ID (defaults to current plan)"),
   },
-  async ({ step_id, name, description, status, notes, acceptance_criteria, plan_id }) => {
+  async ({ step_id, name, description, status, notes, acceptance_criteria, references, plan_id }) => {
     try {
       const updates = {};
       if (name !== undefined) updates.name = name;
@@ -239,6 +271,7 @@ server.tool(
       if (status !== undefined) updates.status = status;
       if (notes !== undefined) updates.notes = notes;
       if (acceptance_criteria !== undefined) updates.acceptance_criteria = acceptance_criteria;
+      if (references !== undefined) updates.references = references;
       return ok(JSON.stringify(updateStep(plan_id, step_id, updates), null, 2));
     } catch (e) {
       return err(e);

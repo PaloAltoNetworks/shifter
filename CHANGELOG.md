@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-03-11
+
+### Added
+- CTF (Capture The Flag) management platform — core app files: models, enums, services, admin, forms, migrations
+- CTF config and routing integration: settings, URL routing, dashboard router, dev login user types, OIDC user type claims
+- UserProfile CTF fields: user_type, active_ctf_event, role properties (is_ctf_organizer, is_ctf_participant, is_standard_user)
+
 ## [2.3.3] - 2026-03-10
 
 ### Added

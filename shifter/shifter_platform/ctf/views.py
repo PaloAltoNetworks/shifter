@@ -464,7 +464,7 @@ def ctf_help(request: HttpRequest) -> HttpResponse:
 
     Public help page for CTF participants.
     """
-    return render(request, "ctf/help.html", {"placeholder": True})
+    return render(request, "ctf/help.html")
 
 
 # -----------------------------------------------------------------------------
@@ -1171,11 +1171,14 @@ def admin_team_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     if event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
-    # TODO: Implement team list
+    from ctf.models import CTFTeam
+
+    teams = CTFTeam.objects.filter(event=event).select_related("captain").order_by("name")
+
     return render(
         request,
         "ctf/admin/team_list.html",
-        {"placeholder": True, "event_id": event_id},
+        {"event": event, "teams": teams},
     )
 
 
@@ -1200,11 +1203,21 @@ def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
     if event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
-    # TODO: Implement admin scoreboard
+    from ctf.services import get_event_stats, get_scoreboard, get_team_scoreboard
+
+    stats = get_event_stats(event)
+
+    rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
+
     return render(
         request,
         "ctf/admin/scoreboard.html",
-        {"placeholder": True, "event_id": event_id},
+        {
+            "event": event,
+            "rankings": rankings,
+            "team_mode": event.team_mode,
+            "stats": stats,
+        },
     )
 
 
@@ -1379,11 +1392,28 @@ def admin_analytics(request: HttpRequest, event_id: UUID) -> HttpResponse:
     if event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
-    # TODO: Implement analytics
+    from ctf.models import CTFChallenge
+    from ctf.services import get_challenge_statistics, get_event_statistics
+
+    event_stats = get_event_statistics(event.id)
+
+    challenges = CTFChallenge.objects.filter(event=event).order_by("category", "order", "name")
+    challenge_stats = []
+    for c in challenges:
+        stats = get_challenge_statistics(c.id)
+        stats["name"] = c.name
+        stats["category"] = c.get_category_display()
+        stats["points"] = c.points
+        challenge_stats.append(stats)
+
     return render(
         request,
         "ctf/admin/analytics.html",
-        {"placeholder": True, "event_id": event_id},
+        {
+            "event": event,
+            "event_stats": event_stats,
+            "challenge_stats": challenge_stats,
+        },
     )
 
 
@@ -1401,8 +1431,46 @@ def api_event_list(request: HttpRequest) -> JsonResponse:
     GET: List events for organizer.
     POST: Create new event.
     """
-    # TODO: Implement event list/create API
-    return JsonResponse({"placeholder": True, "method": request.method})
+    import json
+
+    from ctf.exceptions import CTFValidationError
+    from ctf.services import create_event, get_organizer_events
+
+    user = _get_user(request)
+
+    if request.method == "GET":
+        events = get_organizer_events(user)
+        data = [
+            {
+                "id": str(e.id),
+                "name": e.name,
+                "status": e.status,
+                "event_start": e.event_start.isoformat(),
+                "event_end": e.event_end.isoformat(),
+                "team_mode": e.team_mode,
+            }
+            for e in events
+        ]
+        return JsonResponse({"events": data})
+
+    # POST
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    try:
+        event = create_event(user, body)
+        return JsonResponse(
+            {
+                "id": str(event.id),
+                "name": event.name,
+                "status": event.status,
+            },
+            status=201,
+        )
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required
@@ -1425,8 +1493,54 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
     if event.created_by_id != request.user.pk:
         return JsonResponse({"error": "Forbidden"}, status=403)
 
-    # TODO: Implement event detail API
-    return JsonResponse({"placeholder": True, "event_id": str(event_id), "method": request.method})
+    import json
+
+    from ctf.exceptions import CTFStateError, CTFValidationError
+    from ctf.services import delete_event, update_event
+
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "id": str(event.id),
+                "name": event.name,
+                "description": event.description,
+                "status": event.status,
+                "event_start": event.event_start.isoformat(),
+                "event_end": event.event_end.isoformat(),
+                "registration_deadline": event.registration_deadline.isoformat()
+                if event.registration_deadline
+                else None,
+                "scenario_id": event.scenario_id,
+                "auto_cleanup": event.auto_cleanup,
+                "cleanup_delay_hours": event.cleanup_delay_hours,
+                "max_participants": event.max_participants,
+                "team_mode": event.team_mode,
+                "team_size_limit": event.team_size_limit,
+                "range_config": event.range_config,
+            }
+        )
+
+    if request.method == "DELETE":
+        delete_event(event_id)
+        return JsonResponse({}, status=204)
+
+    # PUT
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    try:
+        updated = update_event(event_id, body)
+        return JsonResponse(
+            {
+                "id": str(updated.id),
+                "name": updated.name,
+                "status": updated.status,
+            }
+        )
+    except (CTFValidationError, CTFStateError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required
@@ -1437,8 +1551,52 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    # TODO: Implement challenge list/create API
-    return JsonResponse({"placeholder": True, "event_id": str(event_id), "method": request.method})
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+    from ctf.services import create_challenge, get_event, list_challenges_for_event
+
+    try:
+        get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    if request.method == "GET":
+        challenges = list_challenges_for_event(event_id)
+        data = [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "category": c.category,
+                "points": c.points,
+                "difficulty": c.difficulty,
+                "order": c.order,
+            }
+            for c in challenges
+        ]
+        return JsonResponse({"challenges": data})
+
+    # POST
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    try:
+        challenge = create_challenge(event_id, body)
+        return JsonResponse(
+            {
+                "id": str(challenge.id),
+                "name": challenge.name,
+                "category": challenge.category,
+                "points": challenge.points,
+            },
+            status=201,
+        )
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except (CTFValidationError, CTFStateError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required
@@ -1449,8 +1607,59 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
     Args:
         challenge_id: UUID of the challenge.
     """
-    # TODO: Implement challenge detail API
-    return JsonResponse({"placeholder": True, "challenge_id": str(challenge_id), "method": request.method})
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+    from ctf.services import delete_challenge, get_challenge, update_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Challenge not found"}, status=404)
+
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "id": str(challenge.id),
+                "name": challenge.name,
+                "description": challenge.description,
+                "category": challenge.category,
+                "points": challenge.points,
+                "difficulty": challenge.difficulty,
+                "flag_format": challenge.flag_format,
+                "hint": challenge.hint,
+                "hint_penalty": challenge.hint_penalty,
+                "max_attempts": challenge.max_attempts,
+                "order": challenge.order,
+                "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
+            }
+        )
+
+    if request.method == "DELETE":
+        try:
+            delete_challenge(challenge_id)
+            return JsonResponse({}, status=204)
+        except (CTFNotFoundError, CTFStateError) as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+    # PUT
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    try:
+        updated = update_challenge(challenge_id, body)
+        return JsonResponse(
+            {
+                "id": str(updated.id),
+                "name": updated.name,
+                "category": updated.category,
+                "points": updated.points,
+            }
+        )
+    except (CTFNotFoundError, CTFValidationError, CTFStateError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required

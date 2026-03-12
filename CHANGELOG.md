@@ -5,11 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.1] - 2026-03-12
+## [3.1.0] - 2026-03-12
+
+### Added
+- CTF admin team list, scoreboard, and analytics pages
+- CTF help page with getting started content
+- CTF API endpoints: event list/detail, challenge list/detail
+- NGFW toggle in CTF event form (range_config)
 
 ### Changed
 - CTF app uses bridge module (`ctf/bridges.py`) for all cross-domain integrations (CMS, management, mission_control)
 - CTF scheduled tasks documented as database-only; no Celery dependency
+- Email backend defaults to console for dev; configure via `EMAIL_BACKEND` env var for production
+- Wire `EMAIL_BACKEND` and `CTF_FROM_EMAIL` through deployment pipeline (SSM → user_data.sh → Docker env → Django settings)
+
+### Fixed
+- Removed stale scheduler module reference from services docstring
 
 ### Removed
 - Dead `mock_scheduler` fixture that patched non-existent `ctf.services.scheduler`

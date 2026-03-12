@@ -30,7 +30,14 @@ class CTFEventForm(forms.ModelForm):
     - Event timing (end after start, registration before start)
     - Team mode settings (team_size_limit required if team_mode)
     - Cleanup settings
+    - Range configuration (ngfw_enabled)
     """
+
+    ngfw_enabled = forms.BooleanField(
+        required=False,
+        label="Enable NGFW",
+        help_text="Provision a Next-Generation Firewall for each participant range",
+    )
 
     class Meta:
         model = CTFEvent
@@ -79,6 +86,11 @@ class CTFEventForm(forms.ModelForm):
                     "%Y-%m-%d %H:%M",
                 ]
 
+        # Populate ngfw_enabled from range_config on edit
+        if self.instance and self.instance.pk:
+            rc = self.instance.range_config or {}
+            self.fields["ngfw_enabled"].initial = rc.get("ngfw_enabled", False)
+
         # Add CSS classes for styling
         for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
@@ -123,6 +135,20 @@ class CTFEventForm(forms.ModelForm):
             cleaned_data["team_size_limit"] = None
 
         return cleaned_data
+
+    def save(self, commit: bool = True) -> CTFEvent:
+        """Save event with range_config packed from form fields."""
+        event = super().save(commit=False)
+
+        # Pack ngfw_enabled into range_config
+        rc = event.range_config or {}
+        rc["ngfw_enabled"] = self.cleaned_data.get("ngfw_enabled", False)
+        event.range_config = rc
+
+        if commit:
+            event.save()
+
+        return event
 
 
 class CTFChallengeForm(forms.ModelForm):

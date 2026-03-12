@@ -64,7 +64,7 @@ resource "aws_iam_role_policy" "ecr_pull" {
         Action = [
           "ecr:GetAuthorizationToken"
         ]
-        Resource = "*"
+        Resource = "*" #tfsec:ignore:aws-iam-no-policy-wildcards -- ecr:GetAuthorizationToken requires Resource=* per AWS docs
       },
       {
         Effect = "Allow"
@@ -131,7 +131,7 @@ resource "aws_iam_role_policy" "range_ssh_keys" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/*/range/*"
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/*/range/*"
       }
     ]
   })
@@ -152,7 +152,7 @@ resource "aws_iam_role_policy" "ngfw_ssh_keys" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:shifter/*/ngfw/*"
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:shifter/*/ngfw/*"
       }
     ]
   })
@@ -210,7 +210,7 @@ resource "aws_iam_role_policy" "ecs_run_task" {
           "ecs:DescribeTasks",
           "ecs:StopTask"
         ]
-        Resource = "*"
+        Resource = "*" #tfsec:ignore:aws-iam-no-policy-wildcards -- scoped by Condition to specific cluster
         Condition = {
           ArnEquals = {
             "ecs:cluster" = var.ecs_cluster_arn
@@ -273,7 +273,7 @@ resource "aws_iam_role_policy" "sqs_publish" {
 }
 
 resource "aws_iam_role_policy" "ses_send" {
-  count = var.ses_domain_identity_arn != "" ? 1 : 0
+  count = var.enable_ses ? 1 : 0
 
   name = "ses-send"
   role = aws_iam_role.this.id
@@ -343,7 +343,7 @@ resource "aws_iam_role_policy" "lifecycle_action" {
         Action = [
           "autoscaling:DescribeAutoScalingInstances"
         ]
-        Resource = "*"
+        Resource = "*" #tfsec:ignore:aws-iam-no-policy-wildcards -- Describe* actions require Resource=*
       }
     ]
   })
@@ -380,14 +380,14 @@ resource "aws_security_group_rule" "app_from_alb" {
   description              = "App traffic from ALB"
 }
 
-resource "aws_security_group_rule" "egress_all" {
+resource "aws_security_group_rule" "egress_all" { #tfsec:ignore:aws-ec2-no-public-egress -- instance requires outbound for ECR, SES, S3, SSM, and external APIs
   type              = "egress"
   from_port         = 0
   to_port           = 0
   protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
+  cidr_blocks       = ["0.0.0.0/0"] # NOSONAR
   security_group_id = aws_security_group.this.id
-  description       = "Allow all outbound"
+  description       = "Allow all outbound (ECR, SES, S3, SSM, external APIs)"
 }
 
 # ------------------------------------------------------------------------------

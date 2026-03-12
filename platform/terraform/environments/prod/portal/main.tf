@@ -275,6 +275,10 @@ module "ssm" {
 
   # Logging level (DEBUG for dev, INFO for prod)
   log_level = var.log_level
+
+  # Email configuration
+  email_backend  = var.email_backend
+  ctf_from_email = var.ctf_from_email
 }
 
 # ------------------------------------------------------------------------------
@@ -327,6 +331,9 @@ module "ec2" {
 
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
+
+  # SES
+  ses_domain_identity_arn = module.ses.domain_identity_arn
 
   tags = var.tags
 }
@@ -576,6 +583,16 @@ module "guacamole" {
   cognito_domain       = module.cognito.cognito_domain
   aws_region           = var.aws_region
   domain_name          = var.domain_name
+}
+
+# ------------------------------------------------------------------------------
+# SES (Transactional Email)
+# ------------------------------------------------------------------------------
+
+module "ses" {
+  source = "../../../modules/portal/ses"
+
+  domain = var.ses_domain
 }
 
 # ------------------------------------------------------------------------------

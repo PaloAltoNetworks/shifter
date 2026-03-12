@@ -8,7 +8,6 @@ This package contains service modules for CTF business logic:
 - scoring: Score calculation and leaderboards
 - range: Range provisioning integration
 - notification: Email notifications
-- scheduler: Scheduled task management
 """
 
 from ctf.services.challenge import (

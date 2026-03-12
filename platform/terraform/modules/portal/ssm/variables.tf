@@ -155,6 +155,18 @@ variable "log_level" {
   default     = "INFO"
 }
 
+variable "email_backend" {
+  description = "Django email backend (e.g., django_ses.SESBackend)"
+  type        = string
+  default     = "django.core.mail.backends.console.EmailBackend"
+}
+
+variable "ctf_from_email" {
+  description = "From address for CTF emails"
+  type        = string
+  default     = "ctf@keplerops.com"
+}
+
 # ------------------------------------------------------------------------------
 # ASG Lifecycle Hook Configuration
 # ------------------------------------------------------------------------------

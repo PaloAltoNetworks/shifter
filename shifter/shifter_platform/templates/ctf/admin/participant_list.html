@@ -1,0 +1,199 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Participants - {{ event.name }}{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1">
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                    <li class="breadcrumb-item active">Participants</li>
+                </ol>
+            </nav>
+            <h1 class="h3 mb-0">Participants</h1>
+        </div>
+        <div class="btn-group">
+            <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}" class="btn btn-primary">
+                <i class="bi bi-plus-lg"></i> Add Participant
+            </a>
+            <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-outline-primary">
+                <i class="bi bi-upload"></i> Import CSV
+            </a>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ total_count }}</div>
+                    <div class="small text-uppercase">Total Participants</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-warning text-dark">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ invited_count }}</div>
+                    <div class="small text-uppercase">Invited (Pending)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-success text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ registered_count }}</div>
+                    <div class="small text-uppercase">Registered</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-center">
+                <div class="col-auto">
+                    <label for="status" class="col-form-label">Filter by Status:</label>
+                </div>
+                <div class="col-auto">
+                    <select name="status" id="status" class="form-select" onchange="this.form.submit()">
+                        <option value="">All Statuses</option>
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% if status_filter %}
+                <div class="col-auto">
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-outline-secondary">Clear Filter</a>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <!-- Participants Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            {% if participants %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            {% if event.team_mode %}
+                            <th>Team</th>
+                            {% endif %}
+                            <th>Registered</th>
+                            <th>Score</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for participant in participants %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}">
+                                    {{ participant.name }}
+                                </a>
+                            </td>
+                            <td>{{ participant.email }}</td>
+                            <td>
+                                {% if participant.status == 'invited' %}
+                                <span class="badge bg-warning">Invited</span>
+                                {% elif participant.status == 'registered' %}
+                                <span class="badge bg-info">Registered</span>
+                                {% elif participant.status == 'active' %}
+                                <span class="badge bg-success">Active</span>
+                                {% elif participant.status == 'completed' %}
+                                <span class="badge bg-secondary">Completed</span>
+                                {% elif participant.status == 'disqualified' %}
+                                <span class="badge bg-danger">Disqualified</span>
+                                {% endif %}
+                            </td>
+                            {% if event.team_mode %}
+                            <td>
+                                {% if participant.team %}
+                                {{ participant.team.name }}
+                                {% else %}
+                                <span class="text-muted">No team</span>
+                                {% endif %}
+                            </td>
+                            {% endif %}
+                            <td>
+                                {% if participant.registered_at %}
+                                {{ participant.registered_at|date:"M d, Y H:i" }}
+                                {% else %}
+                                <span class="text-muted">Not registered</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ participant.total_score }}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}" class="btn btn-outline-primary" title="View">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    {% if participant.status == 'invited' %}
+                                    <button type="button" class="btn btn-outline-secondary" title="Resend Invite" onclick="resendInvite('{{ participant.pk }}')">
+                                        <i class="bi bi-envelope"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                {% if status_filter %}
+                <p class="mb-3">No participants with status "{{ status_filter }}".</p>
+                <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-outline-primary">View All Participants</a>
+                {% else %}
+                <p class="mb-3">No participants yet.</p>
+                <div class="btn-group">
+                    <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}" class="btn btn-primary">Add Participant</a>
+                    <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-outline-primary">Import from CSV</a>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function resendInvite(participantId) {
+    if (!confirm('Resend invitation email to this participant?')) return;
+
+    fetch(`/ctf/api/participants/${participantId}/resend-invite/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Invitation resent successfully.');
+        } else {
+            alert('Error: ' + (data.error || 'Failed to resend invite'));
+        }
+    })
+    .catch(err => {
+        alert('Error resending invite: ' + err.message);
+    });
+}
+</script>
+{% endblock %}

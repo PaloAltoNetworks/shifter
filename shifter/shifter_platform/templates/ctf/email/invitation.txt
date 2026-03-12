@@ -1,0 +1,13 @@
+You're Invited!
+
+Hi {{ participant.name }},
+
+You have been invited to participate in {{ event.name }}.
+
+Event Date: {{ event.event_start|date:"F j, Y g:i A" }} - {{ event.event_end|date:"F j, Y g:i A" }}
+
+{% if event.description %}{{ event.description }}
+
+{% endif %}To register, use your invite token: {{ invite_token }}
+
+If you have any questions, please contact your event organizer.

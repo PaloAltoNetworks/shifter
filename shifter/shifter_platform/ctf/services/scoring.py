@@ -239,7 +239,9 @@ def get_challenge_statistics(challenge_id: UUID) -> dict[str, Any]:
         if first_blood
         else None,
         "solve_rate": (
-            correct.count() / submissions.values("participant").distinct().count() if submissions.exists() else 0
+            correct.count() / distinct_participants
+            if (distinct_participants := submissions.values("participant").distinct().count())
+            else 0
         ),
     }
 

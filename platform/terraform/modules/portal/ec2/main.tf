@@ -272,6 +272,27 @@ resource "aws_iam_role_policy" "sqs_publish" {
   })
 }
 
+resource "aws_iam_role_policy" "ses_send" {
+  count = var.ses_domain_identity_arn != "" ? 1 : 0
+
+  name = "ses-send"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = var.ses_domain_identity_arn
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.this.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"

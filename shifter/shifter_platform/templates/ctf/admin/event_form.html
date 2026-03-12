@@ -92,7 +92,7 @@
                         </div>
 
                         <div class="row">
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <div class="form-check">
                                     {{ form.auto_cleanup }}
                                     <label class="form-check-label" for="{{ form.auto_cleanup.id_for_label }}">
@@ -100,7 +100,16 @@
                                     </label>
                                 </div>
                             </div>
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
+                                <div class="form-check">
+                                    {{ form.ngfw_enabled }}
+                                    <label class="form-check-label" for="{{ form.ngfw_enabled.id_for_label }}">
+                                        Enable NGFW
+                                    </label>
+                                    <div class="form-text">Provision a Next-Generation Firewall per range</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-3">
                                 <label for="{{ form.cleanup_delay_hours.id_for_label }}" class="form-label">Cleanup Delay (hours)</label>
                                 {{ form.cleanup_delay_hours }}
                                 <div class="form-text">Hours after event end before cleanup</div>

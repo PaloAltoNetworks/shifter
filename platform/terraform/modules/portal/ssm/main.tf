@@ -196,7 +196,7 @@ resource "aws_ssm_parameter" "redis_endpoint" {
 }
 
 resource "aws_ssm_parameter" "db_host_override" {
-  count = var.db_host_override != "" ? 1 : 0
+  count = var.enable_db_host_override ? 1 : 0
 
   name        = "${local.ps_prefix}/db-host-override"
   description = "Database host override"

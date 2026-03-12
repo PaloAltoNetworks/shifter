@@ -262,15 +262,14 @@ class CTFChallengeForm(forms.ModelForm):
         Returns:
             The saved challenge instance.
         """
-        import hashlib
+        from ctf.services.challenge import hash_flag
 
         challenge = super().save(commit=False)
 
         # Hash the flag if provided
         flag = self.cleaned_data.get("flag")
         if flag:
-            # Use SHA256 for flag hashing (simpler than bcrypt for CTF flags)
-            challenge.flag_hash = hashlib.sha256(flag.encode()).hexdigest()
+            challenge.flag_hash = hash_flag(flag)
 
         # Set event if provided
         if self.event:

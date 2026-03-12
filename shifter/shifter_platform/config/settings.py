@@ -24,9 +24,10 @@ INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 # For testing, use a deterministic key; in production, use FIELD_ENCRYPTION_KEY env var
 FIELD_ENCRYPTION_KEY = os.environ.get(
     "FIELD_ENCRYPTION_KEY",
-    # Default key for testing only - NOT FOR PRODUCTION
-    # pragma: allowlist secret
-    "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE=" if os.environ.get("TESTING") == "1" else None,  # nosec B105
+    # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required)
+    "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # NOSONAR - test-only key, not a production credential
+    if os.environ.get("TESTING") == "1"
+    else None,
 )
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
@@ -282,8 +283,8 @@ OIDC_EXEMPT_URLS = [
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 if not FIELD_ENCRYPTION_KEY:
     if DEBUG or os.environ.get("TESTING") == "1":
-        # Dev/test: use a fixed key (not for production!)
-        FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # nosec B105
+        # Dev/test default - not a production credential
+        FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # NOSONAR - dev/test-only key
     else:
         raise ValueError("FIELD_ENCRYPTION_KEY environment variable is required in production")
 
@@ -291,8 +292,7 @@ if not FIELD_ENCRYPTION_KEY:
 # Shifter Configuration
 # ------------------------------------------------------------------------------
 
-# TODO: Set via SHIFTER_SUPPORT_EMAIL env var
-SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "support@example.com")
+SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter.local")  # NOSONAR
 
 # Provisioning timeout - how long dashboard waits before showing timeout error
 # UI fallback is 60 min if not provided (avoids long range standup issues during testing)

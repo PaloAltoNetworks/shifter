@@ -63,9 +63,9 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
     ngfw_enabled = event.range_config.get("ngfw_enabled", False) if event.range_config else False
 
     try:
-        import cms.services as cms_services
+        from ctf.bridges import cms_create_range, cms_find_range_instance_id
 
-        result = cms_services.create_range(
+        result = cms_create_range(
             user=participant.user,
             scenario=event.scenario_id,
             agents_by_os=agents_by_os,
@@ -79,13 +79,10 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
         ) from e
 
     # Store the RangeInstance reference
-    # RangeContext has request_id (UUID) - we need to find the RangeInstance by request
-    from cms.models import RangeInstance
+    range_instance_id = cms_find_range_instance_id(result.request_id)
 
-    range_instance = RangeInstance.objects.filter(request__request_id=result.request_id).first()
-
-    if range_instance:
-        participant.range_instance_id = range_instance.pk
+    if range_instance_id:
+        participant.range_instance_id = range_instance_id
     participant.range_status = "provisioning"
     participant.save(update_fields=["range_instance_id", "range_status", "updated_at"])
 
@@ -176,14 +173,10 @@ def get_range_status(participant_id: UUID) -> dict[str, Any]:
             "range_instance_id": None,
         }
 
-    # Query CMS for fresh status
-    from cms.models import RangeInstance
+    # Query CMS for fresh status via bridge
+    from ctf.bridges import cms_get_range_status
 
-    try:
-        range_instance = RangeInstance.objects.get(pk=participant.range_instance_id)
-        fresh_status = range_instance.status
-    except RangeInstance.DoesNotExist:
-        fresh_status = "unknown"
+    fresh_status = cms_get_range_status(participant.range_instance_id)
 
     # Update cached status if changed
     if fresh_status != participant.range_status:
@@ -237,39 +230,31 @@ def get_range_access_url(
             },
         )
 
-    # Load RangeInstance for IP extraction
-    from cms.models import RangeInstance
+    # Load range spec via bridge
+    from ctf.bridges import cms_get_range_spec, get_guacamole_rdp_url
 
-    try:
-        range_instance = RangeInstance.objects.get(pk=participant.range_instance_id)
-    except RangeInstance.DoesNotExist:
+    range_spec = cms_get_range_spec(participant.range_instance_id)
+    if range_spec is None:
         raise CTFRangeError(
             "Range instance not found in CMS",
             details={"range_instance_id": participant.range_instance_id},
-        ) from None
+        )
 
     # Extract IP from range_spec
-    private_ip = _extract_ip_from_range_spec(range_instance.range_spec)
+    private_ip = _extract_ip_from_range_spec(range_spec)
     if not private_ip:
         raise CTFRangeError(
             "No IP address found in range spec",
             details={"range_instance_id": participant.range_instance_id},
         )
 
-    # Generate Guacamole URL
-    from django.conf import settings
-
-    from mission_control.guacamole import create_guacamole_rdp_url
-
+    # Generate Guacamole URL via bridge
     username = participant.user.email if participant.user else participant.email
 
-    url = create_guacamole_rdp_url(
-        base_url=settings.GUACAMOLE_BASE_URL,
-        secret_key=settings.GUACAMOLE_JSON_AUTH_SECRET,
+    url = get_guacamole_rdp_url(
         username=username,
         connection_name=f"ctf-{participant.id}",
         hostname=private_ip,
-        api_base_url=settings.GUACAMOLE_API_BASE_URL,
     )
 
     return url
@@ -384,7 +369,7 @@ def update_participant_range_status(participant_id: UUID) -> dict[str, Any]:
 
 def _destroy_single_range(participant: CTFParticipant, user) -> None:
     """Destroy a single participant's range and clear fields."""
-    import cms.services as cms_services
+    from ctf.bridges import cms_destroy_range
 
     if participant.range_instance_id is None:
         logger.warning("No range_instance_id for participant %s, skipping destroy", participant.pk)
@@ -392,7 +377,7 @@ def _destroy_single_range(participant: CTFParticipant, user) -> None:
     if user is None:
         logger.warning("No user for participant %s, skipping destroy", participant.pk)
         return
-    cms_services.destroy_range(user, participant.range_instance_id)
+    cms_destroy_range(user, participant.range_instance_id)
     participant.range_instance_id = None
     participant.range_status = ""
     participant.save(update_fields=["range_instance_id", "range_status", "updated_at"])

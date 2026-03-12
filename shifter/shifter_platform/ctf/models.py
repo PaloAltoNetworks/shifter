@@ -1009,6 +1009,10 @@ class CTFScheduledTask(CTFBaseModel):
 
     Tracks tasks like range provisioning and cleanup.
 
+    Note: Tasks are database records only -- no background worker (e.g. Celery)
+    auto-executes them yet. A management command or cron job is needed to poll
+    for due tasks and run them.
+
     Attributes:
         event: The event this task belongs to.
         task_type: Type of scheduled task.

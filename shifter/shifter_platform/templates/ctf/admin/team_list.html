@@ -1,7 +1,95 @@
 {% extends "ctf/base.html" %}
-{% block ctf_title %}CTF Admin{% endblock %}
+{% block ctf_title %}Teams - {{ event.name }}{% endblock %}
+
 {% block ctf_content %}
-<div class="ctf-placeholder">
-    <p>This page is under construction.</p>
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1">
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                    <li class="breadcrumb-item active">Teams</li>
+                </ol>
+            </nav>
+            <h1 class="h3 mb-0">Teams</h1>
+        </div>
+    </div>
+
+    {% if not event.team_mode %}
+    <div class="card">
+        <div class="card-body text-center text-muted py-5">
+            <p class="mb-0">Team mode is not enabled for this event.</p>
+        </div>
+    </div>
+    {% else %}
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ teams|length }}</div>
+                    <div class="small text-uppercase">Total Teams</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-info text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ event.team_size_limit|default:"Unlimited" }}</div>
+                    <div class="small text-uppercase">Max Team Size</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teams Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            {% if teams %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Members</th>
+                            <th>Captain</th>
+                            <th>Score</th>
+                            <th>Invite Code</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in teams %}
+                        <tr>
+                            <td><strong>{{ team.name }}</strong></td>
+                            <td>
+                                {{ team.member_count }}{% if event.team_size_limit %} / {{ event.team_size_limit }}{% endif %}
+                                {% if team.is_full %}
+                                <span class="badge bg-warning ms-1">Full</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if team.captain %}
+                                {{ team.captain.name }}
+                                {% else %}
+                                <span class="text-muted">None</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ team.total_score }}</td>
+                            <td><code>{{ team.invite_code }}</code></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <p class="mb-0">No teams yet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

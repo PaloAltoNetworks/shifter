@@ -373,12 +373,12 @@ SQS_QUEUE_CONFIG = {
 # CTF Configuration
 # ------------------------------------------------------------------------------
 
-CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", SHIFTER_SUPPORT_EMAIL)
+CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", "ctf@keplerops.com")
 CTF_DEFAULT_RANGE_SPINUP_MINUTES = int(os.environ.get("CTF_DEFAULT_RANGE_SPINUP_MINUTES", "30"))
 CTF_DEFAULT_CLEANUP_DELAY_HOURS = int(os.environ.get("CTF_DEFAULT_CLEANUP_DELAY_HOURS", "24"))
 
 # Email - SES
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django_ses.SESBackend")
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 AWS_SES_REGION_NAME = "us-east-2"
 AWS_SES_REGION_ENDPOINT = "email.us-east-2.amazonaws.com"
 

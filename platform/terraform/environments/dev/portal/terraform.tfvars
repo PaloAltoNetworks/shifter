@@ -186,6 +186,14 @@ messaging_alarm_dlq_threshold         = 1
 messaging_alarm_actions               = [] # Populated by main.tf from shared SNS topic
 
 # ------------------------------------------------------------------------------
+# SES
+# ------------------------------------------------------------------------------
+
+ses_domain     = "keplerops.com"
+email_backend  = "django_ses.SESBackend"
+ctf_from_email = "ctf@keplerops.com"
+
+# ------------------------------------------------------------------------------
 # Alerting
 # ------------------------------------------------------------------------------
 

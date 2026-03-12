@@ -192,8 +192,9 @@ module "cognito" {
 # ------------------------------------------------------------------------------
 
 resource "aws_sns_topic" "alerts" {
-  name = "${local.name_prefix}-alerts"
-  tags = var.tags
+  name              = "${local.name_prefix}-alerts"
+  kms_master_key_id = "alias/aws/sns"
+  tags              = var.tags
 }
 
 resource "aws_sns_topic_subscription" "alerts_email" {
@@ -271,10 +272,15 @@ module "ssm" {
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
 
   # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
-  db_host_override = module.rds.db_instance_address
+  db_host_override        = module.rds.db_instance_address
+  enable_db_host_override = true
 
   # Logging level (DEBUG for dev, INFO for prod)
   log_level = var.log_level
+
+  # Email configuration
+  email_backend  = var.email_backend
+  ctf_from_email = var.ctf_from_email
 }
 
 # ------------------------------------------------------------------------------
@@ -328,6 +334,10 @@ module "ec2" {
   # Parameter Store prefix for user_data bootstrap
   ssm_parameter_store_prefix = module.ssm.parameter_store_prefix
 
+  # SES
+  ses_domain_identity_arn = module.ses.domain_identity_arn
+  enable_ses              = true
+
   tags = var.tags
 }
 
@@ -373,7 +383,7 @@ resource "random_id" "field_encryption_key" {
 resource "aws_secretsmanager_secret" "app" {
   name                    = "shifter-${local.name_prefix}-app"
   description             = "Django application secrets"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 
   tags = merge(var.tags, {
     Name = "shifter-${local.name_prefix}-app"
@@ -527,6 +537,7 @@ module "guacamole" {
   private_subnet_ids       = module.vpc.private_subnet_ids
   range_vpc_cidr           = data.terraform_remote_state.range.outputs.vpc_cidr
   portal_security_group_id = module.ec2.security_group_id
+  enable_portal_sg_rule    = true
 
   # Shared ALB (from Portal ALB module)
   alb_listener_arn      = module.alb.https_listener_arn
@@ -576,6 +587,16 @@ module "guacamole" {
   cognito_domain       = module.cognito.cognito_domain
   aws_region           = var.aws_region
   domain_name          = var.domain_name
+}
+
+# ------------------------------------------------------------------------------
+# SES (Transactional Email)
+# ------------------------------------------------------------------------------
+
+module "ses" {
+  source = "../../../modules/portal/ses"
+
+  domain = var.ses_domain
 }
 
 # ------------------------------------------------------------------------------

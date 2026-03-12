@@ -1,0 +1,313 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}{{ challenge.name }}{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="mb-3">
+        <a href="{% url 'ctf:challenges' %}" class="btn btn-sm btn-outline-primary">&larr; Back to Challenges</a>
+    </div>
+
+    <div class="row">
+        <!-- Main Content -->
+        <div class="col-md-8 mb-4">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">{{ challenge.name }}</h4>
+                    <div>
+                        {% if challenge.category == 'web' %}
+                        <span class="badge bg-info">Web Exploitation</span>
+                        {% elif challenge.category == 'forensics' %}
+                        <span class="badge bg-info">Forensics</span>
+                        {% elif challenge.category == 'crypto' %}
+                        <span class="badge bg-info">Cryptography</span>
+                        {% elif challenge.category == 'reverse' %}
+                        <span class="badge bg-info">Reverse Engineering</span>
+                        {% elif challenge.category == 'pwn' %}
+                        <span class="badge bg-info">Binary Exploitation</span>
+                        {% elif challenge.category == 'misc' %}
+                        <span class="badge bg-info">Miscellaneous</span>
+                        {% elif challenge.category == 'osint' %}
+                        <span class="badge bg-info">OSINT</span>
+                        {% elif challenge.category == 'hardware' %}
+                        <span class="badge bg-info">Hardware</span>
+                        {% elif challenge.category == 'network' %}
+                        <span class="badge bg-info">Network</span>
+                        {% endif %}
+
+                        {% if challenge.difficulty == 'easy' %}
+                        <span class="badge bg-success">Easy</span>
+                        {% elif challenge.difficulty == 'medium' %}
+                        <span class="badge bg-warning">Medium</span>
+                        {% elif challenge.difficulty == 'hard' %}
+                        <span class="badge bg-danger">Hard</span>
+                        {% elif challenge.difficulty == 'expert' %}
+                        <span class="badge bg-dark">Expert</span>
+                        {% endif %}
+
+                        <span class="badge bg-primary">{{ challenge.points }} pts</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if is_solved %}
+                    <div class="alert alert-success mb-3">
+                        You have solved this challenge!
+                        {% if first_blood and first_blood.participant.pk == participant.pk %}
+                        <strong>First Blood!</strong>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if first_blood and not is_solved %}
+                    <div class="mb-3">
+                        <small class="text-muted">First blood: <strong>{{ first_blood.participant.name }}</strong></small>
+                    </div>
+                    {% endif %}
+
+                    <div class="mb-4">
+                        {{ challenge.description|linebreaksbr }}
+                    </div>
+
+                    {% if challenge.flag_format %}
+                    <div class="mb-3">
+                        <strong>Flag format:</strong> <code>{{ challenge.flag_format }}</code>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Flag Submission -->
+            {% if not is_solved %}
+            <div class="card mb-4" id="submit-section">
+                <div class="card-header">
+                    <h5 class="mb-0">Submit Flag</h5>
+                </div>
+                <div class="card-body">
+                    {% if max_attempts > 0 and attempt_count >= max_attempts %}
+                    <div class="alert alert-danger mb-0">
+                        Maximum attempts reached ({{ attempt_count }}/{{ max_attempts }}). You can no longer submit flags for this challenge.
+                    </div>
+                    {% else %}
+                    <div id="submit-result" class="mb-3" style="display: none;"></div>
+                    <form id="flag-form" onsubmit="return submitFlag(event)">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="flag-input" name="flag"
+                                   placeholder="Enter flag..." required autocomplete="off">
+                            <button type="submit" class="btn btn-primary" id="submit-btn">Submit</button>
+                        </div>
+                        {% if max_attempts > 0 %}
+                        <small class="text-muted mt-1 d-block">
+                            Attempts: {{ attempt_count }}/{{ max_attempts }}
+                        </small>
+                        {% endif %}
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Previous Attempts -->
+            {% if submissions %}
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Previous Attempts</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Submitted Flag</th>
+                                    <th>Result</th>
+                                    <th>Points</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for sub in submissions %}
+                                <tr>
+                                    <td>{{ sub.attempt_number }}</td>
+                                    <td><code>{{ sub.submitted_flag }}</code></td>
+                                    <td>
+                                        {% if sub.is_correct %}
+                                        <span class="badge bg-success">Correct</span>
+                                        {% else %}
+                                        <span class="badge bg-danger">Incorrect</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ sub.points_awarded }}</td>
+                                    <td>{{ sub.submitted_at|date:"M d, H:i:s" }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-md-4 mb-4">
+            <!-- Hint Section -->
+            {% if challenge.hint %}
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Hint</h5>
+                </div>
+                <div class="card-body">
+                    {% if hint_used %}
+                    <div class="alert alert-info mb-0">
+                        {{ challenge.hint }}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-2">A hint is available for this challenge.</p>
+                    {% if challenge.hint_penalty > 0 %}
+                    <p class="text-warning mb-3">
+                        <strong>Warning:</strong> Using the hint will reduce your points by {{ challenge.hint_penalty }}%.
+                    </p>
+                    {% endif %}
+                    <div id="hint-result" style="display: none;"></div>
+                    <button type="button" class="btn btn-outline-warning btn-sm" id="hint-btn" onclick="useHint()">
+                        Reveal Hint
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Challenge Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Stats</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <strong>Solves:</strong> {{ challenge.solve_count }}
+                    </div>
+                    <div class="mb-2">
+                        <strong>Points:</strong> {{ challenge.points }}
+                    </div>
+                    {% if max_attempts > 0 %}
+                    <div class="mb-2">
+                        <strong>Max attempts:</strong> {{ max_attempts }}
+                    </div>
+                    {% endif %}
+                    <div>
+                        <strong>Your attempts:</strong> {{ attempt_count }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCookie(name) {
+    let value = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                value = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return value;
+}
+
+function submitFlag(e) {
+    e.preventDefault();
+    const flag = document.getElementById('flag-input').value;
+    const btn = document.getElementById('submit-btn');
+    const resultDiv = document.getElementById('submit-result');
+
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    fetch("{% url 'ctf:api_submit_flag' challenge_id=challenge.pk %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: JSON.stringify({ flag: flag }),
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        resultDiv.style.display = 'block';
+        if (data.correct) {
+            resultDiv.className = 'alert alert-success mb-3';
+            resultDiv.innerHTML = '<strong>Correct!</strong> You earned ' + data.points_awarded + ' points.';
+            document.getElementById('flag-form').style.display = 'none';
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            resultDiv.className = 'alert alert-danger mb-3';
+            var msg = '<strong>Incorrect.</strong>';
+            if (data.message) {
+                msg += ' ' + data.message;
+            }
+            resultDiv.innerHTML = msg;
+            btn.disabled = false;
+            btn.textContent = 'Submit';
+            document.getElementById('flag-input').value = '';
+        }
+    })
+    .catch(function(err) {
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'alert alert-danger mb-3';
+        resultDiv.textContent = 'An error occurred. Please try again.';
+        btn.disabled = false;
+        btn.textContent = 'Submit';
+    });
+
+    return false;
+}
+
+function useHint() {
+    var btn = document.getElementById('hint-btn');
+    var resultDiv = document.getElementById('hint-result');
+
+    if (!confirm('Are you sure you want to reveal the hint?{% if challenge.hint_penalty > 0 %} This will reduce your points by {{ challenge.hint_penalty }}%.{% endif %}')) {
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+
+    fetch("{% url 'ctf:api_use_hint' challenge_id=challenge.pk %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.hint) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'alert alert-info';
+            resultDiv.textContent = data.hint;
+            btn.style.display = 'none';
+        } else if (data.error) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'alert alert-danger';
+            resultDiv.textContent = data.error;
+            btn.disabled = false;
+            btn.textContent = 'Reveal Hint';
+        }
+    })
+    .catch(function(err) {
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'alert alert-danger';
+        resultDiv.textContent = 'An error occurred. Please try again.';
+        btn.disabled = false;
+        btn.textContent = 'Reveal Hint';
+    });
+}
+</script>
+{% endblock %}

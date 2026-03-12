@@ -17,6 +17,10 @@ import {
   STRIDE_CODES,
   STRIDE_LABELS,
   buildUpdateSet,
+  getSsmDocument,
+  MAX_S3_READ_SIZE,
+  isBinaryContentType,
+  validateManageCommand,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -353,6 +357,115 @@ describe("STRIDE_LABELS", () => {
     for (const code of STRIDE_CODES) {
       assert.ok(STRIDE_LABELS[code], `Missing label for ${code}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSsmDocument
+// ---------------------------------------------------------------------------
+describe("getSsmDocument", () => {
+  it("returns RunPowerShellScript for Windows", () => {
+    assert.equal(getSsmDocument("Windows"), "AWS-RunPowerShellScript");
+  });
+
+  it("returns RunPowerShellScript for Windows with SQL Server", () => {
+    assert.equal(
+      getSsmDocument("Windows with SQL Server"),
+      "AWS-RunPowerShellScript",
+    );
+  });
+
+  it("returns RunShellScript for Linux/UNIX", () => {
+    assert.equal(getSsmDocument("Linux/UNIX"), "AWS-RunShellScript");
+  });
+
+  it("returns RunShellScript for null/undefined", () => {
+    assert.equal(getSsmDocument(null), "AWS-RunShellScript");
+    assert.equal(getSsmDocument(undefined), "AWS-RunShellScript");
+  });
+
+  it("is case-insensitive for windows", () => {
+    assert.equal(getSsmDocument("windows"), "AWS-RunPowerShellScript");
+    assert.equal(getSsmDocument("WINDOWS"), "AWS-RunPowerShellScript");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S3 helpers
+// ---------------------------------------------------------------------------
+describe("MAX_S3_READ_SIZE", () => {
+  it("is 1MB", () => {
+    assert.equal(MAX_S3_READ_SIZE, 1024 * 1024);
+  });
+});
+
+describe("isBinaryContentType", () => {
+  it("detects image types as binary", () => {
+    assert.equal(isBinaryContentType("image/png"), true);
+    assert.equal(isBinaryContentType("image/jpeg"), true);
+  });
+
+  it("detects video types as binary", () => {
+    assert.equal(isBinaryContentType("video/mp4"), true);
+  });
+
+  it("detects audio types as binary", () => {
+    assert.equal(isBinaryContentType("audio/mpeg"), true);
+  });
+
+  it("detects octet-stream as binary", () => {
+    assert.equal(isBinaryContentType("application/octet-stream"), true);
+  });
+
+  it("detects zip and gzip as binary", () => {
+    assert.equal(isBinaryContentType("application/zip"), true);
+    assert.equal(isBinaryContentType("application/gzip"), true);
+  });
+
+  it("returns false for text types", () => {
+    assert.equal(isBinaryContentType("text/plain"), false);
+    assert.equal(isBinaryContentType("text/html"), false);
+    assert.equal(isBinaryContentType("application/json"), false);
+  });
+
+  it("returns false for null/undefined", () => {
+    assert.equal(isBinaryContentType(null), false);
+    assert.equal(isBinaryContentType(undefined), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateManageCommand
+// ---------------------------------------------------------------------------
+describe("validateManageCommand", () => {
+  it("allows whitelisted commands", () => {
+    assert.doesNotThrow(() => validateManageCommand("check"));
+    assert.doesNotThrow(() => validateManageCommand("showmigrations"));
+    assert.doesNotThrow(() => validateManageCommand("diffsettings"));
+    assert.doesNotThrow(() => validateManageCommand("clearsessions"));
+  });
+
+  it("allows commands with arguments", () => {
+    assert.doesNotThrow(() => validateManageCommand("check --deploy"));
+    assert.doesNotThrow(() => validateManageCommand("showmigrations engine"));
+  });
+
+  it("returns parsed parts", () => {
+    const parts = validateManageCommand("check --deploy");
+    assert.deepEqual(parts, ["check", "--deploy"]);
+  });
+
+  it("blocks destructive commands", () => {
+    assert.throws(() => validateManageCommand("flush"), /Blocked/);
+    assert.throws(() => validateManageCommand("migrate"), /Blocked/);
+    assert.throws(() => validateManageCommand("createsuperuser"), /Blocked/);
+    assert.throws(() => validateManageCommand("shell"), /Blocked/);
+    assert.throws(() => validateManageCommand("reset_db"), /Blocked/);
+  });
+
+  it("rejects unknown commands", () => {
+    assert.throws(() => validateManageCommand("custom_thing"), /Unknown/);
+    assert.throws(() => validateManageCommand("makemigrations"), /Unknown/);
   });
 });
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
+from ctf.bridges import RangeProvisionResult
 from ctf.exceptions import CTFNotFoundError, CTFRangeError
 from ctf.services import range as range_service
 
@@ -30,18 +31,12 @@ class TestProvisionParticipantRange:
 
     def test_provision_success(self, ctf_participant, participant_user):
         """Successful provisioning sets range_instance_id and status using participant.user."""
-        mock_result = MagicMock()
-        mock_result.request_id = uuid4()
-
-        mock_range_instance = MagicMock()
-        mock_range_instance.pk = 99
+        request_id = uuid4()
+        mock_result = RangeProvisionResult(request_id=request_id)
 
         with (
-            patch("cms.services.create_range", return_value=mock_result) as mock_create,
-            patch(
-                "cms.models.RangeInstance.objects.filter",
-                return_value=MagicMock(first=MagicMock(return_value=mock_range_instance)),
-            ),
+            patch("ctf.bridges.cms_create_range", return_value=mock_result) as mock_create,
+            patch("ctf.bridges.cms_find_range_instance_id", return_value=99),
         ):
             result = range_service.provision_participant_range(ctf_participant.pk)
 
@@ -60,7 +55,7 @@ class TestProvisionParticipantRange:
     def test_provision_cms_failure(self, ctf_participant):
         """CMS errors are wrapped in CTFRangeError."""
         with (
-            patch("cms.services.create_range", side_effect=RuntimeError("CMS down")),
+            patch("ctf.bridges.cms_create_range", side_effect=RuntimeError("CMS down")),
             pytest.raises(CTFRangeError, match="Range provisioning failed"),
         ):
             range_service.provision_participant_range(ctf_participant.pk)
@@ -129,10 +124,7 @@ class TestGetRangeStatus:
         ctf_participant.range_status = "provisioning"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
 
-        mock_instance = MagicMock()
-        mock_instance.status = "ready"
-
-        with patch("cms.models.RangeInstance.objects.get", return_value=mock_instance):
+        with patch("ctf.bridges.cms_get_range_status", return_value="ready"):
             result = range_service.get_range_status(ctf_participant.pk)
 
         assert result["status"] == "ready"
@@ -169,13 +161,12 @@ class TestGetRangeAccessUrl:
         ctf_participant.range_status = "ready"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
 
-        mock_instance = MagicMock()
-        mock_instance.range_spec = {"subnets": [{"instances": [{"private_ip": "10.0.1.5"}]}]}
+        mock_spec = {"subnets": [{"instances": [{"private_ip": "10.0.1.5"}]}]}
 
         with (
-            patch("cms.models.RangeInstance.objects.get", return_value=mock_instance),
+            patch("ctf.bridges.cms_get_range_spec", return_value=mock_spec),
             patch(
-                "mission_control.guacamole.create_guacamole_rdp_url",
+                "ctf.bridges.get_guacamole_rdp_url",
                 return_value="https://guac.example.com/session",
             ) as mock_guac,
         ):
@@ -200,7 +191,7 @@ class TestCleanupEventRanges:
         ctf_participant.range_status = "ready"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
 
-        with patch("cms.services.destroy_range") as mock_destroy:
+        with patch("ctf.bridges.cms_destroy_range") as mock_destroy:
             result = range_service.cleanup_event_ranges(ctf_event.pk)
 
         assert result["destroyed"] == 1
@@ -230,7 +221,7 @@ class TestDestroyParticipantRange:
         ctf_participant.range_status = "ready"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
 
-        with patch("cms.services.destroy_range") as mock_destroy:
+        with patch("ctf.bridges.cms_destroy_range") as mock_destroy:
             result = range_service.destroy_participant_range(ctf_participant.pk)
 
         assert result["status"] == "destroyed"

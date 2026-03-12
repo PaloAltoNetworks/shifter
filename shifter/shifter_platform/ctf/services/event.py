@@ -446,7 +446,12 @@ def cancel_event(event: CTFEvent) -> bool:
 
 
 def _schedule_event_tasks(event: CTFEvent) -> None:
-    """Schedule automated tasks for an event."""
+    """Schedule automated tasks for an event.
+
+    Note: Tasks are recorded in the database only. There is no background
+    worker (e.g. Celery) that executes them automatically. A future
+    management command or cron job will be needed to poll and run due tasks.
+    """
     from datetime import timedelta
 
     from django.utils import timezone

@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - CTF (Capture The Flag) management platform — core app files: models, enums, services, admin, forms, migrations
 - CTF config and routing integration: settings, URL routing, dashboard router, dev login user types, OIDC user type claims
+- CTF views, URL routing, and templates: organizer admin views, participant views, API endpoints, 38 template files, email templates, sidebar partials
 - UserProfile CTF fields: user_type, active_ctf_event, role properties (is_ctf_organizer, is_ctf_participant, is_standard_user)
+- CTF test suite: 13 test files, 230 tests across models, auth, challenges, events, participant views, services (notification, range)
 
 ## [2.3.3] - 2026-03-10
 

@@ -38,6 +38,7 @@ def _is_dev_environment():
 
     This allows dev_login to work both locally and in deployed dev when accessed via SSM tunnel.
     """
+    # NOSONAR - intentional dev bypass, guarded by ENVIRONMENT; prod uses OIDC
     return settings.DEBUG or getattr(settings, "ENVIRONMENT", "production") == "development"
 
 

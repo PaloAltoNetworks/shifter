@@ -142,9 +142,9 @@ class TestCTFChallengeForm:
         )
         assert form.is_valid(), form.errors
         challenge = form.save()
-        # Flag should be hashed
+        # Flag should be hashed (bcrypt or pbkdf2, not plaintext)
         assert challenge.flag_hash != "FLAG{test_flag}"
-        assert len(challenge.flag_hash) == 64  # SHA256 hex
+        assert challenge.flag_hash.startswith(("$2", "pbkdf2:"))
 
 
 # =============================================================================

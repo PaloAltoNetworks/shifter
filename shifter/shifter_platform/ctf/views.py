@@ -86,6 +86,28 @@ def ctf_participant_required(view_func):
     return wrapper
 
 
+def ctf_role_required(view_func):
+    """Decorator that requires the user to be a CTF organizer or participant.
+
+    Returns 403 Forbidden if user has no CTF role.
+    Must be used after @login_required.
+    """
+
+    @functools.wraps(view_func)
+    def wrapper(request: HttpRequest, *args, **kwargs):
+        user = _get_user(request)
+        role = get_user_role(user)
+        if not role.is_ctf_organizer and not role.is_ctf_participant:
+            logger.warning(
+                "CTF access denied for user %s (no CTF role)",
+                user.email,
+            )
+            return HttpResponse("Forbidden: CTF access required", status=403)
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -1544,6 +1566,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
 
 
 @login_required
+@ctf_organizer_required
 @require_http_methods(["GET", "POST"])
 def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """API: List challenges or create new challenge.
@@ -1600,6 +1623,7 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
 
 
 @login_required
+@ctf_organizer_required
 @require_http_methods(["GET", "PUT", "DELETE"])
 def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     """API: Get, update, or delete challenge.
@@ -1663,6 +1687,7 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
 
 
 @login_required
+@ctf_participant_required
 @require_POST
 def api_submit_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     """API: Submit flag for a challenge.
@@ -1718,6 +1743,7 @@ def api_submit_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
 
 
 @login_required
+@ctf_participant_required
 @require_POST
 def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     """API: Use hint for a challenge.
@@ -1750,6 +1776,7 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
 
 
 @login_required
+@ctf_participant_required
 @require_GET
 def api_submissions(request: HttpRequest) -> JsonResponse:
     """API: Get submissions for current user."""
@@ -1843,7 +1870,7 @@ def api_participant_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
                     "name": participant.name,
                     "email": participant.email,
                     "status": participant.status,
-                    "invite_token": participant.invite_token,
+                    "invited": True,
                 },
                 status=201,
             )
@@ -2006,8 +2033,7 @@ def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) ->
             {
                 "success": True,
                 "id": str(updated.id),
-                "invite_token": updated.invite_token,
-                "invite_token_expires": updated.invite_token_expires.isoformat(),
+                "invited": True,
             }
         )
     except CTFStateError as e:
@@ -2015,6 +2041,7 @@ def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) ->
 
 
 @login_required
+@ctf_participant_required
 @require_GET
 def api_range_status(request: HttpRequest) -> JsonResponse:
     """API: Get range status for current participant."""
@@ -2043,6 +2070,7 @@ def api_range_status(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@ctf_participant_required
 @require_POST
 def api_range_access(request: HttpRequest) -> JsonResponse:
     """API: Get range access URL."""
@@ -2072,6 +2100,7 @@ def api_range_access(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@ctf_role_required
 @require_GET
 def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """API: Get scoreboard data.

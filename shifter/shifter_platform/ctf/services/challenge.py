@@ -35,7 +35,7 @@ except ImportError:
 def hash_flag(flag: str) -> str:
     """Hash a flag for secure storage.
 
-    Uses bcrypt if available, falls back to SHA256 with random salt.
+    Uses bcrypt if available, falls back to PBKDF2-SHA256.
 
     Args:
         flag: The plaintext flag value.
@@ -46,10 +46,9 @@ def hash_flag(flag: str) -> str:
     if BCRYPT_AVAILABLE:
         return bcrypt.hashpw(flag.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     else:
-        # Fallback: SHA256 with salt (less secure than bcrypt)
         salt = secrets.token_hex(16)
-        hash_value = hashlib.sha256(f"{salt}:{flag}".encode()).hexdigest()
-        return f"sha256:{salt}:{hash_value}"
+        hash_value = hashlib.pbkdf2_hmac("sha256", flag.encode("utf-8"), salt.encode("utf-8"), iterations=600_000).hex()
+        return f"pbkdf2:{salt}:{hash_value}"
 
 
 def verify_flag(challenge: CTFChallenge, submitted_flag: str) -> bool:
@@ -74,8 +73,19 @@ def verify_flag(challenge: CTFChallenge, submitted_flag: str) -> bool:
         except Exception as e:
             logger.error("Flag verification error for challenge %s: %s", challenge.id, e)
             return False
+    elif stored_hash.startswith("pbkdf2:"):
+        # PBKDF2-SHA256 hash
+        parts = stored_hash.split(":", 2)
+        if len(parts) != 3:
+            logger.error("Invalid hash format for challenge %s", challenge.id)
+            return False
+        _, salt, expected_hash = parts
+        actual_hash = hashlib.pbkdf2_hmac(
+            "sha256", submitted_flag.encode("utf-8"), salt.encode("utf-8"), iterations=600_000
+        ).hex()
+        return secrets.compare_digest(actual_hash, expected_hash)
     elif stored_hash.startswith("sha256:"):
-        # SHA256 fallback hash
+        # Legacy SHA256 fallback hash (backward compat)
         parts = stored_hash.split(":", 2)
         if len(parts) != 3:
             logger.error("Invalid hash format for challenge %s", challenge.id)

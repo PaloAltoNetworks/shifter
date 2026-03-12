@@ -1,0 +1,22 @@
+{% extends "ctf/base.html" %}
+{% comment %}
+CTF Help page.
+
+Provides help and documentation for CTF participants.
+{% endcomment %}
+
+{% block ctf_title %}Help{% endblock %}
+
+{% block ctf_content %}
+<div class="ctf-help">
+    <h1>CTF Help</h1>
+    <p>Welcome to the Shifter CTF platform!</p>
+
+    <h2>Getting Started</h2>
+    <p>This help page is under construction.</p>
+
+    {% if placeholder %}
+    <p class="text-muted">Placeholder view - implementation pending.</p>
+    {% endif %}
+</div>
+{% endblock %}

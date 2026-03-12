@@ -1158,6 +1158,19 @@ def admin_team_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     Args:
         event_id: UUID of the event.
     """
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
     # TODO: Implement team list
     return render(
         request,
@@ -1174,6 +1187,19 @@ def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
     Args:
         event_id: UUID of the event.
     """
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
     # TODO: Implement admin scoreboard
     return render(
         request,
@@ -1190,6 +1216,8 @@ def admin_range_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     Args:
         event_id: UUID of the event.
     """
+    from django.http import Http404
+
     from ctf.exceptions import CTFNotFoundError
     from ctf.models import CTFParticipant
     from ctf.services import get_event
@@ -1197,7 +1225,10 @@ def admin_range_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        return HttpResponse("Event not found", status=404)
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
     participants = CTFParticipant.objects.filter(event=event).order_by("name")
 
@@ -1216,6 +1247,8 @@ def admin_notification_list(request: HttpRequest, event_id: UUID) -> HttpRespons
     Args:
         event_id: UUID of the event.
     """
+    from django.http import Http404
+
     from ctf.exceptions import CTFNotFoundError
     from ctf.models import CTFNotification
     from ctf.services import get_event
@@ -1223,7 +1256,10 @@ def admin_notification_list(request: HttpRequest, event_id: UUID) -> HttpRespons
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        return HttpResponse("Event not found", status=404)
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
     notifications = CTFNotification.objects.filter(event=event).order_by("-created_at")
 
@@ -1243,13 +1279,18 @@ def admin_notification_create(request: HttpRequest, event_id: UUID) -> HttpRespo
     Args:
         event_id: UUID of the event.
     """
+    from django.http import Http404
+
     from ctf.exceptions import CTFNotFoundError
     from ctf.services import get_event
 
     try:
         event = get_event(event_id)
     except CTFNotFoundError:
-        return HttpResponse("Event not found", status=404)
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
     if request.method == "POST":
         from ctf.enums import NotificationStatus, NotificationType
@@ -1325,6 +1366,19 @@ def admin_analytics(request: HttpRequest, event_id: UUID) -> HttpResponse:
     Args:
         event_id: UUID of the event.
     """
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
     # TODO: Implement analytics
     return render(
         request,
@@ -1360,6 +1414,17 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
     # TODO: Implement event detail API
     return JsonResponse({"placeholder": True, "event_id": str(event_id), "method": request.method})
 
@@ -1845,6 +1910,9 @@ def api_notification_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     except CTFNotFoundError:
         return JsonResponse({"error": "Event not found"}, status=404)
 
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
     if request.method == "POST":
         try:
             data = json.loads(request.body)
@@ -1907,11 +1975,16 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
     from ctf.models import CTFNotification
     from ctf.services import notification
 
-    notif = CTFNotification.objects.filter(pk=notification_id).first()
+    notif = CTFNotification.objects.select_related("event").filter(pk=notification_id).first()
     if not notif:
         if "text/html" in request.headers.get("Accept", ""):
             return HttpResponse("Notification not found", status=404)
         return JsonResponse({"error": "Notification not found"}, status=404)
+
+    if notif.event.created_by_id != request.user.pk:
+        if "text/html" in request.headers.get("Accept", ""):
+            return HttpResponse("Forbidden: You do not have access to this event", status=403)
+        return JsonResponse({"error": "Forbidden"}, status=403)
 
     type_dispatch = {
         NotificationType.INVITE.value: lambda n: notification.send_invitations(n.event_id),
@@ -1959,6 +2032,9 @@ def api_range_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     except CTFNotFoundError:
         return JsonResponse({"error": "Event not found"}, status=404)
 
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
     participants = CTFParticipant.objects.filter(event=event).order_by("name")
     data = [
         {
@@ -1987,9 +2063,12 @@ def api_provision_ranges(request: HttpRequest, event_id: UUID) -> JsonResponse:
     from ctf.services import get_event
 
     try:
-        get_event(event_id)
+        event = get_event(event_id)
     except CTFNotFoundError:
         return JsonResponse({"error": "Event not found"}, status=404)
+
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
 
     from ctf.services import range as range_service
 

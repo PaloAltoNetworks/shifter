@@ -143,6 +143,12 @@ variable "redis_endpoint" {
   default     = ""
 }
 
+variable "enable_redis" {
+  description = "Whether to create the Redis endpoint SSM parameter. Avoids writing an empty string which SSM rejects."
+  type        = bool
+  default     = false
+}
+
 variable "db_host_override" {
   description = "Override database host. If empty, uses RDS host from secret."
   type        = string

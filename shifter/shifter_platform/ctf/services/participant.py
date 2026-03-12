@@ -91,7 +91,6 @@ def invite_participant(
             name=name.strip(),
             team=team,
             status=ParticipantStatus.INVITED.value,
-            invited_at=timezone.now(),
         )
 
         logger.info(
@@ -210,7 +209,6 @@ def bulk_import_participants(
 
     # Create participants
     created: list[CTFParticipant] = []
-    now = timezone.now()
 
     with transaction.atomic():
         for name, email in participants_data:
@@ -219,7 +217,6 @@ def bulk_import_participants(
                 email=email,
                 name=name,
                 status=ParticipantStatus.INVITED.value,
-                invited_at=now,
             )
             created.append(participant)
 

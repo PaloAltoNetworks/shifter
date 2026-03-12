@@ -11,6 +11,7 @@ from ctf.enums import NotificationStatus, NotificationType
 from ctf.exceptions import CTFNotFoundError
 from ctf.models import CTFNotification
 from ctf.services import notification
+from ctf.services import participant as participant_service
 
 
 @pytest.mark.django_db
@@ -197,3 +198,25 @@ class TestRenderEmail:
         assert ctf_event.name in text
         assert "test-token" in html
         assert "test-token" in text
+
+
+@pytest.mark.django_db
+class TestInvitedAtNotSetAtCreation:
+    """Verify invite_participant and bulk_import don't set invited_at."""
+
+    def test_invite_participant_does_not_set_invited_at(self, ctf_event):
+        """invite_participant() should not set invited_at (send_invitations does)."""
+        p = participant_service.invite_participant(
+            event_id=ctf_event.pk,
+            email="newinvite@test.com",
+            name="New Invite",
+        )
+        assert p.invited_at is None
+
+    def test_bulk_import_does_not_set_invited_at(self, ctf_event):
+        """bulk_import_participants() should not set invited_at."""
+        csv_content = "Alice,alice@test.com\nBob,bob@test.com"
+        created = participant_service.bulk_import_participants(ctf_event.pk, csv_content)
+        assert len(created) == 2
+        for p in created:
+            assert p.invited_at is None

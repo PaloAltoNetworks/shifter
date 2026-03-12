@@ -36,12 +36,18 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
     logger.info("Provisioning range for participant %s", participant_id)
 
     try:
-        participant = CTFParticipant.objects.select_related("event", "event__created_by").get(pk=participant_id)
+        participant = CTFParticipant.objects.select_related("event", "user").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
         ) from None
+
+    if participant.user is None:
+        raise CTFRangeError(
+            "Participant must be registered before provisioning a range",
+            details={"participant_id": str(participant_id)},
+        )
 
     if participant.range_instance_id:
         raise CTFRangeError(
@@ -60,7 +66,7 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
         import cms.services as cms_services
 
         result = cms_services.create_range(
-            user=event.created_by,
+            user=participant.user,
             scenario=event.scenario_id,
             agents_by_os=agents_by_os,
             ngfw_enabled=ngfw_enabled,
@@ -294,14 +300,14 @@ def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:
     participants = CTFParticipant.objects.filter(
         event=event,
         range_instance_id__isnull=False,
-    )
+    ).select_related("user")
 
     destroyed = 0
     failed = 0
 
     for participant in participants:
         try:
-            _destroy_single_range(participant, event.created_by)
+            _destroy_single_range(participant, participant.user)
             destroyed += 1
         except Exception as e:
             failed += 1
@@ -335,7 +341,7 @@ def destroy_participant_range(participant_id: UUID) -> dict[str, Any]:
     logger.info("Destroying range for participant %s", participant_id)
 
     try:
-        participant = CTFParticipant.objects.select_related("event", "event__created_by").get(pk=participant_id)
+        participant = CTFParticipant.objects.select_related("user").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
         raise CTFNotFoundError(
             f"Participant {participant_id} not found",
@@ -348,7 +354,7 @@ def destroy_participant_range(participant_id: UUID) -> dict[str, Any]:
             details={"participant_id": str(participant_id)},
         )
 
-    _destroy_single_range(participant, participant.event.created_by)
+    _destroy_single_range(participant, participant.user)
 
     return {
         "participant_id": str(participant_id),
@@ -382,6 +388,9 @@ def _destroy_single_range(participant: CTFParticipant, user) -> None:
 
     if participant.range_instance_id is None:
         logger.warning("No range_instance_id for participant %s, skipping destroy", participant.pk)
+        return
+    if user is None:
+        logger.warning("No user for participant %s, skipping destroy", participant.pk)
         return
     cms_services.destroy_range(user, participant.range_instance_id)
     participant.range_instance_id = None

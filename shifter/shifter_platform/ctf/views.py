@@ -16,10 +16,11 @@ import logging
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from management.services import get_user_profile
@@ -138,6 +139,36 @@ def ctf_login(request: HttpRequest) -> HttpResponse:
             logger.warning("CTF login: invalid invite token")
 
     return render(request, "ctf/login.html", context)
+
+
+@login_required
+def ctf_register(request: HttpRequest) -> HttpResponse:
+    """Register a participant after OIDC authentication.
+
+    Accepts invite token via POST or GET, validates it, and links
+    the authenticated user to the participant record.
+    """
+    from ctf.exceptions import CTFStateError
+    from ctf.models import CTFParticipant
+    from ctf.services.participant import register_participant
+
+    token = request.POST.get("token") or request.GET.get("token")
+    if not token:
+        messages.error(request, "Missing invite token.")
+        return redirect("ctf:ctf_login")
+
+    participant = CTFParticipant.objects.filter(invite_token=token).first()
+    if not participant:
+        messages.error(request, "Invalid invite token.")
+        return redirect("ctf:ctf_login")
+
+    try:
+        register_participant(participant.pk, _get_user(request))
+    except CTFStateError as exc:
+        messages.error(request, str(exc))
+        return redirect("ctf:ctf_login")
+
+    return redirect("ctf:participant_dashboard")
 
 
 @login_required

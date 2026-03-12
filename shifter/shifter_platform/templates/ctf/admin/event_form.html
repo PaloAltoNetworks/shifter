@@ -1,0 +1,168 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}{% if is_edit %}Edit Event{% else %}Create Event{% endif %}{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">{% if is_edit %}Edit Event: {{ event.name }}{% else %}Create New CTF Event{% endif %}</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" novalidate>
+                        {% csrf_token %}
+
+                        {% if form.non_field_errors %}
+                        <div class="alert alert-danger">
+                            {% for error in form.non_field_errors %}
+                            <p class="mb-0">{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Basic Info -->
+                        <h6 class="text-muted mb-3">Basic Information</h6>
+
+                        <div class="mb-3">
+                            <label for="{{ form.name.id_for_label }}" class="form-label">Event Name <span class="text-danger">*</span></label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                            <div class="invalid-feedback d-block">{{ form.name.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.description.id_for_label }}" class="form-label">Description</label>
+                            {{ form.description }}
+                            <div class="form-text">Supports Markdown formatting</div>
+                            {% if form.description.errors %}
+                            <div class="invalid-feedback d-block">{{ form.description.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Schedule -->
+                        <h6 class="text-muted mb-3 mt-4">Schedule</h6>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.event_start.id_for_label }}" class="form-label">Event Start <span class="text-danger">*</span></label>
+                                {{ form.event_start }}
+                                {% if form.event_start.errors %}
+                                <div class="invalid-feedback d-block">{{ form.event_start.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.event_end.id_for_label }}" class="form-label">Event End <span class="text-danger">*</span></label>
+                                {{ form.event_end }}
+                                {% if form.event_end.errors %}
+                                <div class="invalid-feedback d-block">{{ form.event_end.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.registration_deadline.id_for_label }}" class="form-label">Registration Deadline</label>
+                            {{ form.registration_deadline }}
+                            <div class="form-text">Optional. Must be before event start.</div>
+                            {% if form.registration_deadline.errors %}
+                            <div class="invalid-feedback d-block">{{ form.registration_deadline.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Range Settings -->
+                        <h6 class="text-muted mb-3 mt-4">Range Settings</h6>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.scenario_id.id_for_label }}" class="form-label">Scenario Template</label>
+                                {{ form.scenario_id }}
+                                {% if form.scenario_id.errors %}
+                                <div class="invalid-feedback d-block">{{ form.scenario_id.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.range_spinup_minutes.id_for_label }}" class="form-label">Range Spinup (minutes)</label>
+                                {{ form.range_spinup_minutes }}
+                                <div class="form-text">Minutes before event to start range provisioning</div>
+                                {% if form.range_spinup_minutes.errors %}
+                                <div class="invalid-feedback d-block">{{ form.range_spinup_minutes.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <div class="form-check">
+                                    {{ form.auto_cleanup }}
+                                    <label class="form-check-label" for="{{ form.auto_cleanup.id_for_label }}">
+                                        Auto-cleanup ranges after event
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <div class="form-check">
+                                    {{ form.ngfw_enabled }}
+                                    <label class="form-check-label" for="{{ form.ngfw_enabled.id_for_label }}">
+                                        Enable NGFW
+                                    </label>
+                                    <div class="form-text">Provision a Next-Generation Firewall per range</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="{{ form.cleanup_delay_hours.id_for_label }}" class="form-label">Cleanup Delay (hours)</label>
+                                {{ form.cleanup_delay_hours }}
+                                <div class="form-text">Hours after event end before cleanup</div>
+                                {% if form.cleanup_delay_hours.errors %}
+                                <div class="invalid-feedback d-block">{{ form.cleanup_delay_hours.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Participant Settings -->
+                        <h6 class="text-muted mb-3 mt-4">Participant Settings</h6>
+
+                        <div class="mb-3">
+                            <label for="{{ form.max_participants.id_for_label }}" class="form-label">Maximum Participants</label>
+                            {{ form.max_participants }}
+                            <div class="form-text">Leave blank for unlimited</div>
+                            {% if form.max_participants.errors %}
+                            <div class="invalid-feedback d-block">{{ form.max_participants.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check">
+                                    {{ form.team_mode }}
+                                    <label class="form-check-label" for="{{ form.team_mode.id_for_label }}">
+                                        Enable Team Mode
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.team_size_limit.id_for_label }}" class="form-label">Team Size Limit</label>
+                                {{ form.team_size_limit }}
+                                <div class="form-text">Required if team mode is enabled (2-10)</div>
+                                {% if form.team_size_limit.errors %}
+                                <div class="invalid-feedback d-block">{{ form.team_size_limit.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="d-flex justify-content-between mt-4 pt-3 border-top">
+                            <a href="{% if is_edit %}{% url 'ctf:admin_event_detail' event_id=event.pk %}{% else %}{% url 'ctf:admin_event_list' %}{% endif %}" class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                {% if is_edit %}Save Changes{% else %}Create Event{% endif %}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

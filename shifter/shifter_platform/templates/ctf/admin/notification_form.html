@@ -1,0 +1,60 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}New Notification - {{ event.name }}{% endblock %}
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <h2>Compose Notification</h2>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="subject" class="form-label">Subject</label>
+            <input type="text" class="form-control" id="subject" name="subject" required
+                   maxlength="200" placeholder="Notification subject">
+        </div>
+        <div class="mb-3">
+            <label for="body" class="form-label">Body</label>
+            <textarea class="form-control" id="body" name="body" rows="6" required
+                      placeholder="Notification body (supports Markdown)"></textarea>
+        </div>
+        <div class="mb-3" id="schedule-group" style="display:none;">
+            <label for="scheduled_at" class="form-label">Schedule For</label>
+            <input type="datetime-local" class="form-control" id="scheduled_at" name="scheduled_at">
+        </div>
+        <div class="btn-group">
+            <button type="submit" name="action" value="send_now" class="btn btn-primary">Send Now</button>
+            <button type="submit" name="action" value="draft" class="btn btn-outline-secondary">Save Draft</button>
+            <button type="button" class="btn btn-outline-info" id="btn-toggle-schedule">Schedule</button>
+        </div>
+    </form>
+</div>
+
+<script>
+document.getElementById('btn-toggle-schedule').addEventListener('click', function() {
+    var group = document.getElementById('schedule-group');
+    if (group.style.display === 'none') {
+        group.style.display = 'block';
+        this.textContent = 'Cancel Schedule';
+    } else {
+        group.style.display = 'none';
+        this.textContent = 'Schedule';
+    }
+});
+
+document.querySelector('form').addEventListener('submit', function(e) {
+    var scheduleGroup = document.getElementById('schedule-group');
+    if (scheduleGroup.style.display !== 'none') {
+        var actionInput = document.querySelector('button[name="action"][value="send_now"]');
+        if (e.submitter === actionInput) return;
+        var hiddenInput = document.createElement('input');
+        hiddenInput.type = 'hidden';
+        hiddenInput.name = 'action';
+        hiddenInput.value = 'schedule';
+        this.appendChild(hiddenInput);
+    }
+});
+</script>
+{% endblock %}

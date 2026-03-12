@@ -28,8 +28,8 @@ class TestProvisionParticipantRange:
         with pytest.raises(CTFRangeError, match="already has a range"):
             range_service.provision_participant_range(ctf_participant.pk)
 
-    def test_provision_success(self, ctf_participant):
-        """Successful provisioning sets range_instance_id and status."""
+    def test_provision_success(self, ctf_participant, participant_user):
+        """Successful provisioning sets range_instance_id and status using participant.user."""
         mock_result = MagicMock()
         mock_result.request_id = uuid4()
 
@@ -37,7 +37,7 @@ class TestProvisionParticipantRange:
         mock_range_instance.pk = 99
 
         with (
-            patch("cms.services.create_range", return_value=mock_result),
+            patch("cms.services.create_range", return_value=mock_result) as mock_create,
             patch(
                 "cms.models.RangeInstance.objects.filter",
                 return_value=MagicMock(first=MagicMock(return_value=mock_range_instance)),
@@ -48,6 +48,14 @@ class TestProvisionParticipantRange:
         assert result["status"] == "provisioning"
         ctf_participant.refresh_from_db()
         assert ctf_participant.range_status == "provisioning"
+        # Verify range is created under participant's user, not the organizer
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["user"] == participant_user
+
+    def test_provision_requires_registered_user(self, ctf_participant_invited):
+        """Raises CTFRangeError if participant has no linked user."""
+        with pytest.raises(CTFRangeError, match="must be registered"):
+            range_service.provision_participant_range(ctf_participant_invited.pk)
 
     def test_provision_cms_failure(self, ctf_participant):
         """CMS errors are wrapped in CTFRangeError."""
@@ -186,8 +194,8 @@ class TestCleanupEventRanges:
         with pytest.raises(CTFNotFoundError):
             range_service.cleanup_event_ranges(uuid4())
 
-    def test_destroys_ranges(self, ctf_event, ctf_participant):
-        """Destroys all assigned ranges."""
+    def test_destroys_ranges(self, ctf_event, ctf_participant, participant_user):
+        """Destroys all assigned ranges using participant.user."""
         ctf_participant.range_instance_id = 42
         ctf_participant.range_status = "ready"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
@@ -196,7 +204,7 @@ class TestCleanupEventRanges:
             result = range_service.cleanup_event_ranges(ctf_event.pk)
 
         assert result["destroyed"] == 1
-        mock_destroy.assert_called_once()
+        mock_destroy.assert_called_once_with(participant_user, 42)
         ctf_participant.refresh_from_db()
         assert ctf_participant.range_instance_id is None
         assert ctf_participant.range_status == ""
@@ -216,16 +224,17 @@ class TestDestroyParticipantRange:
         with pytest.raises(CTFRangeError, match="No range assigned"):
             range_service.destroy_participant_range(ctf_participant.pk)
 
-    def test_destroy_success(self, ctf_participant):
-        """Successfully destroys a participant's range."""
+    def test_destroy_success(self, ctf_participant, participant_user):
+        """Successfully destroys a participant's range using participant.user."""
         ctf_participant.range_instance_id = 42
         ctf_participant.range_status = "ready"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
 
-        with patch("cms.services.destroy_range"):
+        with patch("cms.services.destroy_range") as mock_destroy:
             result = range_service.destroy_participant_range(ctf_participant.pk)
 
         assert result["status"] == "destroyed"
+        mock_destroy.assert_called_once_with(participant_user, 42)
         ctf_participant.refresh_from_db()
         assert ctf_participant.range_instance_id is None
 

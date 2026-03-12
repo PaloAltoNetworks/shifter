@@ -274,6 +274,7 @@ module "ssm" {
   sqs_engine_url = module.messaging.sqs_queue_urls["engine"]
   sqs_mc_url     = module.messaging.sqs_queue_urls["mc"]
   redis_endpoint = var.enable_autoscaling ? module.redis.redis_endpoint : ""
+  enable_redis   = var.enable_autoscaling
 
   # Database endpoint (direct RDS connection - hostname only, not endpoint with port)
   db_host_override        = module.rds.db_instance_address

@@ -187,6 +187,8 @@ resource "aws_ssm_parameter" "sqs_mc_url" {
 }
 
 resource "aws_ssm_parameter" "redis_endpoint" {
+  count = var.enable_redis ? 1 : 0
+
   name        = "${local.ps_prefix}/redis-endpoint"
   description = "Redis endpoint for Django Channels"
   type        = "String"

@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+<h2>Event Reminder</h2>
+<p>Hi {{ participant.name }},</p>
+<p><strong>{{ event.name }}</strong> starts in {{ hours_before }} hours!</p>
+<p><strong>Start Time:</strong> {{ event.event_start|date:"F j, Y g:i A" }}</p>
+<p>Make sure you're ready. Good luck!</p>
+</body>
+</html>

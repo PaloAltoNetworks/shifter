@@ -1,0 +1,54 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Notifications - {{ event.name }}{% endblock %}
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Notifications</h2>
+        <a href="{% url 'ctf:admin_notification_create' event_id=event.id %}" class="btn btn-primary">
+            New Notification
+        </a>
+    </div>
+
+    {% if notifications %}
+    <div class="row">
+        {% for n in notifications %}
+        <div class="col-12 mb-3">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <h5 class="card-title">{{ n.subject }}</h5>
+                        {% if n.status == "sent" %}
+                            <span class="badge bg-success">Sent</span>
+                        {% elif n.status == "scheduled" %}
+                            <span class="badge bg-info">Scheduled</span>
+                        {% elif n.status == "sending" %}
+                            <span class="badge bg-warning text-dark">Sending</span>
+                        {% elif n.status == "failed" %}
+                            <span class="badge bg-danger">Failed</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Draft</span>
+                        {% endif %}
+                    </div>
+                    <p class="card-text text-muted small">
+                        {{ n.notification_type|title }} &middot;
+                        Created {{ n.created_at|date:"M j, Y g:i A" }}
+                        {% if n.sent_at %}&middot; Sent {{ n.sent_at|date:"M j, Y g:i A" }}{% endif %}
+                        {% if n.sent_count %}&middot; {{ n.sent_count }} delivered{% endif %}
+                    </p>
+                    <p class="card-text">{{ n.body|truncatewords:30 }}</p>
+                    {% if n.status == "draft" %}
+                    <form method="post" action="{% url 'ctf:api_notification_send' notification_id=n.id %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-primary">Send Now</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted">No notifications yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

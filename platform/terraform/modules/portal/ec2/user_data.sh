@@ -134,6 +134,8 @@ GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" 2>/dev/null |
 GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" 2>/dev/null || echo "")
 GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" 2>/dev/null || echo "")
 DB_HOST_OVERRIDE=$(get_param "$PS_PREFIX/db-host-override" 2>/dev/null || echo "")
+EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend")
+CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email")
 
 IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 echo "Deploying image: $IMAGE"
@@ -177,6 +179,10 @@ fi
 if [ -n "$DB_HOST_OVERRIDE" ]; then
   COMMON_ENV="$COMMON_ENV -e DB_HOST=$DB_HOST_OVERRIDE"
 fi
+
+# Email configuration
+COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
+COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
 
 # ------------------------------------------------------------------------------
 # Deploy containers

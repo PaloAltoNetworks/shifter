@@ -15,6 +15,10 @@
         "PANW_SHIFTER_DEV_PROFILE": "panw-shifter-dev-workstation",
         "PANW_SHIFTER_PROD_PROFILE": "panw-shifter-prod-workstation"
       }
+    },
+    "shifter-planner": {
+      "command": "node",
+      "args": ["mcp/planner/index.js"]
     }
   }
 }

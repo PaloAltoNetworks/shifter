@@ -1,0 +1,107 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Analytics - {{ event.name }}{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1">
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                    <li class="breadcrumb-item active">Analytics</li>
+                </ol>
+            </nav>
+            <h1 class="h3 mb-0">Analytics</h1>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ event_stats.participant_count }}</div>
+                    <div class="small text-uppercase">Participants</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ event_stats.challenge_count }}</div>
+                    <div class="small text-uppercase">Challenges</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ event_stats.total_submissions }}</div>
+                    <div class="small text-uppercase">Total Submissions</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body text-center">
+                    <div class="h2 mb-0">{{ event_stats.correct_submissions }}</div>
+                    <div class="small text-uppercase">Correct Submissions</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Challenge Breakdown -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Challenge Breakdown</h5>
+        </div>
+        <div class="card-body p-0">
+            {% if challenge_stats %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Points</th>
+                            <th>Attempts</th>
+                            <th>Solves</th>
+                            <th>Solve Rate</th>
+                            <th>First Blood</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cs in challenge_stats %}
+                        <tr>
+                            <td><strong>{{ cs.name }}</strong></td>
+                            <td>{{ cs.category }}</td>
+                            <td>{{ cs.points }}</td>
+                            <td>{{ cs.total_attempts }}</td>
+                            <td>{{ cs.solve_count }}</td>
+                            <td>
+                                {% widthratio cs.solve_rate 1 100 %}%
+                            </td>
+                            <td>
+                                {% if cs.first_blood %}
+                                {{ cs.first_blood.participant_name }}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <p class="mb-0">No challenges yet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Join Team{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="mb-3">
+        <a href="{% url 'ctf:participant_team' %}" class="btn btn-sm btn-outline-primary">&larr; Back to Team</a>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Join a Team</h5>
+                </div>
+                <div class="card-body">
+                    {% if error %}
+                    <div class="alert alert-danger mb-3">
+                        {{ error }}
+                    </div>
+                    {% endif %}
+
+                    <p class="text-muted mb-3">Enter the invite code provided by your team captain.</p>
+
+                    <form method="post">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="invite_code" class="form-label">Invite Code</label>
+                            <input type="text" class="form-control" id="invite_code" name="invite_code"
+                                   placeholder="Enter invite code..." required autocomplete="off">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Join Team</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

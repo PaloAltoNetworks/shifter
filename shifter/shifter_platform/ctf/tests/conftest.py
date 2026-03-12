@@ -406,10 +406,3 @@ def mock_email_backend(mocker) -> MagicMock:
     """Mock email sending."""
     mock = mocker.patch("django.core.mail.send_mail", return_value=1)
     return mock
-
-
-@pytest.fixture
-def mock_scheduler(mocker) -> MagicMock:
-    """Mock the scheduler service."""
-    mock = mocker.patch("ctf.services.scheduler.schedule_task")
-    return mock

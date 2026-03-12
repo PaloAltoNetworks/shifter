@@ -21,7 +21,7 @@ from django.test import RequestFactory, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from ctf.enums import EventStatus
+from ctf.enums import EventStatus, ParticipantStatus
 from ctf.models import CTFEvent
 from management.models import UserProfile
 
@@ -453,6 +453,84 @@ class TestCTFContextProcessor:
 
         context = ctf_navigation(request)
         assert context["active_ctf_event"] == ctf_event_active
+
+
+# ---------------------------------------------------------------------------
+# CTF Register View Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestCTFRegisterView:
+    """Test CTF participant registration via invite token."""
+
+    def test_register_requires_login(self, client, ctf_participant_invited):
+        """Unauthenticated users should be redirected to login."""
+        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "/login" in response.url or "login" in response.url
+
+    def test_register_with_valid_token(self, client, participant_profile, ctf_participant_invited):
+        """Registered user with valid token should complete registration."""
+        client.force_login(participant_profile.user)
+        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "/ctf/" in response.url
+
+        ctf_participant_invited.refresh_from_db()
+        assert ctf_participant_invited.user == participant_profile.user
+        assert ctf_participant_invited.status == ParticipantStatus.REGISTERED.value
+
+    def test_register_with_expired_token(self, client, participant_profile, ctf_participant_invited):
+        """Expired invite token should show error and redirect to login."""
+        ctf_participant_invited.invite_token_expires = timezone.now() - timedelta(hours=1)
+        ctf_participant_invited.save(update_fields=["invite_token_expires"])
+
+        client.force_login(participant_profile.user)
+        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "login" in response.url
+
+    def test_register_with_invalid_token(self, client, participant_profile):
+        """Invalid token should show error and redirect to login."""
+        client.force_login(participant_profile.user)
+        url = reverse("ctf:ctf_register") + "?token=bogus-token-value"
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "login" in response.url
+
+    def test_register_already_registered(self, client, participant_profile, ctf_participant_invited):
+        """Already-registered participant should show error."""
+        # First registration
+        ctf_participant_invited.user = participant_profile.user
+        ctf_participant_invited.status = ParticipantStatus.REGISTERED.value
+        ctf_participant_invited.save(update_fields=["user", "status"])
+
+        # Create a second user to attempt re-registration
+        second_user = User.objects.create_user(
+            username="second@test.com",
+            email="second@test.com",
+            password="testpass123",  # noqa: S106  # nosec B106
+        )
+        profile, _ = UserProfile.objects.get_or_create(user=second_user)
+        profile.user_type = "ctf_participant"
+        profile.save(update_fields=["user_type"])
+
+        client.force_login(second_user)
+        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "login" in response.url
+
+    def test_register_missing_token(self, client, participant_profile):
+        """Missing token should redirect to login."""
+        client.force_login(participant_profile.user)
+        response = client.get(reverse("ctf:ctf_register"))
+        assert response.status_code == 302
+        assert "login" in response.url
 
 
 # ---------------------------------------------------------------------------

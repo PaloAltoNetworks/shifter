@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.1] - 2026-03-12
+
+### Fixed
+- Flag hashing bug: challenges created via admin form used bare SHA256, producing hashes that `verify_flag()` could never match; now uses `hash_flag()` from services
+- Potential division by zero in scoring solve rate calculation
+- Removed unreachable `return` statements in `api_participant_list` and `api_participant_detail`
+
+### Security
+- Add missing authorization decorators to 8 CTF API views: `api_challenge_list`, `api_challenge_detail`, `api_submit_flag`, `api_use_hint`, `api_submissions`, `api_range_status`, `api_range_access`, `api_scoreboard`
+- Remove `invite_token` from API responses in `api_participant_list` and `api_participant_resend_invite`
+- Replace SHA256 fallback with PBKDF2-SHA256 (600k iterations) for flag hashing when bcrypt is unavailable
+- Add `# NOSONAR` annotations to hardcoded test/dev encryption keys in settings
+- Add SNS topic KMS encryption in dev and prod Terraform environments
+- Set `recovery_window_in_days = 7` for Secrets Manager in production (was 0)
+- Pin Secrets Manager IAM policy ARNs to specific AWS account ID
+- Add `#tfsec:ignore` justifications to required IAM wildcards and egress rules
+- Add `# NOSONAR` annotation to dev auth bypass with justification
+
+## [3.1.0] - 2026-03-12
+
+### Added
+- CTF admin team list, scoreboard, and analytics pages
+- CTF help page with getting started content
+- CTF API endpoints: event list/detail, challenge list/detail
+- NGFW toggle in CTF event form (range_config)
+
+### Changed
+- CTF app uses bridge module (`ctf/bridges.py`) for all cross-domain integrations (CMS, management, mission_control)
+- CTF scheduled tasks documented as database-only; no Celery dependency
+- Email backend defaults to console for dev; configure via `EMAIL_BACKEND` env var for production
+- Wire `EMAIL_BACKEND` and `CTF_FROM_EMAIL` through deployment pipeline (SSM → user_data.sh → Docker env → Django settings)
+
+### Fixed
+- Removed stale scheduler module reference from services docstring
+
+### Removed
+- Dead `mock_scheduler` fixture that patched non-existent `ctf.services.scheduler`
+
+## [3.0.0] - 2026-03-11
+
+### Added
+- CTF (Capture The Flag) management platform — core app files: models, enums, services, admin, forms, migrations
+- CTF config and routing integration: settings, URL routing, dashboard router, dev login user types, OIDC user type claims
+- CTF views, URL routing, and templates: organizer admin views, participant views, API endpoints, 38 template files, email templates, sidebar partials
+- UserProfile CTF fields: user_type, active_ctf_event, role properties (is_ctf_organizer, is_ctf_participant, is_standard_user)
+- CTF test suite: 13 test files, 230 tests across models, auth, challenges, events, participant views, services (notification, range)
+- CTF participant registration endpoint (`/ctf/register/`) to complete invite-link registration flow
+
+### Fixed
+- CTF invite emails never sent: `invite_participant()` and `bulk_import_participants()` prematurely set `invited_at`, causing `send_invitations()` to skip all participants
+- CTF range provisioning: all ranges were created under the organizer's user, causing the second participant's range to fail the active-range check; now uses `participant.user`
+
+### Security
+- Add organizer ownership checks to 11 CTF views missing authorization: range list/provision APIs, notification list/create/send views and APIs, team list, scoreboard, analytics, and event detail API — non-owning organizers now get 403
+
 ## [2.3.3] - 2026-03-10
 
 ### Added

@@ -1,0 +1,41 @@
+{% load static user_extras %}
+{# CTF base template - standalone layout with CTF-specific sidebar #}
+<!DOCTYPE html>
+<html lang="en" class="xdr-dark-theme">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{% block ctf_title %}CTF{% endblock %} - Shifter{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/xdr-sidebar.css' %}">
+    <link rel="stylesheet" href="{% static 'css/xdr-dropdown.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="xdr-dark-theme">
+    {% if is_ctf_organizer %}
+        {% include "partials/ctf_organizer_sidebar.html" %}
+    {% elif is_ctf_participant %}
+        {% include "partials/ctf_participant_sidebar.html" %}
+    {% else %}
+        {% include "partials/icon_sidebar.html" %}
+    {% endif %}
+
+    <div class="layout">
+        <main class="main">
+            {% block content %}
+            <div class="ctf-container">
+                {% block ctf_content %}{% endblock %}
+            </div>
+            {% endblock %}
+        </main>
+    </div>
+
+    <script src="{% static 'js/sidebar.js' %}"></script>
+    <script src="{% static 'js/xdr-dropdown.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

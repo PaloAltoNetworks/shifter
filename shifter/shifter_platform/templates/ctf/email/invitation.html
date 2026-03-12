@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+<h2>You're Invited!</h2>
+<p>Hi {{ participant.name }},</p>
+<p>You have been invited to participate in <strong>{{ event.name }}</strong>.</p>
+<p><strong>Event Date:</strong> {{ event.event_start|date:"F j, Y g:i A" }} - {{ event.event_end|date:"F j, Y g:i A" }}</p>
+{% if event.description %}<p>{{ event.description }}</p>{% endif %}
+<p>To register, use your invite token: <code>{{ invite_token }}</code></p>
+<p>If you have any questions, please contact your event organizer.</p>
+</body>
+</html>

@@ -1,0 +1,115 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}{% if is_add %}Add{% else %}Edit{% endif %} Participant - {{ event.name }}{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="mb-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
+                <li class="breadcrumb-item active">{% if is_add %}Add{% else %}Edit{% endif %}</li>
+            </ol>
+        </nav>
+        <h1 class="h3 mb-0">{% if is_add %}Add Participant{% else %}Edit Participant{% endif %}</h1>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger">
+                        {% for error in form.non_field_errors %}
+                        {{ error }}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <form method="post">
+                        {% csrf_token %}
+
+                        <div class="mb-3">
+                            <label for="id_name" class="form-label">Name <span class="text-danger">*</span></label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                            <div class="text-danger small">
+                                {% for error in form.name.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                            <div class="form-text">Display name for the participant</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="id_email" class="form-label">Email <span class="text-danger">*</span></label>
+                            {{ form.email }}
+                            {% if form.email.errors %}
+                            <div class="text-danger small">
+                                {% for error in form.email.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                            <div class="form-text">Email address for sending invitation</div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                {% if is_add %}
+                                <i class="bi bi-plus-lg"></i> Add Participant
+                                {% else %}
+                                <i class="bi bi-check-lg"></i> Save Changes
+                                {% endif %}
+                            </button>
+                            <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Information</h5>
+                </div>
+                <div class="card-body">
+                    {% if is_add %}
+                    <p>Adding a participant will:</p>
+                    <ul class="mb-0">
+                        <li>Create a participant record</li>
+                        <li>Generate an invitation token</li>
+                        <li>Set status to "Invited"</li>
+                    </ul>
+                    <hr>
+                    <p class="small text-muted mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        To actually send the invitation email, you will need to use the notification system after adding participants.
+                    </p>
+                    {% else %}
+                    <p>Update the participant's profile information.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if is_add %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Bulk Import</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small mb-2">Need to add many participants at once?</p>
+                    <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-upload"></i> Import from CSV
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

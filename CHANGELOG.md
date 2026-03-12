@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CTF views, URL routing, and templates: organizer admin views, participant views, API endpoints, 38 template files, email templates, sidebar partials
 - UserProfile CTF fields: user_type, active_ctf_event, role properties (is_ctf_organizer, is_ctf_participant, is_standard_user)
 - CTF test suite: 13 test files, 230 tests across models, auth, challenges, events, participant views, services (notification, range)
+- CTF participant registration endpoint (`/ctf/register/`) to complete invite-link registration flow
+
+### Fixed
+- CTF invite emails never sent: `invite_participant()` and `bulk_import_participants()` prematurely set `invited_at`, causing `send_invitations()` to skip all participants
+- CTF range provisioning: all ranges were created under the organizer's user, causing the second participant's range to fail the active-range check; now uses `participant.user`
 
 ## [2.3.3] - 2026-03-10
 

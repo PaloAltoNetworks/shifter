@@ -23,7 +23,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from management.services import get_user_profile
+from ctf.bridges import get_user_role
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -52,8 +52,8 @@ def ctf_organizer_required(view_func):
     @functools.wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs):
         user = _get_user(request)
-        profile = get_user_profile(user)
-        if not profile.is_ctf_organizer:
+        role = get_user_role(user)
+        if not role.is_ctf_organizer:
             logger.warning(
                 "CTF organizer access denied for user %s",
                 user.email,
@@ -74,8 +74,8 @@ def ctf_participant_required(view_func):
     @functools.wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs):
         user = _get_user(request)
-        profile = get_user_profile(user)
-        if not profile.is_ctf_participant:
+        role = get_user_role(user)
+        if not role.is_ctf_participant:
             logger.warning(
                 "CTF participant access denied for user %s",
                 user.email,

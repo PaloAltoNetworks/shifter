@@ -32,18 +32,15 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
         }
 
     try:
-        from management.services import get_user_profile
+        from ctf.bridges import get_user_role
 
-        profile = get_user_profile(request.user)
-
-        is_organizer = profile.is_ctf_organizer
-        is_participant = profile.is_ctf_participant
+        role = get_user_role(request.user)
 
         return {
-            "is_ctf_user": is_organizer or is_participant,
-            "is_ctf_organizer": is_organizer,
-            "is_ctf_participant": is_participant,
-            "active_ctf_event": profile.active_ctf_event if is_participant else None,
+            "is_ctf_user": role.is_ctf_organizer or role.is_ctf_participant,
+            "is_ctf_organizer": role.is_ctf_organizer,
+            "is_ctf_participant": role.is_ctf_participant,
+            "active_ctf_event": role.active_ctf_event,
         }
     except Exception:
         logger.exception(

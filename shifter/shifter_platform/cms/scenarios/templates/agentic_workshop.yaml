@@ -1,0 +1,44 @@
+id: agentic_workshop
+name: Agentic Workshop
+description: 5-box CTF range for vibe hacking workshop.
+enabled: true
+ngfw: false
+
+instances:
+  - name: Attacker
+    role: attacker
+    os_type: kali
+    ai_agent: true
+
+  - name: WebShell
+    role: victim
+    os_type: ubuntu
+    ami_key: ctf-webshell
+
+  - name: MailRoom
+    role: victim
+    os_type: ubuntu
+    ami_key: ctf-mailroom
+
+  - name: HelpDesk
+    role: victim
+    os_type: windows
+    ami_key: ctf-helpdesk
+
+  - name: DevBox
+    role: victim
+    os_type: ubuntu
+    ami_key: ctf-devbox
+
+  - name: Vault
+    role: victim
+    os_type: windows
+    ami_key: ctf-vault
+
+subnets:
+  - name: range_network
+    instances: [Attacker, WebShell, MailRoom, HelpDesk, DevBox]
+
+  - name: internal_network
+    instances: [DevBox, Vault]
+    connected_to: [range_network]

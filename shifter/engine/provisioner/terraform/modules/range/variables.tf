@@ -110,6 +110,7 @@ variable "subnets" {
       instance_type     = string
       agent_presigned_url = string
       join_domain       = bool
+      ami_id            = string # Per-instance AMI override; empty = use os_type lookup
     }))
   }))
 }

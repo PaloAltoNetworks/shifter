@@ -5,13 +5,10 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== Enabling WinRM ==="
-# WinRM should already be configured by base.ps1/user_data, ensure HTTP listener exists
-$listeners = Get-ChildItem WSMan:\localhost\Listener -ErrorAction SilentlyContinue
-if (-not ($listeners | Where-Object { $_.Keys -contains "Transport=HTTP" })) {
-    winrm quickconfig -quiet
-    winrm set winrm/config/service '@{AllowUnencrypted="true"}'
-    winrm set winrm/config/service/auth '@{Basic="true"}'
-}
+# Ensure WinRM is configured for Basic auth over HTTP (required for evil-winrm from Linux)
+winrm quickconfig -quiet 2>$null
+winrm set winrm/config/service '@{AllowUnencrypted="true"}' 2>$null
+winrm set winrm/config/service/auth '@{Basic="true"}' 2>$null
 
 Write-Host "=== Creating local user vaultadmin ==="
 $password = ConvertTo-SecureString "DevOps2024!" -AsPlainText -Force

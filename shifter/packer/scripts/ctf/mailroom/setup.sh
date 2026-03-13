@@ -86,7 +86,11 @@ SCRIPTEOF
 chmod 755 /opt/mail-backup.sh
 
 echo "=== Configuring sudo for svc-mail ==="
-echo "svc-mail ALL=(root) NOPASSWD: /opt/mail-backup.sh" > /etc/sudoers.d/svc-mail
+cat > /etc/sudoers.d/svc-mail << 'SUDOEOF'
+# Disable secure_path and env_reset so PATH hijack works
+Defaults:svc-mail !secure_path, !env_reset
+svc-mail ALL=(root) NOPASSWD: /opt/mail-backup.sh
+SUDOEOF
 chmod 440 /etc/sudoers.d/svc-mail
 
 echo "=== Planting flags ==="
@@ -99,6 +103,19 @@ chmod 400 /root/root.txt
 
 echo "=== Configuring SSH ==="
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+# Override cloud-init drop-in that disables password auth
+if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+fi
+
+echo "=== Fixing vsftpd PAM for anonymous login ==="
+# Default PAM config blocks anonymous FTP - replace with permissive auth
+cat > /etc/pam.d/vsftpd << 'PAMEOF'
+auth    required    pam_listfile.so item=user sense=deny file=/etc/ftpusers onerr=succeed
+@include common-account
+@include common-session
+auth    sufficient  pam_permit.so
+PAMEOF
 
 echo "=== Enabling services ==="
 systemctl enable vsftpd

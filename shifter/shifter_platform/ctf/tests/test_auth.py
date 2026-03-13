@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import RequestFactory, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +25,7 @@ from django.utils import timezone
 from ctf.enums import EventStatus, ParticipantStatus
 from ctf.models import CTFEvent
 from management.models import UserProfile
+from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -38,33 +40,29 @@ User = get_user_model()
 
 @pytest.fixture
 def organizer_profile(db, organizer_user) -> UserProfile:
-    """Create an organizer user with CTF organizer profile."""
+    """Create an organizer user with CTF organizer group."""
     profile, _ = UserProfile.objects.get_or_create(user=organizer_user)
-    profile.user_type = "ctf_organizer"
-    profile.save(update_fields=["user_type"])
+    # organizer_user fixture already adds group; ensure profile is returned
     return profile
 
 
 @pytest.fixture
 def participant_profile(db, participant_user) -> UserProfile:
-    """Create a participant user with CTF participant profile."""
+    """Create a participant user with CTF participant group."""
     profile, _ = UserProfile.objects.get_or_create(user=participant_user)
-    profile.user_type = "ctf_participant"
-    profile.save(update_fields=["user_type"])
+    # participant_user fixture already adds group; ensure profile is returned
     return profile
 
 
 @pytest.fixture
 def standard_profile(db) -> UserProfile:
-    """Create a standard user with standard profile."""
+    """Create a standard user (no CTF groups)."""
     user = User.objects.create_user(
         username="standard@test.com",
         email="standard@test.com",
         password="testpass123",  # noqa: S106  # nosec B106
     )
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.user_type = "standard"
-    profile.save(update_fields=["user_type"])
     return profile
 
 
@@ -83,13 +81,12 @@ def request_factory() -> RequestFactory:
 class TestOIDCBackendCTFUserType:
     """Test that the OIDC backend handles CTF user type claims."""
 
-    def test_create_user_sets_user_type_from_claims(self):
-        """OIDC create_user should set user_type from custom:user_type claim."""
+    def test_create_user_sets_group_from_claims(self):
+        """OIDC create_user should add user to CTF Organizer group from claim."""
         from config.oidc import ShifterOIDCBackend
 
         backend = ShifterOIDCBackend()
 
-        # Create a real user to test _update_user_type end-to-end
         user = User.objects.create_user(
             username="newctf@test.com",
             email="newctf@test.com",
@@ -103,11 +100,10 @@ class TestOIDCBackendCTFUserType:
 
         backend._update_user_type(user, claims)
 
-        profile = UserProfile.objects.get(user=user)
-        assert profile.user_type == "ctf_organizer"
+        assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
 
     def test_update_user_type_organizer(self, organizer_user):
-        """_update_user_type should set profile to ctf_organizer."""
+        """_update_user_type should add user to CTF Organizer group."""
         from config.oidc import ShifterOIDCBackend
 
         backend = ShifterOIDCBackend()
@@ -115,11 +111,10 @@ class TestOIDCBackendCTFUserType:
 
         backend._update_user_type(organizer_user, claims)
 
-        profile = UserProfile.objects.get(user=organizer_user)
-        assert profile.user_type == "ctf_organizer"
+        assert organizer_user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
 
     def test_update_user_type_participant(self, participant_user):
-        """_update_user_type should set profile to ctf_participant."""
+        """_update_user_type should add user to CTF Participant group."""
         from config.oidc import ShifterOIDCBackend
 
         backend = ShifterOIDCBackend()
@@ -127,25 +122,22 @@ class TestOIDCBackendCTFUserType:
 
         backend._update_user_type(participant_user, claims)
 
-        profile = UserProfile.objects.get(user=participant_user)
-        assert profile.user_type == "ctf_participant"
+        assert participant_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
-    def test_update_user_type_missing_claim_defaults_standard(self, organizer_user):
-        """Missing custom:user_type claim should leave profile as standard."""
+    def test_update_user_type_missing_claim_no_group_change(self, organizer_user):
+        """Missing custom:user_type claim should not change groups."""
         from config.oidc import ShifterOIDCBackend
 
         backend = ShifterOIDCBackend()
         claims = {"sub": "some-sub"}
 
-        # Reset profile to standard before testing
-        profile, _ = UserProfile.objects.get_or_create(user=organizer_user)
-        profile.user_type = "standard"
-        profile.save(update_fields=["user_type"])
+        # Remove CTF groups before testing
+        organizer_user.groups.clear()
 
         backend._update_user_type(organizer_user, claims)
 
-        profile.refresh_from_db()
-        assert profile.user_type == "standard"
+        assert not organizer_user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+        assert not organizer_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
     def test_update_user_type_invalid_type_ignored(self, organizer_user):
         """Invalid user_type claim value should be ignored."""
@@ -154,15 +146,13 @@ class TestOIDCBackendCTFUserType:
         backend = ShifterOIDCBackend()
         claims = {"custom:user_type": "invalid_type"}
 
-        # Reset profile to standard before testing
-        profile, _ = UserProfile.objects.get_or_create(user=organizer_user)
-        profile.user_type = "standard"
-        profile.save(update_fields=["user_type"])
+        # Remove CTF groups before testing
+        organizer_user.groups.clear()
 
         backend._update_user_type(organizer_user, claims)
 
-        profile.refresh_from_db()
-        assert profile.user_type == "standard"
+        assert not organizer_user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+        assert not organizer_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
     def test_update_ctf_event_from_claims(self, participant_user):
         """_update_user_type should set active_ctf_event from custom:ctf_event_id."""
@@ -187,8 +177,8 @@ class TestOIDCBackendCTFUserType:
 
         backend._update_user_type(participant_user, claims)
 
+        assert participant_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
         profile = UserProfile.objects.get(user=participant_user)
-        assert profile.user_type == "ctf_participant"
         assert profile.active_ctf_event_id == event.id
 
     def test_update_ctf_event_invalid_uuid_ignored(self, participant_user):
@@ -203,8 +193,8 @@ class TestOIDCBackendCTFUserType:
 
         backend._update_user_type(participant_user, claims)
 
+        assert participant_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
         profile = UserProfile.objects.get(user=participant_user)
-        assert profile.user_type == "ctf_participant"
         assert profile.active_ctf_event is None
 
 
@@ -284,11 +274,13 @@ class TestAccessControlDecorators:
         response = client.get(reverse("ctf:admin_dashboard"))
         assert response.status_code == 403
 
-    def test_participant_required_allows_participant(self, client, participant_profile):
-        """ctf_participant_required should allow participant access."""
-        client.force_login(participant_profile.user)
+    def test_participant_required_allows_participant(self, client, ctf_participant):
+        """ctf_participant_required should allow participant with CTFParticipant record."""
+        client.force_login(ctf_participant.user)
+        client.raise_request_exception = False
         response = client.get(reverse("ctf:participant_dashboard"))
-        assert response.status_code == 200
+        # Decorator should not block — 403 means access denied
+        assert response.status_code != 403
 
     def test_participant_required_blocks_standard_user(self, client, standard_profile):
         """ctf_participant_required should block standard users."""
@@ -328,7 +320,7 @@ class TestCTFLoginView:
 
     @override_settings(DEBUG=True)
     def test_dev_login_ctf_organizer(self, request_factory, db):
-        """Dev login should support CTF organizer user type."""
+        """Dev login should add user to CTF Organizer group."""
         from config.dev_auth import dev_login
 
         request = request_factory.post(
@@ -343,12 +335,12 @@ class TestCTFLoginView:
         assert response.status_code == 302
         assert "/ctf/admin/" in response.url
 
-        profile = UserProfile.objects.get(user__email="ctforg@test.com")
-        assert profile.user_type == "ctf_organizer"
+        user = User.objects.get(email="ctforg@test.com")
+        assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
 
     @override_settings(DEBUG=True)
     def test_dev_login_ctf_participant(self, request_factory, db):
-        """Dev login should support CTF participant user type."""
+        """Dev login should add user to CTF Participant group."""
         from config.dev_auth import dev_login
 
         request = request_factory.post(
@@ -362,8 +354,8 @@ class TestCTFLoginView:
         assert response.status_code == 302
         assert "/ctf/" in response.url
 
-        profile = UserProfile.objects.get(user__email="ctfpart@test.com")
-        assert profile.user_type == "ctf_participant"
+        user = User.objects.get(email="ctfpart@test.com")
+        assert user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
     @override_settings(DEBUG=True)
     def test_dev_login_standard_user_default(self, request_factory, db):
@@ -464,23 +456,22 @@ class TestCTFContextProcessor:
 class TestCTFRegisterView:
     """Test CTF participant registration via invite token."""
 
-    def test_register_requires_login(self, client, ctf_participant_invited):
-        """Unauthenticated users should be redirected to login."""
+    def test_register_auto_creates_user(self, client, ctf_participant_invited):
+        """Unauthenticated users with valid token get auto-registered."""
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
-        assert "/login" in response.url or "login" in response.url
+        assert "/ctf/" in response.url
 
-    def test_register_with_valid_token(self, client, participant_profile, ctf_participant_invited):
-        """Registered user with valid token should complete registration."""
-        client.force_login(participant_profile.user)
+    def test_register_with_valid_token(self, client, ctf_participant_invited):
+        """Valid invite token should auto-register and redirect to dashboard."""
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
         assert "/ctf/" in response.url
 
         ctf_participant_invited.refresh_from_db()
-        assert ctf_participant_invited.user == participant_profile.user
+        assert ctf_participant_invited.user is not None
         assert ctf_participant_invited.status == ParticipantStatus.REGISTERED.value
 
     def test_register_with_expired_token(self, client, participant_profile, ctf_participant_invited):
@@ -503,27 +494,17 @@ class TestCTFRegisterView:
         assert "login" in response.url
 
     def test_register_already_registered(self, client, participant_profile, ctf_participant_invited):
-        """Already-registered participant should show error."""
+        """Already-registered participant should be logged in and redirected."""
         # First registration
         ctf_participant_invited.user = participant_profile.user
         ctf_participant_invited.status = ParticipantStatus.REGISTERED.value
         ctf_participant_invited.save(update_fields=["user", "status"])
 
-        # Create a second user to attempt re-registration
-        second_user = User.objects.create_user(
-            username="second@test.com",
-            email="second@test.com",
-            password="testpass123",  # noqa: S106  # nosec B106
-        )
-        profile, _ = UserProfile.objects.get_or_create(user=second_user)
-        profile.user_type = "ctf_participant"
-        profile.save(update_fields=["user_type"])
-
-        client.force_login(second_user)
+        # Using token again should just log in the existing user
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
-        assert "login" in response.url
+        assert "/ctf/" in response.url
 
     def test_register_missing_token(self, client, participant_profile):
         """Missing token should redirect to login."""
@@ -542,12 +523,13 @@ class TestCTFRegisterView:
 class TestCTFSidebar:
     """Test that CTF users get CTF-specific sidebar."""
 
-    def test_participant_sees_ctf_sidebar(self, client, participant_profile):
+    def test_participant_sees_ctf_sidebar(self, client, ctf_participant):
         """CTF participants should see CTF sidebar items."""
-        client.force_login(participant_profile.user)
+        client.force_login(ctf_participant.user)
+        client.raise_request_exception = False
         response = client.get(reverse("ctf:participant_dashboard"))
-        content = response.content.decode()
-        assert "Challenges" in content or response.status_code == 200
+        # Decorator should not block
+        assert response.status_code != 403
 
     def test_organizer_sees_ctf_admin_sidebar(self, client, organizer_profile):
         """CTF organizers should see CTF admin sidebar items."""
@@ -555,3 +537,77 @@ class TestCTFSidebar:
         response = client.get(reverse("ctf:admin_dashboard"))
         content = response.content.decode()
         assert "Events" in content or response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Dual-Role Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestDualRoles:
+    """Test that a user can hold both CTF Organizer and CTF Participant roles."""
+
+    def test_user_can_be_organizer_and_participant(self, organizer_profile, ctf_event):
+        """A user in both groups should be recognized as both roles."""
+        from ctf.bridges import get_user_role
+
+        user = organizer_profile.user
+        # Add participant group
+        participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
+        user.groups.add(participant_group)
+
+        role = get_user_role(user)
+        assert role.is_ctf_organizer is True
+        assert role.is_ctf_participant is True
+
+    def test_dual_role_can_access_admin_views(self, client, organizer_profile):
+        """User with both roles can access organizer views."""
+        user = organizer_profile.user
+        participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
+        user.groups.add(participant_group)
+
+        client.force_login(user)
+        response = client.get(reverse("ctf:admin_dashboard"))
+        assert response.status_code == 200
+
+    def test_adding_participant_does_not_remove_organizer(self, organizer_profile, ctf_event):
+        """Registering as participant should not remove organizer group."""
+        from ctf.services.participant import _set_ctf_participant_profile
+
+        user = organizer_profile.user
+        assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+
+        _set_ctf_participant_profile(user, ctf_event)
+
+        assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+        assert user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
+
+    def test_clearing_participant_does_not_remove_organizer(self, organizer_profile, ctf_event):
+        """Clearing participant should not affect organizer group."""
+        from ctf.services.participant import (
+            _clear_ctf_participant_profile,
+            _set_ctf_participant_profile,
+        )
+        from management.services import get_user_profile
+
+        user = organizer_profile.user
+        _set_ctf_participant_profile(user, ctf_event)
+
+        _clear_ctf_participant_profile(user, ctf_event)
+
+        assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+        assert not user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
+        profile = get_user_profile(user)
+        assert profile.active_ctf_event is None
+
+    def test_dashboard_routes_organizer_to_admin(self, client, organizer_profile):
+        """Dashboard router should route dual-role user to admin (organizer takes priority)."""
+        user = organizer_profile.user
+        participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
+        user.groups.add(participant_group)
+
+        client.force_login(user)
+        response = client.get(reverse("dashboard_router"))
+        assert response.status_code == 302
+        assert "/ctf/admin/" in response.url

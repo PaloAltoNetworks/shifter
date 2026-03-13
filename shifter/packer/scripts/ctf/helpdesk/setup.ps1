@@ -81,8 +81,18 @@ if (Test-Path "C:\Scripts\cleanup.ps1") {
 Write-Host "Deployment check complete."
 "@ | Out-File -FilePath "C:\Shares\IT-Support\deploy.ps1" -Encoding UTF8
 
-# Create the SMB share - readable by Everyone
-New-SmbShare -Name "IT-Support" -Path "C:\Shares\IT-Support" -ReadAccess "Everyone" -Description "IT Support Documentation"
+# Enable Guest account for anonymous SMB access
+net user Guest /active:yes
+net user Guest ""
+
+# Grant Guest read on the NTFS folder
+icacls "C:\Shares\IT-Support" /grant "Guest:(OI)(CI)R" /T
+
+# Create the SMB share - readable by Everyone and Guest
+New-SmbShare -Name "IT-Support" -Path "C:\Shares\IT-Support" -ReadAccess "Everyone","Guest" -Description "IT Support Documentation"
+
+# Allow null/guest sessions to access the share
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "RestrictNullSessAccess" -Value 0 -Type DWord -Force
 
 Write-Host "=== Creating scheduled task ==="
 New-Item -Path "C:\Scripts" -ItemType Directory -Force

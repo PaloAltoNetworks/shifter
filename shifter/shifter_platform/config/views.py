@@ -7,7 +7,7 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
-from management.services import get_user_profile
+from shared.auth import is_ctf_organizer, is_ctf_participant
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +25,10 @@ def dashboard_router(request):
     - ctf_organizer -> CTF Admin dashboard
     - ctf_participant -> CTF Participant dashboard
     """
-    profile = get_user_profile(request.user)
-
-    if profile.is_ctf_organizer:
+    if is_ctf_organizer(request.user):
         logger.debug("Routing organizer %s to CTF admin dashboard", request.user.email)
         return HttpResponseRedirect(reverse("ctf:admin_dashboard"))
-    elif profile.is_ctf_participant:
+    elif is_ctf_participant(request.user):
         logger.debug("Routing participant %s to CTF participant dashboard", request.user.email)
         return HttpResponseRedirect(reverse("ctf:participant_dashboard"))
     else:

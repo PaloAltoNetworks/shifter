@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.utils import timezone
 
 from ctf.enums import (
@@ -27,6 +28,7 @@ from ctf.models import (
     CTFSubmission,
     CTFTeam,
 )
+from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -42,7 +44,7 @@ User = get_user_model()
 
 @pytest.fixture
 def organizer_user(db) -> User:
-    """Create a CTF organizer user with profile."""
+    """Create a CTF organizer user with profile and group."""
     from management.services import get_user_profile
 
     user = User.objects.create_user(
@@ -52,6 +54,8 @@ def organizer_user(db) -> User:
         first_name="Test",
         last_name="Organizer",
     )
+    group, _ = Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)
+    user.groups.add(group)
     profile = get_user_profile(user)
     profile.user_type = "ctf_organizer"
     profile.save(update_fields=["user_type"])
@@ -60,7 +64,7 @@ def organizer_user(db) -> User:
 
 @pytest.fixture
 def participant_user(db) -> User:
-    """Create a CTF participant user with profile."""
+    """Create a CTF participant user with profile and group."""
     from management.services import get_user_profile
 
     user = User.objects.create_user(
@@ -70,6 +74,8 @@ def participant_user(db) -> User:
         first_name="Test",
         last_name="Participant",
     )
+    group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
+    user.groups.add(group)
     profile = get_user_profile(user)
     profile.user_type = "ctf_participant"
     profile.save(update_fields=["user_type"])
@@ -78,7 +84,7 @@ def participant_user(db) -> User:
 
 @pytest.fixture
 def second_participant_user(db) -> User:
-    """Create a second CTF participant user with profile."""
+    """Create a second CTF participant user with profile and group."""
     from management.services import get_user_profile
 
     user = User.objects.create_user(
@@ -88,6 +94,8 @@ def second_participant_user(db) -> User:
         first_name="Second",
         last_name="Participant",
     )
+    group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
+    user.groups.add(group)
     profile = get_user_profile(user)
     profile.user_type = "ctf_participant"
     profile.save(update_fields=["user_type"])
@@ -362,7 +370,7 @@ def authenticated_standard_client(client: Client, standard_user) -> Client:
 
 @pytest.fixture
 def second_organizer_user(db) -> User:
-    """Create a second CTF organizer user with profile."""
+    """Create a second CTF organizer user with profile and group."""
     from management.services import get_user_profile
 
     user = User.objects.create_user(
@@ -372,6 +380,8 @@ def second_organizer_user(db) -> User:
         first_name="Second",
         last_name="Organizer",
     )
+    group, _ = Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)
+    user.groups.add(group)
     profile = get_user_profile(user)
     profile.user_type = "ctf_organizer"
     profile.save(update_fields=["user_type"])

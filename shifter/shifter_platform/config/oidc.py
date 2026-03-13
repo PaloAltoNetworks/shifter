@@ -6,11 +6,13 @@ import re
 from urllib.parse import urlencode
 from uuid import UUID
 
+from django.contrib.auth.models import Group
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
 from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
 from risk_register.services import audit_auth_event
+from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 logger = logging.getLogger(__name__)
 
@@ -173,24 +175,42 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         update_cognito_sub(user, cognito_sub)
 
     def _update_user_type(self, user, claims):
-        """Update user type and active CTF event from Cognito custom claims.
+        """Update CTF groups and active CTF event from Cognito custom claims.
 
         Reads custom:user_type and custom:ctf_event_id from OIDC claims
-        and updates the user's profile accordingly.
+        and adds/removes the user from the appropriate Django Groups.
         """
         user_type = claims.get("custom:user_type")
 
-        profile = get_user_profile(user)
+        CLAIM_TO_GROUP = {
+            "ctf_organizer": CTF_ORGANIZER_GROUP,
+            "ctf_participant": CTF_PARTICIPANT_GROUP,
+        }
 
         if user_type and user_type in VALID_CTF_USER_TYPES:
+            group_name = CLAIM_TO_GROUP.get(user_type)
+            if group_name:
+                group, _ = Group.objects.get_or_create(name=group_name)
+                user.groups.add(group)
+                logger.info(
+                    "Added user %s to group '%s' from OIDC claim",
+                    user.email,
+                    group_name,
+                )
+            elif user_type == "standard":
+                # Remove CTF groups for standard users
+                ctf_groups = Group.objects.filter(name__in=[CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP])
+                user.groups.remove(*ctf_groups)
+                logger.info(
+                    "Removed CTF groups for standard user %s from OIDC claim",
+                    user.email,
+                )
+
+            # Keep user_type field in sync for backwards compat
+            profile = get_user_profile(user)
             if profile.user_type != user_type:
                 profile.user_type = user_type
                 profile.save(update_fields=["user_type"])
-                logger.info(
-                    "Updated user_type to '%s' for user %s",
-                    user_type,
-                    user.email,
-                )
         elif user_type:
             logger.warning(
                 "Invalid user_type claim '%s' for user %s, ignoring",
@@ -200,11 +220,13 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
 
         # Set active CTF event for participant users
         ctf_event_id = claims.get("custom:ctf_event_id")
-        if ctf_event_id and profile.user_type == "ctf_participant":
+        is_participant = user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
+        if ctf_event_id and is_participant:
             try:
                 event_uuid = UUID(ctf_event_id)
                 from ctf.models import CTFEvent
 
+                profile = get_user_profile(user)
                 event = CTFEvent.objects.filter(pk=event_uuid).first()
                 if event:
                     profile.active_ctf_event = event

@@ -8,11 +8,13 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
+from django.contrib.auth.models import Group
 from django.http import HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
 from management.services import get_user_profile
+from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +73,27 @@ def dev_login(request):
         user, _created = User.objects.get_or_create(username=email, defaults={"email": email, "is_active": True})
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
 
-        # Set user type on profile
+        # Set group membership based on user_type
+        ctf_groups = {CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP}
+        type_to_group = {
+            "ctf_organizer": CTF_ORGANIZER_GROUP,
+            "ctf_participant": CTF_PARTICIPANT_GROUP,
+        }
+
+        group_name = type_to_group.get(user_type)
+        if group_name:
+            group, _ = Group.objects.get_or_create(name=group_name)
+            user.groups.add(group)
+        else:
+            # "standard" — remove CTF groups
+            user.groups.remove(*Group.objects.filter(name__in=ctf_groups))
+
+        # Keep user_type field in sync for backwards compat
         profile = get_user_profile(user)
         if profile.user_type != user_type:
             profile.user_type = user_type
             profile.save(update_fields=["user_type"])
-            logger.info("Dev login: set user_type=%s for %s", user_type, email)
+        logger.info("Dev login: set user_type=%s for %s", user_type, email)
 
         # Redirect to appropriate dashboard
         redirect_url = reverse(USER_TYPE_REDIRECTS.get(user_type, "mission_control:dashboard"))

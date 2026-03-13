@@ -255,6 +255,9 @@ chmod 400 /root/root.txt
 
 echo "=== Configuring SSH ==="
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+fi
 systemctl enable ssh
 
 echo "=== DevBox setup complete ==="

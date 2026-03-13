@@ -240,51 +240,15 @@ class TestEventCreateView:
         assert response.status_code == 403
 
     def test_create_view_renders_form(self, authenticated_organizer_client: Client):
-        """Create view should render the form."""
+        """Create view should render the AJAX form template with scenarios."""
         response = authenticated_organizer_client.get(reverse("ctf:admin_event_create"))
         assert response.status_code == 200
-        assert "form" in response.context
+        assert "scenarios_json" in response.context
 
-    def test_create_event_success(self, authenticated_organizer_client: Client, organizer_user):
-        """Creating a valid event should succeed."""
-        start = timezone.now() + timedelta(days=3)
-        data = {
-            "name": "New CTF Event",
-            "description": "A brand new event",
-            "event_start": start.strftime("%Y-%m-%dT%H:%M"),
-            "event_end": (start + timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M"),
-            "scenario_id": "basic",
-            "auto_cleanup": True,
-            "cleanup_delay_hours": 24,
-            "range_spinup_minutes": 30,
-            "team_mode": False,
-        }
-        response = authenticated_organizer_client.post(reverse("ctf:admin_event_create"), data=data)
-        # Should redirect to event detail on success
-        assert response.status_code == 302
-
-        # Event should exist
-        event = CTFEvent.objects.get(name="New CTF Event")
-        assert event.created_by == organizer_user
-        assert event.status == EventStatus.DRAFT.value
-
-    def test_create_event_invalid_data(self, authenticated_organizer_client: Client):
-        """Creating with invalid data should show errors."""
-        data = {
-            "name": "",  # Required
-            "description": "Missing name",
-            "event_start": timezone.now().strftime("%Y-%m-%dT%H:%M"),
-            "event_end": timezone.now().strftime("%Y-%m-%dT%H:%M"),
-            "scenario_id": "basic",
-            "auto_cleanup": True,
-            "cleanup_delay_hours": 24,
-            "range_spinup_minutes": 30,
-            "team_mode": False,
-        }
-        response = authenticated_organizer_client.post(reverse("ctf:admin_event_create"), data=data)
-        assert response.status_code == 200  # Re-renders form with errors
-        assert "form" in response.context
-        assert response.context["form"].errors
+    def test_create_view_is_get_only(self, authenticated_organizer_client: Client):
+        """Create view should reject POST (form submission is via API now)."""
+        response = authenticated_organizer_client.post(reverse("ctf:admin_event_create"), data={})
+        assert response.status_code == 405
 
 
 # ---------------------------------------------------------------------------
@@ -373,35 +337,22 @@ class TestEventEditView:
         assert response.status_code == 403
 
     def test_edit_view_renders_form_with_data(self, authenticated_organizer_client: Client, ctf_event_draft):
-        """Edit view should render form with existing data."""
+        """Edit view should render AJAX form template with scenarios and event_id."""
         response = authenticated_organizer_client.get(
             reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event_draft.pk})
         )
         assert response.status_code == 200
-        assert "form" in response.context
-        assert response.context["form"].instance == ctf_event_draft
+        assert "scenarios_json" in response.context
+        assert response.context["is_edit"] is True
+        assert response.context["event_id"] == str(ctf_event_draft.pk)
 
-    def test_edit_event_success(self, authenticated_organizer_client: Client, ctf_event_draft):
-        """Editing a draft event should succeed."""
-        data = {
-            "name": "Updated Event Name",
-            "description": ctf_event_draft.description,
-            "event_start": ctf_event_draft.event_start.strftime("%Y-%m-%dT%H:%M"),
-            "event_end": ctf_event_draft.event_end.strftime("%Y-%m-%dT%H:%M"),
-            "scenario_id": ctf_event_draft.scenario_id,
-            "auto_cleanup": ctf_event_draft.auto_cleanup,
-            "cleanup_delay_hours": ctf_event_draft.cleanup_delay_hours,
-            "range_spinup_minutes": ctf_event_draft.range_spinup_minutes,
-            "team_mode": ctf_event_draft.team_mode,
-        }
+    def test_edit_view_is_get_only(self, authenticated_organizer_client: Client, ctf_event_draft):
+        """Edit view should reject POST (form submission is via API now)."""
         response = authenticated_organizer_client.post(
             reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event_draft.pk}),
-            data=data,
+            data={},
         )
-        assert response.status_code == 302
-
-        ctf_event_draft.refresh_from_db()
-        assert ctf_event_draft.name == "Updated Event Name"
+        assert response.status_code == 405
 
     def test_edit_completed_event_blocked(self, authenticated_organizer_client: Client, organizer_user, db):
         """Editing a completed event should be blocked."""

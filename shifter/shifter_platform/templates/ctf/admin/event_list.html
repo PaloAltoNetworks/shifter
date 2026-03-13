@@ -1,113 +1,123 @@
 {% extends "ctf/base.html" %}
 {% block ctf_title %}CTF Events{% endblock %}
 
+{% block extra_css %}
+<style>
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.filter-bar select {
+    width: auto;
+    min-width: 180px;
+}
+
+.team-indicator {
+    font-size: 11px;
+    color: var(--xdr-text-secondary);
+    border: 1px solid var(--xdr-border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-left: 8px;
+}
+</style>
+{% endblock %}
+
 {% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">CTF Events</h1>
-        <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">
-            <i class="bi bi-plus-lg"></i> Create Event
-        </a>
-    </div>
+<div class="page-header flex-between">
+    <h1 class="page-title">CTF Events</h1>
+    <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">
+        Create Event
+    </a>
+</div>
 
-    <!-- Filter -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <form method="get" class="row g-3 align-items-center">
-                <div class="col-auto">
-                    <label for="status" class="col-form-label">Filter by Status:</label>
-                </div>
-                <div class="col-auto">
-                    <select name="status" id="status" class="form-select" onchange="this.form.submit()">
-                        <option value="">All Statuses</option>
-                        {% for value, label in status_choices %}
-                        <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                {% if status_filter %}
-                <div class="col-auto">
-                    <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-outline-secondary">Clear Filter</a>
-                </div>
-                {% endif %}
-            </form>
-        </div>
-    </div>
+<!-- Filter -->
+<div class="card">
+    <form method="get" class="filter-bar">
+        <label for="status" class="form-label" style="margin-bottom: 0;">Filter by Status:</label>
+        <select name="status" id="status" class="form-input" style="width: auto; min-width: 180px;" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        {% if status_filter %}
+        <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-secondary">Clear Filter</a>
+        {% endif %}
+    </form>
+</div>
 
-    <!-- Events Table -->
-    <div class="card">
-        <div class="card-body p-0">
-            {% if events %}
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Status</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Participants</th>
-                            <th>Challenges</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for event in events %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">
-                                    {{ event.name }}
-                                </a>
-                                {% if event.team_mode %}
-                                <span class="badge bg-info ms-1" title="Team Mode">Team</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if event.status == 'draft' %}
-                                <span class="badge bg-warning">Draft</span>
-                                {% elif event.status == 'scheduled' %}
-                                <span class="badge bg-info">Scheduled</span>
-                                {% elif event.status == 'active' %}
-                                <span class="badge bg-success">Active</span>
-                                {% elif event.status == 'completed' %}
-                                <span class="badge bg-secondary">Completed</span>
-                                {% elif event.status == 'cancelled' %}
-                                <span class="badge bg-danger">Cancelled</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ event.event_start|date:"M d, Y H:i" }}</td>
-                            <td>{{ event.event_end|date:"M d, Y H:i" }}</td>
-                            <td>{{ event.participant_count }}</td>
-                            <td>{{ event.challenge_count }}</td>
-                            <td>
-                                <div class="btn-group btn-group-sm">
-                                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-outline-primary" title="View">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
-                                    {% if event.is_modifiable %}
-                                    <a href="{% url 'ctf:admin_event_edit' event_id=event.pk %}" class="btn btn-outline-secondary" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </a>
-                                    {% endif %}
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="p-4 text-center text-muted">
-                {% if status_filter %}
-                <p class="mb-3">No events with status "{{ status_filter }}".</p>
-                <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-outline-primary">View All Events</a>
-                {% else %}
-                <p class="mb-3">No events yet.</p>
-                <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">Create Your First Event</a>
-                {% endif %}
-            </div>
-            {% endif %}
-        </div>
+<!-- Events Table -->
+<div class="card" style="padding: 0;">
+    {% if events %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Participants</th>
+                <th>Challenges</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">
+                        {{ event.name }}
+                    </a>
+                    {% if event.team_mode %}
+                    <span class="team-indicator">Team</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if event.status == 'draft' %}
+                    <span class="status status-provisioning"><span class="status-dot"></span> Draft</span>
+                    {% elif event.status == 'scheduled' %}
+                    <span class="status status-paused"><span class="status-dot"></span> Scheduled</span>
+                    {% elif event.status == 'active' %}
+                    <span class="status status-active"><span class="status-dot"></span> Active</span>
+                    {% elif event.status == 'completed' %}
+                    <span class="status status-offline"><span class="status-dot"></span> Completed</span>
+                    {% elif event.status == 'cancelled' %}
+                    <span class="status status-error"><span class="status-dot"></span> Cancelled</span>
+                    {% endif %}
+                </td>
+                <td>{{ event.event_start|date:"M d, Y H:i" }}</td>
+                <td>{{ event.event_end|date:"M d, Y H:i" }}</td>
+                <td>{{ event.participant_count }}</td>
+                <td>{{ event.challenge_count }}</td>
+                <td>
+                    <div class="flex-row gap-sm">
+                        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary" title="View">
+                            View
+                        </a>
+                        {% if event.is_modifiable %}
+                        <a href="{% url 'ctf:admin_event_edit' event_id=event.pk %}" class="btn btn-secondary" title="Edit">
+                            Edit
+                        </a>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        {% if status_filter %}
+        <p>No events with status "{{ status_filter }}".</p>
+        <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-secondary mt-md">View All Events</a>
+        {% else %}
+        <p>No events yet.</p>
+        <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary mt-md">Create Your First Event</a>
+        {% endif %}
     </div>
+    {% endif %}
 </div>
 {% endblock %}

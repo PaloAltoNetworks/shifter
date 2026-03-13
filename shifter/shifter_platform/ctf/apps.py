@@ -12,5 +12,4 @@ class CtfConfig(AppConfig):
 
     def ready(self) -> None:
         """Perform app initialization when Django starts."""
-        # Import signal handlers here if needed in the future
-        pass
+        import ctf.signals  # noqa: F401 — register signal receivers

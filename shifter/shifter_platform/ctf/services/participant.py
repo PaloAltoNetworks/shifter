@@ -22,6 +22,8 @@ from ctf.models import CTFEvent, CTFParticipant, CTFTeam
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from management.models import UserProfile
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,6 +287,10 @@ def register_participant(
             ]
         )
 
+        # Set UserProfile fields so ctf_participant_required decorator works
+        # without requiring Cognito custom claims to be pre-configured.
+        _set_ctf_participant_profile(user, participant.event)
+
         logger.info("Registered participant %s", participant_id)
 
     return participant
@@ -332,6 +338,10 @@ def disqualify_participant(participant_id: UUID, reason: str | None = None) -> C
 
     participant.status = ParticipantStatus.DISQUALIFIED.value
     participant.save(update_fields=["status", "updated_at"])
+
+    # Clear CTF participant profile if user was linked
+    if participant.user is not None:
+        _clear_ctf_participant_profile(participant.user, participant.event)
 
     logger.info(
         "Disqualified participant %s: %s",
@@ -397,6 +407,10 @@ def delete_participant(participant_id: UUID) -> bool:
             details={"participant_id": str(participant_id)},
         ) from None
 
+    # Clear CTF participant profile if user was linked
+    if participant.user is not None:
+        _clear_ctf_participant_profile(participant.user, participant.event)
+
     participant.delete(soft=True)
     logger.info("Deleted participant %s", participant_id)
 
@@ -448,3 +462,48 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
     logger.info("Resent invite for participant %s", participant_id)
 
     return participant
+
+
+# -----------------------------------------------------------------------------
+# Internal helpers
+# -----------------------------------------------------------------------------
+
+
+def _set_ctf_participant_profile(user: User, event: CTFEvent) -> UserProfile:
+    """Set UserProfile fields for CTF participant access.
+
+    This ensures the ctf_participant_required decorator works without
+    requiring Cognito custom claims to be pre-configured externally.
+    """
+    from management.services import get_user_profile
+
+    profile = get_user_profile(user)
+    profile.user_type = "ctf_participant"
+    profile.active_ctf_event = event
+    profile.save(update_fields=["user_type", "active_ctf_event"])
+    logger.info(
+        "Set CTF participant profile for user %s (event %s)",
+        user.email,
+        event.pk,
+    )
+    return profile
+
+
+def _clear_ctf_participant_profile(user: User, event: CTFEvent) -> None:
+    """Clear CTF participant profile fields on unregister/disqualify/delete.
+
+    Only clears if the profile's active_ctf_event matches the given event,
+    to avoid clobbering a profile linked to a different event.
+    """
+    from management.services import get_user_profile
+
+    profile = get_user_profile(user)
+    if profile.active_ctf_event_id == event.pk:
+        profile.user_type = "standard"
+        profile.active_ctf_event = None
+        profile.save(update_fields=["user_type", "active_ctf_event"])
+        logger.info(
+            "Cleared CTF participant profile for user %s (event %s)",
+            user.email,
+            event.pk,
+        )

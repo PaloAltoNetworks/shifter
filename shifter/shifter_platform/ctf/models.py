@@ -757,14 +757,13 @@ class CTFParticipant(CTFBaseModel):
         if not self.invite_token:
             self.invite_token = secrets.token_urlsafe(32)
         if not self.invite_token_expires:
-            # Token expires 7 days after creation or at event end, whichever is first
-            from datetime import timedelta
-
-            default_expiry = timezone.now() + timedelta(days=7)
+            # Token valid through event end
             if hasattr(self, "event") and self.event_id and self.event.event_end:
-                self.invite_token_expires = min(default_expiry, self.event.event_end)
+                self.invite_token_expires = self.event.event_end
             else:
-                self.invite_token_expires = default_expiry
+                from datetime import timedelta
+
+                self.invite_token_expires = timezone.now() + timedelta(days=7)
         super().save(*args, **kwargs)
 
     def clean(self) -> None:

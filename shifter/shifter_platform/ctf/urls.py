@@ -126,6 +126,7 @@ api_patterns = [
     # Event APIs
     path("api/events/", views.api_event_list, name="api_event_list"),
     path("api/events/<uuid:event_id>/", views.api_event_detail, name="api_event_detail"),
+    path("api/scenarios/", views.api_scenarios, name="api_scenarios"),
     # Challenge APIs
     path(
         "api/events/<uuid:event_id>/challenges/",
@@ -200,6 +201,12 @@ api_patterns = [
         "api/notifications/<uuid:notification_id>/send/",
         views.api_notification_send,
         name="api_notification_send",
+    ),
+    # Invitation APIs
+    path(
+        "api/events/<uuid:event_id>/invitations/send/",
+        views.api_send_invitations,
+        name="api_send_invitations",
     ),
 ]
 

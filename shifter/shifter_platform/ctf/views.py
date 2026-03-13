@@ -12,6 +12,7 @@ All views require authentication unless otherwise noted.
 from __future__ import annotations
 
 import functools
+import json
 import logging
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
@@ -555,40 +556,26 @@ def admin_event_list(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @ctf_organizer_required
-@require_http_methods(["GET", "POST"])
+@require_GET
 def admin_event_create(request: HttpRequest) -> HttpResponse:
-    """Create new CTF event.
+    """Show CTF event creation form.
 
-    GET: Show creation form.
-    POST: Process creation.
+    Renders the form template with scenario data. The form submits
+    via fetch() to the event API endpoint.
     """
-    from django.shortcuts import redirect
-
-    from ctf.forms import CTFEventForm
+    from ctf.bridges import cms_list_scenarios
 
     user = _get_user(request)
-    if request.method == "POST":
-        form = CTFEventForm(request.POST, user=user)
-        if form.is_valid():
-            event = form.save(commit=False)
-            event.created_by = user
-            event.save()
-            logger.info(
-                "User %s created event %s: %s",
-                user.email,
-                event.pk,
-                event.name,
-            )
-            return redirect("ctf:admin_event_detail", event_id=event.pk)
-    else:
-        form = CTFEventForm(user=user)
-
-    context = {
-        "form": form,
-        "is_edit": False,
-    }
-
-    return render(request, "ctf/admin/event_form.html", context)
+    scenarios = cms_list_scenarios(user)
+    scenarios_json = json.dumps([{"id": sid, "name": name} for sid, name in scenarios])
+    return render(
+        request,
+        "ctf/admin/event_form.html",
+        {
+            "is_edit": False,
+            "scenarios_json": scenarios_json,
+        },
+    )
 
 
 @login_required
@@ -665,18 +652,20 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
 
 @login_required
 @ctf_organizer_required
-@require_http_methods(["GET", "POST"])
+@require_GET
 def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
-    """Edit CTF event.
+    """Show CTF event edit form.
+
+    Renders the form template with event and scenario data. The form
+    submits via fetch() PUT to the event detail API endpoint.
 
     Args:
         event_id: UUID of the event.
     """
     from django.http import Http404
-    from django.shortcuts import redirect
 
+    from ctf.bridges import cms_list_scenarios
     from ctf.exceptions import CTFNotFoundError
-    from ctf.forms import CTFEventForm
     from ctf.services import get_event
 
     try:
@@ -697,27 +686,18 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
         )
         return redirect("ctf:admin_event_detail", event_id=event.pk)
 
-    if request.method == "POST":
-        form = CTFEventForm(request.POST, instance=event, user=request.user)
-        if form.is_valid():
-            form.save()
-            logger.info(
-                "User %s updated event %s: %s",
-                request.user.email,
-                event.pk,
-                event.name,
-            )
-            return redirect("ctf:admin_event_detail", event_id=event.pk)
-    else:
-        form = CTFEventForm(instance=event, user=request.user)
-
-    context = {
-        "form": form,
-        "event": event,
-        "is_edit": True,
-    }
-
-    return render(request, "ctf/admin/event_form.html", context)
+    user = _get_user(request)
+    scenarios = cms_list_scenarios(user)
+    scenarios_json = json.dumps([{"id": sid, "name": name} for sid, name in scenarios])
+    return render(
+        request,
+        "ctf/admin/event_form.html",
+        {
+            "is_edit": True,
+            "event_id": str(event_id),
+            "scenarios_json": scenarios_json,
+        },
+    )
 
 
 @login_required
@@ -1481,6 +1461,15 @@ def api_event_list(request: HttpRequest) -> JsonResponse:
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
+    # Parse datetime strings to datetime objects for the service layer
+    from django.utils.dateparse import parse_datetime
+
+    for field in ("event_start", "event_end", "registration_deadline"):
+        if field in body and isinstance(body[field], str):
+            parsed = parse_datetime(body[field])
+            if parsed:
+                body[field] = parsed
+
     try:
         event = create_event(user, body)
         return JsonResponse(
@@ -1515,8 +1504,6 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
     if event.created_by_id != request.user.pk:
         return JsonResponse({"error": "Forbidden"}, status=403)
 
-    import json
-
     from ctf.exceptions import CTFStateError, CTFValidationError
     from ctf.services import delete_event, update_event
 
@@ -1539,6 +1526,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "team_mode": event.team_mode,
                 "team_size_limit": event.team_size_limit,
                 "range_config": event.range_config,
+                "range_spinup_minutes": event.range_spinup_minutes,
             }
         )
 
@@ -1551,6 +1539,15 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # Parse datetime strings to datetime objects for the service layer
+    from django.utils.dateparse import parse_datetime
+
+    for field in ("event_start", "event_end", "registration_deadline"):
+        if field in body and isinstance(body[field], str):
+            parsed = parse_datetime(body[field])
+            if parsed:
+                body[field] = parsed
 
     try:
         updated = update_event(event_id, body)
@@ -2312,3 +2309,43 @@ def api_provision_ranges(request: HttpRequest, event_id: UUID) -> JsonResponse:
 
     result = range_service.provision_event_ranges(event_id)
     return JsonResponse(result)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
+    """API: Send invitation emails to all uninvited participants.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+    from ctf.services.notification import send_invitations
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    result = send_invitations(event_id)
+    return JsonResponse({"success": True, **result})
+
+
+@login_required
+@ctf_organizer_required
+@require_GET
+def api_scenarios(request: HttpRequest) -> JsonResponse:
+    """API: List available scenarios for CTF events.
+
+    Returns a list of scenario id/name pairs from the CMS registry.
+    """
+    from ctf.bridges import cms_list_scenarios
+
+    user = _get_user(request)
+    scenarios = [{"id": sid, "name": name} for sid, name in cms_list_scenarios(user)]
+    return JsonResponse({"scenarios": scenarios})

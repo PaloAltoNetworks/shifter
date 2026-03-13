@@ -6,6 +6,8 @@ Provides integration with Shifter's range infrastructure for CTF events.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -146,6 +148,106 @@ def provision_event_ranges(event_id: UUID) -> dict[str, Any]:
     }
 
 
+def provision_event_ranges_throttled(
+    event_id: UUID,
+    spinup_window_seconds: int,
+    shutdown_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Provision ranges for all participants with throttled pacing.
+
+    Spreads provisioning requests across ``spinup_window_seconds`` to avoid
+    overwhelming AWS with simultaneous ECS tasks.
+
+    Args:
+        event_id: UUID of the event.
+        spinup_window_seconds: Total window (seconds) over which to spread requests.
+        shutdown_check: Optional callable returning True when the caller
+            wants to abort (e.g. SIGTERM received by management command).
+
+    Returns:
+        Dict with counts of successful, failed, and whether interrupted.
+
+    Raises:
+        CTFNotFoundError: If event doesn't exist.
+    """
+    logger.info(
+        "Throttled provisioning for event %s (window=%ds)",
+        event_id,
+        spinup_window_seconds,
+    )
+
+    try:
+        CTFEvent.objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Event {event_id} not found",
+            details={"event_id": str(event_id)},
+        ) from None
+
+    participants = list(
+        CTFParticipant.objects.filter(
+            event_id=event_id,
+            range_instance_id__isnull=True,
+        )
+    )
+
+    count = len(participants)
+    if count == 0:
+        return {
+            "event_id": str(event_id),
+            "total": 0,
+            "successful": 0,
+            "failed": 0,
+            "errors": [],
+            "interrupted": False,
+        }
+
+    # Delay between provisions, clamped to [5, 120] seconds
+    raw_delay = spinup_window_seconds / max(count, 1)
+    delay = max(5.0, min(120.0, raw_delay))
+
+    successful = 0
+    failed = 0
+    errors: list[dict[str, str]] = []
+    interrupted = False
+
+    for i, participant in enumerate(participants):
+        if shutdown_check and shutdown_check():
+            logger.info(
+                "Throttled provisioning interrupted at %d/%d for event %s",
+                i,
+                count,
+                event_id,
+            )
+            interrupted = True
+            break
+
+        try:
+            provision_participant_range(participant.pk)
+            successful += 1
+        except Exception as e:
+            failed += 1
+            errors.append({"participant_id": str(participant.pk), "error": str(e)})
+            logger.error(
+                "Failed to provision range for participant %s: %s",
+                participant.pk,
+                e,
+            )
+
+        # Sleep between provisions (skip after the last one)
+        if i < count - 1 and not (shutdown_check and shutdown_check()):
+            time.sleep(delay)
+
+    return {
+        "event_id": str(event_id),
+        "total": successful + failed,
+        "successful": successful,
+        "failed": failed,
+        "errors": errors,
+        "interrupted": interrupted,
+    }
+
+
 def get_range_status(participant_id: UUID) -> dict[str, Any]:
     """Get range status for a participant.
 
@@ -230,31 +332,35 @@ def get_range_access_url(
             },
         )
 
-    # Load range spec via bridge
-    from ctf.bridges import cms_get_range_spec, get_guacamole_rdp_url
+    from ctf.bridges import get_guacamole_rdp_url, get_range_connection_info
 
-    range_spec = cms_get_range_spec(participant.range_instance_id)
-    if range_spec is None:
+    if participant.user is None:
         raise CTFRangeError(
-            "Range instance not found in CMS",
-            details={"range_instance_id": participant.range_instance_id},
+            "Participant has no linked user",
+            details={"participant_id": str(participant_id)},
         )
 
-    # Extract IP from range_spec
-    private_ip = _extract_ip_from_range_spec(range_spec)
-    if not private_ip:
-        raise CTFRangeError(
-            "No IP address found in range spec",
-            details={"range_instance_id": participant.range_instance_id},
-        )
+    username = participant.user.email
 
-    # Generate Guacamole URL via bridge
-    username = participant.user.email if participant.user else participant.email
+    try:
+        conn = get_range_connection_info(
+            user=participant.user,
+            range_instance_id=participant.range_instance_id,
+        )
+    except ValueError as e:
+        raise CTFRangeError(
+            f"Cannot resolve range connection info: {e}",
+            details={"range_instance_id": participant.range_instance_id},
+        ) from e
 
     url = get_guacamole_rdp_url(
         username=username,
-        connection_name=f"ctf-{participant.id}",
-        hostname=private_ip,
+        connection_name=conn["connection_name"],
+        hostname=conn["private_ip"],
+        rdp_username=conn.get("rdp_username"),
+        rdp_password=conn.get("rdp_password"),
+        sftp_root_directory=conn.get("sftp_root_directory"),
+        sftp_private_key=conn.get("ssh_key"),
     )
 
     return url
@@ -381,30 +487,3 @@ def _destroy_single_range(participant: CTFParticipant, user) -> None:
     participant.range_instance_id = None
     participant.range_status = ""
     participant.save(update_fields=["range_instance_id", "range_status", "updated_at"])
-
-
-def _extract_ip_from_range_spec(range_spec: dict | None) -> str | None:
-    """Extract first private IP from range_spec.
-
-    Supports both new format (subnets[*].instances) and legacy (instances[*]).
-    """
-    if not range_spec:
-        return None
-
-    # New format: subnets -> instances
-    subnets = range_spec.get("subnets", [])
-    for subnet in subnets:
-        instances = subnet.get("instances", [])
-        for instance in instances:
-            ip = instance.get("private_ip")
-            if ip:
-                return ip
-
-    # Legacy format: instances directly
-    instances = range_spec.get("instances", [])
-    for instance in instances:
-        ip = instance.get("private_ip")
-        if ip:
-            return ip
-
-    return None

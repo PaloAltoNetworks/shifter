@@ -5,7 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.1.2] - 2026-03-13
+## [3.3.0] - 2026-03-12
+
+### Added
+- Vibe Hacking Workshop CTF range: 5-box range with network topology for 90-minute workshop
+- Packer templates for all CTF boxes: ctf-webshell, ctf-mailroom, ctf-helpdesk, ctf-devbox, ctf-vault
+- Box 0 "WebShell" (Ubuntu walkthrough): Apache/PHP webshell -> sudo -> SUID privesc
+- Box 1 "MailRoom" (Ubuntu): anonymous FTP -> credential pattern -> SSH -> PATH hijack privesc
+- Box 2 "HelpDesk" (Windows): SMB cred leak -> RDP -> scheduled task abuse
+- Box 3 "DevBox" (Ubuntu, dual-homed): command injection -> SSH key hunting -> GTFOBins sudo node
+- Box 4 "Vault" (Windows, internal only): pivot target with WinRM, Backup Operators privesc, KeePass alt path
+- Validation test scripts for each CTF box (setup verification)
+- CTF scheduled task executor management command (`run_ctf_scheduler`) — polls for due `CTFScheduledTask` rows and dispatches SPIN_UP_RANGES, EVENT_START, EVENT_END, CLEANUP_RANGES, and SEND_REMINDER tasks with signal handling and heartbeat monitoring
+- Throttled bulk range provisioning (`provision_event_ranges_throttled`) — spreads AWS resource creation across the spinup window with configurable delay clamped to [5, 120]s and graceful shutdown support
+- Full Guacamole connection parameters (RDP credentials, SFTP config, SSH keys) for CTF range access via new `get_range_connection_info` bridge
+- "Send All Invites" button on the CTF organizer participant list page with API endpoint
+- Registration URL in CTF invitation emails (replaces raw invite token display)
+- Event-driven range status sync from CMS to CTF via Django signal (`range_status_changed`) — updates `CTFParticipant.range_status` when CMS processes SNS range events
+- Scenarios API endpoint (`/ctf/api/scenarios/`) for listing available CMS scenarios as JSON
+- Datetime string parsing in event API POST/PUT handlers so JSON-submitted datetime strings are converted before reaching the service layer
+- `range_spinup_minutes` field in event detail API GET response
+
+### Changed
+- CTF event create/edit form rewritten to use Mission Control AJAX pattern with XDR dark theme instead of Django form posts with Bootstrap
+- CTF admin views and templates: replaced Bootstrap classes with XDR theme styling for visual consistency with Mission Control
+
+### Fixed
+- CTF participant registration now sets `UserProfile.user_type` and `active_ctf_event` directly, removing dependency on pre-configured Cognito custom claims for `ctf_participant_required` decorator
+- CTF participant disqualification and deletion now clear `UserProfile` CTF fields
+- `get_range_access_url` now passes RDP username/password, SFTP root directory, and SSH key to Guacamole instead of only hostname
+
+### Removed
+- Dead `_extract_ip_from_range_spec` helper in `ctf/services/range.py` (replaced by `get_range_connection_info` bridge)
+- Django form-based event creation/edit views (replaced by AJAX pattern)
+
+## [3.2.0] - 2026-03-12
+
+### Added
+- CTF scheduled task executor management command (`run_ctf_scheduler`) — polls for due `CTFScheduledTask` rows and dispatches SPIN_UP_RANGES, EVENT_START, EVENT_END, CLEANUP_RANGES, and SEND_REMINDER tasks with signal handling and heartbeat monitoring
+- Throttled bulk range provisioning (`provision_event_ranges_throttled`) — spreads AWS resource creation across the spinup window with configurable delay clamped to [5, 120]s and graceful shutdown support
+- Full Guacamole connection parameters (RDP credentials, SFTP config, SSH keys) for CTF range access via new `get_range_connection_info` bridge
+- "Send All Invites" button on the CTF organizer participant list page with API endpoint
+- Registration URL in CTF invitation emails (replaces raw invite token display)
+- Event-driven range status sync from CMS to CTF via Django signal (`range_status_changed`) — updates `CTFParticipant.range_status` when CMS processes SNS range events
+
+### Fixed
+- CTF participant registration now sets `UserProfile.user_type` and `active_ctf_event` directly, removing dependency on pre-configured Cognito custom claims for `ctf_participant_required` decorator
+- CTF participant disqualification and deletion now clear `UserProfile` CTF fields
+- `get_range_access_url` now passes RDP username/password, SFTP root directory, and SSH key to Guacamole instead of only hostname
+
+### Removed
+- Dead `_extract_ip_from_range_spec` helper in `ctf/services/range.py` (replaced by `get_range_connection_info` bridge)
+
+## [3.1.2] - 2026-03-12
 
 ### Fixed
 - CTF event form: replace plain text `scenario_id` input with a dropdown populated from the CMS scenario registry

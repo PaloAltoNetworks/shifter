@@ -1,4 +1,5 @@
 {% extends "ctf/base.html" %}
+{% load static %}
 {% block ctf_title %}Ranges - {{ event.name }}{% endblock %}
 
 {% block extra_css %}
@@ -63,4 +64,18 @@
         </tbody>
     </table>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/ctf-ranges.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var manager = new CTFRangeManager({
+        csrfToken: '{{ csrf_token }}',
+        provisionAllUrl: '{% url "ctf:api_provision_ranges" event_id=event.pk %}',
+        rangeListUrl: '{% url "ctf:api_range_list" event_id=event.pk %}',
+    });
+    manager.init();
+});
+</script>
 {% endblock %}

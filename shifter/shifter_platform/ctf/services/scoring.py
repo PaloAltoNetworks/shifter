@@ -63,7 +63,7 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
             ],
         )
         .annotate(
-            total_score=Coalesce(  # type: ignore[no-redef]
+            computed_score=Coalesce(
                 Sum(
                     "submissions__points_awarded",
                     filter=Q(submissions__is_correct=True),
@@ -79,7 +79,7 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
                 filter=Q(submissions__is_correct=True),
             ),
         )
-        .order_by("-total_score", "last_solve_time")
+        .order_by("-computed_score", "last_solve_time")
         .select_related("team")
     )
 
@@ -93,7 +93,7 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
 
     for i, p in enumerate(participants):
         # Calculate rank (handle ties)
-        if p.total_score != last_score or p.last_solve_time != last_time:
+        if p.computed_score != last_score or p.last_solve_time != last_time:
             current_rank = i + 1
 
         scoreboard.append(
@@ -102,13 +102,13 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
                 "participant_id": str(p.id),
                 "name": p.name,
                 "team_name": p.team.name if p.team else None,
-                "score": p.total_score,
+                "score": p.computed_score,
                 "solve_count": p.solve_count,
                 "last_solve": p.last_solve_time.isoformat() if p.last_solve_time else None,
             }
         )
 
-        last_score = p.total_score
+        last_score = p.computed_score
         last_time = p.last_solve_time
 
     return scoreboard
@@ -132,7 +132,7 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
     teams = (
         CTFTeam.objects.filter(event_id=event_id)
         .annotate(
-            total_score=Coalesce(  # type: ignore[no-redef]
+            computed_score=Coalesce(
                 Sum(
                     "members__submissions__points_awarded",
                     filter=Q(members__submissions__is_correct=True),
@@ -149,7 +149,7 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
                 filter=Q(members__submissions__is_correct=True),
             ),
         )
-        .order_by("-total_score", "last_solve_time")
+        .order_by("-computed_score", "last_solve_time")
     )
 
     if limit:
@@ -162,7 +162,7 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
 
     for i, t in enumerate(teams):
         # Calculate rank (handle ties)
-        if t.total_score != last_score or t.last_solve_time != last_time:
+        if t.computed_score != last_score or t.last_solve_time != last_time:
             current_rank = i + 1
 
         scoreboard.append(
@@ -170,14 +170,14 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
                 "rank": current_rank,
                 "team_id": str(t.id),
                 "name": t.name,
-                "score": t.total_score,
+                "score": t.computed_score,
                 "solve_count": t.solve_count,
                 "member_count": t.member_count,
                 "last_solve": t.last_solve_time.isoformat() if t.last_solve_time else None,
             }
         )
 
-        last_score = t.total_score
+        last_score = t.computed_score
         last_time = t.last_solve_time
 
     return scoreboard

@@ -148,7 +148,7 @@ COMMON_ENV="$COMMON_ENV -e AWS_S3_BUCKET_NAME=$S3_BUCKET"
 COMMON_ENV="$COMMON_ENV -e DB_SECRET_ARN=$DB_SECRET_ARN"
 COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN"
 COMMON_ENV="$COMMON_ENV -e COGNITO_SECRET_ARN=$COGNITO_SECRET_ARN"
-COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
+COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME,localhost,127.0.0.1"
 COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
 COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME"
 COMMON_ENV="$COMMON_ENV -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
@@ -191,8 +191,8 @@ echo "Pulling image..."
 docker pull "$IMAGE"
 
 echo "Stopping existing containers..."
-docker stop portal worker-cms worker-engine worker-mc 2>/dev/null || true
-docker rm portal worker-cms worker-engine worker-mc 2>/dev/null || true
+docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
+docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
 
 echo "Starting portal..."
 eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"

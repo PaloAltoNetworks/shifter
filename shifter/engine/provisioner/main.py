@@ -123,21 +123,25 @@ def get_ami_id(ami_type: str) -> str:
     This ensures the provisioner always uses the latest AMI IDs without
     requiring a Terraform apply or ECS task definition update.
 
+    Known types ('kali', 'victim', 'windows', 'dc') use legacy SSM paths.
+    Custom ami_key values resolve to /shifter/ami/<ami_key>.
+
     Args:
-        ami_type: One of 'kali', 'victim', 'windows', 'dc'
+        ami_type: Known type or custom ami_key (e.g. 'ctf-webshell').
 
     Returns:
         AMI ID string
 
     Raises:
-        ValueError: If ami_type is unknown or SSM parameter not found
+        ValueError: If SSM parameter not found.
     """
     if ami_type in _ami_cache:
         return _ami_cache[ami_type]
 
+    # Known types use legacy SSM paths; custom keys construct path directly
     param_path = _AMI_SSM_PARAMS.get(ami_type)
     if not param_path:
-        raise ValueError(f"Unknown AMI type: {ami_type}")
+        param_path = f"/shifter/ami/{ami_type}"
 
     try:
         ssm = boto3.client("ssm")
@@ -2671,6 +2675,10 @@ def _build_range_terraform_variables(
                     key=agent_s3_key,
                 )
 
+            # Resolve custom AMI if ami_key is set
+            ami_key = inst.get("ami_key")
+            resolved_ami_id = get_ami_id(ami_key) if ami_key else ""
+
             subnet_instances.append(
                 {
                     "uuid": inst.get("uuid", ""),
@@ -2679,6 +2687,7 @@ def _build_range_terraform_variables(
                     "instance_type": instance_type,
                     "agent_presigned_url": agent_presigned_url,
                     "join_domain": inst.get("join_domain", False),
+                    "ami_id": resolved_ami_id,
                 }
             )
 

@@ -93,6 +93,21 @@ def cms_get_range_spec(range_instance_id: int) -> dict | None:
         return None
 
 
+def cms_list_scenarios(user: User) -> list[tuple[str, str]]:
+    """List available scenarios as (id, name) tuples for form choices.
+
+    Args:
+        user: Requesting user (used for access filtering).
+
+    Returns:
+        List of (scenario_id, name) tuples sorted by name.
+    """
+    from cms.scenarios.registry import list_all_scenarios
+
+    scenarios = list_all_scenarios(user)
+    return [(s["id"], s["name"]) for s in scenarios]
+
+
 def get_guacamole_rdp_url(username: str, connection_name: str, hostname: str) -> str:
     """Generate Guacamole RDP access URL."""
     from django.conf import settings

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.2] - 2026-03-13
+
+### Fixed
+- CTF event form: replace plain text `scenario_id` input with a dropdown populated from the CMS scenario registry
+- CTF event form: add `is-invalid` CSS class to fields with errors for Bootstrap 5 error visibility
+- CTF event form: validate submitted `scenario_id` exists in the scenario registry
+
 ## [3.1.1] - 2026-03-12
 
 ### Fixed

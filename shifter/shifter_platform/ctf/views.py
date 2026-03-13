@@ -566,10 +566,10 @@ def admin_event_create(request: HttpRequest) -> HttpResponse:
 
     from ctf.forms import CTFEventForm
 
+    user = _get_user(request)
     if request.method == "POST":
-        form = CTFEventForm(request.POST)
+        form = CTFEventForm(request.POST, user=user)
         if form.is_valid():
-            user = _get_user(request)
             event = form.save(commit=False)
             event.created_by = user
             event.save()
@@ -581,7 +581,7 @@ def admin_event_create(request: HttpRequest) -> HttpResponse:
             )
             return redirect("ctf:admin_event_detail", event_id=event.pk)
     else:
-        form = CTFEventForm()
+        form = CTFEventForm(user=user)
 
     context = {
         "form": form,
@@ -698,7 +698,7 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
         return redirect("ctf:admin_event_detail", event_id=event.pk)
 
     if request.method == "POST":
-        form = CTFEventForm(request.POST, instance=event)
+        form = CTFEventForm(request.POST, instance=event, user=request.user)
         if form.is_valid():
             form.save()
             logger.info(
@@ -709,7 +709,7 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
             )
             return redirect("ctf:admin_event_detail", event_id=event.pk)
     else:
-        form = CTFEventForm(instance=event)
+        form = CTFEventForm(instance=event, user=request.user)
 
     context = {
         "form": form,

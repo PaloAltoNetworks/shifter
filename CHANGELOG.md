@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-03-13
+
+### Added
+- `ami_key` optional field on `InstanceConfig`, `InstanceSpec`, and `InstanceContextBase` for custom AMI support
+- Provisioner resolves `ami_key` to AMI ID via SSM `/shifter/ami/<ami_key>` and passes per-instance `ami_id` to Terraform
+- `get_ami_id()` now accepts arbitrary SSM parameter suffixes (custom ami_key values), not just the 4 known types
+- Terraform `ami_id` per-instance override: when non-empty, bypasses the `os_type` AMI lookup
+- `agentic_workshop` scenario template: 5-box CTF range with custom AMIs for vibe hacking workshop
+
+## [3.4.1] - 2026-03-13
+
+### Fixed
+- `resend_invite` now actually sends the invitation email (previously only refreshed the token without emailing)
+- `user_data.sh` includes `localhost,127.0.0.1` in `DJANGO_ALLOWED_HOSTS` for SSM tunnel access
+- `user_data.sh` stops `ctf-scheduler` container during redeployment (was missing from stop list)
+
 ## [3.4.0] - 2026-03-13
 
 ### Changed

@@ -459,6 +459,28 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
     participant.invited_at = now
     participant.save(update_fields=["invite_token", "invite_token_expires", "invited_at", "updated_at"])
 
+    # Send the invitation email
+    from ctf.services.notification import _build_registration_url, _render_email, _send_email
+
+    registration_url = _build_registration_url(participant.invite_token)
+    html_content, text_content = _render_email(
+        "invitation",
+        {
+            "event": participant.event,
+            "participant": participant,
+            "invite_token": participant.invite_token,
+            "registration_url": registration_url,
+        },
+    )
+    sent = _send_email(
+        recipient=participant.email,
+        subject=f"You're invited to {participant.event.name}",
+        html_content=html_content,
+        text_content=text_content,
+    )
+    if not sent:
+        logger.warning("Failed to send resend invite email for participant %s", participant_id)
+
     logger.info("Resent invite for participant %s", participant_id)
 
     return participant

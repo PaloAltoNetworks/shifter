@@ -60,15 +60,17 @@ class UserProfile(models.Model):
 
     @property
     def is_ctf_organizer(self) -> bool:
-        return self.user_type == "ctf_organizer"
+        """Deprecated: use shared.auth.is_ctf_organizer(user) instead."""
+        return self.user.groups.filter(name="CTF Organizer").exists()
 
     @property
     def is_ctf_participant(self) -> bool:
-        return self.user_type == "ctf_participant"
+        """Deprecated: use shared.auth.is_ctf_participant(user) instead."""
+        return self.user.groups.filter(name="CTF Participant").exists()
 
     @property
     def is_standard_user(self) -> bool:
-        return self.user_type == "standard"
+        return not self.is_ctf_organizer and not self.is_ctf_participant
 
 
 class ActivityLog(models.Model):

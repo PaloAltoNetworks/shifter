@@ -288,8 +288,8 @@ class CTFEvent(CTFBaseModel):
     )
     range_spinup_minutes = models.PositiveIntegerField(
         default=30,
-        validators=[MinValueValidator(15), MaxValueValidator(1440)],
-        help_text="Minutes before event start to begin range provisioning",
+        validators=[MinValueValidator(0), MaxValueValidator(1440)],
+        help_text="Minutes before event start to begin range provisioning (0 = at event start)",
     )
     range_config = models.JSONField(
         default=dict,

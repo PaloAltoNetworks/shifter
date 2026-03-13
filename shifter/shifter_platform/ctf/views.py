@@ -20,6 +20,7 @@ from uuid import UUID
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -66,17 +67,23 @@ def ctf_organizer_required(view_func):
 
 
 def ctf_participant_required(view_func):
-    """Decorator that requires the user to be a CTF participant.
+    """Decorator that requires the user to be a registered CTF participant.
 
-    Returns 403 Forbidden if user is not a participant.
-    Must be used after @login_required.
+    Checks the CTFParticipant table directly — works regardless of
+    UserProfile.user_type, so organizers and standard users who are
+    also participants aren't blocked.
     """
 
     @functools.wraps(view_func)
     def wrapper(request: HttpRequest, *args, **kwargs):
+        from ctf.models import CTFParticipant
+
         user = _get_user(request)
-        role = get_user_role(user)
-        if not role.is_ctf_participant:
+        has_participation = CTFParticipant.objects.filter(
+            user=user,
+            registered_at__isnull=False,
+        ).exists()
+        if not has_participation:
             logger.warning(
                 "CTF participant access denied for user %s",
                 user.email,
@@ -164,18 +171,20 @@ def ctf_login(request: HttpRequest) -> HttpResponse:
     return render(request, "ctf/login.html", context)
 
 
-@login_required
 def ctf_register(request: HttpRequest) -> HttpResponse:
-    """Register a participant after OIDC authentication.
+    """Register a participant via invite token link.
 
-    Accepts invite token via POST or GET, validates it, and links
-    the authenticated user to the participant record.
+    No login required. The invite token IS the authentication.
+    Auto-creates a Django user from the participant's email if needed,
+    logs them in, and redirects to the event dashboard.
     """
+    from django.contrib.auth import login
+
     from ctf.exceptions import CTFStateError
     from ctf.models import CTFParticipant
     from ctf.services.participant import register_participant
 
-    token = request.POST.get("token") or request.GET.get("token")
+    token = request.GET.get("token")
     if not token:
         messages.error(request, "Missing invite token.")
         return redirect("ctf:ctf_login")
@@ -185,12 +194,34 @@ def ctf_register(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Invalid invite token.")
         return redirect("ctf:ctf_login")
 
+    if not participant.is_invite_valid:
+        messages.error(request, "This invitation has expired.")
+        return redirect("ctf:ctf_login")
+
+    # Already registered — just log them in and go
+    if participant.user is not None:
+        login(request, participant.user, backend="django.contrib.auth.backends.ModelBackend")
+        return redirect("ctf:participant_dashboard")
+
+    # Auto-create a Django user from the participant's email
+    user = User.objects.filter(email__iexact=participant.email).first()
+    if user is None:
+        user = User.objects.create_user(
+            username=participant.email,
+            email=participant.email,
+            first_name=participant.name.split()[0] if participant.name else "",
+            last_name=" ".join(participant.name.split()[1:]) if participant.name else "",
+        )
+        user.set_unusable_password()
+        user.save()
+
     try:
-        register_participant(participant.pk, _get_user(request))
+        register_participant(participant.pk, user)
     except CTFStateError as exc:
         messages.error(request, str(exc))
         return redirect("ctf:ctf_login")
 
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
     return redirect("ctf:participant_dashboard")
 
 
@@ -1482,6 +1513,9 @@ def api_event_list(request: HttpRequest) -> JsonResponse:
         )
     except CTFValidationError as e:
         return JsonResponse({"error": str(e)}, status=400)
+    except ValidationError as e:
+        # Django model validation (from full_clean in save)
+        return JsonResponse({"error": "; ".join(e.messages)}, status=400)
 
 
 @login_required
@@ -1560,6 +1594,8 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
         )
     except (CTFValidationError, CTFStateError) as e:
         return JsonResponse({"error": str(e)}, status=400)
+    except ValidationError as e:
+        return JsonResponse({"error": "; ".join(e.messages)}, status=400)
 
 
 @login_required

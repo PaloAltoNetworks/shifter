@@ -288,6 +288,11 @@ resource "aws_iam_role_policy" "ses_send" {
           "ses:SendRawEmail"
         ]
         Resource = var.ses_domain_identity_arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = "ses:GetSendQuota"
+        Resource = "*"
       }
     ]
   })

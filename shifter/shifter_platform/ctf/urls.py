@@ -185,6 +185,16 @@ api_patterns = [
         views.api_provision_ranges,
         name="api_provision_ranges",
     ),
+    path(
+        "api/participants/<uuid:participant_id>/range/provision/",
+        views.api_provision_participant_range,
+        name="api_provision_participant_range",
+    ),
+    path(
+        "api/participants/<uuid:participant_id>/range/destroy/",
+        views.api_destroy_participant_range,
+        name="api_destroy_participant_range",
+    ),
     # Scoreboard APIs
     path(
         "api/events/<uuid:event_id>/scoreboard/",

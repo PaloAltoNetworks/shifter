@@ -431,7 +431,6 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
         CTFStateError: If participant is already registered.
     """
     import secrets
-    from datetime import timedelta
 
     logger.info("Resending invite for participant %s", participant_id)
 
@@ -449,10 +448,9 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
             details={"participant_id": str(participant_id)},
         )
 
-    # Generate new token with fresh expiry
+    # Generate new token — valid through event end
     now = timezone.now()
-    default_expiry = now + timedelta(days=7)
-    token_expires = min(default_expiry, participant.event.event_end)
+    token_expires = participant.event.event_end
 
     participant.invite_token = secrets.token_urlsafe(32)
     participant.invite_token_expires = token_expires

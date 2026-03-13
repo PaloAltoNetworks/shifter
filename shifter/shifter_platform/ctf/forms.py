@@ -31,12 +31,19 @@ class CTFEventForm(forms.ModelForm):
     - Team mode settings (team_size_limit required if team_mode)
     - Cleanup settings
     - Range configuration (ngfw_enabled)
+    - Scenario selection (dropdown populated from CMS registry)
     """
 
     ngfw_enabled = forms.BooleanField(
         required=False,
         label="Enable NGFW",
         help_text="Provision a Next-Generation Firewall for each participant range",
+    )
+
+    scenario_id = forms.ChoiceField(
+        label="Scenario",
+        help_text="Select the range scenario template to use",
+        widget=forms.Select(),
     )
 
     class Meta:
@@ -71,9 +78,25 @@ class CTFEventForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, **kwargs):
-        """Initialize form with datetime-local format support."""
+    def __init__(self, *args, user=None, **kwargs):
+        """Initialize form with scenario dropdown and datetime-local format support.
+
+        Args:
+            user: The requesting user, used to filter available scenarios.
+        """
         super().__init__(*args, **kwargs)
+        self._user = user
+
+        # Populate scenario dropdown from CMS registry
+        if user is not None:
+            from ctf.bridges import cms_list_scenarios
+
+            scenario_choices = [("", "Select a scenario...")]
+            scenario_choices += cms_list_scenarios(user)
+            self.fields["scenario_id"].choices = scenario_choices
+        else:
+            # No user context — accept any value (used in tests / programmatic use)
+            self.fields["scenario_id"] = forms.CharField(max_length=50)
 
         # Set input formats for datetime fields
         datetime_fields = ["event_start", "event_end", "registration_deadline"]
@@ -95,6 +118,13 @@ class CTFEventForm(forms.ModelForm):
         for _field_name, field in self.fields.items():
             existing_classes = field.widget.attrs.get("class", "")
             field.widget.attrs["class"] = f"{existing_classes} form-control".strip()
+
+        # Add is-invalid CSS class to fields with errors (Bootstrap 5 pattern)
+        if self.is_bound and self.errors:
+            for field_name in self.errors:
+                if field_name in self.fields:
+                    css = self.fields[field_name].widget.attrs.get("class", "")
+                    self.fields[field_name].widget.attrs["class"] = f"{css} is-invalid".strip()
 
     def clean(self) -> dict:
         """Validate form data."""
@@ -133,6 +163,15 @@ class CTFEventForm(forms.ModelForm):
         elif team_size_limit:
             # Clear team_size_limit if team_mode is disabled
             cleaned_data["team_size_limit"] = None
+
+        # Validate scenario_id exists in the registry
+        scenario_id = cleaned_data.get("scenario_id")
+        if scenario_id and self._user is not None:
+            from ctf.bridges import cms_list_scenarios
+
+            valid_ids = {sid for sid, _ in cms_list_scenarios(self._user)}
+            if scenario_id not in valid_ids:
+                self.add_error("scenario_id", "Selected scenario is not available.")
 
         return cleaned_data
 

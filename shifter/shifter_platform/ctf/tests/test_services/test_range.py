@@ -161,10 +161,18 @@ class TestGetRangeAccessUrl:
         ctf_participant.range_status = "ready"
         ctf_participant.save(update_fields=["range_instance_id", "range_status"])
 
-        mock_spec = {"subnets": [{"instances": [{"private_ip": "10.0.1.5"}]}]}
+        mock_conn_info = {
+            "private_ip": "10.0.1.5",
+            "os_type": "kali",
+            "connection_name": "ctf-42",
+            "rdp_username": "kali",
+            "rdp_password": "kali",
+            "ssh_key": None,
+            "sftp_root_directory": "/home/kali",
+        }
 
         with (
-            patch("ctf.bridges.cms_get_range_spec", return_value=mock_spec),
+            patch("ctf.bridges.get_range_connection_info", return_value=mock_conn_info),
             patch(
                 "ctf.bridges.get_guacamole_rdp_url",
                 return_value="https://guac.example.com/session",
@@ -173,7 +181,15 @@ class TestGetRangeAccessUrl:
             url = range_service.get_range_access_url(ctf_participant.pk)
 
         assert url == "https://guac.example.com/session"
-        mock_guac.assert_called_once()
+        mock_guac.assert_called_once_with(
+            username=ctf_participant.user.email,
+            connection_name="ctf-42",
+            hostname="10.0.1.5",
+            rdp_username="kali",
+            rdp_password="kali",  # noqa: S106  # nosec B106
+            sftp_root_directory="/home/kali",
+            sftp_private_key=None,
+        )
 
 
 @pytest.mark.django_db
@@ -228,26 +244,3 @@ class TestDestroyParticipantRange:
         mock_destroy.assert_called_once_with(participant_user, 42)
         ctf_participant.refresh_from_db()
         assert ctf_participant.range_instance_id is None
-
-
-@pytest.mark.django_db
-class TestExtractIpFromRangeSpec:
-    """Tests for _extract_ip_from_range_spec helper."""
-
-    def test_new_format(self):
-        """Extracts IP from subnets format."""
-        spec = {"subnets": [{"instances": [{"private_ip": "10.0.1.5"}]}]}
-        assert range_service._extract_ip_from_range_spec(spec) == "10.0.1.5"
-
-    def test_legacy_format(self):
-        """Extracts IP from legacy instances format."""
-        spec = {"instances": [{"private_ip": "192.168.1.10"}]}
-        assert range_service._extract_ip_from_range_spec(spec) == "192.168.1.10"
-
-    def test_none_spec(self):
-        """Returns None for None spec."""
-        assert range_service._extract_ip_from_range_spec(None) is None
-
-    def test_empty_spec(self):
-        """Returns None for empty spec."""
-        assert range_service._extract_ip_from_range_spec({}) is None

@@ -1,95 +1,139 @@
 {% extends "ctf/base.html" %}
 {% block ctf_title %}Teams - {{ event.name }}{% endblock %}
 
+{% block extra_css %}
+<style>
+.breadcrumb {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--xdr-text-secondary);
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    max-width: 480px;
+}
+
+.stat-card {
+    text-align: center;
+    padding: 16px;
+}
+
+.stat-card .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--xdr-text);
+}
+
+.stat-card .stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+.full-indicator {
+    font-size: 11px;
+    color: #faad14;
+    border: 1px solid #faad14;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-left: 8px;
+}
+
+.invite-code {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+}
+</style>
+{% endblock %}
+
 {% block ctf_content %}
-<div class="container-fluid py-4">
-    <!-- Header -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb mb-1">
-                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
-                    <li class="breadcrumb-item"><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
-                    <li class="breadcrumb-item active">Teams</li>
-                </ol>
-            </nav>
-            <h1 class="h3 mb-0">Teams</h1>
-        </div>
+<!-- Header -->
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
+        <span class="separator">/</span>
+        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+        <span class="separator">/</span>
+        <span>Teams</span>
     </div>
+    <h1 class="page-title">Teams</h1>
+</div>
 
-    {% if not event.team_mode %}
-    <div class="card">
-        <div class="card-body text-center text-muted py-5">
-            <p class="mb-0">Team mode is not enabled for this event.</p>
-        </div>
+{% if not event.team_mode %}
+<div class="card">
+    <div class="empty-state">
+        <p>Team mode is not enabled for this event.</p>
     </div>
+</div>
+{% else %}
+<!-- Statistics Cards -->
+<div class="stats-grid mb-lg">
+    <div class="card stat-card">
+        <div class="stat-value">{{ teams|length }}</div>
+        <div class="stat-label">Total Teams</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-value">{{ event.team_size_limit|default:"Unlimited" }}</div>
+        <div class="stat-label">Max Team Size</div>
+    </div>
+</div>
+
+<!-- Teams Table -->
+<div class="card" style="padding: 0;">
+    {% if teams %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Members</th>
+                <th>Captain</th>
+                <th>Score</th>
+                <th>Invite Code</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for team in teams %}
+            <tr>
+                <td><strong>{{ team.name }}</strong></td>
+                <td>
+                    {{ team.member_count }}{% if event.team_size_limit %} / {{ event.team_size_limit }}{% endif %}
+                    {% if team.is_full %}
+                    <span class="full-indicator">Full</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if team.captain %}
+                    {{ team.captain.name }}
+                    {% else %}
+                    <span class="text-muted">None</span>
+                    {% endif %}
+                </td>
+                <td>{{ team.total_score }}</td>
+                <td><span class="invite-code">{{ team.invite_code }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
     {% else %}
-    <!-- Statistics Cards -->
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card bg-primary text-white">
-                <div class="card-body text-center">
-                    <div class="h2 mb-0">{{ teams|length }}</div>
-                    <div class="small text-uppercase">Total Teams</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card bg-info text-white">
-                <div class="card-body text-center">
-                    <div class="h2 mb-0">{{ event.team_size_limit|default:"Unlimited" }}</div>
-                    <div class="small text-uppercase">Max Team Size</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Teams Table -->
-    <div class="card">
-        <div class="card-body p-0">
-            {% if teams %}
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Members</th>
-                            <th>Captain</th>
-                            <th>Score</th>
-                            <th>Invite Code</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for team in teams %}
-                        <tr>
-                            <td><strong>{{ team.name }}</strong></td>
-                            <td>
-                                {{ team.member_count }}{% if event.team_size_limit %} / {{ event.team_size_limit }}{% endif %}
-                                {% if team.is_full %}
-                                <span class="badge bg-warning ms-1">Full</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if team.captain %}
-                                {{ team.captain.name }}
-                                {% else %}
-                                <span class="text-muted">None</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ team.total_score }}</td>
-                            <td><code>{{ team.invite_code }}</code></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="p-4 text-center text-muted">
-                <p class="mb-0">No teams yet.</p>
-            </div>
-            {% endif %}
-        </div>
+    <div class="empty-state">
+        <p>No teams yet.</p>
     </div>
     {% endif %}
 </div>
+{% endif %}
 {% endblock %}

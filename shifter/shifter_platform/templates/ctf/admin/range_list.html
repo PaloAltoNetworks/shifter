@@ -1,13 +1,24 @@
 {% extends "ctf/base.html" %}
 {% block ctf_title %}Ranges - {{ event.name }}{% endblock %}
-{% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Range Management</h2>
-        <button class="btn btn-primary" id="btn-provision-all">Provision All Ranges</button>
-    </div>
 
-    <table class="table table-striped">
+{% block extra_css %}
+<style>
+.range-id {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+}
+</style>
+{% endblock %}
+
+{% block ctf_content %}
+<div class="page-header flex-between">
+    <h1 class="page-title">Range Management</h1>
+    <button class="btn btn-primary" id="btn-provision-all">Provision All Ranges</button>
+</div>
+
+<div class="card" style="padding: 0;">
+    <table class="table">
         <thead>
             <tr>
                 <th>Participant</th>
@@ -24,29 +35,29 @@
                 <td>{{ p.email }}</td>
                 <td>
                     {% if p.range_status == "ready" %}
-                        <span class="badge bg-success">Ready</span>
+                    <span class="status status-active"><span class="status-dot"></span> Ready</span>
                     {% elif p.range_status == "provisioning" %}
-                        <span class="badge bg-warning text-dark">Provisioning</span>
+                    <span class="status status-provisioning"><span class="status-dot"></span> Provisioning</span>
                     {% elif p.range_status %}
-                        <span class="badge bg-secondary">{{ p.range_status }}</span>
+                    <span class="status status-offline"><span class="status-dot"></span> {{ p.range_status }}</span>
                     {% else %}
-                        <span class="badge bg-light text-dark">Not Assigned</span>
+                    <span class="status status-paused"><span class="status-dot"></span> Not Assigned</span>
                     {% endif %}
                 </td>
-                <td>{{ p.range_instance_id|default:"-" }}</td>
+                <td><span class="range-id">{{ p.range_instance_id|default:"-" }}</span></td>
                 <td>
                     {% if not p.range_instance_id %}
-                        <button class="btn btn-sm btn-outline-primary btn-provision"
-                                data-participant-id="{{ p.id }}">Provision</button>
+                    <button class="btn btn-secondary btn-provision"
+                            data-participant-id="{{ p.id }}">Provision</button>
                     {% else %}
-                        <button class="btn btn-sm btn-outline-danger btn-destroy"
-                                data-participant-id="{{ p.id }}">Destroy</button>
+                    <button class="btn btn-danger btn-destroy"
+                            data-participant-id="{{ p.id }}">Destroy</button>
                     {% endif %}
                 </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="5" class="text-center text-muted">No participants yet.</td>
+                <td colspan="5" class="text-muted" style="text-align: center;">No participants yet.</td>
             </tr>
             {% endfor %}
         </tbody>

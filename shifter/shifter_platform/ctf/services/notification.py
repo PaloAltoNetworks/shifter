@@ -53,12 +53,14 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
 
     for participant in participants:
         try:
+            registration_url = _build_registration_url(participant.invite_token)
             html_content, text_content = _render_email(
                 "invitation",
                 {
                     "event": event,
                     "participant": participant,
                     "invite_token": participant.invite_token,
+                    "registration_url": registration_url,
                 },
             )
             success = _send_email(
@@ -377,6 +379,20 @@ def schedule_notification(
 # -----------------------------------------------------------------------------
 # Private helpers
 # -----------------------------------------------------------------------------
+
+
+def _build_registration_url(invite_token: str) -> str:
+    """Build a full registration URL from an invite token.
+
+    Uses Django's reverse() to generate the path, then prepends the
+    configured site URL to produce an absolute link suitable for emails.
+    """
+    from django.conf import settings
+    from django.urls import reverse
+
+    path = reverse("ctf:ctf_register") + f"?token={invite_token}"
+    base = getattr(settings, "SITE_URL", "").rstrip("/")
+    return f"{base}{path}"
 
 
 def _send_email(

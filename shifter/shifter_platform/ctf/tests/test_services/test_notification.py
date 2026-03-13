@@ -185,19 +185,21 @@ class TestRenderEmail:
 
     def test_renders_templates(self, ctf_event, ctf_participant):
         """Renders both HTML and text templates."""
+        registration_url = "https://example.com/ctf/register/?token=test-token"
         html, text = notification._render_email(
             "invitation",
             {
                 "event": ctf_event,
                 "participant": ctf_participant,
                 "invite_token": "test-token",
+                "registration_url": registration_url,
             },
         )
 
         assert ctf_event.name in html
         assert ctf_event.name in text
-        assert "test-token" in html
-        assert "test-token" in text
+        assert registration_url in html
+        assert registration_url in text
 
 
 @pytest.mark.django_db

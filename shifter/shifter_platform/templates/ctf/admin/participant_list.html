@@ -1,5 +1,5 @@
-{% extends "ctf/base.html" %}
-{% block ctf_title %}Participants - {{ event.name }}{% endblock %}
+{% extends "mission_control/base.html" %}
+{% block title %}Participants - {{ event.name }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -57,7 +57,7 @@
 </style>
 {% endblock %}
 
-{% block ctf_content %}
+{% block content %}
 <!-- Header -->
 <div class="flex-between mb-lg">
     <div>

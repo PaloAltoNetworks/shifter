@@ -176,6 +176,18 @@ variable "ssm_parameter_store_prefix" {
   default     = ""
 }
 
+variable "ses_domain_identity_arn" {
+  description = "ARN of the SES domain identity for sending email (empty string to skip)"
+  type        = string
+  default     = ""
+}
+
+variable "enable_ses" {
+  description = "Whether to create the SES send IAM policy. Use this instead of testing ses_domain_identity_arn to avoid count depending on unknown values."
+  type        = bool
+  default     = false
+}
+
 variable "lifecycle_hook_heartbeat_timeout" {
   description = "Heartbeat timeout for ASG lifecycle hook in seconds (max 7200)"
   type        = number

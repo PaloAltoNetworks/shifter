@@ -172,7 +172,7 @@ repos:
     hooks:
       - id: mypy-shifter-platform
         name: mypy (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && mypy .'
+        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && PYTHONPATH="..:$PYTHONPATH" mypy .'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false

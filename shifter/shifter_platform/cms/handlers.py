@@ -159,6 +159,10 @@ def process_range_event(message: str | dict) -> None:
         event_id,
     )
 
+    # --- CTF bridge ---
+    # Notify CTF subsystem so it can sync CTFParticipant.range_status.
+    _notify_ctf_range_status(instance.pk, new_status, previous_status)
+
     # --- Experiment bridge ---
     # When a range becomes READY and is linked to an experiment run,
     # publish an event to the experiments SQS queue to continue execution.
@@ -230,6 +234,36 @@ def notify_experiment_on_range_ready(
         run.error_message = "Failed to publish range provisioning notification"
         run.save(update_fields=["error_message"])
         run.transition_to(RunStatus.FAILED)
+
+
+# =============================================================================
+# CTF Bridge
+# =============================================================================
+
+
+def _notify_ctf_range_status(
+    range_instance_id: int,
+    new_status: str,
+    previous_status: str,
+) -> None:
+    """Fire the CTF range_status_changed signal if CTF app is installed."""
+    try:
+        from ctf.signals import range_status_changed
+
+        range_status_changed.send(
+            sender=None,
+            range_instance_id=range_instance_id,
+            new_status=new_status,
+            previous_status=previous_status,
+        )
+    except ImportError:
+        pass  # CTF app not installed — nothing to notify
+    except Exception:
+        logger.exception(
+            "Failed to notify CTF of range status change: range_instance_id=%s status=%s",
+            range_instance_id,
+            new_status,
+        )
 
 
 # =============================================================================

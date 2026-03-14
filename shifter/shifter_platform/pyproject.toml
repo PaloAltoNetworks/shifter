@@ -13,6 +13,7 @@ dependencies = [
     "django",
     "django-encrypted-model-fields>=0.6.5",
     "django-health-check",
+    "django-ses",
     "djangorestframework",
     "gunicorn",
     "markdown",

@@ -10,6 +10,12 @@ from django.db import models
 class UserProfile(models.Model):
     """Extended user data for soft delete and anonymization."""
 
+    USER_TYPE_CHOICES = [
+        ("standard", "Standard"),
+        ("ctf_organizer", "CTF Organizer"),
+        ("ctf_participant", "CTF Participant"),
+    ]
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -22,6 +28,20 @@ class UserProfile(models.Model):
         blank=True,
         db_index=True,
         help_text="Cognito user pool subject identifier (UUID)",
+    )
+    user_type = models.CharField(
+        max_length=20,
+        choices=USER_TYPE_CHOICES,
+        default="standard",
+        help_text="User role type for routing and access control",
+    )
+    active_ctf_event = models.ForeignKey(
+        "ctf.CTFEvent",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="active_participants",
+        help_text="Active CTF event for participant users",
     )
     deleted_at = models.DateTimeField(null=True, blank=True)
     anonymized_at = models.DateTimeField(null=True, blank=True)
@@ -37,6 +57,20 @@ class UserProfile(models.Model):
     @property
     def is_deleted(self):
         return self.deleted_at is not None
+
+    @property
+    def is_ctf_organizer(self) -> bool:
+        """Deprecated: use shared.auth.is_ctf_organizer(user) instead."""
+        return self.user.groups.filter(name="CTF Organizer").exists()
+
+    @property
+    def is_ctf_participant(self) -> bool:
+        """Deprecated: use shared.auth.is_ctf_participant(user) instead."""
+        return self.user.groups.filter(name="CTF Participant").exists()
+
+    @property
+    def is_standard_user(self) -> bool:
+        return not self.is_ctf_organizer and not self.is_ctf_participant
 
 
 class ActivityLog(models.Model):

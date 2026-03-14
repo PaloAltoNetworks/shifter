@@ -88,7 +88,8 @@
                 </a>
             </div>
 
-            {# Assets - opens submenu panel #}
+            {# Assets - opens submenu panel (hidden for CTF participants) #}
+            {% if not is_ctf_participant %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-top-item{% endif %}">
                 <button type="button"
                         class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-link{% endif %}"
@@ -103,6 +104,7 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Assets</span>
                 </button>
             </div>
+            {% endif %}
 
             {# Terminal - always accessible, shows "no range" state if needed #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'terminal' %}active-top-item{% endif %}">
@@ -138,6 +140,21 @@
             </div>
             {% endif %}
 
+            {# CTF Admin - Organizers only #}
+            {% if is_ctf_organizer %}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'ctf_admin' %}active-top-item{% endif %}">
+                <a href="{% url 'ctf:admin_dashboard' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'ctf_admin' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M14.4 6L14 4H5V21H7V14H12.6L13 16H20V6H14.4Z"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">CTF Admin</span>
+                </a>
+            </div>
+            {% endif %}
+
             {# Scenario Editor - Staff or Threat Research group #}
             {% if can_access_threat_research %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'scenarios' %}active-top-item{% endif %}">
@@ -166,7 +183,8 @@
             </div>
             {% endif %}
 
-            {# Documentation #}
+            {# Documentation (hidden for CTF participants) #}
+            {% if not is_ctf_participant %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'docs' %}active-top-item{% endif %}">
                 <a href="{% url 'documentation:index' %}"
                    class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'docs' %}active-link{% endif %}">
@@ -178,11 +196,13 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Docs</span>
                 </a>
             </div>
+            {% endif %}
 
         </div>
 
         {# Footer with settings, help, and user profile #}
         <div class="nav-footer">
+            {% if not is_ctf_participant %}
             {# Settings - exact Cortex XDR icon #}
             <div>
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">
@@ -208,6 +228,7 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Help</span>
                 </a>
             </div>
+            {% endif %}
 
             {# User profile with dropdown menu #}
             <div class="nav-profile-container">

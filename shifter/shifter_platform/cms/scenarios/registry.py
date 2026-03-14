@@ -183,6 +183,28 @@ def get_scenario_detail(scenario_id: str) -> dict[str, Any]:
         raise ValueError(f"Scenario '{scenario_id}' not found") from e
 
 
+def check_scenario_access(scenario_id: str, user: User) -> dict[str, Any]:
+    """Check if a user can access a scenario. Returns detail dict or raises ValueError.
+
+    Staff and superusers can access all scenarios. Non-staff users are blocked
+    from disabled or staff_only scenarios.
+
+    Args:
+        scenario_id: Unique scenario identifier.
+        user: The requesting user.
+
+    Returns:
+        Scenario detail dict (from get_scenario_detail).
+
+    Raises:
+        ValueError: If scenario not found or user lacks access.
+    """
+    detail = get_scenario_detail(scenario_id)
+    if not (user.is_staff or user.is_superuser) and (not detail["enabled"] or detail["staff_only"]):
+        raise ValueError(f"Scenario '{scenario_id}' is not available")
+    return detail
+
+
 def load_scenario_template(scenario_id: str) -> ScenarioTemplate:
     """Load a ScenarioTemplate from either source for hydration.
 

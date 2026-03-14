@@ -47,6 +47,12 @@ variable "portal_security_group_id" {
   default     = ""
 }
 
+variable "enable_portal_sg_rule" {
+  description = "Whether to create the portal-to-guacamole security group rule. Use this instead of testing portal_security_group_id to avoid count depending on unknown values."
+  type        = bool
+  default     = false
+}
+
 # ------------------------------------------------------------------------------
 # Shared ALB (Portal ALB)
 # ------------------------------------------------------------------------------

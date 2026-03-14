@@ -1,0 +1,126 @@
+{% extends "mission_control/base.html" %}
+{% block title %}CTF Admin Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+}
+
+.stat-card {
+    padding: 16px;
+}
+
+.stat-card .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--xdr-text);
+}
+
+.stat-card .stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+.recent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <h1 class="page-title">CTF Admin Dashboard</h1>
+    <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">
+        Create Event
+    </a>
+</div>
+
+<!-- Stats Cards -->
+<div class="stats-grid mb-lg">
+    <div class="card stat-card">
+        <div class="stat-label">Active Events</div>
+        <div class="stat-value">{{ active_count }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Upcoming Events</div>
+        <div class="stat-value">{{ upcoming_count }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Draft Events</div>
+        <div class="stat-value">{{ draft_count }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Total Events</div>
+        <div class="stat-value">{{ total_events }}</div>
+    </div>
+</div>
+
+<!-- Recent Events -->
+<div class="card" style="padding: 0;">
+    <div style="padding: 16px;">
+        <div class="recent-header">
+            <div class="card-title" style="margin-bottom: 0;">Recent Events</div>
+            <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-secondary">View All</a>
+        </div>
+    </div>
+    {% if recent_events %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Participants</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in recent_events %}
+            <tr>
+                <td>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">
+                        {{ event.name }}
+                    </a>
+                </td>
+                <td>
+                    {% if event.status == 'draft' %}
+                    <span class="status status-provisioning"><span class="status-dot"></span> Draft</span>
+                    {% elif event.status == 'scheduled' %}
+                    <span class="status status-paused"><span class="status-dot"></span> Scheduled</span>
+                    {% elif event.status == 'active' %}
+                    <span class="status status-active"><span class="status-dot"></span> Active</span>
+                    {% elif event.status == 'completed' %}
+                    <span class="status status-offline"><span class="status-dot"></span> Completed</span>
+                    {% elif event.status == 'cancelled' %}
+                    <span class="status status-error"><span class="status-dot"></span> Cancelled</span>
+                    {% endif %}
+                </td>
+                <td>{{ event.event_start|date:"M d, Y H:i" }}</td>
+                <td>{{ event.event_end|date:"M d, Y H:i" }}</td>
+                <td>{{ event.participant_count }}</td>
+                <td>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary">
+                        View
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No events yet.</p>
+        <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary mt-md">Create Your First Event</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

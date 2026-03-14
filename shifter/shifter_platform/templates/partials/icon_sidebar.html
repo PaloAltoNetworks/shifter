@@ -140,6 +140,21 @@
             </div>
             {% endif %}
 
+            {# CTF Admin - Organizers only #}
+            {% if is_ctf_organizer %}
+            <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'ctf_admin' %}active-top-item{% endif %}">
+                <a href="{% url 'ctf:admin_dashboard' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'ctf_admin' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M14.4 6L14 4H5V21H7V14H12.6L13 16H20V6H14.4Z"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">CTF Admin</span>
+                </a>
+            </div>
+            {% endif %}
+
             {# Scenario Editor - Staff or Threat Research group #}
             {% if can_access_threat_research %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'scenarios' %}active-top-item{% endif %}">

@@ -1,5 +1,5 @@
-{% extends "ctf/base.html" %}
-{% block ctf_title %}CTF Admin Dashboard{% endblock %}
+{% extends "mission_control/base.html" %}
+{% block title %}CTF Admin Dashboard{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -35,7 +35,7 @@
 </style>
 {% endblock %}
 
-{% block ctf_content %}
+{% block content %}
 <div class="page-header flex-between">
     <h1 class="page-title">CTF Admin Dashboard</h1>
     <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">

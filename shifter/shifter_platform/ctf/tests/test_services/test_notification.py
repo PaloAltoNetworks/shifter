@@ -36,13 +36,13 @@ class TestSendInvitations:
         ctf_participant_invited.refresh_from_db()
         assert ctf_participant_invited.invited_at is not None
 
-    def test_skips_already_invited(self, ctf_event, ctf_participant_invited):
-        """Skips participants already invited."""
-        # ctf_participant_invited already has invited_at set
+    def test_sends_to_already_invited(self, ctf_event, ctf_participant_invited):
+        """Sends to all participants including already-invited ones."""
+        # ctf_participant_invited already has invited_at set — should still get email
         with patch.object(notification, "_send_email", return_value=True):
             result = notification.send_invitations(ctf_event.pk)
 
-        assert result["sent"] == 0
+        assert result["sent"] == 1
 
     def test_tracks_failures(self, ctf_event, ctf_participant_invited):
         """Tracks failed sends."""

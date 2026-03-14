@@ -77,9 +77,9 @@
         <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-secondary">
             Import CSV
         </a>
-        {% if invited_count > 0 %}
+        {% if total_count > 0 %}
         <button type="button" class="btn btn-primary" onclick="sendAllInvites()">
-            Send All Invites ({{ invited_count }})
+            Send All Links ({{ total_count }})
         </button>
         {% endif %}
     </div>
@@ -178,11 +178,9 @@
                         <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}" class="btn btn-secondary" title="View">
                             View
                         </a>
-                        {% if participant.status == 'invited' %}
-                        <button type="button" class="btn btn-secondary" title="Resend Invite" onclick="resendInvite('{{ participant.pk }}')">
-                            Resend
+                        <button type="button" class="btn btn-secondary" title="Send Link" onclick="resendInvite('{{ participant.pk }}')">
+                            Send Link
                         </button>
-                        {% endif %}
                     </div>
                 </td>
             </tr>
@@ -209,7 +207,7 @@
 {% block extra_js %}
 <script>
 function sendAllInvites() {
-    if (!confirm('Send invitation emails to all uninvited participants?')) return;
+    if (!confirm('Send magic link emails to all participants?')) return;
 
     fetch(`{% url 'ctf:api_send_invitations' event_id=event.pk %}`, {
         method: 'POST',
@@ -233,7 +231,7 @@ function sendAllInvites() {
 }
 
 function resendInvite(participantId) {
-    if (!confirm('Resend invitation email to this participant?')) return;
+    if (!confirm('Send magic link email to this participant?')) return;
 
     fetch(`/ctf/api/participants/${participantId}/resend-invite/`, {
         method: 'POST',

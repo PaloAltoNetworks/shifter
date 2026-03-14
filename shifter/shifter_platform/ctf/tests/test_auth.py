@@ -25,7 +25,12 @@ from django.utils import timezone
 from ctf.enums import EventStatus, ParticipantStatus
 from ctf.models import CTFEvent
 from management.models import UserProfile
-from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
+from shared.auth import (
+    CTF_ORGANIZER_GROUP,
+    CTF_PARTICIPANT_GROUP,
+    THREAT_RESEARCH_GROUP,
+    is_ctf_participant_only,
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -445,6 +450,88 @@ class TestCTFContextProcessor:
 
         context = ctf_navigation(request)
         assert context["active_ctf_event"] == ctf_event_active
+
+    def test_context_participant_only_true_for_pure_participant(self, request_factory, participant_profile):
+        """Pure CTF participant should have is_ctf_participant_only=True."""
+        from ctf.context_processors import ctf_navigation
+
+        request = request_factory.get("/")
+        request.user = participant_profile.user
+
+        context = ctf_navigation(request)
+        assert context["is_ctf_participant_only"] is True
+
+    def test_context_participant_only_false_for_staff_participant(self, request_factory, participant_profile):
+        """Staff user who is also a CTF participant should have is_ctf_participant_only=False."""
+        from ctf.context_processors import ctf_navigation
+
+        user = participant_profile.user
+        user.is_staff = True
+        user.save(update_fields=["is_staff"])
+
+        request = request_factory.get("/")
+        request.user = user
+
+        context = ctf_navigation(request)
+        assert context["is_ctf_participant_only"] is False
+
+    def test_context_participant_only_false_for_standard_user(self, request_factory, standard_profile):
+        """Standard (non-CTF) user should have is_ctf_participant_only=False."""
+        from ctf.context_processors import ctf_navigation
+
+        request = request_factory.get("/")
+        request.user = standard_profile.user
+
+        context = ctf_navigation(request)
+        assert context["is_ctf_participant_only"] is False
+
+
+# ---------------------------------------------------------------------------
+# is_ctf_participant_only Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestIsCtfParticipantOnly:
+    """Test the is_ctf_participant_only() utility function."""
+
+    def test_pure_participant_returns_true(self, participant_user):
+        """User with only CTF Participant group should return True."""
+        assert is_ctf_participant_only(participant_user) is True
+
+    def test_staff_participant_returns_false(self, participant_user):
+        """Staff user who is also a CTF participant should return False."""
+        participant_user.is_staff = True
+        participant_user.save(update_fields=["is_staff"])
+        assert is_ctf_participant_only(participant_user) is False
+
+    def test_superuser_participant_returns_false(self, participant_user):
+        """Superuser who is also a CTF participant should return False."""
+        participant_user.is_superuser = True
+        participant_user.save(update_fields=["is_superuser"])
+        assert is_ctf_participant_only(participant_user) is False
+
+    def test_organizer_participant_returns_false(self, participant_user):
+        """User in both Organizer and Participant groups should return False."""
+        organizer_group, _ = Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)
+        participant_user.groups.add(organizer_group)
+        assert is_ctf_participant_only(participant_user) is False
+
+    def test_threat_research_participant_returns_false(self, participant_user):
+        """User in both Threat Research and Participant groups should return False."""
+        tr_group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
+        participant_user.groups.add(tr_group)
+        assert is_ctf_participant_only(participant_user) is False
+
+    def test_non_participant_returns_false(self, standard_user):
+        """User without CTF Participant group should return False."""
+        assert is_ctf_participant_only(standard_user) is False
+
+    def test_inactive_participant_returns_false(self, participant_user):
+        """Inactive user who is a CTF participant should return False."""
+        participant_user.is_active = False
+        participant_user.save(update_fields=["is_active"])
+        assert is_ctf_participant_only(participant_user) is False
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
-{% extends "ctf/base.html" %}
-{% block ctf_title %}New Notification - {{ event.name }}{% endblock %}
+{% extends "mission_control/base.html" %}
+{% block title %}New Notification - {{ event.name }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -34,7 +34,7 @@ input[type="datetime-local"] {
 </style>
 {% endblock %}
 
-{% block ctf_content %}
+{% block content %}
 <div class="notification-form">
     <div class="page-header">
         <h1 class="page-title">Compose Notification</h1>

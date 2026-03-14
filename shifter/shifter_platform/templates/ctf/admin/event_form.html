@@ -1,7 +1,7 @@
-{% extends "ctf/base.html" %}
+{% extends "mission_control/base.html" %}
 {% load static %}
 
-{% block ctf_title %}{% if is_edit %}Edit Event{% else %}Create Event{% endif %}{% endblock %}
+{% block title %}{% if is_edit %}Edit Event{% else %}Create Event{% endif %}{% endblock %}
 
 {% block extra_css %}
 <style>

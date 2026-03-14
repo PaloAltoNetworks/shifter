@@ -143,7 +143,7 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
                 "members__submissions",
                 filter=Q(members__submissions__is_correct=True),
             ),
-            member_count=Count("members", distinct=True),
+            computed_member_count=Count("members", distinct=True),
             last_solve_time=Max(
                 "members__submissions__submitted_at",
                 filter=Q(members__submissions__is_correct=True),
@@ -172,7 +172,7 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
                 "name": t.name,
                 "score": t.computed_score,
                 "solve_count": t.solve_count,
-                "member_count": t.member_count,
+                "member_count": t.computed_member_count,
                 "last_solve": t.last_solve_time.isoformat() if t.last_solve_time else None,
             }
         )

@@ -214,12 +214,12 @@ class TestDashboardRouting:
         assert response.status_code == 302
         assert "/mission-control/" in response.url
 
-    def test_organizer_redirected_to_ctf_admin(self, client, organizer_profile):
-        """CTF organizers should be sent to CTF admin dashboard."""
+    def test_organizer_redirected_to_mission_control(self, client, organizer_profile):
+        """CTF organizers should be sent to Mission Control dashboard."""
         client.force_login(organizer_profile.user)
         response = client.get(reverse("dashboard_router"))
         assert response.status_code == 302
-        assert "/ctf/admin/" in response.url
+        assert "/mission-control/" in response.url
 
     def test_participant_redirected_to_mission_control(self, client, participant_profile):
         """CTF participants should be sent to Mission Control dashboard."""
@@ -601,8 +601,8 @@ class TestDualRoles:
         profile = get_user_profile(user)
         assert profile.active_ctf_event is None
 
-    def test_dashboard_routes_organizer_to_admin(self, client, organizer_profile):
-        """Dashboard router should route dual-role user to admin (organizer takes priority)."""
+    def test_dashboard_routes_organizer_to_mission_control(self, client, organizer_profile):
+        """Dashboard router should route dual-role user to Mission Control (organizer sees CTF Admin in sidebar)."""
         user = organizer_profile.user
         participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
         user.groups.add(participant_group)
@@ -610,4 +610,4 @@ class TestDualRoles:
         client.force_login(user)
         response = client.get(reverse("dashboard_router"))
         assert response.status_code == 302
-        assert "/ctf/admin/" in response.url
+        assert "/mission-control/" in response.url

@@ -36,12 +36,18 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
 
         role = get_user_role(request.user)
 
-        return {
+        result = {
             "is_ctf_user": role.is_ctf_organizer or role.is_ctf_participant,
             "is_ctf_organizer": role.is_ctf_organizer,
             "is_ctf_participant": role.is_ctf_participant,
             "active_ctf_event": role.active_ctf_event,
         }
+
+        # Highlight CTF Admin in the MC sidebar when on CTF admin pages
+        if role.is_ctf_organizer and request.path.startswith("/ctf/admin/"):
+            result["active_nav"] = "ctf_admin"
+
+        return result
     except Exception:
         logger.exception(
             "Error in ctf_navigation context processor for user %s",

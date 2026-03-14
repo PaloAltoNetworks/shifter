@@ -1,6 +1,6 @@
-{% extends "ctf/base.html" %}
+{% extends "mission_control/base.html" %}
 {% load static %}
-{% block ctf_title %}Ranges - {{ event.name }}{% endblock %}
+{% block title %}Ranges - {{ event.name }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -12,7 +12,7 @@
 </style>
 {% endblock %}
 
-{% block ctf_content %}
+{% block content %}
 <div class="page-header flex-between">
     <h1 class="page-title">Range Management</h1>
     <button class="btn btn-primary" id="btn-provision-all">Provision All Ranges</button>

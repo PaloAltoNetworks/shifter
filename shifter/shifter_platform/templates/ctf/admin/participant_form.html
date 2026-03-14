@@ -1,5 +1,5 @@
-{% extends "ctf/base.html" %}
-{% block ctf_title %}{% if is_add %}Add{% else %}Edit{% endif %} Participant - {{ event.name }}{% endblock %}
+{% extends "mission_control/base.html" %}
+{% block title %}{% if is_add %}Add{% else %}Edit{% endif %} Participant - {{ event.name }}{% endblock %}
 
 {% block extra_css %}
 <style>

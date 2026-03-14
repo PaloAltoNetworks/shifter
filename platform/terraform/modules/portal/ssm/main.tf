@@ -187,6 +187,8 @@ resource "aws_ssm_parameter" "sqs_mc_url" {
 }
 
 resource "aws_ssm_parameter" "redis_endpoint" {
+  count = var.enable_redis ? 1 : 0
+
   name        = "${local.ps_prefix}/redis-endpoint"
   description = "Redis endpoint for Django Channels"
   type        = "String"
@@ -196,12 +198,30 @@ resource "aws_ssm_parameter" "redis_endpoint" {
 }
 
 resource "aws_ssm_parameter" "db_host_override" {
-  count = var.db_host_override != "" ? 1 : 0
+  count = var.enable_db_host_override ? 1 : 0
 
   name        = "${local.ps_prefix}/db-host-override"
   description = "Database host override"
   type        = "String"
   value       = var.db_host_override
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "email_backend" {
+  name        = "${local.ps_prefix}/email-backend"
+  description = "Django email backend class"
+  type        = "String"
+  value       = var.email_backend
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "ctf_from_email" {
+  name        = "${local.ps_prefix}/ctf-from-email"
+  description = "From address for CTF emails"
+  type        = "String"
+  value       = var.ctf_from_email
 
   tags = local.common_tags
 }

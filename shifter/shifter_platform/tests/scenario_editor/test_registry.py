@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 
 from cms.models import Scenario, ScenarioMetadata
 from cms.scenarios.registry import (
+    check_scenario_access,
     get_scenario_detail,
     is_default_scenario,
     list_all_scenarios,
@@ -210,3 +211,51 @@ class TestLoadScenarioTemplate:
     def test_not_found_raises(self, db):
         with pytest.raises(ValueError, match="not found"):
             load_scenario_template("nonexistent")
+
+
+class TestCheckScenarioAccess:
+    def test_staff_can_access_disabled(self, staff_user):
+        ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            enabled=False,
+            updated_by=staff_user,
+        )
+        detail = check_scenario_access("basic", staff_user)
+        assert detail["id"] == "basic"
+        assert detail["enabled"] is False
+
+    def test_staff_can_access_staff_only(self, staff_user):
+        ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            staff_only=True,
+            updated_by=staff_user,
+        )
+        detail = check_scenario_access("basic", staff_user)
+        assert detail["id"] == "basic"
+        assert detail["staff_only"] is True
+
+    def test_regular_user_blocked_from_disabled(self, staff_user, regular_user):
+        ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            enabled=False,
+            updated_by=staff_user,
+        )
+        with pytest.raises(ValueError, match="not available"):
+            check_scenario_access("basic", regular_user)
+
+    def test_regular_user_blocked_from_staff_only(self, staff_user, regular_user):
+        ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            staff_only=True,
+            updated_by=staff_user,
+        )
+        with pytest.raises(ValueError, match="not available"):
+            check_scenario_access("basic", regular_user)
+
+    def test_regular_user_can_access_normal_scenario(self, regular_user, db):
+        detail = check_scenario_access("basic", regular_user)
+        assert detail["id"] == "basic"
+
+    def test_nonexistent_scenario_raises(self, regular_user):
+        with pytest.raises(ValueError, match="not found"):
+            check_scenario_access("nonexistent", regular_user)

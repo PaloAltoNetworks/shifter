@@ -1,0 +1,99 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Team{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="mb-4">
+        <h1 class="h3 mb-0">Team</h1>
+    </div>
+
+    {% if team %}
+    <!-- Team Info -->
+    <div class="row">
+        <div class="col-md-8 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">{{ team.name }}</h5>
+                    {% if team_score %}
+                    <span class="badge bg-primary">{{ team_score }} pts</span>
+                    {% endif %}
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Member</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for member in team_members %}
+                                <tr {% if member.pk == participant.pk %}class="table-active"{% endif %}>
+                                    <td>
+                                        {{ member.name }}
+                                        {% if member.pk == participant.pk %}
+                                        <span class="badge bg-primary ms-1">You</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if team.captain and team.captain.pk == member.pk %}
+                                        <span class="badge bg-warning">Captain</span>
+                                        {% else %}
+                                        Member
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if member.status == 'active' %}
+                                        <span class="badge bg-success">Active</span>
+                                        {% elif member.status == 'registered' %}
+                                        <span class="badge bg-info">Registered</span>
+                                        {% elif member.status == 'invited' %}
+                                        <span class="badge bg-secondary">Invited</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">{{ member.status|title }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Team Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <strong>Members:</strong> {{ team_members|length }}{% if event.team_size_limit %} / {{ event.team_size_limit }}{% endif %}
+                    </div>
+                    <div class="mb-2">
+                        <strong>Team Score:</strong> {{ team_score|default:"0" }}
+                    </div>
+                    <div>
+                        <strong>Invite Code:</strong>
+                        <code>{{ team.invite_code }}</code>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% else %}
+    <!-- No Team -->
+    <div class="card">
+        <div class="card-body text-center py-5">
+            <h5 class="mb-3">You're not on a team</h5>
+            <p class="text-muted mb-4">Join a team using an invite code from your team captain.</p>
+            <a href="{% url 'ctf:team_join' %}" class="btn btn-primary">Join a Team</a>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,9 @@
+Event Reminder
+
+Hi {{ participant.name }},
+
+{{ event.name }} starts in {{ hours_before }} hours!
+
+Start Time: {{ event.event_start|date:"F j, Y g:i A" }}
+
+Make sure you're ready. Good luck!

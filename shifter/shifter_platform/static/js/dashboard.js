@@ -20,6 +20,7 @@ class DashboardManager {
         this.agentsUrl = options.agentsUrl;
         this.scenariosUrl = options.scenariosUrl;
         this.loginUrl = options.loginUrl || '/oidc/authenticate/';
+        this.viewOnly = options.viewOnly || false;
 
         // State
         this.currentRange = null;
@@ -37,46 +38,49 @@ class DashboardManager {
         this.statusPollInterval = null;
         this.statusPollDelay = 30000; // 30 seconds
 
-        // Scenario dropdown
-        this.scenarioDropdown = document.getElementById('scenario-dropdown');
-        this.scenarioSelect = document.getElementById('scenario-select-value');
+        // Launch UI elements (not present in viewOnly mode)
+        if (!this.viewOnly) {
+            // Scenario dropdown
+            this.scenarioDropdown = document.getElementById('scenario-dropdown');
+            this.scenarioSelect = document.getElementById('scenario-select-value');
 
-        // OS selection (for from_agent scenarios)
-        this.osSelectionSection = document.getElementById('os-selection-section');
-        this.osDropdown = document.getElementById('os-dropdown');
-        this.osSelect = document.getElementById('os-select-value');
+            // OS selection (for from_agent scenarios)
+            this.osSelectionSection = document.getElementById('os-selection-section');
+            this.osDropdown = document.getElementById('os-dropdown');
+            this.osSelect = document.getElementById('os-select-value');
 
-        // General agent dropdown (filtered by OS selection)
-        this.agentSection = document.getElementById('agent-section');
-        this.agentDropdown = document.getElementById('agent-dropdown');
-        this.agentSelect = document.getElementById('agent-select-value');
-        this.agentItems = document.getElementById('agent-items');
+            // General agent dropdown (filtered by OS selection)
+            this.agentSection = document.getElementById('agent-section');
+            this.agentDropdown = document.getElementById('agent-dropdown');
+            this.agentSelect = document.getElementById('agent-select-value');
+            this.agentItems = document.getElementById('agent-items');
 
-        // Windows agent dropdown (for requires_windows scenarios)
-        this.windowsAgentSection = document.getElementById('windows-agent-section');
-        this.windowsAgentDropdown = document.getElementById('windows-agent-dropdown');
-        this.windowsAgentSelect = document.getElementById('windows-agent-select-value');
-        this.windowsAgentItems = document.getElementById('windows-agent-items');
+            // Windows agent dropdown (for requires_windows scenarios)
+            this.windowsAgentSection = document.getElementById('windows-agent-section');
+            this.windowsAgentDropdown = document.getElementById('windows-agent-dropdown');
+            this.windowsAgentSelect = document.getElementById('windows-agent-select-value');
+            this.windowsAgentItems = document.getElementById('windows-agent-items');
 
-        // Linux agent dropdown (for requires_linux scenarios)
-        this.linuxAgentSection = document.getElementById('linux-agent-section');
-        this.linuxAgentDropdown = document.getElementById('linux-agent-dropdown');
-        this.linuxAgentSelect = document.getElementById('linux-agent-select-value');
-        this.linuxAgentItems = document.getElementById('linux-agent-items');
+            // Linux agent dropdown (for requires_linux scenarios)
+            this.linuxAgentSection = document.getElementById('linux-agent-section');
+            this.linuxAgentDropdown = document.getElementById('linux-agent-dropdown');
+            this.linuxAgentSelect = document.getElementById('linux-agent-select-value');
+            this.linuxAgentItems = document.getElementById('linux-agent-items');
 
-        // Launch button (in launch tile - always present)
-        this.launchBtn = document.getElementById('launch-btn');
+            // Launch button
+            this.launchBtn = document.getElementById('launch-btn');
 
-        // Scenario requirements cache
-        this.scenarioRequirements = {};
+            // Scenario requirements cache
+            this.scenarioRequirements = {};
 
-        // Scenario data cache (for info panel)
-        this.scenarioData = {};
+            // Scenario data cache (for info panel)
+            this.scenarioData = {};
 
-        // Scenario info panel elements
-        this.scenarioInfoPanel = document.getElementById('scenario-info-panel');
-        this.scenarioInfoTitle = document.getElementById('scenario-info-title');
-        this.scenarioInfoDescription = document.getElementById('scenario-info-description');
+            // Scenario info panel elements
+            this.scenarioInfoPanel = document.getElementById('scenario-info-panel');
+            this.scenarioInfoTitle = document.getElementById('scenario-info-title');
+            this.scenarioInfoDescription = document.getElementById('scenario-info-description');
+        }
 
         // Range tiles
         this.launchTile = document.getElementById('launch-tile');
@@ -362,6 +366,12 @@ class DashboardManager {
     }
 
     async init() {
+        if (this.viewOnly) {
+            // CTF participants: only load range status, no launch UI
+            await this.loadRange();
+            return;
+        }
+
         // Initialize dropdowns
         this._initScenarioDropdown();
         this._initDropdown(this.osDropdown);

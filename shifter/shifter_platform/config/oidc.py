@@ -4,14 +4,20 @@ import logging
 import os
 import re
 from urllib.parse import urlencode
+from uuid import UUID
 
+from django.contrib.auth.models import Group
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
-from management.services import update_cognito_sub
+from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
 from risk_register.services import audit_auth_event
+from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
 
 logger = logging.getLogger(__name__)
+
+# Valid CTF user types that can be set from Cognito claims
+VALID_CTF_USER_TYPES = {"standard", "ctf_organizer", "ctf_participant"}
 
 # Django's UnicodeUsernameValidator pattern
 DJANGO_USERNAME_PATTERN = re.compile(r"^[\w.@+-]+$")
@@ -89,17 +95,22 @@ def provider_logout_url(request):
 
 
 class ShifterOIDCBackend(OIDCAuthenticationBackend):
-    """Custom OIDC backend that stores Cognito sub in UserProfile.
+    """Custom OIDC backend that stores Cognito sub and CTF user type in UserProfile.
 
     The Cognito `sub` is the stable identifier for a user across tokens.
     We store it in UserProfile to enable MCP server lookups by sub
     (access tokens only contain sub, not email).
+
+    CTF-specific claims:
+    - custom:user_type: Sets the user's role (standard, ctf_organizer, ctf_participant)
+    - custom:ctf_event_id: Sets the active CTF event for participant users
     """
 
     def create_user(self, claims):
-        """Create user and populate cognito_sub from claims."""
+        """Create user and populate cognito_sub and user_type from claims."""
         user = super().create_user(claims)
         self._update_cognito_sub(user, claims)
+        self._update_user_type(user, claims)
 
         # Audit log: new user created via OIDC
         cognito_sub = claims.get("sub", "")
@@ -114,9 +125,10 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         return user
 
     def update_user(self, user, claims):
-        """Update user and ensure cognito_sub is set."""
+        """Update user and ensure cognito_sub and user_type are set."""
         user = super().update_user(user, claims)
         self._update_cognito_sub(user, claims)
+        self._update_user_type(user, claims)
         return user
 
     def authenticate(self, request, **kwargs):
@@ -161,3 +173,78 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
             return
 
         update_cognito_sub(user, cognito_sub)
+
+    def _update_user_type(self, user, claims):
+        """Update CTF groups and active CTF event from Cognito custom claims.
+
+        Reads custom:user_type and custom:ctf_event_id from OIDC claims
+        and adds/removes the user from the appropriate Django Groups.
+        """
+        user_type = claims.get("custom:user_type")
+
+        CLAIM_TO_GROUP = {
+            "ctf_organizer": CTF_ORGANIZER_GROUP,
+            "ctf_participant": CTF_PARTICIPANT_GROUP,
+        }
+
+        if user_type and user_type in VALID_CTF_USER_TYPES:
+            group_name = CLAIM_TO_GROUP.get(user_type)
+            if group_name:
+                group, _ = Group.objects.get_or_create(name=group_name)
+                user.groups.add(group)
+                logger.info(
+                    "Added user %s to group '%s' from OIDC claim",
+                    user.email,
+                    group_name,
+                )
+            elif user_type == "standard":
+                # Remove CTF groups for standard users
+                ctf_groups = Group.objects.filter(name__in=[CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP])
+                user.groups.remove(*ctf_groups)
+                logger.info(
+                    "Removed CTF groups for standard user %s from OIDC claim",
+                    user.email,
+                )
+
+            # Keep user_type field in sync for backwards compat
+            profile = get_user_profile(user)
+            if profile.user_type != user_type:
+                profile.user_type = user_type
+                profile.save(update_fields=["user_type"])
+        elif user_type:
+            logger.warning(
+                "Invalid user_type claim '%s' for user %s, ignoring",
+                user_type,
+                user.email,
+            )
+
+        # Set active CTF event for participant users
+        ctf_event_id = claims.get("custom:ctf_event_id")
+        is_participant = user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
+        if ctf_event_id and is_participant:
+            try:
+                event_uuid = UUID(ctf_event_id)
+                from ctf.models import CTFEvent
+
+                profile = get_user_profile(user)
+                event = CTFEvent.objects.filter(pk=event_uuid).first()
+                if event:
+                    profile.active_ctf_event = event
+                    profile.save(update_fields=["active_ctf_event"])
+                    logger.info(
+                        "Set active CTF event %s for user %s",
+                        ctf_event_id,
+                        user.email,
+                    )
+                else:
+                    logger.warning(
+                        "CTF event %s not found for user %s",
+                        ctf_event_id,
+                        user.email,
+                    )
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Invalid ctf_event_id claim '%s' for user %s, ignoring",
+                    ctf_event_id,
+                    user.email,
+                )

@@ -139,8 +139,13 @@ def process_range_event(message: str | dict) -> None:
     previous_status = instance.status
     instance.status = new_status
 
+    update_fields = ["status"]
+    if range_id is not None and instance.range_id is None:
+        instance.range_id = range_id
+        update_fields.append("range_id")
+
     try:
-        instance.save(update_fields=["status"])
+        instance.save(update_fields=update_fields)
     except Exception:
         logger.exception("DB error saving RangeInstance: range_id=%s", range_id)
         return

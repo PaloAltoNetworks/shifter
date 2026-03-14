@@ -27,7 +27,7 @@ VALID_DEV_USER_TYPES = {"standard", "ctf_organizer", "ctf_participant"}
 USER_TYPE_REDIRECTS = {
     "standard": "mission_control:dashboard",
     "ctf_organizer": "ctf:admin_dashboard",
-    "ctf_participant": "ctf:participant_dashboard",
+    "ctf_participant": "mission_control:dashboard",
 }
 
 
@@ -58,7 +58,7 @@ def dev_login(request):
     Supports user_type POST parameter for CTF user types:
     - standard (default): redirects to mission control
     - ctf_organizer: redirects to CTF admin dashboard
-    - ctf_participant: redirects to CTF participant dashboard
+    - ctf_participant: redirects to Mission Control dashboard
     """
     if not _is_dev_environment():
         return HttpResponseForbidden("Development auth disabled in production")

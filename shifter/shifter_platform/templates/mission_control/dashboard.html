@@ -94,8 +94,8 @@
 </div>
 
 <div class="ranges-grid">
-    <!-- Launch Range Tile (hidden for CTF participants who have pre-provisioned ranges) -->
-    {% if not is_ctf_participant %}
+    <!-- Launch Range Tile (hidden for CTF-only participants who have pre-provisioned ranges) -->
+    {% if not is_ctf_participant_only %}
     <div class="range-tile launch-tile" id="launch-tile">
         <div class="tile-title">Launch a Range</div>
         <div class="launch-tile-content">
@@ -325,7 +325,7 @@ document.addEventListener('DOMContentLoaded', function() {
         agentsUrl: '{% url "mission_control:list_agents" %}',
         scenariosUrl: '{% url "mission_control:list_scenarios" %}',
         provisioningTimeoutMs: {{ provisioning_timeout_ms }},
-        viewOnly: {{ is_ctf_participant|yesno:"true,false" }},
+        viewOnly: {{ is_ctf_participant_only|yesno:"true,false" }},
     });
     dashboard.init();
 });

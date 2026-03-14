@@ -221,12 +221,12 @@ class TestDashboardRouting:
         assert response.status_code == 302
         assert "/ctf/admin/" in response.url
 
-    def test_participant_redirected_to_ctf_participant(self, client, participant_profile):
-        """CTF participants should be sent to CTF participant dashboard."""
+    def test_participant_redirected_to_mission_control(self, client, participant_profile):
+        """CTF participants should be sent to Mission Control dashboard."""
         client.force_login(participant_profile.user)
         response = client.get(reverse("dashboard_router"))
         assert response.status_code == 302
-        assert "/ctf/" in response.url
+        assert "/mission-control/" in response.url
 
     def test_unauthenticated_redirected_to_login(self, client):
         """Unauthenticated users should be redirected to login."""
@@ -352,7 +352,7 @@ class TestCTFLoginView:
         request.session = SessionStore()
         response = dev_login(request)
         assert response.status_code == 302
-        assert "/ctf/" in response.url
+        assert "/mission-control/" in response.url
 
         user = User.objects.get(email="ctfpart@test.com")
         assert user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
@@ -461,14 +461,14 @@ class TestCTFRegisterView:
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
-        assert "/ctf/" in response.url
+        assert "/mission-control/" in response.url
 
     def test_register_with_valid_token(self, client, ctf_participant_invited):
-        """Valid invite token should auto-register and redirect to dashboard."""
+        """Valid invite token should auto-register and redirect to Mission Control."""
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
-        assert "/ctf/" in response.url
+        assert "/mission-control/" in response.url
 
         ctf_participant_invited.refresh_from_db()
         assert ctf_participant_invited.user is not None
@@ -504,7 +504,7 @@ class TestCTFRegisterView:
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
-        assert "/ctf/" in response.url
+        assert "/mission-control/" in response.url
 
     def test_register_missing_token(self, client, participant_profile):
         """Missing token should redirect to login."""

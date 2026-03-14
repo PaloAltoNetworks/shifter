@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.8.0] - 2026-03-14
+## [3.9.0] - 2026-03-13
+
+### Changed
+- CTF participants now land on Mission Control dashboard instead of separate CTF UI — reuses existing range, terminal, and Guacamole views
+- Magic link registration (`/ctf/register/`) redirects to Mission Control dashboard
+- Dashboard router sends CTF participants to Mission Control
+- Dev login redirects CTF participants to Mission Control
+- MC sidebar hides Assets, Docs, Settings, and Help nav items for CTF participants (shows only Ranges and Terminal)
+- MC dashboard hides Launch Range form for CTF participants (their ranges are pre-provisioned by organizers)
+- Dashboard JS skips launch UI initialization in view-only mode for CTF participants
+
+## [3.8.0] - 2026-03-13
 
 ### Changed
 - CTF participants are auto-registered (Django user created, status set to `registered`) when added individually or via CSV import — eliminates the separate "registration" step
@@ -14,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-participant "Send Link" button always visible in participant list (was hidden after registration)
 - Invitation email wording updated: "Click below to access your event" / "Access Event" (was "To register" / "Register Now")
 
-## [3.7.1] - 2026-03-14
+## [3.7.1] - 2026-03-13
 
 ### Added
 - `list_ranges` MCP tool — list ranges with status, user, scenario, instance count, and timestamps; supports filtering by status and username

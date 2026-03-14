@@ -2515,6 +2515,201 @@ server.tool(
 );
 
 // ==========================================================================
+// Range query tools
+// ==========================================================================
+
+server.tool(
+  "list_ranges",
+  "List ranges with status, user, scenario, instance count, and timestamps. Useful for checking active/failed/destroyed ranges.",
+  {
+    env: EnvSchema,
+    status: z
+      .string()
+      .optional()
+      .describe(
+        "Filter by status (ready, failed, destroyed, provisioning, etc.)"
+      ),
+    user: z
+      .string()
+      .optional()
+      .describe("Filter by username (substring match)"),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(20)
+      .describe("Max results to return (default 20)"),
+  },
+  async ({ env, status, user, limit }) => {
+    try {
+      return await withClient(env, { readOnly: true }, async (client) => {
+        const conditions = [];
+        const params = [];
+        let paramIndex = 1;
+
+        if (status) {
+          conditions.push(`r.status = $${paramIndex++}`);
+          params.push(status);
+        }
+        if (user) {
+          conditions.push(`u.username ILIKE $${paramIndex++}`);
+          params.push(`%${user}%`);
+        }
+
+        const where =
+          conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+        params.push(limit);
+        const limitParam = `$${paramIndex}`;
+
+        const result = await client.query(
+          `SELECT r.id, r.uuid, r.status,
+                  r.range_config->>'scenario_id' AS scenario,
+                  u.username,
+                  r.subnet_cidr,
+                  r.created_at, r.ready_at, r.destroyed_at,
+                  r.request_id,
+                  COUNT(i.id) AS instance_count
+           FROM mission_control_range r
+           LEFT JOIN auth_user u ON r.user_id = u.id
+           LEFT JOIN engine_instance i ON i.request_id = r.request_id
+           ${where}
+           GROUP BY r.id, u.username
+           ORDER BY r.created_at DESC
+           LIMIT ${limitParam}`,
+          params
+        );
+
+        return ok(JSON.stringify(result.rows, null, 2));
+      });
+    } catch (e) {
+      return err(e);
+    }
+  }
+);
+
+server.tool(
+  "get_range",
+  "Get detailed info for a single range including instances and subnet allocations.",
+  {
+    env: EnvSchema,
+    range_id: z.number().int().describe("The range ID"),
+  },
+  async ({ env, range_id }) => {
+    try {
+      return await withClient(env, { readOnly: true }, async (client) => {
+        const rangeResult = await client.query(
+          `SELECT r.id, r.uuid, r.status,
+                  r.range_config->>'scenario_id' AS scenario,
+                  r.range_config->>'scenario_name' AS scenario_name,
+                  u.username,
+                  r.subnet_cidr, r.subnet_id,
+                  r.kali_ip::text, r.victim_ip::text,
+                  r.kali_instance_id, r.victim_instance_id,
+                  r.gwlb_endpoint_id, r.provisioner_version,
+                  r.error_message,
+                  r.created_at, r.ready_at, r.paused_at, r.destroyed_at,
+                  r.request_id
+           FROM mission_control_range r
+           LEFT JOIN auth_user u ON r.user_id = u.id
+           WHERE r.id = $1`,
+          [range_id]
+        );
+
+        if (rangeResult.rows.length === 0) {
+          return ok(`No range found with id ${range_id}`);
+        }
+
+        const range = rangeResult.rows[0];
+
+        const instancesResult = await client.query(
+          `SELECT i.id, i.uuid, i.status, i.role, i.os_type,
+                  i.state->>'aws_instance_id' AS aws_instance_id,
+                  i.state->>'private_ip' AS private_ip,
+                  i.created_at, i.destroyed_at
+           FROM engine_instance i
+           WHERE i.request_id = $1
+           ORDER BY i.role`,
+          [range.request_id]
+        );
+
+        const subnetsResult = await client.query(
+          `SELECT id, vpc_id, cidr, subnet_size, status,
+                  reserved_at, confirmed_at, released_at
+           FROM engine_subnetallocation
+           WHERE request_id = $1`,
+          [range.request_id]
+        );
+
+        return ok(
+          JSON.stringify(
+            {
+              range,
+              instances: instancesResult.rows,
+              subnet_allocations: subnetsResult.rows,
+            },
+            null,
+            2
+          )
+        );
+      });
+    } catch (e) {
+      return err(e);
+    }
+  }
+);
+
+server.tool(
+  "list_subnet_allocations",
+  "List subnet CIDR allocations. Useful for debugging race conditions and stale reservations.",
+  {
+    env: EnvSchema,
+    status: z
+      .string()
+      .optional()
+      .describe("Filter by status (reserved, active, released)"),
+    vpc_id: z.string().optional().describe("Filter by VPC ID"),
+  },
+  async ({ env, status, vpc_id }) => {
+    try {
+      return await withClient(env, { readOnly: true }, async (client) => {
+        const conditions = [];
+        const params = [];
+        let paramIndex = 1;
+
+        if (status) {
+          conditions.push(`sa.status = $${paramIndex++}`);
+          params.push(status);
+        }
+        if (vpc_id) {
+          conditions.push(`sa.vpc_id = $${paramIndex++}`);
+          params.push(vpc_id);
+        }
+
+        const where =
+          conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+        const result = await client.query(
+          `SELECT sa.id, sa.vpc_id, sa.cidr, sa.subnet_size,
+                  sa.range_id, sa.request_id, sa.status,
+                  sa.reserved_at, sa.confirmed_at, sa.released_at
+           FROM engine_subnetallocation sa
+           ${where}
+           ORDER BY sa.reserved_at DESC
+           LIMIT 50`,
+          params
+        );
+
+        return ok(JSON.stringify(result.rows, null, 2));
+      });
+    } catch (e) {
+      return err(e);
+    }
+  }
+);
+
+// ==========================================================================
 // Start server
 // ==========================================================================
 

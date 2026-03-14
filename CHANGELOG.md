@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.13.0] - 2026-03-14
+
+### Fixed
+- Normal Shifter users who are also CTF participants no longer lose access to platform features like Assets, Docs, Settings/Help, and Launch Range (GH #758) — UI restrictions now use `is_ctf_participant_only` which only hides features for pure CTF participants with no other platform role
+
+### Added
+- `is_ctf_participant_only()` utility in `shared/auth.py` — returns True only when a user is a CTF participant with no staff, superuser, organizer, or threat research role
+- `is_ctf_participant_only` template context variable exposed via CTF context processor
+
 ## [3.12.0] - 2026-03-14
 
 ### Fixed

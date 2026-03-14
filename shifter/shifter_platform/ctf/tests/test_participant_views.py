@@ -360,10 +360,11 @@ class TestAdminParticipantAddView:
         # Should redirect on success
         assert response.status_code == 302
 
-        # Participant should be created
+        # Participant should be created and auto-registered
         participant = CTFParticipant.objects.get(event=ctf_event, email="new@example.com")
         assert participant.name == "New Participant"
-        assert participant.status == ParticipantStatus.INVITED.value
+        assert participant.status == ParticipantStatus.REGISTERED.value
+        assert participant.user is not None
 
     def test_rejects_duplicate_email(self, authenticated_organizer_client, ctf_event):
         """POST with duplicate email shows error."""
@@ -528,8 +529,8 @@ class TestAPIParticipantResendInvite:
         participant.refresh_from_db()
         assert participant.invite_token != old_token
 
-    def test_resend_fails_for_registered_participant(self, authenticated_organizer_client, ctf_participant):
-        """Cannot resend invite to already registered participant."""
+    def test_resend_works_for_registered_participant(self, authenticated_organizer_client, ctf_participant):
+        """Resend works for registered participants (sends magic link)."""
         # ctf_participant fixture has user linked (registered)
         url = reverse(
             "ctf:api_participant_resend_invite",
@@ -537,4 +538,6 @@ class TestAPIParticipantResendInvite:
         )
         response = authenticated_organizer_client.post(url)
 
-        assert response.status_code == 400
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True

@@ -8,6 +8,6 @@ Event Date: {{ event.event_start|date:"F j, Y g:i A" }} - {{ event.event_end|dat
 
 {% if event.description %}{{ event.description }}
 
-{% endif %}To register, visit: {{ registration_url }}
+{% endif %}Click below to access your event: {{ registration_url }}
 
 If you have any questions, please contact your event organizer.

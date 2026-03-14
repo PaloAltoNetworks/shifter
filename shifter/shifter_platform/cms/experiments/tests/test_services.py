@@ -224,6 +224,50 @@ class CreateExperimentTest(TestCase):
         assert exp.scripts.count() == 1
 
 
+class CreateExperimentAccessTest(TestCase):
+    """Verify that create_experiment enforces scenario access controls."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.staff_user = User.objects.create_user(username="access_staff", password=TEST_PASSWORD, is_staff=True)
+        cls.regular_user = User.objects.create_user(username="access_regular", password=TEST_PASSWORD, is_staff=False)
+
+    def setUp(self):
+        from cms.models import ScenarioMetadata
+
+        self.ScenarioMetadata = ScenarioMetadata
+
+    def test_disabled_scenario_blocked_for_non_staff(self):
+        self.ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            enabled=False,
+            updated_by=self.staff_user,
+        )
+        data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
+        with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
+            services.create_experiment(self.regular_user, data)
+
+    def test_staff_only_scenario_blocked_for_non_staff(self):
+        self.ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            staff_only=True,
+            updated_by=self.staff_user,
+        )
+        data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
+        with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
+            services.create_experiment(self.regular_user, data)
+
+    def test_staff_only_scenario_allowed_for_staff(self):
+        self.ScenarioMetadata.objects.create(
+            scenario_id="basic",
+            staff_only=True,
+            updated_by=self.staff_user,
+        )
+        data = ExperimentCreateInput(name="Allowed", scenario_id="basic")
+        exp = services.create_experiment(self.staff_user, data)
+        assert exp.pk is not None
+
+
 class StartExperimentTest(TestCase):
     @classmethod
     def setUpTestData(cls):

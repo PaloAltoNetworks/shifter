@@ -23,14 +23,14 @@ def dashboard_router(request):
 
     - standard users -> Mission Control dashboard
     - ctf_organizer -> CTF Admin dashboard
-    - ctf_participant -> CTF Participant dashboard
+    - ctf_participant -> Mission Control dashboard (with restricted nav)
     """
     if is_ctf_organizer(request.user):
         logger.debug("Routing organizer %s to CTF admin dashboard", request.user.email)
         return HttpResponseRedirect(reverse("ctf:admin_dashboard"))
     elif is_ctf_participant(request.user):
-        logger.debug("Routing participant %s to CTF participant dashboard", request.user.email)
-        return HttpResponseRedirect(reverse("ctf:participant_dashboard"))
+        logger.debug("Routing participant %s to Mission Control dashboard", request.user.email)
+        return HttpResponseRedirect(reverse("mission_control:dashboard"))
     else:
         logger.debug("Routing standard user %s to Mission Control", request.user.email)
         return HttpResponseRedirect(reverse("mission_control:dashboard"))

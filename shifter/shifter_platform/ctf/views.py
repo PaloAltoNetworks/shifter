@@ -201,7 +201,7 @@ def ctf_register(request: HttpRequest) -> HttpResponse:
     # Already registered — just log them in and go
     if participant.user is not None:
         login(request, participant.user, backend="django.contrib.auth.backends.ModelBackend")
-        return redirect("ctf:participant_dashboard")
+        return redirect("mission_control:dashboard")
 
     # Auto-create a Django user from the participant's email
     user = User.objects.filter(email__iexact=participant.email).first()
@@ -222,7 +222,7 @@ def ctf_register(request: HttpRequest) -> HttpResponse:
         return redirect("ctf:ctf_login")
 
     login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    return redirect("ctf:participant_dashboard")
+    return redirect("mission_control:dashboard")
 
 
 @login_required

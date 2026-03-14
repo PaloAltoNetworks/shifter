@@ -44,7 +44,7 @@ from cms.experiments.schemas import (
     RunStatus,
     ScriptUploadInput,
 )
-from cms.scenarios.loader import load_scenario
+from cms.scenarios.registry import check_scenario_access, load_scenario_template
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
@@ -358,9 +358,10 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     _validate_user(user, "create_experiment")
     logger.debug("create_experiment called for user_id=%s scenario=%s", user.id, data.scenario_id)
     try:
-        # Validate scenario exists
+        # Validate scenario exists and user has access
         try:
-            scenario = load_scenario(data.scenario_id)
+            check_scenario_access(data.scenario_id, user)
+            scenario = load_scenario_template(data.scenario_id)
         except ValueError as e:
             logger.warning("create_experiment: invalid scenario_id=%s: %s", data.scenario_id, e)
             raise ExperimentValidationError(f"Invalid scenario: {e}") from e
@@ -674,22 +675,25 @@ def get_bundle_download_url(user: User, experiment_id: int) -> str:
 # =============================================================================
 
 
-def get_scenario_instances(scenario_id: str) -> list[dict]:
+def get_scenario_instances(scenario_id: str, user: User | None = None) -> list[dict]:
     """Get instance list for a scenario template.
 
     Args:
         scenario_id: Scenario template ID.
+        user: Optional requesting user. If provided, access is checked.
 
     Returns:
         List of dicts with instance name and role.
 
     Raises:
-        ExperimentValidationError: If scenario not found.
+        ExperimentValidationError: If scenario not found or access denied.
     """
     logger.debug("get_scenario_instances called for scenario_id=%s", scenario_id)
     try:
         try:
-            scenario = load_scenario(scenario_id)
+            if user is not None:
+                check_scenario_access(scenario_id, user)
+            scenario = load_scenario_template(scenario_id)
         except ValueError as e:
             raise ExperimentValidationError(f"Invalid scenario: {e}") from e
 

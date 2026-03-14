@@ -53,16 +53,19 @@ Write-Host "=== Configuring Claude Code for AWS Bedrock ==="
 # Set Machine-level environment variables (persist across reboots and users)
 [System.Environment]::SetEnvironmentVariable("CLAUDE_CODE_USE_BEDROCK", "1", "Machine")
 [System.Environment]::SetEnvironmentVariable("AWS_REGION", "us-east-2", "Machine")
-[System.Environment]::SetEnvironmentVariable("ANTHROPIC_SMALL_FAST_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "Machine")
+[System.Environment]::SetEnvironmentVariable("ANTHROPIC_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "Machine")
+[System.Environment]::SetEnvironmentVariable("ANTHROPIC_SMALL_FAST_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0", "Machine")
 
 # Also set for current session
 $env:CLAUDE_CODE_USE_BEDROCK = "1"
 $env:AWS_REGION = "us-east-2"
-$env:ANTHROPIC_SMALL_FAST_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+$env:ANTHROPIC_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+$env:ANTHROPIC_SMALL_FAST_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 Write-Host "Environment variables configured:"
 Write-Host "  CLAUDE_CODE_USE_BEDROCK=1"
 Write-Host "  AWS_REGION=us-east-2"
-Write-Host "  ANTHROPIC_SMALL_FAST_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+Write-Host "  ANTHROPIC_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+Write-Host "  ANTHROPIC_SMALL_FAST_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 Write-Host "=== Claude Code installation complete ==="

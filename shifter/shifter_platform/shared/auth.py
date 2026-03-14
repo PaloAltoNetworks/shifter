@@ -14,6 +14,22 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 THREAT_RESEARCH_GROUP = "Threat Research"
+CTF_ORGANIZER_GROUP = "CTF Organizer"
+CTF_PARTICIPANT_GROUP = "CTF Participant"
+
+
+def is_ctf_organizer(user) -> bool:
+    """Return True if the user is in the CTF Organizer group."""
+    if not user.is_active:
+        return False
+    return user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
+
+
+def is_ctf_participant(user) -> bool:
+    """Return True if the user is in the CTF Participant group."""
+    if not user.is_active:
+        return False
+    return user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
 
 def _is_staff_or_threat_researcher(user) -> bool:

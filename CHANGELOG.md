@@ -5,10 +5,231 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.3.4] - 2026-03-14
+## [3.12.1] - 2026-03-14
 
 ### Fixed
 - CTF range destroy API returns 500 due to missing `range_id` — `process_range_event()` now persists `range_id` from SNS event to `RangeInstance` (#756)
+
+## [3.12.0] - 2026-03-14
+
+### Fixed
+- Experiment creation now enforces `staff_only` and `disabled` scenario restrictions (GH #770) — previously the experiment UI and service layer loaded scenarios directly via `cms.scenarios.loader`, bypassing `ScenarioMetadata` access controls
+
+### Changed
+- Experiment create form uses `list_all_scenarios(user)` from the scenario registry instead of raw YAML loader, so non-staff users only see scenarios they're allowed to use
+- `create_experiment()` service checks scenario access via `check_scenario_access()` before creating the experiment
+- `get_scenario_instances()` AJAX endpoint passes the requesting user for access checking
+- Experiment services use `load_scenario_template()` from the registry (checks DB first, then YAML) instead of `load_scenario()` from the raw loader
+
+## [3.11.0] - 2026-03-14
+
+### Changed
+- CTF organizer admin views now use Mission Control layout (`mission_control/base.html`) instead of separate CTF portal — organizers see the full MC sidebar with ranges, terminal, assets, etc.
+- Added "CTF Admin" nav item to Mission Control sidebar for organizers (between Risk Register and Scenario Editor)
+- Dashboard router sends CTF organizers to Mission Control dashboard instead of CTF admin dashboard — fixes dual-role users losing access to MC launch panel (GH #758)
+- Removed separate CTF organizer sidebar (`ctf_organizer_sidebar.html`) — organizers use the standard MC sidebar
+
+## [3.10.0] - 2026-03-14
+
+## Changed
+- Update Claude Code model versions (Sonnet 4.5, Haiku 4.5)
+
+## [3.9.0] - 2026-03-13
+
+### Changed
+- CTF participants now land on Mission Control dashboard instead of separate CTF UI — reuses existing range, terminal, and Guacamole views
+- Magic link registration (`/ctf/register/`) redirects to Mission Control dashboard
+- Dashboard router sends CTF participants to Mission Control
+- Dev login redirects CTF participants to Mission Control
+- MC sidebar hides Assets, Docs, Settings, and Help nav items for CTF participants (shows only Ranges and Terminal)
+- MC dashboard hides Launch Range form for CTF participants (their ranges are pre-provisioned by organizers)
+- Dashboard JS skips launch UI initialization in view-only mode for CTF participants
+
+## [3.8.0] - 2026-03-13
+
+### Changed
+- CTF participants are auto-registered (Django user created, status set to `registered`) when added individually or via CSV import — eliminates the separate "registration" step
+- Magic link emails can be sent to any participant at any time, regardless of status — removed registered-participant guard from `resend_invite()`
+- "Send All Links" button now sends to all participants, not just uninvited ones
+- Per-participant "Send Link" button always visible in participant list (was hidden after registration)
+- Invitation email wording updated: "Click below to access your event" / "Access Event" (was "To register" / "Register Now")
+
+## [3.7.1] - 2026-03-13
+
+### Added
+- `list_ranges` MCP tool — list ranges with status, user, scenario, instance count, and timestamps; supports filtering by status and username
+- `get_range` MCP tool — get detailed range info including instances and subnet allocations
+- `list_subnet_allocations` MCP tool — list subnet CIDR allocations with optional status/VPC filtering
+
+## [3.7.0] - 2026-03-13
+
+### Added
+- `SubnetAllocation` model and migration (`engine_subnetallocation` table) to reserve CIDRs during concurrent provisioning, preventing TOCTOU race condition where multiple ranges pick the same subnet CIDR
+- Subnet allocation table is checked alongside AWS `describe_subnets` during CIDR selection; stale reservations (>30min) are automatically reclaimed
+- `confirm_subnet_allocations()` / `release_subnet_allocations()` lifecycle hooks called on provision success, destroy, and failure (Terraform path)
+- `SubnetAllocationAdmin` registered in Django admin for ops visibility
+- 7 new tests for allocation table integration (reserve, skip-reserved, stale-reclaim, released-reuse, confirm, release, DB-fallback)
+
+## [3.6.0] - 2026-03-13
+
+### Fixed
+- CI deploy workflow (`_shifter-platform.yml`) now passes `EMAIL_BACKEND` and `CTF_FROM_EMAIL` env vars to containers (emails were silently going to console backend)
+- EC2 IAM role missing `ses:GetSendQuota` permission required by `django-ses` backend (applied via Terraform)
+- `get_scoreboard` and `get_team_scoreboard` annotation `total_score` collided with model `@property` of the same name, causing 500 on participant dashboard, admin scoreboard, and scoreboard API (renamed annotation to `computed_score`)
+- Invite token expiry now uses event end time directly instead of `min(7 days, event_end)`, ensuring tokens remain valid through the entire event
+
+### Changed
+- `agentic_workshop` scenario template simplified from two-subnet to single flat subnet topology (multi-subnet isolation doesn't work without NGFW; attack path enforced by challenge design instead)
+
+### Added
+- CTF range management JavaScript (`static/js/ctf-ranges.js`) with `CTFRangeManager` class wiring Provision All, per-participant Provision, and per-participant Destroy buttons to API endpoints
+- Per-participant range API endpoints: `POST /ctf/api/participants/<id>/range/provision/` and `POST /ctf/api/participants/<id>/range/destroy/`
+- 20 Jest tests for `CTFRangeManager` covering all button interactions, error handling, and loading states
+
+## [3.5.0] - 2026-03-13
+
+### Added
+- `ami_key` optional field on `InstanceConfig`, `InstanceSpec`, and `InstanceContextBase` for custom AMI support
+- Provisioner resolves `ami_key` to AMI ID via SSM `/shifter/ami/<ami_key>` and passes per-instance `ami_id` to Terraform
+- `get_ami_id()` now accepts arbitrary SSM parameter suffixes (custom ami_key values), not just the 4 known types
+- Terraform `ami_id` per-instance override: when non-empty, bypasses the `os_type` AMI lookup
+- `agentic_workshop` scenario template: 6-box single-subnet CTF range with custom AMIs for vibe hacking workshop
+
+## [3.4.1] - 2026-03-13
+
+### Fixed
+- `resend_invite` now actually sends the invitation email (previously only refreshed the token without emailing)
+- `user_data.sh` includes `localhost,127.0.0.1` in `DJANGO_ALLOWED_HOSTS` for SSM tunnel access
+- `user_data.sh` stops `ctf-scheduler` container during redeployment (was missing from stop list)
+
+## [3.4.0] - 2026-03-13
+
+### Changed
+- CTF RBAC migrated from `UserProfile.user_type` CharField to Django Groups (`CTF Organizer`, `CTF Participant`), enabling users to hold both roles simultaneously
+- `get_user_role()` now checks Django group membership instead of `UserProfile.user_type`
+- `_set_ctf_participant_profile` / `_clear_ctf_participant_profile` use additive/subtractive group operations instead of overwriting `user_type`
+- OIDC callback and dev login add/remove Django groups instead of setting `user_type` field
+- Dashboard router uses `shared.auth` helpers instead of `UserProfile` properties
+- `UserProfile.is_ctf_organizer` / `is_ctf_participant` properties now delegate to group membership (deprecated, use `shared.auth` helpers)
+
+### Added
+- Data migration `0004_ctf_groups` creates `CTF Organizer` and `CTF Participant` groups and migrates existing users
+- `shared.auth`: `CTF_ORGANIZER_GROUP`, `CTF_PARTICIPANT_GROUP` constants and `is_ctf_organizer()`, `is_ctf_participant()` helpers
+- Dual-role test coverage (organizer who is also a participant)
+
+## [3.3.0] - 2026-03-12
+
+### Added
+- Vibe Hacking Workshop CTF range: 5-box range with network topology for 90-minute workshop
+- Packer templates for all CTF boxes: ctf-webshell, ctf-mailroom, ctf-helpdesk, ctf-devbox, ctf-vault
+- Box 0 "WebShell" (Ubuntu walkthrough): Apache/PHP webshell -> sudo -> SUID privesc
+- Box 1 "MailRoom" (Ubuntu): anonymous FTP -> credential pattern -> SSH -> PATH hijack privesc
+- Box 2 "HelpDesk" (Windows): SMB cred leak -> RDP -> scheduled task abuse
+- Box 3 "DevBox" (Ubuntu, dual-homed): command injection -> SSH key hunting -> GTFOBins sudo node
+- Box 4 "Vault" (Windows, internal only): pivot target with WinRM, Backup Operators privesc, KeePass alt path
+- Validation test scripts for each CTF box (setup verification)
+- CTF scheduled task executor management command (`run_ctf_scheduler`) — polls for due `CTFScheduledTask` rows and dispatches SPIN_UP_RANGES, EVENT_START, EVENT_END, CLEANUP_RANGES, and SEND_REMINDER tasks with signal handling and heartbeat monitoring
+- Throttled bulk range provisioning (`provision_event_ranges_throttled`) — spreads AWS resource creation across the spinup window with configurable delay clamped to [5, 120]s and graceful shutdown support
+- Full Guacamole connection parameters (RDP credentials, SFTP config, SSH keys) for CTF range access via new `get_range_connection_info` bridge
+- "Send All Invites" button on the CTF organizer participant list page with API endpoint
+- Registration URL in CTF invitation emails (replaces raw invite token display)
+- Event-driven range status sync from CMS to CTF via Django signal (`range_status_changed`) — updates `CTFParticipant.range_status` when CMS processes SNS range events
+- Scenarios API endpoint (`/ctf/api/scenarios/`) for listing available CMS scenarios as JSON
+- Datetime string parsing in event API POST/PUT handlers so JSON-submitted datetime strings are converted before reaching the service layer
+- `range_spinup_minutes` field in event detail API GET response
+
+### Changed
+- CTF event create/edit form rewritten to use Mission Control AJAX pattern with XDR dark theme instead of Django form posts with Bootstrap
+- CTF admin views and templates: replaced Bootstrap classes with XDR theme styling for visual consistency with Mission Control
+
+### Fixed
+- CTF participant registration now sets `UserProfile.user_type` and `active_ctf_event` directly, removing dependency on pre-configured Cognito custom claims for `ctf_participant_required` decorator
+- CTF participant disqualification and deletion now clear `UserProfile` CTF fields
+- `get_range_access_url` now passes RDP username/password, SFTP root directory, and SSH key to Guacamole instead of only hostname
+
+### Removed
+- Dead `_extract_ip_from_range_spec` helper in `ctf/services/range.py` (replaced by `get_range_connection_info` bridge)
+- Django form-based event creation/edit views (replaced by AJAX pattern)
+
+## [3.2.0] - 2026-03-12
+
+### Added
+- CTF scheduled task executor management command (`run_ctf_scheduler`) — polls for due `CTFScheduledTask` rows and dispatches SPIN_UP_RANGES, EVENT_START, EVENT_END, CLEANUP_RANGES, and SEND_REMINDER tasks with signal handling and heartbeat monitoring
+- Throttled bulk range provisioning (`provision_event_ranges_throttled`) — spreads AWS resource creation across the spinup window with configurable delay clamped to [5, 120]s and graceful shutdown support
+- Full Guacamole connection parameters (RDP credentials, SFTP config, SSH keys) for CTF range access via new `get_range_connection_info` bridge
+- "Send All Invites" button on the CTF organizer participant list page with API endpoint
+- Registration URL in CTF invitation emails (replaces raw invite token display)
+- Event-driven range status sync from CMS to CTF via Django signal (`range_status_changed`) — updates `CTFParticipant.range_status` when CMS processes SNS range events
+
+### Fixed
+- CTF participant registration now sets `UserProfile.user_type` and `active_ctf_event` directly, removing dependency on pre-configured Cognito custom claims for `ctf_participant_required` decorator
+- CTF participant disqualification and deletion now clear `UserProfile` CTF fields
+- `get_range_access_url` now passes RDP username/password, SFTP root directory, and SSH key to Guacamole instead of only hostname
+
+### Removed
+- Dead `_extract_ip_from_range_spec` helper in `ctf/services/range.py` (replaced by `get_range_connection_info` bridge)
+
+## [3.1.2] - 2026-03-12
+
+### Fixed
+- CTF event form: replace plain text `scenario_id` input with a dropdown populated from the CMS scenario registry
+- CTF event form: add `is-invalid` CSS class to fields with errors for Bootstrap 5 error visibility
+- CTF event form: validate submitted `scenario_id` exists in the scenario registry
+
+## [3.1.1] - 2026-03-12
+
+### Fixed
+- Flag hashing bug: challenges created via admin form used bare SHA256, producing hashes that `verify_flag()` could never match; now uses `hash_flag()` from services
+- Potential division by zero in scoring solve rate calculation
+- Removed unreachable `return` statements in `api_participant_list` and `api_participant_detail`
+
+### Security
+- Add missing authorization decorators to 8 CTF API views: `api_challenge_list`, `api_challenge_detail`, `api_submit_flag`, `api_use_hint`, `api_submissions`, `api_range_status`, `api_range_access`, `api_scoreboard`
+- Remove `invite_token` from API responses in `api_participant_list` and `api_participant_resend_invite`
+- Replace SHA256 fallback with PBKDF2-SHA256 (600k iterations) for flag hashing when bcrypt is unavailable
+- Add `# NOSONAR` annotations to hardcoded test/dev encryption keys in settings
+- Add SNS topic KMS encryption in dev and prod Terraform environments
+- Set `recovery_window_in_days = 7` for Secrets Manager in production (was 0)
+- Pin Secrets Manager IAM policy ARNs to specific AWS account ID
+- Add `#tfsec:ignore` justifications to required IAM wildcards and egress rules
+- Add `# NOSONAR` annotation to dev auth bypass with justification
+
+## [3.1.0] - 2026-03-12
+
+### Added
+- CTF admin team list, scoreboard, and analytics pages
+- CTF help page with getting started content
+- CTF API endpoints: event list/detail, challenge list/detail
+- NGFW toggle in CTF event form (range_config)
+
+### Changed
+- CTF app uses bridge module (`ctf/bridges.py`) for all cross-domain integrations (CMS, management, mission_control)
+- CTF scheduled tasks documented as database-only; no Celery dependency
+- Email backend defaults to console for dev; configure via `EMAIL_BACKEND` env var for production
+- Wire `EMAIL_BACKEND` and `CTF_FROM_EMAIL` through deployment pipeline (SSM → user_data.sh → Docker env → Django settings)
+
+### Fixed
+- Removed stale scheduler module reference from services docstring
+
+### Removed
+- Dead `mock_scheduler` fixture that patched non-existent `ctf.services.scheduler`
+
+## [3.0.0] - 2026-03-11
+
+### Added
+- CTF (Capture The Flag) management platform — core app files: models, enums, services, admin, forms, migrations
+- CTF config and routing integration: settings, URL routing, dashboard router, dev login user types, OIDC user type claims
+- CTF views, URL routing, and templates: organizer admin views, participant views, API endpoints, 38 template files, email templates, sidebar partials
+- UserProfile CTF fields: user_type, active_ctf_event, role properties (is_ctf_organizer, is_ctf_participant, is_standard_user)
+- CTF test suite: 13 test files, 230 tests across models, auth, challenges, events, participant views, services (notification, range)
+- CTF participant registration endpoint (`/ctf/register/`) to complete invite-link registration flow
+
+### Fixed
+- CTF invite emails never sent: `invite_participant()` and `bulk_import_participants()` prematurely set `invited_at`, causing `send_invitations()` to skip all participants
+- CTF range provisioning: all ranges were created under the organizer's user, causing the second participant's range to fail the active-range check; now uses `participant.user`
+
+### Security
+- Add organizer ownership checks to 11 CTF views missing authorization: range list/provision APIs, notification list/create/send views and APIs, team list, scoreboard, analytics, and event detail API — non-owning organizers now get 403
 
 ## [2.3.3] - 2026-03-10
 

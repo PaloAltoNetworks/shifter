@@ -1,0 +1,167 @@
+/**
+ * CTF Range Management
+ *
+ * Handles:
+ * - Bulk provisioning all participant ranges
+ * - Individual participant range provisioning
+ * - Individual participant range destruction
+ * - Status polling after provisioning
+ */
+
+class CTFRangeManager {
+    constructor(options) {
+        this.csrfToken = options.csrfToken;
+        this.provisionAllUrl = options.provisionAllUrl;
+        this.rangeListUrl = options.rangeListUrl;
+        this.statusPollDelay = options.statusPollDelay || 10000;
+        this.statusPollInterval = null;
+    }
+
+    init() {
+        this._bindProvisionAll();
+        this._bindPerParticipantButtons();
+    }
+
+    _bindProvisionAll() {
+        var btn = document.getElementById('btn-provision-all');
+        if (!btn) return;
+        btn.addEventListener('click', () => this.provisionAll());
+    }
+
+    _bindPerParticipantButtons() {
+        var self = this;
+
+        document.querySelectorAll('.btn-provision').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var participantId = this.getAttribute('data-participant-id');
+                self.provisionOne(participantId, this);
+            });
+        });
+
+        document.querySelectorAll('.btn-destroy').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var participantId = this.getAttribute('data-participant-id');
+                self.destroyOne(participantId, this);
+            });
+        });
+    }
+
+    async provisionAll() {
+        if (!confirm('Provision ranges for all unassigned participants?')) return;
+
+        var btn = document.getElementById('btn-provision-all');
+        this._setButtonLoading(btn, 'Provisioning...');
+
+        try {
+            var response = await fetch(this.provisionAllUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': this.csrfToken,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            var data = await response.json();
+
+            if (!response.ok) {
+                alert('Error: ' + (data.error || 'Provisioning failed'));
+                return;
+            }
+
+            var msg = 'Provisioned: ' + data.successful + ', Failed: ' + data.failed;
+            if (data.errors && data.errors.length > 0) {
+                msg += '\n\nErrors:\n';
+                data.errors.forEach(function(e) {
+                    msg += '- ' + e.error + '\n';
+                });
+            }
+            alert(msg);
+            this._reload();
+        } catch (err) {
+            alert('Error provisioning ranges: ' + err.message);
+        } finally {
+            this._clearButtonLoading(btn, 'Provision All Ranges');
+        }
+    }
+
+    async provisionOne(participantId, btn) {
+        if (!confirm('Provision a range for this participant?')) return;
+
+        this._setButtonLoading(btn, 'Provisioning...');
+
+        try {
+            var url = '/ctf/api/participants/' + participantId + '/range/provision/';
+            var response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': this.csrfToken,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            var data = await response.json();
+
+            if (!response.ok) {
+                alert('Error: ' + (data.error || 'Provisioning failed'));
+                this._clearButtonLoading(btn, 'Provision');
+                return;
+            }
+
+            this._reload();
+        } catch (err) {
+            alert('Error provisioning range: ' + err.message);
+            this._clearButtonLoading(btn, 'Provision');
+        }
+    }
+
+    async destroyOne(participantId, btn) {
+        if (!confirm('Destroy this participant\'s range? This cannot be undone.')) return;
+
+        this._setButtonLoading(btn, 'Destroying...');
+
+        try {
+            var url = '/ctf/api/participants/' + participantId + '/range/destroy/';
+            var response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': this.csrfToken,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            var data = await response.json();
+
+            if (!response.ok) {
+                alert('Error: ' + (data.error || 'Destruction failed'));
+                this._clearButtonLoading(btn, 'Destroy');
+                return;
+            }
+
+            this._reload();
+        } catch (err) {
+            alert('Error destroying range: ' + err.message);
+            this._clearButtonLoading(btn, 'Destroy');
+        }
+    }
+
+    _reload() {
+        location.reload();
+    }
+
+    _setButtonLoading(btn, text) {
+        if (!btn) return;
+        btn.disabled = true;
+        btn.setAttribute('data-original-text', btn.textContent);
+        btn.textContent = text;
+    }
+
+    _clearButtonLoading(btn, fallbackText) {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.textContent = btn.getAttribute('data-original-text') || fallbackText;
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.CTFRangeManager = CTFRangeManager;
+}

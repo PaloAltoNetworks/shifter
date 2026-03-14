@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from engine.models import Range
+from engine.models import Range, SubnetAllocation
 
 
 @admin.register(Range)
@@ -17,3 +17,22 @@ class RangeAdmin(admin.ModelAdmin):
         if obj.range_config:
             return obj.range_config.get("scenario_id", "—")
         return "—"
+
+
+@admin.register(SubnetAllocation)
+class SubnetAllocationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "vpc_id",
+        "cidr",
+        "subnet_size",
+        "range_id",
+        "request_id",
+        "status",
+        "reserved_at",
+        "confirmed_at",
+        "released_at",
+    )
+    list_filter = ("status", "vpc_id", "subnet_size")
+    search_fields = ("cidr", "request_id", "vpc_id")
+    readonly_fields = ("reserved_at",)

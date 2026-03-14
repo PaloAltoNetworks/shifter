@@ -95,6 +95,9 @@ def invite_participant(
             status=ParticipantStatus.INVITED.value,
         )
 
+        # Auto-register: create Django user and link to participant
+        _auto_register_participant(participant)
+
         logger.info(
             "Invited participant %s to event %s (id: %s)",
             email,
@@ -220,6 +223,8 @@ def bulk_import_participants(
                 name=name,
                 status=ParticipantStatus.INVITED.value,
             )
+            # Auto-register: create Django user and link to participant
+            _auto_register_participant(participant)
             created.append(participant)
 
     logger.info(
@@ -418,7 +423,9 @@ def delete_participant(participant_id: UUID) -> bool:
 
 
 def resend_invite(participant_id: UUID) -> CTFParticipant:
-    """Resend invitation to a participant and refresh the token.
+    """Resend magic link email to a participant and refresh the token.
+
+    Works for any participant regardless of registration status.
 
     Args:
         participant_id: UUID of the participant.
@@ -428,7 +435,6 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
 
     Raises:
         CTFNotFoundError: If participant doesn't exist.
-        CTFStateError: If participant is already registered.
     """
     import secrets
 
@@ -441,12 +447,6 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
         ) from None
-
-    if participant.is_registered:
-        raise CTFStateError(
-            "Cannot resend invite to already registered participant",
-            details={"participant_id": str(participant_id)},
-        )
 
     # Generate new token — valid through event end
     now = timezone.now()
@@ -487,6 +487,40 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
 # -----------------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------------
+
+
+def _auto_register_participant(participant: CTFParticipant) -> None:
+    """Create a Django user and register the participant.
+
+    Find-or-creates a Django user from the participant's email (with an
+    unusable password), then links them and sets status to registered.
+    This eliminates the separate "registration" step — participants are
+    ready to access the platform as soon as they're added.
+    """
+    from django.contrib.auth.models import User
+
+    user = User.objects.filter(email__iexact=participant.email).first()
+    if user is None:
+        user = User.objects.create_user(
+            username=participant.email,
+            email=participant.email,
+            first_name=participant.name.split()[0] if participant.name else "",
+            last_name=" ".join(participant.name.split()[1:]) if participant.name else "",
+        )
+        user.set_unusable_password()
+        user.save()
+
+    participant.user = user
+    participant.status = ParticipantStatus.REGISTERED.value
+    participant.registered_at = timezone.now()
+    participant.save(update_fields=["user", "status", "registered_at", "updated_at"])
+    _set_ctf_participant_profile(user, participant.event)
+
+    logger.info(
+        "Auto-registered participant %s (user %s)",
+        participant.pk,
+        user.email,
+    )
 
 
 def _set_ctf_participant_profile(user: User, event: CTFEvent) -> UserProfile:

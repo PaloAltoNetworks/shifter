@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def send_invitations(event_id: UUID) -> dict[str, Any]:
-    """Send invitation emails to all uninvited participants.
+    """Send magic link emails to all participants.
 
     Args:
         event_id: UUID of the event.
@@ -43,10 +43,7 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
             details={"event_id": str(event_id)},
         ) from None
 
-    participants = CTFParticipant.objects.filter(
-        event=event,
-        invited_at__isnull=True,
-    )
+    participants = CTFParticipant.objects.filter(event=event)
 
     sent = 0
     failed = 0

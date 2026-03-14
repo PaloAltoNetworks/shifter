@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-03-14
+
+### Changed
+- CTF participants are auto-registered (Django user created, status set to `registered`) when added individually or via CSV import — eliminates the separate "registration" step
+- Magic link emails can be sent to any participant at any time, regardless of status — removed registered-participant guard from `resend_invite()`
+- "Send All Links" button now sends to all participants, not just uninvited ones
+- Per-participant "Send Link" button always visible in participant list (was hidden after registration)
+- Invitation email wording updated: "Click below to access your event" / "Access Event" (was "To register" / "Register Now")
+
 ## [3.7.1] - 2026-03-14
 
 ### Added

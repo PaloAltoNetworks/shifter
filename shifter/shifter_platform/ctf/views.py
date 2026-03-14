@@ -2041,9 +2041,10 @@ def api_participant_detail(request: HttpRequest, participant_id: UUID) -> JsonRe
 @ctf_organizer_required
 @require_POST
 def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) -> JsonResponse:
-    """API: Resend invitation to a participant.
+    """API: Resend magic link email to a participant.
 
-    Regenerates the invite token and updates expiry.
+    Regenerates the invite token and sends a new email.
+    Works for any participant regardless of registration status.
 
     Args:
         participant_id: UUID of the participant.

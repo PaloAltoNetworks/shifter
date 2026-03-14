@@ -32,6 +32,24 @@ def is_ctf_participant(user) -> bool:
     return user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
 
+def is_ctf_participant_only(user) -> bool:
+    """Return True if the user is ONLY a CTF participant with no other platform role.
+
+    A user is "CTF participant only" when they:
+    - ARE in the CTF Participant group
+    - Are NOT staff or superuser
+    - Are NOT in CTF Organizer or Threat Research groups
+    """
+    if not user.is_active:
+        return False
+    if user.is_staff or user.is_superuser:
+        return False
+    user_groups = set(user.groups.values_list("name", flat=True))
+    if CTF_PARTICIPANT_GROUP not in user_groups:
+        return False
+    return not user_groups & {CTF_ORGANIZER_GROUP, THREAT_RESEARCH_GROUP}
+
+
 def _is_staff_or_threat_researcher(user) -> bool:
     """Return True if the user is active and is staff or in the Threat Research group."""
     if not user.is_active:

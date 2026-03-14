@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from shared.auth import is_ctf_participant_only as _is_participant_only
+
 if TYPE_CHECKING:
     from django.http import HttpRequest
 
@@ -21,6 +23,7 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
     - is_ctf_user: Whether the user is a CTF organizer or participant.
     - is_ctf_organizer: Whether the user is a CTF organizer.
     - is_ctf_participant: Whether the user is a CTF participant.
+    - is_ctf_participant_only: Whether the user is ONLY a CTF participant (no other role).
     - active_ctf_event: The user's active CTF event (for participants).
     """
     if not request.user.is_authenticated:
@@ -28,6 +31,7 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
             "is_ctf_user": False,
             "is_ctf_organizer": False,
             "is_ctf_participant": False,
+            "is_ctf_participant_only": False,
             "active_ctf_event": None,
         }
 
@@ -40,6 +44,7 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
             "is_ctf_user": role.is_ctf_organizer or role.is_ctf_participant,
             "is_ctf_organizer": role.is_ctf_organizer,
             "is_ctf_participant": role.is_ctf_participant,
+            "is_ctf_participant_only": _is_participant_only(request.user),
             "active_ctf_event": role.active_ctf_event,
         }
 
@@ -57,5 +62,6 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
             "is_ctf_user": False,
             "is_ctf_organizer": False,
             "is_ctf_participant": False,
+            "is_ctf_participant_only": False,
             "active_ctf_event": None,
         }

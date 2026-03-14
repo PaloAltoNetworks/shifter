@@ -88,8 +88,8 @@
                 </a>
             </div>
 
-            {# Assets - opens submenu panel (hidden for CTF participants) #}
-            {% if not is_ctf_participant %}
+            {# Assets - opens submenu panel (hidden for CTF-only participants) #}
+            {% if not is_ctf_participant_only %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-top-item{% endif %}">
                 <button type="button"
                         class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-link{% endif %}"
@@ -183,8 +183,8 @@
             </div>
             {% endif %}
 
-            {# Documentation (hidden for CTF participants) #}
-            {% if not is_ctf_participant %}
+            {# Documentation (hidden for CTF-only participants) #}
+            {% if not is_ctf_participant_only %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'docs' %}active-top-item{% endif %}">
                 <a href="{% url 'documentation:index' %}"
                    class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'docs' %}active-link{% endif %}">
@@ -202,7 +202,7 @@
 
         {# Footer with settings, help, and user profile #}
         <div class="nav-footer">
-            {% if not is_ctf_participant %}
+            {% if not is_ctf_participant_only %}
             {# Settings - exact Cortex XDR icon #}
             <div>
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">

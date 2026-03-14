@@ -88,7 +88,8 @@
                 </a>
             </div>
 
-            {# Assets - opens submenu panel #}
+            {# Assets - opens submenu panel (hidden for CTF participants) #}
+            {% if not is_ctf_participant %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-top-item{% endif %}">
                 <button type="button"
                         class="nav-menu-item nav-menu-item-level-0 nav-submenu-trigger {% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}active-link{% endif %}"
@@ -103,6 +104,7 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Assets</span>
                 </button>
             </div>
+            {% endif %}
 
             {# Terminal - always accessible, shows "no range" state if needed #}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'terminal' %}active-top-item{% endif %}">
@@ -166,7 +168,8 @@
             </div>
             {% endif %}
 
-            {# Documentation #}
+            {# Documentation (hidden for CTF participants) #}
+            {% if not is_ctf_participant %}
             <div class="tw-mx-3 tw-mb-2 {% if active_nav == 'docs' %}active-top-item{% endif %}">
                 <a href="{% url 'documentation:index' %}"
                    class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'docs' %}active-link{% endif %}">
@@ -178,11 +181,13 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Docs</span>
                 </a>
             </div>
+            {% endif %}
 
         </div>
 
         {# Footer with settings, help, and user profile #}
         <div class="nav-footer">
+            {% if not is_ctf_participant %}
             {# Settings - exact Cortex XDR icon #}
             <div>
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">
@@ -208,6 +213,7 @@
                     <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Help</span>
                 </a>
             </div>
+            {% endif %}
 
             {# User profile with dropdown menu #}
             <div class="nav-profile-container">

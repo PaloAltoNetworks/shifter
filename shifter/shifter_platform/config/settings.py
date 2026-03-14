@@ -269,7 +269,8 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
-    "/ctf/login/",  # CTF login page (with invite token)
+    "/ctf/login/",  # CTF login page
+    "/ctf/register/",  # CTF magic link registration (token is the auth)
     "/ctf/help/",  # CTF help page
 ]
 

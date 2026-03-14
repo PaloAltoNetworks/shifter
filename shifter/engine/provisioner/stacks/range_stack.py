@@ -572,7 +572,8 @@ class RangeStack(pulumi.ComponentResource):
         )
 
         # Pre-allocate all subnet CIDRs atomically to prevent race conditions
-        # This holds the advisory lock for the entire allocation
+        # This holds the advisory lock for the entire allocation and reserves
+        # CIDRs in the allocation table to prevent TOCTOU races
         allocated_cidrs = allocate_subnets(
             vpc_id=config.vpc_id,
             cidr_prefix=cidr_prefix,

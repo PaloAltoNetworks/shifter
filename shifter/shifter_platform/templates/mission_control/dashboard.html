@@ -324,6 +324,7 @@ document.addEventListener('DOMContentLoaded', function() {
         resumeUrl: '{% url "mission_control:resume_range" %}',
         agentsUrl: '{% url "mission_control:list_agents" %}',
         scenariosUrl: '{% url "mission_control:list_scenarios" %}',
+        loginUrl: '{% url "dashboard_router" %}',
         provisioningTimeoutMs: {{ provisioning_timeout_ms }},
         viewOnly: {{ is_ctf_participant_only|yesno:"true,false" }},
     });

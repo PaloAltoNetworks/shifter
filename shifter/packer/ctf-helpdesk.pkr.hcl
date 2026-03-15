@@ -1,6 +1,6 @@
 source "amazon-ebs" "ctf-helpdesk" {
   ami_name        = "${var.ami_prefix}-ctf-helpdesk-{{timestamp}}"
-  ami_description = "CTF Box 2 - HelpDesk - SMB cred leak, scheduled task abuse"
+  ami_description = "CTF Box 2 - HelpDesk - SMB cred leak, scheduled task abuse (based on shifter-windows)"
   instance_type   = var.instance_type
   region          = var.aws_region
 
@@ -10,12 +10,12 @@ source "amazon-ebs" "ctf-helpdesk" {
 
   source_ami_filter {
     filters = {
-      name                = "Windows_Server-2022-English-Full-Base-*"
+      name                = "${var.ami_prefix}-windows-*"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
     }
     most_recent = true
-    owners      = ["amazon"]
+    owners      = ["self"]
   }
 
   communicator   = "winrm"
@@ -57,10 +57,6 @@ source "amazon-ebs" "ctf-helpdesk" {
 
 build {
   sources = ["source.amazon-ebs.ctf-helpdesk"]
-
-  provisioner "powershell" {
-    script = "scripts/windows/base.ps1"
-  }
 
   provisioner "powershell" {
     elevated_user     = "Administrator"

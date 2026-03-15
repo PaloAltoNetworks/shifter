@@ -7,7 +7,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "=== Installing Apache + PHP ==="
 apt-get update
-apt-get install -y apache2 libapache2-mod-php php openssh-server
+apt-get install -y apache2 libapache2-mod-php php
 
 echo "=== Creating webshell (cmd.php) ==="
 cat > /var/www/html/cmd.php << 'PHPEOF'
@@ -88,12 +88,7 @@ echo "=== Configuring sudo for www-data -> john ==="
 echo "www-data ALL=(john) NOPASSWD: /bin/bash" > /etc/sudoers.d/www-data
 chmod 440 /etc/sudoers.d/www-data
 
-echo "=== Configuring SSH ==="
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
-    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
-fi
-systemctl enable ssh
+# SSH already installed and configured in base AMI (services.sh)
 
 echo "=== Enabling services ==="
 systemctl enable apache2

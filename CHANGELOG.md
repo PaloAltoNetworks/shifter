@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.13.2] - 2026-03-14
+
+### Fixed
+- Subnet allocation race condition — `allocate_subnets()` call in `range_stack.py` now passes `range_id` and `request_id`, so CIDR reservations are actually written to `engine_subnetallocation` (GH #786)
+- Windows SSH failure during CTF bootstrap — CTF AMIs now build on top of Shifter base AMIs (`shifter-windows`, `shifter-ubuntu`) which have OpenSSH pre-installed, instead of raw Amazon/Canonical images that required runtime installation (GH #786)
+
+### Changed
+- CTF Packer templates (`ctf-helpdesk`, `ctf-vault`, `ctf-webshell`, `ctf-mailroom`, `ctf-devbox`) rebase on Shifter base AMIs instead of raw vendor images; `base.ps1`/`base.sh` provisioner steps removed
+- CTF setup scripts deduplicated — removed IIS install, WinRM config, SSH config, and firewall rules already baked into base AMIs
+- Reverted `configure_ssh` bootstrap DISM fallback — OpenSSH is now guaranteed by base AMI; missing SSH should fail loudly
+
 ## [3.13.1] - 2026-03-14
 
 ### Fixed

@@ -4,11 +4,7 @@
 # Network: 10.0.2.0/24 ONLY - reachable only from Box3
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Enabling WinRM ==="
-# Ensure WinRM is configured for Basic auth over HTTP (required for evil-winrm from Linux)
-winrm quickconfig -quiet 2>$null
-winrm set winrm/config/service '@{AllowUnencrypted="true"}' 2>$null
-winrm set winrm/config/service/auth '@{Basic="true"}' 2>$null
+# WinRM already configured in base AMI (base.ps1 / user_data)
 
 Write-Host "=== Creating local user vaultadmin ==="
 $password = ConvertTo-SecureString "DevOps2024!" -AsPlainText -Force
@@ -134,7 +130,7 @@ $rootAcl.AddAccessRule($systemRule)
 Set-Acl "C:\Users\Administrator\Desktop\root.txt" $rootAcl
 
 Write-Host "=== Configuring firewall ==="
-New-NetFirewallRule -DisplayName "WinRM HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
+# WinRM firewall rule already in base AMI (base.ps1)
 New-NetFirewallRule -DisplayName "SMB Inbound" -Direction Inbound -Protocol TCP -LocalPort 445 -Action Allow -ErrorAction SilentlyContinue
 
 Write-Host "=== Vault box setup complete ==="

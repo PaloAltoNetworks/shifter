@@ -25,7 +25,7 @@ resource "aws_security_group_rule" "guacamole_client_from_alb" {
 
 # Ingress from Portal EC2 on port 8080 (direct API calls for token generation)
 resource "aws_security_group_rule" "guacamole_client_from_portal" {
-  count = var.portal_security_group_id != "" ? 1 : 0
+  count = var.enable_portal_sg_rule ? 1 : 0
 
   type                     = "ingress"
   from_port                = 8080

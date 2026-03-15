@@ -171,15 +171,9 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
     """
     logger.info("experiment_create: user_id=%s method=%s", request.user.id, request.method)
     if request.method == "GET":
-        from cms.scenarios.loader import list_scenario_ids, load_scenario
+        from cms.scenarios.registry import list_all_scenarios
 
-        scenarios = []
-        for sid in list_scenario_ids():
-            try:
-                s = load_scenario(sid)
-                scenarios.append({"id": s.id, "name": s.name, "description": s.description})
-            except ValueError:
-                continue
+        scenarios = list_all_scenarios(user=cast("User", request.user))
         return render(
             request,
             "experiments/experiment_create.html",
@@ -190,7 +184,7 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
         )
 
     if request.method == "POST":
-        from cms.scenarios.loader import load_scenario
+        from cms.scenarios.registry import load_scenario_template
 
         try:
             try:
@@ -201,7 +195,7 @@ def experiment_create(request: HttpRequest) -> HttpResponse:
                 # Load scenario to get instance names for Pydantic validation context
                 scenario_id = request.POST.get("scenario_id", "")
                 try:
-                    scenario = load_scenario(scenario_id)
+                    scenario = load_scenario_template(scenario_id)
                     instance_names = {inst.name for inst in scenario.instances}
                 except (ValueError, CMSError):
                     instance_names = set()
@@ -379,7 +373,7 @@ def scenario_instances(request: HttpRequest, scenario_id: str) -> JsonResponse:
     """Return instance list for a scenario (AJAX)."""
     logger.info("scenario_instances: user_id=%s scenario_id=%s", request.user.id, scenario_id)
     try:
-        instances = services.get_scenario_instances(scenario_id)
+        instances = services.get_scenario_instances(scenario_id, user=cast("User", request.user))
         return JsonResponse({"instances": instances})
     except ExperimentValidationError as e:
         return JsonResponse({"error": str(e)}, status=400)

@@ -26,6 +26,7 @@ locals {
         instance_type = inst.instance_type
         agent_url     = inst.agent_presigned_url
         join_domain   = inst.join_domain
+        ami_id        = inst.ami_id
       }
     ]
   ])
@@ -279,7 +280,7 @@ resource "aws_ssm_parameter" "dc_config" {
 resource "aws_instance" "range" {
   for_each = local.instance_map
 
-  ami           = lookup({
+  ami           = each.value.ami_id != "" ? each.value.ami_id : lookup({
     "kali"    = var.kali_ami_id
     "ubuntu"  = var.victim_ami_id
     "windows" = each.value.role == "dc" ? var.dc_ami_id : var.windows_ami_id

@@ -134,6 +134,8 @@ GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" 2>/dev/null |
 GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" 2>/dev/null || echo "")
 GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" 2>/dev/null || echo "")
 DB_HOST_OVERRIDE=$(get_param "$PS_PREFIX/db-host-override" 2>/dev/null || echo "")
+EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend")
+CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email")
 
 IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 echo "Deploying image: $IMAGE"
@@ -146,7 +148,7 @@ COMMON_ENV="$COMMON_ENV -e AWS_S3_BUCKET_NAME=$S3_BUCKET"
 COMMON_ENV="$COMMON_ENV -e DB_SECRET_ARN=$DB_SECRET_ARN"
 COMMON_ENV="$COMMON_ENV -e APP_SECRET_ARN=$APP_SECRET_ARN"
 COMMON_ENV="$COMMON_ENV -e COGNITO_SECRET_ARN=$COGNITO_SECRET_ARN"
-COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
+COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME,localhost,127.0.0.1"
 COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
 COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME"
 COMMON_ENV="$COMMON_ENV -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
@@ -178,6 +180,10 @@ if [ -n "$DB_HOST_OVERRIDE" ]; then
   COMMON_ENV="$COMMON_ENV -e DB_HOST=$DB_HOST_OVERRIDE"
 fi
 
+# Email configuration
+COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
+COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
+
 # ------------------------------------------------------------------------------
 # Deploy containers
 # ------------------------------------------------------------------------------
@@ -185,8 +191,8 @@ echo "Pulling image..."
 docker pull "$IMAGE"
 
 echo "Stopping existing containers..."
-docker stop portal worker-cms worker-engine worker-mc 2>/dev/null || true
-docker rm portal worker-cms worker-engine worker-mc 2>/dev/null || true
+docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
+docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
 
 echo "Starting portal..."
 eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"
@@ -195,6 +201,7 @@ echo "Starting workers..."
 eval docker run -d --name worker-cms --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue cms
 eval docker run -d --name worker-engine --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue engine
 eval docker run -d --name worker-mc --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
+eval docker run -d --name ctf-scheduler --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
 
 echo "All containers started:"
 docker ps

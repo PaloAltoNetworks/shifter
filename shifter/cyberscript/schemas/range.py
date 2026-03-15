@@ -76,6 +76,7 @@ class InstanceSpec(SpecBase):
     agent: AgentDetails | None = None
     dc_config: DCConfig | None = None
     join_domain: bool = False
+    ami_key: str | None = None
     ngfw_app: NGFWAppSpec | None = None
 
     @classmethod
@@ -125,6 +126,7 @@ class InstanceSpec(SpecBase):
             agent=agent_details,
             dc_config=dc_config,
             join_domain=data.get("join_domain", False),
+            ami_key=data.get("ami_key"),
         )
 
 
@@ -275,6 +277,7 @@ class InstanceContextBase(BaseModel):
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     join_domain: bool = False
+    ami_key: str | None = None
 
 
 class InstanceContext(InstanceContextBase):

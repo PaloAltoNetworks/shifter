@@ -143,16 +143,40 @@ variable "redis_endpoint" {
   default     = ""
 }
 
+variable "enable_redis" {
+  description = "Whether to create the Redis endpoint SSM parameter. Avoids writing an empty string which SSM rejects."
+  type        = bool
+  default     = false
+}
+
 variable "db_host_override" {
   description = "Override database host. If empty, uses RDS host from secret."
   type        = string
   default     = ""
 }
 
+variable "enable_db_host_override" {
+  description = "Whether to create the DB host override SSM parameter. Use this instead of testing db_host_override to avoid count depending on unknown values."
+  type        = bool
+  default     = false
+}
+
 variable "log_level" {
   description = "Django log level (DEBUG, INFO, WARNING, ERROR). Use DEBUG in dev for detailed event tracing."
   type        = string
   default     = "INFO"
+}
+
+variable "email_backend" {
+  description = "Django email backend (e.g., django_ses.SESBackend)"
+  type        = string
+  default     = "django.core.mail.backends.console.EmailBackend"
+}
+
+variable "ctf_from_email" {
+  description = "From address for CTF emails"
+  type        = string
+  default     = "ctf@keplerops.com"
 }
 
 # ------------------------------------------------------------------------------

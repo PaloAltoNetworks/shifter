@@ -134,6 +134,78 @@ export function buildUpdateSet(fields, startParam = 1) {
   return { setClause: setParts.join(", "), values, nextParam: paramIdx };
 }
 
+// --- SSM ---
+
+/**
+ * Map EC2 PlatformDetails to the correct SSM document name.
+ * PlatformDetails values: "Linux/UNIX", "Windows", "Windows with SQL Server", etc.
+ */
+export function getSsmDocument(platformDetails) {
+  if (platformDetails && platformDetails.toLowerCase().startsWith("windows")) {
+    return "AWS-RunPowerShellScript";
+  }
+  return "AWS-RunShellScript";
+}
+
+// --- S3 ---
+
+export const MAX_S3_READ_SIZE = 1024 * 1024; // 1MB
+
+const BINARY_PREFIXES = ["image/", "video/", "audio/"];
+const BINARY_TYPES = new Set([
+  "application/octet-stream",
+  "application/zip",
+  "application/gzip",
+]);
+
+export function isBinaryContentType(contentType) {
+  if (!contentType) return false;
+  if (BINARY_TYPES.has(contentType)) return true;
+  return BINARY_PREFIXES.some((p) => contentType.startsWith(p));
+}
+
+// --- Django Management ---
+
+const ALLOWED_MANAGE_COMMANDS = new Set([
+  "check",
+  "showmigrations",
+  "diffsettings",
+  "inspectdb",
+  "dbshell",
+  "clearsessions",
+  "collectstatic",
+  "show_urls",
+]);
+
+const BLOCKED_MANAGE_COMMANDS = new Set([
+  "flush",
+  "sqlflush",
+  "reset_db",
+  "migrate",
+  "createsuperuser",
+  "changepassword",
+  "loaddata",
+  "dumpdata",
+  "shell",
+  "shell_plus",
+  "runserver",
+  "test",
+]);
+
+export function validateManageCommand(command) {
+  const parts = command.trim().split(/\s+/);
+  const baseCmd = parts[0];
+  if (BLOCKED_MANAGE_COMMANDS.has(baseCmd)) {
+    throw new Error(`Blocked management command: ${baseCmd}`);
+  }
+  if (!ALLOWED_MANAGE_COMMANDS.has(baseCmd)) {
+    throw new Error(
+      `Unknown management command: ${baseCmd}. Allowed: ${[...ALLOWED_MANAGE_COMMANDS].join(", ")}`,
+    );
+  }
+  return parts;
+}
+
 // --- Shared ---
 
 export function getProfile(profiles, env) {

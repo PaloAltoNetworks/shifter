@@ -63,5 +63,6 @@ ElastiCache Redis:
 - [AMI Management](ami-management) - Packer builds and SSM parameter management
 - [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD
 - [CI/CD](cicd) - Deployment pipelines
+- [GitHub Runners](github-runners) - Self-hosted runner setup and maintenance
 - [Networking](networking) - VPC architecture and peering
 - [Guacamole](guacamole) - Browser-based RDP integration

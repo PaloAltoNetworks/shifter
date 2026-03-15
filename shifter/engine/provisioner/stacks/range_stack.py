@@ -283,8 +283,7 @@ class RangeStack(pulumi.ComponentResource):
                 )
                 # Debug logging for NGFW command output
                 logger.info(
-                    "NGFW step '%s' attempt %d: success=%s, exit_code=%s, "
-                    "stdout=%d bytes, stderr=%d bytes",
+                    "NGFW step '%s' attempt %d: success=%s, exit_code=%s, stdout=%d bytes, stderr=%d bytes",
                     step.name,
                     attempt + 1,
                     result.success,

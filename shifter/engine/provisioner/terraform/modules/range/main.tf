@@ -21,6 +21,7 @@ locals {
         subnet_uuid   = subnet.uuid
         subnet_cidr   = subnet.cidr
         instance_uuid = inst.uuid
+        name          = inst.name
         role          = inst.role
         os_type       = inst.os_type
         instance_type = inst.instance_type
@@ -294,12 +295,18 @@ resource "aws_instance" "range" {
   # User data based on role and OS
   user_data_base64 = base64encode(
     each.value.role == "attacker" ? templatefile("${path.module}/templates/kali.sh.tpl", {
-      hostname   = "shifter-kali-${var.range_id}"
+      hostname   = each.value.name != "" ? each.value.name : "shifter-kali-${var.range_id}"
       public_key = tls_private_key.instance[each.key].public_key_openssh
     }) :
-    each.value.role == "dc" ? templatefile("${path.module}/templates/dc_windows.ps1.tpl", {}) :
-    each.value.os_type == "windows" ? templatefile("${path.module}/templates/victim_windows.ps1.tpl", {}) :
-    templatefile("${path.module}/templates/victim_linux.sh.tpl", {})
+    each.value.role == "dc" ? templatefile("${path.module}/templates/dc_windows.ps1.tpl", {
+      hostname = each.value.name != "" ? each.value.name : "shifter-dc-${var.range_id}"
+    }) :
+    each.value.os_type == "windows" ? templatefile("${path.module}/templates/victim_windows.ps1.tpl", {
+      hostname = each.value.name != "" ? each.value.name : "shifter-victim-${var.range_id}"
+    }) :
+    templatefile("${path.module}/templates/victim_linux.sh.tpl", {
+      hostname = each.value.name != "" ? each.value.name : "shifter-victim-${var.range_id}"
+    })
   )
 
   metadata_options {
@@ -308,7 +315,7 @@ resource "aws_instance" "range" {
   }
 
   tags = merge(local.common_tags, {
-    Name                    = "shifter-${each.value.role}-${var.range_id}"
+    Name                    = each.value.name != "" ? each.value.name : "shifter-${each.value.role}-${var.range_id}"
     "shifter:role"          = each.value.role
     "shifter:os"            = each.value.os_type
     "shifter:instance_uuid" = each.value.instance_uuid

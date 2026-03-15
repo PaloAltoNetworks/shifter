@@ -154,5 +154,33 @@ services:
       start_period: 30s
       retries: 2
 
+  # ------------------------------------------------------------------------------
+  # CTF Scheduler
+  # Polls ctf_scheduled_task for due tasks (range provisioning, event lifecycle)
+  # ------------------------------------------------------------------------------
+
+  ctf-scheduler:
+    build: .
+    command: python manage.py run_ctf_scheduler
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/ctf-scheduler-heartbeat -mmin -1 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 2
+
 volumes:
   postgres_data:

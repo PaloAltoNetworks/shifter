@@ -1541,14 +1541,9 @@ def _run_single_instance_setup(
     logger.info("Instance %s is ready (SSM agent online)", instance_id)
 
     # Create context object for plan get_context()
-    # Use friendly name for hostname (e.g., "Workstation" becomes "shifter-range-123-workstation")
+    # Use the scenario template name directly as the hostname (e.g., "webdev01", "kali")
     sanitized_name = sanitize_hostname(instance_name) if instance_name else ""
-    if sanitized_name and range_id:
-        hostname = f"shifter-range-{range_id}-{sanitized_name}"
-    elif sanitized_name:
-        hostname = f"shifter-{sanitized_name}"
-    else:
-        hostname = f"inst-{instance_id[-8:]}"
+    hostname = sanitized_name or f"inst-{instance_id[-8:]}"
 
     class InstanceContext:
         def __init__(self):
@@ -1841,7 +1836,7 @@ def run_instance_setup(
                     dc_ip=actual_dc_ip,
                     domain_name=actual_domain,
                     xdr_required=bool(inst_config.get("agent")),  # XDR required if agent data present
-                    instance_name=inst.get("name", ""),
+                    instance_name=inst.get("hostname", "") or inst.get("name", ""),
                     range_id=range_id,
                 )
                 return (inst_id, True, None)
@@ -2705,6 +2700,7 @@ def _build_range_terraform_variables(
             subnet_instances.append(
                 {
                     "uuid": inst.get("uuid", ""),
+                    "name": inst.get("name", ""),
                     "role": role,
                     "os_type": tf_os_type,
                     "instance_type": instance_type,

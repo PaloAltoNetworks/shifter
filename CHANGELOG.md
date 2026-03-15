@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.0] - 2026-03-15
+
+### Added
+- Instance names from scenario YAML templates are now set as EC2 hostnames during provisioning — instances get meaningful names (e.g., `webdev01`, `kali`, `mx-internal`) instead of AWS defaults like `ip-10-1-2-109.us-east-2.compute.internal`
+- `name` field passed through Terraform variables, locals, user_data templates, and outputs for all instance types (Kali, Linux victim, Windows victim, DC)
+- Hostname setting in `victim_linux.sh.tpl`, `victim_windows.ps1.tpl`, and `dc_windows.ps1.tpl` user_data templates
+- EC2 Name tags now use the scenario template name when available
+
 ## [3.13.2] - 2026-03-14
 
 ### Fixed

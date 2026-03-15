@@ -28,11 +28,8 @@ class SubnetAllocationAdmin(admin.ModelAdmin):
         "subnet_size",
         "range_id",
         "request_id",
-        "status",
-        "reserved_at",
-        "confirmed_at",
-        "released_at",
+        "created_at",
     )
-    list_filter = ("status", "vpc_id", "subnet_size")
+    list_filter = ("vpc_id", "subnet_size")
     search_fields = ("cidr", "request_id", "vpc_id")
-    readonly_fields = ("reserved_at",)
+    readonly_fields = ("created_at",)

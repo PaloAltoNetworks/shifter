@@ -2421,10 +2421,13 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                     cleanup_error,
                 )
 
-            # Release subnet reservations on provision failure
-            from components.network import release_subnet_allocations
+            # Release subnet allocations on provision failure (best-effort)
+            try:
+                from components.network import release_subnet_allocations
 
-            release_subnet_allocations(request_id)
+                release_subnet_allocations(request_id)
+            except Exception as e:
+                logger.warning("Failed to release subnet allocations: %s", e)
 
         publish_failed(
             request_id=request_id,
@@ -2497,11 +2500,6 @@ def _run_terraform_provision(
         range_terraform_runner.RANGE_MODULE_PATH,
     )
     logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
-
-    # Confirm subnet reservations now that AWS subnets exist
-    from components.network import confirm_subnet_allocations
-
-    confirm_subnet_allocations(request_id)
 
     subnets_output = output_data.get("subnets", {})
     instances_output = output_data.get("instances", [])
@@ -2620,10 +2618,13 @@ def _run_terraform_destroy(
             except Exception as e:
                 logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
 
-            # Release subnet reservations now that AWS subnets are gone
-            from components.network import release_subnet_allocations
+            # Release subnet allocations now that AWS subnets are gone (best-effort)
+            try:
+                from components.network import release_subnet_allocations
 
-            release_subnet_allocations(request_id)
+                release_subnet_allocations(request_id)
+            except Exception as e:
+                logger.warning("Failed to release subnet allocations: %s", e)
 
         # Auto-pause NGFW if no other active ranges
         try:

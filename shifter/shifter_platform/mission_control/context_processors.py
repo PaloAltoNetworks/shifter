@@ -4,6 +4,7 @@ import logging
 
 from cms.services import get_active_range, get_scenario
 from mission_control.utils import build_connection_urls
+from shared.auth import is_ctf_participant_only
 from shared.schemas import RangeContext
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,11 @@ def active_range(request):
                 is_ready,
             )
             has_ready_range = is_ready
+
+            # CTF participants only see Kali (attacker) instances
+            if is_ctf_participant_only(request.user):
+                range_context.instances = [inst for inst in range_context.instances if inst.os_type == "kali"]
+
             connection_urls = build_connection_urls(range_context.instances)
 
             # Look up scenario name for display

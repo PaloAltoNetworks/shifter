@@ -344,3 +344,104 @@ class TestActiveRangeContextProcessor:
             assert result["has_active_range"] is False, f"Expected False for {status}"
             assert result["active_range"].status == status
             assert result["active_range"].is_ready is False
+
+    # ---------------------------------------------------------------------
+    # CTF participant instance filtering
+    # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _make_range_with_instances(os_types):
+        """Create a RangeContext with instances of the given os_types."""
+        from shared.schemas import InstanceContext, RangeContext
+
+        instances = [
+            InstanceContext(uuid=str(uuid4()), name=os, os_type=os, role="attacker" if os == "kali" else "victim")
+            for os in os_types
+        ]
+        return RangeContext(
+            request_id=uuid4(),
+            range_id=1,
+            user_id=42,
+            scenario_id="basic",
+            status=ResourceStatus.READY,
+            instances=instances,
+            agent_name="Test Agent",
+        )
+
+    def test_ctf_participant_only_sees_kali_instances(self):
+        """CTF participant sees only the Kali instance, not victims or NGFW."""
+        from mission_control.context_processors import active_range
+
+        mock_request = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.id = 42
+
+        range_ctx = self._make_range_with_instances(["kali", "ubuntu", "windows", "panos"])
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=True),
+        ):
+            result = active_range(mock_request)
+
+        assert len(result["active_range"].instances) == 1
+        assert result["active_range"].instances[0].os_type == "kali"
+        assert len(result["connection_urls"]) == 1
+
+    def test_non_ctf_user_sees_all_instances(self):
+        """Non-CTF user sees all instances."""
+        from mission_control.context_processors import active_range
+
+        mock_request = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.id = 42
+
+        range_ctx = self._make_range_with_instances(["kali", "ubuntu", "windows", "panos"])
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=False),
+        ):
+            result = active_range(mock_request)
+
+        assert len(result["active_range"].instances) == 4
+        assert len(result["connection_urls"]) == 4
+
+    def test_ctf_participant_no_kali_gets_empty(self):
+        """CTF participant with no Kali instance gets empty lists."""
+        from mission_control.context_processors import active_range
+
+        mock_request = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.id = 42
+
+        range_ctx = self._make_range_with_instances(["ubuntu", "windows"])
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=True),
+        ):
+            result = active_range(mock_request)
+
+        assert len(result["active_range"].instances) == 0
+        assert len(result["connection_urls"]) == 0
+
+    def test_ctf_participant_multiple_kali_sees_all_kali(self):
+        """CTF participant with multiple Kali instances sees all of them."""
+        from mission_control.context_processors import active_range
+
+        mock_request = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.id = 42
+
+        range_ctx = self._make_range_with_instances(["kali", "kali", "windows"])
+
+        with (
+            patch("mission_control.context_processors.get_active_range", return_value=range_ctx),
+            patch("mission_control.context_processors.is_ctf_participant_only", return_value=True),
+        ):
+            result = active_range(mock_request)
+
+        assert len(result["active_range"].instances) == 2
+        assert all(inst.os_type == "kali" for inst in result["active_range"].instances)
+        assert len(result["connection_urls"]) == 2

@@ -1,11 +1,10 @@
 """Tests for CTF authentication, routing, and access control.
 
-Phase 2: User Type Routing & Authentication.
 Tests cover:
 - OIDC backend extension for CTF user types
 - Dashboard routing by user type
 - Access control decorators
-- CTF login with invite token
+- CTF magic link authentication
 - CTF context processor
 - Dev auth CTF user type support
 """
@@ -22,7 +21,7 @@ from django.test import RequestFactory, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from ctf.enums import EventStatus, ParticipantStatus
+from ctf.enums import EventStatus
 from ctf.models import CTFEvent
 from management.models import UserProfile
 from shared.auth import (
@@ -300,28 +299,13 @@ class TestAccessControlDecorators:
 
 
 # ---------------------------------------------------------------------------
-# CTF Login View Tests
+# Dev Login Tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
-class TestCTFLoginView:
-    """Test CTF-specific login view."""
-
-    def test_login_page_renders(self, client):
-        """CTF login page should render without errors."""
-        response = client.get(reverse("ctf:ctf_login"))
-        assert response.status_code == 200
-
-    def test_login_page_with_event_param(self, client, ctf_event):
-        """CTF login page should accept event_id query param."""
-        response = client.get(reverse("ctf:ctf_login") + f"?event={ctf_event.id}")
-        assert response.status_code == 200
-
-    def test_login_page_with_invite_token(self, client, ctf_participant_invited):
-        """CTF login page should accept invite token query param."""
-        response = client.get(reverse("ctf:ctf_login") + f"?token={ctf_participant_invited.invite_token}")
-        assert response.status_code == 200
+class TestDevLogin:
+    """Test dev login CTF user type support."""
 
     @override_settings(DEBUG=True)
     def test_dev_login_ctf_organizer(self, request_factory, db):
@@ -541,64 +525,44 @@ class TestIsCtfParticipantOnly:
 
 @pytest.mark.django_db
 class TestCTFRegisterView:
-    """Test CTF participant registration via invite token."""
+    """Test CTF magic link authentication via invite token."""
 
-    def test_register_auto_creates_user(self, client, ctf_participant_invited):
-        """Unauthenticated users with valid token get auto-registered."""
-        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
+    def test_valid_token_logs_in_and_redirects(self, client, ctf_participant):
+        """Valid token with linked user should log in and redirect to dashboard."""
+        url = reverse("ctf:ctf_register") + f"?token={ctf_participant.invite_token}"
         response = client.get(url)
         assert response.status_code == 302
         assert "/mission-control/" in response.url
 
-    def test_register_with_valid_token(self, client, ctf_participant_invited):
-        """Valid invite token should auto-register and redirect to Mission Control."""
-        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
+    def test_repeated_token_use_works(self, client, ctf_participant):
+        """Using the same token again should log in the same user."""
+        url = reverse("ctf:ctf_register") + f"?token={ctf_participant.invite_token}"
+        # First use
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "/mission-control/" in response.url
+        # Second use
         response = client.get(url)
         assert response.status_code == 302
         assert "/mission-control/" in response.url
 
-        ctf_participant_invited.refresh_from_db()
-        assert ctf_participant_invited.user is not None
-        assert ctf_participant_invited.status == ParticipantStatus.REGISTERED.value
+    def test_missing_token_returns_400(self, client):
+        """Missing token should return 400."""
+        response = client.get(reverse("ctf:ctf_register"))
+        assert response.status_code == 400
 
-    def test_register_with_expired_token(self, client, participant_profile, ctf_participant_invited):
-        """Expired invite token should show error and redirect to login."""
-        ctf_participant_invited.invite_token_expires = timezone.now() - timedelta(hours=1)
-        ctf_participant_invited.save(update_fields=["invite_token_expires"])
-
-        client.force_login(participant_profile.user)
-        url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
-        response = client.get(url)
-        assert response.status_code == 302
-        assert "login" in response.url
-
-    def test_register_with_invalid_token(self, client, participant_profile):
-        """Invalid token should show error and redirect to login."""
-        client.force_login(participant_profile.user)
+    def test_invalid_token_returns_400(self, client):
+        """Invalid token should return 400."""
         url = reverse("ctf:ctf_register") + "?token=bogus-token-value"
         response = client.get(url)
-        assert response.status_code == 302
-        assert "login" in response.url
+        assert response.status_code == 400
 
-    def test_register_already_registered(self, client, participant_profile, ctf_participant_invited):
-        """Already-registered participant should be logged in and redirected."""
-        # First registration
-        ctf_participant_invited.user = participant_profile.user
-        ctf_participant_invited.status = ParticipantStatus.REGISTERED.value
-        ctf_participant_invited.save(update_fields=["user", "status"])
-
-        # Using token again should just log in the existing user
+    def test_token_without_linked_user_returns_400(self, client, ctf_participant_invited):
+        """Token for participant with no linked user should return 400."""
+        # ctf_participant_invited has no user linked
         url = reverse("ctf:ctf_register") + f"?token={ctf_participant_invited.invite_token}"
         response = client.get(url)
-        assert response.status_code == 302
-        assert "/mission-control/" in response.url
-
-    def test_register_missing_token(self, client, participant_profile):
-        """Missing token should redirect to login."""
-        client.force_login(participant_profile.user)
-        response = client.get(reverse("ctf:ctf_register"))
-        assert response.status_code == 302
-        assert "login" in response.url
+        assert response.status_code == 400
 
 
 # ---------------------------------------------------------------------------

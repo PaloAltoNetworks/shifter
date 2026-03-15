@@ -269,10 +269,14 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
-    "/ctf/login/",  # CTF login page
     "/ctf/register/",  # CTF magic link registration (token is the auth)
     "/ctf/help/",  # CTF help page
 ]
+
+# Session cookie lifetime — makes Django's 14-day default explicit.
+# CTF participants auth via magic link (ModelBackend), so OIDC SessionRefresh
+# won't expire their sessions. This ensures no surprises from Django defaults.
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
 
 # ------------------------------------------------------------------------------
 # Field Encryption (django-encrypted-model-fields)

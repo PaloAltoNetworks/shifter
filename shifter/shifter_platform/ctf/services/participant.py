@@ -16,7 +16,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from ctf.enums import ParticipantStatus
-from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+from ctf.exceptions import CTFNotFoundError, CTFValidationError
 from ctf.models import CTFEvent, CTFParticipant, CTFTeam
 
 if TYPE_CHECKING:
@@ -234,71 +234,6 @@ def bulk_import_participants(
     )
 
     return created
-
-
-def register_participant(
-    participant_id: UUID,
-    user: User,
-    cognito_sub: str | None = None,
-) -> CTFParticipant:
-    """Register an invited participant with a user account.
-
-    Args:
-        participant_id: UUID of the participant record.
-        user: The Django user to link.
-        cognito_sub: Optional Cognito subject identifier.
-
-    Returns:
-        The updated CTFParticipant instance.
-
-    Raises:
-        CTFNotFoundError: If participant doesn't exist.
-        CTFStateError: If participant is already registered.
-    """
-    logger.info("Registering participant %s with user %s", participant_id, user.email)
-
-    try:
-        participant = CTFParticipant.objects.get(pk=participant_id)
-    except CTFParticipant.DoesNotExist:
-        raise CTFNotFoundError(
-            f"Participant {participant_id} not found",
-            details={"participant_id": str(participant_id)},
-        ) from None
-
-    if participant.user is not None:
-        raise CTFStateError(
-            "Participant is already registered",
-            details={"participant_id": str(participant_id)},
-        )
-
-    if not participant.is_invite_valid:
-        raise CTFStateError(
-            "Invitation has expired",
-            details={"participant_id": str(participant_id)},
-        )
-
-    with transaction.atomic():
-        participant.user = user
-        participant.cognito_sub = cognito_sub
-        participant.status = ParticipantStatus.REGISTERED.value
-        participant.registered_at = timezone.now()
-        participant.save(
-            update_fields=[
-                "user",
-                "cognito_sub",
-                "status",
-                "registered_at",
-                "updated_at",
-            ]
-        )
-
-        # Set UserProfile fields so ctf_participant_required decorator works
-        # without requiring Cognito custom claims to be pre-configured.
-        _set_ctf_participant_profile(user, participant.event)
-
-        logger.info("Registered participant %s", participant_id)
-
-    return participant
 
 
 def get_participant_by_user(user: User, event_id: UUID | None = None) -> CTFParticipant | None:

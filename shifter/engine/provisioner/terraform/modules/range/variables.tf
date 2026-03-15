@@ -105,6 +105,7 @@ variable "subnets" {
     connected_to = list(string)
     instances = list(object({
       uuid              = string
+      name              = string # Instance name from scenario template (e.g., "webdev01", "kali")
       role              = string # attacker, victim, dc
       os_type           = string # kali, ubuntu, windows
       instance_type     = string

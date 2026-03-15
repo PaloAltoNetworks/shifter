@@ -5,36 +5,36 @@ enabled: true
 ngfw: false
 
 instances:
-  - name: Attacker
+  - name: kali
     role: attacker
     os_type: kali
     ai_agent: true
 
-  - name: WebShell
+  - name: webdev01
     role: victim
     os_type: ubuntu
     ami_key: ctf-webshell
 
-  - name: MailRoom
+  - name: mx-internal
     role: victim
     os_type: ubuntu
     ami_key: ctf-mailroom
 
-  - name: HelpDesk
+  - name: support-win
     role: victim
     os_type: windows
     ami_key: ctf-helpdesk
 
-  - name: DevBox
+  - name: ci-runner
     role: victim
     os_type: ubuntu
     ami_key: ctf-devbox
 
-  - name: Vault
+  - name: backup-dc
     role: victim
     os_type: windows
     ami_key: ctf-vault
 
 subnets:
   - name: range_network
-    instances: [Attacker, WebShell, MailRoom, HelpDesk, DevBox, Vault]
+    instances: [kali, webdev01, mx-internal, support-win, ci-runner, backup-dc]

@@ -20,7 +20,6 @@ app_name = "ctf"
 participant_patterns = [
     # Dashboard
     path("", views.participant_dashboard, name="participant_dashboard"),
-    path("login/", views.ctf_login, name="ctf_login"),
     path("register/", views.ctf_register, name="ctf_register"),
     path("event/", views.participant_event, name="participant_event"),
     # Challenges

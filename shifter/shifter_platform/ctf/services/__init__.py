@@ -44,7 +44,6 @@ from ctf.services.participant import (
     get_participant_by_user,
     invite_participant,
     list_participants_for_event,
-    register_participant,
     resend_invite,
 )
 from ctf.services.range import (
@@ -117,7 +116,6 @@ __all__ = [
     "list_participants_for_event",
     "provision_event_ranges",
     "provision_participant_range",
-    "register_participant",
     "resend_invite",
     "schedule_event",
     "start_event",

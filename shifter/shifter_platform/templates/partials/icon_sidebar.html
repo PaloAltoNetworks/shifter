@@ -242,7 +242,7 @@
                     </div>
                 </button>
                 <div class="nav-user-menu" id="userMenu">
-                    <form method="post" action="{% url 'oidc_logout' %}" style="margin:0">
+                    <form method="post" action="{% url 'logout' %}" style="margin:0">
                         {% csrf_token %}
                         <button type="submit" class="nav-user-menu-item">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">

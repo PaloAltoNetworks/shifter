@@ -17,7 +17,6 @@ import logging
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
-from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -134,94 +133,26 @@ def _get_client_ip(request):
 # -----------------------------------------------------------------------------
 
 
-def ctf_login(request: HttpRequest) -> HttpResponse:
-    """CTF-specific login page.
-
-    Handles login for CTF participants with optional event/invite token params.
-    Accepts query parameters:
-    - event: UUID of the event to show context for
-    - token: Invite token for participant registration
-    """
-    context: dict = {}
-
-    event_id = request.GET.get("event")
-    invite_token = request.GET.get("token")
-
-    if event_id:
-        from ctf.models import CTFEvent
-
-        try:
-            event = CTFEvent.objects.get(pk=event_id)
-            context["event"] = event
-        except (CTFEvent.DoesNotExist, ValueError):
-            logger.warning("CTF login: invalid event_id %s", event_id)
-
-    if invite_token:
-        from ctf.models import CTFParticipant
-
-        participant = CTFParticipant.objects.filter(invite_token=invite_token).first()
-        if participant:
-            context["invite_participant"] = participant
-            context["invite_valid"] = participant.is_invite_valid
-            if not context.get("event"):
-                context["event"] = participant.event
-        else:
-            logger.warning("CTF login: invalid invite token")
-
-    return render(request, "ctf/login.html", context)
-
-
 def ctf_register(request: HttpRequest) -> HttpResponse:
-    """Register a participant via invite token link.
+    """Authenticate a participant via magic link token.
 
     No login required. The invite token IS the authentication.
-    Auto-creates a Django user from the participant's email if needed,
-    logs them in, and redirects to the event dashboard.
+    Participants are auto-registered at add-time via _auto_register_participant(),
+    so every valid token maps to a participant with a linked Django user.
     """
     from django.contrib.auth import login
 
-    from ctf.exceptions import CTFStateError
     from ctf.models import CTFParticipant
-    from ctf.services.participant import register_participant
 
     token = request.GET.get("token")
     if not token:
-        messages.error(request, "Missing invite token.")
-        return redirect("ctf:ctf_login")
+        return HttpResponse("Missing invite token.", status=400)
 
-    participant = CTFParticipant.objects.filter(invite_token=token).first()
-    if not participant:
-        messages.error(request, "Invalid invite token.")
-        return redirect("ctf:ctf_login")
+    participant = CTFParticipant.objects.filter(invite_token=token).select_related("user").first()
+    if not participant or not participant.user:
+        return HttpResponse("Invalid invite token.", status=400)
 
-    if not participant.is_invite_valid:
-        messages.error(request, "This invitation has expired.")
-        return redirect("ctf:ctf_login")
-
-    # Already registered — just log them in and go
-    if participant.user is not None:
-        login(request, participant.user, backend="django.contrib.auth.backends.ModelBackend")
-        return redirect("mission_control:dashboard")
-
-    # Auto-create a Django user from the participant's email
-    user = User.objects.filter(email__iexact=participant.email).first()
-    if user is None:
-        user = User.objects.create_user(
-            username=participant.email,
-            email=participant.email,
-            first_name=participant.name.split()[0] if participant.name else "",
-            last_name=" ".join(participant.name.split()[1:]) if participant.name else "",
-        )
-        user.set_unusable_password()
-        user.save()
-
-    try:
-        register_participant(participant.pk, user)
-    except CTFStateError as exc:
-        messages.error(request, str(exc))
-        return redirect("ctf:ctf_login")
-
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    login(request, participant.user, backend="django.contrib.auth.backends.ModelBackend")
     return redirect("mission_control:dashboard")
 
 

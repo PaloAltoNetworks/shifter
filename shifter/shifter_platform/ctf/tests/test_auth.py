@@ -511,11 +511,11 @@ class TestIsCtfParticipantOnly:
         participant_user.save(update_fields=["is_superuser"])
         assert is_ctf_participant_only(participant_user) is False
 
-    def test_organizer_participant_returns_false(self, participant_user):
-        """User in both Organizer and Participant groups should return False."""
+    def test_organizer_participant_returns_true(self, participant_user):
+        """User in both Organizer and Participant groups is still CTF-only (no Launch Range)."""
         organizer_group, _ = Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)
         participant_user.groups.add(organizer_group)
-        assert is_ctf_participant_only(participant_user) is False
+        assert is_ctf_participant_only(participant_user) is True
 
     def test_threat_research_participant_returns_false(self, participant_user):
         """User in both Threat Research and Participant groups should return False."""

@@ -4,11 +4,10 @@ Unit tests for subnet allocation logic:
 - _find_free_subnet: Finds available subnets by querying AWS
 - Handles overlapping CIDRs correctly (e.g., /22 blocks)
 - CIDR candidate generation for /24 and /28 subnets
-- SubnetAllocation table: reserve, confirm, release, stale reclaim
+- SubnetAllocation table: track, release, drift reconciliation
 """
 
 import sys
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,7 +21,6 @@ from components.network import (
     _generate_slash28_candidates,
     _publish_subnet_exhaustion_alarm,
     allocate_subnets,
-    confirm_subnet_allocations,
     release_subnet_allocations,
 )
 
@@ -320,16 +318,16 @@ class TestAllocateSubnetsReservation:
         insert_calls = [s for s in all_sql if "INSERT INTO engine_subnetallocation" in s]
         assert len(insert_calls) == 2
 
-    def test_allocate_skips_reserved_cidrs(self, mock_db_connection):
-        """CIDR in allocation table (status='reserved') is skipped even if not in AWS."""
+    def test_allocate_skips_tracked_cidrs(self, mock_db_connection):
+        """CIDR in allocation table is skipped even if not yet in AWS."""
         mock_ec2 = MagicMock()
         mock_ec2.describe_subnets.return_value = {"Subnets": []}
 
-        # Simulate allocation table returning a reserved CIDR
+        # Simulate allocation table returning a tracked CIDR
         mock_cursor = MagicMock()
         mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
 
-        # The SELECT for reserved subnets returns 10.1.2.0/28
+        # The SELECT returns 10.1.2.0/28 as tracked
         mock_cursor.fetchall.return_value = [("10.1.2.0/28",)]
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
@@ -342,17 +340,18 @@ class TestAllocateSubnetsReservation:
                 request_id="req-abc",
             )
 
-        # Should skip the reserved CIDR and pick the next one
+        # Should skip the tracked CIDR and pick the next one
         assert result == ["10.1.2.16/28"]
 
-    def test_stale_reservations_reclaimed(self, mock_db_connection):
-        """Reservations >30min old with status='reserved' are ignored (reclaimed)."""
+    def test_drift_reconciliation(self, mock_db_connection):
+        """AWS subnets not in the table are inserted during allocation."""
         mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+        # AWS has a subnet that's not in the allocation table
+        mock_ec2.describe_subnets.return_value = {"Subnets": [{"CidrBlock": "10.1.2.0/28"}]}
 
-        # Simulate allocation table returning nothing (stale reservations filtered by SQL)
         mock_cursor = MagicMock()
         mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        # Table is empty
         mock_cursor.fetchall.return_value = []
 
         with patch("components.network.boto3.client", return_value=mock_ec2):
@@ -365,113 +364,54 @@ class TestAllocateSubnetsReservation:
                 request_id="req-abc",
             )
 
-        # Should get first CIDR since stale reservations are excluded
-        assert result == ["10.1.2.0/28"]
+        # Should skip the AWS subnet and pick the next one
+        assert result == ["10.1.2.16/28"]
 
-        # Verify the SELECT query uses a cutoff timestamp
-        select_calls = [
+        # Verify the drift subnet was inserted into the table
+        insert_calls = [
             c
             for c in mock_cursor.execute.call_args_list
-            if c[0] and isinstance(c[0][0], str) and "SELECT cidr FROM engine_subnetallocation" in c[0][0]
+            if c[0] and isinstance(c[0][0], str) and "INSERT INTO engine_subnetallocation" in c[0][0]
         ]
-        assert len(select_calls) == 1
-        # The second param should be the stale cutoff timestamp
-        params = select_calls[0][0][1]
-        assert params[0] == "vpc-123"
-        assert isinstance(params[1], datetime)
-
-    def test_released_cidrs_reusable(self, mock_db_connection):
-        """CIDRs with status='released' are not returned by the allocation table query."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
-
-        # Simulate allocation table returning nothing (released CIDRs excluded by SQL)
-        mock_cursor = MagicMock()
-        mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_cursor.fetchall.return_value = []
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = allocate_subnets(
-                "vpc-123",
-                "10.1",
-                count=1,
-                subnet_size=28,
-                range_id=42,
-                request_id="req-abc",
-            )
-
-        # Released CIDRs are not in the exclusion set, so first CIDR is available
-        assert result == ["10.1.2.0/28"]
-
-
-class TestConfirmSubnetAllocations:
-    """Tests for confirm_subnet_allocations."""
-
-    def test_confirm_sets_active(self, mock_db_connection):
-        """confirm_subnet_allocations updates status to 'active'."""
-        mock_cursor = MagicMock()
-        mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-
-        confirm_subnet_allocations("req-abc")
-
-        # Verify UPDATE was executed
-        update_calls = [
-            c
-            for c in mock_cursor.execute.call_args_list
-            if c[0] and isinstance(c[0][0], str) and "UPDATE engine_subnetallocation" in c[0][0]
-        ]
-        assert len(update_calls) == 1
-        sql = update_calls[0][0][0]
-        assert "status = 'active'" in sql
-        assert "confirmed_at = NOW()" in sql
-        params = update_calls[0][0][1]
-        assert params[0] == "req-abc"
-
-        # Verify commit was called
-        mock_db_connection.commit.assert_called()
+        # At least 2 inserts: 1 for drift reconciliation + 1 for the new allocation
+        assert len(insert_calls) >= 2
 
 
 class TestReleaseSubnetAllocations:
     """Tests for release_subnet_allocations."""
 
-    def test_release_on_destroy(self, mock_db_connection):
-        """release_subnet_allocations updates to 'released'."""
+    def test_release_deletes_rows(self, mock_db_connection):
+        """release_subnet_allocations DELETEs rows for the request."""
         mock_cursor = MagicMock()
         mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
 
         release_subnet_allocations("req-abc")
 
-        # Verify UPDATE was executed
-        update_calls = [
+        # Verify DELETE was executed
+        delete_calls = [
             c
             for c in mock_cursor.execute.call_args_list
-            if c[0] and isinstance(c[0][0], str) and "UPDATE engine_subnetallocation" in c[0][0]
+            if c[0] and isinstance(c[0][0], str) and "DELETE FROM engine_subnetallocation" in c[0][0]
         ]
-        assert len(update_calls) == 1
-        sql = update_calls[0][0][0]
-        assert "status = 'released'" in sql
-        assert "released_at = NOW()" in sql
-        params = update_calls[0][0][1]
+        assert len(delete_calls) == 1
+        params = delete_calls[0][0][1]
         assert params[0] == "req-abc"
 
         mock_db_connection.commit.assert_called()
 
 
-class TestFallbackWithoutDB:
-    """Tests for allocation fallback when DB is unreachable."""
+class TestDBConnectionRequired:
+    """Tests that allocation fails hard when DB is unreachable."""
 
-    def test_fallback_without_db(self):
-        """Allocation still works (AWS-only) when DB is unreachable."""
+    def test_raises_without_db(self):
+        """Allocation must fail when DB is unreachable — no silent fallback."""
         import psycopg
-
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
 
         with (
             patch("components.network._get_db_connection", side_effect=psycopg.Error("conn refused")),
-            patch("components.network.boto3.client", return_value=mock_ec2),
+            pytest.raises(psycopg.Error),
         ):
-            result = allocate_subnets(
+            allocate_subnets(
                 "vpc-123",
                 "10.1",
                 count=1,
@@ -479,6 +419,3 @@ class TestFallbackWithoutDB:
                 range_id=42,
                 request_id="req-abc",
             )
-
-        # Should fall back to AWS-only allocation
-        assert result == ["10.1.2.0/28"]

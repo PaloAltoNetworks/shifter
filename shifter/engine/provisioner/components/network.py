@@ -16,11 +16,9 @@ When an NGFW is in place, a route for the SSM/Bedrock endpoints subnet is also
 added via the NGFW, forcing Bedrock API traffic through the NGFW for inspection.
 """
 
-import hashlib
 import ipaddress
 import logging
 import os
-from datetime import UTC, datetime, timedelta
 
 import boto3
 import psycopg
@@ -82,24 +80,6 @@ def _get_db_connection() -> psycopg.Connection:
         password=token,
         sslmode="require",
     )
-
-
-def _get_vpc_lock_id(vpc_id: str) -> int:
-    """Generate a consistent lock ID from VPC ID for advisory lock.
-
-    Uses MD5 hash of VPC ID to create a deterministic 32-bit integer
-    that can be used with PostgreSQL advisory locks.
-
-    Args:
-        vpc_id: The VPC ID (e.g., "vpc-1234567890abcdef0").
-
-    Returns:
-        A 32-bit integer suitable for pg_advisory_lock.
-    """
-    # Use first 8 hex chars of MD5 hash as lock ID (32-bit integer)
-    # MD5 is used here for consistent hashing, not cryptographic security
-    hash_hex = hashlib.md5(vpc_id.encode(), usedforsecurity=False).hexdigest()[:8]
-    return int(hash_hex, 16)
 
 
 def _publish_subnet_exhaustion_alarm(vpc_id: str, cidr_prefix: str, subnet_size: int) -> None:
@@ -178,11 +158,11 @@ def allocate_subnets(
     range_id: int = 0,
     request_id: str = "",
 ) -> list[str]:
-    """Allocate multiple subnets atomically with a single lock.
+    """Allocate multiple subnets atomically with a table-level lock.
 
-    This is the preferred method for allocating subnets for a range with multiple
-    logical subnets. It holds the advisory lock for the entire allocation, preventing
-    race conditions where multiple subnets in the same range get the same CIDR.
+    Uses LOCK TABLE engine_subnetallocation IN EXCLUSIVE MODE to serialize
+    all concurrent subnet allocations. This prevents race conditions even
+    when the table is empty.
 
     CIDRs are reserved in the engine_subnetallocation table inside the lock to
     prevent TOCTOU races: subsequent allocators see reservations even before
@@ -200,7 +180,7 @@ def allocate_subnets(
         List of allocated CIDR blocks (e.g., ["10.1.2.0/28", "10.1.2.16/28"]).
 
     Raises:
-        RuntimeError: If not enough free subnets can be found.
+        RuntimeError: If not enough free subnets can be found or DB lock fails.
         ValueError: If subnet_size is not 24 or 28, or count < 1.
     """
     if subnet_size not in (24, 28):
@@ -216,48 +196,41 @@ def allocate_subnets(
         cidr_prefix,
     )
 
-    # Use advisory lock to prevent concurrent subnet allocations in the same VPC
-    lock_id = _get_vpc_lock_id(vpc_id)
-    logger.debug("Acquiring advisory lock %d for VPC %s", lock_id, vpc_id)
+    # Table-level lock serializes ALL concurrent allocations.
+    # No silent fallback — if the lock fails, provisioning fails.
+    with _get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute("LOCK TABLE engine_subnetallocation IN EXCLUSIVE MODE")
+        logger.info("Acquired table lock on engine_subnetallocation for VPC %s", vpc_id)
 
-    try:
-        with _get_db_connection() as conn, conn.cursor() as cur:
-            # Acquire advisory lock (blocks other allocations for this VPC)
-            cur.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
-            logger.debug("Acquired advisory lock %d", lock_id)
-
-            try:
-                # Allocate all subnets with the lock held
-                allocated = _allocate_subnets_internal(
-                    vpc_id,
-                    cidr_prefix,
-                    count,
-                    subnet_size,
-                    conn=conn,
-                )
-                # Reserve CIDRs in allocation table so next allocator sees them
-                if range_id and request_id:
-                    _reserve_allocations(
-                        conn,
-                        vpc_id,
-                        allocated,
-                        subnet_size,
-                        range_id,
-                        request_id,
-                    )
-                return allocated
-            finally:
-                # Always release the lock
-                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
-                logger.debug("Released advisory lock %d", lock_id)
-    except psycopg.Error as e:
-        # If DB connection fails, fall back to unlocked allocation
-        # This is riskier but AWS will reject duplicate CIDRs anyway
-        logger.warning(
-            "Failed to acquire advisory lock for subnet allocation (falling back to unlocked): %s",
-            e,
+        # Allocate all subnets with the lock held
+        allocated = _allocate_subnets_internal(
+            vpc_id,
+            cidr_prefix,
+            count,
+            subnet_size,
+            conn=conn,
         )
-        return _allocate_subnets_internal(vpc_id, cidr_prefix, count, subnet_size)
+
+        # Record allocations so next allocator sees them.
+        # This MUST succeed — no silent fallback.
+        if range_id and request_id:
+            _record_allocations(
+                conn,
+                vpc_id,
+                allocated,
+                subnet_size,
+                range_id,
+                request_id,
+            )
+
+        conn.commit()
+        logger.info(
+            "Committed %d subnet allocations for VPC %s",
+            len(allocated),
+            vpc_id,
+        )
+
+        return allocated
 
 
 def _allocate_subnets_internal(
@@ -265,16 +238,20 @@ def _allocate_subnets_internal(
     cidr_prefix: str,
     count: int,
     subnet_size: int,
-    conn: psycopg.Connection | None = None,
+    conn: psycopg.Connection,
 ) -> list[str]:
-    """Internal multi-subnet allocation (called with advisory lock held).
+    """Internal multi-subnet allocation (called with table lock held).
+
+    Reconciles AWS state with the allocation table before picking subnets:
+    - AWS subnets not in the table are inserted (drift repair)
+    - Table entries are trusted even if not yet in AWS (in-flight Terraform)
 
     Args:
         vpc_id: The VPC ID to check.
         cidr_prefix: The CIDR prefix (e.g., "10.1" for 10.1.X.Y/size).
         count: Number of subnets to allocate.
         subnet_size: The subnet prefix length (24 or 28).
-        conn: Optional DB connection for querying the allocation table.
+        conn: DB connection holding the table lock.
 
     Returns:
         List of allocated CIDR blocks.
@@ -282,26 +259,38 @@ def _allocate_subnets_internal(
     Raises:
         RuntimeError: If not enough free subnets can be found.
     """
-    existing_networks = _get_existing_subnets(vpc_id)
-    logger.info("Found %d existing subnets in VPC %s", len(existing_networks), vpc_id)
+    # 1. Get AWS reality
+    aws_networks = _get_existing_subnets(vpc_id)
+    logger.info("Found %d existing subnets in VPC %s", len(aws_networks), vpc_id)
 
-    # Also check the allocation table for reserved/active CIDRs not yet in AWS
-    reserved_networks = _get_reserved_subnets(vpc_id, conn)
-    if reserved_networks:
-        logger.info(
-            "Found %d reserved/active CIDRs in allocation table for VPC %s",
-            len(reserved_networks),
+    # 2. Get allocation table state
+    tracked_cidrs = _get_tracked_subnets(vpc_id, conn)
+    logger.info("Found %d tracked CIDRs in allocation table for VPC %s", len(tracked_cidrs), vpc_id)
+
+    # 3. Reconcile: AWS subnets not in table → insert them
+    tracked_cidr_strs = {str(n) for n in tracked_cidrs}
+    drift_count = 0
+    for aws_net in aws_networks:
+        if str(aws_net) not in tracked_cidr_strs:
+            _record_allocation(conn, vpc_id, str(aws_net), aws_net.prefixlen, 0, "")
+            drift_count += 1
+    if drift_count:
+        logger.warning(
+            "Reconciled %d AWS subnets not tracked in allocation table for VPC %s",
+            drift_count,
             vpc_id,
         )
 
-    # Generate candidate CIDRs based on subnet size
+    # 4. Build merged occupied set (table + AWS + batch)
+    occupied = {str(n) for n in aws_networks} | tracked_cidr_strs
+
+    # 5. Generate candidates and find free ones
     if subnet_size == 24:
         candidates = _generate_slash24_candidates(cidr_prefix)
     else:
         candidates = _generate_slash28_candidates(cidr_prefix)
 
     allocated: list[str] = []
-    allocated_networks: list[ipaddress.IPv4Network] = []
 
     for candidate_cidr in candidates:
         if len(allocated) >= count:
@@ -309,22 +298,15 @@ def _allocate_subnets_internal(
 
         candidate_network = ipaddress.IPv4Network(candidate_cidr)
 
-        # Check against existing AWS subnets
-        has_aws_conflict = any(candidate_network.overlaps(existing) for existing in existing_networks)
+        # Check against all occupied subnets (table + AWS + this batch)
+        has_conflict = any(candidate_network.overlaps(ipaddress.IPv4Network(o)) for o in occupied)
 
-        # Check against reserved CIDRs in allocation table
-        has_reserved_conflict = any(candidate_network.overlaps(reserved) for reserved in reserved_networks)
-
-        # Check against already-allocated subnets in this batch
-        has_batch_conflict = any(candidate_network.overlaps(already) for already in allocated_networks)
-
-        if not has_aws_conflict and not has_reserved_conflict and not has_batch_conflict:
+        if not has_conflict:
             logger.info("Allocated subnet: %s", candidate_cidr)
             allocated.append(candidate_cidr)
-            allocated_networks.append(candidate_network)
+            occupied.add(candidate_cidr)
 
     if len(allocated) < count:
-        # Not enough free subnets - critical infrastructure issue
         _publish_subnet_exhaustion_alarm(vpc_id, cidr_prefix, subnet_size)
         raise RuntimeError(
             f"Could not allocate {count} /{subnet_size} subnets in VPC {vpc_id}. "
@@ -334,60 +316,68 @@ def _allocate_subnets_internal(
     return allocated
 
 
-STALE_RESERVATION_MINUTES = 30
-
-
-def _get_reserved_subnets(
+def _get_tracked_subnets(
     vpc_id: str,
-    conn: psycopg.Connection | None = None,
+    conn: psycopg.Connection,
 ) -> list[ipaddress.IPv4Network]:
-    """Query the allocation table for non-stale reserved/active CIDRs.
+    """Query allocation table for all tracked subnets in a VPC.
 
-    Reservations older than STALE_RESERVATION_MINUTES with status='reserved'
-    are considered stale (provisioner crashed) and ignored.
+    Row exists = occupied. No status column, no stale logic.
 
     Args:
         vpc_id: The VPC ID to check.
-        conn: Optional DB connection (reuses lock connection when available).
+        conn: DB connection (must be provided).
 
     Returns:
-        List of reserved/active networks.
+        List of tracked networks.
     """
-    if conn is None:
-        try:
-            conn = _get_db_connection()
-        except Exception:
-            logger.debug("No DB connection for allocation table check, skipping")
-            return []
-
-    stale_cutoff = datetime.now(UTC) - timedelta(minutes=STALE_RESERVATION_MINUTES)
     networks: list[ipaddress.IPv4Network] = []
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT cidr FROM engine_subnetallocation
-                WHERE vpc_id = %s
-                  AND (
-                    status = 'active'
-                    OR (status = 'reserved' AND reserved_at > %s)
-                  )
-                """,
-                (vpc_id, stale_cutoff),
-            )
-            for (cidr,) in cur.fetchall():
-                try:
-                    networks.append(ipaddress.IPv4Network(cidr))
-                except ValueError:
-                    logger.warning("Invalid CIDR in allocation table: %s", cidr)
-    except Exception as e:
-        logger.warning("Failed to query allocation table (continuing without): %s", e)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT cidr FROM engine_subnetallocation WHERE vpc_id = %s",
+            (vpc_id,),
+        )
+        for (cidr,) in cur.fetchall():
+            try:
+                networks.append(ipaddress.IPv4Network(cidr))
+            except ValueError:
+                logger.warning("Invalid CIDR in allocation table: %s", cidr)
 
     return networks
 
 
-def _reserve_allocations(
+def _record_allocation(
+    conn: psycopg.Connection,
+    vpc_id: str,
+    cidr: str,
+    subnet_size: int,
+    range_id: int,
+    request_id: str,
+) -> None:
+    """Insert a single allocation row. Idempotent via ON CONFLICT.
+
+    Args:
+        conn: Active DB connection holding the table lock.
+        vpc_id: The VPC ID.
+        cidr: CIDR string to record.
+        subnet_size: Subnet prefix length (24 or 28).
+        range_id: Range database ID (0 for drift-discovered subnets).
+        request_id: Request UUID for correlation (empty for drift-discovered).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO engine_subnetallocation
+                (vpc_id, cidr, subnet_size, range_id, request_id, created_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (vpc_id, cidr) DO NOTHING
+            """,
+            (vpc_id, cidr, subnet_size, range_id, request_id),
+        )
+
+
+def _record_allocations(
     conn: psycopg.Connection,
     vpc_id: str,
     cidrs: list[str],
@@ -395,93 +385,49 @@ def _reserve_allocations(
     range_id: int,
     request_id: str,
 ) -> None:
-    """Insert reservation rows for allocated CIDRs.
+    """Insert allocation rows for allocated CIDRs.
 
-    Called inside the advisory lock, before releasing it.
+    Called inside the table lock. Failures are fatal.
 
     Args:
-        conn: Active DB connection (same one holding the advisory lock).
+        conn: Active DB connection holding the table lock.
         vpc_id: The VPC ID.
-        cidrs: List of CIDR strings to reserve.
+        cidrs: List of CIDR strings to record.
         subnet_size: Subnet prefix length (24 or 28).
         range_id: Range database ID.
         request_id: Request UUID for correlation.
     """
-    try:
-        with conn.cursor() as cur:
-            for cidr in cidrs:
-                cur.execute(
-                    """
-                    INSERT INTO engine_subnetallocation
-                        (vpc_id, cidr, subnet_size, range_id, request_id, status, reserved_at)
-                    VALUES (%s, %s, %s, %s, %s, 'reserved', NOW())
-                    ON CONFLICT ON CONSTRAINT unique_active_cidr_per_vpc DO NOTHING
-                    """,
-                    (vpc_id, cidr, subnet_size, range_id, request_id),
-                )
-            conn.commit()
-        logger.info(
-            "Reserved %d CIDRs in allocation table for request %s",
-            len(cidrs),
-            request_id,
-        )
-    except Exception as e:
-        logger.warning("Failed to reserve CIDRs in allocation table (non-fatal): %s", e)
-
-
-def confirm_subnet_allocations(request_id: str) -> None:
-    """Mark reserved allocations as active after successful Terraform apply.
-
-    Args:
-        request_id: Request UUID whose reservations to confirm.
-    """
-    try:
-        with _get_db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE engine_subnetallocation
-                SET status = 'active', confirmed_at = NOW()
-                WHERE request_id = %s AND status = 'reserved'
-                """,
-                (request_id,),
-            )
-            conn.commit()
-            logger.info("Confirmed subnet allocations for request %s", request_id)
-    except Exception as e:
-        logger.warning("Failed to confirm subnet allocations (non-fatal): %s", e)
+    for cidr in cidrs:
+        _record_allocation(conn, vpc_id, cidr, subnet_size, range_id, request_id)
+    logger.info(
+        "Recorded %d subnet allocations for request %s",
+        len(cidrs),
+        request_id,
+    )
 
 
 def release_subnet_allocations(request_id: str) -> None:
-    """Mark allocations as released on destroy or failure.
+    """Delete allocation rows when a range is destroyed or failed.
 
     Args:
-        request_id: Request UUID whose allocations to release.
+        request_id: Request UUID whose allocations to remove.
     """
-    try:
-        with _get_db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE engine_subnetallocation
-                SET status = 'released', released_at = NOW()
-                WHERE request_id = %s AND status IN ('reserved', 'active')
-                """,
-                (request_id,),
-            )
-            conn.commit()
-            logger.info("Released subnet allocations for request %s", request_id)
-    except Exception as e:
-        logger.warning("Failed to release subnet allocations (non-fatal): %s", e)
+    with _get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM engine_subnetallocation WHERE request_id = %s",
+            (request_id,),
+        )
+        conn.commit()
+        logger.info("Released subnet allocations for request %s", request_id)
 
 
 def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> str:
     """Find a free subnet in the VPC by querying AWS.
 
-    NOTE: For ranges with multiple subnets, use allocate_subnets() instead to
-    avoid race conditions. This function is kept for backwards compatibility.
+    NOTE: For ranges with multiple subnets, use allocate_subnets() instead.
 
-    Uses a PostgreSQL advisory lock to prevent concurrent provisions from
-    allocating the same CIDR. The lock is scoped to the VPC ID, so provisions
-    in different VPCs can proceed in parallel.
+    Uses a PostgreSQL table-level EXCLUSIVE lock on engine_subnetallocation
+    to serialize all concurrent allocations.
 
     This queries AWS for all existing subnets in the VPC and finds a subnet
     of the requested size that doesn't conflict with any of them.
@@ -511,35 +457,17 @@ def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> s
         cidr_prefix,
     )
 
-    # Use advisory lock to prevent concurrent subnet allocations in the same VPC
-    lock_id = _get_vpc_lock_id(vpc_id)
-    logger.debug("Acquiring advisory lock %d for VPC %s", lock_id, vpc_id)
+    # Table-level lock serializes ALL concurrent allocations.
+    # No silent fallback — if the lock fails, provisioning fails.
+    with _get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute("LOCK TABLE engine_subnetallocation IN EXCLUSIVE MODE")
+        logger.info("Acquired table lock on engine_subnetallocation for VPC %s", vpc_id)
 
-    try:
-        with _get_db_connection() as conn, conn.cursor() as cur:
-            # Acquire advisory lock (blocks other allocations for this VPC)
-            cur.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
-            logger.debug("Acquired advisory lock %d", lock_id)
-
-            try:
-                # Now safely find a free subnet with the lock held
-                return _find_free_subnet_internal(vpc_id, cidr_prefix, subnet_size)
-            finally:
-                # Always release the lock
-                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
-                logger.debug("Released advisory lock %d", lock_id)
-    except psycopg.Error as e:
-        # If DB connection fails, fall back to unlocked allocation
-        # AWS will reject duplicate CIDRs anyway, so this is safe
-        logger.warning(
-            "Failed to acquire advisory lock for subnet allocation (falling back to unlocked): %s",
-            e,
-        )
         return _find_free_subnet_internal(vpc_id, cidr_prefix, subnet_size)
 
 
 def _find_free_subnet_internal(vpc_id: str, cidr_prefix: str, subnet_size: int) -> str:
-    """Internal subnet finding logic (called with or without advisory lock).
+    """Internal subnet finding logic (called with table lock held).
 
     Args:
         vpc_id: The VPC ID to check.

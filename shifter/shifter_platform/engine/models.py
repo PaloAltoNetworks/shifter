@@ -393,8 +393,10 @@ class Range(models.Model):
         """
         Allocate the next available subnet index for a new range.
 
-        Uses SELECT FOR UPDATE to prevent race conditions when multiple
-        ranges are being created concurrently.
+        Uses a table-level EXCLUSIVE lock to serialize all concurrent
+        allocations. This prevents race conditions even when no rows
+        exist in the table (unlike SELECT FOR UPDATE which only locks
+        matching rows).
 
         Returns:
             int: The allocated subnet index (1-4048)
@@ -402,14 +404,22 @@ class Range(models.Model):
         Raises:
             ValueError: If no subnet indices are available (4048 active ranges)
         """
+        from django.db import connection
+
         with transaction.atomic():
-            # Lock rows to prevent race conditions
+            # Table-level lock serializes ALL concurrent allocations.
+            # EXCLUSIVE mode blocks other EXCLUSIVE locks and all writes,
+            # but allows concurrent reads (SELECT without FOR UPDATE).
+            # Skip for SQLite (used in tests) — SQLite serializes at the file level.
+            if connection.vendor != "sqlite":
+                with connection.cursor() as cursor:
+                    cursor.execute("LOCK TABLE mission_control_range IN EXCLUSIVE MODE")
+
             # Get all subnet_index values currently in use by active ranges
             # Exclude terminal states (DESTROYED, FAILED) - those ranges don't have
             # AWS resources or their resources are being cleaned up
             used_indices = set(
-                cls.objects.select_for_update()
-                .exclude(status__in=[cls.Status.DESTROYED, cls.Status.FAILED])
+                cls.objects.exclude(status__in=[cls.Status.DESTROYED, cls.Status.FAILED])
                 .exclude(subnet_index__isnull=True)
                 .values_list("subnet_index", flat=True)
             )
@@ -559,49 +569,30 @@ class Subnet(Instantiation):
 
 
 class SubnetAllocation(models.Model):
-    """Tracks CIDR reservations to prevent race conditions during concurrent provisioning.
+    """Tracks allocated subnets to prevent CIDR collisions during concurrent provisioning.
 
-    When multiple ranges provision concurrently, there's a TOCTOU gap between
-    selecting a free CIDR and Terraform actually creating the AWS subnet (~30-90s).
-    This table reserves CIDRs at advisory-lock time so subsequent allocations
-    see them as taken.
+    Row exists = subnet is occupied. No row = subnet is free.
+    Rows are INSERTed on allocation and DELETEd on destroy.
 
-    Lifecycle:
-        reserved → active (on successful Terraform apply)
-        reserved → released (on provision failure)
-        active → released (on range destroy)
-
-    Stale reservations (>30min in 'reserved' status) are ignored during
-    allocation, allowing reclamation if a provisioner crashes.
+    The allocator also reconciles with AWS: if a subnet exists in AWS
+    but not in this table, it's inserted (drift repair).
     """
-
-    class Status(models.TextChoices):
-        RESERVED = "reserved"
-        ACTIVE = "active"
-        RELEASED = "released"
 
     vpc_id = models.CharField(max_length=30)
     cidr = models.CharField(max_length=20, help_text="e.g. 10.1.2.16/28")
     subnet_size = models.IntegerField(help_text="Prefix length: 24 or 28")
-    range_id = models.IntegerField()
-    request_id = models.CharField(max_length=64)
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.RESERVED)
-    reserved_at = models.DateTimeField(auto_now_add=True)
-    confirmed_at = models.DateTimeField(null=True, blank=True)
-    released_at = models.DateTimeField(null=True, blank=True)
+    range_id = models.IntegerField(default=0)
+    request_id = models.CharField(max_length=64, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "engine_subnetallocation"
-        indexes = [
-            models.Index(fields=["vpc_id", "status"]),
-        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["vpc_id", "cidr"],
-                condition=models.Q(status__in=["reserved", "active"]),
-                name="unique_active_cidr_per_vpc",
+                name="unique_cidr_per_vpc",
             ),
         ]
 
     def __str__(self):
-        return f"{self.cidr} in {self.vpc_id} ({self.status})"
+        return f"{self.cidr} in {self.vpc_id}"

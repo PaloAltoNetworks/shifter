@@ -1,0 +1,301 @@
+{% extends "mission_control/base.html" %}
+{% block title %}{{ challenge.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.detail-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 16px;
+    align-items: start;
+}
+
+.breadcrumb {
+    display: flex;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+    list-style: none;
+    padding: 0;
+    margin-top: 0;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb li + li::before {
+    content: "/";
+    margin-right: 4px;
+    color: var(--xdr-text-secondary);
+}
+
+.challenge-badges {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-category {
+    background: rgba(18, 141, 243, 0.15);
+    color: #128df3;
+}
+
+.badge-easy {
+    background: rgba(0, 210, 106, 0.15);
+    color: #00d26a;
+}
+
+.badge-medium {
+    background: rgba(250, 173, 20, 0.15);
+    color: #faad14;
+}
+
+.badge-hard {
+    background: rgba(255, 77, 79, 0.15);
+    color: #ff4d4f;
+}
+
+.badge-expert {
+    background: rgba(184, 184, 184, 0.15);
+    color: #b8b8b8;
+}
+
+.badge-points {
+    background: rgba(184, 184, 184, 0.15);
+    color: #b8b8b8;
+}
+
+.badge-correct {
+    background: rgba(0, 210, 106, 0.15);
+    color: #00d26a;
+}
+
+.badge-incorrect {
+    background: rgba(255, 77, 79, 0.15);
+    color: #ff4d4f;
+}
+
+.badge-secondary {
+    background: rgba(184, 184, 184, 0.15);
+    color: #b8b8b8;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+}
+
+.detail-row + .detail-row {
+    border-top: 1px solid var(--xdr-border);
+}
+
+.detail-label {
+    color: var(--xdr-text-secondary);
+}
+
+.detail-value {
+    font-weight: 600;
+    color: var(--xdr-text);
+}
+
+.challenge-description {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--xdr-text);
+}
+
+.challenge-description p {
+    margin: 0 0 8px;
+}
+
+.empty-message {
+    padding: 24px;
+    text-align: center;
+    color: var(--xdr-text-secondary);
+    font-size: 13px;
+}
+
+@media (max-width: 960px) {
+    .detail-layout {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="page-header">
+    <nav>
+        <ol class="breadcrumb">
+            <li><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+            <li><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+            <li><a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}">Challenges</a></li>
+            <li>{{ challenge.name }}</li>
+        </ol>
+    </nav>
+    <div class="flex-between">
+        <div>
+            <h1 class="page-title">{{ challenge.name }}</h1>
+            <div class="challenge-badges">
+                <span class="badge badge-category">{{ challenge.category|title }}</span>
+                {% if challenge.difficulty == 'easy' %}
+                <span class="badge badge-easy">Easy</span>
+                {% elif challenge.difficulty == 'medium' %}
+                <span class="badge badge-medium">Medium</span>
+                {% elif challenge.difficulty == 'hard' %}
+                <span class="badge badge-hard">Hard</span>
+                {% elif challenge.difficulty == 'expert' %}
+                <span class="badge badge-expert">Expert</span>
+                {% endif %}
+                <span class="badge badge-points">{{ challenge.points }} pts</span>
+            </div>
+        </div>
+        {% if event.is_modifiable %}
+        <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}" class="btn btn-primary">
+            Edit
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="detail-layout">
+    <!-- Main Column -->
+    <div>
+        <!-- Description -->
+        <div class="card">
+            <div class="card-title">Description</div>
+            <div class="challenge-description">{{ challenge.description|linebreaks }}</div>
+        </div>
+
+        <!-- Hint -->
+        {% if challenge.hint %}
+        <div class="card">
+            <div class="card-title">Hint</div>
+            <p style="margin: 0 0 4px; font-size: 14px;">{{ challenge.hint }}</p>
+            <span class="text-muted text-small">Penalty: {{ challenge.hint_penalty }}% of points</span>
+        </div>
+        {% endif %}
+
+        <!-- Recent Submissions -->
+        <div class="card">
+            <div class="card-title">Recent Submissions</div>
+            {% if recent_submissions %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Participant</th>
+                        <th>Time</th>
+                        <th>Result</th>
+                        <th>Points</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sub in recent_submissions %}
+                    <tr>
+                        <td>{{ sub.participant.name }}</td>
+                        <td>{{ sub.submitted_at|date:"M d, H:i:s" }}</td>
+                        <td>
+                            {% if sub.is_correct %}
+                            <span class="badge badge-correct">Correct</span>
+                            {% else %}
+                            <span class="badge badge-incorrect">Incorrect</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ sub.points_awarded }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-message">
+                No submissions yet.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div>
+        <!-- Statistics -->
+        <div class="card">
+            <div class="card-title">Statistics</div>
+            <div class="detail-row">
+                <span class="detail-label">Total Submissions</span>
+                <span class="detail-value">{{ total_submissions }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Correct Submissions</span>
+                <span class="detail-value">{{ correct_submissions }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Solve Rate</span>
+                <span class="detail-value">
+                    {% if total_submissions > 0 %}
+                    {{ correct_submissions|floatformat:0 }}%
+                    {% else %}
+                    N/A
+                    {% endif %}
+                </span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">First Blood</span>
+                <span class="detail-value">
+                    {% if first_blood %}
+                    {{ first_blood.participant.name }}
+                    {% else %}
+                    None yet
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="card">
+            <div class="card-title">Settings</div>
+            <div class="detail-row">
+                <span class="detail-label">Category</span>
+                <span class="detail-value">{{ challenge.category|title }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Points</span>
+                <span class="detail-value">{{ challenge.points }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Difficulty</span>
+                <span class="detail-value">{{ challenge.difficulty|title }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Flag Format</span>
+                <span class="detail-value">{% if challenge.flag_format %}{{ challenge.flag_format }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Max Attempts</span>
+                <span class="detail-value">{% if challenge.max_attempts %}{{ challenge.max_attempts }}{% else %}Unlimited{% endif %}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Release Time</span>
+                <span class="detail-value">{% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}{% else %}Immediate{% endif %}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Display Order</span>
+                <span class="detail-value">{{ challenge.order }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

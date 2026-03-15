@@ -1,0 +1,201 @@
+{% extends "mission_control/base.html" %}
+{% block title %}{% if is_add %}Add{% else %}Edit{% endif %} Participant - {{ event.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.participant-form-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    align-items: start;
+    max-width: 900px;
+}
+
+.breadcrumb {
+    display: flex;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+    list-style: none;
+    padding: 0;
+    margin-top: 0;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb li + li::before {
+    content: "/";
+    margin-right: 4px;
+    color: var(--xdr-text-secondary);
+}
+
+.form-help {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+.field-error {
+    font-size: 12px;
+    color: #ff4d4f;
+    margin-top: 4px;
+}
+
+.form-alert {
+    padding: 12px 16px;
+    border: 1px solid #ff4d4f;
+    border-radius: 4px;
+    background: rgba(255, 77, 79, 0.08);
+    color: #ff4d4f;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--xdr-border);
+    margin-top: 8px;
+}
+
+.btn-cancel {
+    background: transparent;
+    color: var(--xdr-text-secondary);
+    border: 1px solid var(--xdr-border);
+}
+
+.info-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0;
+}
+
+.info-list li {
+    position: relative;
+    padding-left: 16px;
+    font-size: 13px;
+    color: var(--xdr-text);
+    margin-bottom: 4px;
+}
+
+.info-list li::before {
+    content: "\2022";
+    position: absolute;
+    left: 0;
+    color: var(--xdr-text-secondary);
+}
+
+.info-note {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    padding-top: 12px;
+    border-top: 1px solid var(--xdr-border);
+    margin-top: 12px;
+}
+
+@media (max-width: 800px) {
+    .participant-form-layout {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="page-header">
+    <nav>
+        <ol class="breadcrumb">
+            <li><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
+            <li><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
+            <li><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
+            <li>{% if is_add %}Add{% else %}Edit{% endif %}</li>
+        </ol>
+    </nav>
+    <h1 class="page-title">{% if is_add %}Add Participant{% else %}Edit Participant{% endif %}</h1>
+</div>
+
+<div class="participant-form-layout">
+    <!-- Form Column -->
+    <div>
+        <div class="card">
+            {% if form.non_field_errors %}
+            <div class="form-alert">
+                {% for error in form.non_field_errors %}
+                {{ error }}
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+
+                <div class="form-group">
+                    <label class="form-label" for="id_name">Name *</label>
+                    <input type="text" id="id_name" name="{{ form.name.html_name }}" class="form-input" required value="{{ form.name.value|default_if_none:'' }}">
+                    {% if form.name.errors %}
+                    <div class="field-error">
+                        {% for error in form.name.errors %}{{ error }}{% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="form-help">Display name for the participant</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="id_email">Email *</label>
+                    <input type="email" id="id_email" name="{{ form.email.html_name }}" class="form-input" required value="{{ form.email.value|default_if_none:'' }}">
+                    {% if form.email.errors %}
+                    <div class="field-error">
+                        {% for error in form.email.errors %}{{ error }}{% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="form-help">Email address for sending invitation</div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                        {% if is_add %}Add Participant{% else %}Save Changes{% endif %}
+                    </button>
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-cancel">
+                        Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Sidebar Column -->
+    <div>
+        <div class="card">
+            <div class="card-title">Information</div>
+            {% if is_add %}
+            <p style="margin: 0; font-size: 13px; color: var(--xdr-text);">Adding a participant will:</p>
+            <ul class="info-list">
+                <li>Create a participant record</li>
+                <li>Generate an invitation token</li>
+                <li>Set status to "Invited"</li>
+            </ul>
+            <div class="info-note">
+                To actually send the invitation email, you will need to use the notification system after adding participants.
+            </div>
+            {% else %}
+            <p style="margin: 0; font-size: 13px; color: var(--xdr-text);">Update the participant's profile information.</p>
+            {% endif %}
+        </div>
+
+        {% if is_add %}
+        <div class="card">
+            <div class="card-title">Bulk Import</div>
+            <p style="margin: 0 0 12px; font-size: 13px; color: var(--xdr-text-secondary);">Need to add many participants at once?</p>
+            <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-secondary" style="font-size: 11px; height: 24px; min-width: 70px; padding: 0 16px;">
+                Import from CSV
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

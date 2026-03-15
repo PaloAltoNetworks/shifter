@@ -37,7 +37,7 @@ $publicKey = "{{ public_key }}"
 Write-Host "Configuring OpenSSH Server..."
 
 try {
-    # Check if OpenSSH Server is installed
+    # Check if OpenSSH Server is installed (should be baked into AMI)
     $sshCapability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
     if ($sshCapability.State -ne 'Installed') {
         Write-Host "Installing OpenSSH Server..."

@@ -123,21 +123,25 @@ def get_ami_id(ami_type: str) -> str:
     This ensures the provisioner always uses the latest AMI IDs without
     requiring a Terraform apply or ECS task definition update.
 
+    Known types ('kali', 'victim', 'windows', 'dc') use legacy SSM paths.
+    Custom ami_key values resolve to /shifter/ami/<ami_key>.
+
     Args:
-        ami_type: One of 'kali', 'victim', 'windows', 'dc'
+        ami_type: Known type or custom ami_key (e.g. 'ctf-webshell').
 
     Returns:
         AMI ID string
 
     Raises:
-        ValueError: If ami_type is unknown or SSM parameter not found
+        ValueError: If SSM parameter not found.
     """
     if ami_type in _ami_cache:
         return _ami_cache[ami_type]
 
+    # Known types use legacy SSM paths; custom keys construct path directly
     param_path = _AMI_SSM_PARAMS.get(ami_type)
     if not param_path:
-        raise ValueError(f"Unknown AMI type: {ami_type}")
+        param_path = f"/shifter/ami/{ami_type}"
 
     try:
         ssm = boto3.client("ssm")
@@ -2417,6 +2421,11 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                     cleanup_error,
                 )
 
+            # Release subnet reservations on provision failure
+            from components.network import release_subnet_allocations
+
+            release_subnet_allocations(request_id)
+
         publish_failed(
             request_id=request_id,
             range_id=range_id,
@@ -2464,7 +2473,14 @@ def _run_terraform_provision(
         subnet_count = len(spec_subnets)
         logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
 
-        allocated_cidrs = allocate_subnets(vpc_id, cidr_prefix, subnet_count, subnet_size=28)
+        allocated_cidrs = allocate_subnets(
+            vpc_id,
+            cidr_prefix,
+            subnet_count,
+            subnet_size=28,
+            range_id=range_id,
+            request_id=request_id,
+        )
         logger.info("Allocated CIDRs: %s", allocated_cidrs)
 
         # Add CIDRs to range_spec subnets
@@ -2481,6 +2497,11 @@ def _run_terraform_provision(
         range_terraform_runner.RANGE_MODULE_PATH,
     )
     logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
+
+    # Confirm subnet reservations now that AWS subnets exist
+    from components.network import confirm_subnet_allocations
+
+    confirm_subnet_allocations(request_id)
 
     subnets_output = output_data.get("subnets", {})
     instances_output = output_data.get("instances", [])
@@ -2599,6 +2620,11 @@ def _run_terraform_destroy(
             except Exception as e:
                 logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
 
+            # Release subnet reservations now that AWS subnets are gone
+            from components.network import release_subnet_allocations
+
+            release_subnet_allocations(request_id)
+
         # Auto-pause NGFW if no other active ranges
         try:
             if not user_has_active_ranges(user_id, range_id):
@@ -2671,6 +2697,10 @@ def _build_range_terraform_variables(
                     key=agent_s3_key,
                 )
 
+            # Resolve custom AMI if ami_key is set
+            ami_key = inst.get("ami_key")
+            resolved_ami_id = get_ami_id(ami_key) if ami_key else ""
+
             subnet_instances.append(
                 {
                     "uuid": inst.get("uuid", ""),
@@ -2679,6 +2709,7 @@ def _build_range_terraform_variables(
                     "instance_type": instance_type,
                     "agent_presigned_url": agent_presigned_url,
                     "join_domain": inst.get("join_domain", False),
+                    "ami_id": resolved_ami_id,
                 }
             )
 

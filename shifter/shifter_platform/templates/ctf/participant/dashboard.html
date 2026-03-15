@@ -1,0 +1,117 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Dashboard{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-1">{{ event.name }}</h1>
+            {% if event.status == 'active' %}
+            <span class="badge bg-success">Active</span>
+            {% elif event.status == 'scheduled' %}
+            <span class="badge bg-info">Upcoming</span>
+            {% elif event.status == 'completed' %}
+            <span class="badge bg-secondary">Ended</span>
+            {% elif event.status == 'draft' %}
+            <span class="badge bg-warning">Draft</span>
+            {% elif event.status == 'cancelled' %}
+            <span class="badge bg-danger">Cancelled</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card bg-primary text-white h-100">
+                <div class="card-body text-center">
+                    <h6 class="card-title">Score</h6>
+                    <h2 class="mb-0">{{ score }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card bg-info text-white h-100">
+                <div class="card-body text-center">
+                    <h6 class="card-title">Rank</h6>
+                    <h2 class="mb-0">{{ rank }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card bg-success text-white h-100">
+                <div class="card-body text-center">
+                    <h6 class="card-title">Challenges Solved</h6>
+                    <h2 class="mb-0">{{ solved_count }} / {{ total_challenges }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Links -->
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <a href="{% url 'ctf:challenges' %}" class="btn btn-outline-primary w-100 py-3">
+                View Challenges
+            </a>
+        </div>
+        <div class="col-md-4 mb-3">
+            <a href="{% url 'ctf:scoreboard' %}" class="btn btn-outline-primary w-100 py-3">
+                Scoreboard
+            </a>
+        </div>
+        <div class="col-md-4 mb-3">
+            <a href="{% url 'ctf:participant_range' %}" class="btn btn-outline-primary w-100 py-3">
+                Range
+            </a>
+        </div>
+    </div>
+
+    <!-- Recent Submissions -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Recent Submissions</h5>
+        </div>
+        <div class="card-body p-0">
+            {% if recent_submissions %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Challenge</th>
+                            <th>Result</th>
+                            <th>Points</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sub in recent_submissions %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'ctf:challenge_detail' challenge_id=sub.challenge.pk %}">
+                                    {{ sub.challenge.name }}
+                                </a>
+                            </td>
+                            <td>
+                                {% if sub.is_correct %}
+                                <span class="badge bg-success">Correct</span>
+                                {% else %}
+                                <span class="badge bg-danger">Incorrect</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ sub.points_awarded }}</td>
+                            <td>{{ sub.submitted_at|date:"M d, H:i" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <p class="mb-0">No submissions yet. Head to the challenges to get started!</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

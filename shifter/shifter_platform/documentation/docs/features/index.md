@@ -8,6 +8,10 @@ Detailed guides for each Shifter feature.
 - [Ranges](ranges) - Launch and manage demo environments
 - [Terminal](terminal) - Access range instances via SSH and RDP
 
+## Events
+
+- [CTF](ctf) - Capture-the-flag events with scored challenges and automated provisioning
+
 ## Advanced Features
 
 - [Credentials](credentials) - Manage SCM and deployment profile credentials

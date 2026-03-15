@@ -206,6 +206,10 @@ systemctl daemon-reload
 systemctl enable devnotes
 systemctl start devnotes
 
+echo "=== Disabling Apache (conflicts with nginx on port 80) ==="
+systemctl stop apache2 || true
+systemctl disable apache2
+
 echo "=== Configuring nginx reverse proxy ==="
 cat > /etc/nginx/sites-available/devnotes << 'NGXEOF'
 server {

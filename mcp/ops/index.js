@@ -2263,39 +2263,6 @@ server.tool(
 // ==========================================================================
 
 server.tool(
-  "describe_stacks",
-  "List CloudFormation stacks with status, last updated time, and drift detection status.",
-  {
-    env: EnvSchema,
-    name_filter: z
-      .string()
-      .optional()
-      .describe("Substring filter for stack names"),
-  },
-  async ({ env, name_filter }) => {
-    try {
-      const profile = getProfile(env);
-      const result = aws(profile, "cloudformation describe-stacks");
-      let stacks = (result.Stacks || []).map((s) => ({
-        name: s.StackName,
-        status: s.StackStatus,
-        drift_status: s.DriftInformation?.StackDriftStatus || "NOT_CHECKED",
-        last_updated: s.LastUpdatedTime || s.CreationTime,
-        description: s.Description || "",
-      }));
-      if (name_filter) {
-        const lower = name_filter.toLowerCase();
-        stacks = stacks.filter((s) => s.name.toLowerCase().includes(lower));
-      }
-      if (stacks.length === 0) return ok("No stacks found.");
-      return ok(JSON.stringify(stacks, null, 2));
-    } catch (e) {
-      return err(e);
-    }
-  },
-);
-
-server.tool(
   "terraform_state",
   "List resources from a Terraform state file stored in S3. Shows resource types, names, and modules.",
   {

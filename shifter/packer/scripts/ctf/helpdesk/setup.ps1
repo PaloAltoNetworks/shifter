@@ -3,9 +3,7 @@
 #        scheduled task runs cleanup.ps1 as SYSTEM -> modify script -> root flag
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Installing IIS ==="
-Install-WindowsFeature -Name Web-Server -IncludeManagementTools
-Set-Service -Name W3SVC -StartupType Automatic
+# IIS and W3SVC already installed and configured in base AMI (services.ps1)
 
 # Create static helpdesk page
 $iisRoot = "C:\inetpub\wwwroot"
@@ -136,8 +134,7 @@ $rootAcl.AddAccessRule($systemRule)
 Set-Acl "C:\Users\Administrator\Desktop\root.txt" $rootAcl
 
 Write-Host "=== Configuring firewall ==="
+# RDP and HTTP firewall rules already in base AMI (base.ps1)
 New-NetFirewallRule -DisplayName "SMB Inbound" -Direction Inbound -Protocol TCP -LocalPort 445 -Action Allow -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "RDP Inbound" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "HTTP Inbound" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -ErrorAction SilentlyContinue
 
 Write-Host "=== HelpDesk box setup complete ==="

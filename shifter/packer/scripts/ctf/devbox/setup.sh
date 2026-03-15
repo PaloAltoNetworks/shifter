@@ -9,7 +9,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "=== Installing packages ==="
 apt-get update
-apt-get install -y nginx openssh-server curl
+apt-get install -y nginx curl
 
 # Install Node.js 18.x from NodeSource (apt nodejs is too old for Express 4.18)
 curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
@@ -253,11 +253,6 @@ chmod 400 /home/devops/user.txt
 echo "FLAG{d3vb0x_r00t_pwn3d}" > /root/root.txt
 chmod 400 /root/root.txt
 
-echo "=== Configuring SSH ==="
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
-    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
-fi
-systemctl enable ssh
+# SSH already installed and configured in base AMI (services.sh)
 
 echo "=== DevBox setup complete ==="

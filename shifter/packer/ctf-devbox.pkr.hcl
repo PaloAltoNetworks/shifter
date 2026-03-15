@@ -1,6 +1,6 @@
 source "amazon-ebs" "ctf-devbox" {
   ami_name        = "${var.ami_prefix}-ctf-devbox-{{timestamp}}"
-  ami_description = "CTF Box 3 - DevBox - Command injection, SSH key hunting, GTFOBins, dual-homed pivot"
+  ami_description = "CTF Box 3 - DevBox - Command injection, SSH key hunting, GTFOBins, dual-homed pivot (based on shifter-ubuntu)"
   instance_type   = var.instance_type
   region          = var.aws_region
 
@@ -8,12 +8,12 @@ source "amazon-ebs" "ctf-devbox" {
 
   source_ami_filter {
     filters = {
-      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      name                = "${var.ami_prefix}-ubuntu-*"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
     }
     most_recent = true
-    owners      = ["099720109477"] // Canonical
+    owners      = ["self"]
   }
 
   ssh_username = "ubuntu"
@@ -41,7 +41,6 @@ build {
 
   provisioner "shell" {
     scripts = [
-      "scripts/ubuntu/base.sh",
       "scripts/ctf/devbox/setup.sh",
       "scripts/common/cleanup.sh"
     ]

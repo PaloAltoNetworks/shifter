@@ -1,6 +1,6 @@
 source "amazon-ebs" "ctf-vault" {
   ami_name        = "${var.ami_prefix}-ctf-vault-{{timestamp}}"
-  ami_description = "CTF Box 4 - Vault - Pivot target, WinRM, Backup Operators privesc, KeePass alt path"
+  ami_description = "CTF Box 4 - Vault - Pivot target, WinRM, Backup Operators privesc, KeePass alt path (based on shifter-windows)"
   instance_type   = var.instance_type
   region          = var.aws_region
 
@@ -10,12 +10,12 @@ source "amazon-ebs" "ctf-vault" {
 
   source_ami_filter {
     filters = {
-      name                = "Windows_Server-2022-English-Full-Base-*"
+      name                = "${var.ami_prefix}-windows-*"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
     }
     most_recent = true
-    owners      = ["amazon"]
+    owners      = ["self"]
   }
 
   communicator   = "winrm"
@@ -57,10 +57,6 @@ source "amazon-ebs" "ctf-vault" {
 
 build {
   sources = ["source.amazon-ebs.ctf-vault"]
-
-  provisioner "powershell" {
-    script = "scripts/windows/base.ps1"
-  }
 
   provisioner "powershell" {
     elevated_user     = "Administrator"

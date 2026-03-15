@@ -16,13 +16,14 @@ output "instances" {
   value = [
     for key, inst in aws_instance.range : {
       uuid               = local.instance_map[key].instance_uuid
+      name               = local.instance_map[key].name
       role               = local.instance_map[key].role
       os                 = local.instance_map[key].os_type
       subnet_name        = local.instance_map[key].subnet_name
       instance_id        = inst.id
       private_ip         = inst.private_ip
       ssh_key_secret_arn = aws_secretsmanager_secret.ssh_key[key].arn
-      hostname           = "shifter-${local.instance_map[key].role}-${var.range_id}"
+      hostname           = local.instance_map[key].name != "" ? local.instance_map[key].name : "shifter-${local.instance_map[key].role}-${var.range_id}"
       public_key         = tls_private_key.instance[key].public_key_openssh
       xdr_agent_url      = local.instance_map[key].agent_url
       join_domain        = local.instance_map[key].join_domain

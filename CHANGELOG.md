@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - CTF magic link now takes participants directly to Mission Control instead of showing a login page
 - Removed dead CTF login page — magic link is the only auth path for CTF participants
+- Logout now works for all auth types — unified `/logout/` view routes OIDC users through Cognito logout, magic-link/dev users through Django session logout
+- Dashboard session-expiry redirect no longer hardcodes `/oidc/authenticate/` — uses `/dashboard/` (the router) so all user types land correctly
 
 ### Changed
 - CTF participants now only see the Kali (attacker) box in the terminal UI — victim, DC, and NGFW tabs are filtered out in the `active_range()` context processor

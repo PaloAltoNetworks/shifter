@@ -12,7 +12,7 @@ apt-get update
 echo "postfix postfix/mailname string mailroom.local" | debconf-set-selections
 echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
 
-apt-get install -y vsftpd openssh-server postfix
+apt-get install -y vsftpd postfix
 
 echo "=== Configuring vsftpd for anonymous access ==="
 cat > /etc/vsftpd.conf << 'FTPEOF'
@@ -101,12 +101,7 @@ chmod 400 /home/svc-mail/user.txt
 echo "FLAG{m41lr00m_r00t_pwn3d}" > /root/root.txt
 chmod 400 /root/root.txt
 
-echo "=== Configuring SSH ==="
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-# Override cloud-init drop-in that disables password auth
-if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
-    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
-fi
+# SSH already installed and configured in base AMI (services.sh)
 
 echo "=== Fixing vsftpd PAM for anonymous login ==="
 # Default PAM config blocks anonymous FTP - replace with permissive auth
@@ -119,7 +114,7 @@ PAMEOF
 
 echo "=== Enabling services ==="
 systemctl enable vsftpd
-systemctl enable ssh
+# ssh already enabled in base AMI (services.sh)
 systemctl enable postfix
 
 echo "=== MailRoom box setup complete ==="

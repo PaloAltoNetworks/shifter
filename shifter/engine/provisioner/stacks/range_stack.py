@@ -579,6 +579,8 @@ class RangeStack(pulumi.ComponentResource):
             cidr_prefix=cidr_prefix,
             count=subnet_count,
             subnet_size=28,  # All range subnets use /28
+            range_id=config.range_id,
+            request_id=config.request_uuid,
         )
 
         logger.info(

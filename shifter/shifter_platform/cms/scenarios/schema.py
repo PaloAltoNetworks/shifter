@@ -43,6 +43,7 @@ class InstanceConfig(BaseModel):
     domain_controller: bool = False
     join_domain: bool = False
     dc_config: DCConfig | None = None
+    ami_key: str | None = None
 
     @model_validator(mode="after")
     def validate_dc_config(self) -> InstanceConfig:

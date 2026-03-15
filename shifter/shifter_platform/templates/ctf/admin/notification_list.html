@@ -1,0 +1,79 @@
+{% extends "mission_control/base.html" %}
+{% block title %}Notifications - {{ event.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.notification-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.notification-meta {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+.notification-body {
+    margin-top: 8px;
+    color: var(--xdr-text);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <h1 class="page-title">Notifications</h1>
+    <a href="{% url 'ctf:admin_notification_create' event_id=event.id %}" class="btn btn-primary">
+        New Notification
+    </a>
+</div>
+
+{% if notifications %}
+{% for n in notifications %}
+<div class="card">
+    <div class="notification-card">
+        <div>
+            <div class="card-title" style="margin-bottom: 0;">{{ n.subject }}</div>
+            <div class="notification-meta">
+                {{ n.notification_type|title }} &middot;
+                Created {{ n.created_at|date:"M j, Y g:i A" }}
+                {% if n.sent_at %}&middot; Sent {{ n.sent_at|date:"M j, Y g:i A" }}{% endif %}
+                {% if n.sent_count %}&middot; {{ n.sent_count }} delivered{% endif %}
+            </div>
+        </div>
+        <div>
+            {% if n.status == "sent" %}
+            <span class="status status-active"><span class="status-dot"></span> Sent</span>
+            {% elif n.status == "scheduled" %}
+            <span class="status status-paused"><span class="status-dot"></span> Scheduled</span>
+            {% elif n.status == "sending" %}
+            <span class="status status-provisioning"><span class="status-dot"></span> Sending</span>
+            {% elif n.status == "failed" %}
+            <span class="status status-error"><span class="status-dot"></span> Failed</span>
+            {% else %}
+            <span class="status status-offline"><span class="status-dot"></span> Draft</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="notification-body">{{ n.body|truncatewords:30 }}</div>
+    {% if n.status == "draft" %}
+    <div class="mt-md">
+        <form method="post" action="{% url 'ctf:api_notification_send' notification_id=n.id %}" style="display: inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">Send Now</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <p>No notifications yet.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

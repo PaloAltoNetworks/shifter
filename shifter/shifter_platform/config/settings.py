@@ -24,9 +24,10 @@ INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 # For testing, use a deterministic key; in production, use FIELD_ENCRYPTION_KEY env var
 FIELD_ENCRYPTION_KEY = os.environ.get(
     "FIELD_ENCRYPTION_KEY",
-    # Default key for testing only - NOT FOR PRODUCTION
-    # pragma: allowlist secret
-    "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE=" if os.environ.get("TESTING") == "1" else None,  # nosec B105
+    # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required)
+    "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # NOSONAR - test-only key, not a production credential
+    if os.environ.get("TESTING") == "1"
+    else None,
 )
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
@@ -60,6 +61,7 @@ INSTALLED_APPS = [
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
     "cms.experiments.apps.ExperimentsConfig",
+    "ctf.apps.CtfConfig",
 ]
 
 MIDDLEWARE = [
@@ -97,6 +99,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "mission_control.context_processors.active_range",
                 "shared.context_processors.user_permissions",
+                "ctf.context_processors.ctf_navigation",
             ],
         },
     },
@@ -244,7 +247,8 @@ OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_SCOPES = "openid email profile"
 
 # Redirect after login/logout
-LOGIN_REDIRECT_URL = "/mission-control/"
+# Uses the dashboard router to redirect users based on their user type
+LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Login URL - dev bypass in DEBUG, OIDC in production
@@ -265,6 +269,9 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
+    "/ctf/login/",  # CTF login page
+    "/ctf/register/",  # CTF magic link registration (token is the auth)
+    "/ctf/help/",  # CTF help page
 ]
 
 # ------------------------------------------------------------------------------
@@ -277,8 +284,8 @@ OIDC_EXEMPT_URLS = [
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 if not FIELD_ENCRYPTION_KEY:
     if DEBUG or os.environ.get("TESTING") == "1":
-        # Dev/test: use a fixed key (not for production!)
-        FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # nosec B105
+        # Dev/test default - not a production credential
+        FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # NOSONAR - dev/test-only key
     else:
         raise ValueError("FIELD_ENCRYPTION_KEY environment variable is required in production")
 
@@ -286,8 +293,7 @@ if not FIELD_ENCRYPTION_KEY:
 # Shifter Configuration
 # ------------------------------------------------------------------------------
 
-# TODO: Set via SHIFTER_SUPPORT_EMAIL env var
-SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "support@example.com")
+SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter.local")  # NOSONAR
 
 # Provisioning timeout - how long dashboard waits before showing timeout error
 # UI fallback is 60 min if not provided (avoids long range standup issues during testing)
@@ -363,6 +369,19 @@ SQS_QUEUE_CONFIG = {
         "handler": "cms.experiments.handlers.process_event",
     },
 }
+
+# ------------------------------------------------------------------------------
+# CTF Configuration
+# ------------------------------------------------------------------------------
+
+CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", "ctf@keplerops.com")
+CTF_DEFAULT_RANGE_SPINUP_MINUTES = int(os.environ.get("CTF_DEFAULT_RANGE_SPINUP_MINUTES", "30"))
+CTF_DEFAULT_CLEANUP_DELAY_HOURS = int(os.environ.get("CTF_DEFAULT_CLEANUP_DELAY_HOURS", "24"))
+
+# Email - SES
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+AWS_SES_REGION_NAME = "us-east-2"
+AWS_SES_REGION_ENDPOINT = "email.us-east-2.amazonaws.com"
 
 # ------------------------------------------------------------------------------
 # Django REST Framework Configuration
@@ -456,6 +475,11 @@ LOGGING = {
             "propagate": False,
         },
         "config": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "ctf": {
             "handlers": ["console"],
             "level": LOG_LEVEL,
             "propagate": False,

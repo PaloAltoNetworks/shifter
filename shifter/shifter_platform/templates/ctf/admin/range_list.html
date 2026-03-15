@@ -1,0 +1,81 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+{% block title %}Ranges - {{ event.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.range-id {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <h1 class="page-title">Range Management</h1>
+    <button class="btn btn-primary" id="btn-provision-all">Provision All Ranges</button>
+</div>
+
+<div class="card" style="padding: 0;">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Participant</th>
+                <th>Email</th>
+                <th>Range Status</th>
+                <th>Range ID</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in participants %}
+            <tr>
+                <td>{{ p.name }}</td>
+                <td>{{ p.email }}</td>
+                <td>
+                    {% if p.range_status == "ready" %}
+                    <span class="status status-active"><span class="status-dot"></span> Ready</span>
+                    {% elif p.range_status == "provisioning" %}
+                    <span class="status status-provisioning"><span class="status-dot"></span> Provisioning</span>
+                    {% elif p.range_status %}
+                    <span class="status status-offline"><span class="status-dot"></span> {{ p.range_status }}</span>
+                    {% else %}
+                    <span class="status status-paused"><span class="status-dot"></span> Not Assigned</span>
+                    {% endif %}
+                </td>
+                <td><span class="range-id">{{ p.range_instance_id|default:"-" }}</span></td>
+                <td>
+                    {% if not p.range_instance_id %}
+                    <button class="btn btn-secondary btn-provision"
+                            data-participant-id="{{ p.id }}">Provision</button>
+                    {% else %}
+                    <button class="btn btn-danger btn-destroy"
+                            data-participant-id="{{ p.id }}">Destroy</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="text-muted" style="text-align: center;">No participants yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/ctf-ranges.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var manager = new CTFRangeManager({
+        csrfToken: '{{ csrf_token }}',
+        provisionAllUrl: '{% url "ctf:api_provision_ranges" event_id=event.pk %}',
+        rangeListUrl: '{% url "ctf:api_range_list" event_id=event.pk %}',
+    });
+    manager.init();
+});
+</script>
+{% endblock %}

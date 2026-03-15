@@ -2,10 +2,13 @@
 
 import logging
 
+from django.conf import settings
+from django.contrib.auth import BACKEND_SESSION_KEY, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from shared.auth import is_ctf_organizer, is_ctf_participant
 
@@ -34,3 +37,37 @@ def dashboard_router(request):
     else:
         logger.debug("Routing standard user %s to Mission Control", request.user.email)
         return HttpResponseRedirect(reverse("mission_control:dashboard"))
+
+
+@require_POST
+def logout_view(request):
+    """Log out the current user, routing to the correct logout mechanism.
+
+    OIDC users (authenticated via ShifterOIDCBackend) get their Django
+    session cleared and are redirected to Cognito's logout endpoint to
+    also clear the identity provider session.
+
+    All other users (magic-link CTF participants, dev-login) get a
+    simple Django session logout and redirect to the landing page.
+    """
+    if not request.user.is_authenticated:
+        return HttpResponseRedirect(settings.LOGOUT_REDIRECT_URL)
+
+    backend = request.session.get(BACKEND_SESSION_KEY, "")
+    email = request.user.email
+    redirect_url = settings.LOGOUT_REDIRECT_URL
+
+    if "OIDCAuthenticationBackend" in backend:
+        # Build the Cognito logout URL before clearing the session,
+        # since provider_logout_url needs the request for the redirect URI.
+        logout_url_method = getattr(settings, "OIDC_OP_LOGOUT_URL_METHOD", "")
+        if logout_url_method:
+            from django.utils.module_loading import import_string
+
+            redirect_url = import_string(logout_url_method)(request)
+        logger.debug("OIDC logout for %s", email)
+    else:
+        logger.debug("Session logout for %s", email)
+
+    logout(request)
+    return HttpResponseRedirect(redirect_url)

@@ -19,7 +19,7 @@ class DashboardManager {
         this.resumeUrl = options.resumeUrl;
         this.agentsUrl = options.agentsUrl;
         this.scenariosUrl = options.scenariosUrl;
-        this.loginUrl = options.loginUrl || '/oidc/authenticate/';
+        this.loginUrl = options.loginUrl || '/dashboard/';
         this.viewOnly = options.viewOnly || false;
 
         // State

@@ -456,6 +456,55 @@ class TestProcessRangeEvent:
         # Verify status updated via request_id lookup
         instance = RangeInstance.objects.get(request__request_id=request_uuid)
         assert instance.status == ResourceStatus.FAILED.value
+        assert instance.range_id == 57  # range_id from event should be persisted
+
+    def test_range_id_not_overwritten_if_already_set(self):
+        """Handler does not overwrite an existing range_id with a different value from the event."""
+        from uuid import uuid4
+
+        from django.contrib.auth import get_user_model
+
+        from cms.handlers import process_range_event
+        from cms.models import RangeInstance, Request
+        from shared.enums import RequestType
+
+        User = get_user_model()
+        user = User.objects.create_user(username="testuser_guard", password="testpass")
+
+        request_uuid = uuid4()
+        cms_request = Request.objects.create(
+            request_id=request_uuid,
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+
+        # RangeInstance already has a range_id set (legacy pattern)
+        RangeInstance.objects.create(
+            range_id=10,
+            request=cms_request,
+            scenario_id="basic",
+            user_id=user.id,
+            status=ResourceStatus.PENDING.value,
+        )
+
+        # Event carries a different range_id
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "range.status.updated",
+                    "request_id": str(request_uuid),
+                    "range_id": 99,
+                    "new_status": ResourceStatus.PROVISIONING.value,
+                    "user_id": user.id,
+                }
+            )
+        }
+
+        process_range_event(message)
+
+        instance = RangeInstance.objects.get(request__request_id=request_uuid)
+        assert instance.status == ResourceStatus.PROVISIONING.value
+        assert instance.range_id == 10  # Original range_id preserved, not overwritten
 
     def test_request_id_lookup_preferred_over_range_id(self):
         """Handler prefers request_id lookup over range_id when both present.

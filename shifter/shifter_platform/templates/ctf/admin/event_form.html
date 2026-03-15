@@ -1,0 +1,492 @@
+{% extends "mission_control/base.html" %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit Event{% else %}Create Event{% endif %}{% endblock %}
+
+{% block extra_css %}
+<style>
+.event-form {
+    max-width: 720px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.form-help {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+.field-error {
+    font-size: 12px;
+    color: #ff4d4f;
+    margin-top: 4px;
+}
+
+.form-alert {
+    padding: 12px 16px;
+    border: 1px solid #ff4d4f;
+    border-radius: 4px;
+    background: rgba(255, 77, 79, 0.08);
+    color: #ff4d4f;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+}
+
+.form-alert.visible {
+    display: block;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 16px;
+    border-top: 1px solid var(--xdr-border);
+    margin-top: 8px;
+}
+
+.btn-cancel {
+    background: transparent;
+    color: var(--xdr-text-secondary);
+    border: 1px solid var(--xdr-border);
+}
+
+textarea.form-input {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* datetime-local inputs need color-scheme for dark mode */
+input[type="datetime-local"] {
+    color-scheme: dark;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="event-form">
+    <div class="page-header">
+        <h1 class="page-title">{% if is_edit %}Edit Event{% else %}Create CTF Event{% endif %}</h1>
+        <p class="text-muted mt-sm">{% if is_edit %}Update event configuration.{% else %}Configure a new Capture The Flag event.{% endif %}</p>
+    </div>
+
+    <div class="form-alert" id="form-alert"></div>
+
+    <!-- Basic Information -->
+    <div class="card">
+        <div class="card-title">Basic Information</div>
+
+        <div class="form-group">
+            <label class="form-label" for="field-name">Event Name *</label>
+            <input type="text" id="field-name" class="form-input" maxlength="200" required>
+            <div class="field-error" id="error-name"></div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="field-description">Description</label>
+            <textarea id="field-description" class="form-input" rows="4"></textarea>
+            <div class="form-help">Supports Markdown formatting</div>
+            <div class="field-error" id="error-description"></div>
+        </div>
+    </div>
+
+    <!-- Schedule -->
+    <div class="card">
+        <div class="card-title">Schedule</div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label" for="field-event_start">Event Start *</label>
+                <input type="datetime-local" id="field-event_start" class="form-input" required>
+                <div class="field-error" id="error-event_start"></div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="field-event_end">Event End *</label>
+                <input type="datetime-local" id="field-event_end" class="form-input" required>
+                <div class="field-error" id="error-event_end"></div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="field-registration_deadline">Registration Deadline</label>
+            <input type="datetime-local" id="field-registration_deadline" class="form-input">
+            <div class="form-help">Optional. Must be before event start.</div>
+            <div class="field-error" id="error-registration_deadline"></div>
+        </div>
+    </div>
+
+    <!-- Range Settings -->
+    <div class="card">
+        <div class="card-title">Range Settings</div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Scenario Template</label>
+                <div class="xdr-dropdown full-width" id="scenario-dropdown">
+                    <input type="hidden" name="scenario_id" id="field-scenario_id" value="">
+                    <button type="button" class="xdr-dropdown-trigger">
+                        <span class="xdr-dropdown-value placeholder">-- Select a scenario --</span>
+                        <span class="xdr-dropdown-chevron"></span>
+                    </button>
+                    <div class="xdr-dropdown-panel">
+                        <ul class="xdr-dropdown-items" id="scenario-items">
+                            <!-- Populated by JS -->
+                        </ul>
+                    </div>
+                </div>
+                <div class="field-error" id="error-scenario_id"></div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="field-range_spinup_minutes">Range Spinup (minutes)</label>
+                <input type="number" id="field-range_spinup_minutes" class="form-input" min="0" max="1440" value="30">
+                <div class="form-help">Minutes before event to start range provisioning (0 = at event start)</div>
+                <div class="field-error" id="error-range_spinup_minutes"></div>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-checkbox">
+                    <input type="checkbox" id="field-auto_cleanup" checked>
+                    <div>
+                        <span class="form-checkbox-label">Auto-cleanup ranges after event</span>
+                    </div>
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label class="form-checkbox">
+                    <input type="checkbox" id="field-ngfw_enabled">
+                    <div>
+                        <span class="form-checkbox-label">Enable NGFW</span>
+                        <div class="form-checkbox-help">Provision a Next-Generation Firewall per range</div>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <div class="form-group" style="max-width: 340px;">
+            <label class="form-label" for="field-cleanup_delay_hours">Cleanup Delay (hours)</label>
+            <input type="number" id="field-cleanup_delay_hours" class="form-input" min="0" value="24">
+            <div class="form-help">Hours after event end before cleanup</div>
+            <div class="field-error" id="error-cleanup_delay_hours"></div>
+        </div>
+    </div>
+
+    <!-- Participant Settings -->
+    <div class="card">
+        <div class="card-title">Participant Settings</div>
+
+        <div class="form-group" style="max-width: 340px;">
+            <label class="form-label" for="field-max_participants">Maximum Participants</label>
+            <input type="number" id="field-max_participants" class="form-input" min="1">
+            <div class="form-help">Leave blank for unlimited</div>
+            <div class="field-error" id="error-max_participants"></div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-checkbox">
+                    <input type="checkbox" id="field-team_mode">
+                    <div>
+                        <span class="form-checkbox-label">Enable Team Mode</span>
+                    </div>
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="field-team_size_limit">Team Size Limit</label>
+                <input type="number" id="field-team_size_limit" class="form-input" min="2" max="10">
+                <div class="form-help">Required if team mode is enabled (2-10)</div>
+                <div class="field-error" id="error-team_size_limit"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="form-actions">
+        <a id="cancel-link" href="{% if is_edit %}{% url 'ctf:admin_event_detail' event_id=event_id %}{% else %}{% url 'ctf:admin_event_list' %}{% endif %}" class="btn btn-cancel">
+            Cancel
+        </a>
+        <button type="button" class="btn btn-primary" id="submit-btn">
+            {% if is_edit %}Save Changes{% else %}Create Event{% endif %}
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var IS_EDIT = {{ is_edit|yesno:"true,false" }};
+    var CSRF_TOKEN = '{{ csrf_token }}';
+    {% if is_edit %}
+    var EVENT_ID = '{{ event_id }}';
+    var API_URL = '{% url "ctf:api_event_detail" event_id=event_id %}';
+    var DETAIL_URL = '{% url "ctf:admin_event_detail" event_id=event_id %}';
+    {% else %}
+    var API_URL = '{% url "ctf:api_event_list" %}';
+    {% endif %}
+
+    // --- DOM refs ---
+    var alertEl = document.getElementById('form-alert');
+    var submitBtn = document.getElementById('submit-btn');
+
+    var FIELDS = [
+        'name', 'description', 'event_start', 'event_end',
+        'registration_deadline', 'scenario_id', 'range_spinup_minutes',
+        'auto_cleanup', 'ngfw_enabled', 'cleanup_delay_hours',
+        'max_participants', 'team_mode', 'team_size_limit'
+    ];
+
+    // --- Helpers ---
+    function getField(name) {
+        return document.getElementById('field-' + name);
+    }
+
+    function getError(name) {
+        return document.getElementById('error-' + name);
+    }
+
+    function clearErrors() {
+        alertEl.textContent = '';
+        alertEl.classList.remove('visible');
+        FIELDS.forEach(function(name) {
+            var el = getError(name);
+            if (el) el.textContent = '';
+        });
+    }
+
+    function showFieldError(name, msg) {
+        var el = getError(name);
+        if (el) el.textContent = msg;
+    }
+
+    function showAlert(msg) {
+        alertEl.textContent = msg;
+        alertEl.classList.add('visible');
+        alertEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    /**
+     * Convert a datetime-local value (YYYY-MM-DDTHH:MM) to ISO-8601
+     * with seconds appended for Django parse_datetime.
+     */
+    function toISODatetime(val) {
+        if (!val) return null;
+        return val.length === 16 ? val + ':00' : val;
+    }
+
+    /**
+     * Convert an ISO datetime string to datetime-local value (YYYY-MM-DDTHH:MM).
+     */
+    function toDatetimeLocal(iso) {
+        if (!iso) return '';
+        return iso.substring(0, 16);
+    }
+
+    // --- Build form data ---
+    function collectFormData() {
+        var data = {
+            name: getField('name').value.trim(),
+            description: getField('description').value,
+            event_start: toISODatetime(getField('event_start').value),
+            event_end: toISODatetime(getField('event_end').value),
+            auto_cleanup: getField('auto_cleanup').checked,
+            team_mode: getField('team_mode').checked,
+        };
+
+        var regDeadline = getField('registration_deadline').value;
+        data.registration_deadline = regDeadline ? toISODatetime(regDeadline) : null;
+
+        var scenarioId = getField('scenario_id').value;
+        data.scenario_id = scenarioId || null;
+
+        var spinup = getField('range_spinup_minutes').value;
+        data.range_spinup_minutes = spinup ? parseInt(spinup, 10) : 30;
+
+        var cleanupHours = getField('cleanup_delay_hours').value;
+        data.cleanup_delay_hours = cleanupHours ? parseInt(cleanupHours, 10) : 0;
+
+        var maxParticipants = getField('max_participants').value;
+        data.max_participants = maxParticipants ? parseInt(maxParticipants, 10) : null;
+
+        var teamSizeLimit = getField('team_size_limit').value;
+        data.team_size_limit = teamSizeLimit ? parseInt(teamSizeLimit, 10) : null;
+
+        // Pack ngfw_enabled into range_config
+        data.range_config = {
+            ngfw_enabled: getField('ngfw_enabled').checked
+        };
+
+        return data;
+    }
+
+    // --- Client-side validation ---
+    function validate(data) {
+        var valid = true;
+        clearErrors();
+
+        if (!data.name) {
+            showFieldError('name', 'Event name is required.');
+            valid = false;
+        }
+        if (!data.event_start) {
+            showFieldError('event_start', 'Event start is required.');
+            valid = false;
+        }
+        if (!data.event_end) {
+            showFieldError('event_end', 'Event end is required.');
+            valid = false;
+        }
+        if (data.event_start && data.event_end && data.event_end <= data.event_start) {
+            showFieldError('event_end', 'Event end must be after event start.');
+            valid = false;
+        }
+        if (data.registration_deadline && data.event_start && data.registration_deadline >= data.event_start) {
+            showFieldError('registration_deadline', 'Registration deadline must be before event start.');
+            valid = false;
+        }
+        if (data.team_mode && (!data.team_size_limit || data.team_size_limit < 2 || data.team_size_limit > 10)) {
+            showFieldError('team_size_limit', 'Team size must be between 2 and 10 when team mode is enabled.');
+            valid = false;
+        }
+
+        if (!valid) {
+            showAlert('Please fix the errors below.');
+        }
+        return valid;
+    }
+
+    // --- Submit ---
+    function submitForm() {
+        var data = collectFormData();
+        if (!validate(data)) return;
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = IS_EDIT ? 'Saving...' : 'Creating...';
+
+        var method = IS_EDIT ? 'PUT' : 'POST';
+
+        fetch(API_URL, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN,
+            },
+            body: JSON.stringify(data),
+        })
+        .then(function(resp) {
+            return resp.json().then(function(json) {
+                return { ok: resp.ok, status: resp.status, data: json };
+            });
+        })
+        .then(function(result) {
+            if (result.ok) {
+                var eventId = IS_EDIT ? EVENT_ID : result.data.id;
+                window.location.href = '/ctf/admin/events/' + eventId + '/';
+            } else {
+                clearErrors();
+                var errorMsg = result.data.error || 'An error occurred.';
+
+                // Try to map field-specific errors
+                if (result.data.details && result.data.details.field_errors) {
+                    var fieldErrors = result.data.details.field_errors;
+                    Object.keys(fieldErrors).forEach(function(field) {
+                        showFieldError(field, fieldErrors[field]);
+                    });
+                }
+
+                showAlert(errorMsg);
+                submitBtn.disabled = false;
+                submitBtn.textContent = IS_EDIT ? 'Save Changes' : 'Create Event';
+            }
+        })
+        .catch(function(err) {
+            clearErrors();
+            showAlert('Network error: ' + err.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = IS_EDIT ? 'Save Changes' : 'Create Event';
+        });
+    }
+
+    submitBtn.addEventListener('click', submitForm);
+
+    // --- Load scenarios into dropdown ---
+    function loadScenarios() {
+        var scenarios = {{ scenarios_json|safe }};
+        var itemsEl = document.getElementById('scenario-items');
+
+        // Clear existing items
+        while (itemsEl.firstChild) {
+            itemsEl.removeChild(itemsEl.firstChild);
+        }
+
+        // Add empty option
+        var emptyLi = document.createElement('li');
+        emptyLi.className = 'xdr-dropdown-item';
+        emptyLi.dataset.value = '';
+        emptyLi.textContent = '(None)';
+        itemsEl.appendChild(emptyLi);
+
+        scenarios.forEach(function(s) {
+            var li = document.createElement('li');
+            li.className = 'xdr-dropdown-item';
+            li.dataset.value = s.id;
+            li.textContent = s.name;
+            itemsEl.appendChild(li);
+        });
+
+        // Initialize the XDR dropdown
+        return XdrDropdown.init(document.getElementById('scenario-dropdown'));
+    }
+
+    var scenarioDropdown = loadScenarios();
+
+    // --- Edit mode: populate fields from API ---
+    {% if is_edit %}
+    function populateForm() {
+        fetch(API_URL, {
+            headers: { 'X-CSRFToken': CSRF_TOKEN },
+        })
+        .then(function(resp) { return resp.json(); })
+        .then(function(event) {
+            getField('name').value = event.name || '';
+            getField('description').value = event.description || '';
+            getField('event_start').value = toDatetimeLocal(event.event_start);
+            getField('event_end').value = toDatetimeLocal(event.event_end);
+            getField('registration_deadline').value = toDatetimeLocal(event.registration_deadline);
+            getField('range_spinup_minutes').value = event.range_spinup_minutes || 30;
+            getField('auto_cleanup').checked = !!event.auto_cleanup;
+            getField('cleanup_delay_hours').value = event.cleanup_delay_hours || 0;
+            getField('max_participants').value = event.max_participants || '';
+            getField('team_mode').checked = !!event.team_mode;
+            getField('team_size_limit').value = event.team_size_limit || '';
+
+            // ngfw_enabled from range_config
+            var rc = event.range_config || {};
+            getField('ngfw_enabled').checked = !!rc.ngfw_enabled;
+
+            // Set scenario dropdown value
+            if (event.scenario_id && scenarioDropdown) {
+                scenarioDropdown.setValue(event.scenario_id);
+            }
+        })
+        .catch(function(err) {
+            showAlert('Failed to load event data: ' + err.message);
+        });
+    }
+
+    populateForm();
+    {% endif %}
+});
+</script>
+{% endblock %}

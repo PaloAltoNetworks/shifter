@@ -60,6 +60,28 @@
             outline: none;
             border-bottom-color: #eaebeb;
         }
+        select {
+            width: 100%;
+            padding: 0.75rem 0;
+            margin-bottom: 1.5rem;
+            background: #1f1f1f;
+            border: none;
+            border-bottom: 1px solid #575757;
+            color: #eaebeb;
+            font-family: Lato, "Assistant", sans-serif;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        select:focus {
+            outline: none;
+            border-bottom-color: #eaebeb;
+        }
+        label {
+            font-size: 0.75rem;
+            color: #b8b8b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
         button {
             background: #fff;
             color: #000;
@@ -84,6 +106,12 @@
         <form method="post">
             {% csrf_token %}
             <input type="email" name="email" value="dev@example.com" placeholder="Email">
+            <label for="user_type">User Type</label>
+            <select name="user_type" id="user_type">
+                <option value="standard">Standard (Mission Control)</option>
+                <option value="ctf_organizer">CTF Organizer</option>
+                <option value="ctf_participant">CTF Participant</option>
+            </select>
             <button type="submit">Login as Dev User</button>
         </form>
     </div>

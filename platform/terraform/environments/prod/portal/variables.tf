@@ -471,6 +471,27 @@ variable "messaging_alarm_actions" {
 }
 
 # ------------------------------------------------------------------------------
+# SES
+# ------------------------------------------------------------------------------
+
+variable "email_backend" {
+  description = "Django email backend"
+  type        = string
+  default     = "django_ses.SESBackend"
+}
+
+variable "ctf_from_email" {
+  description = "From address for CTF emails"
+  type        = string
+  default     = "ctf@keplerops.com"
+}
+
+variable "ses_domain" {
+  description = "Domain for SES email sending (e.g., keplerops.com)"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
 # Alerting
 # ------------------------------------------------------------------------------
 

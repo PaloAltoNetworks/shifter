@@ -351,6 +351,8 @@ jobs:
           SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
           SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
           REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
+          EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend" || echo "")
+          CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email" || echo "")
 
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           echo "Deploying image: $IMAGE"
@@ -374,6 +376,8 @@ jobs:
           COMMON_ENV="$COMMON_ENV -e PULUMI_PRIVATE_SUBNET_IDS=$PULUMI_PRIVATE_SUBNET_IDS"
           COMMON_ENV="$COMMON_ENV -e SQS_CMS_URL=$SQS_CMS_URL -e SQS_ENGINE_URL=$SQS_ENGINE_URL -e SQS_MC_URL=$SQS_MC_URL"
           [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
+          [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
+          [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
 
           docker pull "$IMAGE"
           docker stop portal worker-cms worker-engine worker-mc 2>/dev/null || true

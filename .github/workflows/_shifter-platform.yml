@@ -380,12 +380,13 @@ jobs:
           [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
 
           docker pull "$IMAGE"
-          docker stop portal worker-cms worker-engine worker-mc 2>/dev/null || true
-          docker rm portal worker-cms worker-engine worker-mc 2>/dev/null || true
+          docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
+          docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"
           eval docker run -d --name worker-cms --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue cms
           eval docker run -d --name worker-engine --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue engine
           eval docker run -d --name worker-mc --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_worker --queue mc
+          eval docker run -d --name ctf-scheduler --restart unless-stopped $COMMON_ENV "$IMAGE" python manage.py run_ctf_scheduler
           docker ps
           echo "Deployment complete!"
           EOFSCRIPT

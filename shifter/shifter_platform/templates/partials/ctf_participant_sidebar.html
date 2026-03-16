@@ -116,6 +116,20 @@
 
         {# Footer with help and user profile #}
         <div class="nav-footer">
+            {# Walkthrough #}
+            <div>
+                <a href="{% url 'ctf:ctf_walkthrough' %}"
+                   class="nav-menu-item nav-menu-item-level-0 {% if active_nav == 'walkthrough' %}active-link{% endif %}">
+                    <span class="nav-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">
+                            <title>walkthrough icon</title>
+                            <path fill="currentColor" d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+                        </svg>
+                    </span>
+                    <span class="hide-when-minimized hide-when-submenu nav-menu-item-content">Walkthrough</span>
+                </a>
+            </div>
+
             {# Help #}
             <div>
                 <a href="{% url 'ctf:ctf_help' %}" class="nav-menu-item nav-menu-item-level-0">

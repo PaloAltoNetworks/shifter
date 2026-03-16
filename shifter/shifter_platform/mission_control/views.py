@@ -332,6 +332,52 @@ def help_page(request: HttpRequest) -> HttpResponse:
     return render(request, "mission_control/help.html", context)
 
 
+@login_required
+@require_GET
+def walkthrough(request: HttpRequest) -> HttpResponse:
+    """Box 0 walkthrough with copy-pasteable prompts for CTF participants."""
+    from engine.models import Range
+
+    # Display names and flags per box — flags overwritten via SSM at event start
+    box_info = {
+        "webdev01": ("WebShell", "FLAG{todo_remove_before_prod}", "FLAG{never_trust_user_input}"),
+        "mx-internal": ("MailRoom", "FLAG{anonymous_access_granted}", "FLAG{path_less_traveled}"),
+        "support-win": ("HelpDesk", "FLAG{password_in_the_share}", "FLAG{scheduled_for_destruction}"),
+        "ci-runner": ("DevBox", "FLAG{dotenv_is_not_a_secret}", "FLAG{sudo_make_me_a_sandwich}"),
+        "backup-dc": ("Vault", "FLAG{backup_operators_unite}", "FLAG{keys_to_the_kingdom}"),
+    }
+
+    target_instances = []
+    webshell_ip = ""
+
+    # Find the user's active ready range and extract target IPs
+    user_range = Range.objects.filter(user_id=cast(int, request.user.pk), status="ready").first()
+    if user_range and user_range.provisioned_instances:
+        for inst in user_range.provisioned_instances:
+            if inst.get("role") != "attacker":
+                hostname = inst.get("name", "")
+                display_name, user_flag, root_flag = box_info.get(hostname, (hostname, "", ""))
+                target_instances.append(
+                    {
+                        "name": display_name,
+                        "private_ip": inst.get("private_ip", ""),
+                        "os_type": inst.get("os_type", ""),
+                        "user_flag": user_flag,
+                        "root_flag": root_flag,
+                    }
+                )
+                if hostname == "webdev01":
+                    webshell_ip = inst.get("private_ip", "")
+
+    context = {
+        "page_title": "Walkthrough",
+        "active_nav": "walkthrough",
+        "target_instances": target_instances,
+        "webshell_ip": webshell_ip,
+    }
+    return render(request, "mission_control/walkthrough.html", context)
+
+
 # -----------------------------------------------------------------------------
 # Presigned URL Upload API
 # -----------------------------------------------------------------------------

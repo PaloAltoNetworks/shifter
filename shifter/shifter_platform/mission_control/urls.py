@@ -13,6 +13,7 @@ urlpatterns = [
     path("terminal/", views.terminal, name="terminal"),
     path("settings/", views.settings, name="settings"),
     path("help/", views.help_page, name="help"),
+    path("walkthrough/", views.walkthrough, name="walkthrough"),
     # Presigned URL upload API
     path("api/upload/initiate/", views.initiate_upload, name="initiate_upload"),
     path("api/upload/complete/", views.complete_upload, name="complete_upload"),

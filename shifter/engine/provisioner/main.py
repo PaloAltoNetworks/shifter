@@ -772,6 +772,25 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict:
         }
 
 
+def _update_range_config(range_id: int, range_spec: dict) -> None:
+    """Write updated range_config back to mission_control_range.
+
+    Called after subnet CIDR allocation to persist the CIDRs so that
+    destroy can read them later without needing to re-query allocations.
+
+    Args:
+        range_id: The range database ID.
+        range_spec: The updated range spec dict (with CIDRs populated).
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE mission_control_range SET range_config = %s WHERE id = %s",
+            (json.dumps(range_spec), range_id),
+        )
+        conn.commit()
+    logger.info("Persisted updated range_config for range %d", range_id)
+
+
 def get_range_data_by_request_id(request_id: str) -> dict:
     """Read Range request data from Engine database.
 
@@ -2485,6 +2504,9 @@ def _run_terraform_provision(
         for i, subnet in enumerate(spec_subnets):
             subnet["cidr"] = allocated_cidrs[i]
 
+        # Persist allocated CIDRs back to range_config so destroy can read them
+        _update_range_config(range_id, range_spec)
+
     # Build Terraform variables from range spec (now with CIDRs)
     tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
 
@@ -2590,6 +2612,16 @@ def _run_terraform_destroy(
             remove_ngfw_subnets(user_id, spec_subnets, range_id)
         except Exception as e:
             logger.warning("NGFW subnet removal failed (continuing): %s", e)
+
+    # Recover CIDRs from subnet allocations if missing from range_config
+    if spec_subnets and not spec_subnets[0].get("cidr"):
+        logger.warning("range_config missing CIDRs for range %d, recovering from allocation table", range_id)
+        from components.network import get_allocated_cidrs
+
+        allocated = get_allocated_cidrs(range_id)
+        for i, subnet in enumerate(spec_subnets):
+            if i < len(allocated):
+                subnet["cidr"] = allocated[i]
 
     logger.info("Running terraform destroy for range...")
 

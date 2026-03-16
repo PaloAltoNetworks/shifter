@@ -11,6 +11,7 @@ Detailed guides for each Shifter feature.
 ## Events
 
 - [CTF](ctf) - Capture-the-flag events with scored challenges and automated provisioning
+- [CTF Organizer Guide](ctf-organizer-guide) - Run guide with walkthroughs, hints, and timing
 
 ## Advanced Features
 

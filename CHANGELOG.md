@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.3] - 2026-03-16
+
+### Added
+- CTF walkthrough page with 7-step copy-pasteable prompts for Box 0 (WebShell) guided workshop — accessible to participants at `/ctf/walkthrough/`
+
+## [3.15.2] - 2026-03-15
+
+### Fixed
+- Range destroy no longer fails with empty CIDR — allocated subnet CIDRs are now persisted to range_config during provisioning, and destroy falls back to the allocation table for ranges provisioned before this fix
+
+## [3.15.1] - 2026-03-15
+
+### Added
+- CTF scheduler process (`run_ctf_scheduler`) added to deployment workflow and docker-compose — scheduled tasks (range provisioning, event start/end, cleanup) now execute automatically
+
+### Removed
+- `describe_stacks` tool from the ops MCP server — CloudFormation is not used in this project (Pulumi is used instead), so the tool was dead code
+
 ## [3.15.0] - 2026-03-15
 
 ### Fixed

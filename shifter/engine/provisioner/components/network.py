@@ -421,6 +421,28 @@ def release_subnet_allocations(request_id: str) -> None:
         logger.info("Released subnet allocations for request %s", request_id)
 
 
+def get_allocated_cidrs(range_id: int) -> list[str]:
+    """Look up allocated CIDRs for a range from the subnet allocation table.
+
+    Used as a fallback when range_config doesn't have CIDRs persisted
+    (e.g., ranges provisioned before the persist-on-allocate fix).
+
+    Args:
+        range_id: The range database ID.
+
+    Returns:
+        List of CIDR strings allocated to this range, ordered by creation time.
+    """
+    with _get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT cidr FROM engine_subnetallocation WHERE range_id = %s ORDER BY created_at",
+            (range_id,),
+        )
+        cidrs = [row[0] for row in cur.fetchall()]
+    logger.info("Retrieved %d allocated CIDRs for range %d", len(cidrs), range_id)
+    return cidrs
+
+
 def _find_free_subnet(vpc_id: str, cidr_prefix: str, subnet_size: int = 24) -> str:
     """Find a free subnet in the VPC by querying AWS.
 

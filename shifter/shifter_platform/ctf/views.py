@@ -325,11 +325,31 @@ def participant_range(request: HttpRequest) -> HttpResponse:
     if not participant:
         return render(request, "ctf/participant/range.html", {})
 
+    # Look up provisioned instances (with IPs) from the engine Range
+    target_instances = []
+    if participant.range_instance_id and participant.range_status == "ready":
+        from engine.models import Range
+
+        try:
+            engine_range = Range.objects.get(id=participant.range_instance_id)
+            for inst in engine_range.provisioned_instances or []:
+                if inst.get("role") != "attacker":
+                    target_instances.append(
+                        {
+                            "name": inst.get("name", ""),
+                            "private_ip": inst.get("private_ip", ""),
+                            "os_type": inst.get("os_type", ""),
+                        }
+                    )
+        except Range.DoesNotExist:
+            pass
+
     context = {
         "participant": participant,
         "event": participant.event,
         "range_instance_id": participant.range_instance_id,
         "range_status": participant.range_status,
+        "target_instances": target_instances,
     }
     return render(request, "ctf/participant/range.html", context)
 
@@ -450,6 +470,13 @@ def ctf_help(request: HttpRequest) -> HttpResponse:
     Public help page for CTF participants.
     """
     return render(request, "ctf/help.html")
+
+
+@login_required
+@ctf_participant_required
+def ctf_walkthrough(request: HttpRequest) -> HttpResponse:
+    """Box 0 walkthrough with copy-pasteable prompts for participants."""
+    return render(request, "ctf/participant/walkthrough.html")
 
 
 # -----------------------------------------------------------------------------

@@ -472,13 +472,6 @@ def ctf_help(request: HttpRequest) -> HttpResponse:
     return render(request, "ctf/help.html")
 
 
-@login_required
-@ctf_participant_required
-def ctf_walkthrough(request: HttpRequest) -> HttpResponse:
-    """Box 0 walkthrough with copy-pasteable prompts for participants."""
-    return render(request, "ctf/participant/walkthrough.html")
-
-
 # -----------------------------------------------------------------------------
 # Admin/Organizer Views
 # -----------------------------------------------------------------------------

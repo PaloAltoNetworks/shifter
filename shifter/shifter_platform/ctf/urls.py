@@ -32,8 +32,6 @@ participant_patterns = [
     # Team
     path("team/", views.participant_team, name="participant_team"),
     path("team/join/", views.team_join, name="team_join"),
-    # Walkthrough
-    path("walkthrough/", views.ctf_walkthrough, name="ctf_walkthrough"),
     # Help
     path("help/", views.ctf_help, name="ctf_help"),
 ]

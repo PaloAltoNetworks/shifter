@@ -1,0 +1,236 @@
+{% extends "ctf/base.html" %}
+{% block ctf_title %}Walkthrough{% endblock %}
+
+{% block extra_css %}
+<style>
+    .wt-intro {
+        max-width: 720px;
+        margin-bottom: 2rem;
+        color: var(--xdr-text-secondary);
+        line-height: 1.6;
+    }
+    .wt-ip-note {
+        background: rgba(255, 193, 7, 0.08);
+        border: 1px solid rgba(255, 193, 7, 0.25);
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        margin-bottom: 2rem;
+        color: #ffc107;
+        font-size: 0.9rem;
+    }
+    .wt-ip-note code {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 0.15em 0.4em;
+        border-radius: 3px;
+        color: #fff;
+    }
+    .wt-step {
+        background: var(--xdr-surface);
+        border: 1px solid var(--xdr-border);
+        border-radius: 8px;
+        margin-bottom: 1.25rem;
+        overflow: hidden;
+    }
+    .wt-step-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--xdr-border);
+    }
+    .wt-step-num {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #00c853;
+        color: #000;
+        font-weight: 700;
+        font-size: 0.85rem;
+        flex-shrink: 0;
+    }
+    .wt-step-title {
+        font-weight: 600;
+        color: var(--xdr-text);
+        font-size: 1rem;
+    }
+    .wt-step-body {
+        padding: 1rem 1.25rem;
+    }
+    .wt-step-desc {
+        color: var(--xdr-text-secondary);
+        margin-bottom: 0.75rem;
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+    .wt-prompt-block {
+        position: relative;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--xdr-border);
+        border-radius: 6px;
+        padding: 0.85rem 1rem;
+        padding-right: 5rem;
+        margin-bottom: 0.75rem;
+    }
+    .wt-prompt-block pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        color: #e0e0e0;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 0.88rem;
+        line-height: 1.5;
+    }
+    .wt-copy-btn {
+        position: absolute;
+        top: 0.55rem;
+        right: 0.55rem;
+        background: transparent;
+        border: 1px solid var(--xdr-border);
+        color: var(--xdr-text-secondary);
+        padding: 0.3rem 0.65rem;
+        border-radius: 4px;
+        font-size: 0.78rem;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .wt-copy-btn:hover {
+        background: var(--xdr-hover);
+        color: var(--xdr-text);
+        border-color: var(--xdr-text-secondary);
+    }
+    .wt-copy-btn.copied {
+        background: rgba(0, 200, 83, 0.15);
+        border-color: #00c853;
+        color: #00c853;
+    }
+    .wt-look-for {
+        background: rgba(255, 255, 255, 0.03);
+        border-left: 3px solid #555;
+        padding: 0.6rem 0.85rem;
+        border-radius: 0 4px 4px 0;
+        font-size: 0.85rem;
+        color: var(--xdr-text-secondary);
+        line-height: 1.5;
+    }
+    .wt-look-for strong {
+        color: var(--xdr-text);
+    }
+</style>
+{% endblock %}
+
+{% block ctf_content %}
+<div class="container-fluid py-4">
+    <div class="mb-4">
+        <h1 class="h3 mb-1">Box 0 &mdash; WebShell Walkthrough</h1>
+    </div>
+
+    <div class="wt-intro">
+        Follow these steps to hack your first box. Open <strong>Terminal</strong> in the sidebar,
+        then copy each prompt below into Claude Code.
+    </div>
+
+    <div class="wt-ip-note">
+        Replace <code>&lt;TARGET_IP&gt;</code> in each prompt with your <strong>webdev01</strong> IP address.
+        Find it on the <a href="{% url 'ctf:participant_range' %}" style="color: #ffc107; text-decoration: underline;">Range</a> page under Target Boxes.
+    </div>
+
+    {# Step 1 #}
+    <div class="wt-step">
+        <div class="wt-step-header">
+            <span class="wt-step-num">1</span>
+            <span class="wt-step-title">Reconnaissance</span>
+        </div>
+        <div class="wt-step-body">
+            <div class="wt-step-desc">
+                Every engagement starts with recon. Find out what's running on the target.
+            </div>
+            <div class="wt-prompt-block">
+                <pre>Scan &lt;TARGET_IP&gt; for open ports and identify the services running on them. Use a quick scan of only the most common ports.</pre>
+                <button class="wt-copy-btn" onclick="copyPrompt(this)" data-prompt="Scan <TARGET_IP> for open ports and identify the services running on them. Use a quick scan of only the most common ports.">Copy</button>
+            </div>
+            <div class="wt-look-for">
+                <strong>What to look for:</strong> You should see port 80 (HTTP) with Apache. That's our way in.
+            </div>
+        </div>
+    </div>
+
+    {# Step 2 #}
+    <div class="wt-step">
+        <div class="wt-step-header">
+            <span class="wt-step-num">2</span>
+            <span class="wt-step-title">Find the Vulnerability</span>
+        </div>
+        <div class="wt-step-body">
+            <div class="wt-step-desc">
+                There's a web server. Ask Claude to poke around and find something exploitable.
+            </div>
+            <div class="wt-prompt-block">
+                <pre>Investigate the web server on &lt;TARGET_IP&gt;. Look at the page source, identify any vulnerabilities, and recommend next steps.</pre>
+                <button class="wt-copy-btn" onclick="copyPrompt(this)" data-prompt="Investigate the web server on <TARGET_IP>. Look at the page source, identify any vulnerabilities, and recommend next steps.">Copy</button>
+            </div>
+            <div class="wt-look-for">
+                <strong>What to look for:</strong> Claude should find a hidden page that lets you run commands on the server. It will explain the vulnerability and suggest how to exploit it.
+            </div>
+        </div>
+    </div>
+
+    {# Step 3 #}
+    <div class="wt-step">
+        <div class="wt-step-header">
+            <span class="wt-step-num">3</span>
+            <span class="wt-step-title">Get User Access</span>
+        </div>
+        <div class="wt-step-body">
+            <div class="wt-step-desc">
+                Now exploit the vulnerability, escalate to a real user, and capture the first flag.
+            </div>
+            <div class="wt-prompt-block">
+                <pre>Exploit the vulnerability to get a shell. Escalate to a local user and find their local.txt flag.</pre>
+                <button class="wt-copy-btn" onclick="copyPrompt(this)" data-prompt="Exploit the vulnerability to get a shell. Escalate to a local user and find their local.txt flag.">Copy</button>
+            </div>
+            <div class="wt-look-for">
+                <strong>What to look for:</strong> Claude will chain the web shell with a sudo misconfiguration to become another user. You should get a flag &mdash; submit it on the Challenges page!
+            </div>
+        </div>
+    </div>
+
+    {# Step 4 #}
+    <div class="wt-step">
+        <div class="wt-step-header">
+            <span class="wt-step-num">4</span>
+            <span class="wt-step-title">Get Root</span>
+        </div>
+        <div class="wt-step-body">
+            <div class="wt-step-desc">
+                You own a user account. Now find a way to become root and capture the final flag.
+            </div>
+            <div class="wt-prompt-block">
+                <pre>Find a privilege escalation path to root and get the root flag from /root/root.txt.</pre>
+                <button class="wt-copy-btn" onclick="copyPrompt(this)" data-prompt="Find a privilege escalation path to root and get the root flag from /root/root.txt.">Copy</button>
+            </div>
+            <div class="wt-look-for">
+                <strong>What to look for:</strong> Claude should find a custom SUID binary and exploit a command injection in it to read the root flag. Box owned!
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function copyPrompt(btn) {
+    var text = btn.getAttribute('data-prompt');
+    navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+        }, 2000);
+    });
+}
+</script>
+{% endblock %}

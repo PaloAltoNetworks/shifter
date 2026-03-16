@@ -16,12 +16,29 @@
             <div class="alert alert-success mb-4">
                 <strong>Range is ready.</strong> Your environment is provisioned and available.
             </div>
-            <div class="mb-3">
-                <strong>Instance ID:</strong> {{ range_instance_id }}
+            {% if target_instances %}
+            <h6 class="mt-3 mb-2">Target Boxes</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-4">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>IP Address</th>
+                            <th>OS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inst in target_instances %}
+                        <tr>
+                            <td><code>{{ inst.name }}</code></td>
+                            <td><code>{{ inst.private_ip }}</code></td>
+                            <td>{{ inst.os_type }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-            <a href="/guacamole/" target="_blank" class="btn btn-primary">
-                Open Range Console (Guacamole)
-            </a>
+            {% endif %}
 
             {% elif range_status == 'provisioning' %}
             <div class="alert alert-info mb-3">

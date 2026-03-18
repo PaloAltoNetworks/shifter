@@ -1,6 +1,6 @@
-vpc_id       = "vpc-03a362fc765f475ad"    # Default VPC
-subnet_id    = "subnet-09d3e949c4639fd25" # us-east-2a public subnet
-runner_count = 2
+vpc_id       = "vpc-02f7b6f7a56839637"    # Default VPC
+subnet_id    = "subnet-0b1da5b3dff9045c4" # us-east-2a public subnet
+runner_count = 3
 
 github_org  = "Brad-Edwards"
 github_repo = "shifter"

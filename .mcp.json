@@ -19,6 +19,13 @@
     "shifter-planner": {
       "command": "node",
       "args": ["mcp/planner/index.js"]
+    },
+    "ground-control": {
+      "command": "node",
+      "args": ["/home/atomik/src/Ground-Control/mcp/ground-control/index.js"],
+      "env": {
+        "GC_BASE_URL": "http://localhost:8000"
+      }
     }
   }
 }

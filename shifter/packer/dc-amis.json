@@ -1,5 +1,5 @@
 {
   "description": "Prebaked Domain Controller AMI IDs. These AMIs have AD DS promoted with domain 'internal.shifter'. Update these values when creating new DC AMIs.",
-  "dev": "ami-07c3d67f2e94cd73b",
+  "dev": "ami-069b6146fb34a0a65",
   "prod": "ami-05ac9c21a6c0f8767"
 }

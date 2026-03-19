@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.0] - 2026-03-19
+
+### Added
+- Cloud provider abstraction layer foundation (PLAT-001.1, #811)
+  - Protocol definitions for ObjectStorage, TaskRunner, QueueConsumer, QueuePublisher, SecretsStore (platform)
+  - Protocol definitions for EventBus, ConfigStore, DBAuth, ObjectStorage (provisioner)
+  - Factory functions with `CLOUD_PROVIDER` setting (defaults to "aws")
+  - AWS adapter implementations for all protocols
+  - Provider-agnostic exception hierarchy
+  - Generic setting aliases (`CLOUD_PROVIDER`, `CLOUD_REGION`, `STORAGE_BUCKET_NAME`) with backward-compatible AWS fallbacks
+
 ## [3.15.4] - 2026-03-18
 
 ### Fixed

@@ -304,12 +304,25 @@ SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter
 PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 
 # ------------------------------------------------------------------------------
+# Cloud Provider Configuration
+# ------------------------------------------------------------------------------
+
+# Which cloud provider to use: "aws" (default) or "gcp" (future)
+CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
+
+# Generic names — adapters use these; AWS-specific names kept as fallbacks
+CLOUD_REGION = (
+    os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
+)
+STORAGE_BUCKET_NAME = os.environ.get("STORAGE_BUCKET_NAME") or os.environ.get("AWS_S3_BUCKET_NAME", "")
+
+# ------------------------------------------------------------------------------
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------
 
-AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
-AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
-AWS_REGION = AWS_S3_REGION  # Alias for consistency
+AWS_S3_BUCKET_NAME = STORAGE_BUCKET_NAME  # Backward compat alias
+AWS_S3_REGION = CLOUD_REGION  # Backward compat alias
+AWS_REGION = CLOUD_REGION  # Backward compat alias
 AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
 
 # SNS Topic for publishing events (provisioner -> workers)

@@ -107,8 +107,11 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
 
-          # Get current task definition
-          TASK_DEF=$(aws ecs describe-task-definition --task-definition "${TASK_FAMILY}" --query 'taskDefinition')
+          # Get current task definition (skip if doesn't exist yet - first deploy)
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition "${TASK_FAMILY}" --query 'taskDefinition' 2>/dev/null) || {
+            echo "::warning::Task definition ${TASK_FAMILY} does not exist yet. Skipping deploy - Platform terraform will create it."
+            exit 0
+          }
 
           # Update the image in container definitions
           NEW_CONTAINER_DEFS=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | .containerDefinitions')

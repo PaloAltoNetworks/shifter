@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIGMA-7 // Cyberpunk Isometric // Arctic Black Site</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #020408; cursor: crosshair; }
+  canvas { display: block; }
+  #loading {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #020408; z-index: 100;
+    font-family: 'Orbitron', monospace; color: #00e5ff; font-size: 14px;
+    letter-spacing: 4px; gap: 12px;
+    transition: opacity 1.2s;
+  }
+  #loading .sub {
+    font-family: 'Share Tech Mono', monospace;
+    color: #ff2d7b; font-size: 10px; opacity: 0.7; letter-spacing: 2px;
+  }
+  #loading .bar {
+    width: 260px; height: 2px; background: #0a1020; margin-top: 8px; overflow: hidden;
+  }
+  #loading .bar-fill {
+    width: 0%; height: 100%; background: linear-gradient(90deg, #00e5ff, #ff2d7b);
+    animation: loadBar 2.5s ease-in-out forwards;
+  }
+  @keyframes loadBar { to { width: 100%; } }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #hud-top {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    font-family: 'Orbitron', monospace; color: #00e5ff; font-size: 10px;
+    letter-spacing: 3px; opacity: 0.5; z-index: 20; pointer-events: none;
+    text-shadow: 0 0 10px #00e5ff;
+  }
+  #hud-bottom {
+    position: fixed; bottom: 12px; right: 16px;
+    font-family: 'Share Tech Mono', monospace; color: #ff2d7b; font-size: 9px;
+    letter-spacing: 1px; opacity: 0.4; z-index: 20; pointer-events: none;
+    text-shadow: 0 0 8px #ff2d7b;
+  }
+</style>
+</head>
+<body>
+<div id="loading">
+  NEURAL UPLINK ESTABLISHED
+  <div class="sub">COMPOUND SIGMA-7 // ARCTIC SECTOR // CLEARANCE: ULTRAVIOLET</div>
+  <div class="bar"><div class="bar-fill"></div></div>
+</div>
+<div id="hud-top">SIGMA-7 COMPOUND // ISOMETRIC SURVEILLANCE // 2077</div>
+<div id="hud-bottom">PANW CYBERDOMAIN // SHIFT-7 PROTOCOL ACTIVE</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+// ===========================================================================
+//  CONSTANTS & COLORS
+// ===========================================================================
+const CYAN    = 0x00e5ff;
+const MAGENTA = 0xff2d7b;
+const AMBER   = 0xffb300;
+const DEEP_BLUE  = 0x020a1a;
+const DARK_METAL = 0x0a0e18;
+const PANEL_DARK = 0x060b14;
+
+// ===========================================================================
+//  RENDERER
+// ===========================================================================
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.75;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+// ===========================================================================
+//  SCENE
+// ===========================================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020408);
+scene.fog = new THREE.FogExp2(0x020a14, 0.0025);
+
+// ===========================================================================
+//  CAMERA -- Orthographic Isometric
+// ===========================================================================
+const frustum = 130;
+const aspect = window.innerWidth / window.innerHeight;
+const camera = new THREE.OrthographicCamera(
+  -frustum * aspect, frustum * aspect,
+  frustum, -frustum,
+  -500, 1500
+);
+const isoDistance = 250;
+const isoAngle = Math.PI / 4;
+const isoTilt  = Math.atan(1 / Math.sqrt(2));
+camera.position.set(
+  isoDistance * Math.cos(isoTilt) * Math.sin(isoAngle),
+  isoDistance * Math.sin(isoTilt),
+  isoDistance * Math.cos(isoTilt) * Math.cos(isoAngle)
+);
+camera.lookAt(0, 0, 0);
+
+// ===========================================================================
+//  CONTROLS
+// ===========================================================================
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableRotate = true;
+controls.enablePan = true;
+controls.enableZoom = true;
+controls.minZoom = 0.25;
+controls.maxZoom = 3.5;
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0, 0);
+controls.maxPolarAngle = Math.PI / 2.2;
+
+// ===========================================================================
+//  GLOBAL CLOCK
+// ===========================================================================
+const clock = new THREE.Clock();
+const animatedObjects = []; // { mesh, update(t, dt) }
+
+// ===========================================================================
+//  MATERIALS
+// ===========================================================================
+const darkGroundMat = new THREE.MeshStandardMaterial({
+  color: 0x040810, roughness: 0.95, metalness: 0.1
+});
+const metalMat = new THREE.MeshStandardMaterial({
+  color: 0x0c1018, roughness: 0.3, metalness: 0.85
+});
+const panelMat = new THREE.MeshStandardMaterial({
+  color: PANEL_DARK, roughness: 0.6, metalness: 0.5
+});
+const cyanEmit = new THREE.MeshStandardMaterial({
+  color: CYAN, emissive: CYAN, emissiveIntensity: 2.5, roughness: 0.2, metalness: 0.8
+});
+const magentaEmit = new THREE.MeshStandardMaterial({
+  color: MAGENTA, emissive: MAGENTA, emissiveIntensity: 2.0, roughness: 0.2, metalness: 0.8
+});
+const amberEmit = new THREE.MeshStandardMaterial({
+  color: AMBER, emissive: AMBER, emissiveIntensity: 2.0, roughness: 0.2, metalness: 0.8
+});
+const glassMatCyan = new THREE.MeshStandardMaterial({
+  color: CYAN, emissive: CYAN, emissiveIntensity: 0.8,
+  transparent: true, opacity: 0.25, roughness: 0.1, metalness: 0.9
+});
+const glassMatMagenta = new THREE.MeshStandardMaterial({
+  color: MAGENTA, emissive: MAGENTA, emissiveIntensity: 0.8,
+  transparent: true, opacity: 0.25, roughness: 0.1, metalness: 0.9
+});
+
+// ===========================================================================
+//  GROUND -- Circuit Board Shader
+// ===========================================================================
+const groundSize = 400;
+const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize, 1, 1);
+groundGeo.rotateX(-Math.PI / 2);
+
+const circuitShaderMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0.0 },
+    uCyan: { value: new THREE.Color(CYAN) },
+    uMagenta: { value: new THREE.Color(MAGENTA) },
+    uAmber: { value: new THREE.Color(AMBER) },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    void main() {
+      vUv = uv;
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uCyan;
+    uniform vec3 uMagenta;
+    uniform vec3 uAmber;
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+    }
+
+    float gridLine(float coord, float width) {
+      float d = abs(fract(coord) - 0.5);
+      return smoothstep(width, width + 0.01, d);
+    }
+
+    float circuitTrace(vec2 p, float scale) {
+      vec2 cell = floor(p * scale);
+      float h = hash(cell);
+
+      // Horizontal or vertical traces based on hash
+      vec2 f = fract(p * scale);
+      float trace = 0.0;
+
+      if (h > 0.6) {
+        // Horizontal trace
+        float d = abs(f.y - 0.5);
+        trace = 1.0 - smoothstep(0.0, 0.04, d);
+        // Only draw part of the cell
+        trace *= step(0.1, f.x) * step(f.x, 0.9);
+      } else if (h > 0.3) {
+        // Vertical trace
+        float d = abs(f.x - 0.5);
+        trace = 1.0 - smoothstep(0.0, 0.04, d);
+        trace *= step(0.1, f.y) * step(f.y, 0.9);
+      }
+
+      // Junction nodes
+      if (h > 0.85) {
+        float d = length(f - 0.5);
+        trace = max(trace, 1.0 - smoothstep(0.0, 0.08, d));
+      }
+
+      return trace;
+    }
+
+    void main() {
+      vec2 worldXZ = vWorldPos.xz;
+      vec3 base = vec3(0.01, 0.015, 0.03);
+
+      // Major grid
+      float majorGrid = 1.0 - gridLine(worldXZ.x / 20.0, 0.48) *
+                               gridLine(worldXZ.y / 20.0, 0.48);
+      majorGrid *= 0.08;
+
+      // Minor grid
+      float minorGrid = 1.0 - gridLine(worldXZ.x / 5.0, 0.47) *
+                               gridLine(worldXZ.y / 5.0, 0.47);
+      minorGrid *= 0.03;
+
+      // Circuit traces at multiple scales
+      float trace1 = circuitTrace(worldXZ, 0.08) * 0.35;
+      float trace2 = circuitTrace(worldXZ + 37.0, 0.15) * 0.2;
+      float trace3 = circuitTrace(worldXZ + 91.0, 0.04) * 0.5;
+
+      // Animate: pulse along traces
+      float pulse1 = 0.5 + 0.5 * sin(uTime * 2.0 + worldXZ.x * 0.3 + worldXZ.y * 0.2);
+      float pulse2 = 0.5 + 0.5 * sin(uTime * 1.5 - worldXZ.x * 0.2 + worldXZ.y * 0.4);
+      float pulse3 = 0.5 + 0.5 * sin(uTime * 3.0 + worldXZ.x * 0.1 - worldXZ.y * 0.3);
+
+      vec3 traceColor = uCyan * trace1 * pulse1
+                       + uMagenta * trace2 * pulse2
+                       + uAmber * trace3 * pulse3;
+
+      vec3 gridColor = uCyan * 0.3 * (majorGrid + minorGrid);
+
+      // Distance-based fade from center
+      float dist = length(worldXZ) / 200.0;
+      float fade = 1.0 - smoothstep(0.0, 1.0, dist);
+
+      // Hatch heat zone
+      float hatchDist = length(worldXZ - vec2(0.0, 40.0));
+      float hatchGlow = exp(-hatchDist * hatchDist / 800.0) * 0.15;
+      vec3 hatchHeat = uMagenta * hatchGlow * (0.7 + 0.3 * sin(uTime * 2.0));
+
+      vec3 finalColor = base + (traceColor + gridColor) * fade + hatchHeat;
+
+      // Slight snow/frost overlay at edges
+      float frost = smoothstep(0.6, 1.0, dist) * 0.04;
+      finalColor += vec3(0.05, 0.08, 0.12) * frost;
+
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `,
+});
+const ground = new THREE.Mesh(groundGeo, circuitShaderMat);
+ground.receiveShadow = true;
+scene.add(ground);
+
+animatedObjects.push({
+  mesh: ground,
+  update(t) { circuitShaderMat.uniforms.uTime.value = t; }
+});
+
+// ===========================================================================
+//  LIGHTING
+// ===========================================================================
+// Ambient -- very low, most light from emissives
+const ambientLight = new THREE.AmbientLight(0x0a1525, 0.3);
+scene.add(ambientLight);
+
+// Dim directional "moonlight"
+const dirLight = new THREE.DirectionalLight(0x1a2a4a, 0.4);
+dirLight.position.set(80, 120, 60);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.left = -200;
+dirLight.shadow.camera.right = 200;
+dirLight.shadow.camera.top = 200;
+dirLight.shadow.camera.bottom = -200;
+scene.add(dirLight);
+
+// Cyan rim light
+const rimLight = new THREE.DirectionalLight(CYAN, 0.15);
+rimLight.position.set(-100, 50, -80);
+scene.add(rimLight);
+
+// ===========================================================================
+//  HELPER: Create a building with glowing seams
+// ===========================================================================
+function createCyberpunkBuilding(w, h, d, baseColor, accentColor, accentHex) {
+  const group = new THREE.Group();
+
+  // Main body
+  const bodyGeo = new THREE.BoxGeometry(w, h, d);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: baseColor, roughness: 0.5, metalness: 0.7
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = h / 2;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+
+  // Glowing seam lines -- horizontal bands
+  const seamMat = new THREE.MeshStandardMaterial({
+    color: accentHex, emissive: accentHex, emissiveIntensity: 3.0,
+    roughness: 0.1, metalness: 0.9
+  });
+
+  const seamCount = Math.floor(h / 6);
+  for (let i = 1; i <= seamCount; i++) {
+    const seamY = (h / (seamCount + 1)) * i;
+    // Front seam
+    const seamGeo = new THREE.BoxGeometry(w + 0.2, 0.3, 0.15);
+    const seam = new THREE.Mesh(seamGeo, seamMat);
+    seam.position.set(0, seamY, d / 2 + 0.08);
+    group.add(seam);
+    // Back seam
+    const seamB = seam.clone();
+    seamB.position.z = -d / 2 - 0.08;
+    group.add(seamB);
+    // Side seams
+    const sideSGeo = new THREE.BoxGeometry(0.15, 0.3, d + 0.2);
+    const sideL = new THREE.Mesh(sideSGeo, seamMat);
+    sideL.position.set(-w / 2 - 0.08, seamY, 0);
+    group.add(sideL);
+    const sideR = sideL.clone();
+    sideR.position.x = w / 2 + 0.08;
+    group.add(sideR);
+  }
+
+  // Vertical corner accent lines
+  const cornerGeo = new THREE.BoxGeometry(0.4, h + 0.5, 0.4);
+  const corners = [
+    [-w/2, h/2, -d/2], [w/2, h/2, -d/2],
+    [-w/2, h/2, d/2],  [w/2, h/2, d/2]
+  ];
+  corners.forEach(([cx, cy, cz]) => {
+    const c = new THREE.Mesh(cornerGeo, seamMat);
+    c.position.set(cx, cy, cz);
+    group.add(c);
+  });
+
+  // Roof edge glow
+  const roofEdgeGeo = new THREE.BoxGeometry(w + 1, 0.3, d + 1);
+  const roofEdge = new THREE.Mesh(roofEdgeGeo, seamMat);
+  roofEdge.position.y = h + 0.15;
+  group.add(roofEdge);
+
+  // Roof antenna
+  const antennaGeo = new THREE.CylinderGeometry(0.15, 0.15, 6, 6);
+  const antenna = new THREE.Mesh(antennaGeo, metalMat);
+  antenna.position.set(w * 0.3, h + 3, d * 0.2);
+  group.add(antenna);
+  const antTipGeo = new THREE.SphereGeometry(0.5, 8, 8);
+  const antTip = new THREE.Mesh(antTipGeo, seamMat);
+  antTip.position.set(w * 0.3, h + 6, d * 0.2);
+  group.add(antTip);
+
+  // Point light at base
+  const baseLight = new THREE.PointLight(accentHex, 1.5, 40, 2);
+  baseLight.position.set(0, 1, d / 2 + 2);
+  group.add(baseLight);
+
+  return group;
+}
+
+// ===========================================================================
+//  HELPER: Holographic label floating above a position
+// ===========================================================================
+function createHoloLabel(text, color, width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  // Background with scan lines
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, 512, 128);
+  for (let y = 0; y < 128; y += 3) {
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.fillRect(0, y, 512, 1);
+  }
+
+  // Border
+  const c = new THREE.Color(color);
+  const cssColor = `rgb(${Math.floor(c.r*255)},${Math.floor(c.g*255)},${Math.floor(c.b*255)})`;
+  ctx.strokeStyle = cssColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(4, 4, 504, 120);
+
+  // Corner brackets
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(4, 24); ctx.lineTo(4, 4); ctx.lineTo(24, 4);
+  ctx.moveTo(488, 4); ctx.lineTo(508, 4); ctx.lineTo(508, 24);
+  ctx.moveTo(508, 104); ctx.lineTo(508, 124); ctx.lineTo(488, 124);
+  ctx.moveTo(24, 124); ctx.lineTo(4, 124); ctx.lineTo(4, 104);
+  ctx.stroke();
+
+  // Text
+  ctx.font = 'bold 36px Orbitron, monospace';
+  ctx.fillStyle = cssColor;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = cssColor;
+  ctx.shadowBlur = 12;
+  ctx.fillText(text, 256, 50);
+
+  // Status line
+  ctx.font = '16px Share Tech Mono, monospace';
+  ctx.shadowBlur = 6;
+  ctx.fillText('STATUS: OPERATIONAL', 256, 95);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture, transparent: true, opacity: 0.85,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+
+  const geo = new THREE.PlaneGeometry(width || 20, height || 5);
+  const mesh = new THREE.Mesh(geo, mat);
+
+  // Make it face the camera (billboard-ish) -- we'll orient it manually
+  // For isometric, angle it slightly toward viewer
+  mesh.rotation.x = -0.3;
+  mesh.rotation.y = -Math.PI / 4;
+
+  return mesh;
+}
+
+// ===========================================================================
+//  MAIN BUILDING -- Command Center
+// ===========================================================================
+const mainBuilding = createCyberpunkBuilding(40, 20, 30, 0x080c16, CYAN, CYAN);
+mainBuilding.position.set(-45, 0, -35);
+scene.add(mainBuilding);
+
+// Holographic label
+const mainLabel = createHoloLabel('COMMAND CENTER', CYAN, 24, 6);
+mainLabel.position.set(-45, 30, -35);
+scene.add(mainLabel);
+animatedObjects.push({
+  mesh: mainLabel,
+  update(t) {
+    mainLabel.position.y = 30 + Math.sin(t * 1.5) * 0.5;
+    mainLabel.material.opacity = 0.7 + 0.15 * Math.sin(t * 3.0);
+  }
+});
+
+// Scanning beam from command center
+const scanBeamGeo = new THREE.ConeGeometry(15, 30, 4, 1, true);
+const scanBeamMat = new THREE.MeshBasicMaterial({
+  color: CYAN, transparent: true, opacity: 0.04,
+  side: THREE.DoubleSide, depthWrite: false
+});
+const scanBeam = new THREE.Mesh(scanBeamGeo, scanBeamMat);
+scanBeam.position.set(-45, 35, -35);
+scene.add(scanBeam);
+animatedObjects.push({
+  mesh: scanBeam,
+  update(t) {
+    scanBeam.rotation.y = t * 0.8;
+    scanBeamMat.opacity = 0.02 + 0.03 * Math.sin(t * 2.0);
+  }
+});
+
+// ===========================================================================
+//  RESEARCH BUILDING
+// ===========================================================================
+const researchBuilding = createCyberpunkBuilding(35, 16, 25, 0x0a0812, MAGENTA, MAGENTA);
+researchBuilding.position.set(50, 0, -25);
+scene.add(researchBuilding);
+
+const researchLabel = createHoloLabel('RESEARCH LAB', MAGENTA, 22, 5.5);
+researchLabel.position.set(50, 25, -25);
+scene.add(researchLabel);
+animatedObjects.push({
+  mesh: researchLabel,
+  update(t) {
+    researchLabel.position.y = 25 + Math.sin(t * 1.2 + 1.0) * 0.5;
+    researchLabel.material.opacity = 0.7 + 0.15 * Math.sin(t * 2.5 + 0.5);
+  }
+});
+
+// Data visualization sphere above research building
+const dataSphereGeo = new THREE.IcosahedronGeometry(3, 1);
+const dataSphereMat = new THREE.MeshStandardMaterial({
+  color: MAGENTA, emissive: MAGENTA, emissiveIntensity: 1.5,
+  wireframe: true, transparent: true, opacity: 0.6
+});
+const dataSphere = new THREE.Mesh(dataSphereGeo, dataSphereMat);
+dataSphere.position.set(50, 22, -25);
+scene.add(dataSphere);
+animatedObjects.push({
+  mesh: dataSphere,
+  update(t) {
+    dataSphere.rotation.x = t * 0.5;
+    dataSphere.rotation.z = t * 0.3;
+    dataSphere.position.y = 22 + Math.sin(t * 0.8) * 1.0;
+  }
+});
+
+// ===========================================================================
+//  THE HATCH -- Massive, dramatic centerpiece
+// ===========================================================================
+const hatchGroup = new THREE.Group();
+hatchGroup.position.set(0, 0, 40);
+scene.add(hatchGroup);
+
+// Hatch base ring -- massive concrete/metal surround
+const hatchOuterRadius = 30;
+const hatchInnerRadius = 25;
+const hatchRingGeo = new THREE.RingGeometry(hatchInnerRadius, hatchOuterRadius, 64);
+hatchRingGeo.rotateX(-Math.PI / 2);
+const hatchRingMat = new THREE.MeshStandardMaterial({
+  color: 0x0c0e14, roughness: 0.4, metalness: 0.8
+});
+const hatchRing = new THREE.Mesh(hatchRingGeo, hatchRingMat);
+hatchRing.position.y = 0.2;
+hatchGroup.add(hatchRing);
+
+// Hatch raised rim
+const rimGeo = new THREE.TorusGeometry(hatchOuterRadius, 1.5, 8, 64);
+rimGeo.rotateX(Math.PI / 2);
+const rimMesh = new THREE.Mesh(rimGeo, metalMat);
+rimMesh.position.y = 1.5;
+rimMesh.castShadow = true;
+hatchGroup.add(rimMesh);
+
+// Hatch cover (the massive door)
+const hatchCoverGeo = new THREE.CylinderGeometry(hatchInnerRadius - 0.5, hatchInnerRadius - 0.5, 2, 64);
+const hatchCoverMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0.0 },
+    uCyan: { value: new THREE.Color(CYAN) },
+    uMagenta: { value: new THREE.Color(MAGENTA) },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vPos;
+    void main() {
+      vUv = uv;
+      vPos = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uCyan;
+    uniform vec3 uMagenta;
+    varying vec2 vUv;
+    varying vec3 vPos;
+
+    void main() {
+      vec2 centered = vPos.xz;
+      float dist = length(centered);
+      float maxR = 24.0;
+      float t = dist / maxR;
+
+      // Concentric rings
+      float rings = sin(dist * 2.0 - uTime * 3.0) * 0.5 + 0.5;
+      rings *= smoothstep(0.0, 0.1, rings);
+
+      // Radial lines
+      float angle = atan(centered.y, centered.x);
+      float radial = sin(angle * 8.0 + uTime * 1.0) * 0.5 + 0.5;
+      radial *= 0.3;
+
+      // Core glow
+      float core = exp(-t * 3.0) * 0.6;
+      float corePulse = 0.7 + 0.3 * sin(uTime * 2.5);
+
+      // Warning pulse
+      float warning = step(0.7, sin(uTime * 4.0)) * 0.2;
+
+      vec3 color = vec3(0.02, 0.01, 0.03);
+      color += uMagenta * rings * 0.25 * (0.5 + 0.5 * sin(uTime * 1.5));
+      color += uCyan * radial * (0.5 + 0.5 * cos(uTime * 0.8));
+      color += uMagenta * core * corePulse;
+      color += vec3(1.0, 0.2, 0.1) * warning * (1.0 - t);
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+});
+const hatchCover = new THREE.Mesh(hatchCoverGeo, hatchCoverMat);
+hatchCover.position.y = 0.5;
+hatchGroup.add(hatchCover);
+animatedObjects.push({
+  mesh: hatchCover,
+  update(t) { hatchCoverMat.uniforms.uTime.value = t; }
+});
+
+// Energy containment rings -- 3 glowing torus rings at different heights
+for (let i = 0; i < 3; i++) {
+  const ringRadius = hatchOuterRadius + 3 + i * 4;
+  const ringY = 3 + i * 5;
+  const rGeo = new THREE.TorusGeometry(ringRadius, 0.15, 8, 128);
+  rGeo.rotateX(Math.PI / 2);
+  const rColor = i === 0 ? CYAN : i === 1 ? MAGENTA : AMBER;
+  const rMat = new THREE.MeshStandardMaterial({
+    color: rColor, emissive: rColor, emissiveIntensity: 4.0,
+    transparent: true, opacity: 0.7, roughness: 0.1, metalness: 0.9
+  });
+  const ring = new THREE.Mesh(rGeo, rMat);
+  ring.position.y = ringY;
+  hatchGroup.add(ring);
+  animatedObjects.push({
+    mesh: ring,
+    update(t) {
+      ring.rotation.z = t * (0.3 + i * 0.15) * (i % 2 === 0 ? 1 : -1);
+      ring.position.y = ringY + Math.sin(t * 1.0 + i * 2.0) * 0.8;
+      rMat.opacity = 0.4 + 0.3 * Math.sin(t * 2.0 + i * 1.5);
+      rMat.emissiveIntensity = 2.0 + 2.0 * Math.sin(t * 1.5 + i);
+    }
+  });
+}
+
+// Hatch warning hologram projection
+const hatchLabel = createHoloLabel('MECH BAY HATCH', MAGENTA, 28, 7);
+hatchLabel.position.set(0, 25, 0);
+hatchGroup.add(hatchLabel);
+animatedObjects.push({
+  mesh: hatchLabel,
+  update(t) {
+    hatchLabel.position.y = 25 + Math.sin(t * 0.8) * 1.0;
+    // Flicker effect
+    const flicker = Math.random() > 0.95 ? 0.3 : 1.0;
+    hatchLabel.material.opacity = (0.6 + 0.2 * Math.sin(t * 4.0)) * flicker;
+  }
+});
+
+// Power conduits feeding into hatch -- 4 glowing pipes from edges
+const conduitPositions = [
+  { from: [-80, 0, 40], to: [-32, 0, 40] },
+  { from: [80, 0, 40],  to: [32, 0, 40] },
+  { from: [0, 0, -30],  to: [0, 0, 10] },
+  { from: [0, 0, 110],  to: [0, 0, 70] },
+];
+conduitPositions.forEach((cp, idx) => {
+  const dx = cp.to[0] - cp.from[0];
+  const dz = cp.to[2] - cp.from[2];
+  const len = Math.sqrt(dx * dx + dz * dz);
+  const midX = (cp.from[0] + cp.to[0]) / 2;
+  const midZ = (cp.from[2] + cp.to[2]) / 2;
+  const angle = Math.atan2(dx, dz);
+
+  // Pipe body
+  const pipeGeo = new THREE.BoxGeometry(1.5, 1.0, len);
+  const pipeMat = new THREE.MeshStandardMaterial({
+    color: 0x0a0e18, roughness: 0.3, metalness: 0.8
+  });
+  const pipe = new THREE.Mesh(pipeGeo, pipeMat);
+  pipe.position.set(midX, 0.5, midZ);
+  pipe.rotation.y = angle;
+  pipe.castShadow = true;
+  scene.add(pipe);
+
+  // Glowing energy line on top of pipe
+  const lineGeo = new THREE.BoxGeometry(0.3, 0.15, len);
+  const lineColor = idx < 2 ? MAGENTA : CYAN;
+  const lineMat = new THREE.MeshStandardMaterial({
+    color: lineColor, emissive: lineColor, emissiveIntensity: 3.0,
+    roughness: 0.1
+  });
+  const line = new THREE.Mesh(lineGeo, lineMat);
+  line.position.set(midX, 1.1, midZ);
+  line.rotation.y = angle;
+  scene.add(line);
+
+  animatedObjects.push({
+    mesh: line,
+    update(t) {
+      lineMat.emissiveIntensity = 2.0 + 2.0 * Math.sin(t * 3.0 + idx * 1.5);
+    }
+  });
+
+  // Conduit support pylons
+  const pylonCount = Math.floor(len / 12);
+  for (let p = 0; p < pylonCount; p++) {
+    const frac = (p + 0.5) / pylonCount;
+    const px = cp.from[0] + dx * frac;
+    const pz = cp.from[2] + dz * frac;
+    const pylonGeo = new THREE.BoxGeometry(0.5, 2.5, 0.5);
+    const pylon = new THREE.Mesh(pylonGeo, metalMat);
+    pylon.position.set(px, 1.25, pz);
+    scene.add(pylon);
+  }
+});
+
+// Hatch point lights
+const hatchLightCyan = new THREE.PointLight(CYAN, 4, 60, 2);
+hatchLightCyan.position.set(0, 5, 40);
+scene.add(hatchLightCyan);
+const hatchLightMagenta = new THREE.PointLight(MAGENTA, 6, 80, 2);
+hatchLightMagenta.position.set(0, 2, 40);
+scene.add(hatchLightMagenta);
+animatedObjects.push({
+  mesh: null,
+  update(t) {
+    hatchLightMagenta.intensity = 4.0 + 3.0 * Math.sin(t * 2.0);
+    hatchLightCyan.intensity = 2.0 + 2.0 * Math.sin(t * 1.5 + 1.0);
+  }
+});
+
+// ===========================================================================
+//  PERIMETER FENCE -- Plasma Energy Barrier
+// ===========================================================================
+const fenceHalfW = 120;
+const fenceHalfD = 100;
+const fencePostHeight = 8;
+const fencePostSpacing = 15;
+
+function createFenceSegment(x1, z1, x2, z2) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const len = Math.sqrt(dx * dx + dz * dz);
+  const postCount = Math.ceil(len / fencePostSpacing) + 1;
+
+  for (let i = 0; i < postCount; i++) {
+    const frac = i / (postCount - 1);
+    const px = x1 + dx * frac;
+    const pz = z1 + dz * frac;
+
+    // Post
+    const postGeo = new THREE.CylinderGeometry(0.4, 0.5, fencePostHeight, 6);
+    const post = new THREE.Mesh(postGeo, metalMat);
+    post.position.set(px, fencePostHeight / 2, pz);
+    post.castShadow = true;
+    scene.add(post);
+
+    // Emitter tip
+    const tipGeo = new THREE.SphereGeometry(0.6, 8, 8);
+    const tip = new THREE.Mesh(tipGeo, cyanEmit);
+    tip.position.set(px, fencePostHeight, pz);
+    scene.add(tip);
+
+    // Point light at top
+    if (i % 3 === 0) {
+      const pl = new THREE.PointLight(CYAN, 0.5, 15, 2);
+      pl.position.set(px, fencePostHeight + 1, pz);
+      scene.add(pl);
+    }
+  }
+
+  // Energy barrier between posts
+  const angle = Math.atan2(dx, dz);
+  const midX = (x1 + x2) / 2;
+  const midZ = (z1 + z2) / 2;
+
+  const barrierGeo = new THREE.PlaneGeometry(len, fencePostHeight);
+  const barrierMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 },
+      uColor: { value: new THREE.Color(CYAN) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453);
+      }
+
+      void main() {
+        // Horizontal energy lines
+        float lines = sin(vUv.y * 40.0 - uTime * 5.0) * 0.5 + 0.5;
+        lines = smoothstep(0.7, 0.9, lines);
+
+        // Vertical hex pattern
+        float hex = sin(vUv.x * 60.0) * sin(vUv.y * 20.0 + uTime * 2.0);
+        hex = smoothstep(0.4, 0.6, hex) * 0.3;
+
+        // Edge fade
+        float edgeFade = sin(vUv.x * 3.14159) * sin(vUv.y * 3.14159);
+
+        // Noise flicker
+        float noise = hash(vUv + uTime * 0.1) * 0.1;
+
+        float alpha = (lines * 0.15 + hex + 0.03 + noise) * edgeFade;
+        vec3 color = uColor * (1.0 + lines * 0.5);
+
+        gl_FragColor = vec4(color, alpha * 0.6);
+      }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+
+  const barrier = new THREE.Mesh(barrierGeo, barrierMat);
+  barrier.position.set(midX, fencePostHeight / 2, midZ);
+  barrier.rotation.y = angle;
+  scene.add(barrier);
+
+  animatedObjects.push({
+    mesh: barrier,
+    update(t) { barrierMat.uniforms.uTime.value = t; }
+  });
+}
+
+// Four sides of the perimeter
+createFenceSegment(-fenceHalfW, -fenceHalfD, fenceHalfW, -fenceHalfD); // North
+createFenceSegment(fenceHalfW, -fenceHalfD, fenceHalfW, fenceHalfD);   // East
+createFenceSegment(fenceHalfW, fenceHalfD, -fenceHalfW, fenceHalfD);   // South
+createFenceSegment(-fenceHalfW, fenceHalfD, -fenceHalfW, -fenceHalfD); // West
+
+// Corner guard towers
+const towerCorners = [
+  [-fenceHalfW, -fenceHalfD],
+  [fenceHalfW, -fenceHalfD],
+  [-fenceHalfW, fenceHalfD],
+  [fenceHalfW, fenceHalfD],
+];
+towerCorners.forEach(([tx, tz], idx) => {
+  // Tower base
+  const tBaseGeo = new THREE.CylinderGeometry(3, 3.5, 12, 8);
+  const tBase = new THREE.Mesh(tBaseGeo, metalMat);
+  tBase.position.set(tx, 6, tz);
+  tBase.castShadow = true;
+  scene.add(tBase);
+
+  // Tower top platform
+  const tTopGeo = new THREE.CylinderGeometry(4, 3, 2, 8);
+  const tTop = new THREE.Mesh(tTopGeo, panelMat);
+  tTop.position.set(tx, 13, tz);
+  scene.add(tTop);
+
+  // Tower glow ring
+  const tRingGeo = new THREE.TorusGeometry(3.5, 0.2, 8, 32);
+  tRingGeo.rotateX(Math.PI / 2);
+  const tRing = new THREE.Mesh(tRingGeo, cyanEmit);
+  tRing.position.set(tx, 12, tz);
+  scene.add(tRing);
+
+  // Spotlight
+  const spot = new THREE.SpotLight(CYAN, 3, 80, Math.PI / 6, 0.5, 2);
+  spot.position.set(tx, 14, tz);
+  spot.target.position.set(tx * 0.5, 0, tz * 0.5);
+  scene.add(spot);
+  scene.add(spot.target);
+
+  // Rotating searchlight
+  animatedObjects.push({
+    mesh: spot.target,
+    update(t) {
+      const r = 40;
+      const a = t * 0.4 + idx * Math.PI / 2;
+      spot.target.position.x = tx * 0.3 + Math.cos(a) * r;
+      spot.target.position.z = tz * 0.3 + Math.sin(a) * r;
+    }
+  });
+});
+
+// ===========================================================================
+//  SERVER ARRAY / ANTENNA FARM (near research building)
+// ===========================================================================
+const serverPos = { x: 80, z: -55 };
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 4; col++) {
+    const sx = serverPos.x + col * 4 - 6;
+    const sz = serverPos.z + row * 5 - 5;
+    // Server rack
+    const rackGeo = new THREE.BoxGeometry(2.5, 5, 3);
+    const rack = new THREE.Mesh(rackGeo, panelMat);
+    rack.position.set(sx, 2.5, sz);
+    rack.castShadow = true;
+    scene.add(rack);
+
+    // Blinking light on front
+    const blinkGeo = new THREE.BoxGeometry(1.5, 0.2, 0.1);
+    const blinkColor = (row + col) % 2 === 0 ? CYAN : MAGENTA;
+    const blinkMat = new THREE.MeshStandardMaterial({
+      color: blinkColor, emissive: blinkColor, emissiveIntensity: 3.0
+    });
+    const blink = new THREE.Mesh(blinkGeo, blinkMat);
+    blink.position.set(sx, 3.5 + row * 0.4, sz + 1.55);
+    scene.add(blink);
+
+    animatedObjects.push({
+      mesh: blink,
+      update(t) {
+        const phase = (row * 4 + col) * 0.7;
+        blinkMat.emissiveIntensity = 1.0 + 2.0 * (Math.sin(t * 4.0 + phase) > 0.3 ? 1 : 0);
+      }
+    });
+  }
+}
+
+// Large antenna dishes
+const antennaPositions = [
+  { x: 95, z: -45, scale: 1.0 },
+  { x: 90, z: -60, scale: 0.7 },
+];
+antennaPositions.forEach(ap => {
+  const s = ap.scale;
+  // Pole
+  const poleGeo = new THREE.CylinderGeometry(0.3 * s, 0.4 * s, 12 * s, 8);
+  const pole = new THREE.Mesh(poleGeo, metalMat);
+  pole.position.set(ap.x, 6 * s, ap.z);
+  scene.add(pole);
+
+  // Dish
+  const dishGeo = new THREE.SphereGeometry(4 * s, 16, 8, 0, Math.PI * 2, 0, Math.PI / 3);
+  const dish = new THREE.Mesh(dishGeo, metalMat);
+  dish.position.set(ap.x, 12 * s, ap.z);
+  dish.rotation.x = Math.PI / 6;
+  scene.add(dish);
+
+  // Dish emitter glow
+  const emGeo = new THREE.SphereGeometry(0.6 * s, 8, 8);
+  const em = new THREE.Mesh(emGeo, amberEmit);
+  em.position.set(ap.x, 12 * s + 1, ap.z);
+  scene.add(em);
+});
+
+// ===========================================================================
+//  DRONE LANDING PAD
+// ===========================================================================
+const padGroup = new THREE.Group();
+padGroup.position.set(-80, 0, 50);
+scene.add(padGroup);
+
+// Pad surface
+const padGeo = new THREE.CylinderGeometry(10, 10, 0.5, 32);
+const padMat = new THREE.MeshStandardMaterial({
+  color: 0x0a0e18, roughness: 0.4, metalness: 0.7
+});
+const pad = new THREE.Mesh(padGeo, padMat);
+pad.position.y = 0.25;
+pad.receiveShadow = true;
+padGroup.add(pad);
+
+// Landing circle markers
+for (let i = 0; i < 3; i++) {
+  const r = 4 + i * 3;
+  const circGeo = new THREE.TorusGeometry(r, 0.1, 8, 64);
+  circGeo.rotateX(Math.PI / 2);
+  const circMat = new THREE.MeshStandardMaterial({
+    color: AMBER, emissive: AMBER, emissiveIntensity: 2.0,
+    transparent: true, opacity: 0.8
+  });
+  const circ = new THREE.Mesh(circGeo, circMat);
+  circ.position.y = 0.55;
+  padGroup.add(circ);
+
+  animatedObjects.push({
+    mesh: circ,
+    update(t) {
+      circMat.emissiveIntensity = 1.0 + 1.5 * Math.sin(t * 2.0 + i * 1.0);
+      circMat.opacity = 0.5 + 0.3 * Math.sin(t * 2.0 + i * 1.0);
+    }
+  });
+}
+
+// Pad approach lights
+for (let i = 0; i < 6; i++) {
+  const angle = (i / 6) * Math.PI * 2;
+  const lx = Math.cos(angle) * 11;
+  const lz = Math.sin(angle) * 11;
+  const lGeo = new THREE.BoxGeometry(0.4, 1.5, 0.4);
+  const lPost = new THREE.Mesh(lGeo, metalMat);
+  lPost.position.set(lx, 0.75, lz);
+  padGroup.add(lPost);
+
+  const lTipGeo = new THREE.SphereGeometry(0.4, 6, 6);
+  const lTip = new THREE.Mesh(lTipGeo, amberEmit);
+  lTip.position.set(lx, 1.6, lz);
+  padGroup.add(lTip);
+}
+
+// Pad label
+const padLabel = createHoloLabel('DRONE PAD', AMBER, 16, 4);
+padLabel.position.set(0, 8, 0);
+padGroup.add(padLabel);
+animatedObjects.push({
+  mesh: padLabel,
+  update(t) {
+    padLabel.position.y = 8 + Math.sin(t * 1.0 + 2.0) * 0.4;
+    padLabel.material.opacity = 0.6 + 0.2 * Math.sin(t * 2.0);
+  }
+});
+
+// Pad light
+const padLight = new THREE.PointLight(AMBER, 2, 30, 2);
+padLight.position.set(-80, 3, 50);
+scene.add(padLight);
+animatedObjects.push({
+  mesh: null,
+  update(t) {
+    padLight.intensity = 1.5 + 1.0 * Math.sin(t * 2.0);
+  }
+});
+
+// ===========================================================================
+//  POWER GENERATOR BUILDING
+// ===========================================================================
+const genGroup = new THREE.Group();
+genGroup.position.set(-85, 0, -50);
+scene.add(genGroup);
+
+// Generator housing
+const genGeo = new THREE.BoxGeometry(15, 8, 10);
+const gen = new THREE.Mesh(genGeo, panelMat);
+gen.position.y = 4;
+gen.castShadow = true;
+genGroup.add(gen);
+
+// Exhaust stacks
+for (let i = 0; i < 3; i++) {
+  const stackGeo = new THREE.CylinderGeometry(0.8, 1.0, 6, 8);
+  const stack = new THREE.Mesh(stackGeo, metalMat);
+  stack.position.set(-4 + i * 4, 11, 0);
+  genGroup.add(stack);
+
+  // Exhaust glow
+  const exGeo = new THREE.CylinderGeometry(0.6, 0.3, 1, 8);
+  const exMat = new THREE.MeshStandardMaterial({
+    color: AMBER, emissive: AMBER, emissiveIntensity: 2.0,
+    transparent: true, opacity: 0.6
+  });
+  const ex = new THREE.Mesh(exGeo, exMat);
+  ex.position.set(-4 + i * 4, 14.5, 0);
+  genGroup.add(ex);
+
+  animatedObjects.push({
+    mesh: ex,
+    update(t) {
+      ex.scale.y = 0.8 + 0.4 * Math.sin(t * 5.0 + i * 2.0);
+      exMat.emissiveIntensity = 1.5 + 1.5 * Math.sin(t * 5.0 + i * 2.0);
+    }
+  });
+}
+
+// Generator seam glow
+const genSeamGeo = new THREE.BoxGeometry(15.2, 0.3, 0.15);
+const genSeam = new THREE.Mesh(genSeamGeo, amberEmit);
+genSeam.position.set(0, 4, 5.08);
+genGroup.add(genSeam);
+
+const genLabel = createHoloLabel('POWER CORE', AMBER, 16, 4);
+genLabel.position.set(0, 16, 0);
+genGroup.add(genLabel);
+animatedObjects.push({
+  mesh: genLabel,
+  update(t) {
+    genLabel.position.y = 16 + Math.sin(t * 1.3) * 0.3;
+    genLabel.material.opacity = 0.6 + 0.15 * Math.sin(t * 2.5 + 1.0);
+  }
+});
+
+// ===========================================================================
+//  PERIMETER WARNING HOLOGRAM -- rotating scan ring at perimeter
+// ===========================================================================
+const perimeterRingGeo = new THREE.TorusGeometry(fenceHalfW * 1.05, 0.2, 4, 128);
+perimeterRingGeo.rotateX(Math.PI / 2);
+const perimeterRingMat = new THREE.MeshStandardMaterial({
+  color: MAGENTA, emissive: MAGENTA, emissiveIntensity: 1.5,
+  transparent: true, opacity: 0.3
+});
+const perimeterRing = new THREE.Mesh(perimeterRingGeo, perimeterRingMat);
+perimeterRing.position.y = fencePostHeight + 2;
+scene.add(perimeterRing);
+
+animatedObjects.push({
+  mesh: perimeterRing,
+  update(t) {
+    perimeterRing.rotation.z = t * 0.1;
+    perimeterRing.position.y = fencePostHeight + 2 + Math.sin(t * 0.5) * 0.5;
+    perimeterRingMat.opacity = 0.15 + 0.15 * Math.sin(t * 1.0);
+  }
+});
+
+// Second perimeter scan ring (counter-rotating)
+const perimeterRing2Geo = new THREE.TorusGeometry(fenceHalfW * 0.95, 0.15, 4, 128);
+perimeterRing2Geo.rotateX(Math.PI / 2);
+const perimeterRing2Mat = new THREE.MeshStandardMaterial({
+  color: CYAN, emissive: CYAN, emissiveIntensity: 1.5,
+  transparent: true, opacity: 0.2
+});
+const perimeterRing2 = new THREE.Mesh(perimeterRing2Geo, perimeterRing2Mat);
+perimeterRing2.position.y = fencePostHeight + 1;
+scene.add(perimeterRing2);
+
+animatedObjects.push({
+  mesh: perimeterRing2,
+  update(t) {
+    perimeterRing2.rotation.z = -t * 0.15;
+    perimeterRing2Mat.opacity = 0.1 + 0.1 * Math.sin(t * 1.5 + 1.0);
+  }
+});
+
+// ===========================================================================
+//  ADDITIONAL DETAILS: walkways, crates, pipes
+// ===========================================================================
+// Walkway from main building to hatch
+const walkwayGeo = new THREE.BoxGeometry(4, 0.2, 55);
+const walkwayMat = new THREE.MeshStandardMaterial({
+  color: 0x080c14, roughness: 0.5, metalness: 0.6
+});
+const walkway = new THREE.Mesh(walkwayGeo, walkwayMat);
+walkway.position.set(-25, 0.1, 5);
+walkway.receiveShadow = true;
+scene.add(walkway);
+
+// Walkway edge glow
+const walkEdgeGeo = new THREE.BoxGeometry(0.2, 0.3, 55);
+const walkEdgeL = new THREE.Mesh(walkEdgeGeo, cyanEmit);
+walkEdgeL.position.set(-27, 0.25, 5);
+scene.add(walkEdgeL);
+const walkEdgeR = new THREE.Mesh(walkEdgeGeo, cyanEmit);
+walkEdgeR.position.set(-23, 0.25, 5);
+scene.add(walkEdgeR);
+
+// Walkway from research to hatch
+const walk2Geo = new THREE.BoxGeometry(4, 0.2, 45);
+const walk2 = new THREE.Mesh(walk2Geo, walkwayMat);
+walk2.position.set(30, 0.1, 10);
+walk2.rotation.y = 0.5;
+walk2.receiveShadow = true;
+scene.add(walk2);
+
+// Cargo crates (near drone pad)
+const cratePositions = [
+  { x: -70, z: 35, s: 2.5 },
+  { x: -67, z: 38, s: 2.0 },
+  { x: -65, z: 35, s: 3.0 },
+  { x: -72, z: 40, s: 1.5 },
+];
+cratePositions.forEach(cp => {
+  const cGeo = new THREE.BoxGeometry(cp.s, cp.s, cp.s);
+  const cMat = new THREE.MeshStandardMaterial({
+    color: 0x0c1020, roughness: 0.6, metalness: 0.5
+  });
+  const crate = new THREE.Mesh(cGeo, cMat);
+  crate.position.set(cp.x, cp.s / 2, cp.z);
+  crate.castShadow = true;
+  scene.add(crate);
+
+  // Glow strip on crate
+  const stripGeo = new THREE.BoxGeometry(cp.s + 0.1, 0.15, 0.1);
+  const strip = new THREE.Mesh(stripGeo, cyanEmit);
+  strip.position.set(cp.x, cp.s * 0.7, cp.z + cp.s / 2 + 0.05);
+  scene.add(strip);
+});
+
+// ===========================================================================
+//  HORIZON GLOW -- distant city / aurora
+// ===========================================================================
+const horizonGeo = new THREE.PlaneGeometry(800, 100);
+const horizonMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0.0 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    varying vec2 vUv;
+
+    void main() {
+      // Aurora-like gradient
+      float y = vUv.y;
+
+      // Base aurora colors
+      vec3 col1 = vec3(0.0, 0.9, 1.0); // cyan
+      vec3 col2 = vec3(1.0, 0.1, 0.5); // magenta
+      vec3 col3 = vec3(0.0, 0.3, 0.8); // blue
+
+      float wave1 = sin(vUv.x * 6.0 + uTime * 0.3) * 0.5 + 0.5;
+      float wave2 = sin(vUv.x * 4.0 - uTime * 0.2 + 1.0) * 0.5 + 0.5;
+
+      vec3 aurora = mix(col3, col1, wave1 * y) + col2 * wave2 * 0.3 * y;
+
+      float fade = smoothstep(0.0, 0.5, y) * smoothstep(1.0, 0.6, y);
+      float alpha = fade * 0.08 * (0.7 + 0.3 * sin(uTime * 0.5 + vUv.x * 3.0));
+
+      // Distant city lights at bottom
+      float cityLine = smoothstep(0.12, 0.08, y);
+      float cityLights = sin(vUv.x * 80.0) * sin(vUv.x * 120.0 + 3.0);
+      cityLights = max(0.0, cityLights) * cityLine * 0.3;
+      vec3 cityColor = vec3(1.0, 0.7, 0.3);
+
+      vec3 finalColor = aurora * alpha + cityColor * cityLights;
+      float finalAlpha = max(alpha, cityLights);
+
+      gl_FragColor = vec4(finalColor, finalAlpha);
+    }
+  `,
+  transparent: true,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+
+// Place horizon planes around the scene
+for (let i = 0; i < 4; i++) {
+  const h = new THREE.Mesh(horizonGeo, horizonMat);
+  h.position.y = 30;
+  const angle = (i / 4) * Math.PI * 2;
+  h.position.x = Math.sin(angle) * 300;
+  h.position.z = Math.cos(angle) * 300;
+  h.rotation.y = angle + Math.PI;
+  scene.add(h);
+}
+
+animatedObjects.push({
+  mesh: null,
+  update(t) { horizonMat.uniforms.uTime.value = t; }
+});
+
+// ===========================================================================
+//  PARTICLE SYSTEM -- Digital Snow / Data Fragments
+// ===========================================================================
+const particleCount = 2000;
+const particleGeo = new THREE.BufferGeometry();
+const positions = new Float32Array(particleCount * 3);
+const velocities = new Float32Array(particleCount * 3);
+const colors = new Float32Array(particleCount * 3);
+const sizes = new Float32Array(particleCount);
+
+const cyanColor = new THREE.Color(CYAN);
+const magentaColor = new THREE.Color(MAGENTA);
+const amberColor = new THREE.Color(AMBER);
+
+for (let i = 0; i < particleCount; i++) {
+  const i3 = i * 3;
+  positions[i3]     = (Math.random() - 0.5) * 300;
+  positions[i3 + 1] = Math.random() * 80;
+  positions[i3 + 2] = (Math.random() - 0.5) * 300;
+
+  velocities[i3]     = (Math.random() - 0.5) * 0.02;
+  velocities[i3 + 1] = -(Math.random() * 0.05 + 0.02);
+  velocities[i3 + 2] = (Math.random() - 0.5) * 0.02;
+
+  // Random color from palette
+  const r = Math.random();
+  let c;
+  if (r < 0.5) c = cyanColor;
+  else if (r < 0.8) c = magentaColor;
+  else c = amberColor;
+
+  colors[i3]     = c.r;
+  colors[i3 + 1] = c.g;
+  colors[i3 + 2] = c.b;
+
+  sizes[i] = Math.random() * 1.5 + 0.3;
+}
+
+particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+particleGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+particleGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+const particleMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0.0 },
+    uPixelRatio: { value: renderer.getPixelRatio() },
+  },
+  vertexShader: `
+    attribute float size;
+    attribute vec3 color;
+    varying vec3 vColor;
+    uniform float uPixelRatio;
+    void main() {
+      vColor = color;
+      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mvPos;
+      gl_PointSize = size * uPixelRatio * 2.0;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vColor;
+    void main() {
+      float d = length(gl_PointCoord - vec2(0.5));
+      if (d > 0.5) discard;
+      float alpha = 1.0 - smoothstep(0.2, 0.5, d);
+      gl_FragColor = vec4(vColor, alpha * 0.7);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexColors: true,
+});
+
+const particles = new THREE.Points(particleGeo, particleMat);
+scene.add(particles);
+
+animatedObjects.push({
+  mesh: particles,
+  update(t, dt) {
+    const pos = particleGeo.attributes.position.array;
+    for (let i = 0; i < particleCount; i++) {
+      const i3 = i * 3;
+      pos[i3]     += velocities[i3]     + Math.sin(t + i * 0.1) * 0.005;
+      pos[i3 + 1] += velocities[i3 + 1];
+      pos[i3 + 2] += velocities[i3 + 2] + Math.cos(t + i * 0.1) * 0.005;
+
+      // Reset if below ground
+      if (pos[i3 + 1] < 0) {
+        pos[i3]     = (Math.random() - 0.5) * 300;
+        pos[i3 + 1] = 60 + Math.random() * 20;
+        pos[i3 + 2] = (Math.random() - 0.5) * 300;
+      }
+    }
+    particleGeo.attributes.position.needsUpdate = true;
+    particleMat.uniforms.uTime.value = t;
+  }
+});
+
+// ===========================================================================
+//  ADDITIONAL DETAIL: Ground-level accent lights
+// ===========================================================================
+// Cyan ground spots
+const groundSpots = [
+  { x: -20, z: -20, color: CYAN },
+  { x: 20, z: -40, color: CYAN },
+  { x: -60, z: 0, color: MAGENTA },
+  { x: 60, z: 20, color: MAGENTA },
+  { x: 0, z: -60, color: AMBER },
+  { x: 30, z: 60, color: AMBER },
+];
+groundSpots.forEach(gs => {
+  const gl = new THREE.PointLight(gs.color, 1.0, 20, 2);
+  gl.position.set(gs.x, 0.5, gs.z);
+  scene.add(gl);
+});
+
+// ===========================================================================
+//  ADDITIONAL: Holographic perimeter warning triangles
+// ===========================================================================
+const warningTriGeo = new THREE.ConeGeometry(2, 3, 3);
+const warningTriMat = new THREE.MeshStandardMaterial({
+  color: MAGENTA, emissive: MAGENTA, emissiveIntensity: 2.0,
+  transparent: true, opacity: 0.4, wireframe: true
+});
+const warningPositions = [
+  { x: 0, z: -fenceHalfD - 5 },
+  { x: fenceHalfW + 5, z: 0 },
+  { x: 0, z: fenceHalfD + 5 },
+  { x: -fenceHalfW - 5, z: 0 },
+];
+warningPositions.forEach((wp, idx) => {
+  const tri = new THREE.Mesh(warningTriGeo, warningTriMat.clone());
+  tri.position.set(wp.x, 5, wp.z);
+  scene.add(tri);
+
+  animatedObjects.push({
+    mesh: tri,
+    update(t) {
+      tri.rotation.y = t * 1.5;
+      tri.position.y = 5 + Math.sin(t * 2.0 + idx * 1.5) * 1.0;
+      tri.material.opacity = 0.2 + 0.2 * Math.sin(t * 3.0 + idx);
+    }
+  });
+});
+
+// ===========================================================================
+//  ADDITIONAL: Comms tower with data stream
+// ===========================================================================
+const commsTowerX = 40, commsTowerZ = 60;
+const commsPoleGeo = new THREE.CylinderGeometry(0.5, 0.7, 20, 8);
+const commsPole = new THREE.Mesh(commsPoleGeo, metalMat);
+commsPole.position.set(commsTowerX, 10, commsTowerZ);
+commsPole.castShadow = true;
+scene.add(commsPole);
+
+// Antenna struts
+for (let i = 0; i < 4; i++) {
+  const strutGeo = new THREE.BoxGeometry(8, 0.3, 0.3);
+  const strut = new THREE.Mesh(strutGeo, metalMat);
+  strut.position.set(commsTowerX, 15 + i * 1.5, commsTowerZ);
+  strut.rotation.y = i * Math.PI / 4;
+  scene.add(strut);
+}
+
+// Top beacon
+const beaconGeo = new THREE.SphereGeometry(1.0, 8, 8);
+const beaconMat = new THREE.MeshStandardMaterial({
+  color: MAGENTA, emissive: MAGENTA, emissiveIntensity: 4.0
+});
+const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+beacon.position.set(commsTowerX, 21, commsTowerZ);
+scene.add(beacon);
+
+const beaconLight = new THREE.PointLight(MAGENTA, 3, 50, 2);
+beaconLight.position.set(commsTowerX, 21, commsTowerZ);
+scene.add(beaconLight);
+
+animatedObjects.push({
+  mesh: beacon,
+  update(t) {
+    beaconMat.emissiveIntensity = 2.0 + 3.0 * (Math.sin(t * 5.0) > 0.5 ? 1.0 : 0.0);
+    beaconLight.intensity = beaconMat.emissiveIntensity * 0.6;
+  }
+});
+
+// Data stream beam from comms tower (vertical)
+const dataBeamGeo = new THREE.CylinderGeometry(0.3, 0.3, 40, 8, 1, true);
+const dataBeamMat = new THREE.MeshBasicMaterial({
+  color: CYAN, transparent: true, opacity: 0.08,
+  side: THREE.DoubleSide, depthWrite: false
+});
+const dataBeam = new THREE.Mesh(dataBeamGeo, dataBeamMat);
+dataBeam.position.set(commsTowerX, 40, commsTowerZ);
+scene.add(dataBeam);
+
+animatedObjects.push({
+  mesh: dataBeam,
+  update(t) {
+    dataBeamMat.opacity = 0.04 + 0.06 * Math.sin(t * 2.0);
+  }
+});
+
+// ===========================================================================
+//  ADDITIONAL: Fuel/coolant tanks near generator
+// ===========================================================================
+for (let i = 0; i < 3; i++) {
+  const tankGeo = new THREE.CylinderGeometry(2.5, 2.5, 7, 16);
+  const tank = new THREE.Mesh(tankGeo, metalMat);
+  tank.position.set(-100, 3.5, -45 + i * 8);
+  tank.castShadow = true;
+  scene.add(tank);
+
+  // Tank glow ring
+  const tRingGeo = new THREE.TorusGeometry(2.6, 0.12, 8, 32);
+  tRingGeo.rotateX(Math.PI / 2);
+  const tRingColor = i === 1 ? MAGENTA : CYAN;
+  const tRingMat = new THREE.MeshStandardMaterial({
+    color: tRingColor, emissive: tRingColor, emissiveIntensity: 2.0
+  });
+  const tRing = new THREE.Mesh(tRingGeo, tRingMat);
+  tRing.position.set(-100, 5, -45 + i * 8);
+  scene.add(tRing);
+}
+
+// Pipe connecting tanks to generator
+const tankPipeGeo = new THREE.BoxGeometry(12, 0.8, 0.8);
+const tankPipe = new THREE.Mesh(tankPipeGeo, metalMat);
+tankPipe.position.set(-93, 5, -45);
+scene.add(tankPipe);
+
+const tankPipeGlow = new THREE.BoxGeometry(12, 0.2, 0.1);
+const tankPipeGlowMesh = new THREE.Mesh(tankPipeGlow, cyanEmit);
+tankPipeGlowMesh.position.set(-93, 5.5, -45);
+scene.add(tankPipeGlowMesh);
+
+// ===========================================================================
+//  POST-PROCESSING
+// ===========================================================================
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+// Strong bloom for cyberpunk aesthetic
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  1.4,    // strength -- high for cyberpunk
+  0.5,    // radius
+  0.15    // threshold -- low to catch emissives
+);
+composer.addPass(bloomPass);
+
+// Chromatic aberration / vignette post-processing
+const vignetteShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0.0 },
+    uIntensity: { value: 0.4 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uIntensity;
+    varying vec2 vUv;
+
+    void main() {
+      vec2 uv = vUv;
+
+      // Slight chromatic aberration
+      float aberration = 0.001;
+      float r = texture2D(tDiffuse, uv + vec2(aberration, 0.0)).r;
+      float g = texture2D(tDiffuse, uv).g;
+      float b = texture2D(tDiffuse, uv - vec2(aberration, 0.0)).b;
+      vec3 color = vec3(r, g, b);
+
+      // Vignette
+      vec2 center = uv - 0.5;
+      float dist = length(center);
+      float vignette = 1.0 - smoothstep(0.4, 0.9, dist) * uIntensity;
+      color *= vignette;
+
+      // Very subtle scanlines
+      float scanline = 0.98 + 0.02 * sin(uv.y * 800.0 + uTime * 2.0);
+      color *= scanline;
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+};
+const vignettePass = new ShaderPass(vignetteShader);
+composer.addPass(vignettePass);
+
+animatedObjects.push({
+  mesh: null,
+  update(t) {
+    vignetteShader.uniforms.uTime.value = t;
+  }
+});
+
+// ===========================================================================
+//  RESIZE HANDLER
+// ===========================================================================
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const a = w / h;
+  camera.left   = -frustum * a;
+  camera.right  =  frustum * a;
+  camera.top    =  frustum;
+  camera.bottom = -frustum;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  bloomPass.setSize(w, h);
+});
+
+// ===========================================================================
+//  ANIMATION LOOP
+// ===========================================================================
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const dt = clock.getDelta();
+
+  controls.update();
+
+  // Update all animated objects
+  for (const obj of animatedObjects) {
+    obj.update(t, dt);
+  }
+
+  composer.render();
+}
+
+// ===========================================================================
+//  LOADING SCREEN DISMISS
+// ===========================================================================
+setTimeout(() => {
+  document.getElementById('loading').classList.add('done');
+}, 2800);
+
+animate();
+</script>
+</body>
+</html>

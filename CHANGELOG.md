@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.4] - 2026-03-18
+
+### Fixed
+- Deploy pipeline circular dependency — Engine Deploy now skips gracefully when ECS task definition doesn't exist yet (first deploy), allowing Platform terraform to create it
+- Platform workflow no longer blocked by Engine Deploy failure — tolerates non-success results so first deploy can complete
+- Migration `cms/0015_ngfw_model.py` made idempotent — checks if `ngfw_spec` column exists before adding it, preventing "column already exists" error on fresh databases
+- Docker Compose build context corrected — set to parent directory so Dockerfile can access sibling directories (`cyberscript/`, `shifter_platform/`)
+
+### Added
+- `SKIP_MIGRATIONS` environment variable support in `entrypoint.sh` for local development
+
 ## [3.15.3] - 2026-03-16
 
 ### Added

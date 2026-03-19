@@ -190,6 +190,8 @@ jobs:
           ENV: ${{ inputs.environment }}
         run: |
           CLUSTER_NAME="${ENV}-portal-guacamole"
+          GUACD_SERVICE="${ENV}-portal-guacd"
+          CLIENT_SERVICE="${ENV}-portal-guacamole-client"
 
           # Check if cluster exists
           if ! aws ecs describe-clusters --clusters "$CLUSTER_NAME" --query "clusters[0].status" --output text 2>/dev/null | grep -q "ACTIVE"; then
@@ -197,21 +199,33 @@ jobs:
             exit 0
           fi
 
+          # If services are stuck in FAILED state (e.g. from a prior failed deploy),
+          # force a new deployment so they retry with the now-available images
+          for SVC in "$GUACD_SERVICE" "$CLIENT_SERVICE"; do
+            STATE=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$SVC" \
+              --query "services[0].deployments[?status=='PRIMARY'] | [0].rolloutState" \
+              --output text 2>/dev/null || echo "UNKNOWN")
+            if [ "$STATE" = "FAILED" ]; then
+              echo "::warning::$SVC deployment is FAILED — forcing new deployment"
+              aws ecs update-service --cluster "$CLUSTER_NAME" --service "$SVC" --force-new-deployment --no-cli-pager
+            fi
+          done
+
           echo "Waiting for Guacamole ECS services to stabilize..."
 
-          # Wait for both services with extended timeout via polling
-          # The default waiter (40 attempts × 15s = 10min) is too short for first deploy
-          # where RDS init + schema creation + JVM startup can exceed 10min
+          # Poll with extended timeout (40 × 30s = 20min)
+          # Default aws ecs wait (10min) is too short for first deploy
+          # where RDS init + schema creation + JVM startup can take a while
           ATTEMPTS=0
-          MAX_ATTEMPTS=40  # 40 × 30s = 20min
+          MAX_ATTEMPTS=40
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             GUACD_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" \
-              --services "${ENV}-portal-guacd" \
+              --services "$GUACD_SERVICE" \
               --query "services[0].deployments[?status=='PRIMARY'] | [0].rolloutState" \
               --output text 2>/dev/null || echo "UNKNOWN")
 
             CLIENT_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" \
-              --services "${ENV}-portal-guacamole-client" \
+              --services "$CLIENT_SERVICE" \
               --query "services[0].deployments[?status=='PRIMARY'] | [0].rolloutState" \
               --output text 2>/dev/null || echo "UNKNOWN")
 

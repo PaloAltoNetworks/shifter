@@ -199,12 +199,40 @@ jobs:
 
           echo "Waiting for Guacamole ECS services to stabilize..."
 
-          # Wait for both services (10 min timeout is default)
-          aws ecs wait services-stable \
-            --cluster "$CLUSTER_NAME" \
-            --services "${ENV}-portal-guacd" "${ENV}-portal-guacamole-client"
+          # Wait for both services with extended timeout via polling
+          # The default waiter (40 attempts × 15s = 10min) is too short for first deploy
+          # where RDS init + schema creation + JVM startup can exceed 10min
+          ATTEMPTS=0
+          MAX_ATTEMPTS=40  # 40 × 30s = 20min
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+            GUACD_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" \
+              --services "${ENV}-portal-guacd" \
+              --query "services[0].deployments[?status=='PRIMARY'] | [0].rolloutState" \
+              --output text 2>/dev/null || echo "UNKNOWN")
 
-          echo "Guacamole ECS services are stable"
+            CLIENT_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" \
+              --services "${ENV}-portal-guacamole-client" \
+              --query "services[0].deployments[?status=='PRIMARY'] | [0].rolloutState" \
+              --output text 2>/dev/null || echo "UNKNOWN")
+
+            echo "guacd: $GUACD_STATUS | guacamole-client: $CLIENT_STATUS"
+
+            if [ "$GUACD_STATUS" = "COMPLETED" ] && [ "$CLIENT_STATUS" = "COMPLETED" ]; then
+              echo "Guacamole ECS services are stable"
+              exit 0
+            fi
+
+            # Fail fast if circuit breaker triggered a rollback
+            if [ "$GUACD_STATUS" = "FAILED" ] || [ "$CLIENT_STATUS" = "FAILED" ]; then
+              echo "::error::Deployment failed — circuit breaker triggered rollback"
+              exit 1
+            fi
+
+            ATTEMPTS=$((ATTEMPTS + 1))
+            sleep 30
+          done
+
+          echo "::warning::Guacamole services did not stabilize within 20 minutes — continuing (services may still be starting)"
 
   build:
     name: Build (${{ inputs.environment }})

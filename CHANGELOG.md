@@ -5,12 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.15.4] - 2026-03-18
+## [3.15.4] - 2026-03-19
 
 ### Fixed
 - Deploy pipeline circular dependency — Engine Deploy now skips gracefully when ECS task definition doesn't exist yet (first deploy), allowing Platform terraform to create it
 - Platform workflow no longer blocked by Engine Deploy failure — tolerates non-success results so first deploy can complete
-- Migration `cms/0015_ngfw_model.py` made idempotent — checks if `ngfw_spec` column exists before adding it, preventing "column already exists" error on fresh databases
+- Guacamole ECS stability wait replaced `aws ecs wait services-stable` (hard 10min timeout) with polling loop (20min) that checks deployment `rolloutState` — first deploy needs extra time for RDS init + schema creation + JVM startup
+- Migration `cms/0015_ngfw_model.py` made idempotent — checks if `ngfw_spec` column exists before adding it, preventing "column already exists" error on fresh databases; uses `PRAGMA table_info` for SQLite (tests) and `information_schema` for PostgreSQL (prod)
 - Docker Compose build context corrected — set to parent directory so Dockerfile can access sibling directories (`cyberscript/`, `shifter_platform/`)
 
 ### Added

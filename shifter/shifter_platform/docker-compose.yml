@@ -44,7 +44,9 @@ services:
       retries: 5
 
   web:
-    build: .
+    build:
+      context: ..
+      dockerfile: shifter_platform/Dockerfile
     ports:
       - "8000:8000"
     env_file:
@@ -76,7 +78,9 @@ services:
   # ------------------------------------------------------------------------------
 
   worker-cms:
-    build: .
+    build:
+      context: ..
+      dockerfile: shifter_platform/Dockerfile
     command: python manage.py run_worker --queue cms
     env_file:
       - .env
@@ -102,7 +106,9 @@ services:
       retries: 2
 
   worker-engine:
-    build: .
+    build:
+      context: ..
+      dockerfile: shifter_platform/Dockerfile
     command: python manage.py run_worker --queue engine
     env_file:
       - .env
@@ -128,7 +134,9 @@ services:
       retries: 2
 
   worker-mc:
-    build: .
+    build:
+      context: ..
+      dockerfile: shifter_platform/Dockerfile
     command: python manage.py run_worker --queue mc
     env_file:
       - .env
@@ -160,7 +168,9 @@ services:
   # ------------------------------------------------------------------------------
 
   ctf-scheduler:
-    build: .
+    build:
+      context: ..
+      dockerfile: shifter_platform/Dockerfile
     command: python manage.py run_ctf_scheduler
     env_file:
       - .env

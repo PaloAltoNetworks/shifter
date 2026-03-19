@@ -5,7 +5,28 @@ Infrastructure fields moved to Engine NGFW model.
 Add ngfw_spec JSONField for hydrated configuration.
 """
 
-from django.db import migrations, models
+from django.db import connection, migrations, models
+
+
+def add_ngfw_spec_if_missing(apps, schema_editor):
+    """Add ngfw_spec column only if it doesn't already exist."""
+    with connection.cursor() as cursor:
+        # Use PRAGMA for SQLite (tests), information_schema for PostgreSQL (prod)
+        if connection.vendor == "sqlite":
+            cursor.execute("PRAGMA table_info(mission_control_userngfw)")
+            columns = [row[1] for row in cursor.fetchall()]
+            exists = "ngfw_spec" in columns
+        else:
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'mission_control_userngfw' AND column_name = 'ngfw_spec'"
+            )
+            exists = cursor.fetchone() is not None
+        if not exists:
+            col_type = "JSON" if connection.vendor == "sqlite" else "jsonb"
+            cursor.execute(
+                f"ALTER TABLE mission_control_userngfw ADD COLUMN ngfw_spec {col_type} NULL"
+            )
 
 
 class Migration(migrations.Migration):
@@ -17,11 +38,18 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Step 1: Add ngfw_spec column to the table
-        migrations.AddField(
-            model_name="userngfw",
-            name="ngfw_spec",
-            field=models.JSONField(blank=True, null=True),
+        # Step 1: Add ngfw_spec column to the table (idempotent)
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name="userngfw",
+                    name="ngfw_spec",
+                    field=models.JSONField(blank=True, null=True),
+                ),
+            ],
+            database_operations=[
+                migrations.RunPython(add_ngfw_spec_if_missing, migrations.RunPython.noop),
+            ],
         ),
         # Step 2: Remove infrastructure columns (now in Engine NGFW)
         migrations.RemoveField(

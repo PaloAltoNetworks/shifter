@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.17.0] - 2026-03-19
+
+### Changed
+- Object storage abstraction delegation (PLAT-001.2, #812)
+  - `cms/assets/s3.py`: All S3 functions now delegate to `ObjectStorage` protocol via `get_object_storage()`
+  - `cms/experiments/s3.py`: All S3 functions now delegate to `ObjectStorage` protocol via `get_object_storage()`
+  - `provisioner/config.py`: `generate_presigned_url()` delegates to provisioner `ObjectStorage` adapter
+  - Exception bridging: `CloudStorageError` caught and re-raised as `S3Error` for backward compatibility
+  - All existing function signatures, import paths, and caller contracts preserved
+
 ## [3.16.0] - 2026-03-19
 
 ### Added

@@ -26,25 +26,31 @@ from config import (
 
 
 class TestGeneratePresignedUrl:
-    """Tests for S3 presigned URL generation."""
+    """Tests for S3 presigned URL generation via cloud abstraction."""
 
-    def test_generates_url_with_correct_params(self, mock_boto3_clients):
+    def test_generates_url_with_correct_params(self):
         """Presigned URL should be generated with correct bucket/key params."""
-        url = generate_presigned_url("my-bucket", "path/to/file.tar.gz")
+        mock_storage = MagicMock()
+        mock_storage.generate_presigned_download_url.return_value = "https://s3.example.com/presigned-url"
+
+        with patch("cloud.get_object_storage", return_value=mock_storage):
+            url = generate_presigned_url("my-bucket", "path/to/file.tar.gz")
 
         assert url == "https://s3.example.com/presigned-url"
-        mock_boto3_clients["s3"].generate_presigned_url.assert_called_once_with(
-            "get_object",
-            Params={"Bucket": "my-bucket", "Key": "path/to/file.tar.gz"},
-            ExpiresIn=3600,
+        mock_storage.generate_presigned_download_url.assert_called_once_with(
+            bucket="my-bucket", key="path/to/file.tar.gz", expires_in=3600
         )
 
-    def test_custom_expiry_passed_to_s3(self, mock_boto3_clients):
-        """Custom expires_in value should be passed to S3."""
-        generate_presigned_url("bucket", "key", expires_in=7200)
+    def test_custom_expiry_passed_to_storage(self):
+        """Custom expires_in value should be passed to ObjectStorage."""
+        mock_storage = MagicMock()
+        mock_storage.generate_presigned_download_url.return_value = "https://s3.example.com/presigned-url"
 
-        call_kwargs = mock_boto3_clients["s3"].generate_presigned_url.call_args
-        assert call_kwargs[1]["ExpiresIn"] == 7200
+        with patch("cloud.get_object_storage", return_value=mock_storage):
+            generate_presigned_url("bucket", "key", expires_in=7200)
+
+        call_kwargs = mock_storage.generate_presigned_download_url.call_args
+        assert call_kwargs[1]["expires_in"] == 7200
 
 
 class TestGetRangeFromDb:

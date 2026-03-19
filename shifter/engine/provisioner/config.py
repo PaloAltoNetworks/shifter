@@ -67,6 +67,8 @@ def decrypt_field(encrypted_value: str) -> str:
 def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for an S3 object.
 
+    Delegates to the cloud abstraction layer's ObjectStorage implementation.
+
     This is called during config loading (before Pulumi runs), not during
     resource creation. It's safe because it doesn't create any AWS resources.
 
@@ -78,13 +80,10 @@ def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str
     Returns:
         Presigned URL string.
     """
-    s3_client = boto3.client("s3")
-    url: str = s3_client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=expires_in,
-    )
-    return url
+    from cloud import get_object_storage
+
+    storage = get_object_storage()
+    return storage.generate_presigned_download_url(bucket=bucket, key=key, expires_in=expires_in)
 
 
 @dataclass

@@ -114,9 +114,13 @@ done
 # Django setup
 # ------------------------------------------------------------------------------
 
-# Run migrations
-echo "Running migrations..."
-python manage.py migrate --noinput
+# Run migrations (skip if SKIP_MIGRATIONS is set)
+if [[ -z "${SKIP_MIGRATIONS:-}" ]]; then
+    echo "Running migrations..."
+    python manage.py migrate --noinput
+else
+    echo "Skipping migrations (SKIP_MIGRATIONS is set)"
+fi
 
 # Collect static files
 echo "Collecting static files..."

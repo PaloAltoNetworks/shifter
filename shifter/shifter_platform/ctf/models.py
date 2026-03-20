@@ -546,6 +546,64 @@ class CTFChallenge(CTFBaseModel):
         return self.points
 
 
+class CTFFlag(CTFBaseModel):
+    """Individual flag for a CTF challenge.
+
+    Supports multiple flags per challenge where any correct flag constitutes a solve.
+    Each flag independently supports different types (static/regex) and case sensitivity.
+
+    Attributes:
+        challenge: The challenge this flag belongs to.
+        flag_hash: Hashed flag value (bcrypt/pbkdf2 for static, plaintext regex for regex type).
+        flag_type: Type of flag - "static" (hashed comparison) or "regex" (pattern match).
+        case_sensitive: Whether flag comparison is case-sensitive.
+        order: Display order for admin UI.
+    """
+
+    FLAG_TYPE_CHOICES = [
+        ("static", "Static (hashed comparison)"),
+        ("regex", "Regex (pattern match)"),
+    ]
+
+    challenge = models.ForeignKey(
+        "CTFChallenge",
+        on_delete=models.CASCADE,
+        related_name="flags",
+        help_text="Challenge this flag belongs to",
+    )
+    flag_hash = models.CharField(
+        max_length=255,
+        help_text="Hashed flag value (static) or regex pattern (regex type)",
+    )
+    flag_type = models.CharField(
+        max_length=10,
+        choices=FLAG_TYPE_CHOICES,
+        default="static",
+        help_text="Flag verification type",
+    )
+    case_sensitive = models.BooleanField(
+        default=True,
+        help_text="Whether flag comparison is case-sensitive",
+    )
+    order = models.PositiveIntegerField(
+        default=0,
+        help_text="Display order in admin UI",
+    )
+
+    class Meta:
+        db_table = "ctf_flag"
+        ordering = ["order", "created_at"]
+        verbose_name = "CTF Flag"
+        verbose_name_plural = "CTF Flags"
+        indexes = [
+            models.Index(fields=["challenge", "flag_type"]),
+        ]
+
+    def __str__(self) -> str:
+        """Return flag description."""
+        return f"Flag #{self.order} ({self.flag_type}) for {self.challenge.name}"
+
+
 class CTFTeam(CTFBaseModel):
     """Team for team-based CTF competitions.
 

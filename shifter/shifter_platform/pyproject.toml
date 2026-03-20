@@ -49,8 +49,6 @@ python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
 pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
 addopts = "-n auto"
-# Coverage: run explicitly with --cov or in CI. Not in addopts to avoid 3-5x slowdown on every local run.
-# Full command: pytest --cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov-report=term-missing --cov-report=xml:coverage.xml
 env = ["TESTING=1"]
 
 [tool.coverage.run]

@@ -41,18 +41,19 @@ TESTING=1 python -m pytest tests/test_views.py::TestDashboard -v
 TESTING=1 python -m pytest tests/test_views.py::TestDashboard::test_dashboard_requires_login -v
 ```
 
-### Run with Coverage
+### Run with Coverage (CI only by default)
+Coverage is removed from `addopts` so local runs are fast. To run with coverage locally:
 ```bash
 cd /home/atomik/src/shifter/shifter/shifter_platform
 source .venv/bin/activate
-TESTING=1 python -m pytest --cov=mission_control --cov-report=term-missing
+TESTING=1 python -m pytest --cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov=ctf --cov=engine --cov=risk_register --cov-report=term-missing
 ```
 
 ## Important Notes
 
 - **TESTING=1** is required - it configures Django to use test settings (SQLite, disabled external services)
 - **Always activate .venv** - dependencies are installed there
-- Tests are in `shifter/shifter_platform/tests/` directory
+- All tests are in the centralized `shifter/shifter_platform/tests/` directory (subdirs: `cms/`, `ctf/`, `engine/`, `risk_register/`, etc.)
 - Use `-v` for verbose output
 - Use `-x` to stop on first failure
 - Use `--tb=short` for shorter tracebacks

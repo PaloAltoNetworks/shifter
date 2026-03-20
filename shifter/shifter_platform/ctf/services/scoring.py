@@ -9,11 +9,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, F, Max, Q, Sum
 from django.db.models.functions import Coalesce
 
 from ctf.enums import ParticipantStatus
-from ctf.models import CTFParticipant, CTFSubmission, CTFTeam
+from ctf.models import CTFAward, CTFParticipant, CTFSubmission, CTFTeam
 
 if TYPE_CHECKING:
     pass
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_score(participant_id: UUID) -> int:
-    """Calculate total score for a participant.
+    """Calculate total score for a participant (submissions + awards).
 
     Args:
         participant_id: UUID of the participant.
@@ -30,12 +30,16 @@ def calculate_score(participant_id: UUID) -> int:
     Returns:
         Total score as integer.
     """
-    result = CTFSubmission.objects.filter(
+    submission_total = CTFSubmission.objects.filter(
         participant_id=participant_id,
         is_correct=True,
-    ).aggregate(total=Coalesce(Sum("points_awarded"), 0))
+    ).aggregate(total=Coalesce(Sum("points_awarded"), 0))["total"]
 
-    return result["total"]
+    award_total = CTFAward.objects.filter(
+        participant_id=participant_id,
+    ).aggregate(total=Coalesce(Sum("points"), 0))["total"]
+
+    return submission_total + award_total
 
 
 def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, Any]]:
@@ -63,13 +67,15 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
             ],
         )
         .annotate(
-            computed_score=Coalesce(
+            submission_score=Coalesce(
                 Sum(
                     "submissions__points_awarded",
                     filter=Q(submissions__is_correct=True),
                 ),
                 0,
             ),
+            award_points=Coalesce(Sum("awards__points"), 0),
+            computed_score=F("submission_score") + F("award_points"),
             solve_count=Count(
                 "submissions",
                 filter=Q(submissions__is_correct=True),
@@ -132,13 +138,15 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
     teams = (
         CTFTeam.objects.filter(event_id=event_id)
         .annotate(
-            computed_score=Coalesce(
+            submission_score=Coalesce(
                 Sum(
                     "members__submissions__points_awarded",
                     filter=Q(members__submissions__is_correct=True),
                 ),
                 0,
             ),
+            award_points=Coalesce(Sum("members__awards__points"), 0),
+            computed_score=F("submission_score") + F("award_points"),
             solve_count=Count(
                 "members__submissions",
                 filter=Q(members__submissions__is_correct=True),
@@ -265,6 +273,7 @@ def get_event_statistics(event_id: UUID) -> dict[str, Any]:
     participants = CTFParticipant.objects.filter(event=event)
     challenges = CTFChallenge.objects.filter(event=event)
     submissions = CTFSubmission.objects.filter(participant__event=event)
+    awards = CTFAward.objects.filter(event=event)
 
     return {
         "event_id": str(event_id),
@@ -278,4 +287,5 @@ def get_event_statistics(event_id: UUID) -> dict[str, Any]:
         "total_points_awarded": submissions.filter(is_correct=True).aggregate(total=Coalesce(Sum("points_awarded"), 0))[
             "total"
         ],
+        "total_awards": awards.count(),
     }

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.17.0] - 2026-03-20
+
+### Added
+- CTF awards system (CTF-206) — organizers can grant point bonuses or deductions to participants via `CTFAward` model
+- Award service (`grant_award`, `revoke_award`, `get_participant_awards`, `get_event_awards`)
+- Score calculation now includes awards: `calculate_score`, `get_scoreboard`, `get_team_scoreboard`, model `total_score` properties, and admin annotations all reflect submission points + award points
+- `get_event_statistics` includes `total_awards` count
+- Award admin interface with inline views on participant and event admin pages
+
 ## [3.16.1] - 2026-03-20
 
 ### Changed

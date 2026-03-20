@@ -12,12 +12,14 @@ An isolated demo environment. Contains attacker machine(s) and victim machine(s)
 
 A template that defines what a range contains. Different scenarios for different demo needs:
 
-| Scenario | What It Includes | Use Case |
-|----------|------------------|----------|
-| Basic Range | Kali + 1 victim | Quick demos, simple attacks |
-| AD Attack Lab | Kali + DC + domain victim | Active Directory attacks |
-| Basic Range with NGFW | Basic Range + firewall | Traffic logging to XDR/XSIAM |
-| Cortex BYOT | Full enterprise setup | Complex multi-machine scenarios |
+| Scenario | What It Includes | NGFW | Use Case |
+|----------|------------------|------|----------|
+| Basic Range | Kali + 1 victim | No | Quick demos, simple attacks |
+| AD Attack Lab | Kali + DC + domain victim | Yes | Active Directory attacks |
+| Basic Range with NGFW | Basic Range + firewall | Yes | Traffic logging to XDR/XSIAM |
+| Cortex BYOT | Full enterprise setup (6 instances) | Yes | Complex multi-machine scenarios |
+| Cortex Deployment Experience | Same as BYOT, no pre-installed agents | Yes | Agent deployment exercises |
+| Agentic Workshop | Kali + 5 challenge boxes | No | CTF-style workshops |
 
 ## Terminal
 

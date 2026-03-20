@@ -26,7 +26,7 @@ Launch your first range in 5 minutes.
 
 ### 3. Wait for Provisioning
 
-Takes 10 minutes. You'll see status updates:
+Typically 2-5 minutes. You'll see status updates:
 
 - **Pending** - Queued for provisioning
 - **Provisioning** - Infrastructure spinning up

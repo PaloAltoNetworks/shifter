@@ -1,6 +1,6 @@
 # Cortex BYOT
 
-Full enterprise simulation with domain controller, multiple workstations, server, attacker, and NGFW integration.
+Full enterprise simulation with 6 instances: domain controller, Cortex host, two workstations, server, attacker, and NGFW integration.
 
 ## Architecture
 
@@ -18,6 +18,7 @@ graph TB
     end
     subgraph DC Network
         DC[Domain Controller]
+        CH[Cortex Host]
     end
 
     A -->|Through NGFW| W1
@@ -25,10 +26,13 @@ graph TB
     W1 --- DC
     W2 --- DC
     S --- DC
+    CH --- DC
 
-    W1 -->|Reports to| C[Your XDR/XSIAM Console]
+    DC -->|Reports to| C[Your XDR/XSIAM Console]
+    W1 -->|Reports to| C
     W2 -->|Reports to| C
     S -->|Reports to| C
+    CH -->|Reports to| C
     NGFW[Your NGFW] -->|Logs to| C
 ```
 
@@ -37,7 +41,8 @@ graph TB
 | Instance | OS | Role | Agent | Domain |
 |----------|-----|------|-------|--------|
 | Attacker | Kali Linux | Attack machine | No | No |
-| Domain Controller | Windows Server | AD DC | No | `internal.shifter` |
+| Domain Controller | Windows Server | AD DC | Yes | `internal.shifter` |
+| Cortex Host | Ubuntu | Victim | Yes | Joined |
 | Workstation 1 | Windows | Victim | Yes | Joined |
 | Workstation 2 | Windows | Victim | Yes | Joined |
 | Server | Ubuntu | Victim | Yes | Joined |
@@ -49,7 +54,7 @@ Four segmented subnets with NGFW routing:
 - **Attacker network**: Kali (isolated, routes through NGFW)
 - **Workstation network**: Windows workstations
 - **Server network**: Ubuntu server
-- **DC network**: Domain controller (connected to workstation and server networks)
+- **DC network**: Domain controller and Cortex host (connected to workstation, server, and attacker networks)
 
 ## Domain Configuration
 
@@ -64,12 +69,11 @@ Before launching this scenario:
 1. Set up an NGFW (see [NGFW Guide](../features/ngfw))
 2. Complete SCM device association
 3. Configure log forwarding to XDR/XSIAM
-4. Have a Windows agent uploaded
+4. Have Windows and Linux agents uploaded
 
 ## Access
 
-- **Kali, Windows instances**: SSH terminal and RDP
-- **Ubuntu Server**: SSH terminal only
+- **All instances**: SSH terminal and RDP
 
 ## Use Cases
 

@@ -45,8 +45,8 @@ Before launching this scenario:
 
 ## Access
 
-- **Attacker (Kali)**: SSH terminal, RDP for GUI
-- **Workstation**: SSH terminal, RDP if Windows
+- **Attacker (Kali)**: SSH terminal, RDP
+- **Workstation**: SSH terminal, RDP
 
 ## Use Cases
 

@@ -20,14 +20,15 @@ Run XDR/XSIAM demos without installing tools on your laptop.
 - [Terminal](features/terminal) - SSH and RDP access to instances
 - [Credentials](features/credentials) - SCM and deployment profile management
 - [NGFW](features/ngfw) - Persistent firewall setup for traffic logging
+- [CTF](features/ctf) - Capture-the-flag events with scored challenges
 
 ## Scenarios
 
-- [Overview](scenarios/index) - Compare available scenarios
+- [Overview](scenarios/index) - Compare all available scenarios
 - [Basic Range](scenarios/basic-range) - Kali + victim (fastest)
-- [AD Attack Lab](scenarios/ad-attack-lab) - Active Directory environment
+- [AD Attack Lab](scenarios/ad-attack-lab) - Active Directory environment (requires NGFW)
 - [Basic Range with NGFW](scenarios/ngfw-range) - Basic + network visibility
-- [Cortex BYOT](scenarios/cortex-byot) - Full enterprise simulation
+- [Cortex BYOT](scenarios/cortex-byot) - Full enterprise simulation (6 instances)
 
 ## Reference
 

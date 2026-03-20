@@ -50,13 +50,17 @@ graph TB
         SE["Shifter Engine<br/>(Range Management)"]
         CMS["Shifter CMS<br/>(Content Management)"]
         SA["Shifter Admin<br/>(Platform Management)"]
+        CTF["CTF<br/>(Competitions)"]
+        RR["Risk Register<br/>(Risk & Audit)"]
     end
 
     Users((Users)) --> MC
+    Users --> CTF
 
     MC -->|service calls| SE
     MC -->|service calls| CMS
     MC -->|service calls| SA
+    CTF -->|service calls| CMS
     SE -.->|references models| CMS
 ```
 
@@ -64,8 +68,12 @@ graph TB
 |---------|-----|---------|
 | **Mission Control** | `mission_control` | Presentation layer. Single UI for all users. |
 | **Shifter Engine** | `engine` | Range management. Owns Range lifecycle, references CMS assets. |
-| **Shifter CMS** | `cms` | Content management. Assets, credentials, scenario catalog. |
-| **Shifter Admin** | `management` | Platform management. Audit logging, user profiles. |
+| **Shifter CMS** | `cms` | Content management. Assets, credentials, scenario catalog. Also includes `cms.experiments` (script execution) and `cms.scenario_editor` (template authoring). |
+| **Shifter Admin** | `management` | Platform management. User profiles, Cognito integration. |
+| **CTF** | `ctf` | Capture-the-flag competitions. Events, challenges, teams, scoring, magic-link auth. |
+| **Risk Register** | `risk_register` | Risk tracking, API keys, centralized audit logging. |
+| **Shared** | `shared` | Cross-cutting utilities: auth helpers, enums, schemas, exceptions. |
+| **Documentation** | `documentation` | In-app documentation site. |
 
 ### Event-Driven Communication
 
@@ -101,7 +109,7 @@ sequenceDiagram
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| UI separation | Mission Control is presentation only | Migrating to Angular + PrimeNG to align with Cortex UI practices. Current Django templates are temporary. |
+| UI separation | Mission Control is presentation only | Backend apps expose service interfaces; UI is Django templates. |
 | API style | REST via Django REST Framework | Proven, simple, mature Django ecosystem support. |
-| Identity | Cognito | Project initiated by Cortex Domain Consultant; will be replaced by PANW SSO if officially adopted. |
-| Domains | keplerops.com | Project initiated by Cortex Domain Consultant; will be replaced by paloaltonetworks.com if officially adopted. |
+| Identity | Cognito | AWS-native, supports MFA and domain restriction. |
+| Domains | keplerops.com | Current DNS hosting via Cloudflare. |

@@ -13,6 +13,7 @@ Field reference for `InstanceConfig` in `cms/scenarios/schema.py`. Each entry in
 | **`domain_controller`** | bool | no | `false` | This instance is a Windows domain controller. |
 | **`join_domain`** | bool | no | `false` | This instance should join the Active Directory domain. |
 | **`dc_config`** | object | no | `null` | Domain controller configuration. Required when `domain_controller: true`. |
+| **`ami_key`** | string | no | `null` | Custom AMI key for non-standard images (e.g., `ctf-webshell`). Overrides the default AMI for the given `os_type`. |
 
 ## Roles
 

@@ -1,19 +1,8 @@
-# Platform Audit System Architecture
+# Platform Audit System
 
-Centralized audit logging for Shifter, extending `risk_register.AuditLog` to all platform domains.
+Centralized audit logging for all Shifter platform operations via `risk_register.AuditLog`.
 
-## Current State
-
-Two audit mechanisms exist:
-
-| Mechanism | Location | Scope | Storage |
-|-----------|----------|-------|---------|
-| `AuditLog` | `risk_register/models.py` | Risk, Comment, APIKey entities | Database |
-| `ActivityLog` | `management/models.py` | Agent upload/delete only | Database |
-
-**Gaps**: Range lifecycle, credentials, authentication, user management, configuration changes unaudited.
-
-## Target Architecture
+## Architecture
 
 ```mermaid
 graph TB
@@ -38,114 +27,83 @@ graph TB
     API --> AL
 ```
 
-All apps call `risk_register.services.audit_log()` to record events. AuditLog becomes the single source of truth.
+All apps call `risk_register.services.audit_log()` to record events. AuditLog is the single source of truth.
 
-## Extended AuditLog Model
+## AuditLog Model
 
 ### Entity Types
 
-Current:
-- `risk` - Risk Register risks
-- `comment` - Risk comments
-- `apikey` - API keys
-
-New:
-- `range` - Cyber range instances
-- `credential` - CMS credentials (SCM, deployment profiles)
-- `agent` - XDR agent binaries
-- `user` - User accounts
-- `session` - Terminal/RDP sessions
-- `ngfw` - NGFW instances
-- `config` - System configuration
+| Entity Type | Description |
+|-------------|-------------|
+| `risk` | Risk Register risks |
+| `comment` | Risk comments |
+| `apikey` | API keys |
+| `range` | Cyber range instances |
+| `credential` | CMS credentials (SCM, deployment profiles) |
+| `agent` | XDR agent binaries |
+| `user` | User accounts |
+| `session` | Terminal/RDP sessions |
+| `ngfw` | NGFW instances |
+| `config` | System configuration |
+| `experiment` | Experiments |
+| `scenario` | Scenarios |
+| `script` | Scripts |
 
 ### Action Types
 
-Current:
-- `create`, `update`, `delete`, `restore`, `close`, `reopen`
-
-New:
-- `login` - Authentication success
-- `logout` - Session end
-- `login_failed` - Authentication failure
-- `access_denied` - Authorization failure
-- `connect` - Session established (terminal/RDP)
-- `disconnect` - Session ended
-- `provision` - Resource provisioning started
-- `deprovision` - Resource teardown started
-- `ready` - Resource became available
-- `failed` - Operation failed
+| Action | Description |
+|--------|-------------|
+| `create` | Entity created |
+| `update` | Entity modified |
+| `delete` | Entity deleted |
+| `restore` | Entity restored |
+| `close` | Entity closed |
+| `reopen` | Entity reopened |
+| `login` | Authentication success |
+| `logout` | Session end |
+| `login_failed` | Authentication failure |
+| `access_denied` | Authorization failure |
+| `connect` | Session established (terminal/RDP) |
+| `disconnect` | Session ended |
+| `provision` | Resource provisioning started |
+| `deprovision` | Resource teardown started |
+| `ready` | Resource became available |
+| `failed` | Operation failed |
 
 ### Actor Types
 
-Current:
-- `user` - Authenticated user
-- `apikey` - API key
+| Actor Type | Description |
+|------------|-------------|
+| `user` | Authenticated user |
+| `apikey` | API key |
+| `system` | Automated processes (provisioner, event handlers) |
+| `cognito` | Identity provider events |
 
-New:
-- `system` - Automated processes (provisioner, event handlers)
-- `cognito` - Identity provider events
+### Fields
 
-### Schema Extension
-
-```python
-# risk_register/models.py additions
-
-class AuditLog(models.Model):
-    class EntityType(models.TextChoices):
-        # Existing
-        RISK = "risk", "Risk"
-        COMMENT = "comment", "Comment"
-        APIKEY = "apikey", "API Key"
-        # New
-        RANGE = "range", "Range"
-        CREDENTIAL = "credential", "Credential"
-        AGENT = "agent", "Agent"
-        USER = "user", "User"
-        SESSION = "session", "Session"
-        NGFW = "ngfw", "NGFW"
-        CONFIG = "config", "Configuration"
-
-    class Action(models.TextChoices):
-        # Existing
-        CREATE = "create", "Create"
-        UPDATE = "update", "Update"
-        DELETE = "delete", "Delete"
-        RESTORE = "restore", "Restore"
-        CLOSE = "close", "Close"
-        REOPEN = "reopen", "Reopen"
-        # New - Authentication
-        LOGIN = "login", "Login"
-        LOGOUT = "logout", "Logout"
-        LOGIN_FAILED = "login_failed", "Login Failed"
-        ACCESS_DENIED = "access_denied", "Access Denied"
-        # New - Sessions
-        CONNECT = "connect", "Connect"
-        DISCONNECT = "disconnect", "Disconnect"
-        # New - Lifecycle
-        PROVISION = "provision", "Provision"
-        DEPROVISION = "deprovision", "Deprovision"
-        READY = "ready", "Ready"
-        FAILED = "failed", "Failed"
-
-    class ActorType(models.TextChoices):
-        USER = "user", "User"
-        APIKEY = "apikey", "API Key"
-        SYSTEM = "system", "System"
-        COGNITO = "cognito", "Cognito"
-
-    # New optional fields
-    source_ip = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.CharField(max_length=500, blank=True)
-    request_id = models.CharField(max_length=64, blank=True)  # Trace correlation
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `entity_type` | string | What entity was affected |
+| `entity_id` | integer | ID of the entity |
+| `action` | string | What happened |
+| `actor_type` | string | Who/what performed the action |
+| `actor_id` | integer (nullable) | ID of the actor |
+| `timestamp` | datetime | When it happened |
+| `previous_state` | JSON (nullable) | State before change |
+| `new_state` | JSON (nullable) | State after change |
+| `context` | text | Optional reason or notes |
+| `source_ip` | IP (nullable) | Client IP address |
+| `user_agent` | string | Client user agent |
+| `request_id` | string | Trace correlation ID |
 
 ## Service Layer
 
-### Audit Service API
+### `audit_log()`
 
-Location: `risk_register/services.py`
+Primary function. Called by all platform apps.
 
 ```python
+# risk_register/services.py
 def audit_log(
     entity_type: str,
     entity_id: int,
@@ -159,51 +117,16 @@ def audit_log(
     source_ip: str | None = None,
     user_agent: str = "",
     request_id: str = "",
-) -> AuditLog:
-    """
-    Record an audit event.
-
-    Called by all platform apps for auditable operations.
-    """
+) -> AuditLog
 ```
 
-### Request Context Helper
+### `audit_log_from_request()`
 
-Location: `risk_register/services.py`
+Extracts user/apikey, source IP, user agent, and request ID from an HTTP request.
 
-```python
-def audit_log_from_request(
-    request: HttpRequest,
-    entity_type: str,
-    entity_id: int,
-    action: str,
-    **kwargs,
-) -> AuditLog:
-    """
-    Record audit event with HTTP request context.
+### `audit_log_system_event()`
 
-    Extracts: user/apikey, source IP, user agent, request ID.
-    """
-```
-
-### Event Handler Helper
-
-Location: `risk_register/services.py`
-
-```python
-def audit_log_system_event(
-    entity_type: str,
-    entity_id: int,
-    action: str,
-    source: str,  # e.g., "provisioner", "event_handler"
-    **kwargs,
-) -> AuditLog:
-    """
-    Record system-initiated audit event.
-
-    For provisioner, event handlers, scheduled tasks.
-    """
-```
+For provisioner, event handlers, and scheduled tasks.
 
 ## Integration Points
 
@@ -215,7 +138,6 @@ def audit_log_system_event(
 | OIDC login failure | `config/oidc.py` | cognito | login_failed |
 | API key auth success | `risk_register/api/authentication.py` | apikey | login |
 | API key auth failure | `risk_register/api/authentication.py` | apikey | login_failed |
-| Session timeout | Middleware | user | logout |
 
 ### Range Lifecycle Events
 
@@ -232,8 +154,6 @@ def audit_log_system_event(
 |-------|--------|------------|--------|
 | Terminal connect | `mission_control/consumers.py` | user | connect |
 | Terminal disconnect | `mission_control/consumers.py` | user | disconnect |
-| RDP connect | `mission_control/consumers.py` | user | connect |
-| Access denied | `mission_control/consumers.py` | user | access_denied |
 
 ### Resource Events
 
@@ -246,20 +166,11 @@ def audit_log_system_event(
 | NGFW provisioned | `cms/services.py` | user | provision |
 | NGFW destroyed | `cms/services.py` | user | deprovision |
 
-## Deprecation: ActivityLog
-
-`management.ActivityLog` will be deprecated once AuditLog covers agent events. Migration path:
-
-1. Add `agent` entity type to AuditLog
-2. Update `cms/assets/services.py` to use `audit_log()`
-3. Keep ActivityLog read-only for historical data
-4. Remove ActivityLog writes from codebase
-
 ## Query Interface
 
-### Admin Interface
+### Django Admin
 
-`risk_register/admin.py` - Extended AuditLogAdmin:
+`risk_register/admin.py` - AuditLogAdmin:
 - Filter by entity_type, action, actor_type, timestamp
 - Search by context, entity_id, request_id
 - Date hierarchy by timestamp
@@ -273,32 +184,17 @@ def audit_log_system_event(
 - Query params: `entity_type`, `entity_id`, `action`, `actor_type`, `actor_id`, `from_date`, `to_date`
 - Admin users only
 
-### Export
-
-Future: CSV/JSON export for compliance reporting.
-
 ## Retention and Archival
 
-Default: 90 days in database, archived to existing logs bucket thereafter.
+90 days in database, archived to the log-aggregation S3 bucket thereafter.
 
-### Infrastructure Integration
-
-Uses the existing log-aggregation S3 bucket (`{name_prefix}-logs-{environment}`):
+### Storage
 
 ```
 logs bucket (from Terraform log-aggregation module)
 ├── logs/year=YYYY/month=MM/day=DD/  (CloudWatch → Firehose operational logs)
 └── audit-archive/YYYY/MM/           (AuditLog database records)
 ```
-
-### Configuration Required
-
-Add to portal container environment (user_data.sh):
-```bash
-COMMON_ENV="$COMMON_ENV -e LOGS_BUCKET_NAME=$LOGS_BUCKET_NAME"
-```
-
-Where `$LOGS_BUCKET_NAME` is the output from `module.log_aggregation.logs_bucket_name`.
 
 ### Management Command
 
@@ -311,13 +207,11 @@ python manage.py audit_archive --no-delete  # Archive but keep in database
 
 Archives to: `s3://{bucket}/audit-archive/{year}/{month}/audit_{timestamp}.jsonl.gz`
 
-## Security Considerations
+## Security
 
 1. **Immutability**: AuditLog has no update/delete in admin or API
-2. **Tampering Detection**: Consider adding HMAC signature field for high-security deployments
-3. **Access Control**: Audit API restricted to admin users
-4. **PII**: User emails in actor context; anonymization required for GDPR compliance on user deletion
-5. **Sensitive Data**: Never log credentials, API keys, or secrets in state fields
+2. **Access Control**: Audit API restricted to admin users
+3. **Sensitive Data**: Credentials, API keys, and secrets must never appear in state fields
 
 ## Compliance Mapping
 
@@ -329,19 +223,3 @@ Archives to: `s3://{bucket}/audit-archive/{year}/{month}/audit_{timestamp}.jsonl
 | Where | source_ip |
 | How | user_agent, context |
 | Before/After | previous_state, new_state |
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `risk_register/models.py` | Extend EntityType, Action, ActorType; add source_ip, user_agent, request_id |
-| `risk_register/services.py` | Add audit_log(), audit_log_from_request(), audit_log_system_event() |
-| `risk_register/admin.py` | Extend AuditLogAdmin filters |
-| `risk_register/api/views.py` | Add AuditLogViewSet |
-| `risk_register/api/serializers.py` | Add AuditLogSerializer |
-| `config/oidc.py` | Add authentication event logging |
-| `cms/services.py` | Add range/credential/ngfw audit logging |
-| `cms/assets/services.py` | Migrate from ActivityLog to AuditLog |
-| `engine/handlers.py` | Add range lifecycle audit logging |
-| `mission_control/consumers.py` | Add session audit logging |
-| `management/services.py` | Add user audit logging |

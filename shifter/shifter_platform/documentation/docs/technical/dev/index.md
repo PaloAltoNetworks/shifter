@@ -38,11 +38,20 @@ Configure these profiles in `~/.aws/credentials` with your SSO or IAM credential
 shifter/
 ├── shifter/
 │   ├── shifter_platform/       # Django web application
-│   │   ├── mission_control/    # Main app (ranges, agents, terminal)
-│   │   ├── cms/                # Content management (agents, scenarios)
-│   │   ├── engine/             # Orchestration services
-│   │   ├── documentation/      # In-app docs (you're reading this)
-│   │   └── config/             # Django settings
+│   │   ├── config/             # Django settings, URLs, ASGI
+│   │   ├── mission_control/    # Presentation layer (ranges, agents, terminal)
+│   │   ├── cms/                # Content management (agents, scenarios, credentials)
+│   │   │   ├── scenarios/      # Scenario templates, schema, hydration, registry
+│   │   │   ├── assets/         # Agent file management
+│   │   │   ├── experiments/    # Script execution in ranges
+│   │   │   └── scenario_editor/# Scenario template authoring UI
+│   │   ├── engine/             # Range/NGFW lifecycle, SSH, ECS orchestration
+│   │   ├── ctf/                # CTF competitions (events, challenges, scoring)
+│   │   ├── risk_register/      # Risk tracking, API keys, audit logging
+│   │   ├── management/         # User profiles, Cognito integration
+│   │   ├── shared/             # Cross-cutting utilities, schemas, enums
+│   │   └── documentation/      # In-app docs (you're reading this)
+│   ├── cyberscript/            # Range DSL schemas (InstanceSpec, RangeSpec)
 │   └── engine/                 # Range provisioner (Pulumi + ECS)
 │       └── provisioner/        # Pulumi components and plans
 ├── platform/

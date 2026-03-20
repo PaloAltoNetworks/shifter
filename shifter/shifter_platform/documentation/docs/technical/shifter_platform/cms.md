@@ -49,7 +49,7 @@ instances:
     xdr_agent: boolean        # Deploy XDR agent
     join_domain: boolean      # Join AD domain (optional)
     domain_controller: boolean # Is DC (optional)
-    ai_agent: boolean         # AI-assisted (optional)
+    ami_key: string           # Custom AMI key (optional)
     dc_config:                # DC configuration (optional)
       domain_name: string
       netbios_name: string
@@ -66,8 +66,10 @@ subnets:
 |----|------|-----------|------|
 | `basic` | Basic Range | attacker, victim | No |
 | `basic_ngfw` | Basic Range with NGFW | attacker, victim | Yes |
-| `ad_attack_lab` | AD Attack Lab | attacker, dc, victim | No |
-| `cortex_byot` | Cortex BYOT | attacker, dc, 2x victim, server | Yes |
+| `ad_attack_lab` | AD Attack Lab | attacker, dc, victim | Yes |
+| `cortex_byot` | Cortex BYOT | attacker, dc, 4x victim | Yes |
+| `cortex_deployment_experience` | Cortex Deployment Experience | attacker, dc, 4x victim (no agents) | Yes |
+| `agentic_workshop` | Agentic Workshop | attacker, 5x victim (custom AMIs) | No |
 
 ## Hydrated Range Config
 
@@ -117,6 +119,13 @@ range_config = {
 | `App` | Application (NGFW) definition in a range |
 | `Subnet` | Network subnet definition in a range |
 
+### Scenario Models
+
+| Model | Purpose |
+|-------|---------|
+| `Scenario` | Staff-created custom scenario templates (DB-stored) |
+| `ScenarioMetadata` | Overlay for enabled/staff-only flags on any scenario (YAML or DB) |
+
 ### Request Tracking
 
 | Model | Purpose |
@@ -131,6 +140,7 @@ range_config = {
 | `cms/scenarios/loader.py` | Template loading and validation |
 | `cms/scenarios/schema.py` | Pydantic models for templates |
 | `cms/scenarios/hydrator.py` | Config hydration logic |
+| `cms/scenarios/registry.py` | Scenario access layer (YAML + DB, metadata, access control) |
 | `cms/assets/services.py` | Agent CRUD, storage quota |
 
 ## Service Interface

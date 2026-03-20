@@ -10,10 +10,16 @@ stateDiagram-v2
     Pending --> Provisioning: Processing
     Provisioning --> Ready: Complete
     Provisioning --> Failed: Error
-    Ready --> Destroyed: Destroy
-    Pending --> Destroyed: Cancel
-    Provisioning --> Destroyed: Cancel
-    Failed --> Destroyed: Destroy
+    Ready --> Pausing: Pause
+    Pausing --> Paused: Complete
+    Paused --> Resuming: Resume
+    Resuming --> Ready: Complete
+    Ready --> Destroying: Destroy
+    Paused --> Destroying: Destroy
+    Pending --> Destroying: Cancel
+    Provisioning --> Destroying: Cancel
+    Failed --> Destroying: Destroy
+    Destroying --> Destroyed: Complete
 ```
 
 ## Status Reference
@@ -23,6 +29,10 @@ stateDiagram-v2
 | Pending | Queued for provisioning |
 | Provisioning | Infrastructure being created |
 | Ready | Range is live, accessible |
+| Pausing | Range is being paused |
+| Paused | Range is paused (instances stopped) |
+| Resuming | Range is being resumed |
+| Destroying | Range infrastructure being torn down |
 | Failed | Provisioning error occurred |
 | Destroyed | Range terminated |
 
@@ -55,6 +65,22 @@ While in Pending or Provisioning status:
 
 1. Go to **Ranges page**
 2. Click **Cancel** on the range
+
+## Pause a Range
+
+While in Ready status:
+
+1. Go to **Ranges page**
+2. Click **Pause** on the range
+
+Instances are stopped. Resume when needed.
+
+## Resume a Range
+
+While in Paused status:
+
+1. Go to **Ranges page**
+2. Click **Resume** on the range
 
 ## Destroy a Range
 

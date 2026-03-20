@@ -191,6 +191,76 @@
         </div>
         {% endif %}
 
+        <!-- Flags -->
+        <div class="card">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                Flags
+                {% if event.is_content_modifiable %}
+                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('add-flag-form').style.display = document.getElementById('add-flag-form').style.display === 'none' ? 'block' : 'none'">
+                    Add Flag
+                </button>
+                {% endif %}
+            </div>
+            {% if flags %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Type</th>
+                        <th>Case Sensitive</th>
+                        {% if event.is_content_modifiable %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for flag in flags %}
+                    <tr>
+                        <td>{{ flag.order }}</td>
+                        <td><span class="badge badge-secondary">{{ flag.flag_type }}</span></td>
+                        <td>{% if flag.case_sensitive %}Yes{% else %}No{% endif %}</td>
+                        {% if event.is_content_modifiable %}
+                        <td>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="removeFlag('{{ flag.pk }}')">Remove</button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-message">
+                No flag records. Using legacy flag_hash field.
+            </div>
+            {% endif %}
+
+            {% if event.is_content_modifiable %}
+            <div id="add-flag-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
+                <div style="margin-bottom: 8px;">
+                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Flag Value</label>
+                    <input type="text" id="new-flag-value" class="form-control" placeholder="Enter flag value or regex pattern">
+                </div>
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <div style="flex: 1;">
+                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Type</label>
+                        <select id="new-flag-type" class="form-control">
+                            <option value="static">Static</option>
+                            <option value="regex">Regex</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Case Sensitive</label>
+                        <select id="new-flag-case-sensitive" class="form-control">
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary" onclick="addFlag()">Save Flag</button>
+            </div>
+            {% endif %}
+        </div>
+
         <!-- Recent Submissions -->
         <div class="card">
             <div class="card-title">Recent Submissions</div>
@@ -298,4 +368,32 @@
         </div>
     </div>
 </div>
+{% if event.is_content_modifiable %}
+<script>
+function addFlag() {
+    const flagValue = document.getElementById('new-flag-value').value.trim();
+    if (!flagValue) { alert('Flag value is required'); return; }
+    const flagType = document.getElementById('new-flag-type').value;
+    const caseSensitive = document.getElementById('new-flag-case-sensitive').value === 'true';
+    fetch("{% url 'ctf:api_add_flag' challenge_id=challenge.pk %}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({flag: flagValue, flag_type: flagType, case_sensitive: caseSensitive})
+    }).then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+const REMOVE_FLAG_URL = "{% url 'ctf:api_remove_flag' flag_id='00000000-0000-0000-0000-000000000000' %}";
+function removeFlag(flagId) {
+    if (!confirm('Remove this flag?')) return;
+    const url = REMOVE_FLAG_URL.replace('00000000-0000-0000-0000-000000000000', flagId);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    }).then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+</script>
+{% endif %}
 {% endblock %}

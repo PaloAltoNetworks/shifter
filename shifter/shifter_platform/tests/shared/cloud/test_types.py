@@ -65,7 +65,15 @@ class TestProtocolStructuralTyping:
 
     def test_task_runner_satisfied_by_conforming_class(self):
         class FakeRunner:
-            def run_task(self, task_definition, cluster, command, env_overrides=None, network_config=None):
+            def run_task(
+                self,
+                task_definition,
+                cluster,
+                command,
+                container_name,
+                env_overrides=None,
+                network_config=None,
+            ):
                 return None
 
             def get_task_status(self, cluster, task_id):

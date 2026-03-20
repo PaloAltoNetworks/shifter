@@ -29,7 +29,7 @@ class TestGetEcsClient:
 
         settings.AWS_REGION = "us-east-2"
 
-        with patch("engine.ecs.boto3.client") as mock_client:
+        with patch("boto3.client") as mock_client:
             mock_ecs = MagicMock(spec=BaseClient)
             mock_client.return_value = mock_ecs
 
@@ -45,7 +45,7 @@ class TestGetEcsClient:
 
         settings.AWS_REGION = "us-west-2"
 
-        with patch("engine.ecs.boto3.client") as mock_client:
+        with patch("boto3.client") as mock_client:
             mock_client.return_value = MagicMock(spec=BaseClient)
             _get_ecs_client()
 
@@ -62,7 +62,7 @@ class TestGetEcsClient:
         settings.AWS_REGION = "us-east-2"
 
         with (
-            patch("engine.ecs.boto3.client", return_value=None),
+            patch("boto3.client", return_value=None),
             pytest.raises(TypeError),
         ):
             _get_ecs_client()
@@ -74,7 +74,7 @@ class TestGetEcsClient:
         settings.AWS_REGION = "us-east-2"
 
         with (
-            patch("engine.ecs.boto3.client", return_value="not a client"),
+            patch("boto3.client", return_value="not a client"),
             pytest.raises(TypeError),
         ):
             _get_ecs_client()
@@ -92,7 +92,7 @@ class TestGetEcsClient:
         settings.AWS_REGION = "us-east-2"
 
         with (
-            patch("engine.ecs.boto3.client") as mock_client,
+            patch("boto3.client") as mock_client,
             caplog.at_level(logging.DEBUG, logger="engine.ecs"),
         ):
             mock_client.return_value = MagicMock(spec=BaseClient)
@@ -108,7 +108,7 @@ class TestGetEcsClient:
 
         with (
             patch(
-                "engine.ecs.boto3.client",
+                "boto3.client",
                 side_effect=RuntimeError("AWS credentials not found"),
             ),
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
@@ -125,7 +125,7 @@ class TestGetEcsClient:
         settings.AWS_REGION = "us-east-2"
 
         with (
-            patch("engine.ecs.boto3.client", return_value=None),
+            patch("boto3.client", return_value=None),
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
             pytest.raises(TypeError),
         ):

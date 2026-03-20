@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.18.0] - 2026-03-20
+
+### Changed
+- Test suite cleanup: remove duplicate wrapper tests and unnecessary `@pytest.mark.django_db` markers
+  - Removed ~51 duplicate tests from ECS wrapper test files (delegation verified in 2-4 tests each)
+  - Deleted `tests/mission_control/test_engine.py` (12 tests duplicating `tests/engine/ecs/`)
+  - Removed `@pytest.mark.django_db` from 8 test files that only use mocks (no ORM calls)
+- Task runner abstraction delegation (PLAT-001.3, #813)
+  - `engine/ecs.py`: All ECS task functions now delegate to `TaskRunner` protocol via `get_task_runner()`
+  - `cms/experiments/ecs.py`: `start_experiment_task()` delegates to `TaskRunner` protocol via `get_task_runner()`
+  - Added `container_name` parameter to `TaskRunner.run_task()` protocol and `AWSTaskRunner` adapter
+  - `AWSTaskRunner.run_task()` now raises `CloudTaskError` when no tasks are started (was returning None)
+  - `AWSTaskRunner.get_task_status()` now returns all fields callers expect (`desired_status`, `started_at`, `stopped_at`)
+  - Exception bridging: `CloudTaskError` caught and re-raised as `ClientError` for backward compatibility
+  - All existing function signatures, import paths, and caller contracts preserved
+  - `_get_ecs_client()` kept deprecated in both modules; `import boto3` moved inside it
+
 ## [3.17.0] - 2026-03-19
 
 ### Changed

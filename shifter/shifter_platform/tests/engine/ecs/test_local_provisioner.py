@@ -219,14 +219,14 @@ class TestNgfwProvisioningWithLocalMode:
 
         with (
             patch("engine.ecs._run_local_provisioner") as mock_local,
-            patch("engine.ecs._get_ecs_client") as mock_ecs,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
         ):
             mock_local.return_value = "local-12345"
 
             start_ngfw_provisioning(request_id=TEST_REQUEST_ID)
 
             mock_local.assert_called_once()
-            mock_ecs.assert_not_called()
+            mock_get_runner.assert_not_called()
 
 
 class TestRangeProvisioningWithLocalMode:

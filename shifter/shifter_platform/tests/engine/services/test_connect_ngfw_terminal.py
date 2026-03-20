@@ -8,7 +8,6 @@ import pytest
 from shared.enums import ResourceStatus
 
 
-@pytest.mark.django_db
 class TestConnectNGFWTerminal:
     """Tests for connect_ngfw_terminal() in engine/services.py.
 

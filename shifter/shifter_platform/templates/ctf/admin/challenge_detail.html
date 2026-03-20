@@ -383,9 +383,11 @@ function addFlag() {
         if (data.error) { alert(data.error); } else { location.reload(); }
     });
 }
+const REMOVE_FLAG_URL = "{% url 'ctf:api_remove_flag' flag_id='00000000-0000-0000-0000-000000000000' %}";
 function removeFlag(flagId) {
     if (!confirm('Remove this flag?')) return;
-    fetch(`/ctf/api/flags/${flagId}/remove/`, {
+    const url = REMOVE_FLAG_URL.replace('00000000-0000-0000-0000-000000000000', flagId);
+    fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
     }).then(r => r.json()).then(data => {

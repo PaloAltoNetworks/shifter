@@ -26,7 +26,7 @@ from ctf.models import (
     CTFSubmission,
     CTFTeam,
 )
-from ctf.tests.factories import (
+from tests.ctf.factories import (
     create_challenge_model_data,
     create_submission_data,
 )

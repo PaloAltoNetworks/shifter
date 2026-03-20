@@ -217,6 +217,17 @@ api_patterns = [
         views.api_send_invitations,
         name="api_send_invitations",
     ),
+    # Flag management APIs
+    path(
+        "api/challenges/<uuid:challenge_id>/flags/add/",
+        views.api_add_flag,
+        name="api_add_flag",
+    ),
+    path(
+        "api/flags/<uuid:flag_id>/remove/",
+        views.api_remove_flag,
+        name="api_remove_flag",
+    ),
 ]
 
 # Combine all patterns

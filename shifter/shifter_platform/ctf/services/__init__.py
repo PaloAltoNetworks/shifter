@@ -11,14 +11,17 @@ This package contains service modules for CTF business logic:
 """
 
 from ctf.services.challenge import (
+    add_flag,
     create_challenge,
     delete_challenge,
     get_available_challenges,
     get_challenge,
     hash_flag,
     list_challenges_for_event,
+    remove_flag,
     update_challenge,
     verify_flag,
+    verify_single_flag,
 )
 from ctf.services.event import (
     EventNotModifiableError,
@@ -74,6 +77,7 @@ from ctf.services.submission import (
 __all__ = [
     "EventNotModifiableError",
     "activate_event",
+    "add_flag",
     "bulk_import_participants",
     # Scoring services
     "calculate_score",
@@ -116,6 +120,7 @@ __all__ = [
     "list_participants_for_event",
     "provision_event_ranges",
     "provision_participant_range",
+    "remove_flag",
     "resend_invite",
     "schedule_event",
     "start_event",
@@ -126,4 +131,5 @@ __all__ = [
     "update_participant_range_status",
     "use_hint",
     "verify_flag",
+    "verify_single_flag",
 ]

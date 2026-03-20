@@ -676,14 +676,15 @@ class CTFTeam(CTFBaseModel):
 
     @property
     def total_score(self) -> int:
-        """Calculate total team score from all members."""
+        """Calculate total team score from all members (submissions + awards)."""
         result = self.members.aggregate(
-            total=Sum(
+            submission_total=Sum(
                 "submissions__points_awarded",
                 filter=Q(submissions__is_correct=True),
-            )
+            ),
+            award_total=Sum("awards__points"),
         )
-        return result["total"] or 0
+        return (result["submission_total"] or 0) + (result["award_total"] or 0)
 
 
 class CTFParticipant(CTFBaseModel):
@@ -850,9 +851,10 @@ class CTFParticipant(CTFBaseModel):
 
     @property
     def total_score(self) -> int:
-        """Calculate participant's total score."""
-        result = self.submissions.filter(is_correct=True).aggregate(total=Sum("points_awarded"))
-        return result["total"] or 0
+        """Calculate participant's total score (submissions + awards)."""
+        submission_result = self.submissions.filter(is_correct=True).aggregate(total=Sum("points_awarded"))
+        award_result = self.awards.aggregate(total=Sum("points"))
+        return (submission_result["total"] or 0) + (award_result["total"] or 0)
 
     @property
     def solved_challenge_count(self) -> int:
@@ -953,6 +955,79 @@ class CTFSubmission(CTFBaseModel):
             and self.participant.event_id != self.challenge.event_id
         ):
             errors.setdefault("challenge", []).append("Challenge must belong to participant's event.")
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class CTFAward(CTFBaseModel):
+    """Organizer-granted award (bonus or deduction) for a participant.
+
+    Awards allow organizers to adjust participant scores outside of
+    normal flag submissions — e.g. bonus points for creative solutions,
+    penalties for rule violations, or extra credit tasks.
+
+    Attributes:
+        event: The event this award belongs to.
+        participant: The participant receiving the award.
+        points: Points to add (positive) or deduct (negative).
+        reason: Organizer's explanation for the award.
+        granted_by: User who granted the award.
+    """
+
+    event = models.ForeignKey(
+        CTFEvent,
+        on_delete=models.CASCADE,
+        related_name="awards",
+        help_text="Event this award belongs to",
+    )
+    participant = models.ForeignKey(
+        CTFParticipant,
+        on_delete=models.CASCADE,
+        related_name="awards",
+        help_text="Participant receiving the award",
+    )
+    points = models.IntegerField(
+        validators=[MinValueValidator(-10000), MaxValueValidator(10000)],
+        help_text="Points to add (positive) or deduct (negative)",
+    )
+    reason = models.TextField(
+        help_text="Organizer's explanation for the award",
+    )
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="ctf_awards_granted",
+        help_text="User who granted the award",
+    )
+
+    class Meta:
+        db_table = "ctf_award"
+        ordering = ["-created_at"]
+        verbose_name = "CTF Award"
+        verbose_name_plural = "CTF Awards"
+        indexes = [
+            models.Index(fields=["event", "participant"]),
+            models.Index(fields=["participant"]),
+        ]
+
+    def __str__(self) -> str:
+        """Return award description."""
+        sign = "+" if self.points >= 0 else ""
+        return f"Award: {sign}{self.points} pts — {self.reason[:50]}"
+
+    def clean(self) -> None:
+        """Validate award data."""
+        errors: dict[str, list[str]] = {}
+
+        if (
+            hasattr(self, "participant")
+            and hasattr(self, "event")
+            and self.participant_id
+            and self.event_id
+            and self.participant.event_id != self.event_id
+        ):
+            errors.setdefault("participant", []).append("Participant must belong to the same event.")
 
         if errors:
             raise ValidationError(errors)

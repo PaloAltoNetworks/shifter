@@ -824,6 +824,9 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
     # Get first blood if any
     first_blood = challenge.first_blood
 
+    # Get flags for this challenge
+    flags = challenge.flags.all()
+
     context = {
         "challenge": challenge,
         "event": challenge.event,
@@ -831,6 +834,7 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
         "correct_submissions": correct_submissions,
         "recent_submissions": recent_submissions,
         "first_blood": first_blood,
+        "flags": flags,
     }
 
     return render(request, "ctf/admin/challenge_detail.html", context)
@@ -2393,3 +2397,76 @@ def api_scenarios(request: HttpRequest) -> JsonResponse:
     user = _get_user(request)
     scenarios = [{"id": sid, "name": name} for sid, name in cms_list_scenarios(user)]
     return JsonResponse({"scenarios": scenarios})
+
+
+# -----------------------------------------------------------------------------
+# Flag Management API Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_add_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
+    """API: Add a flag to a challenge.
+
+    Args:
+        challenge_id: UUID of the challenge.
+    """
+    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+    from ctf.services.challenge import add_flag
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    flag_value = body.get("flag", "").strip()
+    if not flag_value:
+        return JsonResponse({"error": "Flag value is required"}, status=400)
+
+    flag_data = {
+        "flag": flag_value,
+        "flag_type": body.get("flag_type", "static"),
+        "case_sensitive": body.get("case_sensitive", True),
+        "order": body.get("order", 0),
+    }
+
+    try:
+        flag_obj = add_flag(challenge_id, flag_data)
+        return JsonResponse(
+            {
+                "id": str(flag_obj.id),
+                "flag_type": flag_obj.flag_type,
+                "case_sensitive": flag_obj.case_sensitive,
+                "order": flag_obj.order,
+            },
+            status=201,
+        )
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except CTFStateError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_remove_flag(request: HttpRequest, flag_id: UUID) -> JsonResponse:
+    """API: Remove a flag from a challenge.
+
+    Args:
+        flag_id: UUID of the flag.
+    """
+    from ctf.exceptions import CTFNotFoundError, CTFStateError
+    from ctf.services.challenge import remove_flag
+
+    try:
+        remove_flag(flag_id)
+        return JsonResponse({"success": True})
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except CTFStateError as e:
+        return JsonResponse({"error": str(e)}, status=400)

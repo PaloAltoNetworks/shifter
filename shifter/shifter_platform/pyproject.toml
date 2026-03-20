@@ -47,7 +47,7 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
 pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
-addopts = "--cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov-report=term-missing --cov-report=xml:coverage.xml"
+addopts = ""
 env = ["TESTING=1"]
 
 [tool.coverage.run]

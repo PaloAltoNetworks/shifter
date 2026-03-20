@@ -18,10 +18,11 @@ import os
 import subprocess  # nosec B404 - used for local dev provisioner only
 from typing import TYPE_CHECKING
 
-import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
 
+from shared.cloud import get_task_runner
+from shared.cloud.exceptions import CloudTaskError
 from shared.enums import ResourceType
 
 if TYPE_CHECKING:
@@ -120,7 +121,12 @@ def _is_local_provisioner_enabled() -> bool:
 
 
 def _get_ecs_client():
-    """Get boto3 ECS client."""
+    """Get boto3 ECS client.
+
+    .. deprecated::
+        Use :func:`shared.cloud.get_task_runner` instead.
+    """
+    import boto3
     from botocore.client import BaseClient
 
     region = settings.AWS_REGION
@@ -171,10 +177,10 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     if not command.strip():
         raise ValueError("command must be a non-empty string")
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
-    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
-    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
-    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "") or ""
 
     if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
         logger.warning(
@@ -193,54 +199,40 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
 
     logger.info(f"Starting ECS task for range_id={range_id} command={command}")
 
-    ecs = _get_ecs_client()
+    command_list = [
+        ResourceType.RANGE.value,
+        command,
+        "--range-id",
+        str(range_id),
+        "--user-id",
+        str(user_id),
+    ]
+
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
 
     try:
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_definition_arn,
             cluster=cluster_arn,
-            taskDefinition=task_definition_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": "pulumi-provisioner",
-                        "command": [
-                            ResourceType.RANGE.value,
-                            command,
-                            "--range-id",
-                            str(range_id),
-                            "--user-id",
-                            str(user_id),
-                        ],
-                    }
-                ]
-            },
+            command=command_list,
+            container_name="pulumi-provisioner",
+            network_config=network_config,
         )
-
-        # Check if task was started successfully
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(f"ECS task failed to start: {failure_reasons}")
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn = response["tasks"][0]["taskArn"]
         logger.info(f"Started ECS task: range_id={range_id} command={command} task_arn={task_arn}")
         return task_arn
-
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to start ECS task for range_id={range_id}: {e}")
-        raise
+        raise ClientError(
+            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
+            "RunTask",
+        ) from e
 
 
 def start_provisioning(range_id: int, user_id: int) -> str | None:
@@ -317,10 +309,10 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
-    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
-    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
-    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "") or ""
 
     if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
         logger.warning(
@@ -340,47 +332,31 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
     command_list = ["range", command, "--request-id", str(request_id)]
     logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
 
-    ecs = _get_ecs_client()
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
 
     try:
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_definition_arn,
             cluster=cluster_arn,
-            taskDefinition=task_definition_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": "pulumi-provisioner",
-                        "command": command_list,
-                    }
-                ]
-            },
+            command=command_list,
+            container_name="pulumi-provisioner",
+            network_config=network_config,
         )
-
-        # Check if task was started successfully
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(f"Range ECS task failed to start: {failure_reasons}")
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn = response["tasks"][0]["taskArn"]
         logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
         return task_arn
-
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
-        raise
+        raise ClientError(
+            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
+            "RunTask",
+        ) from e
 
 
 def start_range_provisioning(request_id: UUID) -> str | None:
@@ -473,10 +449,10 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
         return _run_local_provisioner(command)
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
-    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
-    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
-    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "") or ""
 
     if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
         logger.warning(
@@ -495,47 +471,31 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
 
     logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
 
-    ecs = _get_ecs_client()
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
 
     try:
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_definition_arn,
             cluster=cluster_arn,
-            taskDefinition=task_definition_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": "pulumi-provisioner",
-                        "command": command,
-                    }
-                ]
-            },
+            command=command,
+            container_name="pulumi-provisioner",
+            network_config=network_config,
         )
-
-        # Check if task was started successfully
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(f"NGFW ECS task failed to start: {failure_reasons}")
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn = response["tasks"][0]["taskArn"]
         logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
         return task_arn
-
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
-        raise
+        raise ClientError(
+            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
+            "RunTask",
+        ) from e
 
 
 def start_ngfw_provisioning(request_id: UUID) -> str | None:
@@ -618,22 +578,20 @@ def get_task_status(task_arn: str) -> dict | None:
     if not cluster_arn:
         return None
 
-    ecs = _get_ecs_client()
-
     try:
-        response = ecs.describe_tasks(cluster=cluster_arn, tasks=[task_arn])
+        runner = get_task_runner()
+        result = runner.get_task_status(cluster=cluster_arn, task_id=task_arn)
 
-        if not response.get("tasks"):
+        if result is None:
             return {"status": "UNKNOWN", "reason": "Task not found"}
 
-        task = response["tasks"][0]
         return {
-            "status": task.get("lastStatus", "UNKNOWN"),
-            "desired_status": task.get("desiredStatus"),
-            "started_at": task.get("startedAt"),
-            "stopped_at": task.get("stoppedAt"),
-            "stopped_reason": task.get("stoppedReason"),
+            "status": result.get("status", "UNKNOWN"),
+            "desired_status": result.get("desired_status"),
+            "started_at": result.get("started_at"),
+            "stopped_at": result.get("stopped_at"),
+            "stopped_reason": result.get("stopped_reason"),
         }
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to get task status: {e}")
         return None

@@ -64,7 +64,7 @@ def standard_profile(db) -> UserProfile:
     user = User.objects.create_user(
         username="standard@test.com",
         email="standard@test.com",
-        password="testpass123",  # noqa: S106  # nosec B106
+        password="testpass123",  # nosec B106
     )
     profile, _ = UserProfile.objects.get_or_create(user=user)
     return profile
@@ -94,7 +94,7 @@ class TestOIDCBackendCTFUserType:
         user = User.objects.create_user(
             username="newctf@test.com",
             email="newctf@test.com",
-            password="testpass123",  # noqa: S106  # nosec B106
+            password="testpass123",  # nosec B106
         )
         claims = {
             "sub": "cognito-sub-123",
@@ -242,7 +242,7 @@ class TestDashboardRouting:
         user = User.objects.create_user(
             username="noprofile@test.com",
             email="noprofile@test.com",
-            password="testpass123",  # noqa: S106  # nosec B106
+            password="testpass123",  # nosec B106
         )
         client.force_login(user)
         response = client.get(reverse("dashboard_router"))

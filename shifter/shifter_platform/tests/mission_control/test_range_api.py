@@ -1,6 +1,6 @@
 """Tests for Range API endpoints."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -218,13 +218,12 @@ class TestLaunchRange:
         """Test launch with mocked ECS."""
         from uuid import UUID
 
-        mock_path = "engine.ecs._get_ecs_client"
-        with patch(mock_path) as mock_client:
+        mock_path = "engine.ecs.get_task_runner"
+        with patch(mock_path) as mock_get_runner:
             task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
-            mock_client.return_value.run_task.return_value = {
-                "tasks": [{"taskArn": task_arn}],
-                "failures": [],
-            }
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             client.force_login(test_agent.user)
             from django.conf import settings

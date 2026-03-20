@@ -3,13 +3,11 @@
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-import pytest
 from django.db import DatabaseError
 
 from shared.enums import ResourceStatus
 
 
-@pytest.mark.django_db
 class TestActiveRangeContextProcessor:
     """Tests for active_range context processor."""
 

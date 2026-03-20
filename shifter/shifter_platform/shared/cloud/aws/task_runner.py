@@ -1,9 +1,4 @@
-"""AWS ECS Fargate adapter implementing TaskRunner protocol.
-
-The actual ECS logic will be extracted from engine/ecs.py in Sub-Issue 3
-(#813). This stub satisfies the protocol interface so the factory can
-return it.
-"""
+"""AWS ECS Fargate adapter implementing TaskRunner protocol."""
 
 from __future__ import annotations
 
@@ -33,14 +28,16 @@ class AWSTaskRunner:
         task_definition: str,
         cluster: str,
         command: list[str],
+        container_name: str,
         env_overrides: dict[str, str] | None = None,
         network_config: dict[str, Any] | None = None,
     ) -> str | None:
         logger.debug(
-            "run_task: task_definition=%s cluster=%s command=%s",
+            "run_task: task_definition=%s cluster=%s command=%s container=%s",
             task_definition,
             cluster,
             command,
+            container_name,
         )
         try:
             client = self._get_client()
@@ -55,7 +52,7 @@ class AWSTaskRunner:
                 "overrides": {
                     "containerOverrides": [
                         {
-                            "name": "provisioner",
+                            "name": container_name,
                             **container_overrides,
                         }
                     ]
@@ -65,16 +62,18 @@ class AWSTaskRunner:
                 kwargs["networkConfiguration"] = network_config
 
             response: dict[str, Any] = client.run_task(**kwargs)
-            tasks: list[dict[str, Any]] = response.get("tasks", [])
-            if tasks:
-                task_arn: str | None = tasks[0].get("taskArn")
-                logger.info("run_task: started task_arn=%s", task_arn)
-                return task_arn
-            logger.warning("run_task: no tasks returned for definition=%s", task_definition)
-            return None
         except (ClientError, BotoCoreError) as e:
             logger.error("run_task: failed definition=%s error=%s", task_definition, e)
             raise CloudTaskError(f"Failed to run ECS task: {e}") from e
+
+        tasks: list[dict[str, Any]] = response.get("tasks", [])
+        if tasks:
+            task_arn: str | None = tasks[0].get("taskArn")
+            logger.info("run_task: started task_arn=%s", task_arn)
+            return task_arn
+        failures = response.get("failures", [])
+        failure_reasons = [f.get("reason", "unknown") for f in failures]
+        raise CloudTaskError(f"No tasks started for {task_definition}: {failure_reasons}")
 
     def get_task_status(self, cluster: str, task_id: str) -> dict[str, Any] | None:
         logger.debug("get_task_status: cluster=%s task_id=%s", cluster, task_id)
@@ -88,8 +87,11 @@ class AWSTaskRunner:
             task: dict[str, Any] = tasks[0]
             return {
                 "task_id": task.get("taskArn"),
-                "status": task.get("lastStatus"),
-                "stopped_reason": task.get("stoppedReason", ""),
+                "status": task.get("lastStatus", "UNKNOWN"),
+                "desired_status": task.get("desiredStatus"),
+                "started_at": task.get("startedAt"),
+                "stopped_at": task.get("stoppedAt"),
+                "stopped_reason": task.get("stoppedReason"),
             }
         except (ClientError, BotoCoreError) as e:
             logger.error("get_task_status: failed task_id=%s error=%s", task_id, e)

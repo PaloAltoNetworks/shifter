@@ -23,7 +23,6 @@ def make_range_ctx(range_id: int = 42, user_id: int = 7) -> RangeContext:
     )
 
 
-@pytest.mark.django_db
 class TestDestroyRange:
     """Tests for destroy_range() in engine/services.py.
 
@@ -337,7 +336,6 @@ class TestDestroyRange:
         assert "already destroyed" in caplog.text.lower() or "42" in caplog.text
 
 
-@pytest.mark.django_db
 class TestDestroyRangeByRequest:
     """Tests for destroy_range_by_request() in engine/services.py.
 

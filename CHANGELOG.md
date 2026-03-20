@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.1] - 2026-03-20
+
+### Changed
+- Consolidated all in-app test directories (`ctf/tests/`, `cms/experiments/tests/`, `risk_register/tests/`) into centralized `tests/` directory so all 2331 tests are discovered by the default `pytest` command
+- Removed `--cov` from pytest `addopts` — local runs are now fast; coverage runs only in CI
+- CI workflow now includes `--cov` for `ctf`, `engine`, and `risk_register` modules and no longer ignores `tests/risk_register`
+
 ## [3.16.0] - 2026-03-19
 
 ### Added

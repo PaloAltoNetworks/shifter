@@ -186,7 +186,7 @@ class TestGetRangeAccessUrl:
             connection_name="ctf-42",
             hostname="10.0.1.5",
             rdp_username="kali",
-            rdp_password="kali",  # noqa: S106  # nosec B106
+            rdp_password="kali",  # nosec B106
             sftp_root_directory="/home/kali",
             sftp_private_key=None,
         )

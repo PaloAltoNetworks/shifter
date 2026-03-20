@@ -28,7 +28,7 @@ def staff_user(db):
     return User.objects.create_user(  # nosec B106
         username="testuser",
         email="test@example.com",
-        password="testpass",  # noqa: S106
+        password="testpass",
     )
 
 

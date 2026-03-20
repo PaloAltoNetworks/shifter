@@ -295,6 +295,9 @@ class CTFChallengeForm(forms.ModelForm):
     def save(self, commit: bool = True) -> CTFChallenge:
         """Save challenge with flag hashing.
 
+        Creates a CTFFlag record for the flag. Also sets the legacy flag_hash
+        field on the challenge for backward compatibility.
+
         Args:
             commit: Whether to save to database.
 
@@ -304,6 +307,7 @@ class CTFChallengeForm(forms.ModelForm):
         from ctf.services.challenge import hash_flag
 
         challenge = super().save(commit=False)
+        is_new = challenge._state.adding
 
         # Hash the flag if provided
         flag = self.cleaned_data.get("flag")
@@ -316,6 +320,20 @@ class CTFChallengeForm(forms.ModelForm):
 
         if commit:
             challenge.save()
+
+            # Create a CTFFlag record for the flag
+            if flag:
+                from ctf.models import CTFFlag
+
+                if is_new:
+                    # New challenge: create the first flag record
+                    CTFFlag.objects.create(
+                        challenge=challenge,
+                        flag_hash=challenge.flag_hash,
+                        flag_type="static",
+                        case_sensitive=True,
+                        order=0,
+                    )
 
         return challenge
 

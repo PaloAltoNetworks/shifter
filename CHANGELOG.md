@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exception bridging: `CloudStorageError` caught and re-raised as `S3Error` for backward compatibility
   - All existing function signatures, import paths, and caller contracts preserved
 
+## [3.16.1] - 2026-03-20
+
+### Changed
+- Consolidated all in-app test directories (`ctf/tests/`, `cms/experiments/tests/`, `risk_register/tests/`) into centralized `tests/` directory so all 2331 tests are discovered by the default `pytest` command
+- Removed `--cov` from pytest `addopts` — local runs are now fast; coverage runs only in CI
+- CI workflow now includes `--cov` for `ctf`, `engine`, and `risk_register` modules and no longer ignores `tests/risk_register`
+
 ## [3.16.0] - 2026-03-19
 
 ### Added
@@ -42,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - AWS adapter implementations for all protocols
   - Provider-agnostic exception hierarchy
   - Generic setting aliases (`CLOUD_PROVIDER`, `CLOUD_REGION`, `STORAGE_BUCKET_NAME`) with backward-compatible AWS fallbacks
+- Multiple flags per challenge (CTF-107) — new `CTFFlag` model supports multiple valid flags per challenge where any correct flag constitutes a solve
+- Each flag independently supports static (hashed) or regex (pattern match) types and case sensitivity
+- `add_flag` / `remove_flag` service functions and API endpoints for flag management
+- Flag management UI on admin challenge detail page (add/remove flags with type and case sensitivity controls)
+- Backward compatible — challenges with only the legacy `flag_hash` field continue to work without migration
 
 ## [3.15.4] - 2026-03-18
 

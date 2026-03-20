@@ -1,0 +1,60 @@
+---
+name: django-testing
+description: How to run tests for the Shifter Django application. Always use this skill to run tests for any part of the Django application. Use when the user asks to run tests, check if tests pass, test a specific module, or verify code changes with tests. See tdd-plan skill for how WRITE tests.
+---
+
+# Django Testing
+
+Run tests for the Shifter Platform Django app.
+
+## Prerequisites
+
+Always activate the virtual environment and set the TESTING flag:
+
+```bash
+cd /home/atomik/src/shifter/shifter/shifter_platform
+source .venv/bin/activate
+export TESTING=1
+```
+
+## Running Tests
+
+### All Tests
+```bash
+cd /home/atomik/src/shifter/shifter/shifter_platform
+source .venv/bin/activate
+TESTING=1 python -m pytest
+```
+
+### Specific Test File
+```bash
+cd /home/atomik/src/shifter/shifter/shifter_platform
+source .venv/bin/activate
+TESTING=1 python -m pytest tests/test_views.py -v
+```
+
+### Specific Test Class or Function
+```bash
+cd /home/atomik/src/shifter/shifter/shifter_platform
+source .venv/bin/activate
+TESTING=1 python -m pytest tests/test_views.py::TestDashboard -v
+TESTING=1 python -m pytest tests/test_views.py::TestDashboard::test_dashboard_requires_login -v
+```
+
+### Run with Coverage (CI only by default)
+Coverage is removed from `addopts` so local runs are fast. To run with coverage locally:
+```bash
+cd /home/atomik/src/shifter/shifter/shifter_platform
+source .venv/bin/activate
+TESTING=1 python -m pytest --cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov=ctf --cov=engine --cov=risk_register --cov-report=term-missing
+```
+
+## Important Notes
+
+- **TESTING=1** is required - it configures Django to use test settings (SQLite, disabled external services)
+- **Always activate .venv** - dependencies are installed there
+- All tests are in the centralized `shifter/shifter_platform/tests/` directory (subdirs: `cms/`, `ctf/`, `engine/`, `risk_register/`, etc.)
+- Use `-v` for verbose output
+- Use `-x` to stop on first failure
+- Use `--tb=short` for shorter tracebacks
+- If the venv does not exist in your worktree create it with uv

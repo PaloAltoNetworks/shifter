@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from shared.cloud.exceptions import CloudTaskError
+
 
 class TestStartEcsTask:
     """Tests for _start_ecs_task() internal function.
@@ -13,7 +15,7 @@ class TestStartEcsTask:
     Contract:
     - Inputs: range_id (int), user_id (int), command (str)
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
-    - Side effects: Calls ECS run_task API
+    - Side effects: Calls TaskRunner.run_task via get_task_runner()
     - Errors: Raises ClientError if ECS task fails to start
     - Logging: WARNING when config incomplete, ERROR on failures, INFO on success
     """
@@ -32,19 +34,17 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {"tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123456789:task/test/abc123"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
+            mock_get_runner.return_value = mock_runner
 
             result = _start_ecs_task(range_id=42, user_id=7, command="provision")
 
             assert result == "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
     def test_calls_run_task_with_correct_parameters(self, settings):
-        """Function calls ECS run_task with correct configuration."""
+        """Function calls TaskRunner.run_task with correct configuration."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -53,23 +53,21 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {"tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123456789:task/test/abc123"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
+            mock_get_runner.return_value = mock_runner
 
             _start_ecs_task(range_id=42, user_id=7, command="provision")
 
-            mock_ecs.run_task.assert_called_once()
-            call_kwargs = mock_ecs.run_task.call_args[1]
+            mock_runner.run_task.assert_called_once()
+            call_kwargs = mock_runner.run_task.call_args[1]
             assert call_kwargs["cluster"] == "arn:aws:ecs:us-east-2:123456789:cluster/test"
-            assert call_kwargs["taskDefinition"] == "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-            assert call_kwargs["launchType"] == "FARGATE"
+            assert call_kwargs["task_definition"] == "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+            assert call_kwargs["container_name"] == "pulumi-provisioner"
 
     def test_passes_range_id_user_id_and_command_to_container(self, settings):
-        """Function passes resource type, command, range_id, and user_id to container overrides."""
+        """Function passes resource type, command, range_id, and user_id to container command."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -78,20 +76,16 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {"tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123456789:task/test/abc123"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
+            mock_get_runner.return_value = mock_runner
 
             _start_ecs_task(range_id=99, user_id=7, command="destroy")
 
-            call_kwargs = mock_ecs.run_task.call_args[1]
-            overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            command = overrides["command"]
+            call_kwargs = mock_runner.run_task.call_args[1]
             # Verify exact command format: ["range", "destroy", "--range-id", "99", "--user-id", "7"]
-            assert command == ["range", "destroy", "--range-id", "99", "--user-id", "7"]
+            assert call_kwargs["command"] == ["range", "destroy", "--range-id", "99", "--user-id", "7"]
 
     # -------------------------------------------------------------------------
     # Configuration - ECS not configured
@@ -298,7 +292,7 @@ class TestStartEcsTask:
     # -------------------------------------------------------------------------
 
     def test_raises_client_error_when_run_task_fails(self, settings):
-        """Function raises ClientError when ECS run_task fails."""
+        """Function raises ClientError when TaskRunner.run_task fails."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -307,19 +301,16 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Cluster not found"}},
-                "RunTask",
-            )
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
             with pytest.raises(ClientError):
                 _start_ecs_task(range_id=42, user_id=7, command="provision")
 
     def test_raises_client_error_when_no_tasks_returned(self, settings):
-        """Function raises ClientError when ECS returns empty tasks list."""
+        """Function raises ClientError when adapter reports no tasks started."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -328,21 +319,16 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {
-            "tasks": [],
-            "failures": [{"reason": "RESOURCE:CPU", "arn": "arn:aws:ecs:..."}],
-        }
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("No tasks started: ['RESOURCE:CPU']")
+            mock_get_runner.return_value = mock_runner
 
             with pytest.raises(ClientError):
                 _start_ecs_task(range_id=42, user_id=7, command="provision")
 
-    def test_propagates_get_ecs_client_error(self, settings):
-        """Function propagates errors from _get_ecs_client."""
+    def test_propagates_get_task_runner_error(self, settings):
+        """Function propagates errors from get_task_runner()."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -351,10 +337,10 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_get_client.side_effect = ValueError("AWS_REGION is required")
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_get_runner.side_effect = RuntimeError("Provider not configured")
 
-            with pytest.raises(ValueError, match="AWS_REGION"):
+            with pytest.raises(RuntimeError, match="Provider not configured"):
                 _start_ecs_task(range_id=42, user_id=7, command="provision")
 
     # -------------------------------------------------------------------------
@@ -400,22 +386,20 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {"tasks": [{"taskArn": "arn:aws:ecs:us-east-2:123456789:task/test/abc123"}]}
-
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.INFO, logger="engine.ecs"),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
+            mock_get_runner.return_value = mock_runner
 
             _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert "42" in caplog.text or "range_id" in caplog.text.lower()
 
     def test_logs_error_when_run_task_fails(self, settings, caplog):
-        """Function logs ERROR when ECS run_task fails."""
+        """Function logs ERROR when TaskRunner.run_task fails."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -425,23 +409,20 @@ class TestStartEcsTask:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
             pytest.raises(ClientError),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Cluster not found"}},
-                "RunTask",
-            )
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
             _start_ecs_task(range_id=42, user_id=7, command="provision")
 
         assert "error" in caplog.text.lower() or "failed" in caplog.text.lower()
 
     def test_logs_error_when_no_tasks_returned(self, settings, caplog):
-        """Function logs ERROR when ECS returns empty tasks list."""
+        """Function logs ERROR when adapter reports no tasks started."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -450,19 +431,14 @@ class TestStartEcsTask:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {
-            "tasks": [],
-            "failures": [{"reason": "RESOURCE:CPU"}],
-        }
-
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
             pytest.raises(ClientError),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("No tasks started: ['RESOURCE:CPU']")
+            mock_get_runner.return_value = mock_runner
 
             _start_ecs_task(range_id=42, user_id=7, command="provision")
 

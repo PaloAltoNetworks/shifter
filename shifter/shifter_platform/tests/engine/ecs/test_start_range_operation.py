@@ -7,6 +7,8 @@ from uuid import UUID
 import pytest
 from botocore.exceptions import ClientError
 
+from shared.cloud.exceptions import CloudTaskError
+
 TEST_REQUEST_ID = UUID("550e8400-e29b-41d4-a716-446655440000")
 TEST_REQUEST_ID_2 = UUID("660e8400-e29b-41d4-a716-446655440001")
 
@@ -17,7 +19,7 @@ class TestStartRangeOperation:
     Contract:
     - Inputs: request_id (UUID), operation (str: 'pause' or 'resume')
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
-    - Side effects: Calls ECS run_task API via _start_range_ecs_task
+    - Side effects: Calls TaskRunner.run_task via _start_range_ecs_task
     - Errors: TypeError if request_id not UUID, ValueError if operation invalid
     - Logging: WARNING when config incomplete, ERROR on failures
     """
@@ -38,12 +40,11 @@ class TestStartRangeOperation:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             result = start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
 
@@ -61,19 +62,18 @@ class TestStartRangeOperation:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/def456"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             result = start_range_operation(request_id=TEST_REQUEST_ID, operation="resume")
 
             assert result == task_arn
 
     def test_passes_correct_command_for_pause(self, settings):
-        """Function passes 'pause' command to _start_range_ecs_task."""
+        """Function passes 'pause' command to TaskRunner.run_task."""
         from engine.ecs import start_range_operation
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
@@ -84,23 +84,19 @@ class TestStartRangeOperation:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
 
-            # Verify the command includes 'pause'
-            call_kwargs = mock_ecs.run_task.call_args[1]
-            overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            command = overrides["command"]
-            assert "pause" in command
+            call_kwargs = mock_runner.run_task.call_args[1]
+            assert "pause" in call_kwargs["command"]
 
     def test_passes_correct_command_for_resume(self, settings):
-        """Function passes 'resume' command to _start_range_ecs_task."""
+        """Function passes 'resume' command to TaskRunner.run_task."""
         from engine.ecs import start_range_operation
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
@@ -111,20 +107,16 @@ class TestStartRangeOperation:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             start_range_operation(request_id=TEST_REQUEST_ID, operation="resume")
 
-            # Verify the command includes 'resume'
-            call_kwargs = mock_ecs.run_task.call_args[1]
-            overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            command = overrides["command"]
-            assert "resume" in command
+            call_kwargs = mock_runner.run_task.call_args[1]
+            assert "resume" in call_kwargs["command"]
 
     # -------------------------------------------------------------------------
     # Input validation - operation
@@ -217,7 +209,7 @@ class TestStartRangeOperation:
     # -------------------------------------------------------------------------
 
     def test_raises_client_error_when_run_task_fails(self, settings):
-        """Function raises ClientError when ECS run_task fails."""
+        """Function raises ClientError when TaskRunner.run_task fails."""
         from engine.ecs import start_range_operation
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
@@ -227,13 +219,10 @@ class TestStartRangeOperation:
         settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Not found"}},
-                "RunTask",
-            )
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
             with pytest.raises(ClientError):
                 start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
@@ -269,15 +258,14 @@ class TestStartRangeOperation:
         settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.INFO, logger="engine.ecs"),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
 

@@ -4,12 +4,9 @@ import logging
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-import pytest
-
 from shared.enums import ResourceStatus
 
 
-@pytest.mark.django_db
 class TestResumeRange:
     """Tests for resume_range() in engine/services.py.
 

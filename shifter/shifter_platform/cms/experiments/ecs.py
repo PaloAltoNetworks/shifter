@@ -17,9 +17,11 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
+
+from shared.cloud import get_task_runner
+from shared.cloud.exceptions import CloudTaskError
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -30,12 +32,17 @@ logger = logging.getLogger(__name__)
 def _get_ecs_client() -> Any:
     """Get boto3 ECS client.
 
+    .. deprecated::
+        Use :func:`shared.cloud.get_task_runner` instead.
+
     Returns:
         Boto3 ECS client for the configured AWS region.
 
     Raises:
         ValueError: If AWS_REGION is not configured.
     """
+    import boto3
+
     region: str = getattr(settings, "AWS_REGION", "")
     if not region:
         logger.error("AWS_REGION is not configured")
@@ -132,14 +139,9 @@ def start_experiment_task(
     ]
 
     # Build environment overrides for payload
-    env_overrides: list[dict[str, str]] = []
+    env_overrides: dict[str, str] | None = None
     if payload is not None:
-        env_overrides.append(
-            {
-                "name": "EXPERIMENT_PAYLOAD",
-                "value": json.dumps(payload),
-            }
-        )
+        env_overrides = {"EXPERIMENT_PAYLOAD": json.dumps(payload)}
 
     logger.info(
         "Starting experiment ECS task: experiment=%d run=%d request_id=%s command=%s",
@@ -149,47 +151,24 @@ def start_experiment_task(
         command,
     )
 
-    ecs = _get_ecs_client()
-
-    container_override: dict = {
-        "name": "experiment-executor",
-        "command": container_command,
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
     }
-    if env_overrides:
-        container_override["environment"] = env_overrides
 
     try:
-        # Boto3 automatically retries transient failures (network errors, throttling)
-        # with exponential backoff (default: 5 attempts). No additional retry logic needed.
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_def_arn,
             cluster=cluster_arn,
-            taskDefinition=task_def_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={"containerOverrides": [container_override]},
+            command=container_command,
+            container_name="experiment-executor",
+            env_overrides=env_overrides,
+            network_config=network_config,
         )
-
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(
-                "Experiment ECS task failed to start: %s (experiment=%d run=%d)",
-                failure_reasons,
-                experiment_id,
-                run_id,
-            )
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn: str = response["tasks"][0]["taskArn"]
         logger.info(
             "Started experiment ECS task: experiment=%d run=%d task_arn=%s",
             experiment_id,
@@ -197,11 +176,13 @@ def start_experiment_task(
             task_arn,
         )
         return task_arn
-
-    except ClientError:
+    except CloudTaskError as e:
         logger.exception(
             "Failed to start experiment ECS task: experiment=%d run=%d",
             experiment_id,
             run_id,
         )
-        raise
+        raise ClientError(
+            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
+            "RunTask",
+        ) from e

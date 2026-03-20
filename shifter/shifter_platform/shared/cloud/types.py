@@ -53,6 +53,7 @@ class TaskRunner(Protocol):
         task_definition: str,
         cluster: str,
         command: list[str],
+        container_name: str,
         env_overrides: dict[str, str] | None = None,
         network_config: dict[str, Any] | None = None,
     ) -> str | None: ...

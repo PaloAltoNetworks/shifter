@@ -72,11 +72,47 @@
                         <strong>Flag format:</strong> <code>{{ challenge.flag_format }}</code>
                     </div>
                     {% endif %}
+
+                    {% if challenge_files %}
+                    <div class="mb-3">
+                        <strong>Files:</strong>
+                        <ul class="list-unstyled mt-1">
+                            {% for file in challenge_files %}
+                            <li class="mb-1">
+                                <a href="{% url 'ctf:api_file_download' file_id=file.pk %}" class="btn btn-sm btn-outline-primary">
+                                    &#128196; {{ file.display }}
+                                </a>
+                                <small class="text-muted ms-1">{{ file.file_size_display }}</small>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
 
+            {% if not prereqs_met %}
+            <!-- Prerequisites Not Met -->
+            <div class="card mb-4">
+                <div class="card-header bg-warning bg-opacity-10">
+                    <h5 class="mb-0">&#128274; Prerequisites Required</h5>
+                </div>
+                <div class="card-body">
+                    <p>You must complete the following challenges before you can submit flags for this one:</p>
+                    <ul>
+                        {% for req in unmet_challenges %}
+                        <li>
+                            <a href="{% url 'ctf:challenge_detail' challenge_id=req.pk %}">{{ req.name }}</a>
+                            <span class="text-muted">({{ req.points }} pts)</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Flag Submission -->
-            {% if not is_solved %}
+            {% if not is_solved and prereqs_met %}
             <div class="card mb-4" id="submit-section">
                 <div class="card-header">
                     <h5 class="mb-0">Submit Flag</h5>

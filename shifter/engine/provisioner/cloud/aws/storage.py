@@ -1,9 +1,4 @@
-"""AWS S3 adapter implementing ObjectStorage protocol for provisioner.
-
-The actual S3 presigned URL logic will be extracted from
-provisioner/config.py in Sub-Issue 2 (#812). This stub satisfies the
-protocol interface.
-"""
+"""AWS S3 adapter implementing ObjectStorage protocol for provisioner."""
 
 from __future__ import annotations
 

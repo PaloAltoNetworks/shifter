@@ -1,8 +1,4 @@
-"""AWS SSM Parameter Store adapter implementing ConfigStore protocol.
-
-The actual SSM logic will be extracted from provisioner/main.py in
-Sub-Issue 6 (#816). This stub satisfies the protocol interface.
-"""
+"""AWS SSM Parameter Store adapter implementing ConfigStore protocol."""
 
 from __future__ import annotations
 

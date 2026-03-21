@@ -1,8 +1,4 @@
-"""AWS RDS IAM adapter implementing DBAuth protocol.
-
-The actual RDS IAM logic will be extracted from provisioner/config.py in
-Sub-Issue 6 (#816). This stub satisfies the protocol interface.
-"""
+"""AWS RDS IAM adapter implementing DBAuth protocol."""
 
 from __future__ import annotations
 

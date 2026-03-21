@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
@@ -207,4 +208,22 @@ def generate_download_url(s3_key: str, filename: str, expires_in: int = 300) -> 
         logger.error("CTF download URL generation failed: s3_key=%s error=%s", s3_key, e)
         raise CTFFileError(f"Failed to generate download URL: {e}") from e
 
+    # Validate the presigned URL points to the expected S3 host
+    _validate_s3_url(url)
     return url
+
+
+def _validate_s3_url(url: str) -> None:
+    """Validate that a presigned URL points to a trusted S3 endpoint.
+
+    Prevents open-redirect if the URL were somehow tampered with.
+
+    Raises:
+        CTFFileError: If the URL host is not a trusted S3 endpoint.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    # Accept: s3.region.amazonaws.com, bucket.s3.region.amazonaws.com, localhost (dev)
+    if host.endswith(".amazonaws.com") or host in ("localhost", "127.0.0.1"):
+        return
+    raise CTFFileError(f"Presigned URL has unexpected host: {host}")

@@ -102,6 +102,7 @@ class TestConsumerAuthentication:
             await communicator.disconnect()
 
 
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 class TestConsumerHydration:
     """5.4: Test hydration on connect (initial state sent correctly)."""

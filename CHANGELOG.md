@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.29.0] - 2026-03-21
+
+### Changed
+- **Worker**: Migrate `run_worker` management command from direct `boto3` SQS calls to `shared.cloud.get_queue_consumer()` abstraction layer
+- **CMS**: Migrate `cms/experiments/events.py` from direct `boto3` SQS calls to `shared.cloud.get_queue_publisher()` abstraction layer
+- **Cloud**: Remove stub docstring from `AWSQueuePublisher`/`AWSQueueConsumer` now that extraction is complete
+
 ## [3.28.0] - 2026-03-21
 
 ### Changed

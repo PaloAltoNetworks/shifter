@@ -4,32 +4,46 @@ Tests the view logic, not specific documentation content.
 Content-specific tests are brittle and break when docs are reorganized.
 """
 
-import time
+from unittest.mock import MagicMock, patch
 
 import pytest
-from django.contrib.auth import get_user_model
-from django.test import Client
+from django.http import Http404, HttpResponse
+from django.test import RequestFactory
 
-User = get_user_model()
-
-
-def get_authenticated_client(user):
-    """Create a client with OIDC session data to avoid SessionRefresh redirects."""
-    client = Client()
-    client.force_login(user)
-    session = client.session
-    session["oidc_id_token_expiration"] = time.time() + 3600
-    session.save()
-    return client
+from documentation.views import doc_index, doc_page
 
 
 @pytest.fixture
-def user(db):
-    """Authenticated user."""
-    return User.objects.create_user(
-        username="user@example.com",
-        email="user@example.com",
-    )
+def rf():
+    """Django RequestFactory."""
+    return RequestFactory()
+
+
+@pytest.fixture
+def mock_user():
+    """Authenticated mock user (no DB)."""
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.pk = 1
+    return user
+
+
+@pytest.fixture
+def anon_user():
+    """Anonymous mock user (no DB)."""
+    user = MagicMock()
+    user.is_authenticated = False
+    user.is_active = False
+    user.pk = None
+    return user
+
+
+def _make_request(rf, user, path="/docs/"):
+    """Build a GET request with user attached."""
+    request = rf.get(path)
+    request.user = user
+    return request
 
 
 # =============================================================================
@@ -37,21 +51,23 @@ def user(db):
 # =============================================================================
 
 
-@pytest.mark.django_db
 class TestAccessControl:
     """Tests for authentication."""
 
-    def test_anonymous_user_redirected_to_login(self, client, db):
+    def test_anonymous_user_redirected_to_login(self, rf, anon_user):
         """Anonymous users are redirected to login."""
-        response = client.get("/docs/")
+        request = _make_request(rf, anon_user)
+        response = doc_index(request)
 
         assert response.status_code == 302
         assert "login" in response.url.lower() or "oidc" in response.url.lower()
 
-    def test_authenticated_user_can_access(self, user):
+    @patch("documentation.views.render")
+    def test_authenticated_user_can_access(self, mock_render, rf, mock_user):
         """Authenticated users get 200 OK."""
-        client = get_authenticated_client(user)
-        response = client.get("/docs/")
+        mock_render.return_value = HttpResponse(status=200)
+        request = _make_request(rf, mock_user)
+        response = doc_index(request)
 
         assert response.status_code == 200
 
@@ -61,37 +77,35 @@ class TestAccessControl:
 # =============================================================================
 
 
-@pytest.mark.django_db
 class TestSecurity:
     """Tests for security controls."""
 
-    def test_deprecated_folder_returns_404(self, user):
+    def test_deprecated_folder_returns_404(self, rf, mock_user):
         """/docs/_deprecated/* returns 404 (excluded folder)."""
-        client = get_authenticated_client(user)
-        response = client.get("/docs/_deprecated/anything/")
+        request = _make_request(rf, mock_user, "/docs/_deprecated/anything/")
 
-        assert response.status_code == 404
+        with pytest.raises(Http404):
+            doc_page(request, path="_deprecated/anything")
 
-    def test_directory_traversal_blocked(self, user):
+    def test_directory_traversal_blocked(self, rf, mock_user):
         """Path traversal attempts return 404."""
-        client = get_authenticated_client(user)
-
-        paths = [
-            "/docs/../../../etc/passwd/",
-            "/docs/..%2F..%2Fetc%2Fpasswd/",
-            "/docs/../../etc/passwd/",
+        traversal_paths = [
+            "../../../etc/passwd",
+            "..%2F..%2Fetc%2Fpasswd",
+            "../../etc/passwd",
         ]
 
-        for path in paths:
-            response = client.get(path)
-            assert response.status_code in (404, 400), f"Path {path} should be blocked"
+        for path_str in traversal_paths:
+            request = _make_request(rf, mock_user, f"/docs/{path_str}/")
+            with pytest.raises(Http404, match=r"Invalid path|Document not found"):
+                doc_page(request, path=path_str)
 
-    def test_nonexistent_page_returns_404(self, user):
+    def test_nonexistent_page_returns_404(self, rf, mock_user):
         """Missing pages return 404."""
-        client = get_authenticated_client(user)
-        response = client.get("/docs/this-does-not-exist/")
+        request = _make_request(rf, mock_user, "/docs/this-does-not-exist/")
 
-        assert response.status_code == 404
+        with pytest.raises(Http404):
+            doc_page(request, path="this-does-not-exist")
 
 
 # =============================================================================
@@ -99,32 +113,42 @@ class TestSecurity:
 # =============================================================================
 
 
-@pytest.mark.django_db
 class TestBasicFunctionality:
     """Tests for core view behavior."""
 
-    def test_index_returns_nav_tree(self, user):
+    @patch("documentation.views.render")
+    def test_index_returns_nav_tree(self, mock_render, rf, mock_user):
         """Index page includes nav_tree in context."""
-        client = get_authenticated_client(user)
-        response = client.get("/docs/")
+        mock_render.return_value = HttpResponse(status=200)
+        request = _make_request(rf, mock_user)
+        doc_index(request)
 
-        assert response.status_code == 200
-        assert "nav_tree" in response.context
-        assert isinstance(response.context["nav_tree"], list)
+        mock_render.assert_called_once()
+        context = mock_render.call_args[0][2]
+        assert "nav_tree" in context
+        assert isinstance(context["nav_tree"], list)
 
-    def test_index_sets_active_nav(self, user):
+    @patch("documentation.views.render")
+    def test_index_sets_active_nav(self, mock_render, rf, mock_user):
         """Docs pages set active_nav to 'docs'."""
-        client = get_authenticated_client(user)
-        response = client.get("/docs/")
+        mock_render.return_value = HttpResponse(status=200)
+        request = _make_request(rf, mock_user)
+        doc_index(request)
 
-        assert response.context["active_nav"] == "docs"
+        mock_render.assert_called_once()
+        context = mock_render.call_args[0][2]
+        assert context["active_nav"] == "docs"
 
-    def test_nav_tree_excludes_deprecated(self, user):
+    @patch("documentation.views.render")
+    def test_nav_tree_excludes_deprecated(self, mock_render, rf, mock_user):
         """Nav tree does not include _deprecated folder."""
-        client = get_authenticated_client(user)
-        response = client.get("/docs/")
+        mock_render.return_value = HttpResponse(status=200)
+        request = _make_request(rf, mock_user)
+        doc_index(request)
 
-        nav_tree = response.context["nav_tree"]
+        mock_render.assert_called_once()
+        context = mock_render.call_args[0][2]
+        nav_tree = context["nav_tree"]
 
         def find_deprecated(items):
             for item in items:

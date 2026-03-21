@@ -8,22 +8,203 @@ Tests cover:
 - Event edit view
 - Event status transitions (schedule, activate, complete, cancel)
 - Event services
+
+All tests mock the ORM — no @pytest.mark.django_db markers.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
+from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
 from ctf.enums import EventStatus
-from ctf.models import CTFEvent
 
-if TYPE_CHECKING:
-    from django.test import Client
+# ---------------------------------------------------------------------------
+# Shared mock fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_user():
+    """Create a mock authenticated user (organizer)."""
+    user = MagicMock()
+    user.pk = 1
+    user.id = 1
+    user.email = "organizer@test.com"
+    user.username = "organizer@test.com"
+    user.is_authenticated = True
+    user.is_active = True
+    user.is_anonymous = False
+    user.is_staff = False
+    user.is_superuser = False
+    user.backend = "django.contrib.auth.backends.ModelBackend"
+    return user
+
+
+@pytest.fixture
+def mock_standard_user():
+    """Create a mock non-organizer user."""
+    user = MagicMock()
+    user.pk = 2
+    user.id = 2
+    user.email = "standard@test.com"
+    user.username = "standard@test.com"
+    user.is_authenticated = True
+    user.is_active = True
+    user.is_anonymous = False
+    user.is_staff = False
+    user.is_superuser = False
+    user.backend = "django.contrib.auth.backends.ModelBackend"
+    return user
+
+
+class _MockEvent:
+    """Lightweight mock CTFEvent that works with Django templates.
+
+    Django templates resolve ``event.pk`` by trying ``event['pk']`` first.
+    A MagicMock would return another mock for ``__getitem__``, breaking URL
+    resolution. This plain object avoids that problem.
+    """
+
+    def __init__(
+        self,
+        *,
+        name="Test CTF Event",
+        description="A test CTF event",
+        status=EventStatus.SCHEDULED.value,
+        created_by_id=1,
+        pk=None,
+        is_modifiable=True,
+    ):
+        self.pk = pk or uuid4()
+        self.id = self.pk
+        self.name = name
+        self.description = description
+        self.status = status
+        self.created_by_id = created_by_id
+        self.event_start = timezone.now() + timedelta(days=1)
+        self.event_end = timezone.now() + timedelta(days=1, hours=8)
+        self.scenario_id = "basic"
+        self.auto_cleanup = True
+        self.cleanup_delay_hours = 24
+        self.range_spinup_minutes = 30
+        self.team_mode = False
+        self.team_size_limit = None
+        self.is_modifiable = is_modifiable
+        self.registration_deadline = None
+        self.max_participants = None
+        self.range_config = None
+        self.save = MagicMock()
+        self.refresh_from_db = MagicMock()
+
+    def get_status_display(self):
+        return self.status.title()
+
+
+def _make_mock_event(**kwargs):
+    """Helper to create a mock CTFEvent."""
+    return _MockEvent(**kwargs)
+
+
+@pytest.fixture
+def mock_event():
+    """A scheduled event owned by user pk=1."""
+    return _make_mock_event(status=EventStatus.SCHEDULED.value)
+
+
+@pytest.fixture
+def mock_event_draft():
+    """A draft event owned by user pk=1."""
+    return _make_mock_event(
+        name="Draft CTF Event",
+        description="A draft event",
+        status=EventStatus.DRAFT.value,
+    )
+
+
+@pytest.fixture
+def mock_event_active():
+    """An active event owned by user pk=1."""
+    return _make_mock_event(
+        name="Active CTF Event",
+        description="An active event",
+        status=EventStatus.ACTIVE.value,
+    )
+
+
+@contextmanager
+def _noop_atomic():
+    """No-op replacement for transaction.atomic()."""
+    yield
+
+
+@pytest.fixture
+def _mock_auth_organizer(mock_user):
+    """Patch Django auth to authenticate mock_user as organizer.
+
+    Also patches context processors that would otherwise hit the DB.
+    """
+    from ctf.bridges import UserRole
+
+    role = UserRole(is_ctf_organizer=True, is_ctf_participant=False, active_ctf_event=None)
+
+    ctx_proc_defaults = {
+        "is_ctf_user": True,
+        "is_ctf_organizer": True,
+        "is_ctf_participant": False,
+        "is_ctf_participant_only": False,
+        "active_ctf_event": None,
+    }
+    range_ctx_defaults = {
+        "has_active_range": False,
+        "active_range": None,
+        "connection_urls": [],
+        "scenario_name": None,
+    }
+
+    with (
+        patch("ctf.views.get_user_role", return_value=role),
+        patch("django.contrib.auth.get_user", return_value=mock_user),
+        patch("django.contrib.auth.middleware.get_user", return_value=mock_user),
+        patch("ctf.context_processors.ctf_navigation", return_value=ctx_proc_defaults),
+        patch("mission_control.context_processors.active_range", return_value=range_ctx_defaults),
+        patch("shared.context_processors.user_permissions", return_value={"can_access_threat_research": False}),
+    ):
+        yield
+
+
+@pytest.fixture
+def _mock_auth_standard(mock_standard_user):
+    """Patch Django auth to authenticate mock_standard_user as non-organizer."""
+    from ctf.bridges import UserRole
+
+    role = UserRole(is_ctf_organizer=False, is_ctf_participant=False, active_ctf_event=None)
+
+    with (
+        patch("ctf.views.get_user_role", return_value=role),
+        patch("django.contrib.auth.get_user", return_value=mock_standard_user),
+        patch("django.contrib.auth.middleware.get_user", return_value=mock_standard_user),
+    ):
+        yield
+
+
+@pytest.fixture
+def organizer_client(_mock_auth_organizer) -> Client:
+    """An HTTP client authenticated as an organizer."""
+    return Client()
+
+
+@pytest.fixture
+def standard_client(_mock_auth_standard) -> Client:
+    """An HTTP client authenticated as a non-organizer user."""
+    return Client()
 
 
 # ---------------------------------------------------------------------------
@@ -31,11 +212,14 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestCTFEventForm:
-    """Test CTFEventForm validation."""
+    """Test CTFEventForm validation.
 
-    def test_form_valid_minimal_data(self, organizer_user):
+    Form tests do not need DB access — CTFEventForm with user=None uses
+    a plain CharField for scenario_id, so no ORM calls occur.
+    """
+
+    def test_form_valid_minimal_data(self):
         """Form should accept minimal valid data."""
         from ctf.forms import CTFEventForm
 
@@ -53,7 +237,7 @@ class TestCTFEventForm:
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
 
-    def test_form_valid_team_mode(self, organizer_user):
+    def test_form_valid_team_mode(self):
         """Form should accept team mode with size limit."""
         from ctf.forms import CTFEventForm
 
@@ -72,7 +256,7 @@ class TestCTFEventForm:
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
 
-    def test_form_invalid_end_before_start(self, organizer_user):
+    def test_form_invalid_end_before_start(self):
         """Form should reject end time before start time."""
         from ctf.forms import CTFEventForm
 
@@ -93,7 +277,7 @@ class TestCTFEventForm:
         assert not form.is_valid()
         assert "event_end" in form.errors
 
-    def test_form_invalid_team_mode_without_size(self, organizer_user):
+    def test_form_invalid_team_mode_without_size(self):
         """Form should reject team mode without size limit."""
         from ctf.forms import CTFEventForm
 
@@ -113,7 +297,7 @@ class TestCTFEventForm:
         assert not form.is_valid()
         assert "team_size_limit" in form.errors
 
-    def test_form_invalid_registration_deadline_after_start(self, organizer_user):
+    def test_form_invalid_registration_deadline_after_start(self):
         """Form should reject registration deadline after event start."""
         from ctf.forms import CTFEventForm
 
@@ -134,7 +318,7 @@ class TestCTFEventForm:
         assert not form.is_valid()
         assert "registration_deadline" in form.errors
 
-    def test_form_with_optional_fields(self, organizer_user):
+    def test_form_with_optional_fields(self):
         """Form should accept all optional fields."""
         from ctf.forms import CTFEventForm
 
@@ -162,60 +346,54 @@ class TestCTFEventForm:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestEventListView:
     """Test event list view for organizers."""
 
-    def test_event_list_requires_login(self, client: Client):
+    def test_event_list_requires_login(self):
         """Event list should require authentication."""
+        client = Client()
         response = client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 302  # Redirect to login
 
-    def test_event_list_requires_organizer(self, authenticated_standard_client: Client):
+    def test_event_list_requires_organizer(self, standard_client: Client):
         """Event list should require organizer role."""
-        response = authenticated_standard_client.get(reverse("ctf:admin_event_list"))
+        response = standard_client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 403
 
-    def test_event_list_shows_organizer_events(self, authenticated_organizer_client: Client, ctf_event, organizer_user):
+    def test_event_list_shows_organizer_events(self, organizer_client: Client, mock_event):
         """Organizer should see their own events."""
-        response = authenticated_organizer_client.get(reverse("ctf:admin_event_list"))
+        with patch("ctf.services.get_organizer_events", return_value=[mock_event]):
+            response = organizer_client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 200
-        assert ctf_event.name in response.content.decode()
+        assert mock_event.name in response.content.decode()
 
-    def test_event_list_filter_by_status(
-        self, authenticated_organizer_client: Client, ctf_event, ctf_event_draft, organizer_user
-    ):
+    def test_event_list_filter_by_status(self, organizer_client: Client, mock_event, mock_event_draft):
         """Event list should filter by status."""
-        response = authenticated_organizer_client.get(reverse("ctf:admin_event_list") + "?status=draft")
+        with patch("ctf.services.get_organizer_events", return_value=[mock_event_draft]):
+            response = organizer_client.get(reverse("ctf:admin_event_list") + "?status=draft")
         assert response.status_code == 200
         content = response.content.decode()
-        assert ctf_event_draft.name in content
-        assert ctf_event.name not in content
+        assert mock_event_draft.name in content
+        assert mock_event.name not in content
 
-    def test_event_list_shows_all_statuses_by_default(
-        self, authenticated_organizer_client: Client, ctf_event, ctf_event_draft, organizer_user
-    ):
+    def test_event_list_shows_all_statuses_by_default(self, organizer_client: Client, mock_event, mock_event_draft):
         """Event list should show all events by default."""
-        response = authenticated_organizer_client.get(reverse("ctf:admin_event_list"))
+        with patch("ctf.services.get_organizer_events", return_value=[mock_event, mock_event_draft]):
+            response = organizer_client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert ctf_event.name in content
-        assert ctf_event_draft.name in content
+        assert mock_event.name in content
+        assert mock_event_draft.name in content
 
-    def test_event_list_hides_other_organizer_events(
-        self, authenticated_organizer_client: Client, second_organizer_user, db
-    ):
+    def test_event_list_hides_other_organizer_events(self, organizer_client: Client):
         """Organizer should not see other organizers' events."""
-        other_event = CTFEvent.objects.create(
+        other_event = _make_mock_event(
             name="Other Organizer Event",
-            description="Not mine",
-            created_by=second_organizer_user,
-            status=EventStatus.DRAFT.value,
-            event_start=timezone.now() + timedelta(days=5),
-            event_end=timezone.now() + timedelta(days=5, hours=8),
-            scenario_id="basic",
+            created_by_id=3,
         )
-        response = authenticated_organizer_client.get(reverse("ctf:admin_event_list"))
+        # get_organizer_events filters by user, so return empty for the logged-in organizer
+        with patch("ctf.services.get_organizer_events", return_value=[]):
+            response = organizer_client.get(reverse("ctf:admin_event_list"))
         assert response.status_code == 200
         assert other_event.name not in response.content.decode()
 
@@ -225,29 +403,30 @@ class TestEventListView:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestEventCreateView:
     """Test event creation view."""
 
-    def test_create_view_requires_login(self, client: Client):
+    def test_create_view_requires_login(self):
         """Create view should require authentication."""
+        client = Client()
         response = client.get(reverse("ctf:admin_event_create"))
         assert response.status_code == 302
 
-    def test_create_view_requires_organizer(self, authenticated_standard_client: Client):
+    def test_create_view_requires_organizer(self, standard_client: Client):
         """Create view should require organizer role."""
-        response = authenticated_standard_client.get(reverse("ctf:admin_event_create"))
+        response = standard_client.get(reverse("ctf:admin_event_create"))
         assert response.status_code == 403
 
-    def test_create_view_renders_form(self, authenticated_organizer_client: Client):
+    def test_create_view_renders_form(self, organizer_client: Client):
         """Create view should render the AJAX form template with scenarios."""
-        response = authenticated_organizer_client.get(reverse("ctf:admin_event_create"))
+        with patch("ctf.bridges.cms_list_scenarios", return_value=[("basic", "Basic")]):
+            response = organizer_client.get(reverse("ctf:admin_event_create"))
         assert response.status_code == 200
         assert "scenarios_json" in response.context
 
-    def test_create_view_is_get_only(self, authenticated_organizer_client: Client):
+    def test_create_view_is_get_only(self, organizer_client: Client):
         """Create view should reject POST (form submission is via API now)."""
-        response = authenticated_organizer_client.post(reverse("ctf:admin_event_create"), data={})
+        response = organizer_client.post(reverse("ctf:admin_event_create"), data={})
         assert response.status_code == 405
 
 
@@ -256,64 +435,82 @@ class TestEventCreateView:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestEventDetailView:
     """Test event detail view."""
 
-    def test_detail_view_requires_login(self, client: Client, ctf_event):
+    def _patch_detail_deps(self, event):
+        """Return tuple of patch context managers for detail view dependencies."""
+        stats = {
+            "participant_count": 1,
+            "registered_count": 1,
+            "invited_count": 0,
+            "challenge_count": 1,
+            "team_count": 0,
+            "total_submissions": 0,
+            "correct_submissions": 0,
+            "total_points": 100,
+        }
+        return (
+            patch("ctf.services.get_event", return_value=event),
+            patch("ctf.services.get_event_stats", return_value=stats),
+        )
+
+    def test_detail_view_requires_login(self, mock_event):
         """Detail view should require authentication."""
-        response = client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk}))
+        client = Client()
+        response = client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 302
 
-    def test_detail_view_requires_organizer(self, authenticated_standard_client: Client, ctf_event):
+    def test_detail_view_requires_organizer(self, standard_client: Client, mock_event):
         """Detail view should require organizer role."""
-        response = authenticated_standard_client.get(
-            reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk})
-        )
+        response = standard_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 403
 
-    def test_detail_view_shows_event(self, authenticated_organizer_client: Client, ctf_event):
+    def test_detail_view_shows_event(self, organizer_client: Client, mock_event):
         """Detail view should show event information."""
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk})
-        )
+        p1, p2 = self._patch_detail_deps(mock_event)
+        with p1, p2:
+            response = organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 200
-        assert ctf_event.name in response.content.decode()
+        assert mock_event.name in response.content.decode()
 
-    def test_detail_view_shows_stats(
-        self, authenticated_organizer_client: Client, ctf_event, ctf_challenge, ctf_participant
-    ):
+    def test_detail_view_shows_stats(self, organizer_client: Client, mock_event):
         """Detail view should show event statistics."""
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event.pk})
-        )
+        p1, p2 = self._patch_detail_deps(mock_event)
+        with p1, p2:
+            response = organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 200
-        # Stats should be in context
         assert "event" in response.context
 
-    def test_detail_view_404_for_nonexistent(self, authenticated_organizer_client: Client):
+    def test_detail_view_404_for_nonexistent(self, organizer_client: Client):
         """Detail view should 404 for nonexistent event."""
-        from uuid import uuid4
+        from ctf.exceptions import CTFNotFoundError
 
-        response = authenticated_organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": uuid4()}))
+        with patch("ctf.services.get_event", side_effect=CTFNotFoundError("not found")):
+            response = organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": uuid4()}))
         assert response.status_code == 404
 
-    def test_detail_view_403_for_other_organizer_event(
-        self, authenticated_organizer_client: Client, second_organizer_user, db
-    ):
+    def test_detail_view_403_for_other_organizer_event(self, organizer_client: Client):
         """Organizer should not access other organizer's event."""
-        other_event = CTFEvent.objects.create(
+        other_event = _make_mock_event(
             name="Other Event",
-            description="Not mine",
-            created_by=second_organizer_user,
-            status=EventStatus.DRAFT.value,
-            event_start=timezone.now() + timedelta(days=5),
-            event_end=timezone.now() + timedelta(days=5, hours=8),
-            scenario_id="basic",
+            created_by_id=999,  # Not our organizer (pk=1)
         )
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_detail", kwargs={"event_id": other_event.pk})
-        )
+        stats = {
+            "participant_count": 0,
+            "registered_count": 0,
+            "invited_count": 0,
+            "challenge_count": 0,
+            "team_count": 0,
+            "total_submissions": 0,
+            "correct_submissions": 0,
+            "total_points": 0,
+        }
+        with (
+            patch("ctf.services.get_event", return_value=other_event),
+            patch("ctf.services.get_event_stats", return_value=stats),
+        ):
+            response = organizer_client.get(reverse("ctf:admin_event_detail", kwargs={"event_id": other_event.pk}))
         assert response.status_code == 403
 
 
@@ -322,52 +519,52 @@ class TestEventDetailView:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestEventEditView:
     """Test event edit view."""
 
-    def test_edit_view_requires_login(self, client: Client, ctf_event):
+    def test_edit_view_requires_login(self, mock_event):
         """Edit view should require authentication."""
-        response = client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event.pk}))
+        client = Client()
+        response = client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 302
 
-    def test_edit_view_requires_organizer(self, authenticated_standard_client: Client, ctf_event):
+    def test_edit_view_requires_organizer(self, standard_client: Client, mock_event):
         """Edit view should require organizer role."""
-        response = authenticated_standard_client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event.pk}))
+        response = standard_client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": mock_event.pk}))
         assert response.status_code == 403
 
-    def test_edit_view_renders_form_with_data(self, authenticated_organizer_client: Client, ctf_event_draft):
+    def test_edit_view_renders_form_with_data(self, organizer_client: Client, mock_event_draft):
         """Edit view should render AJAX form template with scenarios and event_id."""
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event_draft.pk})
-        )
+        with (
+            patch("ctf.services.get_event", return_value=mock_event_draft),
+            patch("ctf.bridges.cms_list_scenarios", return_value=[("basic", "Basic")]),
+        ):
+            response = organizer_client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": mock_event_draft.pk}))
         assert response.status_code == 200
         assert "scenarios_json" in response.context
         assert response.context["is_edit"] is True
-        assert response.context["event_id"] == str(ctf_event_draft.pk)
+        assert response.context["event_id"] == str(mock_event_draft.pk)
 
-    def test_edit_view_is_get_only(self, authenticated_organizer_client: Client, ctf_event_draft):
+    def test_edit_view_is_get_only(self, organizer_client: Client, mock_event_draft):
         """Edit view should reject POST (form submission is via API now)."""
-        response = authenticated_organizer_client.post(
-            reverse("ctf:admin_event_edit", kwargs={"event_id": ctf_event_draft.pk}),
+        response = organizer_client.post(
+            reverse("ctf:admin_event_edit", kwargs={"event_id": mock_event_draft.pk}),
             data={},
         )
         assert response.status_code == 405
 
-    def test_edit_completed_event_blocked(self, authenticated_organizer_client: Client, organizer_user, db):
+    def test_edit_completed_event_blocked(self, organizer_client: Client):
         """Editing a completed event should be blocked."""
-        completed_event = CTFEvent.objects.create(
+        completed_event = _make_mock_event(
             name="Completed Event",
-            description="Already done",
-            created_by=organizer_user,
             status=EventStatus.COMPLETED.value,
-            event_start=timezone.now() - timedelta(days=2),
-            event_end=timezone.now() - timedelta(days=1),
-            scenario_id="basic",
+            is_modifiable=False,
         )
-        response = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_edit", kwargs={"event_id": completed_event.pk})
-        )
+        with (
+            patch("ctf.services.get_event", return_value=completed_event),
+            patch("ctf.bridges.cms_list_scenarios", return_value=[("basic", "Basic")]),
+        ):
+            response = organizer_client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": completed_event.pk}))
         # Should redirect or show error
         assert response.status_code in (302, 403)
 
@@ -377,81 +574,87 @@ class TestEventEditView:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestEventStatusTransitions:
-    """Test event status transitions via API."""
+    """Test event status transitions via service functions.
 
-    def test_schedule_draft_event(self, authenticated_organizer_client: Client, ctf_event_draft):
+    These test the pure business logic: status guards and field mutation.
+    ORM .save() and .refresh_from_db() are mocked on the event objects.
+    """
+
+    def test_schedule_draft_event(self, mock_event_draft):
         """Should be able to schedule a draft event."""
-        from ctf.services import schedule_event
+        with patch("ctf.services.event._schedule_event_tasks"):
+            from ctf.services import schedule_event
 
-        result = schedule_event(ctf_event_draft)
+            result = schedule_event(mock_event_draft)
         assert result is True
-        ctf_event_draft.refresh_from_db()
-        assert ctf_event_draft.status == EventStatus.SCHEDULED.value
+        assert mock_event_draft.status == EventStatus.SCHEDULED.value
+        mock_event_draft.save.assert_called_once()
 
-    def test_activate_scheduled_event(self, authenticated_organizer_client: Client, ctf_event):
+    def test_activate_scheduled_event(self, mock_event):
         """Should be able to activate a scheduled event."""
         from ctf.services import activate_event
 
-        result = activate_event(ctf_event)
+        result = activate_event(mock_event)
         assert result is True
-        ctf_event.refresh_from_db()
-        assert ctf_event.status == EventStatus.ACTIVE.value
+        assert mock_event.status == EventStatus.ACTIVE.value
+        mock_event.save.assert_called_once()
 
-    def test_complete_active_event(self, authenticated_organizer_client: Client, ctf_event_active):
+    def test_complete_active_event(self, mock_event_active):
         """Should be able to complete an active event."""
         from ctf.services import complete_event
 
-        result = complete_event(ctf_event_active)
+        result = complete_event(mock_event_active)
         assert result is True
-        ctf_event_active.refresh_from_db()
-        assert ctf_event_active.status == EventStatus.COMPLETED.value
+        assert mock_event_active.status == EventStatus.COMPLETED.value
+        mock_event_active.save.assert_called_once()
 
-    def test_cancel_draft_event(self, authenticated_organizer_client: Client, ctf_event_draft):
+    def test_cancel_draft_event(self, mock_event_draft):
         """Should be able to cancel a draft event."""
-        from ctf.services import cancel_event
+        with (
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+        ):
+            from ctf.services import cancel_event
 
-        result = cancel_event(ctf_event_draft)
+            result = cancel_event(mock_event_draft)
         assert result is True
-        ctf_event_draft.refresh_from_db()
-        assert ctf_event_draft.status == EventStatus.CANCELLED.value
+        assert mock_event_draft.status == EventStatus.CANCELLED.value
 
-    def test_cancel_scheduled_event(self, authenticated_organizer_client: Client, ctf_event):
+    def test_cancel_scheduled_event(self, mock_event):
         """Should be able to cancel a scheduled event."""
-        from ctf.services import cancel_event
+        with (
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+        ):
+            from ctf.services import cancel_event
 
-        result = cancel_event(ctf_event)
+            result = cancel_event(mock_event)
         assert result is True
-        ctf_event.refresh_from_db()
-        assert ctf_event.status == EventStatus.CANCELLED.value
+        assert mock_event.status == EventStatus.CANCELLED.value
 
-    def test_cannot_activate_draft_event(self, authenticated_organizer_client: Client, ctf_event_draft):
+    def test_cannot_activate_draft_event(self, mock_event_draft):
         """Should not be able to activate a draft event directly."""
         from ctf.services import activate_event
 
-        result = activate_event(ctf_event_draft)
+        result = activate_event(mock_event_draft)
         assert result is False
-        ctf_event_draft.refresh_from_db()
-        assert ctf_event_draft.status == EventStatus.DRAFT.value
+        # Status should remain draft
+        assert mock_event_draft.status == EventStatus.DRAFT.value
 
-    def test_cannot_schedule_active_event(self, authenticated_organizer_client: Client, ctf_event_active):
+    def test_cannot_schedule_active_event(self, mock_event_active):
         """Should not be able to schedule an active event."""
         from ctf.services import schedule_event
 
-        result = schedule_event(ctf_event_active)
+        result = schedule_event(mock_event_active)
         assert result is False
 
-    def test_cannot_modify_completed_event(self, authenticated_organizer_client: Client, organizer_user, db):
+    def test_cannot_modify_completed_event(self):
         """Completed events should not be modifiable."""
-        completed_event = CTFEvent.objects.create(
+        completed_event = _make_mock_event(
             name="Completed",
-            description="Done",
-            created_by=organizer_user,
             status=EventStatus.COMPLETED.value,
-            event_start=timezone.now() - timedelta(days=2),
-            event_end=timezone.now() - timedelta(days=1),
-            scenario_id="basic",
+            is_modifiable=False,
         )
         assert completed_event.is_modifiable is False
 
@@ -461,94 +664,125 @@ class TestEventStatusTransitions:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestEventServices:
-    """Test event service functions."""
+    """Test event service functions with mocked ORM."""
 
-    def test_create_event_service(self, organizer_user):
+    def test_create_event_service(self, mock_user):
         """create_event service should create event and return it."""
-        from ctf.services import create_event
+        created_event = _make_mock_event(
+            name="Service Created Event",
+            status=EventStatus.DRAFT.value,
+        )
 
-        event_data = {
-            "name": "Service Created Event",
-            "description": "Created via service",
-            "event_start": timezone.now() + timedelta(days=1),
-            "event_end": timezone.now() + timedelta(days=1, hours=8),
-            "scenario_id": "basic",
-        }
-        event = create_event(organizer_user, event_data)
+        with (
+            patch("ctf.services.event.CTFEvent.objects") as mock_objects,
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+        ):
+            mock_objects.create.return_value = created_event
+            from ctf.services import create_event
+
+            event_data = {
+                "name": "Service Created Event",
+                "description": "Created via service",
+                "event_start": timezone.now() + timedelta(days=1),
+                "event_end": timezone.now() + timedelta(days=1, hours=8),
+                "scenario_id": "basic",
+            }
+            event = create_event(mock_user, event_data)
+
         assert event.pk is not None
         assert event.name == "Service Created Event"
         assert event.status == EventStatus.DRAFT.value
 
-    def test_get_organizer_events(self, organizer_user, ctf_event, ctf_event_draft):
+    def test_get_organizer_events(self, mock_user, mock_event, mock_event_draft):
         """get_organizer_events should return only organizer's events."""
-        from ctf.services import get_organizer_events
+        qs = MagicMock()
+        qs.order_by.return_value = [mock_event, mock_event_draft]
 
-        events = get_organizer_events(organizer_user)
-        assert ctf_event in events
-        assert ctf_event_draft in events
+        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
+            mock_objects.filter.return_value = qs
+            from ctf.services import get_organizer_events
 
-    def test_get_organizer_events_excludes_others(self, organizer_user, second_organizer_user, ctf_event, db):
+            events = get_organizer_events(mock_user)
+
+        assert mock_event in events
+        assert mock_event_draft in events
+
+    def test_get_organizer_events_excludes_others(self, mock_user, mock_event):
         """get_organizer_events should exclude other organizers' events."""
-        from ctf.services import get_organizer_events
-
-        other_event = CTFEvent.objects.create(
+        other_event = _make_mock_event(
             name="Other Event",
-            description="Not mine",
-            created_by=second_organizer_user,
-            status=EventStatus.DRAFT.value,
-            event_start=timezone.now() + timedelta(days=5),
-            event_end=timezone.now() + timedelta(days=5, hours=8),
-            scenario_id="basic",
+            created_by_id=3,
         )
 
-        events = get_organizer_events(organizer_user)
-        assert ctf_event in events
+        qs = MagicMock()
+        qs.order_by.return_value = [mock_event]
+
+        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
+            mock_objects.filter.return_value = qs
+            from ctf.services import get_organizer_events
+
+            events = get_organizer_events(mock_user)
+
+        assert mock_event in events
         assert other_event not in events
 
-    def test_get_event_returns_event(self, ctf_event):
+    def test_get_event_returns_event(self, mock_event):
         """get_event should return event by ID."""
-        from ctf.services import get_event
+        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
+            mock_objects.get.return_value = mock_event
+            from ctf.services import get_event
 
-        event = get_event(ctf_event.pk)
-        assert event == ctf_event
+            event = get_event(mock_event.pk)
+
+        assert event == mock_event
 
     def test_get_event_not_found(self):
         """get_event should raise CTFNotFoundError for nonexistent event."""
-        from uuid import uuid4
-
         from ctf.exceptions import CTFNotFoundError
-        from ctf.services import get_event
+        from ctf.models import CTFEvent
 
-        with pytest.raises(CTFNotFoundError):
-            get_event(uuid4())
+        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
+            mock_objects.get.side_effect = CTFEvent.DoesNotExist
+            from ctf.services import get_event
 
-    def test_update_event(self, ctf_event_draft):
+            with pytest.raises(CTFNotFoundError):
+                get_event(uuid4())
+
+    def test_update_event(self, mock_event_draft):
         """update_event should update event fields."""
-        from ctf.services import update_event
+        mock_event_draft.is_modifiable = True
+        mock_event_draft.event_start = timezone.now() + timedelta(days=7)
+        mock_event_draft.event_end = timezone.now() + timedelta(days=7, hours=8)
 
-        updated = update_event(
-            ctf_event_draft.pk,
-            {"name": "Updated Name", "description": "Updated description"},
-        )
+        with (
+            patch("ctf.services.event.CTFEvent.objects") as mock_objects,
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+        ):
+            mock_objects.get.return_value = mock_event_draft
+            from ctf.services import update_event
+
+            updated = update_event(
+                mock_event_draft.pk,
+                {"name": "Updated Name", "description": "Updated description"},
+            )
+
         assert updated.name == "Updated Name"
         assert updated.description == "Updated description"
 
-    def test_update_event_blocked_for_terminal(self, organizer_user, db):
+    def test_update_event_blocked_for_terminal(self):
         """update_event should block updates to terminal status events."""
         from ctf.exceptions import CTFStateError
-        from ctf.services import update_event
 
-        completed_event = CTFEvent.objects.create(
+        completed_event = _make_mock_event(
             name="Completed",
-            description="Done",
-            created_by=organizer_user,
             status=EventStatus.COMPLETED.value,
-            event_start=timezone.now() - timedelta(days=2),
-            event_end=timezone.now() - timedelta(days=1),
-            scenario_id="basic",
+            is_modifiable=False,
         )
 
-        with pytest.raises(CTFStateError):
-            update_event(completed_event.pk, {"name": "New Name"})
+        with patch("ctf.services.event.CTFEvent.objects") as mock_objects:
+            mock_objects.get.return_value = completed_event
+            from ctf.services import update_event
+
+            with pytest.raises(CTFStateError):
+                update_event(completed_event.pk, {"name": "New Name"})

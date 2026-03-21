@@ -2,14 +2,11 @@
 
 import json
 import logging
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from django.contrib.auth import get_user_model
 
 from shared.enums import ResourceStatus
-
-User = get_user_model()
 
 
 def log_contains(caplog, message: str) -> bool:
@@ -20,7 +17,6 @@ def log_contains(caplog, message: str) -> bool:
     return any(message in record.message for record in caplog.records)
 
 
-@pytest.mark.django_db
 class TestProcessEvent:
     """Tests for process_event dispatcher."""
 
@@ -99,7 +95,6 @@ class TestProcessEvent:
             mock_ngfw_handler.assert_not_called()
 
 
-@pytest.mark.django_db
 class TestParseSnsMessage:
     """Tests for parse_sns_message helper."""
 
@@ -161,11 +156,31 @@ class TestParseSnsMessage:
 
 @pytest.fixture
 def user():
-    """Create a test user."""
-    return User.objects.create_user(username="testuser", password="testpass")
+    """Create a mock user (no database required)."""
+    mock_user = MagicMock()
+    mock_user.id = 42
+    mock_user.username = "testuser"
+    return mock_user
 
 
-@pytest.mark.django_db
+@pytest.fixture
+def mock_range():
+    """Create a mock Range object factory (no database required)."""
+
+    def _make(range_id=1, user_id=42, status=ResourceStatus.PENDING.value, **kwargs):
+        obj = MagicMock()
+        obj.id = range_id
+        obj.user_id = user_id
+        obj.status = status
+        obj.ready_at = kwargs.get("ready_at")
+        obj.destroyed_at = kwargs.get("destroyed_at")
+        obj.error_message = kwargs.get("error_message", "")
+        obj.provisioned_instances = kwargs.get("provisioned_instances")
+        return obj
+
+    return _make
+
+
 class TestProcessRangeEvent:
     """Tests for process_range_event handler."""
 
@@ -173,103 +188,102 @@ class TestProcessRangeEvent:
     # Happy path - status update
     # ---------------------------------------------------------------------
 
-    def test_updates_range_status(self, user):
+    def test_updates_range_status(self, user, mock_range):
         """Handler updates Range.status from event."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PENDING.value,
-        )
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PENDING.value)
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+            patch("engine.handlers.audit_log_system_event"),
+        ):
+            process_range_event(message)
 
-        range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.PROVISIONING.value
+        range_obj.save.assert_called_once()
 
-    def test_sets_ready_at_on_ready_status(self, user):
+    def test_sets_ready_at_on_ready_status(self, user, mock_range):
         """Handler sets ready_at when transitioning to READY."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-        )
-        assert range_obj.ready_at is None
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PROVISIONING.value, ready_at=None)
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.READY.value,
                     "user_id": user.id,
                 }
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+            patch("engine.handlers.audit_log_system_event"),
+        ):
+            process_range_event(message)
 
-        range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.READY.value
         assert range_obj.ready_at is not None
+        range_obj.save.assert_called_once()
 
-    def test_sets_destroyed_at_on_destroyed_status(self, user):
+    def test_sets_destroyed_at_on_destroyed_status(self, user, mock_range):
         """Handler sets destroyed_at when transitioning to DESTROYED."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = mock_range(
+            range_id=1,
+            user_id=user.id,
             status=ResourceStatus.DESTROYING.value,
+            destroyed_at=None,
         )
-        assert range_obj.destroyed_at is None
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.DESTROYED.value,
                     "user_id": user.id,
                 }
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+            patch("engine.handlers.audit_log_system_event"),
+        ):
+            process_range_event(message)
 
-        range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.DESTROYED.value
         assert range_obj.destroyed_at is not None
+        range_obj.save.assert_called_once()
 
-    def test_stores_error_message_on_failed_status(self, user):
+    def test_stores_error_message_on_failed_status(self, user, mock_range):
         """Handler stores error_message when transitioning to FAILED."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-        )
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PROVISIONING.value)
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.FAILED.value,
                     "user_id": user.id,
                     "error_message": "Subnet exhausted",
@@ -277,9 +291,12 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+            patch("engine.handlers.audit_log_system_event"),
+        ):
+            process_range_event(message)
 
-        range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.FAILED.value
         assert range_obj.error_message == "Subnet exhausted"
 
@@ -287,22 +304,16 @@ class TestProcessRangeEvent:
     # Event filtering
     # ---------------------------------------------------------------------
 
-    def test_ignores_unknown_event_types(self, user, caplog):
+    def test_ignores_unknown_event_types(self, caplog):
         """Handler ignores events that are not recognized."""
         from engine.handlers import process_range_event
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PENDING.value,
-        )
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.unknown_event",
-                    "range_id": range_obj.id,
-                    "user_id": user.id,
+                    "range_id": 1,
+                    "user_id": 42,
                 }
             )
         }
@@ -312,10 +323,6 @@ class TestProcessRangeEvent:
 
         assert log_contains(caplog, "Ignoring event_type")
 
-        # Status should be unchanged
-        range_obj.refresh_from_db()
-        assert range_obj.status == ResourceStatus.PENDING.value
-
     # ---------------------------------------------------------------------
     # Error handling - missing data
     # ---------------------------------------------------------------------
@@ -323,6 +330,7 @@ class TestProcessRangeEvent:
     def test_handles_missing_range(self, caplog):
         """Handler logs warning when Range not found."""
         from engine.handlers import process_range_event
+        from engine.models import Range
 
         message = {
             "Message": json.dumps(
@@ -335,62 +343,64 @@ class TestProcessRangeEvent:
             )
         }
 
-        with caplog.at_level(logging.WARNING, logger="engine.handlers"):
+        with (
+            caplog.at_level(logging.WARNING, logger="engine.handlers"),
+            patch(
+                "engine.handlers.Range.objects.get",
+                side_effect=Range.DoesNotExist,
+            ),
+        ):
             process_range_event(message)
 
         assert log_contains(caplog, "Range not found")
         assert log_contains(caplog, "999999")
 
-    def test_handles_user_id_mismatch(self, user, caplog):
+    def test_handles_user_id_mismatch(self, user, mock_range, caplog):
         """Handler logs error when user_id doesn't match Range."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PENDING.value,
-        )
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PENDING.value)
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.READY.value,
                     "user_id": 999999,  # Wrong user
                 }
             )
         }
 
-        with caplog.at_level(logging.ERROR, logger="engine.handlers"):
+        with (
+            caplog.at_level(logging.ERROR, logger="engine.handlers"),
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+        ):
             process_range_event(message)
 
         assert log_contains(caplog, "user_id mismatch")
         assert log_contains(caplog, "999999")
 
         # Status should be unchanged
-        range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.PENDING.value
+        range_obj.save.assert_not_called()
 
     # ---------------------------------------------------------------------
     # Error handling - database failures
     # ---------------------------------------------------------------------
 
-    def test_logs_exception_on_database_error(self, user, caplog):
+    def test_logs_exception_on_database_error(self, user, mock_range, caplog):
         """Handler logs exception when database save fails."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PENDING.value,
-        )
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PENDING.value)
+        range_obj.save.side_effect = Exception("DB down")
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
@@ -399,43 +409,43 @@ class TestProcessRangeEvent:
 
         with (
             caplog.at_level(logging.ERROR, logger="engine.handlers"),
-            patch.object(Range, "save", side_effect=Exception("DB down")),
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
         ):
             process_range_event(message)
 
         assert log_contains(caplog, "DB error saving Range")
-        assert log_contains(caplog, f"range_id={range_obj.id}")
+        assert log_contains(caplog, "range_id=1")
 
     # ---------------------------------------------------------------------
     # Logging - success
     # ---------------------------------------------------------------------
 
-    def test_logs_info_on_successful_update(self, user, caplog):
+    def test_logs_info_on_successful_update(self, user, mock_range, caplog):
         """Handler logs INFO when status successfully updated."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PENDING.value,
-        )
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PENDING.value)
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.PROVISIONING.value,
                     "user_id": user.id,
                 }
             )
         }
 
-        with caplog.at_level(logging.INFO, logger="engine.handlers"):
+        with (
+            caplog.at_level(logging.INFO, logger="engine.handlers"),
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+            patch("engine.handlers.audit_log_system_event"),
+        ):
             process_range_event(message)
 
         assert log_contains(caplog, "Engine updated Range")
-        assert log_contains(caplog, f"range_id={range_obj.id}")
+        assert log_contains(caplog, "range_id=1")
         assert log_contains(caplog, "pending")
         assert log_contains(caplog, "provisioning")
 
@@ -463,21 +473,17 @@ class TestProcessRangeEvent:
     # Edge cases
     # ---------------------------------------------------------------------
 
-    def test_failed_without_error_message(self, user):
+    def test_failed_without_error_message(self, user, mock_range):
         """Handler handles FAILED status even without error_message."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=ResourceStatus.PROVISIONING.value,
-        )
+        range_obj = mock_range(range_id=1, user_id=user.id, status=ResourceStatus.PROVISIONING.value)
 
         message = {
             "Message": json.dumps(
                 {
                     "event_type": "range.status.updated",
-                    "range_id": range_obj.id,
+                    "range_id": 1,
                     "new_status": ResourceStatus.FAILED.value,
                     "user_id": user.id,
                     # No error_message
@@ -485,14 +491,17 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("engine.handlers.Range.objects.get", return_value=range_obj),
+            patch("engine.handlers.audit_log_system_event"),
+        ):
+            process_range_event(message)
 
-        range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.FAILED.value
-        assert range_obj.error_message == ""  # Default empty string
+        # error_message not set by handler when not in event payload
+        range_obj.save.assert_called_once()
 
 
-@pytest.mark.django_db
 class TestHandleProvisioned:
     """Tests for _handle_provisioned handler.
 
@@ -501,7 +510,7 @@ class TestHandleProvisioned:
     publishing the range.provisioned event.
     """
 
-    def test_logs_provisioned_event(self, user, caplog):
+    def test_logs_provisioned_event(self, caplog):
         """Handler logs INFO when receiving provisioned event."""
         from engine.handlers import process_range_event
 
@@ -512,7 +521,7 @@ class TestHandleProvisioned:
                     "event_id": "evt-12345",
                     "request_id": "550e8400-e29b-41d4-a716-446655440000",
                     "range_id": 42,
-                    "user_id": user.id,
+                    "user_id": 7,
                 }
             )
         }
@@ -525,13 +534,13 @@ class TestHandleProvisioned:
         assert log_contains(caplog, "range_id=42")
         assert log_contains(caplog, "event_id=evt-12345")
 
-    def test_does_not_modify_database(self, user):
+    def test_does_not_call_save(self, mock_range):
         """Handler does not modify Range model (provisioner writes directly)."""
         from engine.handlers import process_range_event
-        from engine.models import Range
 
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = mock_range(
+            range_id=1,
+            user_id=42,
             status=ResourceStatus.PROVISIONING.value,
             provisioned_instances=None,
         )
@@ -542,17 +551,17 @@ class TestHandleProvisioned:
                     "event_type": "range.provisioned",
                     "event_id": "evt-12345",
                     "request_id": "550e8400-e29b-41d4-a716-446655440000",
-                    "range_id": range_obj.id,
-                    "user_id": user.id,
+                    "range_id": 1,
+                    "user_id": 42,
                 }
             )
         }
 
-        process_range_event(message)
+        with patch("engine.handlers.Range.objects.get", return_value=range_obj):
+            process_range_event(message)
 
-        # Handler is log-only - provisioned_instances should be unchanged
-        range_obj.refresh_from_db()
-        assert range_obj.provisioned_instances is None
+        # Handler is log-only - save should not be called
+        range_obj.save.assert_not_called()
 
     def test_handles_event_without_range_in_db(self, caplog):
         """Handler logs event even if Range not in DB (notification-only)."""

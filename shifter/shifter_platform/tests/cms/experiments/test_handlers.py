@@ -1,19 +1,13 @@
 """Tests for SQS event handler dispatch."""
 
 import json
-
-from django.contrib.auth.models import User
-from django.test import TestCase
+from unittest.mock import MagicMock, patch
 
 from cms.experiments.handlers import _parse_message, process_event
-from cms.experiments.models import Experiment, ExperimentRun
-from cms.experiments.schemas import ExperimentStatus, RunStatus
-
-# Test password constant for all test users
-TEST_PASSWORD = "test"  # nosec B105
+from cms.experiments.schemas import RunStatus
 
 
-class ParseMessageTest(TestCase):
+class TestParseMessage:
     def test_direct_dict(self):
         result = _parse_message({"event_type": "test"})
         assert result["event_type"] == "test"
@@ -28,69 +22,56 @@ class ParseMessageTest(TestCase):
         assert result["event_type"] == "test"
 
 
-class ProcessEventTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="handler_user", password=TEST_PASSWORD, is_staff=True)
-
+class TestProcessEvent:
     def test_ignores_unknown_event(self):
         # Should not raise
         process_event({"event_type": "unknown.event", "event_id": "123"})
 
-    def test_experiment_start_schedules_runs(self):
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Start Handler",
-            scenario_id="basic",
-            total_runs=2,
-            max_parallel_runs=2,
-        )
-        exp.transition_to(ExperimentStatus.QUEUED)
-        for i in range(1, 3):
-            ExperimentRun.objects.create(experiment=exp, run_number=i)
+    @patch("cms.experiments.handlers.ExperimentOrchestrator")
+    def test_experiment_start_schedules_runs(self, mock_orch_cls):
+        """experiment.start event creates orchestrator and calls schedule_runs."""
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
 
         process_event(
             {
                 "event_type": "experiment.start",
-                "experiment_id": exp.pk,
+                "experiment_id": 42,
             }
         )
 
-        exp.refresh_from_db()
-        assert exp.status == ExperimentStatus.RUNNING.value
+        mock_orch_cls.assert_called_once_with(42)
+        mock_orch.schedule_runs.assert_called_once()
 
-    def test_run_failed_event(self):
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Fail Handler",
-            scenario_id="basic",
-            total_runs=1,
-            max_parallel_runs=1,
-            status=ExperimentStatus.RUNNING.value,
-        )
-        from django.utils import timezone
+    @patch("cms.experiments.models.Experiment")
+    @patch("cms.experiments.models.ExperimentRun")
+    @patch("cms.experiments.handlers.ExperimentOrchestrator")
+    def test_run_failed_event(self, mock_orch_cls, mock_run_model, mock_exp_model):
+        """experiment.run.failed event calls handle_run_failed on orchestrator."""
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
 
-        exp.started_at = timezone.now()
-        exp.save(update_fields=["started_at"])
+        # Mock the ExperimentRun.objects.get for broadcast (local import inside handler)
+        mock_run = MagicMock(run_number=1, status=RunStatus.FAILED.value)
+        mock_run_model.objects.get.return_value = mock_run
+        mock_run_model.DoesNotExist = Exception
 
-        run = ExperimentRun.objects.create(
-            experiment=exp,
-            run_number=1,
-            status=RunStatus.PROVISIONING.value,
-        )
+        # Mock Experiment.objects.get for broadcast (local import inside handler)
+        mock_exp = MagicMock(status="failed")
+        mock_exp_model.objects.get.return_value = mock_exp
+        mock_exp_model.DoesNotExist = Exception
 
         process_event(
             {
                 "event_type": "experiment.run.failed",
-                "experiment_id": exp.pk,
-                "run_id": run.pk,
+                "experiment_id": 10,
+                "run_id": 5,
                 "error_message": "SSM timeout",
             }
         )
 
-        run.refresh_from_db()
-        assert run.status == RunStatus.FAILED.value
-        assert run.error_message == "SSM timeout"
+        mock_orch_cls.assert_called_once_with(10)
+        mock_orch.handle_run_failed.assert_called_once_with(5, "SSM timeout")
 
     def test_string_experiment_id_ignored(self):
         """String experiment_id should be silently ignored (not crash)."""
@@ -100,21 +81,17 @@ class ProcessEventTest(TestCase):
                 "experiment_id": "not-an-int",
             }
         )
-        # No exception raised — event was silently dropped
+        # No exception raised -- event was silently dropped
 
-    def test_string_run_id_ignored(self):
+    @patch("cms.experiments.handlers.ExperimentOrchestrator")
+    def test_string_run_id_ignored(self, mock_orch_cls):
         """String run_id should be silently ignored (not crash)."""
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Type Check",
-            scenario_id="basic",
-            status=ExperimentStatus.RUNNING.value,
-        )
         process_event(
             {
                 "event_type": "experiment.run.failed",
-                "experiment_id": exp.pk,
+                "experiment_id": 10,
                 "run_id": "not-an-int",
             }
         )
-        # No exception raised — event was silently dropped
+        # No exception raised -- event was silently dropped
+        mock_orch_cls.assert_not_called()

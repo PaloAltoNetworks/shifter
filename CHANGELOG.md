@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.18.0] - 2026-03-20
+
+### Added
+- Programmable flag validation (CTF-118) — flags can use registered Python validator functions or HTTP callbacks for custom pass/fail logic
+- New flag types: `programmable` (server-side validator registry) and `http` (external endpoint validation)
+- Validator registry module (`ctf/validators.py`) with `register_validator` / `get_validator` API
+- Built-in example validators: `always_true`, `contains_substring`
+- `validator_config` JSONField on `CTFFlag` model for per-flag configuration
+
+### Changed
+- `CTFFlag.flag_type` max_length increased from 10 to 20 to accommodate new type names
+
 ## [3.17.0] - 2026-03-20
 
 ### Added

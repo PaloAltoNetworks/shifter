@@ -215,9 +215,9 @@ def _validate_http_config(validator_config: dict[str, Any] | None) -> None:
             "validator_config.url is required",
             details={"missing_fields": ["validator_config.url"]},
         )
-    if not url.startswith(("http://", "https://")):
+    if not url.startswith("https://"):
         raise CTFValidationError(
-            "validator_config.url must start with http:// or https://",
+            "validator_config.url must use HTTPS",
             details={"url": url},
         )
 

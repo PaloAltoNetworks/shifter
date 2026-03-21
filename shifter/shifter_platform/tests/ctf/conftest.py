@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -20,11 +21,13 @@ from ctf.enums import (
     ChallengeDifficulty,
     EventStatus,
     ParticipantStatus,
+    ScheduledTaskStatus,
 )
 from ctf.models import (
     CTFChallenge,
     CTFEvent,
     CTFParticipant,
+    CTFScheduledTask,
     CTFSubmission,
     CTFTeam,
 )
@@ -35,6 +38,112 @@ if TYPE_CHECKING:
     from django.test import Client
 
 User = get_user_model()
+
+
+# -----------------------------------------------------------------------------
+# In-memory model builders (no DB required)
+# -----------------------------------------------------------------------------
+
+
+def make_ctf_event(**overrides) -> CTFEvent:
+    """Build an in-memory CTFEvent without saving.
+
+    Uses `created_by_id` to avoid Django FK descriptor validation.
+    All defaults can be overridden via kwargs.
+    """
+    now = timezone.now()
+    defaults = {
+        "id": uuid4(),
+        "name": "Test CTF Event",
+        "created_by_id": 1,
+        "status": EventStatus.SCHEDULED.value,
+        "event_start": now + timedelta(days=1),
+        "event_end": now + timedelta(days=1, hours=8),
+        "scenario_id": "basic",
+        "auto_cleanup": True,
+        "cleanup_delay_hours": 24,
+        "team_mode": False,
+        "range_spinup_minutes": 30,
+    }
+    defaults.update(overrides)
+    return CTFEvent(**defaults)
+
+
+def make_challenge(event=None, **overrides) -> CTFChallenge:
+    """Build an in-memory CTFChallenge without saving."""
+    if event is None:
+        event = make_ctf_event()
+    defaults = {
+        "id": uuid4(),
+        "event": event,
+        "name": "Test Challenge",
+        "description": "Find the flag in the source code",
+        "category": ChallengeCategory.WEB.value,
+        "points": 100,
+        "difficulty": ChallengeDifficulty.EASY.value,
+        "flag_hash": "$2b$12$test_hash_placeholder",
+        "flag_format": "FLAG{...}",
+        "hint": "",
+        "hint_penalty": 0,
+        "release_time": None,
+        "order": 0,
+    }
+    defaults.update(overrides)
+    return CTFChallenge(**defaults)
+
+
+def make_team(event=None, **overrides) -> CTFTeam:
+    """Build an in-memory CTFTeam without saving."""
+    if event is None:
+        event = make_ctf_event(team_mode=True, team_size_limit=4)
+    defaults = {
+        "id": uuid4(),
+        "event": event,
+        "name": "Test Team",
+        "invite_code": "test-invite-code-12345678",
+    }
+    defaults.update(overrides)
+    return CTFTeam(**defaults)
+
+
+def make_participant(event=None, **overrides) -> CTFParticipant:
+    """Build an in-memory CTFParticipant without saving.
+
+    Uses `user_id` to avoid Django FK descriptor validation.
+    """
+    if event is None:
+        event = make_ctf_event()
+    defaults = {
+        "id": uuid4(),
+        "event": event,
+        "email": "participant@test.com",
+        "name": "Test Participant",
+        "user_id": 1,
+        "status": ParticipantStatus.ACTIVE.value,
+        "registered_at": timezone.now(),
+        "invite_token": "test-token-abcdef123456",
+        "invite_token_expires": timezone.now() + timedelta(days=7),
+        "last_active_at": None,
+    }
+    defaults.update(overrides)
+    return CTFParticipant(**defaults)
+
+
+def make_scheduled_task(event=None, **overrides) -> CTFScheduledTask:
+    """Build an in-memory CTFScheduledTask without saving."""
+    if event is None:
+        event = make_ctf_event()
+    defaults = {
+        "id": uuid4(),
+        "event": event,
+        "task_type": "spin_up_ranges",
+        "scheduled_for": timezone.now() + timedelta(hours=1),
+        "status": ScheduledTaskStatus.PENDING.value,
+        "error_message": "",
+        "executed_at": None,
+    }
+    defaults.update(overrides)
+    return CTFScheduledTask(**defaults)
 
 
 # -----------------------------------------------------------------------------

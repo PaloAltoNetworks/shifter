@@ -1,9 +1,4 @@
-"""AWS SQS adapter implementing QueueConsumer and QueuePublisher protocols.
-
-The actual SQS logic will be extracted from run_worker.py and
-cms/experiments/events.py in Sub-Issue 4 (#814). This stub satisfies
-the protocol interfaces so the factory can return them.
-"""
+"""AWS SQS adapter implementing QueueConsumer and QueuePublisher protocols."""
 
 from __future__ import annotations
 

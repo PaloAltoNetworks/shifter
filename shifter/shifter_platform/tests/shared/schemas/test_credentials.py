@@ -13,6 +13,64 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
+# =============================================================================
+# Parametrized round-trip tests for credential schema models
+# =============================================================================
+
+_ROUND_TRIP_CASES = [
+    pytest.param(
+        "shared.schemas.credentials.SCMCredentialSpec",
+        {
+            "name": "Test",
+            "user_id": 42,
+            "scm_folder_name": "folder",
+            "scm_pin_id": "PIN",
+            "scm_pin_value": "secret",
+            "sls_region": "americas",
+        },
+        {"name": "Test", "user_id": 42, "scm_folder_name": "folder"},
+        id="SCMCredentialSpec",
+    ),
+    pytest.param(
+        "shared.schemas.credentials.DeploymentProfileSpec",
+        {"name": "Test", "user_id": 42, "authcode": "D1234567"},
+        {"name": "Test", "user_id": 42, "authcode": "D1234567"},
+        id="DeploymentProfileSpec",
+    ),
+    pytest.param(
+        "shared.schemas.credentials.CredentialRef",
+        {"credential_id": 123, "user_id": 42},
+        {"credential_id": 123, "user_id": 42, "is_deleted": False},
+        id="CredentialRef",
+    ),
+]
+
+
+@pytest.mark.parametrize("model_path,kwargs,expected_fields", _ROUND_TRIP_CASES)
+class TestCredentialSchemaRoundTrip:
+    """model_dump/model_validate round-trip for credential schemas."""
+
+    @staticmethod
+    def _import(model_path):
+        module_path, class_name = model_path.rsplit(".", 1)
+        import importlib
+
+        return getattr(importlib.import_module(module_path), class_name)
+
+    def test_model_dump_returns_dict(self, model_path, kwargs, expected_fields):
+        cls = self._import(model_path)
+        instance = cls(**kwargs)
+        result = instance.model_dump()
+        assert isinstance(result, dict)
+        for key, value in expected_fields.items():
+            assert result[key] == value
+
+    def test_model_validate_round_trip(self, model_path, kwargs, expected_fields):
+        cls = self._import(model_path)
+        instance = cls.model_validate(kwargs)
+        for key, value in expected_fields.items():
+            assert getattr(instance, key) == value
+
 
 class TestCredentialSpecBase:
     """Tests for CredentialSpecBase Pydantic model."""
@@ -104,57 +162,30 @@ class TestSCMCredentialSpec:
 
         assert issubclass(SCMCredentialSpec, CredentialSpecBase)
 
-    def test_scm_folder_name_is_required(self):
-        """SCMCredentialSpec requires scm_folder_name."""
+    @pytest.mark.parametrize(
+        "missing_field",
+        [
+            pytest.param("scm_folder_name", id="scm_folder_name"),
+            pytest.param("scm_pin_id", id="scm_pin_id"),
+            pytest.param("scm_pin_value", id="scm_pin_value"),
+            pytest.param("sls_region", id="sls_region"),
+        ],
+    )
+    def test_required_field_missing(self, missing_field):
+        """SCMCredentialSpec requires all type-specific fields."""
         from shared.schemas.credentials import SCMCredentialSpec
 
+        all_fields = {
+            "name": "Test",
+            "user_id": 1,
+            "scm_folder_name": "folder",
+            "scm_pin_id": "PIN",
+            "scm_pin_value": "secret",
+            "sls_region": "americas",
+        }
+        del all_fields[missing_field]
         with pytest.raises(ValidationError):
-            SCMCredentialSpec(
-                name="Test",
-                user_id=1,
-                scm_pin_id="PIN",
-                scm_pin_value="secret",
-                sls_region="americas",
-            )
-
-    def test_scm_pin_id_is_required(self):
-        """SCMCredentialSpec requires scm_pin_id."""
-        from shared.schemas.credentials import SCMCredentialSpec
-
-        with pytest.raises(ValidationError):
-            SCMCredentialSpec(
-                name="Test",
-                user_id=1,
-                scm_folder_name="folder",
-                scm_pin_value="secret",
-                sls_region="americas",
-            )
-
-    def test_scm_pin_value_is_required(self):
-        """SCMCredentialSpec requires scm_pin_value."""
-        from shared.schemas.credentials import SCMCredentialSpec
-
-        with pytest.raises(ValidationError):
-            SCMCredentialSpec(
-                name="Test",
-                user_id=1,
-                scm_folder_name="folder",
-                scm_pin_id="PIN",
-                sls_region="americas",
-            )
-
-    def test_sls_region_is_required(self):
-        """SCMCredentialSpec requires sls_region."""
-        from shared.schemas.credentials import SCMCredentialSpec
-
-        with pytest.raises(ValidationError):
-            SCMCredentialSpec(
-                name="Test",
-                user_id=1,
-                scm_folder_name="folder",
-                scm_pin_id="PIN",
-                scm_pin_value="secret",
-            )
+            SCMCredentialSpec(**all_fields)
 
     def test_sls_region_validates_allowed_values(self):
         """SCMCredentialSpec sls_region must be valid region."""
@@ -184,40 +215,6 @@ class TestSCMCredentialSpec:
                 sls_region=region,
             )
             assert spec.sls_region == region
-
-    def test_model_dump_returns_dict(self):
-        """SCMCredentialSpec.model_dump() returns a dictionary."""
-        from shared.schemas.credentials import SCMCredentialSpec
-
-        spec = SCMCredentialSpec(
-            name="Test",
-            user_id=42,
-            scm_folder_name="folder",
-            scm_pin_id="PIN",
-            scm_pin_value="secret",
-            sls_region="americas",
-        )
-        result = spec.model_dump()
-        assert isinstance(result, dict)
-        assert result["name"] == "Test"
-        assert result["user_id"] == 42
-        assert result["scm_folder_name"] == "folder"
-
-    def test_model_validate_from_dict(self):
-        """SCMCredentialSpec.model_validate() creates instance from dict."""
-        from shared.schemas.credentials import SCMCredentialSpec
-
-        data = {
-            "name": "Test Cred",
-            "user_id": 1,
-            "scm_folder_name": "folder",
-            "scm_pin_id": "PIN",
-            "scm_pin_value": "secret",
-            "sls_region": "americas",
-        }
-        spec = SCMCredentialSpec.model_validate(data)
-        assert spec.name == "Test Cred"
-        assert spec.scm_folder_name == "folder"
 
 
 class TestDeploymentProfileSpec:
@@ -249,63 +246,24 @@ class TestDeploymentProfileSpec:
         with pytest.raises(ValidationError):
             DeploymentProfileSpec(name="Test", user_id=1)
 
-    def test_model_dump_returns_dict(self):
-        """DeploymentProfileSpec.model_dump() returns a dictionary."""
-        from shared.schemas.credentials import DeploymentProfileSpec
-
-        spec = DeploymentProfileSpec(
-            name="Test",
-            user_id=42,
-            authcode="D1234567",
-        )
-        result = spec.model_dump()
-        assert isinstance(result, dict)
-        assert result["name"] == "Test"
-        assert result["user_id"] == 42
-        assert result["authcode"] == "D1234567"
-
-    def test_model_validate_from_dict(self):
-        """DeploymentProfileSpec.model_validate() creates instance from dict."""
-        from shared.schemas.credentials import DeploymentProfileSpec
-
-        data = {
-            "name": "Test Profile",
-            "user_id": 1,
-            "authcode": "D9999999",
-        }
-        spec = DeploymentProfileSpec.model_validate(data)
-        assert spec.name == "Test Profile"
-        assert spec.authcode == "D9999999"
-
 
 class TestCredentialContextBase:
     """Tests for CredentialContextBase Pydantic model (base projection)."""
 
-    def test_credential_id_must_be_positive(self):
-        """CredentialContextBase rejects zero or negative credential_id."""
+    @pytest.mark.parametrize(
+        "field,kwargs",
+        [
+            pytest.param("credential_id", {"credential_id": 0, "user_id": 1}, id="credential_id-zero"),
+            pytest.param("user_id", {"credential_id": 1, "user_id": 0}, id="user_id-zero"),
+        ],
+    )
+    def test_rejects_non_positive_ids(self, field, kwargs):
+        """CredentialContextBase rejects zero ids."""
         from shared.schemas.credentials import CredentialContextBase
 
         now = datetime.now(UTC)
-        with pytest.raises(ValidationError, match="credential_id"):
-            CredentialContextBase(
-                credential_id=0,
-                name="Test",
-                user_id=1,
-                created_at=now,
-            )
-
-    def test_user_id_must_be_positive(self):
-        """CredentialContextBase rejects zero or negative user_id."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        with pytest.raises(ValidationError, match="user_id"):
-            CredentialContextBase(
-                credential_id=1,
-                name="Test",
-                user_id=0,
-                created_at=now,
-            )
+        with pytest.raises(ValidationError, match=field):
+            CredentialContextBase(name="Test", created_at=now, **kwargs)
 
     def test_is_deleted_defaults_to_false(self):
         """CredentialContextBase is_deleted defaults to False."""
@@ -320,108 +278,30 @@ class TestCredentialContextBase:
         )
         assert ctx.is_deleted is False
 
-    def test_is_expired_false_when_no_expiration(self):
-        """is_expired returns False when expires_at is None."""
+    @pytest.mark.parametrize(
+        "expires_at_offset,expected_expired,expected_soon",
+        [
+            pytest.param(None, False, False, id="no-expiration"),
+            pytest.param(timedelta(days=-1), True, False, id="expired"),
+            pytest.param(timedelta(days=15), False, True, id="expiring-soon"),
+            pytest.param(timedelta(days=60), False, False, id="far-future"),
+        ],
+    )
+    def test_expiry_properties(self, expires_at_offset, expected_expired, expected_soon):
+        """is_expired and expires_soon reflect expiry state."""
         from shared.schemas.credentials import CredentialContextBase
 
         now = datetime.now(UTC)
+        expires_at = None if expires_at_offset is None else now + expires_at_offset
         ctx = CredentialContextBase(
             credential_id=1,
             name="Test",
             user_id=1,
             created_at=now,
-            expires_at=None,
+            expires_at=expires_at,
         )
-        assert ctx.is_expired is False
-
-    def test_is_expired_true_when_past(self):
-        """is_expired returns True when expires_at is in the past."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        past = now - timedelta(days=1)
-        ctx = CredentialContextBase(
-            credential_id=1,
-            name="Test",
-            user_id=1,
-            created_at=now,
-            expires_at=past,
-        )
-        assert ctx.is_expired is True
-
-    def test_is_expired_false_when_future(self):
-        """is_expired returns False when expires_at is in the future."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        future = now + timedelta(days=60)
-        ctx = CredentialContextBase(
-            credential_id=1,
-            name="Test",
-            user_id=1,
-            created_at=now,
-            expires_at=future,
-        )
-        assert ctx.is_expired is False
-
-    def test_expires_soon_false_when_no_expiration(self):
-        """expires_soon returns False when expires_at is None."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        ctx = CredentialContextBase(
-            credential_id=1,
-            name="Test",
-            user_id=1,
-            created_at=now,
-            expires_at=None,
-        )
-        assert ctx.expires_soon is False
-
-    def test_expires_soon_false_when_expired(self):
-        """expires_soon returns False when already expired."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        past = now - timedelta(days=1)
-        ctx = CredentialContextBase(
-            credential_id=1,
-            name="Test",
-            user_id=1,
-            created_at=now,
-            expires_at=past,
-        )
-        assert ctx.expires_soon is False
-
-    def test_expires_soon_true_within_30_days(self):
-        """expires_soon returns True when expiring within 30 days."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        soon = now + timedelta(days=15)
-        ctx = CredentialContextBase(
-            credential_id=1,
-            name="Test",
-            user_id=1,
-            created_at=now,
-            expires_at=soon,
-        )
-        assert ctx.expires_soon is True
-
-    def test_expires_soon_false_beyond_30_days(self):
-        """expires_soon returns False when expiring beyond 30 days."""
-        from shared.schemas.credentials import CredentialContextBase
-
-        now = datetime.now(UTC)
-        far = now + timedelta(days=60)
-        ctx = CredentialContextBase(
-            credential_id=1,
-            name="Test",
-            user_id=1,
-            created_at=now,
-            expires_at=far,
-        )
-        assert ctx.expires_soon is False
+        assert ctx.is_expired is expected_expired
+        assert ctx.expires_soon is expected_soon
 
 
 class TestSCMCredentialContext:
@@ -653,25 +533,21 @@ class TestCredentialRef:
         assert ref.user_id == 42
         assert ref.is_deleted is False
 
-    def test_credential_id_must_be_positive(self):
-        """CredentialRef rejects zero or negative credential_id."""
+    @pytest.mark.parametrize(
+        "field,kwargs",
+        [
+            pytest.param("credential_id", {"credential_id": 0, "user_id": 1}, id="credential_id-zero"),
+            pytest.param("credential_id", {"credential_id": -1, "user_id": 1}, id="credential_id-negative"),
+            pytest.param("user_id", {"credential_id": 1, "user_id": 0}, id="user_id-zero"),
+            pytest.param("user_id", {"credential_id": 1, "user_id": -1}, id="user_id-negative"),
+        ],
+    )
+    def test_rejects_non_positive_ids(self, field, kwargs):
+        """CredentialRef rejects zero or negative ids."""
         from shared.schemas.credentials import CredentialRef
 
-        with pytest.raises(ValidationError, match="credential_id"):
-            CredentialRef(credential_id=0, user_id=1)
-
-        with pytest.raises(ValidationError, match="credential_id"):
-            CredentialRef(credential_id=-1, user_id=1)
-
-    def test_user_id_must_be_positive(self):
-        """CredentialRef rejects zero or negative user_id."""
-        from shared.schemas.credentials import CredentialRef
-
-        with pytest.raises(ValidationError, match="user_id"):
-            CredentialRef(credential_id=1, user_id=0)
-
-        with pytest.raises(ValidationError, match="user_id"):
-            CredentialRef(credential_id=1, user_id=-1)
+        with pytest.raises(ValidationError, match=field):
+            CredentialRef(**kwargs)
 
     def test_is_deleted_defaults_to_false(self):
         """CredentialRef is_deleted defaults to False."""
@@ -685,25 +561,4 @@ class TestCredentialRef:
         from shared.schemas.credentials import CredentialRef
 
         ref = CredentialRef(credential_id=1, user_id=1, is_deleted=True)
-        assert ref.is_deleted is True
-
-    def test_model_dump_returns_dict(self):
-        """model_dump() returns a dictionary."""
-        from shared.schemas.credentials import CredentialRef
-
-        ref = CredentialRef(credential_id=123, user_id=42)
-        result = ref.model_dump()
-        assert isinstance(result, dict)
-        assert result["credential_id"] == 123
-        assert result["user_id"] == 42
-        assert result["is_deleted"] is False
-
-    def test_model_validate_from_dict(self):
-        """model_validate() creates CredentialRef from dict."""
-        from shared.schemas.credentials import CredentialRef
-
-        data = {"credential_id": 123, "user_id": 42, "is_deleted": True}
-        ref = CredentialRef.model_validate(data)
-        assert ref.credential_id == 123
-        assert ref.user_id == 42
         assert ref.is_deleted is True

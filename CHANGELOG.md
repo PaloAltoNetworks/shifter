@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.27.3] - 2026-03-21
+
+### Changed
+- **Tests**: Consolidate test suite through parametrization and fixture extraction (39,712 → 39,050 lines, -662 net)
+- **Tests**: Extract shared `mock_queryset` fixture and `INVALID_USERS`/`INVALID_RANGE_IDS` parametrize helpers to `tests/conftest.py`
+- **Tests**: Extract in-memory model builders (`make_ctf_event`, `make_challenge`, `make_team`, `make_participant`, `make_scheduled_task`) to `tests/ctf/conftest.py`
+- **Tests**: Create `tests/cms/conftest.py` with shared `credential_type_obj` fixture and `make_credential` builder
+- **Tests**: Convert `_create_range_patches` helper to `create_range_ctx` pytest fixture in `cms/test_services_range.py`
+- **Tests**: Parametrize user/range_id validation and error propagation tests across service classes in `cms/test_services_range.py`
+- **Tests**: Consolidate model_dump/model_validate round-trip tests into parametrized classes in `shared/schemas/test_range.py` and `test_credentials.py`
+- **Tests**: Parametrize required-field, default-value, computed-property, and status validation tests in `shared/schemas/test_range.py`
+- **Tests**: Parametrize expiry property and positive-id validator tests in `shared/schemas/test_credentials.py`
+- **Tests**: Parametrize boolean property, count, and status transition tests in `ctf/test_models.py`
+- **Tests**: Parametrize credential property tests in `cms/test_models.py`
+- **Tests**: Refactor `test_scoring.py` scoreboard setup methods to use shared `mock_queryset` fixture
+
+### Added
+- **Tests**: Add error handling, input validation, and missing config tests for `start_provisioning()` (2 → 7 tests)
+- **Tests**: Add error handling, input validation, and missing config tests for `start_teardown()` (2 → 7 tests)
+- **Tests**: Add error cases for `start_ngfw_provisioning()` (3 → 6 tests)
+- **Tests**: Add error cases for `start_ngfw_teardown()` (4 → 7 tests)
+
+### Removed
+- **Tests**: Delete empty `mission_control/test_consumers.py` (0 tests, placeholder comment only)
+- **Tests**: Remove redundant `InstanceContext` tests that duplicated `InstanceContextBase` coverage
+
+## [3.27.2] - 2026-03-21
+
+### Security
+- **Platform**: Bump `django` 6.0 -> 6.0.3
+- **Platform**: Bump `cryptography` 46.0.3 -> 46.0.5
+- **Platform**: Bump `pyopenssl` 25.3.0 -> 26.0.0
+- **Platform**: Bump `pyasn1` 0.6.1 -> 0.6.3
+- **Platform**: Bump `ujson` 5.11.0 -> 5.12.0
+- **Platform**: Bump `cbor2` 5.7.1 -> 5.8.0
+- **Platform**: Bump `urllib3` 2.6.0 -> 2.6.3
+- **Platform**: Bump `filelock` 3.20.0 -> 3.25.2
+- **Platform**: Bump `virtualenv` 20.35.4 -> 21.2.0
+- **Platform**: Add `[tool.uv] constraint-dependencies` to enforce minimum versions for transitive security deps
+
+## [3.27.1] - 2026-03-21
+
+### Security
+- **Provisioner**: Bump `cryptography` 46.0.3 -> 46.0.5
+- **Provisioner**: Bump `protobuf` 5.29.5 -> 5.29.6
+- **Provisioner**: Bump `urllib3` minimum to >=2.6.3
+
 ## [3.27.0] - 2026-03-21
 
 ### Changed

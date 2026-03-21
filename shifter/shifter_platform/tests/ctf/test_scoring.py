@@ -138,27 +138,22 @@ class TestCalculateScore:
 class TestGetScoreboard:
     """Tests for get_scoreboard()."""
 
-    def _setup_scoreboard(self, mock_participant_objects, participants):
-        """Wire up the queryset chain to return the given participant list."""
-        qs = MagicMock()
-        mock_participant_objects.filter.return_value = qs
-        qs.annotate.return_value = qs
-        qs.order_by.return_value = qs
-        qs.select_related.return_value = qs
-        # Make the queryset iterable via enumerate()
-        qs.__iter__ = MagicMock(return_value=iter(participants))
-        return qs
+    @staticmethod
+    def _wire_qs(mock_participant_objects, mock_queryset, participants):
+        """Wire a shared mock_queryset to the participant manager and make it iterable."""
+        mock_participant_objects.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = MagicMock(return_value=iter(participants))
+        return mock_queryset
 
-    def test_ranked_by_score_descending(self, mock_participant_objects):
+    def test_ranked_by_score_descending(self, mock_participant_objects, mock_queryset):
         """Higher score = lower rank number."""
         p_bob = _make_participant("Bob", computed_score=300, solve_count=2, last_solve_time=_NOW)
         p_charlie = _make_participant("Charlie", computed_score=200, solve_count=1, last_solve_time=_NOW)
         p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW)
 
-        self._setup_scoreboard(mock_participant_objects, [p_bob, p_charlie, p_alice])
-        event_id = uuid4()
+        self._wire_qs(mock_participant_objects, mock_queryset, [p_bob, p_charlie, p_alice])
 
-        board = get_scoreboard(event_id)
+        board = get_scoreboard(uuid4())
 
         assert board[0]["name"] == "Bob"
         assert board[0]["score"] == 300
@@ -172,7 +167,7 @@ class TestGetScoreboard:
         assert board[2]["score"] == 100
         assert board[2]["rank"] == 3
 
-    def test_tie_breaking_by_earlier_last_solve(self, mock_participant_objects):
+    def test_tie_breaking_by_earlier_last_solve(self, mock_participant_objects, mock_queryset):
         """Same score: participant who solved last challenge earlier ranks higher."""
         early = _NOW - timedelta(minutes=10)
         late = _NOW
@@ -180,8 +175,7 @@ class TestGetScoreboard:
         p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=early)
         p_bob = _make_participant("Bob", computed_score=100, solve_count=1, last_solve_time=late)
 
-        # Already ordered by the mock (service trusts DB ordering)
-        self._setup_scoreboard(mock_participant_objects, [p_alice, p_bob])
+        self._wire_qs(mock_participant_objects, mock_queryset, [p_alice, p_bob])
 
         board = get_scoreboard(uuid4())
 
@@ -191,27 +185,23 @@ class TestGetScoreboard:
         assert tied[0]["rank"] == 1
         assert tied[1]["rank"] == 2
 
-    def test_limit_parameter(self, mock_participant_objects):
+    def test_limit_parameter(self, mock_participant_objects, mock_queryset):
         """Limit restricts the number of scoreboard entries."""
         p1 = _make_participant("Charlie", computed_score=300, solve_count=1, last_solve_time=_NOW)
         p2 = _make_participant("Bob", computed_score=200, solve_count=1, last_solve_time=_NOW)
 
-        qs = MagicMock()
-        mock_participant_objects.filter.return_value = qs
-        qs.annotate.return_value = qs
-        qs.order_by.return_value = qs
-        qs.select_related.return_value = qs
+        mock_participant_objects.filter.return_value = mock_queryset
 
         # Slicing via __getitem__ returns a new qs that yields limited results
         sliced_qs = MagicMock()
         sliced_qs.__iter__ = MagicMock(return_value=iter([p1, p2]))
-        qs.__getitem__ = MagicMock(return_value=sliced_qs)
+        mock_queryset.__getitem__ = MagicMock(return_value=sliced_qs)
 
         board = get_scoreboard(uuid4(), limit=2)
         assert len(board) == 2
         assert board[0]["score"] == 300
 
-    def test_excludes_non_active_statuses(self, mock_participant_objects):
+    def test_excludes_non_active_statuses(self, mock_participant_objects, mock_queryset):
         """Only ACTIVE, REGISTERED, and COMPLETED participants appear.
 
         The service passes status__in filter. We verify the filter is called
@@ -220,7 +210,7 @@ class TestGetScoreboard:
         """
         p_active = _make_participant("Active", computed_score=100, solve_count=1, last_solve_time=_NOW)
 
-        self._setup_scoreboard(mock_participant_objects, [p_active])
+        self._wire_qs(mock_participant_objects, mock_queryset, [p_active])
 
         board = get_scoreboard(uuid4())
         names = [e["name"] for e in board]
@@ -234,18 +224,18 @@ class TestGetScoreboard:
             ParticipantStatus.COMPLETED.value,
         }
 
-    def test_empty_scoreboard(self, mock_participant_objects):
+    def test_empty_scoreboard(self, mock_participant_objects, mock_queryset):
         """Event with no participants returns empty list."""
-        self._setup_scoreboard(mock_participant_objects, [])
+        self._wire_qs(mock_participant_objects, mock_queryset, [])
 
         board = get_scoreboard(uuid4())
         assert board == []
 
-    def test_scoreboard_includes_solve_count(self, mock_participant_objects):
+    def test_scoreboard_includes_solve_count(self, mock_participant_objects, mock_queryset):
         """solve_count reflects number of correct submissions."""
         p_alice = _make_participant("Alice", computed_score=300, solve_count=2, last_solve_time=_NOW)
 
-        self._setup_scoreboard(mock_participant_objects, [p_alice])
+        self._wire_qs(mock_participant_objects, mock_queryset, [p_alice])
 
         board = get_scoreboard(uuid4())
         p1_entry = next(e for e in board if e["name"] == "Alice")
@@ -260,21 +250,19 @@ class TestGetScoreboard:
 class TestGetTeamScoreboard:
     """Tests for get_team_scoreboard()."""
 
-    def _setup_team_scoreboard(self, mock_team_objects, teams):
-        """Wire up the queryset chain for team scoreboard."""
-        qs = MagicMock()
-        mock_team_objects.filter.return_value = qs
-        qs.annotate.return_value = qs
-        qs.order_by.return_value = qs
-        qs.__iter__ = MagicMock(return_value=iter(teams))
-        return qs
+    @staticmethod
+    def _wire_qs(mock_team_objects, mock_queryset, teams):
+        """Wire a shared mock_queryset to the team manager and make it iterable."""
+        mock_team_objects.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = MagicMock(return_value=iter(teams))
+        return mock_queryset
 
-    def test_team_scores_aggregated(self, mock_team_objects):
+    def test_team_scores_aggregated(self, mock_team_objects, mock_queryset):
         """Team score is the sum of all members' correct submissions."""
         t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=2, last_solve_time=_NOW)
         t_bravo = _make_team("Bravo", computed_score=100, solve_count=1, computed_member_count=1, last_solve_time=_NOW)
 
-        self._setup_team_scoreboard(mock_team_objects, [t_alpha, t_bravo])
+        self._wire_qs(mock_team_objects, mock_queryset, [t_alpha, t_bravo])
 
         board = get_team_scoreboard(uuid4())
 
@@ -287,28 +275,25 @@ class TestGetTeamScoreboard:
         assert board[1]["score"] == 100
         assert board[1]["rank"] == 2
 
-    def test_team_scoreboard_limit(self, mock_team_objects):
+    def test_team_scoreboard_limit(self, mock_team_objects, mock_queryset):
         """Limit restricts team scoreboard results."""
         t_alpha = _make_team("Alpha", computed_score=200, solve_count=1, computed_member_count=2, last_solve_time=_NOW)
 
-        qs = MagicMock()
-        mock_team_objects.filter.return_value = qs
-        qs.annotate.return_value = qs
-        qs.order_by.return_value = qs
+        mock_team_objects.filter.return_value = mock_queryset
 
         sliced_qs = MagicMock()
         sliced_qs.__iter__ = MagicMock(return_value=iter([t_alpha]))
-        qs.__getitem__ = MagicMock(return_value=sliced_qs)
+        mock_queryset.__getitem__ = MagicMock(return_value=sliced_qs)
 
         board = get_team_scoreboard(uuid4(), limit=1)
         assert len(board) == 1
 
-    def test_team_with_no_solves_scores_zero(self, mock_team_objects):
+    def test_team_with_no_solves_scores_zero(self, mock_team_objects, mock_queryset):
         """Teams with no correct submissions have score 0."""
         t_alpha = _make_team("Alpha", computed_score=0, computed_member_count=2)
         t_bravo = _make_team("Bravo", computed_score=0, computed_member_count=1)
 
-        self._setup_team_scoreboard(mock_team_objects, [t_alpha, t_bravo])
+        self._wire_qs(mock_team_objects, mock_queryset, [t_alpha, t_bravo])
 
         board = get_team_scoreboard(uuid4())
         for entry in board:

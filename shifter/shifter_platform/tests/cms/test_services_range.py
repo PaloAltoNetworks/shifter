@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from cms import services
+from tests.conftest import INVALID_RANGE_IDS, INVALID_USERS
 
 
 def make_mock_request(request_id: UUID | None = None) -> Mock:
@@ -221,21 +222,11 @@ class TestListRanges:
         with pytest.raises(TypeError):
             services.list_ranges()
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
-        with pytest.raises((TypeError, ValueError)):
-            services.list_ranges(None)
-
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
-        with pytest.raises((TypeError, AttributeError)):
-            services.list_ranges("not-a-user")
-
-    def test_raises_on_unsaved_user(self):
-        """Service raises error if user has no ID (unsaved)."""
-        unsaved_user = Mock(id=None, pk=None)
-        with pytest.raises((TypeError, ValueError)):
-            services.list_ranges(unsaved_user)
+    @pytest.mark.parametrize("invalid_user", INVALID_USERS)
+    def test_raises_on_invalid_user(self, invalid_user):
+        """Service raises error for invalid user values."""
+        with pytest.raises((TypeError, ValueError, AttributeError)):
+            services.list_ranges(invalid_user)
 
 
 class TestGetRange:
@@ -373,21 +364,11 @@ class TestGetRange:
         with pytest.raises(TypeError):
             services.get_range(range_id=42)
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
-        with pytest.raises((TypeError, ValueError)):
-            services.get_range(None, 42)
-
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
-        with pytest.raises((TypeError, AttributeError)):
-            services.get_range("not-a-user", 42)
-
-    def test_raises_on_unsaved_user(self):
-        """Service raises error if user has no ID (unsaved)."""
-        unsaved_user = Mock(id=None, pk=None)
-        with pytest.raises((TypeError, ValueError)):
-            services.get_range(unsaved_user, 42)
+    @pytest.mark.parametrize("invalid_user", INVALID_USERS)
+    def test_raises_on_invalid_user(self, invalid_user):
+        """Service raises error for invalid user values."""
+        with pytest.raises((TypeError, ValueError, AttributeError)):
+            services.get_range(invalid_user, 42)
 
     # -------------------------------------------------------------------------
     # Input validation - range_id parameter
@@ -398,20 +379,11 @@ class TestGetRange:
         with pytest.raises(TypeError):
             services.get_range(mock_user)
 
-    def test_raises_on_none_range_id(self, mock_user):
-        """Service raises error if range_id is None."""
+    @pytest.mark.parametrize("invalid_range_id", INVALID_RANGE_IDS)
+    def test_raises_on_invalid_range_id(self, mock_user, invalid_range_id):
+        """Service raises error for invalid range_id values."""
         with pytest.raises((TypeError, ValueError)):
-            services.get_range(mock_user, None)
-
-    def test_raises_on_invalid_range_id_type(self, mock_user):
-        """Service raises error if range_id is wrong type."""
-        with pytest.raises((TypeError, ValueError)):
-            services.get_range(mock_user, "not-an-id")
-
-    def test_raises_on_negative_range_id(self, mock_user):
-        """Service raises error if range_id is negative."""
-        with pytest.raises((TypeError, ValueError)):
-            services.get_range(mock_user, -1)
+            services.get_range(mock_user, invalid_range_id)
 
     # -------------------------------------------------------------------------
     # Response validation - model returns garbage
@@ -503,11 +475,12 @@ class TestCreateRangeValidation:
             services.create_range(mock_user, "basic", {"windows": 10})
 
 
-def _create_range_patches(mock_user, mock_agent):
-    """Return a dict of common patches for create_range tests.
+@pytest.fixture
+def create_range_ctx(mock_user, mock_windows_agent):
+    """Fixture providing common mocks for create_range tests.
 
     Mocks all ORM access so tests run without a database.
-    Returns a dict mapping patch target -> (args, kwargs) for patch().
+    Yields a dict of mock objects; ExitStack is auto-closed on teardown.
     """
     from contextlib import ExitStack
 
@@ -526,7 +499,6 @@ def _create_range_patches(mock_user, mock_agent):
     }
     mock_template.ngfw = False
 
-    # Build a canned RangeSpec matching the "basic" scenario
     attacker_spec = InstanceSpec(
         name="Attacker",
         uuid=str(uuid4()),
@@ -539,9 +511,9 @@ def _create_range_patches(mock_user, mock_agent):
         role="victim",
         os_type="windows",
         agent=AgentDetails(
-            s3_key=mock_agent.s3_key,
-            filename=mock_agent.original_filename,
-            sha256=mock_agent.sha256_hash,
+            s3_key=mock_windows_agent.s3_key,
+            filename=mock_windows_agent.original_filename,
+            sha256=mock_windows_agent.sha256_hash,
         ),
     )
     canned_range_spec = RangeSpec(
@@ -561,198 +533,167 @@ def _create_range_patches(mock_user, mock_agent):
 
     mock_request = Mock()
     mock_request.request_id = uuid4()
-
     mock_ri = Mock()
 
-    stack = ExitStack()
-    mocks = {}
-    mocks["active_range"] = stack.enter_context(patch("cms.services.get_active_range", return_value=None))
-    mocks["load_scenario"] = stack.enter_context(
-        patch("cms.scenarios.registry.load_scenario_template", return_value=mock_template)
-    )
-    mocks["get_agent"] = stack.enter_context(patch("cms.services.get_agent", return_value=mock_agent))
-    mocks["hydrate"] = stack.enter_context(
-        patch("cms.scenarios.hydrator.hydrate_scenario", return_value=canned_range_spec)
-    )
-    mocks["request_create"] = stack.enter_context(patch("cms.models.Request.objects.create", return_value=mock_request))
-    mocks["engine"] = stack.enter_context(patch("cms.services.engine_create_range"))
-    mocks["ri_create"] = stack.enter_context(patch("cms.services.RangeInstance.objects.create", return_value=mock_ri))
-    mocks["audit"] = stack.enter_context(patch("cms.services.audit_log"))
-
-    mocks["range_spec"] = canned_range_spec
-    mocks["stack"] = stack
-    return mocks
+    with ExitStack() as stack:
+        mocks = {}
+        mocks["active_range"] = stack.enter_context(patch("cms.services.get_active_range", return_value=None))
+        mocks["load_scenario"] = stack.enter_context(
+            patch("cms.scenarios.registry.load_scenario_template", return_value=mock_template)
+        )
+        mocks["get_agent"] = stack.enter_context(patch("cms.services.get_agent", return_value=mock_windows_agent))
+        mocks["hydrate"] = stack.enter_context(
+            patch("cms.scenarios.hydrator.hydrate_scenario", return_value=canned_range_spec)
+        )
+        mocks["request_create"] = stack.enter_context(
+            patch("cms.models.Request.objects.create", return_value=mock_request)
+        )
+        mocks["engine"] = stack.enter_context(patch("cms.services.engine_create_range"))
+        mocks["ri_create"] = stack.enter_context(
+            patch("cms.services.RangeInstance.objects.create", return_value=mock_ri)
+        )
+        mocks["audit"] = stack.enter_context(patch("cms.services.audit_log"))
+        mocks["range_spec"] = canned_range_spec
+        yield mocks
 
 
 class TestCreateRangeEngineCall:
     """Tests for create_range() engine integration."""
 
-    def test_calls_engine_create_range(self, mock_user, mock_windows_agent):
+    def test_calls_engine_create_range(self, mock_user, mock_windows_agent, create_range_ctx):
         """create_range calls engine.create_range with RangeSpec."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            ctx["engine"].assert_called_once()
+        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        create_range_ctx["engine"].assert_called_once()
 
-    def test_engine_receives_request_spec(self, mock_user, mock_windows_agent):
+    def test_engine_receives_request_spec(self, mock_user, mock_windows_agent, create_range_ctx):
         """Engine receives a RequestSpec containing RangeSpec."""
         from shared.schemas import RangeSpec, RequestSpec
 
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
 
-            call_args = ctx["engine"].call_args
-            request_spec = call_args[0][0]
+        call_args = create_range_ctx["engine"].call_args
+        request_spec = call_args[0][0]
 
-            assert isinstance(request_spec, RequestSpec)
-            assert request_spec.user_id == mock_user.id
-            assert len(request_spec.items) == 1
-            range_spec = request_spec.items[0]
-            assert isinstance(range_spec, RangeSpec)
-            assert range_spec.scenario_id == "basic"
-            assert isinstance(range_spec.all_instances, list)
+        assert isinstance(request_spec, RequestSpec)
+        assert request_spec.user_id == mock_user.id
+        assert len(request_spec.items) == 1
+        range_spec = request_spec.items[0]
+        assert isinstance(range_spec, RangeSpec)
+        assert range_spec.scenario_id == "basic"
+        assert isinstance(range_spec.all_instances, list)
 
-    def test_range_request_has_correct_scenario_id(self, mock_user, mock_windows_agent):
+    def test_range_request_has_correct_scenario_id(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeSpec inside RequestSpec includes the correct scenario_id."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
 
-            request_spec = ctx["engine"].call_args[0][0]
-            range_spec = request_spec.items[0]
-            assert range_spec.scenario_id == "basic"
+        request_spec = create_range_ctx["engine"].call_args[0][0]
+        range_spec = request_spec.items[0]
+        assert range_spec.scenario_id == "basic"
 
-    def test_range_request_has_hydrated_instances(self, mock_user, mock_windows_agent):
+    def test_range_request_has_hydrated_instances(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeSpec instances are hydrated with resolved OS and agent."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
 
-            request_spec = ctx["engine"].call_args[0][0]
-            range_spec = request_spec.items[0]
-            instances = range_spec.all_instances
+        request_spec = create_range_ctx["engine"].call_args[0][0]
+        range_spec = request_spec.items[0]
+        instances = range_spec.all_instances
 
-            assert len(instances) == 2
+        assert len(instances) == 2
 
-            victim = next(i for i in instances if i.role == "victim")
-            assert victim.os_type == "windows"
-            assert victim.agent is not None
-            assert victim.agent.s3_key == "agents/123/agent.msi"
+        victim = next(i for i in instances if i.role == "victim")
+        assert victim.os_type == "windows"
+        assert victim.agent is not None
+        assert victim.agent.s3_key == "agents/123/agent.msi"
 
 
 class TestCreateRangeInstance:
     """Tests for create_range() RangeInstance storage."""
 
-    def test_creates_range_instance_record(self, mock_user, mock_windows_agent):
+    def test_creates_range_instance_record(self, mock_user, mock_windows_agent, create_range_ctx):
         """create_range calls RangeInstance.objects.create with correct args."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
 
-            ctx["ri_create"].assert_called_once()
-            call_kwargs = ctx["ri_create"].call_args[1]
-            assert call_kwargs["scenario_id"] == "basic"
-            assert call_kwargs["user_id"] == mock_user.id
-            assert call_kwargs["agent"] == mock_windows_agent
+        create_range_ctx["ri_create"].assert_called_once()
+        call_kwargs = create_range_ctx["ri_create"].call_args[1]
+        assert call_kwargs["scenario_id"] == "basic"
+        assert call_kwargs["user_id"] == mock_user.id
+        assert call_kwargs["agent"] == mock_windows_agent
 
-    def test_range_instance_has_correct_scenario_id(self, mock_user, mock_windows_agent):
+    def test_range_instance_has_correct_scenario_id(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeInstance.objects.create receives the scenario_id used."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        # Override hydrate to return ad_attack_lab
-        canned = ctx["range_spec"]
+        canned = create_range_ctx["range_spec"]
         canned_ad = canned.model_copy(update={"scenario_id": "ad_attack_lab"})
-        ctx["hydrate"].return_value = canned_ad
-        with ctx["stack"]:
-            services.create_range(mock_user, "ad_attack_lab", {"windows": mock_windows_agent.id})
+        create_range_ctx["hydrate"].return_value = canned_ad
 
-            call_kwargs = ctx["ri_create"].call_args[1]
-            assert call_kwargs["scenario_id"] == "ad_attack_lab"
+        services.create_range(mock_user, "ad_attack_lab", {"windows": mock_windows_agent.id})
 
-    def test_range_instance_stores_integer_ids(self, mock_user, mock_windows_agent):
+        call_kwargs = create_range_ctx["ri_create"].call_args[1]
+        assert call_kwargs["scenario_id"] == "ad_attack_lab"
+
+    def test_range_instance_stores_integer_ids(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeInstance.objects.create receives user_id and agent as expected types."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
 
-            call_kwargs = ctx["ri_create"].call_args[1]
-            assert call_kwargs["user_id"] == mock_user.id
-            assert isinstance(call_kwargs["user_id"], int)
+        call_kwargs = create_range_ctx["ri_create"].call_args[1]
+        assert call_kwargs["user_id"] == mock_user.id
+        assert isinstance(call_kwargs["user_id"], int)
 
 
 class TestCreateRangeReturn:
     """Tests for create_range() return value."""
 
-    def test_returns_range_context(self, mock_user, mock_windows_agent):
+    def test_returns_range_context(self, mock_user, mock_windows_agent, create_range_ctx):
         """create_range returns a RangeContext."""
         from shared.schemas.range import RangeContext
 
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert isinstance(result, RangeContext)
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert isinstance(result, RangeContext)
 
-    def test_range_context_has_request_id(self, mock_user, mock_windows_agent):
+    def test_range_context_has_request_id(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeContext contains request_id (range_id is None for new ranges)."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert result.request_id is not None
-            assert result.range_id is None
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert result.request_id is not None
+        assert result.range_id is None
 
-    def test_range_context_has_scenario_id(self, mock_user, mock_windows_agent):
+    def test_range_context_has_scenario_id(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeContext contains the scenario_id."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert result.scenario_id == "basic"
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert result.scenario_id == "basic"
 
-    def test_range_context_has_user_id(self, mock_user, mock_windows_agent):
+    def test_range_context_has_user_id(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeContext contains the user_id."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert result.user_id == mock_user.id
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert result.user_id == mock_user.id
 
-    def test_range_context_has_agent_name(self, mock_user, mock_windows_agent):
+    def test_range_context_has_agent_name(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeContext contains the agent_name."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert result.agent_name == "Windows Agent"
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert result.agent_name == "Windows Agent"
 
-    def test_range_context_has_provisioning_status(self, mock_user, mock_windows_agent):
+    def test_range_context_has_provisioning_status(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeContext has PROVISIONING status (engine invariant on creation)."""
         from shared.enums import ResourceStatus
 
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert result.status == ResourceStatus.PROVISIONING
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert result.status == ResourceStatus.PROVISIONING
 
-    def test_range_context_has_instances(self, mock_user, mock_windows_agent):
+    def test_range_context_has_instances(self, mock_user, mock_windows_agent, create_range_ctx):
         """RangeContext contains instances list."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            assert len(result.instances) == 2  # basic scenario has attacker + victim
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        assert len(result.instances) == 2  # basic scenario has attacker + victim
 
-    def test_instances_have_uuids(self, mock_user, mock_windows_agent):
+    def test_instances_have_uuids(self, mock_user, mock_windows_agent, create_range_ctx):
         """Each instance has a UUID."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            for instance in result.instances:
-                assert instance.uuid is not None
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        for instance in result.instances:
+            assert instance.uuid is not None
 
-    def test_instances_have_roles(self, mock_user, mock_windows_agent):
+    def test_instances_have_roles(self, mock_user, mock_windows_agent, create_range_ctx):
         """Instances have correct roles from scenario."""
-        ctx = _create_range_patches(mock_user, mock_windows_agent)
-        with ctx["stack"]:
-            result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
-            roles = [i.role for i in result.instances]
-            assert "attacker" in roles
-            assert "victim" in roles
+        result = services.create_range(mock_user, "basic", {"windows": mock_windows_agent.id})
+        roles = [i.role for i in result.instances]
+        assert "attacker" in roles
+        assert "victim" in roles
 
 
 class TestDestroyRange:
@@ -888,40 +829,27 @@ class TestDestroyRange:
     # Error propagation - engine service errors
     # -------------------------------------------------------------------------
 
-    def test_propagates_engine_error(self, mock_user):
-        """Service propagates EngineError from engine service."""
+    @pytest.mark.parametrize(
+        "exc_class,exc_msg",
+        [
+            pytest.param("EngineError", "No range to destroy", id="engine-error"),
+            pytest.param("Exception", "DB connection failed", id="unexpected"),
+        ],
+    )
+    def test_propagates_error(self, mock_user, exc_class, exc_msg):
+        """Service propagates errors from engine service."""
         from cms.models import RangeInstance
         from engine import EngineError
 
+        exc_type = EngineError if exc_class == "EngineError" else Exception
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id, scenario_id="basic")
         mock_range.agent = None
         mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            patch(
-                "cms.services.engine_destroy_range_by_request",
-                side_effect=EngineError("No range to destroy"),
-            ),
-            pytest.raises(EngineError, match="No range to destroy"),
-        ):
-            services.destroy_range(mock_user, 42)
-
-    def test_propagates_unexpected_exception(self, mock_user):
-        """Service propagates unexpected exceptions from engine service."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id, scenario_id="basic")
-        mock_range.agent = None
-        mock_range.request = make_mock_request()
-        mock_range.save = Mock()
-        with (
-            patch("cms.services.RangeInstance.objects.get", return_value=mock_range),
-            patch(
-                "cms.services.engine_destroy_range_by_request",
-                side_effect=Exception("DB connection failed"),
-            ),
-            pytest.raises(Exception, match="DB connection failed"),
+            patch("cms.services.engine_destroy_range_by_request", side_effect=exc_type(exc_msg)),
+            pytest.raises(exc_type, match=exc_msg),
         ):
             services.destroy_range(mock_user, 42)
 
@@ -934,21 +862,11 @@ class TestDestroyRange:
         with pytest.raises(TypeError):
             services.destroy_range(range_id=42)
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
-        with pytest.raises((TypeError, ValueError)):
-            services.destroy_range(None, 42)
-
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
-        with pytest.raises((TypeError, AttributeError)):
-            services.destroy_range("not-a-user", 42)
-
-    def test_raises_on_unsaved_user(self):
-        """Service raises error if user has no ID (unsaved)."""
-        unsaved_user = Mock(id=None, pk=None)
-        with pytest.raises((TypeError, ValueError)):
-            services.destroy_range(unsaved_user, 42)
+    @pytest.mark.parametrize("invalid_user", INVALID_USERS)
+    def test_raises_on_invalid_user(self, invalid_user):
+        """Service raises error for invalid user values."""
+        with pytest.raises((TypeError, ValueError, AttributeError)):
+            services.destroy_range(invalid_user, 42)
 
     # -------------------------------------------------------------------------
     # Input validation - range_id parameter
@@ -959,20 +877,11 @@ class TestDestroyRange:
         with pytest.raises(TypeError):
             services.destroy_range(mock_user)
 
-    def test_raises_on_none_range_id(self, mock_user):
-        """Service raises error if range_id is None."""
+    @pytest.mark.parametrize("invalid_range_id", INVALID_RANGE_IDS)
+    def test_raises_on_invalid_range_id(self, mock_user, invalid_range_id):
+        """Service raises error for invalid range_id values."""
         with pytest.raises((TypeError, ValueError)):
-            services.destroy_range(mock_user, None)
-
-    def test_raises_on_invalid_range_id_type(self, mock_user):
-        """Service raises error if range_id is wrong type."""
-        with pytest.raises((TypeError, ValueError)):
-            services.destroy_range(mock_user, "not-an-id")
-
-    def test_raises_on_negative_range_id(self, mock_user):
-        """Service raises error if range_id is negative."""
-        with pytest.raises((TypeError, ValueError)):
-            services.destroy_range(mock_user, -1)
+            services.destroy_range(mock_user, invalid_range_id)
 
 
 class TestCancelRange:
@@ -1095,40 +1004,27 @@ class TestCancelRange:
     # Error propagation - engine service errors
     # -------------------------------------------------------------------------
 
-    def test_propagates_engine_error(self, mock_user):
-        """Service propagates EngineError from engine service."""
+    @pytest.mark.parametrize(
+        "exc_class,exc_msg",
+        [
+            pytest.param("EngineError", "Cannot cancel range", id="engine-error"),
+            pytest.param("Exception", "DB connection failed", id="unexpected"),
+        ],
+    )
+    def test_propagates_error(self, mock_user, exc_class, exc_msg):
+        """Service propagates errors from engine service."""
         from cms.models import RangeInstance
         from engine import EngineError
 
+        exc_type = EngineError if exc_class == "EngineError" else Exception
         mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id, scenario_id="basic")
         mock_range.agent = None
         mock_range.request = make_mock_request()
         mock_range.save = Mock()
         with (
             patch.object(services, "get_range", return_value=mock_range),
-            patch(
-                "cms.services.engine_cancel_range_by_request",
-                side_effect=EngineError("Cannot cancel range"),
-            ),
-            pytest.raises(EngineError, match="Cannot cancel range"),
-        ):
-            services.cancel_range(mock_user, 42)
-
-    def test_propagates_unexpected_exception(self, mock_user):
-        """Service propagates unexpected exceptions from engine service."""
-        from cms.models import RangeInstance
-
-        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id, scenario_id="basic")
-        mock_range.agent = None
-        mock_range.request = make_mock_request()
-        mock_range.save = Mock()
-        with (
-            patch.object(services, "get_range", return_value=mock_range),
-            patch(
-                "cms.services.engine_cancel_range_by_request",
-                side_effect=Exception("DB connection failed"),
-            ),
-            pytest.raises(Exception, match="DB connection failed"),
+            patch("cms.services.engine_cancel_range_by_request", side_effect=exc_type(exc_msg)),
+            pytest.raises(exc_type, match=exc_msg),
         ):
             services.cancel_range(mock_user, 42)
 
@@ -1141,21 +1037,11 @@ class TestCancelRange:
         with pytest.raises(TypeError):
             services.cancel_range(range_id=42)
 
-    def test_raises_on_none_user(self):
-        """Service raises error if user is None."""
-        with pytest.raises((TypeError, ValueError)):
-            services.cancel_range(None, 42)
-
-    def test_raises_on_invalid_user_type(self):
-        """Service raises error if user is wrong type."""
-        with pytest.raises((TypeError, AttributeError)):
-            services.cancel_range("not-a-user", 42)
-
-    def test_raises_on_unsaved_user(self):
-        """Service raises error if user has no ID (unsaved)."""
-        unsaved_user = Mock(id=None, pk=None)
-        with pytest.raises((TypeError, ValueError)):
-            services.cancel_range(unsaved_user, 42)
+    @pytest.mark.parametrize("invalid_user", INVALID_USERS)
+    def test_raises_on_invalid_user(self, invalid_user):
+        """Service raises error for invalid user values."""
+        with pytest.raises((TypeError, ValueError, AttributeError)):
+            services.cancel_range(invalid_user, 42)
 
     # -------------------------------------------------------------------------
     # Input validation - range_id parameter
@@ -1166,20 +1052,11 @@ class TestCancelRange:
         with pytest.raises(TypeError):
             services.cancel_range(mock_user)
 
-    def test_raises_on_none_range_id(self, mock_user):
-        """Service raises error if range_id is None."""
+    @pytest.mark.parametrize("invalid_range_id", INVALID_RANGE_IDS)
+    def test_raises_on_invalid_range_id(self, mock_user, invalid_range_id):
+        """Service raises error for invalid range_id values."""
         with pytest.raises((TypeError, ValueError)):
-            services.cancel_range(mock_user, None)
-
-    def test_raises_on_invalid_range_id_type(self, mock_user):
-        """Service raises error if range_id is wrong type."""
-        with pytest.raises((TypeError, ValueError)):
-            services.cancel_range(mock_user, "not-an-id")
-
-    def test_raises_on_negative_range_id(self, mock_user):
-        """Service raises error if range_id is negative."""
-        with pytest.raises((TypeError, ValueError)):
-            services.cancel_range(mock_user, -1)
+            services.cancel_range(mock_user, invalid_range_id)
 
 
 class TestPauseRange:

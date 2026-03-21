@@ -79,7 +79,7 @@ resource "aws_instance" "webserver1" {
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.webserver.id]
 
-  associate_public_ip_address = true
+  associate_public_ip_address = false
 
   tags = {
     Name = "WebServer1"
@@ -186,7 +186,7 @@ resource "aws_instance" "ctfd" {
   iam_instance_profile   = aws_iam_instance_profile.ctfd.name
   user_data              = file("${path.module}/ctfd-userdata.sh")
 
-  associate_public_ip_address = true
+  associate_public_ip_address = false
 
   root_block_device {
     volume_size           = 50

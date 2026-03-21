@@ -96,6 +96,20 @@ def submit_flag(
             },
         )
 
+    # Check prerequisites
+    from ctf.services.challenge import check_prerequisites_met
+
+    prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant_id)
+    if not prereqs_met:
+        unmet_names = [c.name for c in unmet_challenges]
+        raise CTFStateError(
+            f"Prerequisites not met. Complete first: {', '.join(unmet_names)}",
+            details={
+                "challenge_id": str(challenge_id),
+                "unmet_prerequisites": [str(c.id) for c in unmet_challenges],
+            },
+        )
+
     # Check if already solved
     existing_correct = CTFSubmission.objects.filter(
         participant=participant,

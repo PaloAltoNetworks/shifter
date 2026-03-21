@@ -29,12 +29,14 @@
             {% for challenge in challenges %}
             <div class="col-md-4 col-lg-3 mb-3">
                 <a href="{% url 'ctf:challenge_detail' challenge_id=challenge.pk %}" class="text-decoration-none">
-                    <div class="card h-100 {% if challenge.pk in solved_ids %}border-success{% endif %}">
+                    <div class="card h-100 {% if challenge.pk in solved_ids %}border-success{% elif challenge.is_locked %}opacity-50{% endif %}">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <h6 class="card-title mb-0">{{ challenge.name }}</h6>
                                 {% if challenge.pk in solved_ids %}
                                 <span class="text-success" title="Solved">&#10003;</span>
+                                {% elif challenge.is_locked %}
+                                <span class="text-secondary" title="Locked - prerequisites required">&#128274;</span>
                                 {% endif %}
                             </div>
                             <div class="mb-2">
@@ -50,6 +52,13 @@
                                 {% endif %}
                             </div>
                             <small class="text-muted">{{ challenge.solve_count }} solve{{ challenge.solve_count|pluralize }}</small>
+                            {% if challenge.is_locked %}
+                            <div class="mt-1">
+                                <small class="text-warning">
+                                    Requires: {% for req in challenge.required_challenges %}{{ req.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                </small>
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                 </a>

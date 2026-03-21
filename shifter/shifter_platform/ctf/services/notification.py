@@ -388,7 +388,7 @@ def _build_registration_url(invite_token: str) -> str:
     from django.urls import reverse
 
     path = reverse("ctf:ctf_register") + f"?token={invite_token}"
-    base = getattr(settings, "SITE_URL", "").rstrip("/")
+    base = (getattr(settings, "SITE_URL", None) or "").rstrip("/")
     return f"{base}{path}"
 
 

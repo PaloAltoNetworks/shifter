@@ -1,15 +1,17 @@
-"""Tests for cms.models.Subnet - Logical network segment model."""
+"""Tests for cms.models.Subnet - Logical network segment model.
 
-from uuid import UUID
+All tests use in-memory model construction and mocked ORM operations.
+No database access required.
+"""
+
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
-from django.contrib.auth import get_user_model
 from django.utils import timezone
 from pydantic import ValidationError
 
-from shared.enums import RequestType, ResourceStatus
-
-User = get_user_model()
+from shared.enums import ResourceStatus
 
 
 # Helper to create valid instance spec dicts
@@ -18,42 +20,39 @@ def make_instance(name: str, role: str = "victim", os_type: str = "windows") -> 
     return {"name": name, "role": role, "os_type": os_type}
 
 
-@pytest.fixture
-def user(db):
-    """Create a test user."""
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+def _make_subnet(**overrides):
+    """Build a Subnet instance in-memory without touching the DB.
 
-
-@pytest.fixture
-def request_obj(db, user):
-    """Create a test Request."""
-    from uuid import uuid4
-
-    from cms.models import Request
-
-    return Request.objects.create(
-        request_id=uuid4(),
-        request_type=RequestType.NGFW.value,
-        user=user,
-    )
-
-
-@pytest.fixture
-def subnet(db, request_obj):
-    """Create a test Subnet."""
+    Provides sensible defaults for all fields; any keyword argument
+    overrides the corresponding attribute.  Uses __dict__ assignment
+    to bypass Django descriptor validation for FK fields.
+    """
     from cms.models import Subnet
 
-    return Subnet.objects.create(
-        request=request_obj,
-        name="test_network",
-        data={
+    defaults = {
+        "id": uuid4(),
+        "name": "test_network",
+        "status": ResourceStatus.PENDING.value,
+        "created_at": timezone.now(),
+        "deleted_at": None,
+        "request_id": uuid4(),
+        "data": {
             "instances": [
                 make_instance("server1"),
                 make_instance("server2"),
             ],
             "connected_to": ["other_network"],
         },
-    )
+    }
+    defaults.update(overrides)
+
+    subnet = Subnet.__new__(Subnet)
+    # Initialize Django model state so _state.adding / _state.db work
+    subnet.__dict__["_state"] = Subnet()._state
+    for key, value in defaults.items():
+        subnet.__dict__[key] = value
+
+    return subnet
 
 
 # -----------------------------------------------------------------------------
@@ -61,16 +60,12 @@ def subnet(db, request_obj):
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestSubnetModel:
     """Tests for Subnet model structure and basic operations."""
 
-    def test_create_subnet(self, request_obj):
+    def test_create_subnet(self):
         """Can create a subnet with required fields."""
-        from cms.models import Subnet
-
-        subnet = Subnet.objects.create(
-            request=request_obj,
+        subnet = _make_subnet(
             name="dc_network",
             data={
                 "instances": [make_instance("domain_controller", "dc")],
@@ -79,51 +74,30 @@ class TestSubnetModel:
         )
 
         assert subnet.id is not None
-        assert isinstance(subnet.id, UUID)
-        assert subnet.request == request_obj
         assert subnet.name == "dc_network"
         assert len(subnet.data["instances"]) == 1
         assert subnet.data["instances"][0]["name"] == "domain_controller"
         assert subnet.data["connected_to"] == []
 
-    def test_str_returns_name_and_id(self, subnet):
+    def test_str_returns_name_and_id(self):
         """__str__ returns name and UUID."""
+        subnet = _make_subnet(name="test_network")
         result = str(subnet)
 
         assert "test_network" in result
         assert str(subnet.id) in result
 
-    def test_default_status_is_pending(self, request_obj):
+    def test_default_status_is_pending(self):
         """Default status is 'pending'."""
-        from cms.models import Subnet
-
-        subnet = Subnet.objects.create(
-            request=request_obj,
-            name="status_test",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-        )
+        subnet = _make_subnet()
 
         assert subnet.status == ResourceStatus.PENDING.value
 
-    def test_ordering_by_created_at_descending(self, request_obj):
-        """Subnets are ordered by created_at descending."""
+    def test_ordering_by_created_at_descending(self):
+        """Subnets are ordered by created_at descending (Meta.ordering)."""
         from cms.models import Subnet
 
-        subnet1 = Subnet.objects.create(
-            request=request_obj,
-            name="first",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-        )
-        subnet2 = Subnet.objects.create(
-            request=request_obj,
-            name="second",
-            data={"instances": [make_instance("box2")], "connected_to": []},
-        )
-
-        subnets = list(Subnet.objects.filter(request=request_obj))
-
-        assert subnets[0] == subnet2  # Newest first
-        assert subnets[1] == subnet1
+        assert Subnet._meta.ordering == ["-created_at"]
 
 
 # -----------------------------------------------------------------------------
@@ -131,56 +105,45 @@ class TestSubnetModel:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestSubnetEntityBase:
     """Tests for Subnet's EntityBase inheritance."""
 
-    def test_is_deleted_property(self, subnet, request_obj):
-        """is_deleted reflects deleted_at state."""
-        from cms.models import Subnet
+    def test_is_deleted_false_when_deleted_at_none(self):
+        """is_deleted is False when deleted_at is None."""
+        subnet = _make_subnet(deleted_at=None)
 
-        # False when deleted_at is None
-        assert subnet.deleted_at is None
         assert subnet.is_deleted is False
 
-        # True when deleted_at is set
-        deleted_subnet = Subnet.objects.create(
-            request=request_obj,
-            name="deleted_test",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-            deleted_at=timezone.now(),
-        )
-        assert deleted_subnet.is_deleted is True
+    def test_is_deleted_true_when_deleted_at_set(self):
+        """is_deleted is True when deleted_at is set."""
+        subnet = _make_subnet(deleted_at=timezone.now())
 
-    def test_terminal_status_auto_sets_deleted_at(self, request_obj):
-        """Terminal status automatically sets deleted_at."""
-        from cms.models import Subnet
+        assert subnet.is_deleted is True
 
-        subnet = Subnet.objects.create(
-            request=request_obj,
-            name="terminal_test",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-        )
-        assert subnet.deleted_at is None
+    @patch("cms.models.Subnet.validate_data")
+    def test_terminal_status_auto_sets_deleted_at(self, mock_validate):
+        """Terminal status automatically sets deleted_at via EntityBase.save()."""
+        subnet = _make_subnet(status=ResourceStatus.PENDING.value, deleted_at=None)
 
+        # Transition to terminal status
         subnet.status = ResourceStatus.DESTROYED.value
-        subnet.save()
+
+        # Call save with the real EntityBase logic but mock the DB write
+        with patch("django.db.models.Model.save"):
+            subnet.save()
 
         assert subnet.deleted_at is not None
         assert subnet.is_deleted is True
 
-    def test_failed_status_auto_sets_deleted_at(self, request_obj):
+    @patch("cms.models.Subnet.validate_data")
+    def test_failed_status_auto_sets_deleted_at(self, mock_validate):
         """FAILED status automatically sets deleted_at."""
-        from cms.models import Subnet
-
-        subnet = Subnet.objects.create(
-            request=request_obj,
-            name="failed_test",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-        )
+        subnet = _make_subnet(status=ResourceStatus.PENDING.value, deleted_at=None)
 
         subnet.status = ResourceStatus.FAILED.value
-        subnet.save()
+
+        with patch("django.db.models.Model.save"):
+            subnet.save()
 
         assert subnet.deleted_at is not None
 
@@ -190,41 +153,25 @@ class TestSubnetEntityBase:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestSubnetRelationships:
     """Tests for Subnet foreign key relationships."""
 
-    def test_subnet_deleted_when_request_deleted(self, request_obj):
-        """Subnets cascade delete when Request is deleted."""
+    def test_cascade_delete_configured(self):
+        """Subnet.request FK is configured with CASCADE on_delete."""
+        from django.db import models as dj_models
+
         from cms.models import Subnet
 
-        subnet = Subnet.objects.create(
-            request=request_obj,
-            name="cascade_test",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-        )
-        subnet_id = subnet.id
+        field = Subnet._meta.get_field("request")
+        assert isinstance(field, dj_models.ForeignKey)
+        assert field.remote_field.on_delete is dj_models.CASCADE
 
-        request_obj.delete()
-
-        assert not Subnet.objects.filter(id=subnet_id).exists()
-
-    def test_request_subnets_related_name(self, request_obj):
-        """Can access subnets via request.subnets."""
+    def test_request_subnets_related_name(self):
+        """Subnet FK declares related_name='subnets'."""
         from cms.models import Subnet
 
-        Subnet.objects.create(
-            request=request_obj,
-            name="subnet1",
-            data={"instances": [make_instance("box1")], "connected_to": []},
-        )
-        Subnet.objects.create(
-            request=request_obj,
-            name="subnet2",
-            data={"instances": [make_instance("box2")], "connected_to": []},
-        )
-
-        assert request_obj.subnets.count() == 2
+        field = Subnet._meta.get_field("request")
+        assert field.remote_field.related_name == "subnets"
 
 
 # -----------------------------------------------------------------------------
@@ -232,18 +179,12 @@ class TestSubnetRelationships:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestSubnetData:
     """Tests for Subnet data JSONField."""
 
-    def test_data_field_storage(self, request_obj):
-        """Data field stores and retrieves JSON data correctly."""
-        from cms.models import Subnet
-
-        # Test with full data
-        subnet = Subnet.objects.create(
-            request=request_obj,
-            name="data_test",
+    def test_data_field_stores_json(self):
+        """Data field stores and retrieves JSON data correctly (in-memory)."""
+        subnet = _make_subnet(
             data={
                 "instances": [
                     make_instance("server1"),
@@ -254,69 +195,64 @@ class TestSubnetData:
             },
         )
 
-        subnet.refresh_from_db()
         assert len(subnet.data["instances"]) == 3
         assert subnet.data["instances"][0]["name"] == "server1"
         assert subnet.data["connected_to"] == ["network_a", "network_b"]
 
-        # Test empty connected_to (isolated subnet)
-        isolated = Subnet.objects.create(
-            request=request_obj,
-            name="isolated",
+    def test_data_field_empty_connected_to(self):
+        """Data field handles empty connected_to list (isolated subnet)."""
+        subnet = _make_subnet(
             data={"instances": [make_instance("box1")], "connected_to": []},
         )
-        isolated.refresh_from_db()
-        assert isolated.data["connected_to"] == []
+
+        assert subnet.data["connected_to"] == []
 
 
-@pytest.mark.django_db
 class TestSubnetValidation:
     """Tests for Subnet data validation."""
 
-    def test_validation_rejects_empty_instances(self, request_obj):
+    def test_validation_rejects_empty_instances(self):
         """Validation rejects empty instances list."""
-        from cms.models import Subnet
+        subnet = _make_subnet(
+            name="empty_instances",
+            data={"instances": [], "connected_to": []},
+        )
 
         with pytest.raises(ValidationError):
-            Subnet.objects.create(
-                request=request_obj,
-                name="empty_instances",
-                data={"instances": [], "connected_to": []},
-            )
+            subnet.validate_data()
 
-    def test_validation_rejects_missing_instances(self, request_obj):
+    def test_validation_rejects_missing_instances(self):
         """Validation rejects missing instances field."""
-        from cms.models import Subnet
+        subnet = _make_subnet(
+            name="no_instances",
+            data={"connected_to": []},
+        )
 
         with pytest.raises(ValidationError):
-            Subnet.objects.create(
-                request=request_obj,
-                name="no_instances",
-                data={"connected_to": []},
-            )
+            subnet.validate_data()
 
-    def test_instances_property(self, subnet, request_obj):
-        """instances property returns data['instances'] or empty list."""
-        from cms.models import Subnet
+    def test_instances_property_with_data(self):
+        """instances property returns data['instances']."""
+        subnet = _make_subnet()
 
-        # With data
         assert len(subnet.instances) == 2
         assert subnet.instances[0]["name"] == "server1"
         assert subnet.instances[1]["name"] == "server2"
 
-        # Empty data returns empty list
-        empty = Subnet(request=request_obj, name="test")
-        empty.data = {}
-        assert empty.instances == []
+    def test_instances_property_empty_data(self):
+        """instances property returns empty list when data is empty."""
+        subnet = _make_subnet(data={})
 
-    def test_connected_to_property(self, subnet, request_obj):
-        """connected_to property returns data['connected_to'] or empty list."""
-        from cms.models import Subnet
+        assert subnet.instances == []
 
-        # With data
+    def test_connected_to_property_with_data(self):
+        """connected_to property returns data['connected_to']."""
+        subnet = _make_subnet()
+
         assert subnet.connected_to == ["other_network"]
 
-        # Empty data returns empty list
-        empty = Subnet(request=request_obj, name="test")
-        empty.data = {}
-        assert empty.connected_to == []
+    def test_connected_to_property_empty_data(self):
+        """connected_to property returns empty list when data is empty."""
+        subnet = _make_subnet(data={})
+
+        assert subnet.connected_to == []

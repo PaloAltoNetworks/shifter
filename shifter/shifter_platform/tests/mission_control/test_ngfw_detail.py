@@ -3,11 +3,9 @@
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-import pytest
 from django.http import HttpRequest
 
 
-@pytest.mark.django_db
 class TestNGFWDetailView:
     """Tests for ngfw_detail view.
 

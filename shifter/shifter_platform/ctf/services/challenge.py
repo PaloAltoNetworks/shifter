@@ -117,6 +117,27 @@ def verify_single_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
         except re.error as e:
             logger.error("Invalid regex pattern for flag %s: %s", flag_obj.id, e)
             return False
+    elif flag_obj.flag_type in ("programmable", "http"):
+        from ctf.validators import get_validator, validate_http
+
+        config = flag_obj.validator_config or {}
+        if flag_obj.flag_type == "programmable":
+            validator_name = config.get("validator_name", "")
+            validator_func = get_validator(validator_name)
+            if validator_func is None:
+                logger.error("Unknown validator %r for flag %s", validator_name, flag_obj.id)
+                return False
+            try:
+                return validator_func(submitted_flag, config.get("params", {}))
+            except Exception as e:
+                logger.error("Validator %r error for flag %s: %s", validator_name, flag_obj.id, e)
+                return False
+        else:  # http
+            try:
+                return validate_http(submitted_flag, config, flag_obj.challenge_id)
+            except Exception as e:
+                logger.error("HTTP validator error for flag %s: %s", flag_obj.id, e)
+                return False
     else:
         # Static flags: hashed comparison
         value = submitted_flag if flag_obj.case_sensitive else submitted_flag.lower()
@@ -145,6 +166,80 @@ def verify_flag(challenge: CTFChallenge, submitted_flag: str) -> bool:
     return _verify_hash(submitted_flag, challenge.flag_hash, challenge.id)
 
 
+def _validate_programmable_config(validator_config: dict[str, Any] | None) -> None:
+    """Validate configuration for a programmable flag.
+
+    Args:
+        validator_config: The validator configuration dict.
+
+    Raises:
+        CTFValidationError: If configuration is invalid.
+    """
+    from ctf.validators import get_validator
+
+    if validator_config is None or not isinstance(validator_config, dict):
+        raise CTFValidationError(
+            "validator_config is required for programmable flags",
+            details={"missing_fields": ["validator_config"]},
+        )
+    validator_name = validator_config.get("validator_name", "")
+    if not validator_name:
+        raise CTFValidationError(
+            "validator_config.validator_name is required",
+            details={"missing_fields": ["validator_config.validator_name"]},
+        )
+    if get_validator(validator_name) is None:
+        raise CTFValidationError(
+            f"Unknown validator: {validator_name}",
+            details={"validator_name": validator_name},
+        )
+
+
+def _validate_http_config(validator_config: dict[str, Any] | None) -> None:
+    """Validate configuration for an HTTP flag.
+
+    Args:
+        validator_config: The validator configuration dict.
+
+    Raises:
+        CTFValidationError: If configuration is invalid.
+    """
+    if validator_config is None or not isinstance(validator_config, dict):
+        raise CTFValidationError(
+            "validator_config is required for HTTP flags",
+            details={"missing_fields": ["validator_config"]},
+        )
+    url = validator_config.get("url", "")
+    if not url:
+        raise CTFValidationError(
+            "validator_config.url is required",
+            details={"missing_fields": ["validator_config.url"]},
+        )
+    if not url.startswith(("http://", "https://")):
+        raise CTFValidationError(
+            "validator_config.url must start with http:// or https://",
+            details={"url": url},
+        )
+
+    from ctf.validators import is_blocked_url
+
+    if is_blocked_url(url):
+        raise CTFValidationError(
+            "validator_config.url must not target private or reserved addresses",
+            details={"url": url},
+        )
+
+    timeout = validator_config.get("timeout")
+    if timeout is not None and (not isinstance(timeout, int) or timeout < 1 or timeout > 30):
+        raise CTFValidationError(
+            "validator_config.timeout must be an integer between 1 and 30",
+            details={"timeout": timeout},
+        )
+
+
+VALID_FLAG_TYPES = ("static", "regex", "programmable", "http")
+
+
 def add_flag(
     challenge_id: UUID,
     flag_data: dict[str, Any],
@@ -154,10 +249,11 @@ def add_flag(
     Args:
         challenge_id: UUID of the challenge.
         flag_data: Dictionary with keys:
-            - flag (str): plaintext flag value (required for static) or regex pattern
-            - flag_type (str): "static" or "regex" (default "static")
+            - flag (str): plaintext flag value (required for static/regex types)
+            - flag_type (str): "static", "regex", "programmable", or "http"
             - case_sensitive (bool): default True
             - order (int): default 0
+            - validator_config (dict): configuration for programmable/http types
 
     Returns:
         The created CTFFlag instance.
@@ -181,37 +277,45 @@ def add_flag(
             details={"challenge_id": str(challenge_id), "event_status": challenge.event.status},
         )
 
-    plaintext_flag = flag_data.get("flag", "").strip()
-    if not plaintext_flag:
-        raise CTFValidationError(
-            "Flag value is required",
-            details={"missing_fields": ["flag"]},
-        )
-
     flag_type = flag_data.get("flag_type", "static")
     case_sensitive = flag_data.get("case_sensitive", True)
     order = flag_data.get("order", 0)
+    validator_config = flag_data.get("validator_config")
 
-    if flag_type not in ("static", "regex"):
+    if flag_type not in VALID_FLAG_TYPES:
         raise CTFValidationError(
             f"Invalid flag_type: {flag_type}",
             details={"flag_type": flag_type},
         )
 
-    if flag_type == "regex":
-        # Validate regex pattern
-        try:
-            re.compile(plaintext_flag)
-        except re.error as e:
+    if flag_type in ("static", "regex"):
+        plaintext_flag = flag_data.get("flag", "").strip()
+        if not plaintext_flag:
             raise CTFValidationError(
-                f"Invalid regex pattern: {e}",
-                details={"pattern": plaintext_flag},
-            ) from None
-        # Regex patterns stored as plaintext (can't hash a regex)
-        stored_value = plaintext_flag
-    else:
-        # Static flags: hash for secure storage
-        stored_value = hash_flag(plaintext_flag, case_sensitive=case_sensitive)
+                "Flag value is required",
+                details={"missing_fields": ["flag"]},
+            )
+
+        if flag_type == "regex":
+            # Validate regex pattern
+            try:
+                re.compile(plaintext_flag)
+            except re.error as e:
+                raise CTFValidationError(
+                    f"Invalid regex pattern: {e}",
+                    details={"pattern": plaintext_flag},
+                ) from None
+            # Regex patterns stored as plaintext (can't hash a regex)
+            stored_value = plaintext_flag
+        else:
+            # Static flags: hash for secure storage
+            stored_value = hash_flag(plaintext_flag, case_sensitive=case_sensitive)
+    elif flag_type == "programmable":
+        _validate_programmable_config(validator_config)
+        stored_value = "programmable"
+    else:  # http
+        _validate_http_config(validator_config)
+        stored_value = "http"
 
     flag_obj = CTFFlag.objects.create(
         challenge=challenge,
@@ -219,6 +323,7 @@ def add_flag(
         flag_type=flag_type,
         case_sensitive=case_sensitive,
         order=order,
+        validator_config=validator_config,
     )
 
     logger.info("Added flag %s to challenge %s", flag_obj.id, challenge_id)
@@ -302,15 +407,16 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any]) -> CTFChall
         plaintext_flag = data.pop("flag")
         data["flag_hash"] = hash_flag(plaintext_flag)
     elif flags_list:
-        # Use first static flag for legacy field, or placeholder for regex
+        # Use first static flag for legacy field, or sentinel for other types
         first_flag = flags_list[0]
-        if first_flag.get("flag_type", "static") == "static":
+        first_type = first_flag.get("flag_type", "static")
+        if first_type == "static":
             data["flag_hash"] = hash_flag(
                 first_flag["flag"],
                 case_sensitive=first_flag.get("case_sensitive", True),
             )
         else:
-            data["flag_hash"] = "multi-flag"
+            data["flag_hash"] = first_type if first_type in ("programmable", "http") else "multi-flag"
 
     with transaction.atomic():
         challenge = CTFChallenge.objects.create(

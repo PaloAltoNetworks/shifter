@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.28.0] - 2026-03-21
+
+### Changed
+- **Engine**: Migrate `engine/secrets.get_ssh_key()` from direct `boto3` Secrets Manager calls to `shared.cloud` abstraction layer
+- **CTF**: Migrate `ctf/bridges._get_instance_ssh_key()` from direct `boto3` Secrets Manager calls to `shared.cloud` abstraction layer
+- **Cloud**: Remove stub docstring from `AWSSecretsStore` now that extraction is complete
+
 ## [3.27.3] - 2026-03-21
 
 ### Changed

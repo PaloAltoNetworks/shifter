@@ -1,9 +1,4 @@
-"""AWS Secrets Manager adapter implementing SecretsStore protocol.
-
-The actual Secrets Manager logic will be extracted from engine/secrets.py
-in Sub-Issue 5 (#815). This stub satisfies the protocol interface so the
-factory can return it.
-"""
+"""AWS Secrets Manager adapter implementing SecretsStore protocol."""
 
 from __future__ import annotations
 

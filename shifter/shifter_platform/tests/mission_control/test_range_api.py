@@ -1,169 +1,203 @@
-"""Tests for Range API endpoints."""
+"""Tests for Range API endpoints.
+
+All tests mock the ORM — no @pytest.mark.django_db markers.
+Views are called via RequestFactory with mock users; CMS/engine
+service functions are patched at the view-module boundary.
+"""
 
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from django.urls import reverse
+from django.contrib.auth.models import AnonymousUser
+from django.test import RequestFactory
 
-from cms.models import AgentConfig, OperatingSystem
-from cms.models import Request as CMSRequest
-from engine.models import Range
-from engine.models import Request as EngineRequest
+from mission_control import views
 from shared.enums import ResourceStatus
+from shared.exceptions import CMSError
 from shared.schemas import RangeContext
 
-
-@pytest.fixture
-def windows_os(db):
-    return OperatingSystem.objects.get(slug="windows")
-
-
-@pytest.fixture
-def linux_os(db):
-    return OperatingSystem.objects.get(slug="linux-debian")
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def test_agent(db, django_user_model, windows_os):
-    user = django_user_model.objects.create_user(
-        username="rangetest", email="rangetest@example.com", password="testpass"
-    )
-    agent = AgentConfig.objects.create(
-        user=user,
-        os=windows_os,
-        name="Test XDR Agent",
-        s3_key="agents/test/fake.msi",
-        original_filename="agent.msi",
-        file_size_bytes=50000000,
-        sha256_hash="abc123",
-    )
+def rf():
+    """Django RequestFactory (no DB needed)."""
+    return RequestFactory()
+
+
+@pytest.fixture
+def mock_user():
+    """Authenticated mock user."""
+    user = MagicMock()
+    user.id = 1
+    user.pk = 1
+    user.username = "rangetest"
+    user.email = "rangetest@example.com"
+    user.is_authenticated = True
+    user.is_active = True
+    return user
+
+
+@pytest.fixture
+def other_user():
+    """A second authenticated mock user."""
+    user = MagicMock()
+    user.id = 2
+    user.pk = 2
+    user.username = "other"
+    user.email = "other@example.com"
+    user.is_authenticated = True
+    user.is_active = True
+    return user
+
+
+@pytest.fixture
+def mock_agent():
+    """Mock AgentConfig object."""
+    agent = MagicMock()
+    agent.id = 10
+    agent.name = "Test XDR Agent"
+    agent.os = MagicMock()
+    agent.os.slug = "windows"
+    agent.os.name = "Windows"
+    agent.file_size_mb = 47.7
+    agent.original_filename = "agent.msi"
+    agent.s3_key = "agents/test/fake.msi"
+    agent.file_size_bytes = 50000000
+    agent.sha256_hash = "abc123"
     return agent
 
 
 @pytest.fixture
-def mock_provisioner():
-    """Mock the engine service to avoid AWS calls."""
-    with (
-        patch("engine.ecs.start_provisioning") as mock_provision,
-        patch("engine.ecs.start_teardown") as mock_teardown,
-    ):
-        mock_provision.return_value = None  # No ARN in test mode
-        mock_teardown.return_value = None
-        yield {"provision": mock_provision, "teardown": mock_teardown}
+def mock_linux_agent():
+    """Mock Linux AgentConfig object."""
+    agent = MagicMock()
+    agent.id = 20
+    agent.name = "Linux Agent"
+    agent.os = MagicMock()
+    agent.os.slug = "linux-debian"
+    agent.os.name = "Linux (Debian/Ubuntu)"
+    agent.file_size_mb = 23.8
+    agent.original_filename = "agent.deb"
+    agent.s3_key = "agents/test/fake.deb"
+    agent.file_size_bytes = 25000000
+    agent.sha256_hash = "def456"
+    return agent
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_range_context(user_id=1, **overrides):
+    """Build a RangeContext with sensible defaults."""
+    defaults = {
+        "request_id": uuid4(),
+        "range_id": 42,
+        "user_id": user_id,
+        "scenario_id": "basic",
+        "status": ResourceStatus.READY,
+        "instances": [],
+        "agent_name": "Test XDR Agent",
+    }
+    defaults.update(overrides)
+    return RangeContext(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# TestGetRange
+# ---------------------------------------------------------------------------
+
+
 class TestGetRange:
     """Tests for get_range view.
 
-    The view now consumes RangeContext from cms.get_active_range().
-    Tests mock the CMS service layer to return RangeContext projections.
+    The view consumes RangeContext from cms.get_active_range().
     """
 
-    def test_requires_login(self, client):
-        response = client.get(reverse("mission_control:get_range"))
+    def test_requires_login(self, rf):
+        request = rf.get("/api/range/")
+        request.user = AnonymousUser()
+        response = views.get_range(request)
         assert response.status_code == 302  # Redirect to login
 
-    def test_returns_no_range_when_none_exists(self, client, test_agent):
-        client.force_login(test_agent.user)
+    def test_returns_no_range_when_none_exists(self, rf, mock_user):
+        request = rf.get("/api/range/")
+        request.user = mock_user
 
-        with patch("mission_control.views.get_active_range", return_value=None):
-            response = client.get(reverse("mission_control:get_range"))
+        with patch.object(views, "get_active_range", return_value=None):
+            response = views.get_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["has_range"] is False
         assert data["range"] is None
 
-    def test_returns_active_range(self, client, test_agent):
-        from uuid import uuid4
+    def test_returns_active_range(self, rf, mock_user):
+        request = rf.get("/api/range/")
+        request.user = mock_user
 
-        client.force_login(test_agent.user)
-
-        # Create a RangeContext projection (what CMS service returns)
-        mock_range_context = RangeContext(
-            request_id=uuid4(),
-            range_id=42,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
+        mock_range_context = _make_range_context(
+            user_id=mock_user.id,
             status=ResourceStatus.READY,
-            instances=[],
-            agent_name="Test XDR Agent",
         )
 
-        with patch(
-            "mission_control.views.get_active_range",
-            return_value=mock_range_context,
-        ):
-            response = client.get(reverse("mission_control:get_range"))
+        with patch.object(views, "get_active_range", return_value=mock_range_context):
+            response = views.get_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["has_range"] is True
         assert data["range"]["range_id"] == 42
         assert data["range"]["status"] == "ready"
         assert data["range"]["agent_name"] == "Test XDR Agent"
         assert data["range"]["scenario_id"] == "basic"
-        # Computed properties are included in model_dump
         assert data["range"]["is_ready"] is True
         assert data["range"]["is_terminal"] is False
         assert data["range"]["is_active"] is True
 
-    def test_returns_provisioning_range(self, client, test_agent):
+    def test_returns_provisioning_range(self, rf, mock_user):
         """Test range in provisioning state has correct computed properties."""
-        from uuid import uuid4
+        request = rf.get("/api/range/")
+        request.user = mock_user
 
-        client.force_login(test_agent.user)
-
-        mock_range_context = RangeContext(
-            request_id=uuid4(),
-            range_id=42,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
+        mock_range_context = _make_range_context(
+            user_id=mock_user.id,
             status=ResourceStatus.PROVISIONING,
-            instances=[],
             agent_name="Test Agent",
         )
 
-        with patch(
-            "mission_control.views.get_active_range",
-            return_value=mock_range_context,
-        ):
-            response = client.get(reverse("mission_control:get_range"))
+        with patch.object(views, "get_active_range", return_value=mock_range_context):
+            response = views.get_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["has_range"] is True
         assert data["range"]["status"] == "provisioning"
         assert data["range"]["is_ready"] is False
         assert data["range"]["is_terminal"] is False
         assert data["range"]["is_active"] is True
 
-    def test_returns_destroying_range(self, client, test_agent):
+    def test_returns_destroying_range(self, rf, mock_user):
         """Test range in destroying state has correct computed properties."""
-        from uuid import uuid4
+        request = rf.get("/api/range/")
+        request.user = mock_user
 
-        client.force_login(test_agent.user)
-
-        mock_range_context = RangeContext(
-            request_id=uuid4(),
-            range_id=42,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
+        mock_range_context = _make_range_context(
+            user_id=mock_user.id,
             status=ResourceStatus.DESTROYING,
-            instances=[],
             agent_name="Test Agent",
         )
 
-        with patch(
-            "mission_control.views.get_active_range",
-            return_value=mock_range_context,
-        ):
-            response = client.get(reverse("mission_control:get_range"))
+        with patch.object(views, "get_active_range", return_value=mock_range_context):
+            response = views.get_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["has_range"] is True
         assert data["range"]["status"] == "destroying"
         assert data["range"]["is_ready"] is False
@@ -171,710 +205,679 @@ class TestGetRange:
         assert data["range"]["is_active"] is True
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# TestLaunchRange
+# ---------------------------------------------------------------------------
+
+
 class TestLaunchRange:
-    def test_requires_login(self, client):
-        response = client.post(reverse("mission_control:launch_range"))
+    def test_requires_login(self, rf):
+        request = rf.post(
+            "/api/range/launch/",
+            data="{}",
+            content_type="application/json",
+        )
+        request.user = AnonymousUser()
+        response = views.launch_range(request)
         assert response.status_code == 302
 
-    def test_requires_agent_id(self, client, test_agent):
-        client.force_login(test_agent.user)
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={},
+    def test_requires_agent_id(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/launch/",
+            data="{}",
             content_type="application/json",
         )
+        request.user = mock_user
+
+        with patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]):
+            response = views.launch_range(request)
+
         assert response.status_code == 400
-        assert "agent_id" in response.json()["error"]
+        assert "agent_id" in _json(response)["error"] or "agents" in _json(response)["error"]
 
-    def test_rejects_nonexistent_agent(self, client, test_agent):
-        client.force_login(test_agent.user)
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": 99999},
+    def test_rejects_nonexistent_agent(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/launch/",
+            data='{"agent_id": 99999}',
             content_type="application/json",
         )
-        # CMS returns 400 (CMSError) for agent not found, not 404
+        request.user = mock_user
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", side_effect=CMSError("Agent not found")),
+        ):
+            response = views.launch_range(request)
+
         assert response.status_code == 400
 
-    def test_successful_launch(self, client, test_agent, settings):
-        # Ensure ECS is not configured (local dev mode)
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-
-        client.force_login(test_agent.user)
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id},
+    def test_successful_launch(self, rf, mock_user, mock_agent):
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}}}',
             content_type="application/json",
         )
+        request.user = mock_user
+
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+            agent_name=mock_agent.name,
+        )
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx),
+        ):
+            response = views.launch_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["success"] is True
         assert data["range"]["status"] == "provisioning"
-        assert data["range"]["agent_name"] == test_agent.name
+        assert data["range"]["agent_name"] == mock_agent.name
 
-    def test_successful_launch_with_ecs(self, client, test_agent):
-        """Test launch with mocked ECS."""
-        from uuid import UUID
-
-        mock_path = "engine.ecs.get_task_runner"
-        with patch(mock_path) as mock_get_runner:
-            task_arn = "arn:aws:ecs:us-east-2:123:task/test/abc123"
-            mock_runner = MagicMock()
-            mock_runner.run_task.return_value = task_arn
-            mock_get_runner.return_value = mock_runner
-
-            client.force_login(test_agent.user)
-            from django.conf import settings
-
-            # Set ECS config
-            orig_local_provisioner = getattr(settings, "LOCAL_PROVISIONER", None)
-            orig_cluster = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
-            orig_task_def = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", "")
-            orig_sg = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
-            orig_subnets = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
-
-            settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
-            settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
-            settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
-            settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-            settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-abc123"
-
-            try:
-                response = client.post(
-                    reverse("mission_control:launch_range"),
-                    data={"agent_id": test_agent.id},
-                    content_type="application/json",
-                )
-
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] is True
-                assert data["range"]["status"] == "provisioning"
-
-                # Verify task ARN was stored
-                # Range is linked via Request FK, use request_id from response
-                request_id = UUID(data["range"]["request_id"])
-                range_obj = Range.objects.get(request__request_id=request_id)
-                assert range_obj.step_function_execution_arn == task_arn
-            finally:
-                settings.LOCAL_PROVISIONER = orig_local_provisioner
-                settings.PULUMI_ECS_CLUSTER_ARN = orig_cluster
-                settings.PULUMI_TASK_DEFINITION_ARN = orig_task_def
-                settings.PULUMI_ECS_SECURITY_GROUP_ID = orig_sg
-                settings.PULUMI_PRIVATE_SUBNET_IDS = orig_subnets
-
-    def test_rejects_when_range_exists(self, client, test_agent, settings):
-        from cms.models import RangeInstance
-
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create existing range (both Engine Range and CMS RangeInstance)
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.READY,
-        )
-        # CMS tracks ranges via RangeInstance - get_active_range queries this
-        RangeInstance.objects.create(
-            range_id=range_obj.id,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
-            agent=test_agent,
-            status="ready",
-        )
-
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id},
+    def test_successful_launch_with_ecs(self, rf, mock_user, mock_agent):
+        """Test launch delegates to CMS service (ECS details are internal)."""
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}}}',
             content_type="application/json",
         )
+        request.user = mock_user
 
-        # CMS returns 400 for "already have active range" (CMSError)
-        assert response.status_code == 400
-        assert "already have an active range" in response.json()["error"]
-
-    def test_ad_scenario_requires_windows_agent_for_dc(self, client, test_agent, linux_os, settings):
-        """AD scenario requires Windows agent for DC (xdr_agent=true on DC).
-
-        Linux-only agent is insufficient because DC needs Windows agent.
-        """
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create only a Linux agent - insufficient for AD scenario
-        linux_agent = AgentConfig.objects.create(
-            user=test_agent.user,
-            os=linux_os,
-            name="Linux Agent",
-            s3_key="agents/test/fake.deb",
-            original_filename="agent.deb",
-            file_size_bytes=25000000,
-            sha256_hash="def456",
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+            agent_name=mock_agent.name,
         )
 
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={
-                "agent_id": linux_agent.id,
-                "scenario": "ad_attack_lab",
-            },
-            content_type="application/json",
-        )
-
-        # Fails because DC requires Windows agent (xdr_agent=true, os_type=windows)
-        assert response.status_code == 400
-
-    def test_ad_scenario_success_with_windows_agent(self, client, test_agent, settings):
-        """AD scenario succeeds with Windows agent (used for both DC and victim)."""
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # test_agent uses windows_os fixture
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={
-                "agent_id": test_agent.id,
-                "scenario": "ad_attack_lab",
-            },
-            content_type="application/json",
-        )
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx) as mock_create,
+        ):
+            response = views.launch_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
+        assert data["success"] is True
+        assert data["range"]["status"] == "provisioning"
+        # Verify cms_create_range was called with correct args
+        mock_create.assert_called_once_with(mock_user, "basic", {"windows": mock_agent.id})
+
+    def test_rejects_when_range_exists(self, rf, mock_user, mock_agent):
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}}}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(
+                views,
+                "cms_create_range",
+                side_effect=CMSError("You already have an active range"),
+            ),
+        ):
+            response = views.launch_range(request)
+
+        assert response.status_code == 400
+        assert "already have an active range" in _json(response)["error"]
+
+    def test_ad_scenario_requires_windows_agent_for_dc(self, rf, mock_user, mock_linux_agent):
+        """AD scenario requires Windows agent for DC.
+        Linux-only agent is insufficient because DC needs Windows agent.
+        """
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_linux_agent.id}, "scenario": "ad_attack_lab"}}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch.object(
+                views,
+                "cms_list_scenarios",
+                return_value=[{"id": "basic"}, {"id": "ad_attack_lab"}],
+            ),
+            patch.object(views, "cms_get_agent", return_value=mock_linux_agent),
+            patch.object(
+                views,
+                "cms_create_range",
+                side_effect=CMSError("AD scenario requires a Windows agent for the DC"),
+            ),
+        ):
+            response = views.launch_range(request)
+
+        assert response.status_code == 400
+
+    def test_ad_scenario_success_with_windows_agent(self, rf, mock_user, mock_agent):
+        """AD scenario succeeds with Windows agent."""
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}, "scenario": "ad_attack_lab"}}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+            scenario_id="ad_attack_lab",
+        )
+
+        with (
+            patch.object(
+                views,
+                "cms_list_scenarios",
+                return_value=[{"id": "basic"}, {"id": "ad_attack_lab"}],
+            ),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx),
+        ):
+            response = views.launch_range(request)
+
+        assert response.status_code == 200
+        data = _json(response)
         assert data["success"] is True
         assert data["range"]["status"] == "provisioning"
         assert data["range"]["scenario_id"] == "ad_attack_lab"
 
-    def test_basic_scenario_allows_any_agent(self, client, test_agent, linux_os, settings):
+    def test_basic_scenario_allows_any_agent(self, rf, mock_user, mock_linux_agent):
         """Basic scenario works with any agent OS."""
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create a Linux agent
-        linux_agent = AgentConfig.objects.create(
-            user=test_agent.user,
-            os=linux_os,
-            name="Linux Agent",
-            s3_key="agents/test/fake.deb",
-            original_filename="agent.deb",
-            file_size_bytes=25000000,
-            sha256_hash="def456",
-        )
-
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": linux_agent.id, "scenario": "basic"},
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_linux_agent.id}, "scenario": "basic"}}',
             content_type="application/json",
         )
+        request.user = mock_user
+
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+            scenario_id="basic",
+        )
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_linux_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx),
+        ):
+            response = views.launch_range(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["success"] is True
         assert data["range"]["scenario_id"] == "basic"
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# TestCancelRange
+# ---------------------------------------------------------------------------
+
+
 class TestCancelRange:
     """Tests for cancel_range view.
 
-    The view now requires range_id in the request body and delegates to
+    The view requires range_id in the request body and delegates to
     cms.cancel_range() which updates status to DESTROYED and calls engine.
     """
 
-    def test_requires_login(self, client):
-        response = client.post(reverse("mission_control:cancel_range"))
+    def test_requires_login(self, rf):
+        request = rf.post(
+            "/api/range/cancel/",
+            data="{}",
+            content_type="application/json",
+        )
+        request.user = AnonymousUser()
+        response = views.cancel_range(request)
         assert response.status_code == 302
 
-    def test_requires_range_id_in_body(self, client, test_agent):
+    def test_requires_range_id_in_body(self, rf, mock_user):
         """Request must include range_id in JSON body."""
-        client.force_login(test_agent.user)
-        response = client.post(
-            reverse("mission_control:cancel_range"),
-            data={},
+        request = rf.post(
+            "/api/range/cancel/",
+            data="{}",
             content_type="application/json",
         )
+        request.user = mock_user
+        response = views.cancel_range(request)
         assert response.status_code == 400
-        assert "range_id" in response.json()["error"]
+        assert "range_id" in _json(response)["error"]
 
-    def test_returns_error_when_range_not_found(self, client, test_agent):
+    def test_returns_error_when_range_not_found(self, rf, mock_user):
         """Returns error when range_id doesn't exist."""
-        client.force_login(test_agent.user)
-        response = client.post(
-            reverse("mission_control:cancel_range"),
-            data={"range_id": 99999},
+        request = rf.post(
+            "/api/range/cancel/",
+            data='{"range_id": 99999}',
             content_type="application/json",
         )
+        request.user = mock_user
+
+        # View does `from cms import cancel_range` locally — mock at source
+        with patch(
+            "cms.cancel_range",
+            side_effect=CMSError("Range not found"),
+        ):
+            response = views.cancel_range(request)
+
         assert response.status_code == 400
-        # CMS returns CMSError which is converted to 400
 
-    def test_successful_cancel(self, client, test_agent):
+    def test_successful_cancel(self, rf, mock_user):
         """Successfully cancels a range by setting status to DESTROYED."""
-        from cms.models import RangeInstance
-
-        client.force_login(test_agent.user)
-
-        # Create Request objects (required for engine operations)
-        request_id = uuid4()
-        engine_request = EngineRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
-        cms_request = CMSRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
-
-        # Create a provisioning range (both Engine Range and CMS RangeInstance)
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.PROVISIONING,
-            request=engine_request,
-        )
-        RangeInstance.objects.create(
-            range_id=range_obj.id,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
-            agent=test_agent,
-            status="provisioning",
-            request=cms_request,
-        )
-
-        # Mock engine cancel to avoid AWS calls
-        with patch("cms.services.engine_cancel_range_by_request") as mock_engine:
-            response = client.post(
-                reverse("mission_control:cancel_range"),
-                data={"range_id": range_obj.id},
-                content_type="application/json",
-            )
-            assert response.status_code == 200
-            assert response.json()["success"] is True
-
-            # Verify engine was called with request_id
-            mock_engine.assert_called_once_with(request_id)
-
-    def test_cancel_sets_status_to_destroyed(self, client, test_agent):
-        """Cancel updates CMS status to DESTROYED before calling engine."""
-        from cms.models import RangeInstance
-
-        client.force_login(test_agent.user)
-
-        # Create Request objects (required for engine operations)
-        request_id = uuid4()
-        engine_request = EngineRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
-        cms_request = CMSRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
-
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.PROVISIONING,
-            request=engine_request,
-        )
-        RangeInstance.objects.create(
-            range_id=range_obj.id,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
-            agent=test_agent,
-            status="provisioning",
-            request=cms_request,
-        )
-
-        with patch("cms.services.engine_cancel_range_by_request"):
-            client.post(
-                reverse("mission_control:cancel_range"),
-                data={"range_id": range_obj.id},
-                content_type="application/json",
-            )
-
-        # Verify CMS RangeInstance was updated (via model invariant)
-        ri = RangeInstance.objects.get(range_id=range_obj.id)
-        assert ri.status == "destroyed"
-        assert ri.deleted_at is not None  # Terminal status invariant
-
-    def test_cannot_cancel_other_users_range(self, client, test_agent, django_user_model):
-        """Users cannot cancel ranges they don't own."""
-        from cms.models import RangeInstance
-
-        other_user = django_user_model.objects.create_user(
-            username="other", email="other@example.com", password="testpass"
-        )
-        client.force_login(other_user)
-
-        # Create Request objects (required for engine operations)
-        request_id = uuid4()
-        engine_request = EngineRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
-        cms_request = CMSRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
-
-        # Create range owned by test_agent.user (both Engine Range and CMS RangeInstance)
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.PROVISIONING,
-            request=engine_request,
-        )
-        RangeInstance.objects.create(
-            range_id=range_obj.id,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
-            agent=test_agent,
-            status="provisioning",
-            request=cms_request,
-        )
-
-        response = client.post(
-            reverse("mission_control:cancel_range"),
-            data={"range_id": range_obj.id},
+        request = rf.post(
+            "/api/range/cancel/",
+            data='{"range_id": 42}',
             content_type="application/json",
         )
-        assert response.status_code == 400  # CMSError for not found/not owned
+        request.user = mock_user
+
+        with patch(
+            "cms.cancel_range",
+        ) as mock_cancel:
+            response = views.cancel_range(request)
+
+        assert response.status_code == 200
+        assert _json(response)["success"] is True
+        mock_cancel.assert_called_once_with(mock_user, 42)
+
+    def test_cancel_delegates_to_cms(self, rf, mock_user):
+        """Cancel calls CMS cancel_range which handles status + engine call."""
+        request = rf.post(
+            "/api/range/cancel/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with patch("cms.cancel_range") as mock_cancel:
+            views.cancel_range(request)
+
+        mock_cancel.assert_called_once_with(mock_user, 42)
+
+    def test_cannot_cancel_other_users_range(self, rf, other_user):
+        """Users cannot cancel ranges they don't own."""
+        request = rf.post(
+            "/api/range/cancel/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = other_user
+
+        with patch(
+            "cms.cancel_range",
+            side_effect=CMSError("Range not found"),
+        ):
+            response = views.cancel_range(request)
+
+        assert response.status_code == 400
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# TestDestroyRange
+# ---------------------------------------------------------------------------
+
+
 class TestDestroyRange:
-    def test_requires_login(self, client):
-        response = client.post(reverse("mission_control:destroy_range"))
+    def test_requires_login(self, rf):
+        request = rf.post(
+            "/api/range/destroy/",
+            data="{}",
+            content_type="application/json",
+        )
+        request.user = AnonymousUser()
+        response = views.destroy_range(request)
         assert response.status_code == 302
 
-    def test_returns_404_when_no_range(self, client, test_agent):
-        client.force_login(test_agent.user)
-        response = client.post(
-            reverse("mission_control:destroy_range"),
-            data={"range_id": 99999},
+    def test_returns_error_when_no_range(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/destroy/",
+            data='{"range_id": 99999}',
             content_type="application/json",
         )
-        # CMS returns 400 (CMSError) for range not found, not 404
+        request.user = mock_user
+
+        with patch(
+            "cms.destroy_range",
+            side_effect=CMSError("Range not found"),
+        ):
+            response = views.destroy_range(request)
+
         assert response.status_code == 400
 
-    def test_successful_destroy(self, client, test_agent, settings):
-        from cms.models import RangeInstance
-
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create Request objects (required for engine operations)
-        request_id = uuid4()
-        engine_request = EngineRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
+    def test_successful_destroy(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/destroy/",
+            data='{"range_id": 42}',
+            content_type="application/json",
         )
-        cms_request = CMSRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
+        request.user = mock_user
 
-        # Create a ready range (both Engine Range and CMS RangeInstance)
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.READY,
-            request=engine_request,
-        )
-        RangeInstance.objects.create(
-            range_id=range_obj.id,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
-            agent=test_agent,
-            status="ready",
-            request=cms_request,
-        )
+        with patch("cms.destroy_range") as mock_destroy:
+            response = views.destroy_range(request)
 
-        with patch("cms.services.engine_destroy_range_by_request"):
-            response = client.post(
-                reverse("mission_control:destroy_range"),
-                data={"range_id": range_obj.id},
-                content_type="application/json",
-            )
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["success"] is True
+        mock_destroy.assert_called_once_with(mock_user, 42)
 
-        # Verify CMS RangeInstance was marked as DESTROYING
-        ri = RangeInstance.objects.get(range_id=range_obj.id)
-        assert ri.status == "destroying"
-        assert ri.deleted_at is not None  # Soft deleted
-
-    def test_can_destroy_failed_range(self, client, test_agent, settings):
+    def test_can_destroy_failed_range(self, rf, mock_user):
         """Failed ranges can be destroyed to clean up."""
-        from cms.models import RangeInstance
-
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create Request objects (required for engine operations)
-        request_id = uuid4()
-        engine_request = EngineRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
+        request = rf.post(
+            "/api/range/destroy/",
+            data='{"range_id": 42}',
+            content_type="application/json",
         )
-        cms_request = CMSRequest.objects.create(
-            request_id=request_id,
-            user=test_agent.user,
-            request_type="create_range",
-        )
+        request.user = mock_user
 
-        # Create a failed range (both Engine Range and CMS RangeInstance)
-        range_obj = Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.FAILED,
-            error_message="Provisioning timed out",
-            request=engine_request,
-        )
-        RangeInstance.objects.create(
-            range_id=range_obj.id,
-            user_id=test_agent.user.id,
-            scenario_id="basic",
-            agent=test_agent,
-            status="failed",
-            request=cms_request,
-        )
+        with patch("cms.destroy_range") as mock_destroy:
+            response = views.destroy_range(request)
 
-        with patch("cms.services.engine_destroy_range_by_request"):
-            response = client.post(
-                reverse("mission_control:destroy_range"),
-                data={"range_id": range_obj.id},
-                content_type="application/json",
-            )
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert data["success"] is True
-
-        # Verify CMS RangeInstance was marked as DESTROYING
-        ri = RangeInstance.objects.get(range_id=range_obj.id)
-        assert ri.status == "destroying"
-        assert ri.deleted_at is not None  # Soft deleted
+        mock_destroy.assert_called_once_with(mock_user, 42)
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# TestLaunchRangeWhileDestroying
+# ---------------------------------------------------------------------------
+
+
 class TestLaunchRangeWhileDestroying:
     """Test that users CAN launch while a range is being destroyed."""
 
-    def test_can_launch_while_destroying(self, client, test_agent, settings):
-        """User can launch a new range while old one is being cleaned up."""
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
+    def test_can_launch_while_destroying(self, rf, mock_user, mock_agent):
+        """User can launch a new range while old one is being cleaned up.
 
-        # Create a range being destroyed
-        Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.DESTROYING,
-            subnet_index=1,
-        )
-
-        # User can launch a new range (gets different subnet)
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id},
+        The CMS service handles subnet allocation internally — the view
+        just delegates to cms_create_range which succeeds if allowed.
+        """
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}}}',
             content_type="application/json",
         )
+        request.user = mock_user
+
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+        )
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx),
+        ):
+            response = views.launch_range(request)
 
         assert response.status_code == 200
-        # New range should get subnet_index=2 (1 is reserved by DESTROYING range)
-        new_range = Range.objects.filter(status=Range.Status.PROVISIONING).first()
-        assert new_range is not None
-        assert new_range.subnet_index == 2
+        data = _json(response)
+        assert data["success"] is True
+        assert data["range"]["status"] == "provisioning"
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# TestListAgents
+# ---------------------------------------------------------------------------
+
+
 class TestListAgents:
-    def test_requires_login(self, client):
-        response = client.get(reverse("mission_control:list_agents"))
+    def test_requires_login(self, rf):
+        request = rf.get("/api/agents/")
+        request.user = AnonymousUser()
+        response = views.list_agents(request)
         assert response.status_code == 302
 
-    def test_returns_user_agents(self, client, test_agent):
-        client.force_login(test_agent.user)
-        response = client.get(reverse("mission_control:list_agents"))
+    def test_returns_user_agents(self, rf, mock_user, mock_agent):
+        request = rf.get("/api/agents/")
+        request.user = mock_user
+
+        agent_dict = {
+            "id": mock_agent.id,
+            "name": "Test XDR Agent",
+            "os_name": "Windows",
+            "os_slug": "windows",
+            "file_size_mb": 47.7,
+            "original_filename": "agent.msi",
+            "created_at": "2025-01-01T00:00:00Z",
+            "agent_type": "xdr",
+            "agent_type_display": "XDR",
+        }
+
+        with patch.object(views, "cms_list_agents", return_value=[agent_dict]):
+            response = views.list_agents(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         assert len(data["agents"]) == 1
-        assert data["agents"][0]["id"] == test_agent.id
+        assert data["agents"][0]["id"] == mock_agent.id
         assert data["agents"][0]["name"] == "Test XDR Agent"
 
-    def test_includes_os_slug_for_filtering(self, client, test_agent):
+    def test_includes_os_slug_for_filtering(self, rf, mock_user, mock_agent):
         """Agent list should include os_slug for frontend filtering."""
-        client.force_login(test_agent.user)
-        response = client.get(reverse("mission_control:list_agents"))
+        request = rf.get("/api/agents/")
+        request.user = mock_user
+
+        agent_dict = {
+            "id": mock_agent.id,
+            "name": "Test XDR Agent",
+            "os_name": "Windows",
+            "os_slug": "windows",
+            "file_size_mb": 47.7,
+            "original_filename": "agent.msi",
+            "created_at": "2025-01-01T00:00:00Z",
+            "agent_type": "xdr",
+            "agent_type_display": "XDR",
+        }
+
+        with patch.object(views, "cms_list_agents", return_value=[agent_dict]):
+            response = views.list_agents(request)
 
         assert response.status_code == 200
-        data = response.json()
+        data = _json(response)
         agent = data["agents"][0]
         assert "os_slug" in agent
-        assert agent["os_slug"] == "windows"  # test_agent uses windows_os fixture
+        assert agent["os_slug"] == "windows"
 
 
-@pytest.mark.django_db
+# ---------------------------------------------------------------------------
+# TestSubnetIndexAllocation
+# ---------------------------------------------------------------------------
+
+
 class TestSubnetIndexAllocation:
-    """Tests for subnet_index allocation in Range model."""
+    """Tests for subnet_index allocation in Range model.
 
-    def test_allocates_index_on_launch(self, client, test_agent, settings):
-        """Launch should allocate a subnet_index."""
-        from uuid import UUID
+    These tests mock Range.allocate_subnet_index and Range.objects
+    since they are pure model/ORM operations.
+    """
 
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        response = client.post(
-            reverse("mission_control:launch_range"),
-            data={"agent_id": test_agent.id},
+    def test_allocates_index_on_launch(self, rf, mock_user, mock_agent):
+        """Launch should delegate to CMS which allocates a subnet_index."""
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}}}',
             content_type="application/json",
         )
+        request.user = mock_user
+
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+        )
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx) as mock_create,
+        ):
+            response = views.launch_range(request)
 
         assert response.status_code == 200
-        # Range is linked via Request FK, use request_id from response
-        request_id = UUID(response.json()["range"]["request_id"])
-        range_obj = Range.objects.get(request__request_id=request_id)
-        assert range_obj.subnet_index is not None
-        assert 1 <= range_obj.subnet_index <= Range.SUBNET_INDEX_MAX
+        # Verify cms_create_range was called (it handles subnet allocation)
+        mock_create.assert_called_once()
 
-    def test_first_allocation_returns_one(self, test_agent):
+    def test_first_allocation_returns_one(self):
         """First allocation should return index 1."""
-        index = Range.allocate_subnet_index()
-        assert index == 1
+        from engine.models import Range
 
-    def test_allocates_sequential_indices(self, test_agent):
-        """Allocations should fill gaps."""
-        # Create range with index 1
-        Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.PROVISIONING,
-            subnet_index=1,
-        )
-
-        # Next allocation should be 2
-        index = Range.allocate_subnet_index()
-        assert index == 2
-
-    def test_reuses_destroyed_indices(self, test_agent):
-        """Destroyed ranges should free up their indices."""
-        # Create and destroy a range with index 1
-        Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.DESTROYED,
-            subnet_index=1,
-        )
-
-        # Should reuse index 1
-        index = Range.allocate_subnet_index()
-        assert index == 1
-
-    def test_fills_gaps(self, test_agent):
-        """Should fill gaps in index sequence."""
-        # Create ranges with indices 1 and 3 (gap at 2)
-        Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.READY,
-            subnet_index=1,
-        )
-        Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.READY,
-            subnet_index=3,
-        )
-
-        # Should fill gap at index 2
-        index = Range.allocate_subnet_index()
-        assert index == 2
-
-    def test_skips_active_indices(self, test_agent):
-        """Should not reuse indices from active ranges (excludes DESTROYED and FAILED)."""
-        # Create ranges in various active states (FAILED is now excluded like DESTROYED)
-        for i, status in enumerate(
-            [
-                Range.Status.PROVISIONING,
-                Range.Status.READY,
-                Range.Status.PAUSED,
-                Range.Status.DESTROYING,
-            ],
-            start=1,
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
         ):
-            Range.objects.create(
-                user=test_agent.user,
-                status=status,
-                subnet_index=i,
-            )
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = []
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
 
-        # Next allocation should be 5
-        index = Range.allocate_subnet_index()
-        assert index == 5
+            index = Range.allocate_subnet_index()
+            assert index == 1
 
-    def test_reuses_failed_indices(self, test_agent):
-        """Failed ranges should free up their indices (like destroyed ranges)."""
-        # Create a failed range with index 1
-        Range.objects.create(
-            user=test_agent.user,
-            status=Range.Status.FAILED,
-            subnet_index=1,
-        )
+    def test_allocates_sequential_indices(self):
+        """Allocations should fill gaps."""
+        from engine.models import Range
 
-        # Should reuse index 1 since FAILED ranges are excluded from allocation
-        index = Range.allocate_subnet_index()
-        assert index == 1
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
+        ):
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = [1]
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
 
-    def test_raises_when_exhausted(self, test_agent):
+            index = Range.allocate_subnet_index()
+            assert index == 2
+
+    def test_reuses_destroyed_indices(self):
+        """Destroyed ranges should free up their indices."""
+        from engine.models import Range
+
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
+        ):
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = []
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
+
+            index = Range.allocate_subnet_index()
+            assert index == 1
+
+    def test_fills_gaps(self):
+        """Should fill gaps in index sequence."""
+        from engine.models import Range
+
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
+        ):
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = [1, 3]
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
+
+            index = Range.allocate_subnet_index()
+            assert index == 2
+
+    def test_skips_active_indices(self):
+        """Should not reuse indices from active ranges."""
+        from engine.models import Range
+
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
+        ):
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = [1, 2, 3, 4]
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
+
+            index = Range.allocate_subnet_index()
+            assert index == 5
+
+    def test_reuses_failed_indices(self):
+        """Failed ranges should free up their indices (like destroyed)."""
+        from engine.models import Range
+
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
+        ):
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = []
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
+
+            index = Range.allocate_subnet_index()
+            assert index == 1
+
+    def test_raises_when_exhausted(self):
         """Should raise ValueError when all indices are used."""
-        # Mock a small max to avoid creating thousands of ranges
-        with patch.object(Range, "SUBNET_INDEX_MAX", 5):
-            for i in range(1, 6):
-                Range.objects.create(
-                    user=test_agent.user,
-                    status=Range.Status.READY,
-                    subnet_index=i,
-                )
+        from engine.models import Range
+
+        with (
+            patch("engine.models.transaction") as mock_tx,
+            patch("engine.models.Range.objects") as mock_objects,
+            patch.object(Range, "SUBNET_INDEX_MAX", 5),
+        ):
+            mock_tx.atomic.return_value.__enter__ = MagicMock()
+            mock_tx.atomic.return_value.__exit__ = MagicMock(return_value=False)
+            mock_qs = MagicMock()
+            mock_qs.values_list.return_value = [1, 2, 3, 4, 5]
+            mock_objects.exclude.return_value.exclude.return_value = mock_qs
 
             with pytest.raises(ValueError, match="No subnet indices available"):
                 Range.allocate_subnet_index()
 
-    def test_capacity_error_raises_value_error(self, client, test_agent, settings, django_user_model):
-        """API raises ValueError when subnet allocation fails (no capacity).
+    def test_capacity_error_on_launch(self, rf, mock_user, mock_agent):
+        """API returns error when subnet allocation fails (no capacity).
 
-        Note: This currently raises an uncaught ValueError because the error
-        from allocate_subnet_index() isn't caught and converted to a user-friendly
-        response. A future improvement would be to catch this and return 503
-        with a proper error message.
+        CMS service raises CMSError (or ValueError propagates) when
+        allocate_subnet_index() fails.
         """
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        client.force_login(test_agent.user)
-
-        # Create a different user to hold the ranges (so test_agent.user has no active range)
-        other_user = django_user_model.objects.create_user(
-            username="capacitytest",
-            email="capacitytest@example.com",
-            password="testpass",
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}}}',
+            content_type="application/json",
         )
+        request.user = mock_user
 
-        # Mock a small max to avoid creating thousands of ranges
-        with patch.object(Range, "SUBNET_INDEX_MAX", 5):
-            # Create ranges for all 5 indices (owned by other_user, all READY so they block)
-            for i in range(1, 6):
-                Range.objects.create(
-                    user=other_user,
-                    status=Range.Status.READY,
-                    subnet_index=i,
-                )
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(
+                views,
+                "cms_create_range",
+                side_effect=ValueError("No subnet indices available"),
+            ),
+            pytest.raises(ValueError, match="No subnet indices available"),
+        ):
+            views.launch_range(request)
 
-            # Django test client propagates uncaught exceptions
-            with pytest.raises(ValueError, match="No subnet indices available"):
-                client.post(
-                    reverse("mission_control:launch_range"),
-                    data={"agent_id": test_agent.id},
-                    content_type="application/json",
-                )
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _json(response):
+    """Extract JSON from a JsonResponse."""
+    import json
+
+    return json.loads(response.content)

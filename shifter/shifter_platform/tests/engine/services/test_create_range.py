@@ -37,7 +37,6 @@ def make_request_spec(
     )
 
 
-@pytest.mark.django_db
 class TestCreateRange:
     """Tests for create_range() in engine/services.py.
 
@@ -48,6 +47,12 @@ class TestCreateRange:
     - Errors: TypeError (wrong type), ValueError (missing RangeSpec/subnet exhausted), User.DoesNotExist
     - Logging: DEBUG on entry, INFO on range creation, INFO on ECS task start
     """
+
+    @pytest.fixture(autouse=True)
+    def _mock_transaction(self):
+        """Mock transaction.atomic — unit tests don't need real DB transactions."""
+        with patch("engine.services.transaction"):
+            yield
 
     # -------------------------------------------------------------------------
     # Outputs - returns request_id UUID

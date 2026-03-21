@@ -1,5 +1,9 @@
 """Tests for launch_range view wiring to cms_create_range.
 
+All tests mock the ORM -- no @pytest.mark.django_db markers.
+Views are called via RequestFactory with mock users; CMS service
+functions are patched at the view-module boundary.
+
 Verifies that launch_range:
 - Validates inputs (agent_id required, JSON format)
 - Uses CMS for scenario validation
@@ -8,49 +12,66 @@ Verifies that launch_range:
 - Logs successful launches
 """
 
-from unittest.mock import patch
+import json
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from django.contrib.auth import get_user_model
-from django.test import Client
-from django.urls import reverse
+from django.test import RequestFactory
 
-from cms.models import AgentConfig, OperatingSystem
+from mission_control import views
 from shared.enums import ResourceStatus
+from shared.exceptions import CMSError
+from shared.schemas import InstanceContext, RangeContext
 
-User = get_user_model()
-
-
-@pytest.fixture
-def user(db):
-    return User.objects.create_user(
-        username="test@example.com",
-        email="test@example.com",
-        password="testpass",
-    )
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def client(user):
-    c = Client()
-    c.login(username="test@example.com", password="testpass")
-    return c
+def _json(response):
+    """Extract JSON from a JsonResponse."""
+    return json.loads(response.content)
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def windows_agent(user, db):
-    """Windows agent for testing."""
-    os = OperatingSystem.objects.get(slug="windows")
-    return AgentConfig.objects.create(
-        user=user,
-        name="Windows Agent",
-        os=os,
-        s3_key="agents/123/agent.msi",
-        original_filename="cortex_agent.msi",
-        file_size_bytes=5000000,
-        sha256_hash="abc123def456",
-    )
+def rf():
+    """Django RequestFactory (no DB needed)."""
+    return RequestFactory()
+
+
+@pytest.fixture
+def mock_user():
+    """Authenticated mock user."""
+    user = MagicMock()
+    user.id = 1
+    user.pk = 1
+    user.username = "test@example.com"
+    user.email = "test@example.com"
+    user.is_authenticated = True
+    user.is_active = True
+    return user
+
+
+@pytest.fixture
+def mock_windows_agent():
+    """Mock Windows AgentConfig object."""
+    agent = MagicMock()
+    agent.id = 10
+    agent.name = "Windows Agent"
+    agent.os = MagicMock()
+    agent.os.slug = "windows"
+    agent.os.name = "Windows"
+    agent.original_filename = "cortex_agent.msi"
+    agent.s3_key = "agents/123/agent.msi"
+    agent.file_size_bytes = 5000000
+    agent.sha256_hash = "abc123def456"
+    return agent
 
 
 @pytest.fixture
@@ -60,15 +81,20 @@ def mock_cms_list_scenarios():
         {"id": "basic", "name": "Basic"},
         {"id": "ad_attack_lab", "name": "AD Attack Lab"},
     ]
-    with patch("mission_control.views.cms_list_scenarios", return_value=scenarios):
+    with patch.object(views, "cms_list_scenarios", return_value=scenarios):
         yield scenarios
+
+
+@pytest.fixture
+def mock_cms_get_agent(mock_windows_agent):
+    """Mock CMS get_agent to return the mock Windows agent."""
+    with patch.object(views, "cms_get_agent", return_value=mock_windows_agent) as mock_get:
+        yield mock_get
 
 
 @pytest.fixture
 def mock_range_context():
     """Create a mock RangeContext for testing."""
-    from shared.schemas import InstanceContext, RangeContext
-
     return RangeContext(
         request_id=uuid4(),
         range_id=42,
@@ -88,64 +114,73 @@ def mock_range_context():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestLaunchRangeInputValidation:
     """Tests for input validation in launch_range view."""
 
-    def test_returns_400_for_invalid_json(self, client):
+    def test_returns_400_for_invalid_json(self, rf, mock_user):
         """View returns 400 when request body is not valid JSON."""
-        url = reverse("mission_control:launch_range")
-        response = client.post(
-            url,
+        request = rf.post(
+            "/api/range/launch/",
             data="not valid json{",
             content_type="application/json",
         )
-        assert response.status_code == 400
-        assert response.json()["error"] == "Invalid JSON"
+        request.user = mock_user
 
-    def test_returns_400_for_empty_body(self, client):
+        response = views.launch_range(request)
+        assert response.status_code == 400
+        assert _json(response)["error"] == "Invalid JSON"
+
+    def test_returns_400_for_empty_body(self, rf, mock_user):
         """View returns 400 when request body is empty."""
-        url = reverse("mission_control:launch_range")
-        response = client.post(
-            url,
+        request = rf.post(
+            "/api/range/launch/",
             data="",
             content_type="application/json",
         )
-        assert response.status_code == 400
-        assert response.json()["error"] == "Invalid JSON"
+        request.user = mock_user
 
-    def test_returns_400_when_agent_id_missing(self, client, mock_cms_list_scenarios):
+        response = views.launch_range(request)
+        assert response.status_code == 400
+        assert _json(response)["error"] == "Invalid JSON"
+
+    def test_returns_400_when_agent_id_missing(self, rf, mock_user, mock_cms_list_scenarios):
         """View returns 400 when agent_id is not provided."""
-        url = reverse("mission_control:launch_range")
-        response = client.post(
-            url,
-            data={"scenario": "basic"},
+        request = rf.post(
+            "/api/range/launch/",
+            data=json.dumps({"scenario": "basic"}),
             content_type="application/json",
         )
-        assert response.status_code == 400
-        assert "agent_id" in response.json()["error"]
+        request.user = mock_user
 
-    def test_returns_400_when_agent_id_is_null(self, client, mock_cms_list_scenarios):
+        response = views.launch_range(request)
+        assert response.status_code == 400
+        assert "agent_id" in _json(response)["error"]
+
+    def test_returns_400_when_agent_id_is_null(self, rf, mock_user, mock_cms_list_scenarios):
         """View returns 400 when agent_id is explicitly null."""
-        url = reverse("mission_control:launch_range")
-        response = client.post(
-            url,
-            data={"agent_id": None, "scenario": "basic"},
+        request = rf.post(
+            "/api/range/launch/",
+            data=json.dumps({"agent_id": None, "scenario": "basic"}),
             content_type="application/json",
         )
-        assert response.status_code == 400
-        assert "agent_id" in response.json()["error"]
+        request.user = mock_user
 
-    def test_returns_400_when_agent_id_is_zero(self, client, mock_cms_list_scenarios):
+        response = views.launch_range(request)
+        assert response.status_code == 400
+        assert "agent_id" in _json(response)["error"]
+
+    def test_returns_400_when_agent_id_is_zero(self, rf, mock_user, mock_cms_list_scenarios):
         """View returns 400 when agent_id is zero (falsy)."""
-        url = reverse("mission_control:launch_range")
-        response = client.post(
-            url,
-            data={"agent_id": 0, "scenario": "basic"},
+        request = rf.post(
+            "/api/range/launch/",
+            data=json.dumps({"agent_id": 0, "scenario": "basic"}),
             content_type="application/json",
         )
+        request.user = mock_user
+
+        response = views.launch_range(request)
         assert response.status_code == 400
-        assert "agent_id" in response.json()["error"]
+        assert "agent_id" in _json(response)["error"]
 
 
 # -----------------------------------------------------------------------------
@@ -153,92 +188,119 @@ class TestLaunchRangeInputValidation:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestLaunchRangeScenarioValidation:
     """Tests for scenario validation in launch_range view."""
 
-    def test_accepts_basic_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
+    def test_accepts_basic_scenario(
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+        mock_range_context,
+    ):
         """View accepts 'basic' scenario."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+        with patch.object(views, "cms_create_range", return_value=mock_range_context):
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
+
+            response = views.launch_range(request)
             assert response.status_code == 200
 
-    def test_accepts_ad_attack_lab_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
+    def test_accepts_ad_attack_lab_scenario(
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+        mock_range_context,
+    ):
         """View accepts 'ad_attack_lab' scenario."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "ad_attack_lab"},
+        with patch.object(views, "cms_create_range", return_value=mock_range_context):
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps(
+                    {
+                        "agent_id": mock_windows_agent.id,
+                        "scenario": "ad_attack_lab",
+                    }
+                ),
                 content_type="application/json",
             )
+            request.user = mock_user
+
+            response = views.launch_range(request)
             assert response.status_code == 200
 
-    def test_rejects_unknown_scenario(self, client, windows_agent):
+    def test_rejects_unknown_scenario(self, rf, mock_user, mock_windows_agent, mock_cms_get_agent):
         """View rejects unknown scenario with 400 error."""
-        # Mock CMS to return only basic
-        with patch(
-            "mission_control.views.cms_list_scenarios",
+        with patch.object(
+            views,
+            "cms_list_scenarios",
             return_value=[{"id": "basic", "name": "Basic"}],
         ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={
-                    "agent_id": windows_agent.id,
-                    "scenario": "unknown_scenario",
-                },
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps(
+                    {
+                        "agent_id": mock_windows_agent.id,
+                        "scenario": "unknown_scenario",
+                    }
+                ),
                 content_type="application/json",
             )
-            assert response.status_code == 400
-            assert "Invalid" in response.json()["error"]
+            request.user = mock_user
 
-    def test_scenario_validation_uses_cms(self, client, windows_agent):
+            response = views.launch_range(request)
+            assert response.status_code == 400
+            assert "Invalid" in _json(response)["error"]
+
+    def test_scenario_validation_uses_cms(self, rf, mock_user, mock_windows_agent, mock_cms_get_agent):
         """Scenario validation uses CMS list_scenarios, not hardcoded list."""
-        # Mock CMS to return only 'basic' as valid
         mock_scenarios = [{"id": "basic", "name": "Basic"}]
 
-        with patch(
-            "mission_control.views.cms_list_scenarios",
-            return_value=mock_scenarios,
-        ):
-            url = reverse("mission_control:launch_range")
+        with patch.object(views, "cms_list_scenarios", return_value=mock_scenarios):
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps(
+                    {
+                        "agent_id": mock_windows_agent.id,
+                        "scenario": "ad_attack_lab",
+                    }
+                ),
+                content_type="application/json",
+            )
+            request.user = mock_user
 
             # ad_attack_lab should be rejected since CMS doesn't list it
-            response = client.post(
-                url,
-                data={
-                    "agent_id": windows_agent.id,
-                    "scenario": "ad_attack_lab",
-                },
-                content_type="application/json",
-            )
-            # If CMS is being used, ad_attack_lab should be invalid
+            response = views.launch_range(request)
             assert response.status_code == 400
 
-    def test_defaults_to_basic_scenario(self, client, windows_agent, mock_cms_list_scenarios, mock_range_context):
+    def test_defaults_to_basic_scenario(
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+        mock_range_context,
+    ):
         """View defaults to 'basic' scenario when not specified."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ) as mock_create:
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id},
+        with patch.object(views, "cms_create_range", return_value=mock_range_context) as mock_create:
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id}),
                 content_type="application/json",
             )
+            request.user = mock_user
+
+            response = views.launch_range(request)
             assert response.status_code == 200
             # Verify basic was passed to cms_create_range
             mock_create.assert_called_once()
@@ -251,47 +313,54 @@ class TestLaunchRangeScenarioValidation:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestLaunchRangeSuccess:
     """Tests for successful launch_range behavior."""
 
     def test_returns_success_with_range_context_dict(
-        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+        mock_range_context,
     ):
         """Successful launch returns success=True and range as dict."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+        with patch.object(views, "cms_create_range", return_value=mock_range_context):
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
+            response = views.launch_range(request)
             assert response.status_code == 200
-            data = response.json()
+            data = _json(response)
             assert data["success"] is True
             assert "range" in data
             assert isinstance(data["range"], dict)
 
     def test_range_dict_contains_expected_fields(
-        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+        mock_range_context,
     ):
         """Range dict contains RangeContext fields."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+        with patch.object(views, "cms_create_range", return_value=mock_range_context):
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
-            data = response.json()
+            response = views.launch_range(request)
+            data = _json(response)
             range_data = data["range"]
 
             # Verify RangeContext fields are present
@@ -304,21 +373,25 @@ class TestLaunchRangeSuccess:
             assert len(range_data["instances"]) == 2
 
     def test_range_dict_contains_computed_fields(
-        self, client, windows_agent, mock_cms_list_scenarios, mock_range_context
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+        mock_range_context,
     ):
         """Range dict includes computed fields from RangeContext."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id},
+        with patch.object(views, "cms_create_range", return_value=mock_range_context):
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
-            data = response.json()
+            response = views.launch_range(request)
+            data = _json(response)
             range_data = data["range"]
 
             # Computed fields should be present
@@ -328,34 +401,36 @@ class TestLaunchRangeSuccess:
 
     def test_calls_cms_create_range_with_correct_args(
         self,
-        client,
-        user,
-        windows_agent,
+        rf,
+        mock_user,
+        mock_windows_agent,
         mock_cms_list_scenarios,
+        mock_cms_get_agent,
         mock_range_context,
     ):
         """launch_range passes correct arguments to cms_create_range."""
-        with patch(
-            "mission_control.views.cms_create_range",
-            return_value=mock_range_context,
-        ) as mock_create:
-            url = reverse("mission_control:launch_range")
-            client.post(
-                url,
-                data={
-                    "agent_id": windows_agent.id,
-                    "scenario": "ad_attack_lab",
-                },
+        with patch.object(views, "cms_create_range", return_value=mock_range_context) as mock_create:
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps(
+                    {
+                        "agent_id": mock_windows_agent.id,
+                        "scenario": "ad_attack_lab",
+                    }
+                ),
                 content_type="application/json",
             )
+            request.user = mock_user
+
+            views.launch_range(request)
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
 
             # Verify positional args: (user, scenario, agents_by_os)
-            assert call_args[0][0].email == user.email  # User object
+            assert call_args[0][0].email == mock_user.email  # User object
             assert call_args[0][1] == "ad_attack_lab"  # scenario
-            assert call_args[0][2] == {"windows": windows_agent.id}  # agents_by_os
+            assert call_args[0][2] == {"windows": mock_windows_agent.id}  # agents_by_os
 
 
 # -----------------------------------------------------------------------------
@@ -363,45 +438,58 @@ class TestLaunchRangeSuccess:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestLaunchRangeErrorHandling:
     """Tests for error handling in launch_range view."""
 
-    def test_returns_400_on_cms_error(self, client, windows_agent, mock_cms_list_scenarios):
+    def test_returns_400_on_cms_error(
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+    ):
         """View returns 400 when cms_create_range raises CMSError."""
-        from cms.exceptions import CMSError
-
-        with patch(
-            "mission_control.views.cms_create_range",
+        with patch.object(
+            views,
+            "cms_create_range",
             side_effect=CMSError("Agent not found"),
         ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
+            response = views.launch_range(request)
             assert response.status_code == 400
-            assert response.json()["error"] == "Agent not found"
+            assert _json(response)["error"] == "Agent not found"
 
-    def test_cms_error_message_passed_to_response(self, client, windows_agent, mock_cms_list_scenarios):
+    def test_cms_error_message_passed_to_response(
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+    ):
         """CMSError message is included in error response."""
-        from cms.exceptions import CMSError
-
         error_message = "User already has an active range"
-        with patch(
-            "mission_control.views.cms_create_range",
+        with patch.object(
+            views,
+            "cms_create_range",
             side_effect=CMSError(error_message),
         ):
-            url = reverse("mission_control:launch_range")
-            response = client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
-            assert response.json()["error"] == error_message
+            response = views.launch_range(request)
+            assert _json(response)["error"] == error_message
 
 
 # -----------------------------------------------------------------------------
@@ -409,63 +497,75 @@ class TestLaunchRangeErrorHandling:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestLaunchRangeLogging:
     """Tests for logging in launch_range view."""
 
     def test_logs_info_on_successful_launch(
         self,
-        client,
-        user,
-        windows_agent,
+        rf,
+        mock_user,
+        mock_windows_agent,
         mock_cms_list_scenarios,
+        mock_cms_get_agent,
         mock_range_context,
     ):
         """View logs INFO on successful launch."""
         with (
-            patch(
-                "mission_control.views.cms_create_range",
-                return_value=mock_range_context,
-            ),
-            patch("mission_control.views.logger") as mock_logger,
+            patch.object(views, "cms_create_range", return_value=mock_range_context),
+            patch.object(views, "logger") as mock_logger,
         ):
-            url = reverse("mission_control:launch_range")
-            client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
+            views.launch_range(request)
             mock_logger.info.assert_called_once()
 
-    def test_no_log_on_validation_failure(self, client, windows_agent):
+    def test_no_log_on_validation_failure(self, rf, mock_user):
         """View does not log INFO when validation fails."""
-        with patch("mission_control.views.logger") as mock_logger:
-            url = reverse("mission_control:launch_range")
-            client.post(
-                url,
-                data={"scenario": "basic"},  # Missing agent_id
+        with patch.object(views, "logger") as mock_logger:
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"scenario": "basic"}),  # Missing agent_id
                 content_type="application/json",
             )
+            request.user = mock_user
+
+            with patch.object(
+                views,
+                "cms_list_scenarios",
+                return_value=[{"id": "basic", "name": "Basic"}],
+            ):
+                views.launch_range(request)
 
             mock_logger.info.assert_not_called()
 
-    def test_no_log_on_cms_error(self, client, windows_agent, mock_cms_list_scenarios):
+    def test_no_log_on_cms_error(
+        self,
+        rf,
+        mock_user,
+        mock_windows_agent,
+        mock_cms_list_scenarios,
+        mock_cms_get_agent,
+    ):
         """View does not log INFO when CMSError occurs."""
-        from cms.exceptions import CMSError
-
         with (
-            patch(
-                "mission_control.views.cms_create_range",
+            patch.object(
+                views,
+                "cms_create_range",
                 side_effect=CMSError("Test error"),
             ),
-            patch("mission_control.views.logger") as mock_logger,
+            patch.object(views, "logger") as mock_logger,
         ):
-            url = reverse("mission_control:launch_range")
-            client.post(
-                url,
-                data={"agent_id": windows_agent.id, "scenario": "basic"},
+            request = rf.post(
+                "/api/range/launch/",
+                data=json.dumps({"agent_id": mock_windows_agent.id, "scenario": "basic"}),
                 content_type="application/json",
             )
+            request.user = mock_user
 
+            views.launch_range(request)
             mock_logger.info.assert_not_called()

@@ -18,62 +18,7 @@ from django.utils import timezone
 
 from cms.models import Credential, CredentialType
 
-# -----------------------------------------------------------------------------
-# Fixtures
-# -----------------------------------------------------------------------------
-
-
-@pytest.fixture
-def credential_type_obj():
-    """Create a CredentialType instance in memory (no DB)."""
-    ct = CredentialType(
-        name="Deployment Profile",
-        slug="deployment_profile",
-        spec_class="shared.schemas.DeploymentProfileSpec",
-    )
-    ct.pk = 1
-    ct.id = 1
-    return ct
-
-
-@pytest.fixture
-def scm_credential_type_obj():
-    """Create an SCM CredentialType instance in memory (no DB)."""
-    ct = CredentialType(
-        name="SCM Credential",
-        slug="scm",
-        spec_class="shared.schemas.SCMCredentialSpec",
-    )
-    ct.pk = 2
-    ct.id = 2
-    return ct
-
-
-def _make_credential(credential_type_obj, pk=1, **overrides):
-    """Build a Credential instance in memory using _id fields to bypass FK checks.
-
-    Uses __new__ + manual __dict__ population to avoid Django's FK descriptor
-    type-checking (which rejects MagicMock users). The _state object is
-    initialized manually to keep FK cache access working.
-    """
-    from django.db.models.base import ModelState
-
-    cred = Credential.__new__(Credential)
-    cred._state = ModelState()
-    # Set fields directly to avoid FK descriptor type checks
-    cred.__dict__["name"] = overrides.get("name", "My Credential")
-    cred.__dict__["user_id"] = overrides.get("user_id", 1)
-    cred.__dict__["credential_type_id"] = credential_type_obj.pk
-    cred.__dict__["data"] = overrides.get("data", {"authcode": "D1234567"})
-    cred.__dict__["deleted_at"] = overrides.get("deleted_at")
-    cred.__dict__["expires_at"] = overrides.get("expires_at")
-    cred.__dict__["created_at"] = overrides.get("created_at", timezone.now())
-    # Cache the FK object so descriptor access works without DB
-    cred._state.fields_cache["credential_type"] = credential_type_obj
-    cred.pk = pk
-    cred.id = pk
-    return cred
-
+from .conftest import make_credential
 
 # -----------------------------------------------------------------------------
 # CatalogBase Tests
@@ -127,7 +72,7 @@ class TestCredentialModel:
 
     def test_create_credential(self, credential_type_obj):
         """Can create a credential with required fields."""
-        cred = _make_credential(credential_type_obj, name="My Credential")
+        cred = make_credential(credential_type_obj, name="My Credential")
 
         with patch.object(Credential.objects, "create", return_value=cred):
             result = Credential.objects.create(
@@ -146,69 +91,54 @@ class TestCredentialModel:
 
     def test_str_returns_name(self, credential_type_obj):
         """__str__ returns the credential name."""
-        cred = _make_credential(credential_type_obj, name="My Test Credential")
+        cred = make_credential(credential_type_obj, name="My Test Credential")
         assert str(cred) == "My Test Credential"
 
-    def test_is_deleted_false_when_deleted_at_none(self, credential_type_obj):
-        """is_deleted returns False when deleted_at is None."""
-        cred = _make_credential(credential_type_obj, name="Active")
-        assert cred.is_deleted is False
+    @pytest.mark.parametrize(
+        "deleted_at,expected",
+        [
+            pytest.param(None, False, id="not-deleted"),
+            pytest.param("now", True, id="deleted"),
+        ],
+    )
+    def test_is_deleted(self, credential_type_obj, deleted_at, expected):
+        """is_deleted reflects whether deleted_at is set."""
+        actual_deleted_at = timezone.now() if deleted_at == "now" else None
+        cred = make_credential(credential_type_obj, deleted_at=actual_deleted_at)
+        assert cred.is_deleted is expected
 
-    def test_is_deleted_true_when_deleted_at_set(self, credential_type_obj):
-        """is_deleted returns True when deleted_at is set."""
-        cred = _make_credential(credential_type_obj, name="Deleted", deleted_at=timezone.now())
-        assert cred.is_deleted is True
+    @pytest.mark.parametrize(
+        "expires_at_offset,expected",
+        [
+            pytest.param(None, False, id="no-expiry"),
+            pytest.param(timedelta(days=30), False, id="future"),
+            pytest.param(timedelta(days=-1), True, id="past"),
+        ],
+    )
+    def test_is_expired(self, credential_type_obj, expires_at_offset, expected):
+        """is_expired reflects expiry state."""
+        expires_at = None if expires_at_offset is None else timezone.now() + expires_at_offset
+        cred = make_credential(credential_type_obj, expires_at=expires_at)
+        assert cred.is_expired is expected
 
-    def test_is_expired_false_when_no_expiry(self, credential_type_obj):
-        """is_expired returns False when expires_at is None."""
-        cred = _make_credential(credential_type_obj, name="No Expiry")
-        assert cred.is_expired is False
-
-    def test_is_expired_false_when_future(self, credential_type_obj):
-        """is_expired returns False when expires_at is in the future."""
-        cred = _make_credential(
-            credential_type_obj,
-            name="Future",
-            expires_at=timezone.now() + timedelta(days=30),
-        )
-        assert cred.is_expired is False
-
-    def test_is_expired_true_when_past(self, credential_type_obj):
-        """is_expired returns True when expires_at is in the past."""
-        cred = _make_credential(
-            credential_type_obj,
-            name="Expired",
-            expires_at=timezone.now() - timedelta(days=1),
-        )
-        assert cred.is_expired is True
-
-    def test_expires_soon_false_when_no_expiry(self, credential_type_obj):
-        """expires_soon returns False when expires_at is None."""
-        cred = _make_credential(credential_type_obj, name="No Expiry")
-        assert cred.expires_soon is False
-
-    def test_expires_soon_true_within_30_days(self, credential_type_obj):
-        """expires_soon returns True when expires_at is within 30 days."""
-        cred = _make_credential(
-            credential_type_obj,
-            name="Soon",
-            expires_at=timezone.now() + timedelta(days=15),
-        )
-        assert cred.expires_soon is True
-
-    def test_expires_soon_false_when_already_expired(self, credential_type_obj):
-        """expires_soon returns False when already expired."""
-        cred = _make_credential(
-            credential_type_obj,
-            name="Expired",
-            expires_at=timezone.now() - timedelta(days=1),
-        )
-        assert cred.expires_soon is False
+    @pytest.mark.parametrize(
+        "expires_at_offset,expected",
+        [
+            pytest.param(None, False, id="no-expiry"),
+            pytest.param(timedelta(days=15), True, id="within-30-days"),
+            pytest.param(timedelta(days=-1), False, id="already-expired"),
+        ],
+    )
+    def test_expires_soon(self, credential_type_obj, expires_at_offset, expected):
+        """expires_soon reflects whether expiry is within 30 days."""
+        expires_at = None if expires_at_offset is None else timezone.now() + expires_at_offset
+        cred = make_credential(credential_type_obj, expires_at=expires_at)
+        assert cred.expires_soon is expected
 
     def test_ordering_by_created_at_descending(self, credential_type_obj):
         """Credentials are ordered by created_at descending."""
-        cred1 = _make_credential(credential_type_obj, pk=1, name="First")
-        cred2 = _make_credential(credential_type_obj, pk=2, name="Second")
+        cred1 = make_credential(credential_type_obj, pk=1, name="First")
+        cred2 = make_credential(credential_type_obj, pk=2, name="Second")
 
         mock_qs = MagicMock()
         mock_qs.__iter__ = MagicMock(return_value=iter([cred2, cred1]))
@@ -231,7 +161,7 @@ class TestCredentialUniqueness:
 
     def test_duplicate_name_same_user_rejected(self, credential_type_obj):
         """Rejects duplicate name for same user (active credentials)."""
-        first_cred = _make_credential(credential_type_obj, pk=1, name="My Credential")
+        first_cred = make_credential(credential_type_obj, pk=1, name="My Credential")
 
         with patch.object(Credential.objects, "create") as mock_create:
             # First create succeeds
@@ -255,11 +185,11 @@ class TestCredentialUniqueness:
 
     def test_same_name_different_users_allowed(self, credential_type_obj):
         """Allows same name for different users."""
-        cred2 = _make_credential(credential_type_obj, pk=2, user_id=2, name="My Credential")
+        cred2 = make_credential(credential_type_obj, pk=2, user_id=2, name="My Credential")
 
         with patch.object(Credential.objects, "create") as mock_create:
             # First create for user 1
-            mock_create.return_value = _make_credential(credential_type_obj, pk=1, user_id=1, name="My Credential")
+            mock_create.return_value = make_credential(credential_type_obj, pk=1, user_id=1, name="My Credential")
             Credential.objects.create(
                 user_id=1,
                 name="My Credential",
@@ -280,11 +210,11 @@ class TestCredentialUniqueness:
 
     def test_deleted_credential_allows_same_name(self, credential_type_obj):
         """Soft-deleted credential doesn't block new credential with same name."""
-        cred2 = _make_credential(credential_type_obj, pk=2, name="My Credential")
+        cred2 = make_credential(credential_type_obj, pk=2, name="My Credential")
 
         with patch.object(Credential.objects, "create") as mock_create:
             # First create is soft-deleted
-            mock_create.return_value = _make_credential(
+            mock_create.return_value = make_credential(
                 credential_type_obj, pk=1, name="My Credential", deleted_at=timezone.now()
             )
             Credential.objects.create(
@@ -318,7 +248,7 @@ class TestCredentialRelationships:
 
     def test_credential_deleted_when_user_deleted(self, credential_type_obj):
         """Credentials cascade delete when user is deleted (on_delete=CASCADE)."""
-        cred = _make_credential(credential_type_obj, pk=10, user_id=99, name="Temp Cred")
+        cred = make_credential(credential_type_obj, pk=10, user_id=99, name="Temp Cred")
 
         # After user deletion, credential no longer exists
         mock_qs = MagicMock()
@@ -330,7 +260,7 @@ class TestCredentialRelationships:
 
     def test_credential_protected_when_type_deleted(self, credential_type_obj):
         """Cannot delete CredentialType with existing credentials (PROTECT)."""
-        cred = _make_credential(credential_type_obj, pk=1, name="Using Type")
+        cred = make_credential(credential_type_obj, pk=1, name="Using Type")
 
         # Mock delete to raise ProtectedError (what PROTECT does)
         credential_type_obj.delete = MagicMock(

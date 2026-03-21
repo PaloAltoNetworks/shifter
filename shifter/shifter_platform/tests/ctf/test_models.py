@@ -30,6 +30,14 @@ from ctf.models import (
     CTFTeam,
 )
 
+from .conftest import (
+    make_challenge,
+    make_ctf_event,
+    make_participant,
+    make_scheduled_task,
+    make_team,
+)
+
 # -----------------------------------------------------------------------------
 # CTFEvent Model Tests
 # -----------------------------------------------------------------------------
@@ -37,28 +45,6 @@ from ctf.models import (
 
 class TestCTFEventModel:
     """Tests for CTFEvent model."""
-
-    def _make_event(self, **overrides):
-        """Build an in-memory CTFEvent without saving.
-
-        Uses `created_by_id` to avoid Django FK descriptor validation.
-        """
-        now = timezone.now()
-        defaults = {
-            "id": uuid4(),
-            "name": "Test CTF Event",
-            "created_by_id": 1,
-            "status": EventStatus.SCHEDULED.value,
-            "event_start": now + timedelta(days=1),
-            "event_end": now + timedelta(days=1, hours=8),
-            "scenario_id": "basic",
-            "auto_cleanup": True,
-            "cleanup_delay_hours": 24,
-            "team_mode": False,
-            "range_spinup_minutes": 30,
-        }
-        defaults.update(overrides)
-        return CTFEvent(**defaults)
 
     def test_create_event_defaults(self):
         """Test that a freshly constructed event has expected defaults."""
@@ -78,66 +64,72 @@ class TestCTFEventModel:
 
     def test_event_str_representation(self):
         """Test event string representation."""
-        event = self._make_event(name="Test CTF Event")
+        event = make_ctf_event(name="Test CTF Event")
         assert str(event) == "Test CTF Event"
 
-    def test_event_is_active_property(self):
-        """Test is_active property for active event."""
-        event = self._make_event(status=EventStatus.ACTIVE.value)
-        assert event.is_active is True
-
-    def test_event_is_active_false_for_draft(self):
-        """Test is_active property for draft event."""
-        event = self._make_event(status=EventStatus.DRAFT.value)
-        assert event.is_active is False
+    @pytest.mark.parametrize(
+        "status,expected",
+        [
+            pytest.param(EventStatus.ACTIVE.value, True, id="active"),
+            pytest.param(EventStatus.DRAFT.value, False, id="draft"),
+            pytest.param(EventStatus.SCHEDULED.value, False, id="scheduled"),
+            pytest.param(EventStatus.COMPLETED.value, False, id="completed"),
+        ],
+    )
+    def test_event_is_active_property(self, status, expected):
+        """Test is_active property for various statuses."""
+        event = make_ctf_event(status=status)
+        assert event.is_active is expected
 
     def test_event_is_upcoming_property(self):
         """Test is_upcoming property for scheduled event with future start."""
-        event = self._make_event(
+        event = make_ctf_event(
             status=EventStatus.SCHEDULED.value,
             event_start=timezone.now() + timedelta(days=1),
         )
         assert event.is_upcoming is True
 
-    def test_event_is_modifiable_for_draft(self):
-        """Test is_modifiable for draft event."""
-        event = self._make_event(status=EventStatus.DRAFT.value)
-        assert event.is_modifiable is True
-
-    def test_event_is_modifiable_for_completed(self):
-        """Test is_modifiable for completed event."""
-        event = self._make_event(status=EventStatus.COMPLETED.value)
-        assert event.is_modifiable is False
+    @pytest.mark.parametrize(
+        "status,expected",
+        [
+            pytest.param(EventStatus.DRAFT.value, True, id="draft"),
+            pytest.param(EventStatus.SCHEDULED.value, True, id="scheduled"),
+            pytest.param(EventStatus.COMPLETED.value, False, id="completed"),
+        ],
+    )
+    def test_event_is_modifiable(self, status, expected):
+        """Test is_modifiable for various statuses."""
+        event = make_ctf_event(status=status)
+        assert event.is_modifiable is expected
 
     def test_event_duration_hours(self):
         """Test duration_hours calculation."""
         now = timezone.now()
-        event = self._make_event(
+        event = make_ctf_event(
             event_start=now,
             event_end=now + timedelta(hours=8),
         )
         assert event.duration_hours == pytest.approx(8.0)
 
-    def test_event_participant_count(self):
-        """Test participant_count property uses queryset count."""
-        event = self._make_event()
+    @pytest.mark.parametrize(
+        "relation,property_name,count",
+        [
+            pytest.param("participants", "participant_count", 3, id="participants"),
+            pytest.param("challenges", "challenge_count", 5, id="challenges"),
+        ],
+    )
+    def test_event_count_properties(self, relation, property_name, count):
+        """Test count properties use queryset count."""
+        event = make_ctf_event()
         mock_qs = MagicMock()
-        mock_qs.count.return_value = 3
-        with patch.object(type(event), "participants", new_callable=lambda: property(lambda self: mock_qs)):
-            assert event.participant_count == 3
-
-    def test_event_challenge_count(self):
-        """Test challenge_count property uses queryset count."""
-        event = self._make_event()
-        mock_qs = MagicMock()
-        mock_qs.count.return_value = 5
-        with patch.object(type(event), "challenges", new_callable=lambda: property(lambda self: mock_qs)):
-            assert event.challenge_count == 5
+        mock_qs.count.return_value = count
+        with patch.object(type(event), relation, new_callable=lambda: property(lambda self: mock_qs)):
+            assert getattr(event, property_name) == count
 
     def test_event_get_cleanup_time(self):
         """Test get_cleanup_time calculation."""
         now = timezone.now()
-        event = self._make_event(
+        event = make_ctf_event(
             event_end=now + timedelta(hours=8),
             cleanup_delay_hours=24,
         )
@@ -147,7 +139,7 @@ class TestCTFEventModel:
     def test_event_get_spinup_time(self):
         """Test get_spinup_time calculation."""
         now = timezone.now()
-        event = self._make_event(
+        event = make_ctf_event(
             event_start=now + timedelta(days=1),
             range_spinup_minutes=30,
         )
@@ -186,7 +178,7 @@ class TestCTFEventModel:
 
     def test_event_soft_delete(self):
         """Test soft delete sets deleted_at and calls save."""
-        event = self._make_event()
+        event = make_ctf_event()
         assert event.deleted_at is None
 
         with patch.object(CTFEvent, "save") as mock_save:
@@ -198,7 +190,7 @@ class TestCTFEventModel:
 
     def test_event_restore(self):
         """Test restoring a soft-deleted event."""
-        event = self._make_event()
+        event = make_ctf_event()
         event.deleted_at = timezone.now()
         assert event.is_deleted is True
 
@@ -217,66 +209,31 @@ class TestCTFEventModel:
 class TestCTFChallengeModel:
     """Tests for CTFChallenge model."""
 
-    def _make_event(self, **overrides):
-        """Build an in-memory CTFEvent."""
-        now = timezone.now()
-        defaults = {
-            "id": uuid4(),
-            "name": "Test Event",
-            "created_by_id": 1,
-            "status": EventStatus.SCHEDULED.value,
-            "event_start": now + timedelta(days=1),
-            "event_end": now + timedelta(days=1, hours=8),
-            "team_mode": False,
-        }
-        defaults.update(overrides)
-        return CTFEvent(**defaults)
-
-    def _make_challenge(self, event=None, **overrides):
-        """Build an in-memory CTFChallenge."""
-        if event is None:
-            event = self._make_event()
-        defaults = {
-            "id": uuid4(),
-            "event": event,
-            "name": "Test Challenge",
-            "description": "Find the flag in the source code",
-            "category": ChallengeCategory.WEB.value,
-            "points": 100,
-            "difficulty": ChallengeDifficulty.EASY.value,
-            "flag_hash": "$2b$12$test_hash_placeholder",
-            "flag_format": "FLAG{...}",
-            "hint": "",
-            "hint_penalty": 0,
-            "release_time": None,
-            "order": 0,
-        }
-        defaults.update(overrides)
-        return CTFChallenge(**defaults)
-
     def test_challenge_str_representation(self):
         """Test challenge string representation."""
-        challenge = self._make_challenge(
+        challenge = make_challenge(
             category=ChallengeCategory.WEB.value,
             name="Test Challenge",
         )
         assert str(challenge) == "[web] Test Challenge"
 
-    def test_challenge_is_released_no_release_time(self):
-        """Test is_released when no release_time set."""
-        challenge = self._make_challenge(release_time=None)
-        assert challenge.is_released is True
-
-    def test_challenge_is_released_future_time(self):
-        """Test is_released for future release time."""
-        challenge = self._make_challenge(
-            release_time=timezone.now() + timedelta(hours=2),
-        )
-        assert challenge.is_released is False
+    @pytest.mark.parametrize(
+        "release_time_offset,expected",
+        [
+            pytest.param(None, True, id="no-release-time"),
+            pytest.param(timedelta(hours=2), False, id="future-release"),
+            pytest.param(timedelta(hours=-1), True, id="past-release"),
+        ],
+    )
+    def test_challenge_is_released(self, release_time_offset, expected):
+        """Test is_released for various release times."""
+        release_time = None if release_time_offset is None else timezone.now() + release_time_offset
+        challenge = make_challenge(release_time=release_time)
+        assert challenge.is_released is expected
 
     def test_challenge_solve_count(self):
         """Test solve_count property uses queryset."""
-        challenge = self._make_challenge()
+        challenge = make_challenge()
         mock_submissions = MagicMock()
         mock_submissions.filter.return_value.count.return_value = 3
         with patch.object(type(challenge), "submissions", new_callable=lambda: property(lambda self: mock_submissions)):
@@ -285,7 +242,7 @@ class TestCTFChallengeModel:
 
     def test_challenge_first_blood(self):
         """Test first_blood property uses queryset."""
-        challenge = self._make_challenge()
+        challenge = make_challenge()
         mock_submission = Mock()
         mock_submissions = MagicMock()
         mock_submissions.filter.return_value.order_by.return_value.first.return_value = mock_submission
@@ -293,29 +250,26 @@ class TestCTFChallengeModel:
             assert challenge.first_blood == mock_submission
         mock_submissions.filter.assert_called_once_with(is_correct=True)
 
-    def test_challenge_calculate_points_no_penalty(self):
-        """Test points calculation without hint penalty."""
-        challenge = self._make_challenge(points=100, hint_penalty=0)
-        points = challenge.calculate_points_with_penalty(hint_used=False)
-        assert points == 100
-
-    def test_challenge_calculate_points_with_penalty(self):
-        """Test points calculation with hint penalty."""
-        challenge = self._make_challenge(
-            points=200,
-            hint="Look at the cipher mode",
-            hint_penalty=25,
+    @pytest.mark.parametrize(
+        "points,hint_penalty,hint_used,expected",
+        [
+            pytest.param(100, 0, False, 100, id="no-penalty"),
+            pytest.param(200, 25, True, 150, id="with-penalty"),
+            pytest.param(200, 25, False, 200, id="penalty-not-used"),
+        ],
+    )
+    def test_challenge_calculate_points(self, points, hint_penalty, hint_used, expected):
+        """Test points calculation with various penalty configurations."""
+        challenge = make_challenge(
+            points=points,
+            hint="Look at the cipher mode" if hint_penalty else "",
+            hint_penalty=hint_penalty,
         )
-        # 25% of 200 = 50, so 200 - 50 = 150
-        points = challenge.calculate_points_with_penalty(hint_used=True)
-        assert points == 150
+        assert challenge.calculate_points_with_penalty(hint_used=hint_used) == expected
 
     def test_challenge_validation_hint_penalty_without_hint(self):
         """Test validation rejects hint_penalty without hint."""
-        challenge = self._make_challenge(
-            hint="",  # No hint
-            hint_penalty=25,  # But penalty set
-        )
+        challenge = make_challenge(hint="", hint_penalty=25)
         with pytest.raises(ValidationError) as exc_info:
             challenge.clean()
 
@@ -330,70 +284,39 @@ class TestCTFChallengeModel:
 class TestCTFTeamModel:
     """Tests for CTFTeam model."""
 
-    def _make_event(self, **overrides):
-        """Build an in-memory CTFEvent."""
-        now = timezone.now()
-        defaults = {
-            "id": uuid4(),
-            "name": "Team CTF Event",
-            "created_by_id": 1,
-            "status": EventStatus.SCHEDULED.value,
-            "event_start": now + timedelta(days=1),
-            "event_end": now + timedelta(days=1, hours=8),
-            "team_mode": True,
-            "team_size_limit": 4,
-        }
-        defaults.update(overrides)
-        return CTFEvent(**defaults)
-
-    def _make_team(self, event=None, **overrides):
-        """Build an in-memory CTFTeam."""
-        if event is None:
-            event = self._make_event()
-        defaults = {
-            "id": uuid4(),
-            "event": event,
-            "name": "Test Team",
-            "invite_code": "test-invite-code-12345678",
-        }
-        defaults.update(overrides)
-        return CTFTeam(**defaults)
-
     def test_team_str_representation(self):
         """Test team string representation."""
-        team = self._make_team(name="Test Team")
+        team = make_team(name="Test Team")
         assert str(team) == "Test Team"
 
     def test_team_member_count(self):
         """Test member_count property uses queryset."""
-        team = self._make_team()
+        team = make_team()
         mock_members = MagicMock()
         mock_members.count.return_value = 3
         with patch.object(type(team), "members", new_callable=lambda: property(lambda self: mock_members)):
             assert team.member_count == 3
 
-    def test_team_is_full_when_at_capacity(self):
-        """Test is_full property when team is at capacity."""
-        event = self._make_event(team_size_limit=4)
-        team = self._make_team(event=event)
+    @pytest.mark.parametrize(
+        "team_size_limit,member_count,expected",
+        [
+            pytest.param(4, 4, True, id="at-capacity"),
+            pytest.param(4, 2, False, id="has-space"),
+        ],
+    )
+    def test_team_is_full(self, team_size_limit, member_count, expected):
+        """Test is_full property for various capacities."""
+        event = make_ctf_event(team_mode=True, team_size_limit=team_size_limit)
+        team = make_team(event=event)
         mock_members = MagicMock()
-        mock_members.count.return_value = 4
+        mock_members.count.return_value = member_count
         with patch.object(type(team), "members", new_callable=lambda: property(lambda self: mock_members)):
-            assert team.is_full is True
-
-    def test_team_is_full_when_not_at_capacity(self):
-        """Test is_full property when team has space."""
-        event = self._make_event(team_size_limit=4)
-        team = self._make_team(event=event)
-        mock_members = MagicMock()
-        mock_members.count.return_value = 2
-        with patch.object(type(team), "members", new_callable=lambda: property(lambda self: mock_members)):
-            assert team.is_full is False
+            assert team.is_full is expected
 
     def test_team_is_full_no_limit(self):
         """Test is_full when no team_size_limit is set."""
-        event = self._make_event(team_size_limit=None, team_mode=False)
-        team = self._make_team(event=event)
+        event = make_ctf_event(team_size_limit=None, team_mode=False)
+        team = make_team(event=event)
         assert team.is_full is False
 
 
@@ -405,46 +328,9 @@ class TestCTFTeamModel:
 class TestCTFParticipantModel:
     """Tests for CTFParticipant model."""
 
-    def _make_event(self, **overrides):
-        """Build an in-memory CTFEvent."""
-        now = timezone.now()
-        defaults = {
-            "id": uuid4(),
-            "name": "Test CTF Event",
-            "created_by_id": 1,
-            "status": EventStatus.SCHEDULED.value,
-            "event_start": now + timedelta(days=1),
-            "event_end": now + timedelta(days=1, hours=8),
-            "team_mode": False,
-        }
-        defaults.update(overrides)
-        return CTFEvent(**defaults)
-
-    def _make_participant(self, event=None, **overrides):
-        """Build an in-memory CTFParticipant.
-
-        Uses `user_id` to avoid Django FK descriptor validation.
-        """
-        if event is None:
-            event = self._make_event()
-        defaults = {
-            "id": uuid4(),
-            "event": event,
-            "email": "participant@test.com",
-            "name": "Test Participant",
-            "user_id": 1,
-            "status": ParticipantStatus.ACTIVE.value,
-            "registered_at": timezone.now(),
-            "invite_token": "test-token-abcdef123456",
-            "invite_token_expires": timezone.now() + timedelta(days=7),
-            "last_active_at": None,
-        }
-        defaults.update(overrides)
-        return CTFParticipant(**defaults)
-
     def test_participant_str_representation(self):
         """Test participant string representation."""
-        p = self._make_participant(name="Test Participant", email="participant@test.com")
+        p = make_participant(name="Test Participant", email="participant@test.com")
         assert "Test Participant" in str(p)
         assert "participant@test.com" in str(p)
 
@@ -454,56 +340,52 @@ class TestCTFParticipantModel:
 
         User = get_user_model()
 
-        p = self._make_participant(user_id=1, registered_at=timezone.now())
-        # is_registered checks self.user is not None — with user_id set but
-        # no DB, accessing .user raises. Patch the descriptor to return a mock.
+        p = make_participant(user_id=1, registered_at=timezone.now())
         mock_user = MagicMock(spec=User)
         with patch.object(CTFParticipant, "user", new_callable=lambda: property(lambda self: mock_user)):
             assert p.is_registered is True
 
     def test_participant_is_registered_false_when_invited(self):
         """Test is_registered for invited participant (no user)."""
-        p = self._make_participant(
+        p = make_participant(
             user_id=None,
             registered_at=None,
             status=ParticipantStatus.INVITED.value,
         )
         assert p.is_registered is False
 
-    def test_participant_is_invite_valid(self):
-        """Test is_invite_valid property."""
-        p = self._make_participant(
-            invite_token_expires=timezone.now() + timedelta(days=7),
-        )
-        assert p.is_invite_valid is True
+    @pytest.mark.parametrize(
+        "expires_offset,expected",
+        [
+            pytest.param(timedelta(days=7), True, id="valid"),
+            pytest.param(timedelta(hours=-1), False, id="expired"),
+        ],
+    )
+    def test_participant_is_invite_valid(self, expires_offset, expected):
+        """Test is_invite_valid for various token expiry times."""
+        p = make_participant(invite_token_expires=timezone.now() + expires_offset)
+        assert p.is_invite_valid is expected
 
-    def test_participant_is_invite_expired(self):
-        """Test is_invite_valid for expired token."""
-        p = self._make_participant(
-            invite_token_expires=timezone.now() - timedelta(hours=1),
-        )
-        assert p.is_invite_valid is False
-
-    def test_participant_total_score(self):
-        """Test total_score property uses queryset."""
-        p = self._make_participant()
+    @pytest.mark.parametrize(
+        "aggregate_total,expected",
+        [
+            pytest.param(250, 250, id="has-score"),
+            pytest.param(None, 0, id="none-returns-zero"),
+            pytest.param(0, 0, id="zero-score"),
+        ],
+    )
+    def test_participant_total_score(self, aggregate_total, expected):
+        """Test total_score property with various aggregate results."""
+        p = make_participant()
         mock_submissions = MagicMock()
-        mock_submissions.filter.return_value.aggregate.return_value = {"total": 250}
+        mock_submissions.filter.return_value.aggregate.return_value = {"total": aggregate_total}
         with patch.object(type(p), "submissions", new_callable=lambda: property(lambda self: mock_submissions)):
-            assert p.total_score == 250
+            assert p.total_score == expected
         mock_submissions.filter.assert_called_once_with(is_correct=True)
-
-    def test_participant_total_score_none_returns_zero(self):
-        """Test total_score returns 0 when aggregate is None."""
-        p = self._make_participant()
-        mock_submissions = MagicMock()
-        mock_submissions.filter.return_value.aggregate.return_value = {"total": None}
-        with patch.object(type(p), "submissions", new_callable=lambda: property(lambda self: mock_submissions)):
-            assert p.total_score == 0
 
     def test_participant_solved_challenge_count(self):
         """Test solved_challenge_count property uses queryset."""
-        p = self._make_participant()
+        p = make_participant()
         mock_submissions = MagicMock()
         mock_submissions.filter.return_value.count.return_value = 5
         with patch.object(type(p), "submissions", new_callable=lambda: property(lambda self: mock_submissions)):
@@ -512,16 +394,15 @@ class TestCTFParticipantModel:
 
     def test_participant_validation_team_in_non_team_event(self):
         """Test validation rejects team assignment in non-team event."""
-        event = self._make_event(team_mode=False)
-        team_event = self._make_event(team_mode=True, team_size_limit=4)
+        event = make_ctf_event(team_mode=False)
+        team_event = make_ctf_event(team_mode=True, team_size_limit=4)
         team = CTFTeam(
             id=uuid4(),
             event=team_event,
             name="Test Team",
             invite_code="test-code-123",
         )
-        # Participant's event is non-team, but has a team assigned
-        p = self._make_participant(event=event, team=team)
+        p = make_participant(event=event, team=team)
 
         with pytest.raises(ValidationError) as exc_info:
             p.clean()
@@ -530,7 +411,7 @@ class TestCTFParticipantModel:
 
     def test_participant_update_last_active(self):
         """Test update_last_active method sets timestamp and calls save."""
-        p = self._make_participant(last_active_at=None)
+        p = make_participant(last_active_at=None)
         assert p.last_active_at is None
 
         with patch.object(CTFParticipant, "save") as mock_save:
@@ -548,22 +429,9 @@ class TestCTFParticipantModel:
 class TestCTFSubmissionModel:
     """Tests for CTFSubmission model."""
 
-    def _make_event(self, **overrides):
-        """Build an in-memory CTFEvent."""
-        now = timezone.now()
-        defaults = {
-            "id": uuid4(),
-            "name": "Test Event",
-            "created_by_id": 1,
-            "event_start": now + timedelta(days=1),
-            "event_end": now + timedelta(days=1, hours=8),
-        }
-        defaults.update(overrides)
-        return CTFEvent(**defaults)
-
     def test_submission_str_representation(self):
         """Test submission string representation."""
-        event = self._make_event()
+        event = make_ctf_event()
         participant = CTFParticipant(
             id=uuid4(),
             event=event,
@@ -598,8 +466,8 @@ class TestCTFSubmissionModel:
 
     def test_submission_validation_mismatched_event(self):
         """Test validation rejects challenge from different event."""
-        event1 = self._make_event()
-        event2 = self._make_event()
+        event1 = make_ctf_event()
+        event2 = make_ctf_event()
         participant = CTFParticipant(
             id=uuid4(),
             event=event1,
@@ -639,77 +507,48 @@ class TestCTFSubmissionModel:
 class TestCTFScheduledTaskModel:
     """Tests for CTFScheduledTask model."""
 
-    def _make_event(self, **overrides):
-        """Build an in-memory CTFEvent for FK reference."""
-        defaults = {
-            "id": uuid4(),
-            "name": "Test Event",
-            "created_by_id": 1,
-            "event_start": timezone.now() + timedelta(days=1),
-            "event_end": timezone.now() + timedelta(days=1, hours=8),
-        }
-        defaults.update(overrides)
-        return CTFEvent(**defaults)
-
-    def _make_task(self, event=None, **overrides):
-        """Build an in-memory CTFScheduledTask."""
-        if event is None:
-            event = self._make_event()
-        defaults = {
-            "id": uuid4(),
-            "event": event,
-            "task_type": "spin_up_ranges",
-            "scheduled_for": timezone.now() + timedelta(hours=1),
-            "status": ScheduledTaskStatus.PENDING.value,
-            "error_message": "",
-            "executed_at": None,
-        }
-        defaults.update(overrides)
-        return CTFScheduledTask(**defaults)
-
     def test_task_default_status(self):
         """Test default status is PENDING."""
-        task = self._make_task()
+        task = make_scheduled_task()
         assert task.status == ScheduledTaskStatus.PENDING.value
 
-    def test_task_is_due_future(self):
-        """Test is_due for future task."""
-        task = self._make_task(
-            scheduled_for=timezone.now() + timedelta(hours=1),
+    @pytest.mark.parametrize(
+        "scheduled_offset,expected",
+        [
+            pytest.param(timedelta(hours=1), False, id="future"),
+            pytest.param(timedelta(minutes=-1), True, id="past"),
+        ],
+    )
+    def test_task_is_due(self, scheduled_offset, expected):
+        """Test is_due for various schedule times."""
+        task = make_scheduled_task(
+            scheduled_for=timezone.now() + scheduled_offset,
             status=ScheduledTaskStatus.PENDING.value,
         )
-        assert task.is_due is False
+        assert task.is_due is expected
 
-    def test_task_is_due_past(self):
-        """Test is_due for past task."""
-        task = self._make_task(
-            scheduled_for=timezone.now() - timedelta(minutes=1),
-            status=ScheduledTaskStatus.PENDING.value,
-        )
-        assert task.is_due is True
-
-    def test_task_mark_running(self):
-        """Test mark_running method."""
-        task = self._make_task()
-
-        with patch.object(CTFScheduledTask, "save"):
-            task.mark_running()
-
-        assert task.status == ScheduledTaskStatus.RUNNING.value
-
-    def test_task_mark_completed(self):
-        """Test mark_completed method."""
-        task = self._make_task()
+    @pytest.mark.parametrize(
+        "method,expected_status,has_executed_at",
+        [
+            pytest.param("mark_running", ScheduledTaskStatus.RUNNING.value, False, id="running"),
+            pytest.param("mark_completed", ScheduledTaskStatus.COMPLETED.value, True, id="completed"),
+            pytest.param("mark_cancelled", ScheduledTaskStatus.CANCELLED.value, False, id="cancelled"),
+        ],
+    )
+    def test_task_status_transitions(self, method, expected_status, has_executed_at):
+        """Test status transition methods."""
+        task = make_scheduled_task()
 
         with patch.object(CTFScheduledTask, "save"):
-            task.mark_completed()
+            getattr(task, method)()
 
-        assert task.status == ScheduledTaskStatus.COMPLETED.value
-        assert task.executed_at is not None
+        assert task.status == expected_status
+        if has_executed_at:
+            assert task.executed_at is not None
 
     def test_task_mark_failed(self):
-        """Test mark_failed method."""
-        task = self._make_task()
+        """Test mark_failed method sets error message."""
+        task = make_scheduled_task()
 
         with patch.object(CTFScheduledTask, "save"):
             task.mark_failed("Connection timeout")
@@ -717,12 +556,3 @@ class TestCTFScheduledTaskModel:
         assert task.status == ScheduledTaskStatus.FAILED.value
         assert task.error_message == "Connection timeout"
         assert task.executed_at is not None
-
-    def test_task_mark_cancelled(self):
-        """Test mark_cancelled method."""
-        task = self._make_task()
-
-        with patch.object(CTFScheduledTask, "save"):
-            task.mark_cancelled()
-
-        assert task.status == ScheduledTaskStatus.CANCELLED.value

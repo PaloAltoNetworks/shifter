@@ -14,10 +14,55 @@ if str(SHIFTER_DIR) not in sys.path:
 # Set testing flag before Django loads settings
 os.environ["TESTING"] = "1"
 
+from unittest.mock import MagicMock, Mock  # noqa: E402
+
 import pytest  # noqa: E402
 from django.test import Client  # noqa: E402
 
 TESTS_DIR = Path(__file__).parent
+
+
+# -----------------------------------------------------------------------------
+# Shared test data for parametrized validation tests
+# -----------------------------------------------------------------------------
+
+INVALID_USERS = [
+    pytest.param(None, id="none"),
+    pytest.param("not-a-user", id="string"),
+    pytest.param(Mock(id=None, pk=None), id="unsaved"),
+]
+
+INVALID_RANGE_IDS = [
+    pytest.param(None, id="none"),
+    pytest.param("not-an-id", id="string"),
+    pytest.param(-1, id="negative"),
+]
+
+
+# -----------------------------------------------------------------------------
+# Shared mock fixtures
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_queryset():
+    """Chainable queryset mock for ORM query chains.
+
+    Supports .filter().annotate().order_by().select_related() etc.
+    Each method returns the same mock, enabling arbitrary chain lengths.
+    """
+    qs = MagicMock()
+    for method in (
+        "filter",
+        "exclude",
+        "annotate",
+        "order_by",
+        "select_related",
+        "prefetch_related",
+        "values_list",
+    ):
+        getattr(qs, method).return_value = qs
+    return qs
 
 
 @pytest.fixture(autouse=True)

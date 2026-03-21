@@ -1,8 +1,4 @@
-"""AWS SNS adapter implementing EventBus protocol.
-
-The actual SNS logic will be extracted from provisioner/events.py in
-Sub-Issue 6 (#816). This stub satisfies the protocol interface.
-"""
+"""AWS SNS adapter implementing EventBus protocol."""
 
 from __future__ import annotations
 

@@ -11,8 +11,10 @@ import json
 import logging
 from typing import Any
 
-import boto3
 from django.conf import settings
+
+from shared.cloud import get_queue_publisher
+from shared.cloud.exceptions import CloudQueueError
 
 logger = logging.getLogger(__name__)
 
@@ -35,23 +37,6 @@ def _get_experiments_queue_url() -> str | None:
     return url or None
 
 
-def _get_sqs_client() -> Any:
-    """Get boto3 SQS client for the configured region.
-
-    Returns:
-        Boto3 SQS client.
-
-    Raises:
-        ValueError: If AWS_REGION is not configured.
-    """
-    region: str = getattr(settings, "AWS_REGION", "")
-    if not region:
-        raise ValueError("AWS_REGION is required for SQS operations")
-
-    endpoint_url: str | None = getattr(settings, "AWS_ENDPOINT_URL", "") or None
-    return boto3.client("sqs", region_name=region, endpoint_url=endpoint_url)
-
-
 def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
     """Publish an event to the experiments SQS queue.
 
@@ -60,8 +45,7 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
         payload: Event data dict. Must be JSON-serializable.
 
     Raises:
-        ExperimentEventError: If SQS message publishing fails.
-        ValueError: If AWS_REGION is not configured (via _get_sqs_client).
+        ExperimentEventError: If queue message publishing fails.
     """
     queue_url = _get_experiments_queue_url()
     if queue_url is None:
@@ -75,18 +59,13 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
     }
 
     try:
-        sqs = _get_sqs_client()
-        # Boto3 automatically retries transient failures (network errors, throttling)
-        # with exponential backoff (default: 5 attempts). No additional retry logic needed.
-        sqs.send_message(
-            QueueUrl=queue_url,
-            MessageBody=json.dumps(message_body, default=str),
-        )
+        publisher = get_queue_publisher()
+        publisher.send_message(queue_url, json.dumps(message_body, default=str))
         logger.info(
             "publish_experiment_event: published event_type=%s to experiments queue",
             event_type,
         )
-    except Exception as exc:
+    except CloudQueueError as exc:
         logger.exception(
             "publish_experiment_event: failed to publish event_type=%s",
             event_type,
@@ -111,8 +90,7 @@ def publish_range_provisioned_for_experiment(
             from the range provisioning event.
 
     Raises:
-        ExperimentEventError: If SQS message publishing fails.
-        ValueError: If AWS_REGION is not configured.
+        ExperimentEventError: If queue message publishing fails.
     """
     publish_experiment_event(
         event_type="experiment.run.range_provisioned",

@@ -2666,6 +2666,15 @@ def api_file_download(request: HttpRequest, file_id: UUID) -> HttpResponse:
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
 
+    # Validate URL points to trusted S3 host before redirecting (S5146)
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not (host.endswith(".amazonaws.com") or host in ("localhost", "127.0.0.1")):
+        logger.error("Presigned URL has unexpected host: %s", host)
+        return JsonResponse({"error": "Invalid download URL"}, status=500)
+
     return redirect(url)
 
 

@@ -30,7 +30,9 @@ from ctf.services.attachment import (
 def mock_s3():
     """Mock S3 operations for CTF file attachments."""
     mock_client = MagicMock()
-    mock_client.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+    mock_client.generate_presigned_url.return_value = (
+        "https://s3.us-east-2.amazonaws.com/bucket/key?X-Amz-Signature=test"
+    )
     with patch("ctf.s3.get_s3_client", return_value=mock_client):
         yield mock_client
 
@@ -200,7 +202,7 @@ class TestGetDownloadUrl:
         """Returns a presigned S3 URL and filename."""
         cf = add_challenge_file(challenge.id, _make_file(), "download_me.pcap")
         url, filename = get_download_url(cf.id)
-        assert url == "https://s3.example.com/presigned"
+        assert "amazonaws.com" in url
         assert filename == "download_me.pcap"
 
     def test_nonexistent_file_raises(self, db, mock_s3):

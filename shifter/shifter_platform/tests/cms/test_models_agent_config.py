@@ -7,7 +7,8 @@ These tests verify the AgentConfig model is:
 - Has correct meta options (ordering, verbose_name)
 """
 
-import pytest
+from unittest.mock import MagicMock, patch
+
 from django.db import models
 
 # -----------------------------------------------------------------------------
@@ -15,7 +16,6 @@ from django.db import models
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestAgentConfigModel:
     """Tests for AgentConfig model structure."""
 
@@ -123,163 +123,82 @@ class TestAgentConfigModel:
 
 
 # -----------------------------------------------------------------------------
-# Test AgentConfig Behavior
+# Test AgentConfig Properties (no DB needed)
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
-class TestAgentConfigBehavior:
-    """Tests for AgentConfig model behavior."""
+class TestAgentConfigProperties:
+    """Tests for AgentConfig model properties using in-memory construction."""
 
     def test_str_returns_name_and_os(self):
         """__str__ should return name and OS name."""
-        from django.contrib.auth import get_user_model
-
         from cms.models import AgentConfig, OperatingSystem
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser-str", password="testpass")
-        os = OperatingSystem.objects.create(
-            slug="test-os-str-agent",
-            name="Test OS",
-            extensions=[".test"],
-        )
+        os_obj = OperatingSystem(slug="test", name="Test OS", extensions=[".test"])
 
-        agent = AgentConfig.objects.create(
-            user=user,
-            os=os,
+        agent = AgentConfig(
             name="Test Agent",
-            s3_key="agents/test/agent.msi",
-            original_filename="agent.msi",
-            file_size_bytes=1024,
-            sha256_hash="a" * 64,
+            os=os_obj,
         )
 
         assert str(agent) == "Test Agent (Test OS)"
 
     def test_is_deleted_property(self):
         """is_deleted should return True if deleted_at is set."""
-        from django.contrib.auth import get_user_model
         from django.utils import timezone
 
-        from cms.models import AgentConfig, OperatingSystem
+        from cms.models import AgentConfig
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser-deleted", password="testpass")
-        os = OperatingSystem.objects.create(
-            slug="test-os-deleted-agent",
-            name="Test OS",
-            extensions=[".test"],
-        )
-
-        agent = AgentConfig.objects.create(
-            user=user,
-            os=os,
-            name="Test Agent",
-            s3_key="agents/test/agent.msi",
-            original_filename="agent.msi",
-            file_size_bytes=1024,
-            sha256_hash="b" * 64,
-        )
+        agent = AgentConfig(name="Test Agent")
 
         assert agent.is_deleted is False
 
         agent.deleted_at = timezone.now()
-        agent.save()
 
         assert agent.is_deleted is True
 
     def test_file_size_mb_property(self):
         """file_size_mb should return size in MB rounded to 1 decimal."""
-        from django.contrib.auth import get_user_model
+        from cms.models import AgentConfig
 
-        from cms.models import AgentConfig, OperatingSystem
-
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser-size", password="testpass")
-        os = OperatingSystem.objects.create(
-            slug="test-os-size-agent",
-            name="Test OS",
-            extensions=[".test"],
-        )
-
-        agent = AgentConfig.objects.create(
-            user=user,
-            os=os,
+        agent = AgentConfig(
             name="Test Agent",
-            s3_key="agents/test/agent.msi",
-            original_filename="agent.msi",
             file_size_bytes=1048576,  # 1 MB
-            sha256_hash="c" * 64,
         )
 
         assert agent.file_size_mb == 1.0
 
+
+# -----------------------------------------------------------------------------
+# Test AgentConfig Behavior (DB required)
+# -----------------------------------------------------------------------------
+
+
+class TestAgentConfigBehavior:
+    """Tests for AgentConfig model behavior with mocked database access."""
+
     def test_active_for_user_excludes_deleted(self):
         """active_for_user should exclude soft-deleted agents."""
-        from django.contrib.auth import get_user_model
-        from django.utils import timezone
+        from cms.models import AgentConfig
 
-        from cms.models import AgentConfig, OperatingSystem
+        user = MagicMock(id=1, username="testuser-active")
+        active_agent = MagicMock(name="Active Agent")
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser-active", password="testpass")
-        os = OperatingSystem.objects.create(
-            slug="test-os-active-agent",
-            name="Test OS",
-            extensions=[".test"],
-        )
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([active_agent])
+        mock_qs.__eq__ = lambda self, other: list(self) == list(other)
 
-        # Create active agent
-        active_agent = AgentConfig.objects.create(
-            user=user,
-            os=os,
-            name="Active Agent",
-            s3_key="agents/test/active.msi",
-            original_filename="active.msi",
-            file_size_bytes=1024,
-            sha256_hash="d" * 64,
-        )
+        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
+            result = list(AgentConfig.active_for_user(user))
 
-        # Create deleted agent
-        AgentConfig.objects.create(
-            user=user,
-            os=os,
-            name="Deleted Agent",
-            s3_key="agents/test/deleted.msi",
-            original_filename="deleted.msi",
-            file_size_bytes=1024,
-            sha256_hash="e" * 64,
-            deleted_at=timezone.now(),
-        )
-
-        active_agents = AgentConfig.active_for_user(user)
-        assert list(active_agents) == [active_agent]
+        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        assert result == [active_agent]
 
     def test_os_foreign_key_protects_on_delete(self):
-        """Deleting an OS should be blocked if agents reference it."""
-        from django.contrib.auth import get_user_model
-        from django.db import IntegrityError
+        """OS FK uses PROTECT — verified via field inspection."""
+        from django.db.models import PROTECT
 
-        from cms.models import AgentConfig, OperatingSystem
+        from cms.models import AgentConfig
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser-protect", password="testpass")
-        os = OperatingSystem.objects.create(
-            slug="test-os-protect-agent",
-            name="Test OS",
-            extensions=[".test"],
-        )
-
-        AgentConfig.objects.create(
-            user=user,
-            os=os,
-            name="Test Agent",
-            s3_key="agents/test/agent.msi",
-            original_filename="agent.msi",
-            file_size_bytes=1024,
-            sha256_hash="f" * 64,
-        )
-
-        with pytest.raises(IntegrityError):
-            os.delete()
+        field = AgentConfig._meta.get_field("os")
+        assert field.remote_field.on_delete is PROTECT

@@ -5,6 +5,111 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.27.0] - 2026-03-21
+
+### Changed
+- **Test suite: eliminate all DB access outside `tests/integration/`** — 63% faster (722s → 269s)
+  - Converted 87 `@pytest.mark.django_db` markers and ~48 `TestCase` subclasses to mock-based tests
+  - Only 22 markers remain, all in `tests/integration/` (legitimate integration tests)
+  - View tests: replaced `Client`/`force_login` with `RequestFactory` + mock users
+  - Model tests: in-memory construction via `Model()` or `__new__` + `__dict__`
+  - Service tests: patched ORM managers (`objects.get`, `objects.filter`, `objects.create`, etc.)
+  - Added missing engine migration (SubnetAllocation `reserved_at` → `created_at` rename)
+  - Added missing CTF migration (index rename, field alter)
+  - Changed all `OperatingSystem.objects.get(slug=...)` to `get_or_create()` for xdist resilience
+
+## [3.26.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_models_subnet.py` (CMS) by mocking ORM
+  - Added `_make_subnet()` helper to construct Subnet instances in-memory via `__dict__` assignment, bypassing Django FK descriptor validation
+  - EntityBase `is_deleted` tests: built in-memory with `deleted_at` set/unset
+  - Terminal status auto-`deleted_at` tests: patched `validate_data` and `django.db.models.Model.save` to exercise real `EntityBase.save()` logic without DB
+  - Relationship tests: replaced cascade-delete DB test with `_meta` introspection asserting `CASCADE` on_delete and `related_name='subnets'`
+  - Ordering test: asserted `Subnet._meta.ordering` instead of querying DB
+  - Validation tests: called `subnet.validate_data()` directly on in-memory instances
+  - Data/property tests: constructed in-memory instances and asserted properties
+  - 4 class-level `@pytest.mark.django_db` markers removed, all 18 tests pass without DB access
+
+## [3.25.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_models.py` (mission_control) by mocking ORM
+  - Added `_make()` helper to construct Django model instances in-memory, bypassing FK validation and populating `_state.fields_cache`
+  - OperatingSystem `get_for_extension` tests: patched `OperatingSystem.objects.all`
+  - UserProfile tests: built via `_make()` with mock user in fields_cache
+  - AgentConfig tests: built via `_make()` with mock user/os, `active_for_user` patched at `AgentConfig.objects.filter`
+  - Range standup_duration tests: set `created_at`/`ready_at` directly on in-memory instances; annotation test mocks `Range.objects` chain
+  - ActivityLog tests: `log()` patched at `ActivityLog.objects.create`, `__str__` tests use `_make()`
+  - 4 class/method-level `@pytest.mark.django_db` markers removed, all 34 tests pass without DB access
+
+## [3.24.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_auth.py` (CTF) by mocking ORM
+  - Created `_MockGroupManager`/`_MockGroupQS` helpers to simulate `user.groups` with in-memory sets
+  - OIDC backend tests: patched `config.oidc.Group.objects`, `config.oidc.get_user_profile`, `ctf.models.CTFEvent.objects`
+  - Dashboard routing tests: call `dashboard_router` directly via `RequestFactory` with mock users
+  - Access control decorator tests: patched `management.services.get_user_profile`, `ctf.models.CTFParticipant.objects`
+  - Dev login tests: patched `config.dev_auth.User.objects`, `config.dev_auth.Group.objects`, `config.dev_auth.login`
+  - Context processor tests: patched `management.services.get_user_profile` (bridges import locally)
+  - Register view tests: patched `ctf.models.CTFParticipant.objects`, `django.contrib.auth.login`
+  - Dual-role tests: patched `management.services.get_user_profile`, `django.contrib.auth.models.Group.objects`
+  - 8 class-level `@pytest.mark.django_db` markers removed, all 48 tests pass without DB access
+
+## [3.23.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_range_api.py` (mission_control) by mocking ORM
+  - Replaced `Client`/`force_login` with `RequestFactory` + mock user via `AnonymousUser` for auth tests
+  - View tests (get_range, launch_range, cancel_range, destroy_range, list_agents): patched CMS service functions (`get_active_range`, `cms_create_range`, `cms_get_agent`, `cms_list_agents`, `cms_list_scenarios`) at the view-module boundary
+  - Subnet allocation tests: mocked `transaction.atomic` and `Range.objects` queryset chain
+  - Shared fixtures (`mock_user`, `mock_agent`, `mock_linux_agent`, `other_user`) replace DB-backed `test_agent`/`windows_os`/`linux_os` fixtures
+  - 6 class-level `@pytest.mark.django_db` markers removed, all 37 tests pass without DB access
+
+## [3.22.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_scoring.py` (CTF) by mocking ORM
+  - `TestCalculateScore`: mocked `CTFSubmission.objects.filter().aggregate()` chain
+  - `TestGetScoreboard` / `TestGetTeamScoreboard`: mocked annotated queryset chains with mock participant/team objects
+  - `TestGetParticipantRank`: mocked both `.get()` lookup and scoreboard queryset
+  - `TestGetChallengeStatistics`: mocked `CTFChallenge.objects.get()` and submission queryset chains
+  - `TestGetEventStatistics`: mocked `CTFEvent.objects.get()` and all related model managers
+  - `TestCalculatePointsWithPenalty`: replaced real model instances with mocks binding the real method
+  - 7 class-level `@pytest.mark.django_db` markers removed, all 27 tests pass without DB access
+
+## [3.21.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_views.py` (mission_control) by mocking ORM
+  - View tests (dashboard, settings, help): replaced `Client`/`force_login` with `RequestFactory` + mock user, patched `render` to avoid DB-hitting context processors
+  - `TestGetUserStorageUsed`: mocked `AgentConfig.active_for_user` queryset instead of creating real DB records
+  - `TestUploadLock`: replaced Django session with plain dict (no DB session backend needed)
+  - 5 class-level `@pytest.mark.django_db` markers removed, all 14 tests pass without DB access
+
+## [3.20.0] - 2026-03-20
+
+### Changed
+- Remove `@pytest.mark.django_db` from three CMS test files by mocking all ORM access
+  - `test_services_scenarios.py`: replaced real User/AgentConfig fixtures with mocks, patched registry functions (list_all_scenarios, get_scenario_detail, load_scenario_template)
+  - `test_scenario_hydrator.py`: replaced real User/AgentConfig fixtures with mocks, patched hydrator's load_scenario with canned ScenarioTemplate Pydantic objects
+  - `test_services_range.py`: converted remaining 4 `create_range` test classes (Validation, EngineCall, Instance, Return) from DB to fully mocked ORM using ExitStack-based helper
+
+## [3.19.0] - 2026-03-20
+
+### Changed
+- Test suite optimization: remove unnecessary `@pytest.mark.django_db` markers and add `--reuse-db`
+  - Added `--reuse-db` to pytest addopts in pyproject.toml for faster repeated runs
+  - `test_create_range.py`: removed `django_db`, added `_mock_transaction` autouse fixture
+  - `test_cancel_range.py`: removed `django_db` from both classes, added `_mock_range_lookup` fixture
+  - `test_services_storage.py`: converted real `User` fixture to `mock_user`, removed `django_db`
+  - `test_handlers.py` (CMS): removed `django_db` from `TestProcessEvent` and `TestParseSnsMessage`
+  - `test_handlers.py` (Engine): removed `django_db` from `TestProcessEvent` and `TestParseSnsMessage`
+  - `test_models_agent_config.py`: removed `django_db` from `TestAgentConfigModel` (metadata-only tests)
+  - `test_models_operating_system.py`: removed `django_db` from `TestOperatingSystemModel` (metadata-only tests)
+  - 10 class-level markers removed across 7 test files
+
 ## [3.18.0] - 2026-03-20
 
 ### Changed
@@ -12,6 +117,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed ~51 duplicate tests from ECS wrapper test files (delegation verified in 2-4 tests each)
   - Deleted `tests/mission_control/test_engine.py` (12 tests duplicating `tests/engine/ecs/`)
   - Removed `@pytest.mark.django_db` from 8 test files that only use mocks (no ORM calls)
+- CMS service test streamlining: replace real DB fixtures with mocks in mock-heavy tests
+  - `test_services_range.py`: removed `django_db` from 8/12 classes (~75 tests), kept 4 `create_range` classes on DB
+  - `test_services_upload.py`: removed `django_db` from all 3 classes (57 tests), removed unused DB fixtures
+  - `test_services_agents.py`: removed `django_db` from all 4 classes (34 tests), removed unused DB fixtures
+  - Added `mock_user` fixture with `Mock(pk=42, id=42)` to replace real `User.objects.create_user` in pure-mock tests
 - Task runner abstraction delegation (PLAT-001.3, #813)
   - `engine/ecs.py`: All ECS task functions now delegate to `TaskRunner` protocol via `get_task_runner()`
   - `cms/experiments/ecs.py`: `start_experiment_task()` delegates to `TaskRunner` protocol via `get_task_runner()`

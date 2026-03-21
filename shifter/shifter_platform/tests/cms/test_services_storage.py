@@ -8,39 +8,20 @@ Tests service-level behavior only:
 Does NOT re-test model behavior (filtering, field validation, etc).
 """
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
-from django.contrib.auth import get_user_model
 
 from cms import services
-from cms.models import AgentConfig, OperatingSystem
 from shared.constants import USER_CANNOT_BE_NONE
 
-User = get_user_model()
-
 
 @pytest.fixture
-def user(db):
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+def mock_user():
+    """Mock user that passes _validate_user checks."""
+    return Mock(pk=42, id=42)
 
 
-@pytest.fixture
-def agent(user, db):
-    """Create an agent for testing."""
-    os = OperatingSystem.objects.get(slug="windows")
-    return AgentConfig.objects.create(
-        user=user,
-        name="Test Agent",
-        os=os,
-        s3_key="agents/test/agent.msi",
-        original_filename="agent.msi",
-        file_size_bytes=1000,
-        sha256_hash="abc123",
-    )
-
-
-@pytest.mark.django_db
 class TestGetStorageUsed:
     """Tests for get_storage_used() service function.
 
@@ -54,38 +35,38 @@ class TestGetStorageUsed:
 
     # --- Service calls dependency correctly ---
 
-    def test_calls_assets_get_storage_used_with_user(self, user):
+    def test_calls_assets_get_storage_used_with_user(self, mock_user):
         """Service calls assets.get_storage_used with the user."""
         with patch("cms.assets.services.get_storage_used", return_value=0) as mock_storage:
-            services.get_storage_used(user)
-            mock_storage.assert_called_once_with(user)
+            services.get_storage_used(mock_user)
+            mock_storage.assert_called_once_with(mock_user)
 
     # --- Service returns what dependency returns ---
 
-    def test_returns_zero_when_no_agents(self, user):
+    def test_returns_zero_when_no_agents(self, mock_user):
         """Service returns 0 when user has no storage used."""
         with patch("cms.assets.services.get_storage_used", return_value=0):
-            result = services.get_storage_used(user)
+            result = services.get_storage_used(mock_user)
             assert result == 0
 
-    def test_returns_positive_value_when_agents_exist(self, user):
+    def test_returns_positive_value_when_agents_exist(self, mock_user):
         """Service returns positive value when user has agents."""
         expected_bytes = 1024 * 1024 * 5  # 5 MB
         with patch("cms.assets.services.get_storage_used", return_value=expected_bytes):
-            result = services.get_storage_used(user)
+            result = services.get_storage_used(mock_user)
             assert result == expected_bytes
 
-    def test_returns_large_value_for_many_agents(self, user):
+    def test_returns_large_value_for_many_agents(self, mock_user):
         """Service returns large value when user has many agents."""
         expected_bytes = 1024 * 1024 * 1024  # 1 GB
         with patch("cms.assets.services.get_storage_used", return_value=expected_bytes):
-            result = services.get_storage_used(user)
+            result = services.get_storage_used(mock_user)
             assert result == expected_bytes
 
-    def test_returns_int_type(self, user):
+    def test_returns_int_type(self, mock_user):
         """Service returns int type."""
         with patch("cms.assets.services.get_storage_used", return_value=1000):
-            result = services.get_storage_used(user)
+            result = services.get_storage_used(mock_user)
             assert isinstance(result, int)
 
     # --- Input validation ---
@@ -100,18 +81,18 @@ class TestGetStorageUsed:
         with pytest.raises(TypeError, match="user must be a User instance"):
             services.get_storage_used("not_a_user")
 
-    def test_raises_value_error_when_user_unsaved(self, db):
+    def test_raises_value_error_when_user_unsaved(self):
         """Service raises ValueError when user has no ID."""
-        unsaved_user = User(username="unsaved@example.com")
+        unsaved_user = Mock(id=None)
         with pytest.raises(ValueError, match="user must be saved"):
             services.get_storage_used(unsaved_user)
 
     # --- Error propagation ---
 
-    def test_propagates_unexpected_exception(self, user):
+    def test_propagates_unexpected_exception(self, mock_user):
         """Service propagates unexpected exceptions from assets service."""
         with (
             patch("cms.assets.services.get_storage_used", side_effect=RuntimeError("Unexpected")),
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
-            services.get_storage_used(user)
+            services.get_storage_used(mock_user)

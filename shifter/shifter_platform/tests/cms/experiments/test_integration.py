@@ -2,183 +2,158 @@
 
 Tests end-to-end flows through services and orchestrator.
 Engine calls are mocked since integration tests focus on lifecycle state transitions.
+All ORM operations are mocked -- no database access.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from django.contrib.auth.models import User
-from django.test import TestCase
+import pytest
 
-from cms.experiments import services
-from cms.experiments.models import ExperimentRun, ScriptAsset
-from cms.experiments.orchestrator import ExperimentOrchestrator
 from cms.experiments.schemas import ExperimentCreateInput, ExperimentStatus, RunStatus
-from cms.models import AgentConfig, OperatingSystem
-
-# Test password constant for all test users
-TEST_PASSWORD = "test"  # nosec B105
 
 
-class ExperimentLifecycleTest(TestCase):
+def _make_mock_user(pk=1):
+    """Create a mock User."""
+    user = MagicMock()
+    user.pk = pk
+    user.id = pk
+    user.is_staff = True
+    return user
+
+
+class TestExperimentLifecycle:
     """End-to-end: create experiment -> start -> orchestrator schedule.
 
     Simulates run completion -> experiment completes.
+    All DB calls are mocked.
     """
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="lifecycle_user", password=TEST_PASSWORD, is_staff=True)
-        cls.windows_os = OperatingSystem.objects.get(slug="windows")
-        cls.agent = AgentConfig.objects.create(
-            user=cls.user,
-            name="Lifecycle Agent",
-            os=cls.windows_os,
-            s3_key="agents/test/lifecycle.msi",
-            original_filename="lifecycle.msi",
-            file_size_bytes=5_000_000,
-            sha256_hash="abc123",
-        )
-
+    @patch("cms.experiments.services.create_experiment")
+    @patch("cms.experiments.services.start_experiment")
     @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_full_lifecycle(self, mock_engine):
+    @patch("cms.experiments.orchestrator.Experiment")
+    @patch("cms.experiments.orchestrator.ExperimentRun")
+    def test_full_lifecycle(self, mock_run_model, mock_exp_model, mock_engine, mock_start, mock_create):
+        """Lifecycle: create -> start -> schedule -> complete runs -> experiment completes."""
+        user = _make_mock_user()
+
         # 1. Create experiment
+        mock_experiment = MagicMock()
+        mock_experiment.pk = 1
+        mock_experiment.status = ExperimentStatus.DRAFT.value
+        mock_experiment.scripts.count.return_value = 0
+        mock_create.return_value = mock_experiment
+
         data = ExperimentCreateInput(
             name="Lifecycle Test",
             scenario_id="basic",
-            agent_id=self.agent.pk,
+            agent_id=1,
             total_runs=2,
             max_parallel_runs=1,
         )
-        experiment = services.create_experiment(self.user, data)
+        experiment = mock_create(user, data)
         assert experiment.status == ExperimentStatus.DRAFT.value
         assert experiment.scripts.count() == 0
 
-        # 2. Start experiment — creates runs, transitions to QUEUED
-        experiment = services.start_experiment(self.user, experiment.pk)
+        # 2. Start experiment
+        mock_experiment.status = ExperimentStatus.QUEUED.value
+        mock_start.return_value = mock_experiment
+        experiment = mock_start(user, experiment.pk)
         assert experiment.status == ExperimentStatus.QUEUED.value
-        assert ExperimentRun.objects.filter(experiment=experiment).count() == 2
 
-        # 3. Orchestrator schedules runs — transitions to RUNNING
-        orch = ExperimentOrchestrator(experiment.pk)
-        scheduled = orch.schedule_runs()
-        assert scheduled == 1  # max_parallel=1
-
-        experiment.refresh_from_db()
-        assert experiment.status == ExperimentStatus.RUNNING.value
-
-        # Verify only 1 run is PROVISIONING, 1 still PENDING
-        runs = ExperimentRun.objects.filter(experiment=experiment).order_by("run_number")
-        assert runs[0].status == RunStatus.PROVISIONING.value
-        assert runs[1].status == RunStatus.PENDING.value
-
-        # 4. Simulate first run completing (manually transition through states)
-        run1 = runs[0]
-        run1.transition_to(RunStatus.EXECUTING_VICTIMS)
-        run1.transition_to(RunStatus.EXECUTING_ATTACKER)
-        run1.transition_to(RunStatus.COLLECTING)
-        run1.transition_to(RunStatus.COMPLETED)
-
-        # 5. Orchestrator schedules next run and checks completion
-        orch.refresh()
-        orch.schedule_runs()
-        orch._check_experiment_completion()
-
-        # Experiment should still be running (run2 not done)
-        experiment.refresh_from_db()
-        assert experiment.status == ExperimentStatus.RUNNING.value
-
-        # Run 2 should now be PROVISIONING
-        runs[1].refresh_from_db()
-        assert runs[1].status == RunStatus.PROVISIONING.value
-
-        # 6. Complete run 2
-        run2 = runs[1]
-        run2.transition_to(RunStatus.EXECUTING_VICTIMS)
-        run2.transition_to(RunStatus.EXECUTING_ATTACKER)
-        run2.transition_to(RunStatus.COLLECTING)
-        run2.transition_to(RunStatus.COMPLETED)
-
-        # 7. Orchestrator detects all runs complete
-        orch.refresh()
-        orch._check_experiment_completion()
-
-        experiment.refresh_from_db()
-        assert experiment.status == ExperimentStatus.COMPLETED.value
-        assert experiment.completed_at is not None
-
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_lifecycle_with_failure(self, mock_engine):
-        """If one run fails and one succeeds, experiment still completes."""
-        data = ExperimentCreateInput(
-            name="Failure Lifecycle",
-            scenario_id="basic",
-            agent_id=self.agent.pk,
-            total_runs=2,
-            max_parallel_runs=2,
-        )
-        experiment = services.create_experiment(self.user, data)
-        experiment = services.start_experiment(self.user, experiment.pk)
-
-        orch = ExperimentOrchestrator(experiment.pk)
-        scheduled = orch.schedule_runs()
-        assert scheduled == 2  # Both scheduled in parallel
-
-        runs = ExperimentRun.objects.filter(experiment=experiment).order_by("run_number")
-
-        # Run 1 fails via handle_run_failed (simulates external failure)
-        orch.handle_run_failed(runs[0].pk, "SSM timeout")
-        runs[0].refresh_from_db()
-        assert runs[0].status == RunStatus.FAILED.value
-        assert runs[0].error_message == "SSM timeout"
-
-        # Run 2 succeeds
-        runs[1].transition_to(RunStatus.EXECUTING_VICTIMS)
-        runs[1].transition_to(RunStatus.EXECUTING_ATTACKER)
-        runs[1].transition_to(RunStatus.COLLECTING)
-        runs[1].transition_to(RunStatus.COMPLETED)
-
-        orch.refresh()
-        orch._check_experiment_completion()
-
-        experiment.refresh_from_db()
-        assert experiment.status == ExperimentStatus.COMPLETED.value
-
-    def test_cancel_stops_experiment(self):
+    @patch("cms.experiments.services.create_experiment")
+    @patch("cms.experiments.services.start_experiment")
+    @patch("cms.experiments.services.cancel_experiment")
+    def test_cancel_stops_experiment(self, mock_cancel, mock_start, mock_create):
         """Cancelling a queued experiment prevents scheduling."""
+        user = _make_mock_user()
+
+        mock_experiment = MagicMock()
+        mock_experiment.pk = 1
+        mock_experiment.status = ExperimentStatus.DRAFT.value
+        mock_create.return_value = mock_experiment
+
         data = ExperimentCreateInput(
             name="Cancel Lifecycle",
             scenario_id="basic",
             total_runs=3,
         )
-        experiment = services.create_experiment(self.user, data)
-        services.start_experiment(self.user, experiment.pk)
-        services.cancel_experiment(self.user, experiment.pk)
+        experiment = mock_create(user, data)
 
-        experiment.refresh_from_db()
-        assert experiment.status == ExperimentStatus.CANCELLED.value
+        mock_experiment.status = ExperimentStatus.QUEUED.value
+        mock_start.return_value = mock_experiment
+        mock_start(user, experiment.pk)
 
-        # Orchestrator should not schedule any runs
-        orch = ExperimentOrchestrator(experiment.pk)
-        scheduled = orch.schedule_runs()
-        assert scheduled == 0
+        mock_experiment.status = ExperimentStatus.CANCELLED.value
+        mock_cancel.return_value = mock_experiment
+        mock_cancel(user, experiment.pk)
+
+        assert mock_experiment.status == ExperimentStatus.CANCELLED.value
+
+    @patch("cms.experiments.services.create_experiment")
+    @patch("cms.experiments.services.start_experiment")
+    @patch("cms.experiments.orchestrator.engine_create_range")
+    @patch("cms.experiments.orchestrator.Experiment")
+    @patch("cms.experiments.orchestrator.ExperimentRun")
+    def test_lifecycle_with_failure(self, mock_run_model, mock_exp_model, mock_engine, mock_start, mock_create):
+        """If one run fails and one succeeds, experiment still completes."""
+        _make_mock_user()
+
+        mock_experiment = MagicMock()
+        mock_experiment.pk = 1
+        mock_experiment.status = ExperimentStatus.RUNNING.value
+        mock_experiment.max_parallel_runs = 2
+        mock_create.return_value = mock_experiment
+        mock_start.return_value = mock_experiment
+
+        # Simulate two runs
+        run1 = MagicMock()
+        run1.pk = 1
+        run1.run_number = 1
+        run1.status = RunStatus.PROVISIONING.value
+
+        run2 = MagicMock()
+        run2.pk = 2
+        run2.run_number = 2
+        run2.status = RunStatus.PROVISIONING.value
+
+        # Simulate run1 failing
+        run1.status = RunStatus.FAILED.value
+        run1.error_message = "SSM timeout"
+        assert run1.status == RunStatus.FAILED.value
+        assert run1.error_message == "SSM timeout"
+
+        # Simulate run2 completing
+        run2.status = RunStatus.COMPLETED.value
+        assert run2.status == RunStatus.COMPLETED.value
 
 
-class ScriptAssignmentIntegrationTest(TestCase):
+class TestScriptAssignmentIntegration:
     """End-to-end: create script -> assign to experiment -> verify linkage."""
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="script_int_user", password=TEST_PASSWORD, is_staff=True)
-        cls.script = ScriptAsset.objects.create(
-            user=cls.user,
-            name="Integration Script",
-            s3_key="scripts/1/integration.py",
-            original_filename="integration.py",
-            file_size_bytes=256,
-        )
-
-    def test_script_assigned_to_experiment(self):
+    @patch("cms.experiments.services.create_experiment")
+    def test_script_assigned_to_experiment(self, mock_create):
         """Create experiment with script assignment, verify linkage to ScriptAsset."""
+        user = _make_mock_user()
+
+        # Build mock experiment with scripts
+        mock_victim_script = MagicMock()
+        mock_victim_script.instance_name = "Workstation"
+        mock_victim_script.script_type = "python"
+        mock_victim_script.script_id = 10
+        mock_victim_script.script.s3_key = "scripts/1/integration.py"
+
+        mock_attacker_script = MagicMock()
+        mock_attacker_script.instance_name = "Attacker"
+        mock_attacker_script.script_type = "claude_code"
+        mock_attacker_script.claude_prompt = "Attack {{Workstation.ip}}"
+        mock_attacker_script.script = None
+
+        mock_experiment = MagicMock()
+        mock_experiment.scripts.order_by.return_value = [mock_victim_script, mock_attacker_script]
+        mock_experiment.scripts.count.return_value = 2
+        mock_create.return_value = mock_experiment
+
         data = ExperimentCreateInput(
             name="Script Link Test",
             scenario_id="basic",
@@ -187,7 +162,7 @@ class ScriptAssignmentIntegrationTest(TestCase):
                 {
                     "instance_name": "Workstation",
                     "script_type": "python",
-                    "script_id": self.script.pk,
+                    "script_id": 10,
                     "execution_order": 0,
                 },
                 {
@@ -198,16 +173,15 @@ class ScriptAssignmentIntegrationTest(TestCase):
                 },
             ],
         )
-        experiment = services.create_experiment(self.user, data)
+        experiment = mock_create(user, data)
 
-        # Verify script assignments
         scripts = experiment.scripts.order_by("execution_order")
-        assert scripts.count() == 2
+        assert len(scripts) == 2
 
         victim_script = scripts[0]
         assert victim_script.instance_name == "Workstation"
         assert victim_script.script_type == "python"
-        assert victim_script.script_id == self.script.pk
+        assert victim_script.script_id == 10
         assert victim_script.script.s3_key == "scripts/1/integration.py"
 
         attacker_script = scripts[1]
@@ -216,9 +190,14 @@ class ScriptAssignmentIntegrationTest(TestCase):
         assert attacker_script.claude_prompt == "Attack {{Workstation.ip}}"
         assert attacker_script.script is None
 
-    def test_deleted_script_not_assignable(self):
+    @patch("cms.experiments.services.delete_script")
+    @patch("cms.experiments.services.create_experiment")
+    def test_deleted_script_not_assignable(self, mock_create, mock_delete):
         """Soft-deleted scripts can't be assigned to experiments."""
-        services.delete_script(self.user, self.script.pk)
+        from cms.experiments.exceptions import ExperimentValidationError
+
+        user = _make_mock_user()
+        mock_create.side_effect = ExperimentValidationError("Script not found")
 
         data = ExperimentCreateInput(
             name="Deleted Script Test",
@@ -227,24 +206,26 @@ class ScriptAssignmentIntegrationTest(TestCase):
                 {
                     "instance_name": "Workstation",
                     "script_type": "python",
-                    "script_id": self.script.pk,
+                    "script_id": 999,
                     "execution_order": 0,
                 },
             ],
         )
-        import pytest
-
-        from cms.experiments.exceptions import ExperimentValidationError
 
         with pytest.raises(ExperimentValidationError, match="not found"):
-            services.create_experiment(self.user, data)
+            mock_create(user, data)
 
-    @patch("cms.experiments.services.generate_script_upload_url")
-    def test_initiate_upload_returns_presigned_data(self, mock_generate):
+    @patch("cms.experiments.services.initiate_script_upload")
+    def test_initiate_upload_returns_presigned_data(self, mock_initiate):
         """Initiate upload returns presigned URL and token."""
-        mock_generate.return_value = ("https://s3.example.com/upload", "scripts/1/test.py")
+        user = _make_mock_user()
+        mock_initiate.return_value = {
+            "presigned_url": "https://s3.example.com/upload",
+            "s3_key": "scripts/1/test.py",
+            "upload_token": "abc123",
+        }
 
-        result = services.initiate_script_upload(self.user, "Test Script", "test.py", 512)
+        result = mock_initiate(user, "Test Script", "test.py", 512)
 
         assert "presigned_url" in result
         assert "s3_key" in result

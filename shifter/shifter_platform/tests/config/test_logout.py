@@ -7,67 +7,78 @@ Verifies that:
 - Only POST is accepted
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from django.contrib.auth import BACKEND_SESSION_KEY, get_user_model
-from django.test import Client
-from django.urls import reverse
+from django.contrib.auth import BACKEND_SESSION_KEY
+from django.test import RequestFactory
 
-User = get_user_model()
-
-
-@pytest.fixture
-def client(db):
-    """Django test client with database access."""
-    return Client()
+from config.views import logout_view
 
 
 @pytest.fixture
-def user(db):
-    """Create a test user."""
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+def rf():
+    """Django RequestFactory."""
+    return RequestFactory()
 
 
-@pytest.mark.django_db
+@pytest.fixture
+def mock_user():
+    """Create a mock authenticated user."""
+    user = MagicMock()
+    user.is_authenticated = True
+    user.email = "test@example.com"
+    return user
+
+
 class TestLogoutView:
     """Test the unified logout view."""
 
-    def test_non_oidc_user_gets_session_logout(self, client, user):
+    def test_non_oidc_user_gets_session_logout(self, rf, mock_user):
         """Non-OIDC user (ModelBackend) should get a simple session logout."""
-        client.force_login(user, backend="django.contrib.auth.backends.ModelBackend")
-        response = client.post(reverse("logout"))
+        request = rf.post("/logout/")
+        request.user = mock_user
+        request.session = {"_auth_user_backend": "django.contrib.auth.backends.ModelBackend"}
+
+        with patch("config.views.logout") as mock_logout:
+            response = logout_view(request)
+
+        mock_logout.assert_called_once_with(request)
         assert response.status_code == 302
         assert response.url == "/"
 
-        # Session should be cleared — user is no longer authenticated
-        response = client.get(reverse("dashboard_router"))
-        assert response.status_code == 302  # Redirected to login
-
-    def test_oidc_user_redirects_to_cognito_logout(self, client, user):
+    def test_oidc_user_redirects_to_cognito_logout(self, rf, mock_user):
         """OIDC user should be logged out and redirected to Cognito logout URL."""
-        client.force_login(user, backend="config.oidc.ShifterOIDCBackend")
+        request = rf.post("/logout/")
+        request.user = mock_user
+        request.session = {
+            BACKEND_SESSION_KEY: "config.oidc.ShifterOIDCBackend",
+        }
 
-        # Set the backend session key as Django's login() would
-        session = client.session
-        session[BACKEND_SESSION_KEY] = "config.oidc.ShifterOIDCBackend"
-        session.save()
+        # No OIDC_OP_LOGOUT_URL_METHOD configured, so falls back to LOGOUT_REDIRECT_URL
+        with patch("config.views.logout") as mock_logout:
+            response = logout_view(request)
 
-        response = client.post(reverse("logout"))
+        mock_logout.assert_called_once_with(request)
         assert response.status_code == 302
         # In dev/test (no OIDC_AUTH_DOMAIN env var), provider_logout_url returns "/"
         assert response.url == "/"
 
-        # Session should be cleared
-        response = client.get(reverse("dashboard_router"))
-        assert response.status_code == 302  # Redirected to login
-
-    def test_unauthenticated_redirects_to_landing(self, client):
+    def test_unauthenticated_redirects_to_landing(self, rf):
         """Unauthenticated POST should redirect to landing page."""
-        response = client.post(reverse("logout"))
+        request = rf.post("/logout/")
+        anon = MagicMock()
+        anon.is_authenticated = False
+        request.user = anon
+
+        response = logout_view(request)
         assert response.status_code == 302
         assert response.url == "/"
 
-    def test_get_not_allowed(self, client, user):
+    def test_get_not_allowed(self, rf, mock_user):
         """GET requests should be rejected (405 Method Not Allowed)."""
-        client.force_login(user)
-        response = client.get(reverse("logout"))
+        request = rf.get("/logout/")
+        request.user = mock_user
+
+        response = logout_view(request)
         assert response.status_code == 405

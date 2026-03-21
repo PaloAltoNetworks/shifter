@@ -428,9 +428,17 @@ class TestHTTPFlagVerification:
                 {"flag_type": "http", "validator_config": {}},
             )
 
-    def test_add_flag_http_invalid_url(self, draft_challenge):
-        """add_flag rejects HTTP flag with non-HTTP URL."""
-        with pytest.raises(CTFValidationError, match="must start with http"):
+    def test_add_flag_http_rejects_non_https(self, draft_challenge):
+        """add_flag rejects HTTP flag with non-HTTPS URL."""
+        with pytest.raises(CTFValidationError, match="must use HTTPS"):
+            add_flag(
+                draft_challenge.id,
+                {"flag_type": "http", "validator_config": {"url": "http://example.com/check"}},
+            )
+
+    def test_add_flag_http_rejects_ftp(self, draft_challenge):
+        """add_flag rejects HTTP flag with FTP URL."""
+        with pytest.raises(CTFValidationError, match="must use HTTPS"):
             add_flag(
                 draft_challenge.id,
                 {"flag_type": "http", "validator_config": {"url": "ftp://bad.com"}},
@@ -502,7 +510,7 @@ class TestURLBlocklistCreation:
                 draft_challenge.id,
                 {
                     "flag_type": "http",
-                    "validator_config": {"url": "http://169.254.169.254/latest/"},
+                    "validator_config": {"url": "https://169.254.169.254/latest/"},
                 },
             )
 

@@ -120,34 +120,6 @@ def _is_local_provisioner_enabled() -> bool:
     return mode in ("subprocess", "docker")
 
 
-def _get_ecs_client():
-    """Get boto3 ECS client.
-
-    .. deprecated::
-        Use :func:`shared.cloud.get_task_runner` instead.
-    """
-    import boto3
-    from botocore.client import BaseClient
-
-    region = settings.AWS_REGION
-    if not region:
-        logger.error("AWS_REGION is not configured")
-        raise ValueError("AWS_REGION is required")
-
-    try:
-        client = boto3.client("ecs", region_name=region)
-    except Exception:
-        logger.error(f"Failed to create ECS client for region {region}")
-        raise
-
-    if not isinstance(client, BaseClient):
-        logger.error(f"Invalid ECS client returned: {type(client)}")
-        raise TypeError(f"Expected BaseClient, got {type(client)}")
-
-    logger.debug(f"Created ECS client for region {region}")
-    return client
-
-
 def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     """Start an ECS Fargate task for provisioning operations.
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from botocore.exceptions import ClientError
 from django.conf import settings
@@ -27,28 +27,6 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
-
-
-def _get_ecs_client() -> Any:
-    """Get boto3 ECS client.
-
-    .. deprecated::
-        Use :func:`shared.cloud.get_task_runner` instead.
-
-    Returns:
-        Boto3 ECS client for the configured AWS region.
-
-    Raises:
-        ValueError: If AWS_REGION is not configured.
-    """
-    import boto3
-
-    region: str = getattr(settings, "AWS_REGION", "")
-    if not region:
-        logger.error("AWS_REGION is not configured")
-        raise ValueError("AWS_REGION is required for ECS operations")
-
-    return boto3.client("ecs", region_name=region)
 
 
 def _get_ecs_config() -> tuple[str, str, str, list[str]] | None:

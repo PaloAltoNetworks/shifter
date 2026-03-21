@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CMS**: Migrate `cms/experiments/events.py` from direct `boto3` SQS calls to `shared.cloud.get_queue_publisher()` abstraction layer
 - **Cloud**: Remove stub docstring from `AWSQueuePublisher`/`AWSQueueConsumer` now that extraction is complete
 
+### Removed
+- **Engine**: Delete deprecated `_get_ecs_client()` from `engine/ecs.py` (replaced by `shared.cloud.get_task_runner()`)
+- **CMS**: Delete deprecated `_get_ecs_client()` from `cms/experiments/ecs.py` (replaced by `shared.cloud.get_task_runner()`)
+- **Tests**: Delete `tests/engine/ecs/test_get_ecs_client.py` (tested removed function)
+
 ## [3.28.0] - 2026-03-21
 
 ### Changed

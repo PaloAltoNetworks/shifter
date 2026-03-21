@@ -2421,28 +2421,32 @@ def api_add_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
+    flag_type = body.get("flag_type", "static")
     flag_value = body.get("flag", "").strip()
-    if not flag_value:
+
+    # Flag value is only required for static and regex types
+    if flag_type in ("static", "regex") and not flag_value:
         return JsonResponse({"error": "Flag value is required"}, status=400)
 
     flag_data = {
         "flag": flag_value,
-        "flag_type": body.get("flag_type", "static"),
+        "flag_type": flag_type,
         "case_sensitive": body.get("case_sensitive", True),
         "order": body.get("order", 0),
+        "validator_config": body.get("validator_config"),
     }
 
     try:
         flag_obj = add_flag(challenge_id, flag_data)
-        return JsonResponse(
-            {
-                "id": str(flag_obj.id),
-                "flag_type": flag_obj.flag_type,
-                "case_sensitive": flag_obj.case_sensitive,
-                "order": flag_obj.order,
-            },
-            status=201,
-        )
+        response_data = {
+            "id": str(flag_obj.id),
+            "flag_type": flag_obj.flag_type,
+            "case_sensitive": flag_obj.case_sensitive,
+            "order": flag_obj.order,
+        }
+        if flag_obj.validator_config:
+            response_data["validator_config"] = flag_obj.validator_config
+        return JsonResponse(response_data, status=201)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
     except CTFStateError as e:

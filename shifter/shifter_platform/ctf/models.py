@@ -550,19 +550,23 @@ class CTFFlag(CTFBaseModel):
     """Individual flag for a CTF challenge.
 
     Supports multiple flags per challenge where any correct flag constitutes a solve.
-    Each flag independently supports different types (static/regex) and case sensitivity.
+    Each flag independently supports different types and case sensitivity.
 
     Attributes:
         challenge: The challenge this flag belongs to.
-        flag_hash: Hashed flag value (bcrypt/pbkdf2 for static, plaintext regex for regex type).
-        flag_type: Type of flag - "static" (hashed comparison) or "regex" (pattern match).
+        flag_hash: Hashed flag value (static), regex pattern (regex), or sentinel
+            value for programmable/http types.
+        flag_type: Type of flag verification.
         case_sensitive: Whether flag comparison is case-sensitive.
         order: Display order for admin UI.
+        validator_config: JSON configuration for programmable/http validators.
     """
 
     FLAG_TYPE_CHOICES = [
         ("static", "Static (hashed comparison)"),
         ("regex", "Regex (pattern match)"),
+        ("programmable", "Programmable (custom validator)"),
+        ("http", "HTTP (external endpoint)"),
     ]
 
     challenge = models.ForeignKey(
@@ -573,10 +577,10 @@ class CTFFlag(CTFBaseModel):
     )
     flag_hash = models.CharField(
         max_length=255,
-        help_text="Hashed flag value (static) or regex pattern (regex type)",
+        help_text="Hashed flag value (static), regex pattern (regex), or sentinel for programmable/http",
     )
     flag_type = models.CharField(
-        max_length=10,
+        max_length=20,
         choices=FLAG_TYPE_CHOICES,
         default="static",
         help_text="Flag verification type",
@@ -588,6 +592,12 @@ class CTFFlag(CTFBaseModel):
     order = models.PositiveIntegerField(
         default=0,
         help_text="Display order in admin UI",
+    )
+    validator_config = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Configuration for programmable/http validators",
     )
 
     class Meta:

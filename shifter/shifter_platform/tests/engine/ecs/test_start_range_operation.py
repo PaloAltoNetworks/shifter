@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared.cloud.exceptions import CloudTaskError
 
@@ -208,8 +207,8 @@ class TestStartRangeOperation:
     # Error handling
     # -------------------------------------------------------------------------
 
-    def test_raises_client_error_when_run_task_fails(self, settings):
-        """Function raises ClientError when TaskRunner.run_task fails."""
+    def test_raises_cloud_task_error_when_run_task_fails(self, settings):
+        """Function raises CloudTaskError when TaskRunner.run_task fails."""
         from engine.ecs import start_range_operation
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
@@ -224,7 +223,7 @@ class TestStartRangeOperation:
             mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
 
     # -------------------------------------------------------------------------

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.30.0] - 2026-03-21
+
+### Added
+- **Provisioner Cloud**: `SecretsStore` protocol, `CloudSecretsError` exception, `AWSSecretsStore` adapter, and `get_secrets_store()` factory
+- **Provisioner Cloud**: `object_exists()` and `delete_object()` methods on `ObjectStorage` protocol and `AWSObjectStorage` adapter
+
+### Changed
+- **Provisioner**: Migrate `events.py` from direct `boto3` SNS calls to `EventBus` cloud abstraction
+- **Provisioner**: Migrate `config.py` RDS IAM auth from `boto3` to `DBAuth` cloud abstraction
+- **Provisioner**: Migrate `main.py` S3/SSM/RDS/Secrets calls to `ObjectStorage`, `ConfigStore`, `DBAuth`, `SecretsStore` cloud abstractions
+- **Provisioner**: Migrate `stacks/range_stack.py` Secrets Manager call to `SecretsStore` cloud abstraction
+- **Provisioner**: Migrate `components/network.py` RDS IAM auth to `DBAuth` cloud abstraction
+- **Provisioner**: Migrate `terraform_runner.py` S3 calls to `ObjectStorage` cloud abstraction
+- **Provisioner**: Migrate `range_terraform_runner.py` S3 calls to `ObjectStorage` cloud abstraction
+
+### Removed
+- **Provisioner**: Remove `_get_sns_client()` from `events.py` (replaced by `EventBus` protocol)
+- **Provisioner**: Remove direct `import boto3` from `events.py`, `config.py`, `main.py`, `stacks/range_stack.py`, `terraform_runner.py`, `range_terraform_runner.py`
+
 ## [3.29.1] - 2026-03-21
 
 ### Changed

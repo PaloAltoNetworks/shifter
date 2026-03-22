@@ -16,7 +16,6 @@ import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hard
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import boto3
 import psycopg
 from psycopg import sql
 
@@ -76,12 +75,10 @@ def get_agent_presigned_url(inst_config: dict) -> str | None:
         return None
 
     try:
-        s3_client = boto3.client("s3")
-        url: str = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": s3_key},
-            ExpiresIn=3600,
-        )
+        from cloud import get_object_storage
+
+        storage = get_object_storage()
+        url = storage.generate_presigned_download_url(bucket=bucket, key=s3_key, expires_in=3600)
         return url
     except Exception as e:
         logger.error("Failed to generate presigned URL for %s: %s", s3_key, e)
@@ -144,9 +141,10 @@ def get_ami_id(ami_type: str) -> str:
         param_path = f"/shifter/ami/{ami_type}"
 
     try:
-        ssm = boto3.client("ssm")
-        response = ssm.get_parameter(Name=param_path)
-        ami_id = response["Parameter"]["Value"]
+        from cloud import get_config_store
+
+        store = get_config_store()
+        ami_id = store.get_parameter(param_path)
         logger.info("Fetched %s AMI from SSM %s: %s", ami_type, param_path, ami_id)
         _ami_cache[ami_type] = ami_id
         return ami_id
@@ -259,12 +257,15 @@ def get_db_connection() -> psycopg.Connection:
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
     logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
-    client = boto3.client("rds")
-    token = client.generate_db_auth_token(
-        DBHostname=db_host,
-        Port=db_port,
-        DBUsername=db_user,
-        Region=aws_region,
+    assert db_host is not None  # validated above
+    assert db_user is not None  # validated above
+    from cloud import get_db_auth
+
+    auth = get_db_auth()
+    token = auth.generate_auth_token(
+        hostname=db_host,
+        port=db_port,
+        username=db_user,
     )
     return psycopg.connect(
         host=db_host,
@@ -651,9 +652,10 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
         return
 
     # Get SSH private key from Secrets Manager
-    secrets_client = boto3.client("secretsmanager")
-    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-    private_key = secret_response["SecretString"]
+    from cloud import get_secrets_store
+
+    secrets = get_secrets_store()
+    private_key = secrets.get_secret(ssh_key_secret_arn)
 
     # Create NGFW executor and wait for NGFW to be ready
     ssh_executor = NGFWExecutor(private_key=private_key)
@@ -1438,9 +1440,10 @@ def configure_ngfw_subnets(
     )
 
     # Get SSH private key from Secrets Manager
-    secrets_client = boto3.client("secretsmanager")
-    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-    private_key = secret_response["SecretString"]
+    from cloud import get_secrets_store
+
+    secrets = get_secrets_store()
+    private_key = secrets.get_secret(ssh_key_secret_arn)
 
     # Create NGFW executor
     ssh_executor = NGFWExecutor(private_key=private_key)

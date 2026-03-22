@@ -79,7 +79,7 @@
                         <ul class="list-unstyled mt-1">
                             {% for file in challenge_files %}
                             <li class="mb-1">
-                                <a href="{% url 'ctf:api_file_download' file_id=file.pk %}" class="btn btn-sm btn-outline-primary">
+                                <a href="#" onclick="downloadFile('{% url 'ctf:api_file_download' file_id=file.pk %}'); return false;" class="btn btn-sm btn-outline-primary">
                                     &#128196; {{ file.display }}
                                 </a>
                                 <small class="text-muted ms-1">{{ file.file_size_display }}</small>
@@ -344,6 +344,16 @@ function useHint() {
         btn.disabled = false;
         btn.textContent = 'Reveal Hint';
     });
+}
+
+function downloadFile(apiUrl) {
+    fetch(apiUrl, {headers: {'X-CSRFToken': getCookie('csrftoken')}})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.url) { window.location.href = data.url; }
+            else if (data.error) { alert(data.error); }
+        })
+        .catch(function() { alert('Download failed.'); });
 }
 </script>
 {% endblock %}

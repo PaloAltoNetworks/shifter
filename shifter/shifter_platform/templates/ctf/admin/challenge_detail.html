@@ -287,7 +287,7 @@
                     {% for file in challenge_files %}
                     <tr>
                         <td>
-                            <a href="{% url 'ctf:api_file_download' file_id=file.pk %}">{{ file.display }}</a>
+                            <a href="#" onclick="downloadFile('{% url 'ctf:api_file_download' file_id=file.pk %}'); return false;">{{ file.display }}</a>
                         </td>
                         <td>{{ file.file_size_display }}</td>
                         <td>{{ file.content_type }}</td>
@@ -491,6 +491,17 @@
         </div>
     </div>
 </div>
+<script>
+function downloadFile(apiUrl) {
+    fetch(apiUrl, {headers: {'X-CSRFToken': '{{ csrf_token }}'}})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.url) { window.location.href = data.url; }
+            else if (data.error) { alert(data.error); }
+        })
+        .catch(function() { alert('Download failed.'); });
+}
+</script>
 {% if event.is_content_modifiable %}
 <script>
 function addFlag() {

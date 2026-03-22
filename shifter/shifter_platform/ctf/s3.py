@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -192,6 +193,9 @@ def generate_download_url(s3_key: str, filename: str, expires_in: int = 300) -> 
         raise CTFFileError("AWS_S3_BUCKET_NAME is not configured")
 
     safe_filename = sanitize_s3_filename(filename)
+    # Strip characters that could cause HTTP header injection (S5131).
+    # Only allow alphanumeric, dash, underscore, dot, and space.
+    safe_filename = re.sub(r"[^a-zA-Z0-9._\- ]", "_", safe_filename)
 
     try:
         client = get_s3_client()

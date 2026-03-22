@@ -47,7 +47,7 @@ resource "aws_iam_role_policy" "ecs_execution_ecr" {
 # ------------------------------------------------------------------------------
 # ECS Task Role
 # ------------------------------------------------------------------------------
-# Used by the Pulumi provisioner container for AWS operations
+# Used by the engine provisioner container for AWS operations
 
 resource "aws_iam_role" "ecs_task" {
   name = "${var.name_prefix}-pulumi-ecs-task"
@@ -67,7 +67,7 @@ resource "aws_iam_role" "ecs_task" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - Pulumi State
+# Task Role Policy - Engine State
 # ------------------------------------------------------------------------------
 
 resource "aws_iam_role_policy" "pulumi_state" {

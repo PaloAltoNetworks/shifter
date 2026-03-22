@@ -1,4 +1,4 @@
-# Pulumi Provisioner Module - CloudWatch Alarms
+# Engine Provisioner Module - CloudWatch Alarms
 #
 # Creates:
 # - SNS topic for range launch failure notifications

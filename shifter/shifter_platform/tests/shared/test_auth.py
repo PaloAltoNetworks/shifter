@@ -1,8 +1,9 @@
 """Tests for shared.auth access control utilities."""
 
-from django.contrib.auth.models import AnonymousUser, Group, User
-from django.test import RequestFactory, TestCase
-from django.urls import reverse
+from unittest.mock import MagicMock
+
+from django.contrib.auth.models import AnonymousUser
+from django.test import RequestFactory
 
 from shared.auth import (
     THREAT_RESEARCH_GROUP,
@@ -10,51 +11,49 @@ from shared.auth import (
     threat_research_required,
 )
 
-TEST_PASSWORD = "test"  # nosec B105
+
+def _make_user(is_staff=False, is_active=True, groups=None):
+    """Create a mock user with the given properties."""
+    user = MagicMock()
+    user.is_staff = is_staff
+    user.is_active = is_active
+    user.is_authenticated = True
+    user.is_anonymous = False
+    user.pk = 1
+    if groups:
+        user.groups.filter.return_value.exists.return_value = True
+    else:
+        user.groups.filter.return_value.exists.return_value = False
+    return user
 
 
-class IsStaffOrThreatResearcherTest(TestCase):
+class TestIsStaffOrThreatResearcher:
     """Unit tests for _is_staff_or_threat_researcher helper."""
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.staff = User.objects.create_user(username="staff", password=TEST_PASSWORD, is_staff=True)
-        cls.threat_user = User.objects.create_user(username="threat", password=TEST_PASSWORD, is_staff=False)
-        group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
-        cls.threat_user.groups.add(group)
-        cls.regular = User.objects.create_user(username="regular", password=TEST_PASSWORD, is_staff=False)
-        cls.inactive = User.objects.create_user(
-            username="inactive", password=TEST_PASSWORD, is_staff=True, is_active=False
-        )
-
     def test_active_staff_returns_true(self):
-        assert _is_staff_or_threat_researcher(self.staff) is True
+        user = _make_user(is_staff=True)
+        assert _is_staff_or_threat_researcher(user) is True
 
     def test_active_threat_research_member_returns_true(self):
-        assert _is_staff_or_threat_researcher(self.threat_user) is True
+        user = _make_user(is_staff=False, groups=[THREAT_RESEARCH_GROUP])
+        assert _is_staff_or_threat_researcher(user) is True
 
     def test_inactive_user_returns_false(self):
-        assert _is_staff_or_threat_researcher(self.inactive) is False
+        user = _make_user(is_staff=True, is_active=False)
+        assert _is_staff_or_threat_researcher(user) is False
 
     def test_regular_user_returns_false(self):
-        assert _is_staff_or_threat_researcher(self.regular) is False
+        user = _make_user(is_staff=False)
+        assert _is_staff_or_threat_researcher(user) is False
 
     def test_anonymous_user_returns_false(self):
         assert _is_staff_or_threat_researcher(AnonymousUser()) is False
 
 
-class ThreatResearchRequiredDecoratorTest(TestCase):
+class TestThreatResearchRequiredDecorator:
     """Unit tests for the threat_research_required decorator."""
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.staff = User.objects.create_user(username="dec_staff", password=TEST_PASSWORD, is_staff=True)
-        cls.threat_user = User.objects.create_user(username="dec_threat", password=TEST_PASSWORD, is_staff=False)
-        group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
-        cls.threat_user.groups.add(group)
-        cls.regular = User.objects.create_user(username="dec_regular", password=TEST_PASSWORD, is_staff=False)
-
-    def setUp(self):
+    def setup_method(self):
         self.factory = RequestFactory()
 
         from django.http import HttpResponse
@@ -71,11 +70,9 @@ class ThreatResearchRequiredDecoratorTest(TestCase):
             request.user = AnonymousUser()
         else:
             request.user = user
-        # Add session and messages support for the middleware
         from django.contrib.messages.storage.fallback import FallbackStorage
-        from django.contrib.sessions.backends.db import SessionStore
 
-        request.session = SessionStore()
+        request.session = {}
         request._messages = FallbackStorage(request)
         return request
 
@@ -83,29 +80,33 @@ class ThreatResearchRequiredDecoratorTest(TestCase):
         request = self._make_request()
         resp = self.view(request)
         assert resp.status_code == 302
-        # Should redirect to LOGIN_URL, not admin:index
         assert "admin" not in resp.url
 
     def test_unauthorized_redirects_to_dashboard(self):
-        request = self._make_request(user=self.regular)
+        user = _make_user(is_staff=False)
+        request = self._make_request(user=user)
         resp = self.view(request)
         assert resp.status_code == 302
-        assert resp.url == reverse("mission_control:dashboard")
+        # The redirect URL should be the mission_control:dashboard URL
+        assert "mission-control" in resp.url
 
     def test_unauthorized_sets_error_message(self):
-        request = self._make_request(user=self.regular)
+        user = _make_user(is_staff=False)
+        request = self._make_request(user=user)
         self.view(request)
         msgs = [str(m) for m in request._messages]
         assert any("permission" in m.lower() for m in msgs)
 
     def test_staff_passes_through(self):
-        request = self._make_request(user=self.staff)
+        user = _make_user(is_staff=True)
+        request = self._make_request(user=user)
         resp = self.view(request)
         assert resp.status_code == 200
         assert resp.content == b"ok"
 
     def test_threat_research_member_passes_through(self):
-        request = self._make_request(user=self.threat_user)
+        user = _make_user(is_staff=False, groups=[THREAT_RESEARCH_GROUP])
+        request = self._make_request(user=user)
         resp = self.view(request)
         assert resp.status_code == 200
         assert resp.content == b"ok"

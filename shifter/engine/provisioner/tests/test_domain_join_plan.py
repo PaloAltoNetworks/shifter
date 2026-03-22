@@ -39,13 +39,13 @@ class TestDomainJoinPlanContext:
         dc_config = {
             "dc_ip": "10.0.0.10",
             "domain_name": "test.local",
-            "domain_admin_password": "TestPass123!",
+            "domain_admin_password": "TestPass123!",  # nosec B105  # NOSONAR — test fixture
         }
         context = plan.get_context(dc_config)
 
         assert context["dc_ip"] == "10.0.0.10"
         assert context["domain_name"] == "test.local"
-        assert context["domain_admin_password"] == "TestPass123!"
+        assert context["domain_admin_password"] == "TestPass123!"  # nosec B105  # NOSONAR
         assert context["domain_admin_user"] == "Administrator"
 
     def test_get_context_custom_admin_user(self):
@@ -54,7 +54,7 @@ class TestDomainJoinPlanContext:
         dc_config = {
             "dc_ip": "10.0.0.10",
             "domain_name": "test.local",
-            "domain_admin_password": "TestPass123!",
+            "domain_admin_password": "TestPass123!",  # nosec B105  # NOSONAR — test fixture
             "domain_admin_user": "DomainAdmin",
         }
         context = plan.get_context(dc_config)

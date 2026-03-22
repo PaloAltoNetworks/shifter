@@ -13,10 +13,11 @@ import logging
 import time
 import uuid
 
-from botocore.exceptions import ClientError
 from django.conf import settings
 
-from cms.assets.s3 import S3Error, get_s3_client, sanitize_s3_filename
+from cms.assets.s3 import S3Error, sanitize_s3_filename
+from shared.cloud import get_object_storage
+from shared.cloud.exceptions import CloudStorageError
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +49,16 @@ def generate_script_upload_url(user_id: int, filename: str) -> tuple[str, str]:
     s3_key = f"scripts/{user_id}/{unique_id}_{safe_filename}"
 
     try:
-        client = get_s3_client()
-        presigned_url = client.generate_presigned_url(
-            ClientMethod="put_object",
-            Params={
-                "Bucket": settings.AWS_S3_BUCKET_NAME,
-                "Key": s3_key,
-                "ContentType": "text/x-python",
-            },
-            ExpiresIn=settings.SCRIPT_UPLOAD_URL_EXPIRES,
+        storage = get_object_storage()
+        presigned_url = storage.generate_presigned_upload_url(
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            content_type="text/x-python",
+            expires_in=settings.SCRIPT_UPLOAD_URL_EXPIRES,
         )
-    except ClientError as e:
+    except CloudStorageError as e:
         logger.error("generate_script_upload_url: failed user_id=%s error=%s", user_id, e)
-        raise S3Error(f"Failed to generate presigned URL: {e}") from e
+        raise S3Error(str(e)) from e
 
     logger.debug("generate_script_upload_url: success user_id=%s s3_key=%s", user_id, s3_key)
     return presigned_url, s3_key
@@ -84,18 +82,15 @@ def generate_presigned_download_url(s3_key: str, expires_in: int = 3600) -> str:
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
-        client = get_s3_client()
-        url = client.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={
-                "Bucket": settings.AWS_S3_BUCKET_NAME,
-                "Key": s3_key,
-            },
-            ExpiresIn=expires_in,
+        storage = get_object_storage()
+        url = storage.generate_presigned_download_url(
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            expires_in=expires_in,
         )
-    except ClientError as e:
+    except CloudStorageError as e:
         logger.error("generate_presigned_download_url: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to generate download URL: {e}") from e
+        raise S3Error(str(e)) from e
 
     logger.debug("generate_presigned_download_url: success s3_key=%s", s3_key)
     return url
@@ -115,11 +110,11 @@ def delete_s3_object(s3_key: str) -> None:
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
-        client = get_s3_client()
-        client.delete_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
-    except ClientError as e:
+        storage = get_object_storage()
+        storage.delete_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
+    except CloudStorageError as e:
         logger.error("delete_s3_object: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to delete from S3: {e}") from e  # nosec B608
+        raise S3Error(str(e)) from e
 
     logger.info("delete_s3_object: success s3_key=%s", s3_key)
 
@@ -141,19 +136,18 @@ def verify_s3_object(s3_key: str) -> tuple[int, str]:
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
-        client = get_s3_client()
-        response = client.head_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
-        size = response["ContentLength"]
-        etag = response["ETag"].strip('"')
+        storage = get_object_storage()
+        metadata = storage.head_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
+        size = metadata["content_length"]
+        etag = metadata["etag"]
         logger.debug("verify_s3_object: success s3_key=%s size=%d", s3_key, size)
         return size, etag
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-        if error_code == "404":
+    except CloudStorageError as e:
+        if "not found" in str(e).lower() or "404" in str(e):
             logger.warning("verify_s3_object: not found s3_key=%s", s3_key)
             raise S3Error(f"Object not found: {s3_key}") from e
         logger.error("verify_s3_object: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to verify S3 object: {e}") from e
+        raise S3Error(str(e)) from e
 
 
 # ---------------------------------------------------------------------------

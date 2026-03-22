@@ -1,6 +1,6 @@
 """SQS worker management command.
 
-Direct SQS polling using boto3.
+Polls a message queue using the cloud abstraction layer.
 Run one instance per queue:
 
     python manage.py run_worker --queue cms
@@ -18,7 +18,6 @@ from __future__ import annotations
 import contextlib
 import importlib
 import logging
-import os
 import signal
 import sys
 import tempfile
@@ -28,9 +27,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import boto3
 from django.conf import settings
 from django.core.management.base import BaseCommand
+
+from shared.cloud import get_queue_consumer
+from shared.cloud.types import QueueConsumer
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class Command(BaseCommand):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.shutdown = False
-        self.sqs = None
+        self.consumer: QueueConsumer | None = None
         self.heartbeat_file: Path | None = None
         self.queue_name: str = ""
 
@@ -99,9 +100,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
-        # Support LocalStack via AWS_ENDPOINT_URL
-        endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
-        self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION, endpoint_url=endpoint_url)
+        self.consumer = get_queue_consumer()
 
         # Log startup with structured fields for CloudWatch filtering
         logger.info(
@@ -164,21 +163,13 @@ class Command(BaseCommand):
         max_messages: int,
     ):
         """Main polling loop."""
-        assert self.sqs is not None, "sqs client not initialized"
+        assert self.consumer is not None, "queue consumer not initialized"
         while not self.shutdown:
             try:
-                response = self.sqs.receive_message(
-                    QueueUrl=queue_url,
-                    MaxNumberOfMessages=max_messages,
-                    WaitTimeSeconds=wait_time,
-                    AttributeNames=["All"],
-                    MessageAttributeNames=["All"],
-                )
+                messages = self.consumer.receive_messages(queue_url, max_messages, wait_time)
 
                 # Update heartbeat after successful poll (even if no messages)
                 self._touch_heartbeat()
-
-                messages = response.get("Messages", [])
 
                 for message in messages:
                     if self.shutdown:
@@ -198,22 +189,19 @@ class Command(BaseCommand):
         message: dict,
     ):
         """Process a single SQS message."""
-        assert self.sqs is not None, "sqs client not initialized"
-        receipt_handle = message["ReceiptHandle"]
-        body = message["Body"]
+        assert self.consumer is not None, "queue consumer not initialized"
+        receipt_handle = message["receipt_handle"]
+        body = message["body"]
 
         try:
             handler(body)
 
-            self.sqs.delete_message(
-                QueueUrl=queue_url,
-                ReceiptHandle=receipt_handle,
-            )
+            self.consumer.delete_message(queue_url, receipt_handle)
             logger.debug(
                 "Message acknowledged: queue=%s message_id=%s",
                 self.queue_name,
-                message.get("MessageId"),
+                message.get("message_id"),
             )
 
         except Exception:
-            logger.exception("Error processing message: %s", message.get("MessageId"))
+            logger.exception("Error processing message: %s", message.get("message_id"))

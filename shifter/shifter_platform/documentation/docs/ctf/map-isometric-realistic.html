@@ -1,0 +1,1390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compound Sigma-7 - Isometric Reconnaissance</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #c8ced6; }
+  canvas { display: block; }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #c8ced6; color: #4a5568; font-family: 'Courier New', monospace; font-size: 13px;
+    letter-spacing: 2px; z-index: 10; transition: opacity 1.2s;
+  }
+  #loading.done { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="loading">RECONSTRUCTING 3D TERRAIN MODEL...</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// =========================================================================
+//  RENDERER
+// =========================================================================
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+// =========================================================================
+//  SCENE
+// =========================================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xc8ced6);
+scene.fog = new THREE.Fog(0xc8ced6, 300, 600);
+
+// =========================================================================
+//  CAMERA -- Orthographic isometric
+// =========================================================================
+const frustum = 110;
+const aspect = window.innerWidth / window.innerHeight;
+const camera = new THREE.OrthographicCamera(
+  -frustum * aspect, frustum * aspect,
+  frustum, -frustum,
+  -500, 1000
+);
+const isoDistance = 200;
+const isoAngle = Math.PI / 4;
+const isoTilt = Math.atan(1 / Math.sqrt(2));
+camera.position.set(
+  isoDistance * Math.cos(isoTilt) * Math.sin(isoAngle),
+  isoDistance * Math.sin(isoTilt),
+  isoDistance * Math.cos(isoTilt) * Math.cos(isoAngle)
+);
+camera.lookAt(0, 0, 0);
+
+// =========================================================================
+//  CONTROLS
+// =========================================================================
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableRotate = true;
+controls.enablePan = true;
+controls.enableZoom = true;
+controls.minZoom = 0.3;
+controls.maxZoom = 4;
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0, 0);
+
+// =========================================================================
+//  LIGHTING -- Overcast arctic
+// =========================================================================
+// Strong ambient for overcast feel -- slight blue tint
+const ambient = new THREE.AmbientLight(0xb8c4d4, 1.8);
+scene.add(ambient);
+
+// Hemisphere: cold sky above, slightly warm bounce from snow below
+const hemi = new THREE.HemisphereLight(0xa8b8cc, 0xd0c8c0, 0.6);
+scene.add(hemi);
+
+// Soft directional -- low angle arctic sun behind clouds
+const dirLight = new THREE.DirectionalLight(0xe8e0d8, 1.2);
+dirLight.position.set(60, 80, 40);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.left = -150;
+dirLight.shadow.camera.right = 150;
+dirLight.shadow.camera.top = 150;
+dirLight.shadow.camera.bottom = -150;
+dirLight.shadow.camera.near = 0.1;
+dirLight.shadow.camera.far = 400;
+dirLight.shadow.bias = -0.001;
+dirLight.shadow.normalBias = 0.02;
+scene.add(dirLight);
+
+// Fill light from opposite side
+const fillLight = new THREE.DirectionalLight(0xc0c8d8, 0.4);
+fillLight.position.set(-40, 50, -30);
+scene.add(fillLight);
+
+// =========================================================================
+//  PROCEDURAL TEXTURE HELPERS
+// =========================================================================
+function createCanvasTexture(width, height, drawFn) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  drawFn(ctx, width, height);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// Seeded pseudo-random
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+// =========================================================================
+//  MATERIALS
+// =========================================================================
+
+// -- Snow ground texture --
+const snowTex = createCanvasTexture(512, 512, (ctx, w, h) => {
+  // Base snow
+  ctx.fillStyle = '#d4d8dc';
+  ctx.fillRect(0, 0, w, h);
+  const rng = seededRandom(42);
+  // Subtle variation
+  for (let i = 0; i < 8000; i++) {
+    const x = rng() * w;
+    const y = rng() * h;
+    const v = Math.floor(200 + rng() * 30);
+    ctx.fillStyle = `rgb(${v},${v+2},${v+5})`;
+    ctx.fillRect(x, y, 1 + rng() * 3, 1 + rng() * 3);
+  }
+  // Dirt patches
+  for (let i = 0; i < 30; i++) {
+    const x = rng() * w;
+    const y = rng() * h;
+    const r = 5 + rng() * 15;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    const dv = Math.floor(140 + rng() * 40);
+    ctx.fillStyle = `rgba(${dv-20},${dv-10},${dv-25}, 0.3)`;
+    ctx.fill();
+  }
+});
+snowTex.repeat.set(4, 4);
+
+const snowMat = new THREE.MeshStandardMaterial({
+  map: snowTex,
+  color: 0xd8dce0,
+  roughness: 0.92,
+  metalness: 0.0,
+});
+
+// -- Dirty/trampled snow near buildings --
+const trampledSnowTex = createCanvasTexture(512, 512, (ctx, w, h) => {
+  ctx.fillStyle = '#b0b4b0';
+  ctx.fillRect(0, 0, w, h);
+  const rng = seededRandom(77);
+  for (let i = 0; i < 10000; i++) {
+    const x = rng() * w;
+    const y = rng() * h;
+    const v = Math.floor(150 + rng() * 40);
+    ctx.fillStyle = `rgb(${v-10},${v-5},${v-15})`;
+    ctx.fillRect(x, y, 1 + rng() * 4, 1 + rng() * 2);
+  }
+  // Mud streaks
+  for (let i = 0; i < 15; i++) {
+    ctx.beginPath();
+    ctx.moveTo(rng() * w, rng() * h);
+    ctx.lineTo(rng() * w, rng() * h);
+    ctx.strokeStyle = `rgba(90,80,70,${0.1 + rng() * 0.15})`;
+    ctx.lineWidth = 2 + rng() * 6;
+    ctx.stroke();
+  }
+});
+trampledSnowTex.repeat.set(2, 2);
+
+const trampledSnowMat = new THREE.MeshStandardMaterial({
+  map: trampledSnowTex,
+  color: 0xb8b8b0,
+  roughness: 0.88,
+  metalness: 0.0,
+});
+
+// -- Concrete --
+const concreteTex = createCanvasTexture(256, 256, (ctx, w, h) => {
+  ctx.fillStyle = '#8a8a85';
+  ctx.fillRect(0, 0, w, h);
+  const rng = seededRandom(101);
+  for (let i = 0; i < 6000; i++) {
+    const x = rng() * w;
+    const y = rng() * h;
+    const v = Math.floor(120 + rng() * 40);
+    ctx.fillStyle = `rgb(${v},${v-2},${v-5})`;
+    ctx.fillRect(x, y, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  // Cracks
+  for (let i = 0; i < 8; i++) {
+    ctx.beginPath();
+    let cx = rng() * w, cy = rng() * h;
+    ctx.moveTo(cx, cy);
+    for (let j = 0; j < 5; j++) {
+      cx += (rng() - 0.5) * 40;
+      cy += (rng() - 0.5) * 40;
+      ctx.lineTo(cx, cy);
+    }
+    ctx.strokeStyle = `rgba(60,58,55,${0.2 + rng() * 0.3})`;
+    ctx.lineWidth = 0.5 + rng();
+    ctx.stroke();
+  }
+  // Stains
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.arc(rng() * w, rng() * h, 10 + rng() * 20, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(70,68,65, ${0.05 + rng() * 0.1})`;
+    ctx.fill();
+  }
+});
+
+const concreteMat = new THREE.MeshStandardMaterial({
+  map: concreteTex,
+  color: 0x8a8880,
+  roughness: 0.92,
+  metalness: 0.05,
+});
+
+// -- Corrugated metal siding --
+const corrugatedTex = createCanvasTexture(256, 512, (ctx, w, h) => {
+  ctx.fillStyle = '#6a7068';
+  ctx.fillRect(0, 0, w, h);
+  // Corrugation ridges
+  for (let y = 0; y < h; y += 12) {
+    ctx.fillStyle = y % 24 < 12 ? '#727870' : '#626860';
+    ctx.fillRect(0, y, w, 12);
+  }
+  const rng = seededRandom(201);
+  // Weathering
+  for (let i = 0; i < 3000; i++) {
+    const x = rng() * w;
+    const y = rng() * h;
+    const v = Math.floor(80 + rng() * 50);
+    ctx.fillStyle = `rgba(${v+10},${v},${v-5}, 0.3)`;
+    ctx.fillRect(x, y, 1 + rng() * 3, 1);
+  }
+  // Rust streaks
+  for (let i = 0; i < 10; i++) {
+    const x = rng() * w;
+    const startY = rng() * h * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(x, startY);
+    ctx.lineTo(x + (rng() - 0.5) * 8, startY + 30 + rng() * 80);
+    ctx.strokeStyle = `rgba(120,70,40, ${0.1 + rng() * 0.15})`;
+    ctx.lineWidth = 2 + rng() * 4;
+    ctx.stroke();
+  }
+});
+
+const metalSidingMat = new THREE.MeshStandardMaterial({
+  map: corrugatedTex,
+  color: 0x6a7068,
+  roughness: 0.75,
+  metalness: 0.35,
+});
+
+// -- Weathered dark metal (doors, industrial) --
+const darkMetalMat = new THREE.MeshStandardMaterial({
+  color: 0x3a3e3a,
+  roughness: 0.8,
+  metalness: 0.45,
+});
+
+// -- Rusty metal --
+const rustyMetalMat = new THREE.MeshStandardMaterial({
+  color: 0x6b4a35,
+  roughness: 0.85,
+  metalness: 0.3,
+});
+
+// -- Roof snow --
+const roofSnowMat = new THREE.MeshStandardMaterial({
+  color: 0xd0d4d8,
+  roughness: 0.95,
+  metalness: 0.0,
+});
+
+// -- Flat roof (bitumen/tar) --
+const roofMat = new THREE.MeshStandardMaterial({
+  color: 0x4a4a48,
+  roughness: 0.9,
+  metalness: 0.1,
+});
+
+// -- Fence metal --
+const fenceMat = new THREE.MeshStandardMaterial({
+  color: 0x707878,
+  roughness: 0.7,
+  metalness: 0.5,
+});
+
+// -- Hatch metal --
+const hatchMat = new THREE.MeshStandardMaterial({
+  color: 0x505550,
+  roughness: 0.8,
+  metalness: 0.55,
+});
+
+// -- Hatch glow (the only unrealistic element) --
+const hatchGlowMat = new THREE.MeshStandardMaterial({
+  color: 0xff8844,
+  emissive: 0xff6622,
+  emissiveIntensity: 0.3,
+  roughness: 0.5,
+  metalness: 0.2,
+  transparent: true,
+  opacity: 0.4,
+});
+
+// -- Sandbag --
+const sandbagMat = new THREE.MeshStandardMaterial({
+  color: 0x8a7e6a,
+  roughness: 0.95,
+  metalness: 0.0,
+});
+
+// -- Frozen mud --
+const mudMat = new THREE.MeshStandardMaterial({
+  color: 0x6a6058,
+  roughness: 0.9,
+  metalness: 0.0,
+});
+
+// -- Window glass --
+const glassMat = new THREE.MeshStandardMaterial({
+  color: 0x6080a0,
+  roughness: 0.3,
+  metalness: 0.1,
+  transparent: true,
+  opacity: 0.6,
+});
+
+// -- Pipe --
+const pipeMat = new THREE.MeshStandardMaterial({
+  color: 0x606860,
+  roughness: 0.7,
+  metalness: 0.5,
+});
+
+// =========================================================================
+//  GROUND PLANE
+// =========================================================================
+const groundGeo = new THREE.PlaneGeometry(500, 500, 64, 64);
+// Displace vertices slightly for terrain unevenness
+const gPos = groundGeo.attributes.position;
+const terrainRng = seededRandom(999);
+for (let i = 0; i < gPos.count; i++) {
+  const x = gPos.getX(i);
+  const y = gPos.getY(i);
+  // Gentle rolling terrain
+  let h = Math.sin(x * 0.02) * 0.5 + Math.cos(y * 0.03) * 0.4 + terrainRng() * 0.3;
+  // Flatten center compound area
+  const dist = Math.sqrt(x * x + y * y);
+  if (dist < 100) {
+    h *= dist / 100;
+  }
+  gPos.setZ(i, h);
+}
+groundGeo.computeVertexNormals();
+const ground = new THREE.Mesh(groundGeo, snowMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Trampled area near buildings
+const trampledGeo = new THREE.PlaneGeometry(140, 120, 8, 8);
+const trampled = new THREE.Mesh(trampledGeo, trampledSnowMat);
+trampled.rotation.x = -Math.PI / 2;
+trampled.position.set(0, 0.05, 0);
+trampled.receiveShadow = true;
+scene.add(trampled);
+
+// =========================================================================
+//  TIRE RUTS / PATHS
+// =========================================================================
+function createPath(points, width, mat) {
+  const shape = new THREE.Shape();
+  // Build a path strip
+  for (let i = 0; i < points.length - 1; i++) {
+    const p = points[i];
+    const pn = points[i + 1];
+    const dx = pn.x - p.x;
+    const dz = pn.z - p.z;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    const nx = -dz / len * width / 2;
+    const nz = dx / len * width / 2;
+    if (i === 0) {
+      shape.moveTo(p.x + nx, p.z + nz);
+    }
+    shape.lineTo(pn.x + nx, pn.z + nz);
+  }
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i];
+    const pn = points[Math.min(i + 1, points.length - 1)];
+    const dx = pn.x - p.x;
+    const dz = pn.z - p.z;
+    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+    const nx = -dz / len * width / 2;
+    const nz = dx / len * width / 2;
+    shape.lineTo(p.x - nx, p.z - nz);
+  }
+  const geo = new THREE.ShapeGeometry(shape);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.08;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+// Main road from gate to buildings
+const mainRoad = createPath([
+  { x: -90, z: 0 }, { x: -50, z: 0 }, { x: -20, z: 5 },
+  { x: 10, z: 5 }, { x: 30, z: 0 }, { x: 50, z: -5 }
+], 8, mudMat);
+scene.add(mainRoad);
+
+// Side path to research building
+const sidePath = createPath([
+  { x: 10, z: 5 }, { x: 15, z: 20 }, { x: 20, z: 35 }
+], 4, mudMat);
+scene.add(sidePath);
+
+// Path to hatch
+const hatchPath = createPath([
+  { x: 30, z: 0 }, { x: 45, z: -20 }, { x: 55, z: -35 }
+], 5, mudMat);
+scene.add(hatchPath);
+
+// =========================================================================
+//  HELPER: Building with details
+// =========================================================================
+function createBuilding(config) {
+  const group = new THREE.Group();
+  const { w, h, d, x, z, rotation = 0 } = config;
+
+  // Concrete foundation
+  const foundH = 1.5;
+  const foundGeo = new THREE.BoxGeometry(w + 1, foundH, d + 1);
+  const found = new THREE.Mesh(foundGeo, concreteMat);
+  found.position.y = foundH / 2;
+  found.castShadow = true;
+  found.receiveShadow = true;
+  group.add(found);
+
+  // Main walls (corrugated metal siding)
+  const wallGeo = new THREE.BoxGeometry(w, h, d);
+  const walls = new THREE.Mesh(wallGeo, metalSidingMat);
+  walls.position.y = foundH + h / 2;
+  walls.castShadow = true;
+  walls.receiveShadow = true;
+  group.add(walls);
+
+  // Flat roof
+  const roofGeo = new THREE.BoxGeometry(w + 0.5, 0.4, d + 0.5);
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.position.y = foundH + h + 0.2;
+  roof.castShadow = true;
+  roof.receiveShadow = true;
+  group.add(roof);
+
+  // Snow on roof (uneven accumulation)
+  const snowRoofGeo = new THREE.BoxGeometry(w * 0.9, 0.8 + Math.random() * 0.4, d * 0.85);
+  const snowRoof = new THREE.Mesh(snowRoofGeo, roofSnowMat);
+  snowRoof.position.y = foundH + h + 0.6 + Math.random() * 0.2;
+  snowRoof.position.x = (Math.random() - 0.5) * 2;
+  snowRoof.position.z = (Math.random() - 0.5) * 2;
+  snowRoof.castShadow = true;
+  group.add(snowRoof);
+
+  // Snow drifts against walls
+  for (let side = 0; side < 4; side++) {
+    const driftGeo = new THREE.BoxGeometry(
+      side % 2 === 0 ? w * (0.5 + Math.random() * 0.4) : 2 + Math.random(),
+      1 + Math.random() * 1.5,
+      side % 2 === 0 ? 2 + Math.random() : d * (0.5 + Math.random() * 0.4)
+    );
+    const drift = new THREE.Mesh(driftGeo, roofSnowMat);
+    drift.position.y = 0.5;
+    if (side === 0) drift.position.z = d / 2 + 0.8;
+    else if (side === 1) drift.position.z = -d / 2 - 0.8;
+    else if (side === 2) drift.position.x = w / 2 + 0.8;
+    else drift.position.x = -w / 2 - 0.8;
+    drift.receiveShadow = true;
+    group.add(drift);
+  }
+
+  // Industrial door
+  const doorGeo = new THREE.BoxGeometry(4, 5, 0.3);
+  const door = new THREE.Mesh(doorGeo, darkMetalMat);
+  door.position.set(0, foundH + 2.5, d / 2 + 0.15);
+  door.castShadow = true;
+  group.add(door);
+
+  // Door frame
+  const doorFrameGeo = new THREE.BoxGeometry(4.6, 5.6, 0.15);
+  const doorFrame = new THREE.Mesh(doorFrameGeo, new THREE.MeshStandardMaterial({
+    color: 0x4a4a48, roughness: 0.8, metalness: 0.4
+  }));
+  doorFrame.position.set(0, foundH + 2.8, d / 2 + 0.25);
+  group.add(doorFrame);
+
+  // Windows
+  const windowCount = Math.max(1, Math.floor(w / 8));
+  for (let i = 0; i < windowCount; i++) {
+    const winGeo = new THREE.BoxGeometry(2.5, 1.8, 0.2);
+    const win = new THREE.Mesh(winGeo, glassMat);
+    const wx = -w / 2 + (i + 1) * w / (windowCount + 1);
+    win.position.set(wx, foundH + h * 0.65, d / 2 + 0.15);
+    group.add(win);
+
+    // Window frame
+    const wfGeo = new THREE.BoxGeometry(2.8, 2.1, 0.1);
+    const wf = new THREE.Mesh(wfGeo, darkMetalMat);
+    wf.position.set(wx, foundH + h * 0.65, d / 2 + 0.22);
+    group.add(wf);
+
+    // Back windows
+    const win2 = win.clone();
+    win2.position.z = -d / 2 - 0.15;
+    group.add(win2);
+    const wf2 = wf.clone();
+    wf2.position.z = -d / 2 - 0.22;
+    group.add(wf2);
+  }
+
+  // External pipes along one wall
+  for (let i = 0; i < 2; i++) {
+    const pipeGeo = new THREE.CylinderGeometry(0.3, 0.3, h + 3, 8);
+    const pipe = new THREE.Mesh(pipeGeo, pipeMat);
+    pipe.position.set(w / 2 + 0.5, foundH + h / 2, -d / 4 + i * d / 2);
+    pipe.castShadow = true;
+    group.add(pipe);
+
+    // Pipe bracket
+    const bracketGeo = new THREE.BoxGeometry(0.8, 0.4, 0.8);
+    const bracket = new THREE.Mesh(bracketGeo, darkMetalMat);
+    bracket.position.set(w / 2 + 0.3, foundH + h * 0.4, -d / 4 + i * d / 2);
+    group.add(bracket);
+  }
+
+  // Horizontal pipe run between verticals
+  const hPipeGeo = new THREE.CylinderGeometry(0.25, 0.25, d * 0.5, 8);
+  const hPipe = new THREE.Mesh(hPipeGeo, pipeMat);
+  hPipe.rotation.x = Math.PI / 2;
+  hPipe.position.set(w / 2 + 0.5, foundH + h * 0.7, 0);
+  group.add(hPipe);
+
+  // HVAC unit on roof
+  const hvacGeo = new THREE.BoxGeometry(4, 2, 3);
+  const hvac = new THREE.Mesh(hvacGeo, darkMetalMat);
+  hvac.position.set(w / 4, foundH + h + 1.4, -d / 4);
+  hvac.castShadow = true;
+  group.add(hvac);
+
+  // Snow on HVAC
+  const hvacSnowGeo = new THREE.BoxGeometry(4.2, 0.5, 3.2);
+  const hvacSnow = new THREE.Mesh(hvacSnowGeo, roofSnowMat);
+  hvacSnow.position.set(w / 4, foundH + h + 2.6, -d / 4);
+  group.add(hvacSnow);
+
+  group.position.set(x, 0, z);
+  group.rotation.y = rotation;
+  return group;
+}
+
+// =========================================================================
+//  MAIN BUILDING (command / operations center)
+// =========================================================================
+const mainBuilding = createBuilding({
+  w: 40, h: 12, d: 22,
+  x: -15, z: -5
+});
+scene.add(mainBuilding);
+
+// Additional detail: antenna/comms mast on main building
+const mastGeo = new THREE.CylinderGeometry(0.15, 0.2, 10, 6);
+const mast = new THREE.Mesh(mastGeo, darkMetalMat);
+mast.position.set(-15 + 15, 12 + 1.5 + 5, -5);
+mast.castShadow = true;
+scene.add(mast);
+
+// Antenna dish
+const dishGeo = new THREE.SphereGeometry(1.5, 8, 8, 0, Math.PI);
+const dish = new THREE.Mesh(dishGeo, metalSidingMat);
+dish.position.set(-15 + 15, 12 + 1.5 + 8, -5);
+dish.rotation.x = Math.PI / 6;
+dish.castShadow = true;
+scene.add(dish);
+
+// =========================================================================
+//  RESEARCH BUILDING (smaller, more secured look)
+// =========================================================================
+const researchBuilding = createBuilding({
+  w: 25, h: 10, d: 18,
+  x: 15, z: 35,
+  rotation: Math.PI * 0.05
+});
+scene.add(researchBuilding);
+
+// Extra: biohazard-style vent stacks on research building
+for (let i = 0; i < 3; i++) {
+  const ventGeo = new THREE.CylinderGeometry(0.5, 0.6, 4, 8);
+  const vent = new THREE.Mesh(ventGeo, rustyMetalMat);
+  vent.position.set(15 - 8 + i * 8, 10 + 1.5 + 2, 35 - 5);
+  vent.castShadow = true;
+  scene.add(vent);
+
+  // Vent cap
+  const capGeo = new THREE.CylinderGeometry(0.8, 0.8, 0.3, 8);
+  const cap = new THREE.Mesh(capGeo, darkMetalMat);
+  cap.position.set(15 - 8 + i * 8, 10 + 1.5 + 4.2, 35 - 5);
+  scene.add(cap);
+}
+
+// =========================================================================
+//  THE HATCH -- massive, ~30m diameter structure
+// =========================================================================
+const hatchGroup = new THREE.Group();
+hatchGroup.position.set(55, 0, -35);
+
+// Hatch rim -- concrete pad
+const hatchPadGeo = new THREE.CylinderGeometry(22, 23, 2, 32);
+const hatchPad = new THREE.Mesh(hatchPadGeo, concreteMat);
+hatchPad.position.y = 1;
+hatchPad.castShadow = true;
+hatchPad.receiveShadow = true;
+hatchGroup.add(hatchPad);
+
+// Main hatch doors (two semicircles)
+for (let half = 0; half < 2; half++) {
+  const hatchDoorGeo = new THREE.CylinderGeometry(19, 19, 1.5, 32, 1, false,
+    half * Math.PI, Math.PI);
+  const hatchDoor = new THREE.Mesh(hatchDoorGeo, hatchMat);
+  hatchDoor.position.y = 2.5;
+  hatchDoor.castShadow = true;
+  hatchDoor.receiveShadow = true;
+  hatchGroup.add(hatchDoor);
+
+  // Reinforcement ribs on each half
+  for (let r = 0; r < 3; r++) {
+    const ribAngle = half * Math.PI + Math.PI * 0.25 + r * Math.PI * 0.25;
+    const ribGeo = new THREE.BoxGeometry(18, 0.5, 0.8);
+    const rib = new THREE.Mesh(ribGeo, darkMetalMat);
+    rib.position.y = 3.3;
+    rib.rotation.y = ribAngle;
+    rib.castShadow = true;
+    hatchGroup.add(rib);
+  }
+}
+
+// Center seam line
+const seamGeo = new THREE.BoxGeometry(38, 0.2, 0.4);
+const seam = new THREE.Mesh(seamGeo, darkMetalMat);
+seam.position.y = 3.3;
+hatchGroup.add(seam);
+
+// Perpendicular seam
+const seamPerp = seam.clone();
+seamPerp.rotation.y = Math.PI / 2;
+hatchGroup.add(seamPerp);
+
+// Glow seam -- the ONLY unrealistic element (subtle warm glow from below)
+const glowSeamGeo = new THREE.BoxGeometry(38.5, 0.05, 0.6);
+const glowSeam1 = new THREE.Mesh(glowSeamGeo, hatchGlowMat);
+glowSeam1.position.y = 3.15;
+hatchGroup.add(glowSeam1);
+
+const glowSeam2 = glowSeam1.clone();
+glowSeam2.rotation.y = Math.PI / 2;
+hatchGroup.add(glowSeam2);
+
+// Subtle warm point light inside the seam
+const hatchGlowLight = new THREE.PointLight(0xff7744, 0.5, 20);
+hatchGlowLight.position.set(0, 2, 0);
+hatchGroup.add(hatchGlowLight);
+
+// Hatch ring bolts
+for (let i = 0; i < 24; i++) {
+  const angle = (i / 24) * Math.PI * 2;
+  const boltGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.6, 6);
+  const bolt = new THREE.Mesh(boltGeo, darkMetalMat);
+  bolt.position.set(Math.cos(angle) * 20, 2.5, Math.sin(angle) * 20);
+  hatchGroup.add(bolt);
+}
+
+// Snow accumulation on hatch edges
+for (let i = 0; i < 8; i++) {
+  const angle = (i / 8) * Math.PI * 2 + 0.3;
+  const snowClumpGeo = new THREE.SphereGeometry(2 + Math.random() * 2, 6, 4);
+  const snowClump = new THREE.Mesh(snowClumpGeo, roofSnowMat);
+  snowClump.position.set(
+    Math.cos(angle) * (18 + Math.random() * 4),
+    2 + Math.random(),
+    Math.sin(angle) * (18 + Math.random() * 4)
+  );
+  snowClump.scale.y = 0.4;
+  hatchGroup.add(snowClump);
+}
+
+scene.add(hatchGroup);
+
+// =========================================================================
+//  PERIMETER FENCE
+// =========================================================================
+function createFenceSegment(x1, z1, x2, z2) {
+  const group = new THREE.Group();
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  const angle = Math.atan2(dx, dz);
+
+  // Posts
+  const postSpacing = 6;
+  const numPosts = Math.max(2, Math.floor(length / postSpacing) + 1);
+  for (let i = 0; i < numPosts; i++) {
+    const t = i / (numPosts - 1);
+    const px = x1 + dx * t;
+    const pz = z1 + dz * t;
+
+    // Main post
+    const postGeo = new THREE.CylinderGeometry(0.2, 0.2, 8, 6);
+    const post = new THREE.Mesh(postGeo, fenceMat);
+    post.position.set(px, 4, pz);
+    post.castShadow = true;
+    group.add(post);
+
+    // Angled barbed wire arm (V-shape at top)
+    for (let side = -1; side <= 1; side += 2) {
+      const armGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.5, 4);
+      const arm = new THREE.Mesh(armGeo, fenceMat);
+      arm.position.set(px + Math.cos(angle + Math.PI / 2) * side * 0.8, 8.5, pz + Math.sin(angle + Math.PI / 2) * side * 0.8);
+      arm.rotation.z = side * 0.4;
+      arm.rotation.y = -angle;
+      group.add(arm);
+    }
+  }
+
+  // Chain-link mesh (simplified as thin box)
+  const meshGeo = new THREE.BoxGeometry(0.1, 7, length);
+  const chainLinkMat = new THREE.MeshStandardMaterial({
+    color: 0x889090,
+    roughness: 0.6,
+    metalness: 0.5,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+  });
+  const meshFence = new THREE.Mesh(meshGeo, chainLinkMat);
+  meshFence.position.set((x1 + x2) / 2, 4, (z1 + z2) / 2);
+  meshFence.rotation.y = angle;
+  meshFence.castShadow = true;
+  group.add(meshFence);
+
+  // Top wire (barbed wire)
+  const wireGeo = new THREE.CylinderGeometry(0.05, 0.05, length, 4);
+  const wire = new THREE.Mesh(wireGeo, fenceMat);
+  wire.position.set((x1 + x2) / 2, 8, (z1 + z2) / 2);
+  wire.rotation.x = Math.PI / 2;
+  wire.rotation.order = 'YXZ';
+  wire.rotation.y = angle;
+  group.add(wire);
+
+  // Second wire higher
+  const wire2 = wire.clone();
+  wire2.position.y = 8.8;
+  group.add(wire2);
+
+  return group;
+}
+
+// Perimeter: roughly rectangular with some irregularity
+const fencePoints = [
+  { x: -85, z: -70 },
+  { x: 90, z: -70 },
+  { x: 95, z: -65 },
+  { x: 95, z: 65 },
+  { x: 90, z: 70 },
+  { x: -80, z: 70 },
+  { x: -85, z: 65 },
+  // Gate gap: -85,65 to -85,-65 but we skip part for the gate
+  { x: -85, z: -65 },
+];
+
+// Build fence segments (leave gap for gate)
+for (let i = 0; i < fencePoints.length - 1; i++) {
+  const p1 = fencePoints[i];
+  const p2 = fencePoints[i + 1];
+  scene.add(createFenceSegment(p1.x, p1.z, p2.x, p2.z));
+}
+
+// Gate segment on the west side with gap
+scene.add(createFenceSegment(-85, -65, -85, -8));
+scene.add(createFenceSegment(-85, 8, -85, 65));
+
+// Gate structure
+const gateGroup = new THREE.Group();
+// Gate posts (larger)
+for (let side = -1; side <= 1; side += 2) {
+  const gatePostGeo = new THREE.BoxGeometry(1.2, 9, 1.2);
+  const gatePost = new THREE.Mesh(gatePostGeo, concreteMat);
+  gatePost.position.set(-85, 4.5, side * 7);
+  gatePost.castShadow = true;
+  gateGroup.add(gatePost);
+}
+// Gate bar (horizontal)
+const gateBarGeo = new THREE.BoxGeometry(0.6, 0.6, 14);
+const gateBar = new THREE.Mesh(gateBarGeo, darkMetalMat);
+gateBar.position.set(-85, 8.5, 0);
+gateGroup.add(gateBar);
+
+// Gate doors (open position - slightly ajar)
+for (let side = -1; side <= 1; side += 2) {
+  const gateDoorGeo = new THREE.BoxGeometry(0.2, 7, 6);
+  const gateDoor = new THREE.Mesh(gateDoorGeo, fenceMat);
+  gateDoor.position.set(-84.5, 3.5, side * 4);
+  gateDoor.rotation.y = side * 0.2;
+  gateGroup.add(gateDoor);
+}
+scene.add(gateGroup);
+
+// Guard booth near gate
+const guardBooth = createBuilding({
+  w: 5, h: 6, d: 4,
+  x: -80, z: -12
+});
+scene.add(guardBooth);
+
+// =========================================================================
+//  GENERATOR BUILDING + FUEL STORAGE
+// =========================================================================
+const genGroup = new THREE.Group();
+genGroup.position.set(-45, 0, 30);
+
+// Generator housing
+const genGeo = new THREE.BoxGeometry(8, 5, 5);
+const gen = new THREE.Mesh(genGeo, darkMetalMat);
+gen.position.y = 2.5;
+gen.castShadow = true;
+gen.receiveShadow = true;
+genGroup.add(gen);
+
+// Generator foundation
+const genFoundGeo = new THREE.BoxGeometry(9, 1, 6);
+const genFound = new THREE.Mesh(genFoundGeo, concreteMat);
+genFound.position.y = 0.5;
+genFound.castShadow = true;
+genGroup.add(genFound);
+
+// Exhaust pipe (vertical)
+const exhaustGeo = new THREE.CylinderGeometry(0.4, 0.5, 6, 8);
+const exhaust = new THREE.Mesh(exhaustGeo, rustyMetalMat);
+exhaust.position.set(3, 6, 0);
+exhaust.castShadow = true;
+genGroup.add(exhaust);
+
+// Exhaust cap
+const exhaustCapGeo = new THREE.CylinderGeometry(0.7, 0.7, 0.3, 8);
+const exhaustCap = new THREE.Mesh(exhaustCapGeo, darkMetalMat);
+exhaustCap.position.set(3, 9.2, 0);
+genGroup.add(exhaustCap);
+
+// Snow on generator
+const genSnowGeo = new THREE.BoxGeometry(7, 0.5, 4.5);
+const genSnow = new THREE.Mesh(genSnowGeo, roofSnowMat);
+genSnow.position.y = 5.3;
+genGroup.add(genSnow);
+
+// Fuel tank 1
+const fuelGeo = new THREE.CylinderGeometry(2, 2, 8, 12);
+const fuel1 = new THREE.Mesh(fuelGeo, rustyMetalMat);
+fuel1.rotation.z = Math.PI / 2;
+fuel1.position.set(15, 3, 0);
+fuel1.castShadow = true;
+genGroup.add(fuel1);
+
+// Fuel tank supports
+for (let i = -1; i <= 1; i += 2) {
+  const supportGeo = new THREE.BoxGeometry(0.5, 3, 3);
+  const support = new THREE.Mesh(supportGeo, concreteMat);
+  support.position.set(15 + i * 3, 1.5, 0);
+  genGroup.add(support);
+}
+
+// Fuel tank 2
+const fuel2 = fuel1.clone();
+fuel2.position.z = 5;
+genGroup.add(fuel2);
+for (let i = -1; i <= 1; i += 2) {
+  const supportGeo = new THREE.BoxGeometry(0.5, 3, 3);
+  const support = new THREE.Mesh(supportGeo, concreteMat);
+  support.position.set(15 + i * 3, 1.5, 5);
+  genGroup.add(support);
+}
+
+// Fuel pipe to generator
+const fuelPipeGeo = new THREE.CylinderGeometry(0.15, 0.15, 8, 6);
+const fuelPipe = new THREE.Mesh(fuelPipeGeo, pipeMat);
+fuelPipe.rotation.z = Math.PI / 2;
+fuelPipe.position.set(8, 1.5, 0);
+genGroup.add(fuelPipe);
+
+scene.add(genGroup);
+
+// =========================================================================
+//  FLAGPOLE
+// =========================================================================
+const flagpoleGroup = new THREE.Group();
+flagpoleGroup.position.set(-30, 0, -20);
+
+const poleGeo = new THREE.CylinderGeometry(0.15, 0.25, 16, 6);
+const pole = new THREE.Mesh(poleGeo, fenceMat);
+pole.position.y = 8;
+pole.castShadow = true;
+flagpoleGroup.add(pole);
+
+// Flag (stiff in cold, slightly angled)
+const flagGeo = new THREE.PlaneGeometry(6, 3.5, 8, 4);
+// Deform flag slightly
+const flagPos = flagGeo.attributes.position;
+for (let i = 0; i < flagPos.count; i++) {
+  const x = flagPos.getX(i);
+  flagPos.setZ(i, Math.sin(x * 0.8) * 0.4);
+}
+flagGeo.computeVertexNormals();
+const flagMat = new THREE.MeshStandardMaterial({
+  color: 0x8b1a1a,
+  roughness: 0.9,
+  metalness: 0.0,
+  side: THREE.DoubleSide,
+});
+const flag = new THREE.Mesh(flagGeo, flagMat);
+flag.position.set(3, 14.5, 0);
+flag.castShadow = true;
+flagpoleGroup.add(flag);
+
+// Pole base
+const poleBaseGeo = new THREE.CylinderGeometry(0.8, 1, 1, 8);
+const poleBase = new THREE.Mesh(poleBaseGeo, concreteMat);
+poleBase.position.y = 0.5;
+flagpoleGroup.add(poleBase);
+
+scene.add(flagpoleGroup);
+
+// =========================================================================
+//  SANDBAG POSITIONS (2 emplacements)
+// =========================================================================
+function createSandbagPosition(x, z, rotation = 0) {
+  const group = new THREE.Group();
+
+  // U-shaped wall of sandbags
+  const bagRows = 3;
+  const bagCols = 5;
+  for (let row = 0; row < bagRows; row++) {
+    for (let col = 0; col < bagCols; col++) {
+      const bagGeo = new THREE.BoxGeometry(2.2, 0.8, 1.2);
+      // Slightly randomize each bag
+      const bag = new THREE.Mesh(bagGeo, sandbagMat);
+      bag.position.set(
+        -bagCols + col * 2.3 + (row % 2) * 0.3,
+        0.4 + row * 0.75,
+        3
+      );
+      bag.rotation.y = (Math.random() - 0.5) * 0.1;
+      bag.castShadow = true;
+      bag.receiveShadow = true;
+      group.add(bag);
+    }
+    // Side walls
+    for (let side = -1; side <= 1; side += 2) {
+      const sideBagGeo = new THREE.BoxGeometry(1.2, 0.8, 2.2);
+      const sideBag = new THREE.Mesh(sideBagGeo, sandbagMat);
+      sideBag.position.set(
+        side * (bagCols * 1.15 + 0.5),
+        0.4 + row * 0.75,
+        1.5
+      );
+      sideBag.castShadow = true;
+      sideBag.receiveShadow = true;
+      group.add(sideBag);
+    }
+  }
+
+  group.position.set(x, 0, z);
+  group.rotation.y = rotation;
+  return group;
+}
+
+scene.add(createSandbagPosition(-60, -40, Math.PI * 0.1));
+scene.add(createSandbagPosition(70, 30, Math.PI * 0.7));
+
+// =========================================================================
+//  VEHICLE (military truck / utility vehicle)
+// =========================================================================
+function createTruck(x, z, rotation = 0) {
+  const group = new THREE.Group();
+
+  // Chassis
+  const chassisGeo = new THREE.BoxGeometry(12, 2, 5);
+  const chassis = new THREE.Mesh(chassisGeo, darkMetalMat);
+  chassis.position.y = 2.5;
+  chassis.castShadow = true;
+  chassis.receiveShadow = true;
+  group.add(chassis);
+
+  // Cab
+  const cabGeo = new THREE.BoxGeometry(4, 3, 4.5);
+  const cabMat = new THREE.MeshStandardMaterial({
+    color: 0x4a5540,
+    roughness: 0.85,
+    metalness: 0.15,
+  });
+  const cab = new THREE.Mesh(cabGeo, cabMat);
+  cab.position.set(-3.5, 5, 0);
+  cab.castShadow = true;
+  group.add(cab);
+
+  // Windshield
+  const windshieldGeo = new THREE.BoxGeometry(0.1, 1.8, 3.5);
+  const windshield = new THREE.Mesh(windshieldGeo, glassMat);
+  windshield.position.set(-5.5, 5.2, 0);
+  group.add(windshield);
+
+  // Cargo bed
+  const bedGeo = new THREE.BoxGeometry(7, 0.5, 4.8);
+  const bed = new THREE.Mesh(bedGeo, darkMetalMat);
+  bed.position.set(2.5, 3.7, 0);
+  bed.castShadow = true;
+  group.add(bed);
+
+  // Cargo bed sides
+  for (let side = -1; side <= 1; side += 2) {
+    const sideGeo = new THREE.BoxGeometry(7, 2, 0.3);
+    const sideMesh = new THREE.Mesh(sideGeo, cabMat);
+    sideMesh.position.set(2.5, 4.8, side * 2.3);
+    sideMesh.castShadow = true;
+    group.add(sideMesh);
+  }
+  // Back wall
+  const backGeo = new THREE.BoxGeometry(0.3, 2, 4.6);
+  const back = new THREE.Mesh(backGeo, cabMat);
+  back.position.set(6, 4.8, 0);
+  group.add(back);
+
+  // Wheels (6 wheels)
+  const wheelPositions = [
+    { x: -3.5, z: -2.8 }, { x: -3.5, z: 2.8 },
+    { x: 2, z: -2.8 }, { x: 2, z: 2.8 },
+    { x: 4, z: -2.8 }, { x: 4, z: 2.8 },
+  ];
+  const wheelMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2a2a, roughness: 0.9, metalness: 0.1
+  });
+  wheelPositions.forEach(wp => {
+    const wheelGeo = new THREE.CylinderGeometry(1.2, 1.2, 1, 12);
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(wp.x, 1.2, wp.z);
+    wheel.castShadow = true;
+    group.add(wheel);
+  });
+
+  // Snow on cab roof
+  const cabSnowGeo = new THREE.BoxGeometry(3.8, 0.4, 4.2);
+  const cabSnow = new THREE.Mesh(cabSnowGeo, roofSnowMat);
+  cabSnow.position.set(-3.5, 6.7, 0);
+  group.add(cabSnow);
+
+  // Snow dusting on cargo
+  const cargoSnowGeo = new THREE.BoxGeometry(6, 0.3, 4);
+  const cargoSnow = new THREE.Mesh(cargoSnowGeo, roofSnowMat);
+  cargoSnow.position.set(2.5, 4.1, 0);
+  group.add(cargoSnow);
+
+  group.position.set(x, 0, z);
+  group.rotation.y = rotation;
+  return group;
+}
+
+scene.add(createTruck(-55, 5, Math.PI * 0.02));
+// Second vehicle (SUV-ish) parked near research building
+scene.add(createTruck(30, 50, Math.PI * 0.55));
+
+// =========================================================================
+//  ADDITIONAL DETAIL: footprint paths
+// =========================================================================
+function createFootprints(points) {
+  const group = new THREE.Group();
+  const fpRng = seededRandom(555);
+  const footMat = new THREE.MeshStandardMaterial({
+    color: 0xa0a098,
+    roughness: 0.88,
+    metalness: 0.0,
+  });
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const dx = p2.x - p1.x;
+    const dz = p2.z - p1.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const steps = Math.floor(dist / 1.5);
+    const angle = Math.atan2(dx, dz);
+
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      const side = s % 2 === 0 ? -0.4 : 0.4;
+      const fpGeo = new THREE.BoxGeometry(0.6, 0.08, 1.0);
+      const fp = new THREE.Mesh(fpGeo, footMat);
+      fp.position.set(
+        p1.x + dx * t + Math.cos(angle + Math.PI / 2) * side + fpRng() * 0.2,
+        0.06,
+        p1.z + dz * t + Math.sin(angle + Math.PI / 2) * side + fpRng() * 0.2
+      );
+      fp.rotation.y = angle + (fpRng() - 0.5) * 0.15;
+      fp.receiveShadow = true;
+      group.add(fp);
+    }
+  }
+  return group;
+}
+
+// Footprint paths between buildings
+scene.add(createFootprints([
+  { x: -15, z: 6 }, { x: 0, z: 10 }, { x: 15, z: 18 }
+]));
+scene.add(createFootprints([
+  { x: -15, z: -16 }, { x: 10, z: -20 }, { x: 40, z: -30 }
+]));
+scene.add(createFootprints([
+  { x: -78, z: -8 }, { x: -60, z: -2 }, { x: -35, z: -5 }
+]));
+
+// =========================================================================
+//  ADDITIONAL DETAIL: tire ruts (darker mud strips)
+// =========================================================================
+function createTireRuts(x1, z1, x2, z2) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  const angle = Math.atan2(dx, dz);
+  const group = new THREE.Group();
+
+  for (let side = -1; side <= 1; side += 2) {
+    const rutGeo = new THREE.BoxGeometry(0.8, 0.05, length);
+    const rut = new THREE.Mesh(rutGeo, mudMat);
+    rut.position.set(
+      (x1 + x2) / 2 + Math.cos(angle + Math.PI / 2) * side * 1.5,
+      0.07,
+      (z1 + z2) / 2 + Math.sin(angle + Math.PI / 2) * side * 1.5
+    );
+    rut.rotation.y = angle;
+    rut.receiveShadow = true;
+    group.add(rut);
+  }
+  return group;
+}
+
+scene.add(createTireRuts(-85, 0, -55, 5));
+scene.add(createTireRuts(-55, 5, -15, -5));
+
+// =========================================================================
+//  ADDITIONAL DETAIL: misc compound objects
+// =========================================================================
+
+// Concrete barriers near hatch
+for (let i = 0; i < 4; i++) {
+  const angle = (i / 4) * Math.PI * 2 + Math.PI / 8;
+  const dist = 28;
+  const barrierGeo = new THREE.BoxGeometry(4, 2, 1.5);
+  const barrier = new THREE.Mesh(barrierGeo, concreteMat);
+  barrier.position.set(
+    55 + Math.cos(angle) * dist,
+    1,
+    -35 + Math.sin(angle) * dist
+  );
+  barrier.rotation.y = angle;
+  barrier.castShadow = true;
+  barrier.receiveShadow = true;
+  scene.add(barrier);
+}
+
+// Utility poles with lights (two near main road)
+for (const pos of [{ x: -60, z: 8 }, { x: -25, z: 12 }]) {
+  const lightPoleGeo = new THREE.CylinderGeometry(0.15, 0.2, 10, 6);
+  const lightPole = new THREE.Mesh(lightPoleGeo, fenceMat);
+  lightPole.position.set(pos.x, 5, pos.z);
+  lightPole.castShadow = true;
+  scene.add(lightPole);
+
+  // Light fixture arm
+  const armGeo = new THREE.CylinderGeometry(0.08, 0.08, 3, 4);
+  const arm = new THREE.Mesh(armGeo, darkMetalMat);
+  arm.rotation.z = Math.PI / 2;
+  arm.position.set(pos.x + 1.5, 10, pos.z);
+  scene.add(arm);
+
+  // Light housing
+  const lightHousingGeo = new THREE.BoxGeometry(1.5, 0.5, 0.8);
+  const lightHousing = new THREE.Mesh(lightHousingGeo, darkMetalMat);
+  lightHousing.position.set(pos.x + 2.5, 9.8, pos.z);
+  scene.add(lightHousing);
+}
+
+// Small storage shed / container
+const containerGeo = new THREE.BoxGeometry(8, 4, 4);
+const container = new THREE.Mesh(containerGeo, new THREE.MeshStandardMaterial({
+  color: 0x5a6558, roughness: 0.82, metalness: 0.3,
+}));
+container.position.set(40, 2, 15);
+container.castShadow = true;
+container.receiveShadow = true;
+scene.add(container);
+
+// Snow on container
+const contSnowGeo = new THREE.BoxGeometry(7.5, 0.5, 3.8);
+const contSnow = new THREE.Mesh(contSnowGeo, roofSnowMat);
+contSnow.position.set(40, 4.3, 15);
+scene.add(contSnow);
+
+// Crate stack near main building
+for (let row = 0; row < 2; row++) {
+  for (let col = 0; col < 3; col++) {
+    const crateGeo = new THREE.BoxGeometry(2, 2, 2);
+    const crateMat = new THREE.MeshStandardMaterial({
+      color: 0x6a5e50, roughness: 0.9, metalness: 0.05,
+    });
+    const crate = new THREE.Mesh(crateGeo, crateMat);
+    crate.position.set(-8 + col * 2.2, 1 + row * 2, -18);
+    crate.rotation.y = (Math.random() - 0.5) * 0.15;
+    crate.castShadow = true;
+    crate.receiveShadow = true;
+    scene.add(crate);
+  }
+}
+
+// Snow on crate stack top
+const crateSnowGeo = new THREE.BoxGeometry(7, 0.4, 2.5);
+const crateSnow = new THREE.Mesh(crateSnowGeo, roofSnowMat);
+crateSnow.position.set(-6, 4.2, -18);
+scene.add(crateSnow);
+
+// Barrel cluster near generator
+for (let i = 0; i < 4; i++) {
+  const barrelGeo = new THREE.CylinderGeometry(0.8, 0.8, 2.5, 10);
+  const barrelMat = new THREE.MeshStandardMaterial({
+    color: i < 2 ? 0x5a5a52 : 0x7a4a30,
+    roughness: 0.85,
+    metalness: 0.2,
+  });
+  const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+  barrel.position.set(
+    -38 + (i % 2) * 2,
+    1.25,
+    25 + Math.floor(i / 2) * 2
+  );
+  barrel.castShadow = true;
+  barrel.receiveShadow = true;
+  scene.add(barrel);
+}
+
+// =========================================================================
+//  SNOW PARTICLE SYSTEM (very light snowfall)
+// =========================================================================
+const snowParticleCount = 2000;
+const snowGeo = new THREE.BufferGeometry();
+const snowPositions = new Float32Array(snowParticleCount * 3);
+const snowVelocities = new Float32Array(snowParticleCount);
+const snowRng = seededRandom(12345);
+
+for (let i = 0; i < snowParticleCount; i++) {
+  snowPositions[i * 3] = (snowRng() - 0.5) * 300;
+  snowPositions[i * 3 + 1] = snowRng() * 80;
+  snowPositions[i * 3 + 2] = (snowRng() - 0.5) * 300;
+  snowVelocities[i] = 0.02 + snowRng() * 0.06;
+}
+
+snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+
+const snowParticleMat = new THREE.PointsMaterial({
+  color: 0xdde0e4,
+  size: 0.6,
+  transparent: true,
+  opacity: 0.6,
+  depthWrite: false,
+  sizeAttenuation: false,
+});
+
+const snowParticles = new THREE.Points(snowGeo, snowParticleMat);
+scene.add(snowParticles);
+
+// =========================================================================
+//  ANIMATION
+// =========================================================================
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const elapsed = clock.getElapsedTime();
+  const delta = clock.getDelta();
+
+  // Snow particles falling
+  const positions = snowGeo.attributes.position.array;
+  for (let i = 0; i < snowParticleCount; i++) {
+    positions[i * 3 + 1] -= snowVelocities[i];
+    // Slight lateral drift
+    positions[i * 3] += Math.sin(elapsed * 0.3 + i) * 0.005;
+    positions[i * 3 + 2] += Math.cos(elapsed * 0.2 + i) * 0.005;
+
+    // Reset if below ground
+    if (positions[i * 3 + 1] < -1) {
+      positions[i * 3 + 1] = 60 + Math.random() * 20;
+      positions[i * 3] = (Math.random() - 0.5) * 300;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 300;
+    }
+  }
+  snowGeo.attributes.position.needsUpdate = true;
+
+  // Subtle hatch glow pulse (barely perceptible)
+  const glowIntensity = 0.25 + Math.sin(elapsed * 0.5) * 0.08;
+  hatchGlowMat.emissiveIntensity = glowIntensity;
+  hatchGlowMat.opacity = 0.3 + Math.sin(elapsed * 0.5) * 0.1;
+  hatchGlowLight.intensity = 0.3 + Math.sin(elapsed * 0.5) * 0.15;
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// =========================================================================
+//  RESIZE
+// =========================================================================
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const a = w / h;
+  camera.left = -frustum * a;
+  camera.right = frustum * a;
+  camera.top = frustum;
+  camera.bottom = -frustum;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+});
+
+// =========================================================================
+//  INIT
+// =========================================================================
+// Dismiss loading screen after brief delay
+setTimeout(() => {
+  document.getElementById('loading').classList.add('done');
+}, 1500);
+
+animate();
+
+</script>
+</body>
+</html>

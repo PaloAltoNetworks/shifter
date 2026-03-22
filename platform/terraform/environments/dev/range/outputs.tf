@@ -76,37 +76,37 @@ output "firewall_endpoint_id" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi State Backend
+# Engine State Backend
 # ------------------------------------------------------------------------------
 
-output "pulumi_state_bucket_name" {
-  description = "Name of the Pulumi state S3 bucket"
-  value       = module.pulumi_state.bucket_name
+output "engine_state_bucket_name" {
+  description = "Name of the engine state S3 bucket"
+  value       = module.engine_state.bucket_name
 }
 
-output "pulumi_state_bucket_arn" {
-  description = "ARN of the Pulumi state S3 bucket"
-  value       = module.pulumi_state.bucket_arn
+output "engine_state_bucket_arn" {
+  description = "ARN of the engine state S3 bucket"
+  value       = module.engine_state.bucket_arn
 }
 
-output "pulumi_locks_table_name" {
-  description = "Name of the Pulumi locks DynamoDB table"
-  value       = module.pulumi_state.dynamodb_table_name
+output "engine_locks_table_name" {
+  description = "Name of the engine locks DynamoDB table"
+  value       = module.engine_state.dynamodb_table_name
 }
 
-output "pulumi_locks_table_arn" {
-  description = "ARN of the Pulumi locks DynamoDB table"
-  value       = module.pulumi_state.dynamodb_table_arn
+output "engine_locks_table_arn" {
+  description = "ARN of the engine locks DynamoDB table"
+  value       = module.engine_state.dynamodb_table_arn
 }
 
-output "pulumi_secrets_kms_key_arn" {
-  description = "ARN of the KMS key for Pulumi secrets encryption"
-  value       = module.pulumi_state.secrets_kms_key_arn
+output "engine_secrets_kms_key_arn" {
+  description = "ARN of the KMS key for engine secrets encryption"
+  value       = module.engine_state.secrets_kms_key_arn
 }
 
-output "pulumi_secrets_kms_key_alias" {
-  description = "Alias of the KMS key for Pulumi secrets encryption"
-  value       = module.pulumi_state.secrets_kms_key_alias
+output "engine_secrets_kms_key_alias" {
+  description = "Alias of the KMS key for engine secrets encryption"
+  value       = module.engine_state.secrets_kms_key_alias
 }
 
 # ------------------------------------------------------------------------------

@@ -10,49 +10,90 @@ Responsibilities:
 - Input validation and error handling
 """
 
-import pytest
-from django.contrib.auth import get_user_model
+from unittest.mock import Mock, patch
 
-from cms.models import AgentConfig, OperatingSystem
+import pytest
+
+from cms.scenarios.schema import DCConfig, InstanceConfig, ScenarioTemplate
 from shared.schemas import RangeSpec
 
-User = get_user_model()
+
+def _make_mock_agent(*, os_slug, s3_key, original_filename, sha256_hash):
+    """Create a mock agent with the attributes the hydrator accesses."""
+    mock_os = Mock()
+    mock_os.slug = os_slug
+    agent = Mock()
+    agent.os = mock_os
+    agent.s3_key = s3_key
+    agent.original_filename = original_filename
+    agent.sha256_hash = sha256_hash
+    return agent
+
+
+# --- Canned templates (pure Pydantic, no DB) ---
+
+BASIC_TEMPLATE = ScenarioTemplate(
+    id="basic",
+    name="Basic Scenario",
+    description="Basic attacker/victim scenario",
+    instances=[
+        InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+        InstanceConfig(name="Victim", role="victim", os_type="from_agent", xdr_agent=True),
+    ],
+)
+
+AD_ATTACK_LAB_TEMPLATE = ScenarioTemplate(
+    id="ad_attack_lab",
+    name="AD Attack Lab",
+    description="Active Directory attack scenario",
+    instances=[
+        InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+        InstanceConfig(
+            name="DC",
+            role="dc",
+            os_type="windows",
+            xdr_agent=True,
+            domain_controller=True,
+            dc_config=DCConfig(domain_name="lab.local", netbios_name="LAB"),
+        ),
+        InstanceConfig(
+            name="Victim",
+            role="victim",
+            os_type="from_agent",
+            xdr_agent=True,
+            join_domain=True,
+        ),
+    ],
+)
 
 
 @pytest.fixture
-def user(db):
-    return User.objects.create_user(
-        username="test@example.com",
-        email="test@example.com",
-    )
+def user():
+    mock = Mock()
+    mock.pk = 42
+    mock.id = 42
+    mock.email = "test@example.com"
+    return mock
 
 
 @pytest.fixture
-def windows_agent_obj(user, db):
-    """Windows agent object for testing."""
-    os = OperatingSystem.objects.get(slug="windows")
-    return AgentConfig.objects.create(
-        user=user,
-        name="Windows Agent",
-        os=os,
+def windows_agent_obj():
+    """Windows agent mock for testing."""
+    return _make_mock_agent(
+        os_slug="windows",
         s3_key="agents/123/agent.msi",
         original_filename="cortex_agent.msi",
-        file_size_bytes=5000000,
         sha256_hash="abc123def456",
     )
 
 
 @pytest.fixture
-def linux_agent_obj(user, db):
-    """Linux agent object for testing."""
-    os = OperatingSystem.objects.get(slug="linux-debian")
-    return AgentConfig.objects.create(
-        user=user,
-        name="Linux Agent",
-        os=os,
+def linux_agent_obj():
+    """Linux agent mock for testing."""
+    return _make_mock_agent(
+        os_slug="linux-debian",
         s3_key="agents/456/agent.deb",
         original_filename="cortex_agent.deb",
-        file_size_bytes=3000000,
         sha256_hash="def789ghi012",
     )
 
@@ -69,41 +110,56 @@ def linux_agent(linux_agent_obj):
     return {"linux": linux_agent_obj}
 
 
-@pytest.mark.django_db
+def _load_scenario_side_effect(scenario_id):
+    """Return canned template or raise ValueError."""
+    templates = {
+        "basic": BASIC_TEMPLATE,
+        "ad_attack_lab": AD_ATTACK_LAB_TEMPLATE,
+    }
+    if scenario_id not in templates:
+        raise ValueError(f"Scenario '{scenario_id}' not found")
+    return templates[scenario_id]
+
+
 class TestHydrateScenario:
     """Tests for hydrate_scenario() function."""
 
     # --- Basic structure ---
 
-    def test_returns_range_request(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_returns_range_request(self, _mock_load, user, windows_agent):
         """hydrate_scenario returns a RangeSpec."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
         assert isinstance(result, RangeSpec)
 
-    def test_includes_scenario_id(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_includes_scenario_id(self, _mock_load, user, windows_agent):
         """Result includes scenario_id."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
         assert result.scenario_id == "basic"
 
-    def test_includes_user_id(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_includes_user_id(self, _mock_load, user, windows_agent):
         """Result includes user_id."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
         assert result.user_id == user.id
 
-    def test_includes_instances_list(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_includes_instances_list(self, _mock_load, user, windows_agent):
         """Result includes all_instances list (flattened from subnets)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
         result = hydrate_scenario("basic", user.id, windows_agent)
         assert isinstance(result.all_instances, list)
 
-    def test_basic_has_two_instances(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_basic_has_two_instances(self, _mock_load, user, windows_agent):
         """Basic scenario has attacker and victim instances."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -113,7 +169,8 @@ class TestHydrateScenario:
         assert "attacker" in roles
         assert "victim" in roles
 
-    def test_each_instance_has_uuid(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_each_instance_has_uuid(self, _mock_load, user, windows_agent):
         """Each instance gets a unique UUID."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -122,7 +179,8 @@ class TestHydrateScenario:
         assert all(uuid is not None for uuid in uuids)
         assert len(set(uuids)) == len(uuids)  # All unique
 
-    def test_uuid_is_valid_format(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_uuid_is_valid_format(self, _mock_load, user, windows_agent):
         """Instance UUIDs are valid UUID4 format."""
         import uuid
 
@@ -136,7 +194,8 @@ class TestHydrateScenario:
 
     # --- OS resolution from agent ---
 
-    def test_resolves_from_agent_to_windows(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_resolves_from_agent_to_windows(self, _mock_load, user, windows_agent):
         """os_type 'from_agent' resolves to 'windows' for Windows agent."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -144,7 +203,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.os_type == "windows"
 
-    def test_resolves_from_agent_to_ubuntu(self, user, linux_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_resolves_from_agent_to_ubuntu(self, _mock_load, user, linux_agent):
         """os_type 'from_agent' resolves to 'ubuntu' for Linux agent."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -152,7 +212,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.os_type == "ubuntu"
 
-    def test_attacker_remains_kali(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_attacker_remains_kali(self, _mock_load, user, windows_agent):
         """Attacker os_type remains 'kali' (not resolved from agent)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -162,7 +223,8 @@ class TestHydrateScenario:
 
     # --- Agent embedding ---
 
-    def test_embeds_agent_in_victim(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_embeds_agent_in_victim(self, _mock_load, user, windows_agent):
         """Agent details are embedded in victim instance."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -170,7 +232,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent is not None
 
-    def test_agent_has_s3_key(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_agent_has_s3_key(self, _mock_load, user, windows_agent):
         """Embedded agent has s3_key."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -178,7 +241,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent.s3_key == "agents/123/agent.msi"
 
-    def test_agent_has_filename(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_agent_has_filename(self, _mock_load, user, windows_agent):
         """Embedded agent has filename."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -186,7 +250,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent.filename == "cortex_agent.msi"
 
-    def test_agent_has_sha256(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_agent_has_sha256(self, _mock_load, user, windows_agent):
         """Embedded agent has sha256."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -194,7 +259,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.agent.sha256 == "abc123def456"
 
-    def test_attacker_has_no_agent(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_attacker_has_no_agent(self, _mock_load, user, windows_agent):
         """Attacker instance has no agent (no agent_slot)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -204,7 +270,8 @@ class TestHydrateScenario:
 
     # --- AD Attack Lab scenario ---
 
-    def test_ad_attack_lab_has_three_instances(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_ad_attack_lab_has_three_instances(self, _mock_load, user, windows_agent):
         """AD attack lab has attacker, dc, and victim instances."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -215,7 +282,8 @@ class TestHydrateScenario:
         assert "dc" in roles
         assert "victim" in roles
 
-    def test_ad_attack_lab_dc_has_dc_config(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_ad_attack_lab_dc_has_dc_config(self, _mock_load, user, windows_agent):
         """DC instance has dc_config with domain settings."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -225,7 +293,8 @@ class TestHydrateScenario:
         assert dc.dc_config.domain_name is not None
         assert dc.dc_config.netbios_name is not None
 
-    def test_ad_attack_lab_victim_joins_domain(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_ad_attack_lab_victim_joins_domain(self, _mock_load, user, windows_agent):
         """AD victim has join_domain flag."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -233,7 +302,8 @@ class TestHydrateScenario:
         victim = next(i for i in result.all_instances if i.role == "victim")
         assert victim.join_domain is True
 
-    def test_ad_attack_lab_victim_has_agent(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_ad_attack_lab_victim_has_agent(self, _mock_load, user, windows_agent):
         """AD victim has embedded agent."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -242,7 +312,8 @@ class TestHydrateScenario:
         assert victim.agent is not None
         assert victim.agent.s3_key == "agents/123/agent.msi"
 
-    def test_ad_attack_lab_dc_has_agent(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_ad_attack_lab_dc_has_agent(self, _mock_load, user, windows_agent):
         """DC instance has Windows agent (xdr_agent=true in template)."""
         from cms.scenarios.hydrator import hydrate_scenario
 
@@ -253,7 +324,8 @@ class TestHydrateScenario:
 
     # --- Error handling ---
 
-    def test_raises_for_unknown_scenario(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_raises_for_unknown_scenario(self, _mock_load, user, windows_agent):
         """Raises CMSError for unknown scenario_id."""
         from cms.exceptions import CMSError
         from cms.scenarios.hydrator import hydrate_scenario
@@ -261,7 +333,8 @@ class TestHydrateScenario:
         with pytest.raises(CMSError, match="not found"):
             hydrate_scenario("nonexistent", user.id, windows_agent)
 
-    def test_raises_when_agents_empty(self, user):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_raises_when_agents_empty(self, _mock_load, user):
         """Raises CMSError when agents dict is empty."""
         from cms.exceptions import CMSError
         from cms.scenarios.hydrator import hydrate_scenario
@@ -271,7 +344,8 @@ class TestHydrateScenario:
 
     # --- Model serialization ---
 
-    def test_model_dump_returns_dict(self, user, windows_agent):
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_model_dump_returns_dict(self, _mock_load, user, windows_agent):
         """RangeSpec can be serialized to dict."""
         from cms.scenarios.hydrator import hydrate_scenario
 

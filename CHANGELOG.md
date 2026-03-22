@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.19.0] - 2026-03-21
+## [3.35.0] - 2026-03-22
 
 ### Added
 - File attachments for CTF challenges (CTF-001) — organizers can upload downloadable files (binaries, pcaps, images, etc.) to challenges; participants download via presigned S3 URLs
@@ -22,6 +22,299 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_available_challenges()` accepts optional `participant_id` to exclude challenges with unmet prerequisites
 - `submit_flag()` checks prerequisites before accepting submissions
 - `delete_challenge()` cascades soft-delete to prerequisite links where the challenge is required
+
+## [3.34.0] - 2026-03-22
+
+### Changed
+- **Terraform**: Rename remaining `pulumi_state_*`, `pulumi_locks_*`, `pulumi_secrets_*` variable names in `modules/engine-provisioner/variables.tf` to `engine_state_*`, `engine_locks_*`, `engine_secrets_*`
+- **Terraform**: Rename remaining `pulumi_state_*`, `pulumi_locks_*`, `pulumi_secrets_*` output names in `environments/*/range/outputs.tf` to `engine_*` equivalents
+- **Terraform**: Update all `data.terraform_remote_state.range.outputs.pulumi_*` references in `environments/*/portal/main.tf` to match renamed outputs
+- **Terraform**: Rename Terraform resource identifiers (with `moved` blocks) in `modules/engine-state/` (`aws_s3_bucket.pulumi_state` → `engine_state`, `aws_kms_key.pulumi_secrets` → `engine_secrets`, `aws_dynamodb_table.pulumi_locks` → `engine_locks`, plus sub-resources)
+- **Terraform**: Rename Terraform resource identifiers (with `moved` blocks) in `modules/engine-provisioner/` (`aws_ecs_cluster.pulumi` → `engine`, `aws_ecs_task_definition.pulumi_provisioner` → `engine_provisioner`, `aws_iam_role_policy.pulumi_state` → `engine_state`)
+- **Terraform**: Update comments and descriptions referencing "Pulumi" to "engine" in `modules/engine-provisioner/iam.tf` and `variables.tf`
+
+### Removed
+- **Terraform**: Remove deprecated `pulumi-*` SSM parameters from `modules/portal/ssm/main.tf` (confirmed no application code references them; `engine-*` parameters already active)
+
+## [3.33.0] - 2026-03-22
+
+### Changed
+- **Platform**: ECS modules (`engine/ecs.py`, `cms/experiments/ecs.py`) now propagate `CloudTaskError` instead of catching it and re-raising as `botocore.exceptions.ClientError`
+- **Platform**: `engine/services.py` callers (`pause_range`, `resume_range`) catch `CloudTaskError` instead of `ClientError`
+- **Platform**: Extract `_get_engine_ecs_config()` helper in `engine/ecs.py` to DRY up config reading from 3 internal functions
+
+### Fixed
+- **Terraform**: Portal `ecr_repository_url` uses `try()` fallback for foundation output rename (`engine_provisioner_ecr_url` || `pulumi_provisioner_ecr_url`) so portal plan succeeds regardless of foundation apply order
+
+### Removed
+- **Platform**: Remove `from botocore.exceptions import ClientError` from `engine/ecs.py` and `cms/experiments/ecs.py`
+
+## [3.32.0] - 2026-03-22
+
+### Changed
+- **Platform**: Rename `PULUMI_ECS_CLUSTER_ARN`, `PULUMI_TASK_DEFINITION_ARN`, `PULUMI_ECS_SECURITY_GROUP_ID`, `PULUMI_PRIVATE_SUBNET_IDS` to `ENGINE_*` prefix across settings, application code, tests, Terraform SSM, deployment scripts, and CI/CD
+- **Platform**: Rename `PULUMI_BACKEND_URL` to `STATE_BUCKET_URL` in task definition and local provisioner script
+- **Platform**: Settings use fallback pattern (`ENGINE_*` || `PULUMI_*`) for zero-downtime transition
+- **Terraform**: Rename module directories `modules/pulumi-provisioner/` to `modules/engine-provisioner/` and `modules/pulumi-state/` to `modules/engine-state/`
+- **Terraform**: Rename module blocks `pulumi_provisioner` to `engine_provisioner`, `pulumi_state` to `engine_state`, `pulumi_provisioner_ecr` to `engine_provisioner_ecr` with `moved` blocks for state continuity
+- **Terraform**: Rename variables `pulumi_provisioner_repository_name` to `engine_provisioner_repository_name`, `pulumi_container_tag` to `engine_container_tag`, and SSM module variables `pulumi_ecs_*`/`pulumi_task_*`/`pulumi_private_*` to `engine_*`
+- **Terraform**: Rename outputs `pulumi_provisioner_ecr_*` to `engine_provisioner_ecr_*` and portal outputs `pulumi_ecs_*`/`pulumi_task_*`/`pulumi_private_*` to `engine_*`
+- **Terraform**: Update all `module.pulumi_provisioner.*` and `module.pulumi_state.*` references to `module.engine_provisioner.*` and `module.engine_state.*` across environments
+- **Terraform**: Update comments, descriptions, and tags from "Pulumi" to "Engine" in module internals (resource names unchanged for state compatibility)
+- **Terraform**: Add new `engine-*` SSM parameters alongside deprecated `pulumi-*` parameters for transition
+
+### Removed
+- **Platform**: Remove `PULUMI_SECRETS_PROVIDER` env var (dead after Pulumi removal)
+- **Platform**: Remove `PULUMI_BACKEND_URL`/`PULUMI_SECRETS_PROVIDER` from `_run_local_provisioner()` and `.env.example`
+- **Platform**: Remove mock-pulumi PATH injection from local provisioner
+
+## [3.31.0] - 2026-03-22
+
+### Added
+- **Provisioner**: `terraform_base.py` — shared Terraform runner helpers extracted from duplicate code in `terraform_runner.py` and `range_terraform_runner.py`
+- **Provisioner**: `cloud/aws/base.py` — `BaseAWSAdapter` base class with shared `_get_client()` for all AWS adapters
+- **Provisioner**: Shared executor exceptions (`ExecutorError`, `ExecutorCommandError`, `ExecutorTimeoutError`) in `executors/base.py`
+
+### Changed
+- **Provisioner**: `terraform_runner.py` and `range_terraform_runner.py` are now thin wrappers around `terraform_base.py`, eliminating ~550 lines of exact duplication
+- **Provisioner**: All 5 AWS adapters (`secrets`, `db_auth`, `config_store`, `event_bus`, `storage`) inherit `BaseAWSAdapter` instead of duplicating `_get_client()`
+- **Provisioner**: SSM, SSH, and NGFW executors use shared exception base classes from `executors/base.py` with backward-compatible aliases
+- **Provisioner**: `main.py` SQL query construction uses `psycopg.sql` module for safe identifier composition instead of f-string formatting
+- **Provisioner**: `linux_xdr_agent_install.py` bash scripts use `mktemp` for unpredictable temp file paths instead of hardcoded `/tmp` paths
+- **Provisioner**: NGFW executor temp key file cleanup improved with `__del__` fallback; removed redundant `os.chmod` (mkstemp already creates with 0o600)
+
+### Removed
+- **Provisioner**: Remove `pulumi` and `pulumi_aws` from `requirements.txt` (already removed from `pyproject.toml`)
+
+### Security
+- **Provisioner**: Added `# NOSONAR` annotations for reviewed security hotspots (subprocess calls, Paramiko AutoAddPolicy, SSH StrictHostKeyChecking, test credentials)
+
+## [3.30.0] - 2026-03-21
+
+### Added
+- **Provisioner Cloud**: `SecretsStore` protocol, `CloudSecretsError` exception, `AWSSecretsStore` adapter, and `get_secrets_store()` factory
+- **Provisioner Cloud**: `object_exists()` and `delete_object()` methods on `ObjectStorage` protocol and `AWSObjectStorage` adapter
+
+### Changed
+- **Provisioner**: Migrate `events.py` from direct `boto3` SNS calls to `EventBus` cloud abstraction
+- **Provisioner**: Migrate `config.py` RDS IAM auth from `boto3` to `DBAuth` cloud abstraction
+- **Provisioner**: Migrate `main.py` S3/SSM/RDS/Secrets calls to `ObjectStorage`, `ConfigStore`, `DBAuth`, `SecretsStore` cloud abstractions
+- **Provisioner**: Migrate `stacks/range_stack.py` Secrets Manager call to `SecretsStore` cloud abstraction
+- **Provisioner**: Migrate `components/network.py` RDS IAM auth to `DBAuth` cloud abstraction
+- **Provisioner**: Migrate `terraform_runner.py` S3 calls to `ObjectStorage` cloud abstraction
+- **Provisioner**: Migrate `range_terraform_runner.py` S3 calls to `ObjectStorage` cloud abstraction
+
+### Removed
+- **Provisioner**: Remove `_get_sns_client()` from `events.py` (replaced by `EventBus` protocol)
+- **Provisioner**: Remove direct `import boto3` from `events.py`, `config.py`, `main.py`, `stacks/range_stack.py`, `terraform_runner.py`, `range_terraform_runner.py`
+
+## [3.29.1] - 2026-03-21
+
+### Changed
+- **Provisioner**: Remove misleading "stub" docstrings from AWS cloud adapters (`AWSObjectStorage`, `AWSConfigStore`, `AWSEventBus`, `AWSDBAuth`) — implementations are complete
+
+## [3.29.0] - 2026-03-21
+
+### Changed
+- **Worker**: Migrate `run_worker` management command from direct `boto3` SQS calls to `shared.cloud.get_queue_consumer()` abstraction layer
+- **CMS**: Migrate `cms/experiments/events.py` from direct `boto3` SQS calls to `shared.cloud.get_queue_publisher()` abstraction layer
+- **Cloud**: Remove stub docstring from `AWSQueuePublisher`/`AWSQueueConsumer` now that extraction is complete
+
+### Removed
+- **Engine**: Delete deprecated `_get_ecs_client()` from `engine/ecs.py` (replaced by `shared.cloud.get_task_runner()`)
+- **CMS**: Delete deprecated `_get_ecs_client()` from `cms/experiments/ecs.py` (replaced by `shared.cloud.get_task_runner()`)
+- **Tests**: Delete `tests/engine/ecs/test_get_ecs_client.py` (tested removed function)
+
+## [3.28.0] - 2026-03-21
+
+### Changed
+- **Engine**: Migrate `engine/secrets.get_ssh_key()` from direct `boto3` Secrets Manager calls to `shared.cloud` abstraction layer
+- **CTF**: Migrate `ctf/bridges._get_instance_ssh_key()` from direct `boto3` Secrets Manager calls to `shared.cloud` abstraction layer
+- **Cloud**: Remove stub docstring from `AWSSecretsStore` now that extraction is complete
+
+## [3.27.3] - 2026-03-21
+
+### Changed
+- **Tests**: Consolidate test suite through parametrization and fixture extraction (39,712 → 39,050 lines, -662 net)
+- **Tests**: Extract shared `mock_queryset` fixture and `INVALID_USERS`/`INVALID_RANGE_IDS` parametrize helpers to `tests/conftest.py`
+- **Tests**: Extract in-memory model builders (`make_ctf_event`, `make_challenge`, `make_team`, `make_participant`, `make_scheduled_task`) to `tests/ctf/conftest.py`
+- **Tests**: Create `tests/cms/conftest.py` with shared `credential_type_obj` fixture and `make_credential` builder
+- **Tests**: Convert `_create_range_patches` helper to `create_range_ctx` pytest fixture in `cms/test_services_range.py`
+- **Tests**: Parametrize user/range_id validation and error propagation tests across service classes in `cms/test_services_range.py`
+- **Tests**: Consolidate model_dump/model_validate round-trip tests into parametrized classes in `shared/schemas/test_range.py` and `test_credentials.py`
+- **Tests**: Parametrize required-field, default-value, computed-property, and status validation tests in `shared/schemas/test_range.py`
+- **Tests**: Parametrize expiry property and positive-id validator tests in `shared/schemas/test_credentials.py`
+- **Tests**: Parametrize boolean property, count, and status transition tests in `ctf/test_models.py`
+- **Tests**: Parametrize credential property tests in `cms/test_models.py`
+- **Tests**: Refactor `test_scoring.py` scoreboard setup methods to use shared `mock_queryset` fixture
+
+### Added
+- **Tests**: Add error handling, input validation, and missing config tests for `start_provisioning()` (2 → 7 tests)
+- **Tests**: Add error handling, input validation, and missing config tests for `start_teardown()` (2 → 7 tests)
+- **Tests**: Add error cases for `start_ngfw_provisioning()` (3 → 6 tests)
+- **Tests**: Add error cases for `start_ngfw_teardown()` (4 → 7 tests)
+
+### Removed
+- **Tests**: Delete empty `mission_control/test_consumers.py` (0 tests, placeholder comment only)
+- **Tests**: Remove redundant `InstanceContext` tests that duplicated `InstanceContextBase` coverage
+
+## [3.27.2] - 2026-03-21
+
+### Security
+- **Platform**: Bump `django` 6.0 -> 6.0.3
+- **Platform**: Bump `cryptography` 46.0.3 -> 46.0.5
+- **Platform**: Bump `pyopenssl` 25.3.0 -> 26.0.0
+- **Platform**: Bump `pyasn1` 0.6.1 -> 0.6.3
+- **Platform**: Bump `ujson` 5.11.0 -> 5.12.0
+- **Platform**: Bump `cbor2` 5.7.1 -> 5.8.0
+- **Platform**: Bump `urllib3` 2.6.0 -> 2.6.3
+- **Platform**: Bump `filelock` 3.20.0 -> 3.25.2
+- **Platform**: Bump `virtualenv` 20.35.4 -> 21.2.0
+- **Platform**: Add `[tool.uv] constraint-dependencies` to enforce minimum versions for transitive security deps
+
+## [3.27.1] - 2026-03-21
+
+### Security
+- **Provisioner**: Bump `cryptography` 46.0.3 -> 46.0.5
+- **Provisioner**: Bump `protobuf` 5.29.5 -> 5.29.6
+- **Provisioner**: Bump `urllib3` minimum to >=2.6.3
+
+## [3.27.0] - 2026-03-21
+
+### Changed
+- **Test suite: eliminate all DB access outside `tests/integration/`** — 63% faster (722s → 269s)
+  - Converted 87 `@pytest.mark.django_db` markers and ~48 `TestCase` subclasses to mock-based tests
+  - Only 22 markers remain, all in `tests/integration/` (legitimate integration tests)
+  - View tests: replaced `Client`/`force_login` with `RequestFactory` + mock users
+  - Model tests: in-memory construction via `Model()` or `__new__` + `__dict__`
+  - Service tests: patched ORM managers (`objects.get`, `objects.filter`, `objects.create`, etc.)
+  - Added missing engine migration (SubnetAllocation `reserved_at` → `created_at` rename)
+  - Added missing CTF migration (index rename, field alter)
+  - Changed all `OperatingSystem.objects.get(slug=...)` to `get_or_create()` for xdist resilience
+
+## [3.26.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_models_subnet.py` (CMS) by mocking ORM
+  - Added `_make_subnet()` helper to construct Subnet instances in-memory via `__dict__` assignment, bypassing Django FK descriptor validation
+  - EntityBase `is_deleted` tests: built in-memory with `deleted_at` set/unset
+  - Terminal status auto-`deleted_at` tests: patched `validate_data` and `django.db.models.Model.save` to exercise real `EntityBase.save()` logic without DB
+  - Relationship tests: replaced cascade-delete DB test with `_meta` introspection asserting `CASCADE` on_delete and `related_name='subnets'`
+  - Ordering test: asserted `Subnet._meta.ordering` instead of querying DB
+  - Validation tests: called `subnet.validate_data()` directly on in-memory instances
+  - Data/property tests: constructed in-memory instances and asserted properties
+  - 4 class-level `@pytest.mark.django_db` markers removed, all 18 tests pass without DB access
+
+## [3.25.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_models.py` (mission_control) by mocking ORM
+  - Added `_make()` helper to construct Django model instances in-memory, bypassing FK validation and populating `_state.fields_cache`
+  - OperatingSystem `get_for_extension` tests: patched `OperatingSystem.objects.all`
+  - UserProfile tests: built via `_make()` with mock user in fields_cache
+  - AgentConfig tests: built via `_make()` with mock user/os, `active_for_user` patched at `AgentConfig.objects.filter`
+  - Range standup_duration tests: set `created_at`/`ready_at` directly on in-memory instances; annotation test mocks `Range.objects` chain
+  - ActivityLog tests: `log()` patched at `ActivityLog.objects.create`, `__str__` tests use `_make()`
+  - 4 class/method-level `@pytest.mark.django_db` markers removed, all 34 tests pass without DB access
+
+## [3.24.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_auth.py` (CTF) by mocking ORM
+  - Created `_MockGroupManager`/`_MockGroupQS` helpers to simulate `user.groups` with in-memory sets
+  - OIDC backend tests: patched `config.oidc.Group.objects`, `config.oidc.get_user_profile`, `ctf.models.CTFEvent.objects`
+  - Dashboard routing tests: call `dashboard_router` directly via `RequestFactory` with mock users
+  - Access control decorator tests: patched `management.services.get_user_profile`, `ctf.models.CTFParticipant.objects`
+  - Dev login tests: patched `config.dev_auth.User.objects`, `config.dev_auth.Group.objects`, `config.dev_auth.login`
+  - Context processor tests: patched `management.services.get_user_profile` (bridges import locally)
+  - Register view tests: patched `ctf.models.CTFParticipant.objects`, `django.contrib.auth.login`
+  - Dual-role tests: patched `management.services.get_user_profile`, `django.contrib.auth.models.Group.objects`
+  - 8 class-level `@pytest.mark.django_db` markers removed, all 48 tests pass without DB access
+
+## [3.23.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_range_api.py` (mission_control) by mocking ORM
+  - Replaced `Client`/`force_login` with `RequestFactory` + mock user via `AnonymousUser` for auth tests
+  - View tests (get_range, launch_range, cancel_range, destroy_range, list_agents): patched CMS service functions (`get_active_range`, `cms_create_range`, `cms_get_agent`, `cms_list_agents`, `cms_list_scenarios`) at the view-module boundary
+  - Subnet allocation tests: mocked `transaction.atomic` and `Range.objects` queryset chain
+  - Shared fixtures (`mock_user`, `mock_agent`, `mock_linux_agent`, `other_user`) replace DB-backed `test_agent`/`windows_os`/`linux_os` fixtures
+  - 6 class-level `@pytest.mark.django_db` markers removed, all 37 tests pass without DB access
+
+## [3.22.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_scoring.py` (CTF) by mocking ORM
+  - `TestCalculateScore`: mocked `CTFSubmission.objects.filter().aggregate()` chain
+  - `TestGetScoreboard` / `TestGetTeamScoreboard`: mocked annotated queryset chains with mock participant/team objects
+  - `TestGetParticipantRank`: mocked both `.get()` lookup and scoreboard queryset
+  - `TestGetChallengeStatistics`: mocked `CTFChallenge.objects.get()` and submission queryset chains
+  - `TestGetEventStatistics`: mocked `CTFEvent.objects.get()` and all related model managers
+  - `TestCalculatePointsWithPenalty`: replaced real model instances with mocks binding the real method
+  - 7 class-level `@pytest.mark.django_db` markers removed, all 27 tests pass without DB access
+
+## [3.21.0] - 2026-03-21
+
+### Changed
+- Remove all `@pytest.mark.django_db` markers from `test_views.py` (mission_control) by mocking ORM
+  - View tests (dashboard, settings, help): replaced `Client`/`force_login` with `RequestFactory` + mock user, patched `render` to avoid DB-hitting context processors
+  - `TestGetUserStorageUsed`: mocked `AgentConfig.active_for_user` queryset instead of creating real DB records
+  - `TestUploadLock`: replaced Django session with plain dict (no DB session backend needed)
+  - 5 class-level `@pytest.mark.django_db` markers removed, all 14 tests pass without DB access
+
+## [3.20.0] - 2026-03-20
+
+### Changed
+- Remove `@pytest.mark.django_db` from three CMS test files by mocking all ORM access
+  - `test_services_scenarios.py`: replaced real User/AgentConfig fixtures with mocks, patched registry functions (list_all_scenarios, get_scenario_detail, load_scenario_template)
+  - `test_scenario_hydrator.py`: replaced real User/AgentConfig fixtures with mocks, patched hydrator's load_scenario with canned ScenarioTemplate Pydantic objects
+  - `test_services_range.py`: converted remaining 4 `create_range` test classes (Validation, EngineCall, Instance, Return) from DB to fully mocked ORM using ExitStack-based helper
+
+## [3.19.0] - 2026-03-20
+
+### Changed
+- Test suite optimization: remove unnecessary `@pytest.mark.django_db` markers and add `--reuse-db`
+  - Added `--reuse-db` to pytest addopts in pyproject.toml for faster repeated runs
+  - `test_create_range.py`: removed `django_db`, added `_mock_transaction` autouse fixture
+  - `test_cancel_range.py`: removed `django_db` from both classes, added `_mock_range_lookup` fixture
+  - `test_services_storage.py`: converted real `User` fixture to `mock_user`, removed `django_db`
+  - `test_handlers.py` (CMS): removed `django_db` from `TestProcessEvent` and `TestParseSnsMessage`
+  - `test_handlers.py` (Engine): removed `django_db` from `TestProcessEvent` and `TestParseSnsMessage`
+  - `test_models_agent_config.py`: removed `django_db` from `TestAgentConfigModel` (metadata-only tests)
+  - `test_models_operating_system.py`: removed `django_db` from `TestOperatingSystemModel` (metadata-only tests)
+  - 10 class-level markers removed across 7 test files
+
+## [3.18.0] - 2026-03-20
+
+### Changed
+- Test suite cleanup: remove duplicate wrapper tests and unnecessary `@pytest.mark.django_db` markers
+  - Removed ~51 duplicate tests from ECS wrapper test files (delegation verified in 2-4 tests each)
+  - Deleted `tests/mission_control/test_engine.py` (12 tests duplicating `tests/engine/ecs/`)
+  - Removed `@pytest.mark.django_db` from 8 test files that only use mocks (no ORM calls)
+- CMS service test streamlining: replace real DB fixtures with mocks in mock-heavy tests
+  - `test_services_range.py`: removed `django_db` from 8/12 classes (~75 tests), kept 4 `create_range` classes on DB
+  - `test_services_upload.py`: removed `django_db` from all 3 classes (57 tests), removed unused DB fixtures
+  - `test_services_agents.py`: removed `django_db` from all 4 classes (34 tests), removed unused DB fixtures
+  - Added `mock_user` fixture with `Mock(pk=42, id=42)` to replace real `User.objects.create_user` in pure-mock tests
+- Task runner abstraction delegation (PLAT-001.3, #813)
+  - `engine/ecs.py`: All ECS task functions now delegate to `TaskRunner` protocol via `get_task_runner()`
+  - `cms/experiments/ecs.py`: `start_experiment_task()` delegates to `TaskRunner` protocol via `get_task_runner()`
+  - Added `container_name` parameter to `TaskRunner.run_task()` protocol and `AWSTaskRunner` adapter
+  - `AWSTaskRunner.run_task()` now raises `CloudTaskError` when no tasks are started (was returning None)
+  - `AWSTaskRunner.get_task_status()` now returns all fields callers expect (`desired_status`, `started_at`, `stopped_at`)
+  - Exception bridging: `CloudTaskError` caught and re-raised as `ClientError` for backward compatibility
+  - All existing function signatures, import paths, and caller contracts preserved
+  - `_get_ecs_client()` kept deprecated in both modules; `import boto3` moved inside it
+
+## [3.17.0] - 2026-03-19
+
+### Changed
+- Object storage abstraction delegation (PLAT-001.2, #812)
+  - `cms/assets/s3.py`: All S3 functions now delegate to `ObjectStorage` protocol via `get_object_storage()`
+  - `cms/experiments/s3.py`: All S3 functions now delegate to `ObjectStorage` protocol via `get_object_storage()`
+  - `provisioner/config.py`: `generate_presigned_url()` delegates to provisioner `ObjectStorage` adapter
+  - Exception bridging: `CloudStorageError` caught and re-raised as `S3Error` for backward compatibility
+  - All existing function signatures, import paths, and caller contracts preserved
 
 ## [3.18.0] - 2026-03-20
 
@@ -54,6 +347,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.16.0] - 2026-03-19
 
 ### Added
+- Cloud provider abstraction layer foundation (PLAT-001.1, #811)
+  - Protocol definitions for ObjectStorage, TaskRunner, QueueConsumer, QueuePublisher, SecretsStore (platform)
+  - Protocol definitions for EventBus, ConfigStore, DBAuth, ObjectStorage (provisioner)
+  - Factory functions with `CLOUD_PROVIDER` setting (defaults to "aws")
+  - AWS adapter implementations for all protocols
+  - Provider-agnostic exception hierarchy
+  - Generic setting aliases (`CLOUD_PROVIDER`, `CLOUD_REGION`, `STORAGE_BUCKET_NAME`) with backward-compatible AWS fallbacks
 - Multiple flags per challenge (CTF-107) — new `CTFFlag` model supports multiple valid flags per challenge where any correct flag constitutes a solve
 - Each flag independently supports static (hashed) or regex (pattern match) types and case sensitivity
 - `add_flag` / `remove_flag` service functions and API endpoints for flag management

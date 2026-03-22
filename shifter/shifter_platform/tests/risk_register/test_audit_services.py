@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from django.contrib.auth.models import User
 
 from risk_register.models import AuditLog
 from risk_register.services import (
@@ -23,12 +22,14 @@ from risk_register.services import (
 
 
 @pytest.fixture
-def staff_user(db):
-    """Create a saved staff user."""
-    return User.objects.create_user(  # nosec B106
-        username="testuser",
+def staff_user():
+    """Mock staff user (no DB)."""
+    return Mock(
+        pk=42,
+        id=42,
         email="test@example.com",
-        password="testpass",
+        username="testuser",
+        is_authenticated=True,
     )
 
 
@@ -78,12 +79,32 @@ def mock_apikey_request():
     return request
 
 
+def _make_audit_entry(**kwargs):
+    """Build a MagicMock that mimics an AuditLog instance with given fields."""
+    entry = MagicMock(spec=AuditLog)
+    for k, v in kwargs.items():
+        setattr(entry, k, v)
+    return entry
+
+
 # ---- audit_log() ----
 
 
-@pytest.mark.django_db
 class TestAuditLog:
-    def test_creates_entry_with_correct_fields(self, staff_user):
+    @patch("risk_register.services.AuditLog.log")
+    def test_creates_entry_with_correct_fields(self, mock_log, staff_user):
+        mock_log.return_value = _make_audit_entry(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=42,
+            action=AuditLog.Action.CREATE,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=staff_user.id,
+            new_state={"scenario": "test"},
+            context="test context",
+            source_ip="10.0.0.1",
+            user_agent="TestAgent",
+            request_id="req-123",
+        )
         entry = audit_log(
             entity_type=AuditLog.EntityType.RANGE,
             entity_id=42,
@@ -121,9 +142,16 @@ class TestAuditLog:
 # ---- audit_log_from_request() ----
 
 
-@pytest.mark.django_db
 class TestAuditLogFromRequest:
-    def test_extracts_request_context(self, mock_request, staff_user):
+    @patch("risk_register.services.AuditLog.log")
+    def test_extracts_request_context(self, mock_log, mock_request, staff_user):
+        mock_log.return_value = _make_audit_entry(
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=staff_user.id,
+            source_ip="10.0.0.1",
+            user_agent="TestBrowser/1.0",
+            request_id="req-abc-123",
+        )
         entry = audit_log_from_request(
             mock_request,
             entity_type=AuditLog.EntityType.RANGE,
@@ -154,9 +182,13 @@ class TestAuditLogFromRequest:
 # ---- audit_log_system_event() ----
 
 
-@pytest.mark.django_db
 class TestAuditLogSystemEvent:
-    def test_prefixes_source_to_context(self):
+    @patch("risk_register.services.AuditLog.log")
+    def test_prefixes_source_to_context(self, mock_log):
+        mock_log.return_value = _make_audit_entry(
+            context="[engine.handlers] range provisioned",
+            actor_type=AuditLog.ActorType.SYSTEM,
+        )
         entry = audit_log_system_event(
             entity_type=AuditLog.EntityType.RANGE,
             entity_id=1,
@@ -168,7 +200,11 @@ class TestAuditLogSystemEvent:
         assert entry.context == "[engine.handlers] range provisioned"
         assert entry.actor_type == AuditLog.ActorType.SYSTEM
 
-    def test_source_only_context(self):
+    @patch("risk_register.services.AuditLog.log")
+    def test_source_only_context(self, mock_log):
+        mock_log.return_value = _make_audit_entry(
+            context="[engine.handlers]",
+        )
         entry = audit_log_system_event(
             entity_type=AuditLog.EntityType.RANGE,
             entity_id=1,
@@ -181,9 +217,15 @@ class TestAuditLogSystemEvent:
 # ---- audit_auth_event() ----
 
 
-@pytest.mark.django_db
 class TestAuditAuthEvent:
-    def test_records_login_event(self, staff_user):
+    @patch("risk_register.services.AuditLog.log")
+    def test_records_login_event(self, mock_log, staff_user):
+        mock_log.return_value = _make_audit_entry(
+            action=AuditLog.Action.LOGIN,
+            entity_type=AuditLog.EntityType.USER,
+            new_state={"email": "test@example.com", "cognito_sub": "abc-123"},
+            actor_type=AuditLog.ActorType.COGNITO,
+        )
         entry = audit_auth_event(
             action=AuditLog.Action.LOGIN,
             user_id=staff_user.id,
@@ -202,9 +244,19 @@ class TestAuditAuthEvent:
 # ---- audit_session_event() ----
 
 
-@pytest.mark.django_db
 class TestAuditSessionEvent:
-    def test_records_connect_event(self, staff_user):
+    @patch("risk_register.services.AuditLog.log")
+    def test_records_connect_event(self, mock_log, staff_user):
+        mock_log.return_value = _make_audit_entry(
+            action=AuditLog.Action.CONNECT,
+            entity_type=AuditLog.EntityType.SESSION,
+            new_state={
+                "session_id": "sess-abc",
+                "range_id": 42,
+                "session_type": "terminal",
+                "target_ip": "172.16.0.5",
+            },
+        )
         entry = audit_session_event(
             action=AuditLog.Action.CONNECT,
             user_id=staff_user.id,

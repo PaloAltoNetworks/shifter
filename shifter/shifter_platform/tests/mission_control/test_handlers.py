@@ -5,15 +5,12 @@ import logging
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
-import pytest
-
 from shared.enums import ResourceStatus
 
 # Test UUID for request_id
 TEST_REQUEST_ID = UUID("12345678-1234-5678-1234-567812345678")
 
 
-@pytest.mark.django_db
 class TestProcessEvent:
     """Tests for process_event dispatcher."""
 
@@ -93,7 +90,6 @@ class TestProcessEvent:
             mock_ngfw_handler.assert_not_called()
 
 
-@pytest.mark.django_db
 class TestParseSnsMessage:
     """Tests for parse_sns_message helper."""
 
@@ -153,7 +149,6 @@ class TestParseSnsMessage:
         assert result["range_id"] == 1
 
 
-@pytest.mark.django_db
 class TestProcessRangeEvent:
     """Tests for process_range_event handler."""
 

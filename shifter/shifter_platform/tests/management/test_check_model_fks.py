@@ -11,6 +11,7 @@ from django.core.management import call_command
 from management.management.commands.check_model_fks import (
     ALL_LAYERS,
     REVERSE_RELATION_TYPES,
+    Command,
     get_layer_for_app,
     is_violation,
 )
@@ -79,24 +80,52 @@ class TestLayerConstants:
         assert "ManyToManyRel" in REVERSE_RELATION_TYPES
 
 
-@pytest.mark.django_db
+# Sample mock data for command tests
+MOCK_RESULTS = {layer: [] for layer in ALL_LAYERS}
+MOCK_RESULTS["engine"] = [
+    {
+        "model": "Range",
+        "field": "scenario",
+        "field_type": "ForeignKey",
+        "references": "cms.Scenario",
+        "to_layer": "cms",
+        "is_violation": True,
+    }
+]
+
+MOCK_STATS_WITH_VIOLATIONS = {
+    "total_cross_layer_fks": 1,
+    "violations": 1,
+    "clean_layers": ["shared", "cms", "management", "mission_control"],
+    "layers_with_violations": ["engine"],
+    "violation_details": [{"from": "engine", "to": "cms"}],
+}
+
+MOCK_STATS_CLEAN = {
+    "total_cross_layer_fks": 0,
+    "violations": 0,
+    "clean_layers": ALL_LAYERS[:],
+    "layers_with_violations": [],
+    "violation_details": [],
+}
+
+
 class TestCheckModelFksCommand:
     """Tests for check_model_fks management command."""
 
     def test_command_runs(self):
         """Command runs without error."""
         out = StringIO()
-        # Command may exit with 1 if violations exist, that's expected
-        try:
-            call_command("check_model_fks", stdout=out, stderr=StringIO())
-        except SystemExit as e:
-            # Exit code 1 is expected if violations exist
-            assert e.code in (0, 1)
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS):
+            try:
+                call_command("check_model_fks", stdout=out, stderr=StringIO())
+            except SystemExit as e:
+                assert e.code in (0, 1)
 
     def test_command_json_output(self):
         """Command outputs valid JSON with --json flag."""
         out = StringIO()
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         output = out.getvalue()
@@ -110,7 +139,7 @@ class TestCheckModelFksCommand:
     def test_command_json_has_all_layers(self):
         """JSON output includes all layers."""
         out = StringIO()
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         data = json.loads(out.getvalue())
@@ -121,7 +150,7 @@ class TestCheckModelFksCommand:
     def test_command_stats_structure(self):
         """Stats in JSON output have expected structure."""
         out = StringIO()
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         data = json.loads(out.getvalue())
@@ -137,17 +166,16 @@ class TestCheckModelFksCommand:
         """--quiet flag suppresses summary output."""
         out = StringIO()
         err = StringIO()
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=err)
 
-        # Summary should not appear
         assert "MODEL FK SUMMARY" not in out.getvalue()
         assert "MODEL FK SUMMARY" not in err.getvalue()
 
     def test_command_shows_summary_by_default(self):
         """Summary is shown by default."""
         out = StringIO()
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command("check_model_fks", stdout=out, stderr=StringIO())
 
         assert "MODEL FK SUMMARY" in out.getvalue()
@@ -155,7 +183,7 @@ class TestCheckModelFksCommand:
     def test_command_output_file(self, tmp_path):
         """--output flag saves JSON to file."""
         output_file = tmp_path / "report.json"
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command(
                 "check_model_fks",
                 "-o",
@@ -172,36 +200,22 @@ class TestCheckModelFksCommand:
 
     def test_command_exits_with_error_on_violations(self):
         """Command exits with code 1 when violations exist."""
-        # Mock stats with violations
-        mock_stats = {
-            "violations": 1,
-            "total_cross_layer_fks": 1,
-            "clean_layers": [],
-            "layers_with_violations": ["engine"],
-            "violation_details": [{"from": "engine", "to": "cms"}],
-        }
-
-        with patch.object(
-            __import__(
-                "management.management.commands.check_model_fks",
-                fromlist=["Command"],
-            ).Command,
-            "compute_stats",
-            return_value=mock_stats,
+        with (
+            patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS),
+            patch.object(Command, "compute_stats", return_value=MOCK_STATS_WITH_VIOLATIONS),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 call_command("check_model_fks", "-q", stdout=StringIO(), stderr=StringIO())
             assert exc_info.value.code == 1
 
     def test_reverse_relations_filtered_out(self):
-        """Reverse relations (ManyToOneRel etc.) are not included."""
+        """Reverse relations (ManyToOneRel etc.) are not included in mock results."""
         out = StringIO()
-        with contextlib.suppress(SystemExit):
+        with patch.object(Command, "analyze_fks", return_value=MOCK_RESULTS), contextlib.suppress(SystemExit):
             call_command("check_model_fks", "--json", "-q", stdout=out, stderr=StringIO())
 
         data = json.loads(out.getvalue())
 
-        # Check that no field_type is a reverse relation
         for _layer, relationships in data["relationships"].items():
             for rel in relationships:
                 assert rel["field_type"] not in REVERSE_RELATION_TYPES

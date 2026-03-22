@@ -12,8 +12,8 @@ import pytest
 class TestDestroyNgfw:
     """Test destroy_ngfw passes variables correctly."""
 
-    @patch("terraform_runner._run_terraform")
-    @patch("terraform_runner.init_ngfw_workspace")
+    @patch("terraform_base.run_terraform")
+    @patch("terraform_base.init_workspace")
     def test_destroy_with_variables_writes_tfvars(self, mock_init, mock_run, tmp_path):
         """When variables are provided, destroy should write tfvars and pass -var-file."""
         from terraform_runner import destroy_ngfw
@@ -35,8 +35,8 @@ class TestDestroyNgfw:
         destroy_args = mock_run.call_args[0][0]
         assert any("-var-file=" in arg for arg in destroy_args)
 
-    @patch("terraform_runner._run_terraform")
-    @patch("terraform_runner.init_ngfw_workspace")
+    @patch("terraform_base.run_terraform")
+    @patch("terraform_base.init_workspace")
     def test_destroy_without_variables_no_var_file(self, mock_init, mock_run, tmp_path):
         """When no variables provided, destroy should not pass -var-file."""
         from terraform_runner import destroy_ngfw
@@ -50,8 +50,8 @@ class TestDestroyNgfw:
         assert not any("-var-file=" in arg for arg in destroy_args)
         assert "-auto-approve" in destroy_args
 
-    @patch("terraform_runner._run_terraform", side_effect=RuntimeError("destroy failed"))
-    @patch("terraform_runner.init_ngfw_workspace")
+    @patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed"))
+    @patch("terraform_base.init_workspace")
     def test_destroy_cleans_up_tfvars_on_failure(self, mock_init, mock_run, tmp_path):
         """Tfvars file should be cleaned up even if destroy fails."""
         from terraform_runner import destroy_ngfw

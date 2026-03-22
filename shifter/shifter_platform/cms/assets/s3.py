@@ -1,4 +1,9 @@
-"""S3 storage service for agent uploads."""
+"""S3 storage service for agent uploads.
+
+Delegates actual storage operations to the cloud abstraction layer
+(``shared.cloud.get_object_storage``).  All public function signatures and
+import paths are preserved for backward compatibility.
+"""
 
 import hashlib
 import logging
@@ -6,9 +11,10 @@ import os
 import re
 import uuid
 
-import boto3
-from botocore.exceptions import ClientError
 from django.conf import settings
+
+from shared.cloud import get_object_storage
+from shared.cloud.exceptions import CloudStorageError
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +28,13 @@ class S3Error(Exception):
 def get_s3_client():
     """Get boto3 S3 client configured for the region.
 
-    Supports LocalStack via AWS_ENDPOINT_URL environment variable.
+    .. deprecated::
+        Kept for backward compatibility. New code should use
+        ``get_object_storage()`` from ``shared.cloud`` instead.
     """
+    import boto3
     from botocore.config import Config
 
-    # Use regional endpoint to avoid cross-region redirects that break CORS
-    # For local dev, AWS_ENDPOINT_URL points to LocalStack
     endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
     if not endpoint_url:
         endpoint_url = f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com"
@@ -111,16 +118,16 @@ def upload_agent(file_obj, user_id: int, filename: str) -> tuple[str, str, int]:
     file_obj.seek(0)
 
     try:
-        client = get_s3_client()
-        client.upload_fileobj(
+        storage = get_object_storage()
+        storage.upload_file(
             file_obj,
-            settings.AWS_S3_BUCKET_NAME,
-            s3_key,
-            ExtraArgs={"ContentType": "application/octet-stream"},
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            content_type="application/octet-stream",
         )
-    except ClientError as e:
+    except CloudStorageError as e:
         logger.error("upload_agent: failed user_id=%s s3_key=%s error=%s", user_id, s3_key, e)
-        raise S3Error(f"Failed to upload to S3: {e}") from e
+        raise S3Error(str(e)) from e
 
     logger.info("upload_agent: success user_id=%s s3_key=%s size=%d", user_id, s3_key, file_size)
     return s3_key, sha256_hash, file_size
@@ -143,11 +150,11 @@ def delete_agent(s3_key: str) -> None:
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
-        client = get_s3_client()
-        client.delete_object(Bucket=settings.AWS_S3_BUCKET_NAME, Key=s3_key)
-    except ClientError as e:
+        storage = get_object_storage()
+        storage.delete_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
+    except CloudStorageError as e:
         logger.error("delete_agent: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to delete from S3: {e}") from e  # nosec B608
+        raise S3Error(str(e)) from e
 
     logger.info("delete_agent: success s3_key=%s", s3_key)
 
@@ -183,19 +190,16 @@ def generate_presigned_upload_url(
     s3_key = f"agents/{user_id}/{unique_id}_{safe_filename}"
 
     try:
-        client = get_s3_client()
-        presigned_url = client.generate_presigned_url(
-            ClientMethod="put_object",
-            Params={
-                "Bucket": settings.AWS_S3_BUCKET_NAME,
-                "Key": s3_key,
-                "ContentType": content_type,
-            },
-            ExpiresIn=settings.AGENT_UPLOAD_URL_EXPIRES,
+        storage = get_object_storage()
+        presigned_url = storage.generate_presigned_upload_url(
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            content_type=content_type,
+            expires_in=settings.AGENT_UPLOAD_URL_EXPIRES,
         )
-    except ClientError as e:
+    except CloudStorageError as e:
         logger.error("generate_presigned_upload_url: failed user_id=%s error=%s", user_id, e)
-        raise S3Error(f"Failed to generate presigned URL: {e}") from e
+        raise S3Error(str(e)) from e
 
     logger.debug("generate_presigned_upload_url: success user_id=%s s3_key=%s", user_id, s3_key)
     return presigned_url, s3_key
@@ -221,21 +225,18 @@ def verify_s3_object_exists(s3_key: str) -> tuple[int, str]:
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
-        client = get_s3_client()
-        response = client.head_object(
-            Bucket=settings.AWS_S3_BUCKET_NAME,
-            Key=s3_key,
-        )
-        size = response["ContentLength"]
-        etag = response["ETag"].strip('"')
+        storage = get_object_storage()
+        metadata = storage.head_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
+        size = metadata["content_length"]
+        etag = metadata["etag"]
         logger.debug("verify_s3_object_exists: success s3_key=%s size=%d", s3_key, size)
         return size, etag
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "404":
+    except CloudStorageError as e:
+        if "not found" in str(e).lower() or "404" in str(e):
             logger.warning("verify_s3_object_exists: not found s3_key=%s", s3_key)
             raise S3Error(f"Object not found: {s3_key}") from e
         logger.error("verify_s3_object_exists: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to verify S3 object: {e}") from e
+        raise S3Error(str(e)) from e
 
 
 def tag_s3_object(s3_key: str, tags: dict[str, str]) -> None:
@@ -256,14 +257,10 @@ def tag_s3_object(s3_key: str, tags: dict[str, str]) -> None:
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
     try:
-        client = get_s3_client()
-        client.put_object_tagging(
-            Bucket=settings.AWS_S3_BUCKET_NAME,
-            Key=s3_key,
-            Tagging={"TagSet": [{"Key": k, "Value": v} for k, v in tags.items()]},
-        )
-    except ClientError as e:
+        storage = get_object_storage()
+        storage.tag_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key, tags=tags)
+    except CloudStorageError as e:
         logger.error("tag_s3_object: failed s3_key=%s error=%s", s3_key, e)
-        raise S3Error(f"Failed to tag S3 object: {e}") from e
+        raise S3Error(str(e)) from e
 
     logger.debug("tag_s3_object: success s3_key=%s", s3_key)

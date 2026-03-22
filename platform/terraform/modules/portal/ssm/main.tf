@@ -123,38 +123,39 @@ resource "aws_ssm_parameter" "guacamole_api_base_url" {
   tags = local.common_tags
 }
 
-resource "aws_ssm_parameter" "pulumi_ecs_cluster_arn" {
-  name        = "${local.ps_prefix}/pulumi-ecs-cluster-arn"
-  description = "ECS cluster ARN for Pulumi provisioner"
+# Engine SSM parameters
+resource "aws_ssm_parameter" "engine_ecs_cluster_arn" {
+  name        = "${local.ps_prefix}/engine-ecs-cluster-arn"
+  description = "ECS cluster ARN for engine provisioner"
   type        = "String"
-  value       = var.pulumi_ecs_cluster_arn
+  value       = var.engine_ecs_cluster_arn
 
   tags = local.common_tags
 }
 
-resource "aws_ssm_parameter" "pulumi_task_definition_arn" {
-  name        = "${local.ps_prefix}/pulumi-task-definition-arn"
-  description = "ECS task definition family for Pulumi provisioner"
+resource "aws_ssm_parameter" "engine_task_definition_arn" {
+  name        = "${local.ps_prefix}/engine-task-definition-arn"
+  description = "ECS task definition family for engine provisioner"
   type        = "String"
-  value       = var.pulumi_task_definition_family
+  value       = var.engine_task_definition_family
 
   tags = local.common_tags
 }
 
-resource "aws_ssm_parameter" "pulumi_ecs_security_group_id" {
-  name        = "${local.ps_prefix}/pulumi-ecs-security-group-id"
-  description = "Security group ID for Pulumi ECS tasks"
+resource "aws_ssm_parameter" "engine_ecs_security_group_id" {
+  name        = "${local.ps_prefix}/engine-ecs-security-group-id"
+  description = "Security group ID for engine ECS tasks"
   type        = "String"
-  value       = var.pulumi_ecs_security_group_id
+  value       = var.engine_ecs_security_group_id
 
   tags = local.common_tags
 }
 
-resource "aws_ssm_parameter" "pulumi_private_subnet_ids" {
-  name        = "${local.ps_prefix}/pulumi-private-subnet-ids"
-  description = "Private subnet IDs for Pulumi ECS tasks"
+resource "aws_ssm_parameter" "engine_private_subnet_ids" {
+  name        = "${local.ps_prefix}/engine-private-subnet-ids"
+  description = "Private subnet IDs for engine ECS tasks"
   type        = "String"
-  value       = var.pulumi_private_subnet_ids
+  value       = var.engine_private_subnet_ids
 
   tags = local.common_tags
 }

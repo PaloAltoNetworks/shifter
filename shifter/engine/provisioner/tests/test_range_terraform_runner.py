@@ -12,8 +12,8 @@ import pytest
 class TestDestroyRange:
     """Test destroy_range passes variables correctly."""
 
-    @patch("range_terraform_runner._run_terraform")
-    @patch("range_terraform_runner.init_range_workspace")
+    @patch("terraform_base.run_terraform")
+    @patch("terraform_base.init_workspace")
     def test_destroy_with_variables_writes_tfvars(self, mock_init, mock_run, tmp_path):
         """When variables are provided, destroy should write tfvars and pass -var-file."""
         from range_terraform_runner import destroy_range
@@ -32,8 +32,8 @@ class TestDestroyRange:
         destroy_args = mock_run.call_args[0][0]
         assert any("-var-file=" in arg for arg in destroy_args)
 
-    @patch("range_terraform_runner._run_terraform")
-    @patch("range_terraform_runner.init_range_workspace")
+    @patch("terraform_base.run_terraform")
+    @patch("terraform_base.init_workspace")
     def test_destroy_without_variables_no_var_file(self, mock_init, mock_run, tmp_path):
         """When no variables provided, destroy should not pass -var-file."""
         from range_terraform_runner import destroy_range
@@ -47,8 +47,8 @@ class TestDestroyRange:
         assert not any("-var-file=" in arg for arg in destroy_args)
         assert "-auto-approve" in destroy_args
 
-    @patch("range_terraform_runner._run_terraform", side_effect=RuntimeError("destroy failed"))
-    @patch("range_terraform_runner.init_range_workspace")
+    @patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed"))
+    @patch("terraform_base.init_workspace")
     def test_destroy_cleans_up_tfvars_on_failure(self, mock_init, mock_run, tmp_path):
         """Tfvars file should be cleaned up even if destroy fails."""
         from range_terraform_runner import destroy_range
@@ -67,8 +67,8 @@ class TestDestroyRange:
 
         mock_unlink.assert_called_once_with(missing_ok=True)
 
-    @patch("range_terraform_runner._run_terraform")
-    @patch("range_terraform_runner.init_range_workspace")
+    @patch("terraform_base.run_terraform")
+    @patch("terraform_base.init_workspace")
     def test_destroy_without_variables_does_not_create_tfvars(self, mock_init, mock_run, tmp_path):
         """When no variables provided, no tfvars file should be created or cleaned up."""
         from range_terraform_runner import destroy_range

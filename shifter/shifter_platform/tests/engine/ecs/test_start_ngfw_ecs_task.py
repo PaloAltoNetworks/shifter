@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
-from botocore.exceptions import ClientError
+
+from shared.cloud.exceptions import CloudTaskError
 
 TEST_REQUEST_ID = UUID("550e8400-e29b-41d4-a716-446655440000")
 TEST_REQUEST_ID_2 = UUID("660e8400-e29b-41d4-a716-446655440001")
@@ -17,8 +18,8 @@ class TestStartNgfwEcsTask:
     Contract:
     - Inputs: request_id (UUID), command (list[str])
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
-    - Side effects: Calls ECS run_task API
-    - Errors: TypeError if request_id not UUID, ClientError if ECS fails
+    - Side effects: Calls TaskRunner.run_task via get_task_runner()
+    - Errors: TypeError if request_id not UUID, CloudTaskError if ECS fails
     - Logging: WARNING when config incomplete, ERROR on failures
     """
 
@@ -32,18 +33,17 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             result = _start_ngfw_ecs_task(
                 request_id=TEST_REQUEST_ID,
@@ -52,47 +52,46 @@ class TestStartNgfwEcsTask:
 
             assert result == task_arn
 
-    def test_passes_command_list_to_container(self, settings):
-        """Function passes command list directly to container overrides."""
+    def test_passes_command_list_to_runner(self, settings):
+        """Function passes command list to TaskRunner.run_task."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             command = ["ngfw", "deprovision", "--request-id", str(TEST_REQUEST_ID_2)]
             _start_ngfw_ecs_task(request_id=TEST_REQUEST_ID_2, command=command)
 
-            call_kwargs = mock_ecs.run_task.call_args[1]
-            overrides = call_kwargs["overrides"]["containerOverrides"][0]
-            assert overrides["command"] == command
+            call_kwargs = mock_runner.run_task.call_args[1]
+            assert call_kwargs["command"] == command
+            assert call_kwargs["container_name"] == "pulumi-provisioner"
 
     # -------------------------------------------------------------------------
     # Configuration - ECS not configured
     # -------------------------------------------------------------------------
 
     def test_returns_none_when_cluster_arn_missing(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is not set."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is not set."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
-            delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        if hasattr(settings, "ENGINE_ECS_CLUSTER_ARN"):
+            delattr(settings, "ENGINE_ECS_CLUSTER_ARN")
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         result = _start_ngfw_ecs_task(
             request_id=TEST_REQUEST_ID,
@@ -107,10 +106,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "   ,   ,   "
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "   ,   ,   "
 
         result = _start_ngfw_ecs_task(
             request_id=TEST_REQUEST_ID,
@@ -129,10 +128,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         invalid_ids = [None, str(TEST_REQUEST_ID), 42]
         for invalid_id in invalid_ids:
@@ -149,10 +148,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         # TypeError for None and string
         for invalid_cmd in [None, "ngfw provision"]:
@@ -167,53 +166,45 @@ class TestStartNgfwEcsTask:
     # Error handling
     # -------------------------------------------------------------------------
 
-    def test_raises_client_error_when_run_task_fails(self, settings):
-        """Function raises ClientError when ECS run_task fails."""
+    def test_raises_cloud_task_error_when_run_task_fails(self, settings):
+        """Function raises CloudTaskError when TaskRunner.run_task fails."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Not found"}},
-                "RunTask",
-            )
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 _start_ngfw_ecs_task(
                     request_id=TEST_REQUEST_ID,
                     command=["ngfw", "provision"],
                 )
 
-    def test_raises_client_error_when_no_tasks_returned(self, settings):
-        """Function raises ClientError when ECS returns empty tasks list."""
+    def test_raises_cloud_task_error_when_no_tasks_returned(self, settings):
+        """Function raises CloudTaskError when adapter reports no tasks started."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
-        mock_response = {
-            "tasks": [],
-            "failures": [{"reason": "RESOURCE:CPU"}],
-        }
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("No tasks started: ['RESOURCE:CPU']")
+            mock_get_runner.return_value = mock_runner
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
-
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 _start_ngfw_ecs_task(
                     request_id=TEST_REQUEST_ID,
                     command=["ngfw", "provision"],
@@ -229,8 +220,8 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
-            delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
+        if hasattr(settings, "ENGINE_ECS_CLUSTER_ARN"):
+            delattr(settings, "ENGINE_ECS_CLUSTER_ARN")
 
         with caplog.at_level(logging.WARNING, logger="engine.ecs"):
             _start_ngfw_ecs_task(
@@ -247,21 +238,20 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
-        mock_response = {"tasks": [{"taskArn": task_arn}]}
 
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.INFO, logger="engine.ecs"),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.run_task.return_value = task_arn
+            mock_get_runner.return_value = mock_runner
 
             _start_ngfw_ecs_task(
                 request_id=TEST_REQUEST_ID,
@@ -271,27 +261,24 @@ class TestStartNgfwEcsTask:
         assert str(TEST_REQUEST_ID) in caplog.text or "request_id" in caplog.text
 
     def test_logs_error_when_run_task_fails(self, settings, caplog):
-        """Function logs ERROR when ECS run_task fails."""
+        """Function logs ERROR when TaskRunner.run_task fails."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
-            pytest.raises(ClientError),
+            pytest.raises(CloudTaskError),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.run_task.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Not found"}},
-                "RunTask",
-            )
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
             _start_ngfw_ecs_task(
                 request_id=TEST_REQUEST_ID,

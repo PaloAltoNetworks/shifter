@@ -4,19 +4,16 @@ This module is the main entry point when running the Shifter Engine container.
 It handles:
 - Database connection via RDS IAM authentication
 - Range status updates in the Django database
-- Pulumi stack creation, provisioning, and destruction
+- Terraform-based provisioning and destruction
 """
 
 import ipaddress
 import json
 import logging
 import os
-import shutil
-import subprocess  # nosec B404 - subprocess used for Pulumi CLI calls with hardcoded commands
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import boto3
 import psycopg
 from psycopg import sql
 
@@ -76,12 +73,10 @@ def get_agent_presigned_url(inst_config: dict) -> str | None:
         return None
 
     try:
-        s3_client = boto3.client("s3")
-        url: str = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": s3_key},
-            ExpiresIn=3600,
-        )
+        from cloud import get_object_storage
+
+        storage = get_object_storage()
+        url = storage.generate_presigned_download_url(bucket=bucket, key=s3_key, expires_in=3600)
         return url
     except Exception as e:
         logger.error("Failed to generate presigned URL for %s: %s", s3_key, e)
@@ -144,9 +139,10 @@ def get_ami_id(ami_type: str) -> str:
         param_path = f"/shifter/ami/{ami_type}"
 
     try:
-        ssm = boto3.client("ssm")
-        response = ssm.get_parameter(Name=param_path)
-        ami_id = response["Parameter"]["Value"]
+        from cloud import get_config_store
+
+        store = get_config_store()
+        ami_id = store.get_parameter(param_path)
         logger.info("Fetched %s AMI from SSM %s: %s", ami_type, param_path, ami_id)
         _ami_cache[ami_type] = ami_id
         return ami_id
@@ -180,17 +176,8 @@ def get_vpc_gateway_ip(cidr: str) -> str:
     return str(network.network_address + 1)
 
 
-def _get_pulumi_path() -> str:
-    """Get the full path to the pulumi executable."""
-    path = shutil.which("pulumi")
-    if not path:
-        raise RuntimeError("pulumi executable not found in PATH")
-    logger.debug("_get_pulumi_path: found pulumi at %s", path)
-    return path
-
-
 def _get_working_dir() -> str:
-    """Get the working directory for Pulumi commands.
+    """Get the working directory for provisioner commands.
 
     In ECS container: /app
     In local dev: the provisioner directory (where this script lives)
@@ -259,12 +246,15 @@ def get_db_connection() -> psycopg.Connection:
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
     logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
-    client = boto3.client("rds")
-    token = client.generate_db_auth_token(
-        DBHostname=db_host,
-        Port=db_port,
-        DBUsername=db_user,
-        Region=aws_region,
+    assert db_host is not None  # validated above
+    assert db_user is not None  # validated above
+    from cloud import get_db_auth
+
+    auth = get_db_auth()
+    token = auth.generate_auth_token(
+        hostname=db_host,
+        port=db_port,
+        username=db_user,
     )
     return psycopg.connect(
         host=db_host,
@@ -287,44 +277,25 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
     logger.debug("update_range_status: range_id=%s status=%s kwargs=%s", range_id, status, list(kwargs.keys()))
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            updates = ["status = %s", "updated_at = NOW()"]
+            assignments = [
+                sql.SQL("{} = %s").format(sql.Identifier("status")),
+                sql.SQL("{} = NOW()").format(sql.Identifier("updated_at")),
+            ]
             values: list = [status]
 
             for key, value in kwargs.items():
                 if value is not None:
                     # Handle special SQL expressions
                     if value == "NOW()":
-                        updates.append(f"{key} = NOW()")
+                        assignments.append(sql.SQL("{} = NOW()").format(sql.Identifier(key)))
                     else:
-                        updates.append(f"{key} = %s")
+                        assignments.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
                         values.append(value)
 
             values.append(range_id)
-            # Security: Column names in 'updates' are from hardcoded kwargs keys in calling code,
-            # not user input. Values are parameterized via %s placeholders.
-            sql = f"UPDATE mission_control_range SET {', '.join(updates)} WHERE id = %s"  # nosec B608  # noqa: S608
-            cur.execute(sql, values)
+            query = sql.SQL("UPDATE mission_control_range SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments))
+            cur.execute(query, values)
         conn.commit()
-
-
-def _validate_pulumi_output_schema(output_data: dict) -> None:
-    """Validate Pulumi stack outputs have expected structure.
-
-    Args:
-        output_data: Parsed JSON from `pulumi stack output --json`.
-
-    Raises:
-        ValueError: If required keys are missing or have wrong types.
-    """
-    if "subnets" not in output_data:
-        raise ValueError("Pulumi outputs missing 'subnets' key")
-    if not isinstance(output_data["subnets"], dict):
-        raise ValueError("Pulumi 'subnets' must be a dict")
-
-    if "instances" not in output_data:
-        raise ValueError("Pulumi outputs missing 'instances' key")
-    if not isinstance(output_data["instances"], list):
-        raise ValueError("Pulumi 'instances' must be a list")
 
 
 def _validate_provisioned_outputs(
@@ -651,9 +622,10 @@ def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> Non
         return
 
     # Get SSH private key from Secrets Manager
-    secrets_client = boto3.client("secretsmanager")
-    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-    private_key = secret_response["SecretString"]
+    from cloud import get_secrets_store
+
+    secrets = get_secrets_store()
+    private_key = secrets.get_secret(ssh_key_secret_arn)
 
     # Create NGFW executor and wait for NGFW to be ready
     ssh_executor = NGFWExecutor(private_key=private_key)
@@ -1438,9 +1410,10 @@ def configure_ngfw_subnets(
     )
 
     # Get SSH private key from Secrets Manager
-    secrets_client = boto3.client("secretsmanager")
-    secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-    private_key = secret_response["SecretString"]
+    from cloud import get_secrets_store
+
+    secrets = get_secrets_store()
+    private_key = secrets.get_secret(ssh_key_secret_arn)
 
     # Create NGFW executor
     ssh_executor = NGFWExecutor(private_key=private_key)
@@ -1872,476 +1845,10 @@ def run_instance_setup(
     logger.info("All instance setup complete")
 
 
-def run_pulumi(operation: str, request_id: str) -> None:
-    """Run Pulumi operation.
-
-    Args:
-        operation: Either 'up' (provision) or 'destroy' (teardown).
-        request_id: UUID string of the Request.
-
-    Raises:
-        Exception: If the Pulumi operation fails.
-    """
-    logger.info("run_pulumi: starting operation=%s request_id=%s", operation, request_id)
-
-    # Fetch data from DB (matches NGFW pattern)
-    range_data = get_range_data_by_request_id(request_id)
-    range_id = range_data["range_id"]
-    user_id = range_data["user_id"]
-    range_spec = range_data.get("spec", {})
-
-    stack_name = f"range-{range_id}"
-    env = os.environ.copy()
-    # Security: Empty passphrase is intentional - we use AWS KMS via PULUMI_SECRETS_PROVIDER.
-    env["PULUMI_CONFIG_PASSPHRASE"] = ""  # nosec B105
-
-    # If NGFW is enabled, get NGFW connection info for Pulumi
-    # This is used by range_stack.py to configure NGFW routes/rules
-    if range_spec.get("ngfw", False):
-        ngfw_data = get_user_ngfw_data(user_id)
-        if ngfw_data and ngfw_data.get("management_ip"):
-            env["NGFW_MANAGEMENT_IP"] = ngfw_data["management_ip"]
-            env["NGFW_SSH_KEY_SECRET_ARN"] = ngfw_data.get("ssh_key_secret_arn", "")
-            logger.info(
-                "NGFW enabled for range %s, management_ip=%s",
-                range_id,
-                ngfw_data["management_ip"],
-            )
-
-            # Resume NGFW if paused/pausing (must be running for subnet config)
-            ngfw_status = ngfw_data.get("status")
-            if ngfw_status in ("paused", "pausing"):
-                ec2_instance_id = ngfw_data.get("ec2_instance_id")
-                if ngfw_status == "pausing" and ec2_instance_id:
-                    # Wait for pause to complete before resuming
-                    logger.info("NGFW is pausing, waiting for pause to complete...")
-                    aws_executor = AWSExecutor()
-                    aws_executor.wait_for_stopped(ec2_instance_id)
-                    logger.info("NGFW pause complete, now resuming...")
-                logger.info("Resuming paused NGFW for range provisioning...")
-                run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
-
-    try:
-        # Select or create stack with proper secrets provider
-        _select_or_create_stack(stack_name, env)
-
-        # Set stack configuration from environment
-        _set_stack_config(env, range_id)
-
-        if operation == "up":
-            _run_provision(request_id, range_id, user_id, stack_name, env)
-        elif operation == "destroy":
-            _run_destroy(request_id, range_id, user_id, stack_name, env)
-        else:
-            raise ValueError(f"Unknown operation: {operation}")
-
-    except Exception as e:
-        error_msg = str(e)[:1000]
-        logger.error(f"Operation failed: {error_msg}")
-
-        if operation == "up":
-            # Auto-cleanup on failure to avoid orphaned resources
-            logger.info("Provision failed - attempting auto-cleanup...")
-            subprocess.run(
-                ["pulumi", "destroy", "--yes", "--non-interactive"],  # noqa: S607
-                cwd=_get_working_dir(),
-                env=env,
-                capture_output=True,
-            )
-
-        # Publish failed event
-        publish_failed(request_id=request_id, range_id=range_id, user_id=user_id, error_message=error_msg)
-        raise
-
-
-def _select_or_create_stack(stack_name: str, env: dict) -> None:
-    """Select an existing stack or create a new one with the KMS secrets provider.
-
-    `pulumi stack select --create` does not honor PULUMI_SECRETS_PROVIDER for new
-    stacks. We must use `pulumi stack init --secrets-provider` to ensure new stacks
-    use KMS encryption instead of the default passphrase provider.
-
-    Args:
-        stack_name: The Pulumi stack name.
-        env: Environment dictionary for subprocess.
-
-    Raises:
-        Exception: If stack selection/creation fails.
-    """
-    logger.info(f"Selecting stack: {stack_name}")
-
-    # Try to select existing stack
-    result = subprocess.run(  # noqa: S603
-        ["pulumi", "stack", "select", stack_name],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode == 0:
-        logger.info(f"Selected existing stack: {stack_name}")
-        return
-
-    # Stack doesn't exist - create with explicit secrets provider
-    # PULUMI_SECRETS_PROVIDER env var is NOT honored by `stack init` without --secrets-provider
-    # The env var is set by the ECS task definition to use our dedicated KMS CMK
-    secrets_provider = os.environ.get("PULUMI_SECRETS_PROVIDER")
-    if not secrets_provider:
-        raise ValueError("PULUMI_SECRETS_PROVIDER environment variable is required")
-    logger.info(f"Creating new stack with secrets provider: {secrets_provider}")
-
-    result = subprocess.run(  # noqa: S603
-        [
-            _get_pulumi_path(),
-            "stack",
-            "init",
-            stack_name,
-            "--secrets-provider",
-            secrets_provider,
-        ],
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Stack creation failed: {result.stderr}")
-
-    logger.info(f"Created new stack: {stack_name}")
-
-
-def _set_stack_config(env: dict, range_id: int) -> None:
-    """Set Pulumi stack configuration from environment variables.
-
-    All config values are explicitly set or removed to prevent stale values
-    from persisting across runs (e.g., old AMI IDs from previous deployments).
-
-    Args:
-        env: Environment dictionary for subprocess.
-        range_id: The range ID to configure.
-    """
-    config_values = {
-        "rangeId": str(range_id),
-        "environment": os.environ.get("ENVIRONMENT", "dev"),
-        "rangeVpcId": os.environ.get("RANGE_VPC_ID", ""),
-        "rangeVpcCidr": os.environ.get("RANGE_VPC_CIDR", ""),
-        "rangeRouteTableId": os.environ.get("RANGE_ROUTE_TABLE_ID", ""),
-        "availabilityZone": os.environ.get("RANGE_AVAILABILITY_ZONE", ""),
-        "rangeInstanceProfileName": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
-        # AMI IDs fetched from SSM at runtime for latest values
-        "kaliAmiId": get_ami_id("kali"),
-        "victimAmiId": get_ami_id("victim"),
-        "windowsAmiId": get_ami_id("windows"),
-        "dcAmiId": get_ami_id("dc"),
-        "agentS3Bucket": os.environ.get("AGENT_S3_BUCKET", ""),
-        "s3EndpointId": os.environ.get("S3_ENDPOINT_ID", ""),
-        "firewallEndpointId": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
-        "ssmEndpointsSubnetCidr": os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
-        "portalVpcCidr": os.environ.get("PORTAL_VPC_CIDR", ""),
-        "portalVpcPeeringId": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
-    }
-
-    for key, value in config_values.items():
-        if value:
-            subprocess.run(  # noqa: S603
-                ["pulumi", "config", "set", key, value],  # noqa: S607
-                cwd=_get_working_dir(),
-                env=env,
-                capture_output=True,
-            )
-        else:
-            # Remove empty config values to prevent stale values from persisting
-            subprocess.run(  # noqa: S603
-                ["pulumi", "config", "rm", key],  # noqa: S607
-                cwd=_get_working_dir(),
-                env=env,
-                capture_output=True,
-                # Ignore errors - key may not exist
-            )
-
-
-def _run_provision(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
-    """Run Pulumi up to provision the range.
-
-    The sequence is:
-    1. Run Pulumi up (creates subnets and instances - infrastructure only)
-    2. Validate outputs (fail early if incomplete)
-    3. Configure NGFW subnets (routes for traffic flow)
-    4. Run instance setup (DC first, then others in parallel)
-    5. Write to DB (mark as ready)
-    6. Publish ready event
-
-    NGFW configuration and instance setup happen AFTER pulumi up returns,
-    ensuring a clear sequential flow: infrastructure -> NGFW routes -> instance setup.
-
-    Args:
-        request_id: UUID string of the Request.
-        range_id: The range ID being provisioned.
-        user_id: The Django user ID who owns this range.
-        stack_name: The Pulumi stack name.
-        env: Environment dictionary for subprocess.
-    """
-    # Publish status change event
-    publish_status_update(request_id=request_id, range_id=range_id, user_id=user_id, new_status="provisioning")
-
-    logger.info("Running pulumi up...")
-
-    result = subprocess.run(
-        ["pulumi", "up", "--yes", "--non-interactive", "--skip-preview"],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    logger.info(f"Pulumi stdout:\n{result.stdout}")
-    if result.stderr:
-        logger.warning(f"Pulumi stderr:\n{result.stderr}")
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Pulumi up failed: {result.stderr}")
-
-    # Get outputs
-    logger.info("Retrieving stack outputs...")
-    outputs = subprocess.run(
-        ["pulumi", "stack", "output", "--json"],  # noqa: S607
-        cwd=_get_working_dir(),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    output_data = json.loads(outputs.stdout)
-    logger.info(f"Stack outputs: {json.dumps(output_data, indent=2)}")
-
-    # Wait for all instances to have private_ip (retry up to 60s)
-    # AWS assigns private_ip at ENI attachment, but Pulumi may export before it's available
-    MAX_WAIT_SECONDS = 60
-    POLL_INTERVAL = 5
-
-    start_time = time.time()
-    while True:
-        instances = output_data.get("instances", [])
-        missing_ips = [
-            f"{i.get('role', 'unknown')}/{i.get('os', 'unknown')}" for i in instances if not i.get("private_ip")
-        ]
-
-        if not missing_ips:
-            break  # All instances have IPs
-
-        elapsed = time.time() - start_time
-        if elapsed >= MAX_WAIT_SECONDS:
-            raise RuntimeError(
-                f"Timed out after {MAX_WAIT_SECONDS}s waiting for private_ip on instances: {missing_ips}"
-            )
-
-        logger.info(
-            "Waiting for private_ip on %d instances (%s), elapsed %.0fs...",
-            len(missing_ips),
-            missing_ips,
-            elapsed,
-        )
-        time.sleep(POLL_INTERVAL)
-
-        # Re-fetch outputs
-        outputs = subprocess.run(
-            ["pulumi", "stack", "output", "--json"],  # noqa: S607
-            cwd=_get_working_dir(),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        output_data = json.loads(outputs.stdout)
-
-    logger.info("All instances have private_ip, proceeding with validation")
-
-    # Validate output schema
-    _validate_pulumi_output_schema(output_data)
-
-    subnets_output = output_data.get("subnets", {})
-    instances_output = output_data.get("instances", [])
-
-    # Get range spec for validation and NGFW config
-    range_data = get_range_data_by_request_id(request_id)
-    range_spec = range_data.get("spec", {})
-    spec_subnets = range_spec.get("subnets", [])
-    expected_subnet_names = {s.get("name") for s in spec_subnets}
-
-    # Validate outputs have all required fields
-    _validate_provisioned_outputs(
-        subnets=subnets_output,
-        instances=instances_output,
-        expected_subnet_names=expected_subnet_names,
-    )
-
-    # Configure NGFW with routes for range subnets (before instance setup)
-    ngfw_data = get_user_ngfw_data(user_id)
-    ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-    if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
-        logger.info("Configuring NGFW with subnet routes...")
-        # Build subnets list with CIDRs from Pulumi output + connected_to from spec
-        subnets_for_ngfw = []
-        for spec_subnet in spec_subnets:
-            subnet_name = spec_subnet.get("name", "")
-            subnet_output = subnets_output.get(subnet_name, {})
-            subnets_for_ngfw.append(
-                {
-                    "name": subnet_name,
-                    "cidr": subnet_output.get("subnet_cidr", ""),
-                    "connected_to": spec_subnet.get("connected_to", []),
-                }
-            )
-        configure_ngfw_subnets(
-            subnets=subnets_for_ngfw,
-            range_id=range_id,
-            management_ip=ngfw_data["management_ip"],
-            ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-            ngfw_subnet_cidr=ngfw_subnet_cidr,
-            ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
-        )
-    else:
-        logger.warning(
-            "Skipping NGFW config: ngfw_data=%s, ngfw_subnet_cidr=%s",
-            bool(ngfw_data),
-            bool(ngfw_subnet_cidr),
-        )
-
-    # Run instance setup (DC first, then others in parallel)
-    logger.info("Running instance setup...")
-    run_instance_setup(
-        instances_output=instances_output,
-        range_spec=range_spec,
-        range_id=range_id,
-    )
-
-    # Write provisioned state to DB
-    write_provisioned_state(
-        range_id=range_id,
-        subnets=subnets_output,
-        instances=instances_output,
-        ngfw_instance_id=range_data.get("ngfw_instance_id"),
-    )
-
-    # Publish notification-only ready event
-    publish_ready(
-        request_id=request_id,
-        range_id=range_id,
-        user_id=user_id,
-    )
-
-
-def _run_destroy(request_id: str, range_id: int, user_id: int, stack_name: str, env: dict) -> None:
-    """Run Pulumi destroy to tear down the range.
-
-    This function is designed to be idempotent: if Pulumi destroy succeeds,
-    the database records are marked as destroyed even if subsequent steps fail.
-
-    Pre-destroy validation ensures we don't attempt to destroy ranges that are
-    already in a terminal state or don't exist.
-
-    Args:
-        request_id: UUID string of the Request.
-        range_id: The range ID being destroyed.
-        user_id: The Django user ID who owns this range.
-        stack_name: The Pulumi stack name.
-        env: Environment dictionary for subprocess.
-    """
-    # Pre-destroy validation: verify range exists and is in a destroyable state
-    try:
-        range_data = get_range_data_by_request_id(request_id)
-    except ValueError as e:
-        logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
-        return
-
-    current_status = range_data.get("status")
-    if current_status in ("destroyed", "failed"):
-        logger.info(
-            "Range %d already in terminal state '%s', skipping destroy",
-            range_id,
-            current_status,
-        )
-        return
-
-    # Get subnet specs from range_config for NGFW removal
-    range_spec = range_data.get("spec", {})
-    spec_subnets = range_spec.get("subnets", [])
-
-    if spec_subnets:
-        try:
-            remove_ngfw_subnets(user_id, spec_subnets, range_id)
-        except Exception as e:
-            # Log but continue with destroy - don't leave AWS resources orphaned
-            logger.warning("NGFW subnet removal failed (continuing with destroy): %s", e)
-
-    logger.info("Running pulumi destroy...")
-
-    pulumi_succeeded = False
-    try:
-        result = subprocess.run(  # noqa: S603
-            [
-                _get_pulumi_path(),
-                "destroy",
-                "--yes",
-                "--non-interactive",
-                "--skip-preview",
-            ],
-            cwd=_get_working_dir(),
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-        logger.info(f"Pulumi stdout:\n{result.stdout}")
-        if result.stderr:
-            logger.warning(f"Pulumi stderr:\n{result.stderr}")
-
-        if result.returncode != 0:
-            raise RuntimeError(f"Pulumi destroy failed: {result.stderr}")
-
-        pulumi_succeeded = True
-
-        # Remove stack
-        logger.info(f"Removing stack: {stack_name}")
-        subprocess.run(  # noqa: S603
-            ["pulumi", "stack", "rm", stack_name, "--yes"],  # noqa: S607
-            cwd=_get_working_dir(),
-            env=env,
-            check=True,
-            capture_output=True,
-        )
-
-    finally:
-        # Always mark DB records as destroyed if Pulumi succeeded
-        # This ensures DB state is updated even if stack removal fails
-        if pulumi_succeeded:
-            try:
-                mark_range_instances_destroyed(range_id)
-            except Exception as e:
-                logger.error("Failed to mark range %d as destroyed in DB: %s", range_id, e)
-                # Don't raise - AWS resources are gone, DB inconsistency is better than stuck
-
-        # Always attempt NGFW auto-pause (soft fail)
-        try:
-            if not user_has_active_ranges(user_id, range_id):
-                ngfw_data = get_user_ngfw_data(user_id)
-                if ngfw_data and ngfw_data["status"] == "ready":
-                    logger.info("No other active ranges for user %s, pausing NGFW", user_id)
-                    run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
-        except Exception as e:
-            logger.warning("Failed to pause NGFW (non-fatal): %s", e)
-
-    # Publish destroyed event only on full success
-    publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
-
-
 def run_range_terraform(operation: str, request_id: str) -> None:
     """Run Range Terraform operation (provision or destroy).
 
-    This is the Terraform equivalent of run_pulumi for ranges. It uses
-    range_terraform_runner for infrastructure and the existing instance
+    Uses range_terraform_runner for infrastructure and the existing instance
     setup code for configuration.
 
     Args:

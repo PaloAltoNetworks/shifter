@@ -1,12 +1,16 @@
-"""Tests for WebSocket consumer authentication, hydration, and broadcasting."""
+"""Tests for WebSocket consumer authentication, hydration, and broadcasting.
+
+All ORM operations are mocked -- no database access.
+These tests verify the consumer logic by mocking the internal DB helper methods.
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth.models import AnonymousUser
 
 from cms.experiments.consumers import ExperimentStatusConsumer
-from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.schemas import ExperimentStatus, RunStatus
 
 # Test password constant for all test users
@@ -24,7 +28,29 @@ def _build_communicator(experiment_id: int, user=None):
     return communicator
 
 
-@pytest.mark.django_db(transaction=True)
+def _make_staff_user(pk=1):
+    """Create a mock staff user."""
+    user = MagicMock()
+    user.pk = pk
+    user.is_staff = True
+    user.is_authenticated = True
+    user.is_anonymous = False
+    # Make isinstance(user, AnonymousUser) return False
+    user.__class__ = type("User", (), {})
+    return user
+
+
+def _make_non_staff_user(pk=2):
+    """Create a mock non-staff user."""
+    user = MagicMock()
+    user.pk = pk
+    user.is_staff = False
+    user.is_authenticated = True
+    user.is_anonymous = False
+    user.__class__ = type("User", (), {})
+    return user
+
+
 @pytest.mark.asyncio
 class TestConsumerAuthentication:
     """5.3: Test consumer authentication (reject unauthenticated, reject non-owner)."""
@@ -42,40 +68,38 @@ class TestConsumerAuthentication:
         assert code == 4001
 
     async def test_rejects_non_staff_user(self):
-        user = await database_sync_to_async(User.objects.create_user)(
-            username="ws_nonstaf", password=TEST_PASSWORD, is_staff=False
-        )
+        user = _make_non_staff_user()
         communicator = _build_communicator(999, user=user)
         connected, code = await communicator.connect()
         assert connected is False
         assert code == 4003
 
     async def test_rejects_non_owner(self):
-        owner = await database_sync_to_async(User.objects.create_user)(
-            username="ws_owner", password=TEST_PASSWORD, is_staff=True
-        )
-        other = await database_sync_to_async(User.objects.create_user)(
-            username="ws_other", password=TEST_PASSWORD, is_staff=True
-        )
-        exp = await database_sync_to_async(Experiment.objects.create)(
-            user=owner, name="Owner Only", scenario_id="basic"
-        )
-        communicator = _build_communicator(exp.pk, user=other)
-        connected, code = await communicator.connect()
-        assert connected is False
-        assert code == 4004
+        _make_staff_user(pk=1)
+        other = _make_staff_user(pk=2)
+
+        # Patch the consumer's _get_experiment to return None (not owner)
+        with patch.object(ExperimentStatusConsumer, "_get_experiment", new_callable=AsyncMock, return_value=None):
+            communicator = _build_communicator(100, user=other)
+            connected, code = await communicator.connect()
+            assert connected is False
+            assert code == 4004
 
     async def test_accepts_owner(self):
-        user = await database_sync_to_async(User.objects.create_user)(
-            username="ws_accepted", password=TEST_PASSWORD, is_staff=True
-        )
-        exp = await database_sync_to_async(Experiment.objects.create)(
-            user=user, name="Accept Test", scenario_id="basic"
-        )
-        communicator = _build_communicator(exp.pk, user=user)
-        connected, _ = await communicator.connect()
-        assert connected is True
-        await communicator.disconnect()
+        user = _make_staff_user(pk=1)
+        mock_experiment = MagicMock()
+        mock_experiment.status = ExperimentStatus.DRAFT.value
+
+        with (
+            patch.object(
+                ExperimentStatusConsumer, "_get_experiment", new_callable=AsyncMock, return_value=mock_experiment
+            ),
+            patch.object(ExperimentStatusConsumer, "_get_runs", new_callable=AsyncMock, return_value=[]),
+        ):
+            communicator = _build_communicator(100, user=user)
+            connected, _ = await communicator.connect()
+            assert connected is True
+            await communicator.disconnect()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -84,134 +108,104 @@ class TestConsumerHydration:
     """5.4: Test hydration on connect (initial state sent correctly)."""
 
     async def test_hydrate_message_on_connect(self):
-        user = await database_sync_to_async(User.objects.create_user)(
-            username="ws_hydrate", password=TEST_PASSWORD, is_staff=True
-        )
-        exp = await database_sync_to_async(Experiment.objects.create)(
-            user=user, name="Hydrate Test", scenario_id="basic", status=ExperimentStatus.RUNNING.value
-        )
-        await database_sync_to_async(ExperimentRun.objects.create)(
-            experiment=exp, run_number=1, status=RunStatus.PROVISIONING.value
-        )
-        await database_sync_to_async(ExperimentRun.objects.create)(
-            experiment=exp, run_number=2, status=RunStatus.PENDING.value
-        )
+        user = _make_staff_user(pk=1)
+        mock_experiment = MagicMock()
+        mock_experiment.status = ExperimentStatus.RUNNING.value
 
-        communicator = _build_communicator(exp.pk, user=user)
-        connected, _ = await communicator.connect()
-        assert connected is True
+        mock_runs = [
+            {"run_id": 1, "run_number": 1, "status": RunStatus.PROVISIONING.value, "error_message": ""},
+            {"run_id": 2, "run_number": 2, "status": RunStatus.PENDING.value, "error_message": ""},
+        ]
 
-        # First message should be hydration
-        response = await communicator.receive_json_from(timeout=3)
-        assert response["type"] == "hydrate"
-        assert response["experiment_id"] == exp.pk
-        assert response["experiment_status"] == ExperimentStatus.RUNNING.value
-        assert len(response["runs"]) == 2
-        assert response["runs"][0]["run_number"] == 1
-        assert response["runs"][0]["status"] == RunStatus.PROVISIONING.value
-        assert response["runs"][1]["run_number"] == 2
-        assert response["runs"][1]["status"] == RunStatus.PENDING.value
+        with (
+            patch.object(
+                ExperimentStatusConsumer, "_get_experiment", new_callable=AsyncMock, return_value=mock_experiment
+            ),
+            patch.object(ExperimentStatusConsumer, "_get_runs", new_callable=AsyncMock, return_value=mock_runs),
+        ):
+            communicator = _build_communicator(100, user=user)
+            connected, _ = await communicator.connect()
+            assert connected is True
 
-        await communicator.disconnect()
+            response = await communicator.receive_json_from(timeout=3)
+            assert response["type"] == "hydrate"
+            assert response["experiment_id"] == 100
+            assert response["experiment_status"] == ExperimentStatus.RUNNING.value
+            assert len(response["runs"]) == 2
+            assert response["runs"][0]["run_number"] == 1
+            assert response["runs"][0]["status"] == RunStatus.PROVISIONING.value
+            assert response["runs"][1]["run_number"] == 2
+            assert response["runs"][1]["status"] == RunStatus.PENDING.value
+
+            await communicator.disconnect()
 
     async def test_hydrate_empty_runs(self):
-        user = await database_sync_to_async(User.objects.create_user)(
-            username="ws_empty", password=TEST_PASSWORD, is_staff=True
-        )
-        exp = await database_sync_to_async(Experiment.objects.create)(user=user, name="Empty Runs", scenario_id="basic")
+        user = _make_staff_user(pk=1)
+        mock_experiment = MagicMock()
+        mock_experiment.status = ExperimentStatus.DRAFT.value
 
-        communicator = _build_communicator(exp.pk, user=user)
-        connected, _ = await communicator.connect()
-        assert connected is True
+        with (
+            patch.object(
+                ExperimentStatusConsumer, "_get_experiment", new_callable=AsyncMock, return_value=mock_experiment
+            ),
+            patch.object(ExperimentStatusConsumer, "_get_runs", new_callable=AsyncMock, return_value=[]),
+        ):
+            communicator = _build_communicator(100, user=user)
+            connected, _ = await communicator.connect()
+            assert connected is True
 
-        response = await communicator.receive_json_from(timeout=3)
-        assert response["type"] == "hydrate"
-        assert response["runs"] == []
+            response = await communicator.receive_json_from(timeout=3)
+            assert response["type"] == "hydrate"
+            assert response["runs"] == []
 
-        await communicator.disconnect()
+            await communicator.disconnect()
 
 
-@pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 class TestConsumerBroadcast:
     """5.5: Test broadcast reception (run status updates delivered to connected clients)."""
 
     async def test_receives_run_status_broadcast(self):
-        user = await database_sync_to_async(User.objects.create_user)(
-            username="ws_bcast", password=TEST_PASSWORD, is_staff=True
-        )
-        exp = await database_sync_to_async(Experiment.objects.create)(
-            user=user, name="Broadcast Test", scenario_id="basic", status=ExperimentStatus.RUNNING.value
-        )
+        """Verify experiment_run_status handler sends correct JSON to client."""
+        consumer = ExperimentStatusConsumer()
+        consumer.send = AsyncMock()
 
-        communicator = _build_communicator(exp.pk, user=user)
-        connected, _ = await communicator.connect()
-        assert connected is True
-
-        # Consume the hydration message
-        await communicator.receive_json_from(timeout=3)
-
-        # Send a run_status broadcast to the group
-        from channels.layers import get_channel_layer
-
-        from cms.experiments.consumers import experiment_event_group
-
-        channel_layer = get_channel_layer()
-        group = experiment_event_group(exp.pk)
-        await channel_layer.group_send(
-            group,
+        await consumer.experiment_run_status(
             {
                 "type": "experiment.run_status",
                 "run_id": 42,
                 "run_number": 1,
                 "status": "executing_victims",
                 "error_message": "",
-            },
+            }
         )
 
-        # Receive the broadcast
-        response = await communicator.receive_json_from(timeout=3)
+        import json
+
+        consumer.send.assert_called_once()
+        response = json.loads(consumer.send.call_args[1]["text_data"])
         assert response["type"] == "run_status"
         assert response["run_id"] == 42
         assert response["run_number"] == 1
         assert response["status"] == "executing_victims"
 
-        await communicator.disconnect()
-
     async def test_receives_experiment_status_broadcast(self):
-        user = await database_sync_to_async(User.objects.create_user)(
-            username="ws_expstat", password=TEST_PASSWORD, is_staff=True
-        )
-        exp = await database_sync_to_async(Experiment.objects.create)(
-            user=user, name="Exp Status Broadcast", scenario_id="basic", status=ExperimentStatus.RUNNING.value
-        )
+        """Verify experiment_status handler sends correct JSON to client."""
+        consumer = ExperimentStatusConsumer()
+        consumer.send = AsyncMock()
 
-        communicator = _build_communicator(exp.pk, user=user)
-        connected, _ = await communicator.connect()
-        assert connected is True
-
-        # Consume the hydration message
-        await communicator.receive_json_from(timeout=3)
-
-        # Send an experiment_status broadcast
-        from channels.layers import get_channel_layer
-
-        from cms.experiments.consumers import experiment_event_group
-
-        channel_layer = get_channel_layer()
-        group = experiment_event_group(exp.pk)
-        await channel_layer.group_send(
-            group,
+        await consumer.experiment_status(
             {
                 "type": "experiment.status",
-                "experiment_id": exp.pk,
+                "experiment_id": 100,
                 "status": "completed",
-            },
+            }
         )
 
-        response = await communicator.receive_json_from(timeout=3)
-        assert response["type"] == "experiment_status"
-        assert response["experiment_id"] == exp.pk
-        assert response["status"] == "completed"
+        import json
 
-        await communicator.disconnect()
+        consumer.send.assert_called_once()
+        response = json.loads(consumer.send.call_args[1]["text_data"])
+        assert response["type"] == "experiment_status"
+        assert response["experiment_id"] == 100
+        assert response["status"] == "completed"

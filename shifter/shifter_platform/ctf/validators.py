@@ -63,14 +63,31 @@ def is_blocked_url(url: str) -> bool:
     if hostname in _BLOCKED_HOSTNAMES:
         return True
 
-    # Resolve hostname to IP and check for private/reserved ranges
+    # Check if hostname is an IP literal
     try:
         addr = ipaddress.ip_address(hostname)
         if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
             return True
     except ValueError:
-        # hostname is a DNS name, not an IP literal — allow it
-        pass
+        # hostname is a DNS name — resolve and check for private IPs (SSRF)
+        import socket
+
+        try:
+            results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC)
+            for _, _, _, _, sockaddr in results:
+                resolved_ip = ipaddress.ip_address(sockaddr[0])
+                if (
+                    resolved_ip.is_private
+                    or resolved_ip.is_loopback
+                    or resolved_ip.is_link_local
+                    or resolved_ip.is_reserved
+                ):
+                    return True
+        except (socket.gaierror, OSError):
+            # DNS resolution failed — allow, since the URL is validated
+            # at config time (HTTPS required) and the request will fail
+            # naturally at call time if the host is unreachable.
+            pass
 
     return False
 

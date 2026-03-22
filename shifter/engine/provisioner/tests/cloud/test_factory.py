@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 import pytest
 
-from cloud import get_config_store, get_db_auth, get_event_bus, get_object_storage
+from cloud import get_config_store, get_db_auth, get_event_bus, get_object_storage, get_secrets_store
 from cloud.exceptions import CloudProviderNotImplementedError
-from cloud.types import ConfigStore, DBAuth, EventBus, ObjectStorage
+from cloud.types import ConfigStore, DBAuth, EventBus, ObjectStorage, SecretsStore
 
 
 class TestFactoryWithAWS:
@@ -32,6 +32,11 @@ class TestFactoryWithAWS:
         storage = get_object_storage()
         assert isinstance(storage, ObjectStorage)
 
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"})
+    def test_get_secrets_store_returns_aws(self):
+        store = get_secrets_store()
+        assert isinstance(store, SecretsStore)
+
 
 class TestFactoryWithUnsupportedProvider:
     """Factory raises clear error for unsupported providers."""
@@ -50,6 +55,11 @@ class TestFactoryWithUnsupportedProvider:
     def test_get_db_auth_raises_for_gcp(self):
         with pytest.raises(CloudProviderNotImplementedError, match="gcp"):
             get_db_auth()
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_secrets_store_raises_for_gcp(self):
+        with pytest.raises(CloudProviderNotImplementedError, match="gcp"):
+            get_secrets_store()
 
     @patch.dict("os.environ", {"CLOUD_PROVIDER": "azure"})
     def test_raises_for_unknown_provider(self):

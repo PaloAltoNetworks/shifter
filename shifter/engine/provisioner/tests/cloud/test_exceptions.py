@@ -6,6 +6,7 @@ from cloud.exceptions import (
     CloudError,
     CloudEventBusError,
     CloudProviderNotImplementedError,
+    CloudSecretsError,
     CloudStorageError,
 )
 
@@ -18,6 +19,7 @@ class TestExceptionHierarchy:
         assert issubclass(CloudConfigStoreError, CloudError)
         assert issubclass(CloudDBAuthError, CloudError)
         assert issubclass(CloudStorageError, CloudError)
+        assert issubclass(CloudSecretsError, CloudError)
         assert issubclass(CloudProviderNotImplementedError, CloudError)
 
     def test_cloud_error_inherits_from_exception(self):

@@ -22,7 +22,6 @@ import time
 from collections.abc import Awaitable
 from typing import Any, cast
 
-import boto3
 import pulumi
 
 from components.instance import InstanceComponent
@@ -243,9 +242,10 @@ class RangeStack(pulumi.ComponentResource):
         )
 
         # Get SSH private key from Secrets Manager
-        secrets_client = boto3.client("secretsmanager")
-        secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-        private_key = secret_response["SecretString"]
+        from cloud import get_secrets_store
+
+        secrets = get_secrets_store()
+        private_key = secrets.get_secret(ssh_key_secret_arn)
 
         # Create NGFW executor
         ssh_executor = NGFWExecutor(private_key=private_key)

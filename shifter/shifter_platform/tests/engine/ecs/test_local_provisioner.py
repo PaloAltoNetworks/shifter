@@ -1,6 +1,5 @@
 """Tests for local provisioner functionality."""
 
-import logging
 import os
 from unittest.mock import MagicMock, patch
 from uuid import UUID
@@ -51,34 +50,6 @@ class TestRunLocalProvisioner:
         result = _run_local_provisioner(["range", "provision", "--request-id", "x"])
 
         assert result is None
-
-    def test_sets_mock_pulumi_first_in_path(self, settings, tmp_path):
-        """Puts mock-pulumi directory first in PATH."""
-        from engine.ecs import _run_local_provisioner
-
-        # Create fake provisioner
-        provisioner_dir = tmp_path / "provisioner"
-        provisioner_dir.mkdir()
-        (provisioner_dir / "main.py").write_text("# fake")
-
-        settings.PROVISIONER_PATH = str(provisioner_dir)
-        settings.ENVIRONMENT = "dev"
-        settings.AWS_REGION = "us-east-2"
-
-        captured_env = {}
-
-        def capture_popen(cmd, **kwargs):
-            captured_env.update(kwargs.get("env", {}))
-            mock_proc = MagicMock()
-            mock_proc.pid = 12345
-            return mock_proc
-
-        with patch("subprocess.Popen", side_effect=capture_popen):
-            _run_local_provisioner(["range", "provision"])
-
-        # Verify mock-pulumi dir is first in PATH
-        path = captured_env.get("PATH", "")
-        assert path.startswith(str(provisioner_dir))
 
     def test_passes_db_config_from_settings(self, settings, tmp_path):
         """Passes database config from Django settings."""
@@ -145,30 +116,6 @@ class TestRunLocalProvisioner:
 
         assert result == "local-99999"
 
-    def test_logs_mock_pulumi_warning(self, settings, tmp_path, caplog):
-        """Logs warning about mock pulumi usage."""
-        from engine.ecs import _run_local_provisioner
-
-        # Create fake provisioner
-        provisioner_dir = tmp_path / "provisioner"
-        provisioner_dir.mkdir()
-        (provisioner_dir / "main.py").write_text("# fake")
-
-        settings.PROVISIONER_PATH = str(provisioner_dir)
-        settings.ENVIRONMENT = "dev"
-        settings.AWS_REGION = "us-east-2"
-
-        mock_proc = MagicMock()
-        mock_proc.pid = 12345
-
-        with (
-            patch("subprocess.Popen", return_value=mock_proc),
-            caplog.at_level(logging.INFO, logger="engine.ecs"),
-        ):
-            _run_local_provisioner(["range", "provision"])
-
-        assert "mock" in caplog.text.lower() or "NO INFRA" in caplog.text
-
 
 class TestNgfwProvisioningWithLocalMode:
     """Tests for NGFW provisioning when local mode is enabled."""
@@ -212,21 +159,21 @@ class TestNgfwProvisioningWithLocalMode:
 
         settings.LOCAL_PROVISIONER = "subprocess"
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:task/test"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-123"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:task/test"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-123"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1"
 
         with (
             patch("engine.ecs._run_local_provisioner") as mock_local,
-            patch("engine.ecs._get_ecs_client") as mock_ecs,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
         ):
             mock_local.return_value = "local-12345"
 
             start_ngfw_provisioning(request_id=TEST_REQUEST_ID)
 
             mock_local.assert_called_once()
-            mock_ecs.assert_not_called()
+            mock_get_runner.assert_not_called()
 
 
 class TestRangeProvisioningWithLocalMode:

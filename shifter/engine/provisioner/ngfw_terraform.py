@@ -197,10 +197,10 @@ def _run_provision(
     if not management_ip:
         raise RuntimeError("NGFW Terraform missing management_ip output")
 
-    secrets_client = boto3.client("secretsmanager")
+    from cloud import get_secrets_store
+
     try:
-        secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-        private_key = secret_response["SecretString"]
+        private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
     except Exception as e:
         raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
 
@@ -364,9 +364,9 @@ def _run_deprovision(
                 waiter.wait(InstanceIds=[ec2_instance_id])
 
             # Get SSH key from Secrets Manager
-            secrets_client = boto3.client("secretsmanager")
-            secret_response = secrets_client.get_secret_value(SecretId=ssh_key_secret_arn)
-            private_key = secret_response["SecretString"]
+            from cloud import get_secrets_store
+
+            private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
 
             # Create NGFWExecutor and wait for SSH (uses piping, not paramiko)
             ssh_executor = NGFWExecutor(private_key=private_key)

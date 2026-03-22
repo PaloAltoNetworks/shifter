@@ -3,7 +3,7 @@
 import logging
 from unittest.mock import MagicMock, patch
 
-from botocore.exceptions import ClientError
+from shared.cloud.exceptions import CloudTaskError
 
 
 class TestGetTaskStatus:
@@ -12,8 +12,8 @@ class TestGetTaskStatus:
     Contract:
     - Inputs: task_arn (str)
     - Outputs: Dict with status info, or None if not configured/error
-    - Side effects: Calls ECS describe_tasks API
-    - Errors: Returns None on ClientError (does not raise)
+    - Side effects: Calls TaskRunner.get_task_status via get_task_runner()
+    - Errors: Returns None on CloudTaskError (does not raise)
     - Logging: ERROR on failures
     """
 
@@ -26,25 +26,19 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {
-            "tasks": [
-                {
-                    "taskArn": "arn:aws:ecs:us-east-2:123456789:task/test/abc123",
-                    "lastStatus": "RUNNING",
-                    "desiredStatus": "RUNNING",
-                    "startedAt": "2024-01-01T00:00:00Z",
-                    "stoppedAt": None,
-                    "stoppedReason": None,
-                }
-            ]
-        }
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {
+                "task_id": "arn:aws:ecs:us-east-2:123456789:task/test/abc123",
+                "status": "RUNNING",
+                "desired_status": "RUNNING",
+                "started_at": "2024-01-01T00:00:00Z",
+                "stopped_at": None,
+                "stopped_reason": None,
+            }
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:us-east-2:123456789:task/test/abc123")
 
@@ -56,25 +50,19 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {
-            "tasks": [
-                {
-                    "taskArn": "arn:aws:ecs:task/abc123",
-                    "lastStatus": "STOPPED",
-                    "desiredStatus": "STOPPED",
-                    "startedAt": "2024-01-01T00:00:00Z",
-                    "stoppedAt": "2024-01-01T01:00:00Z",
-                    "stoppedReason": "Essential container exited",
-                }
-            ]
-        }
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {
+                "task_id": "arn:aws:ecs:task/abc123",
+                "status": "STOPPED",
+                "desired_status": "STOPPED",
+                "started_at": "2024-01-01T00:00:00Z",
+                "stopped_at": "2024-01-01T01:00:00Z",
+                "stopped_reason": "Essential container exited",
+            }
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -89,14 +77,15 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "RUNNING", "desiredStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {
+                "status": "RUNNING",
+                "desired_status": "RUNNING",
+            }
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -108,22 +97,16 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {
-            "tasks": [
-                {
-                    "lastStatus": "STOPPED",
-                    "desiredStatus": "STOPPED",
-                    "stoppedReason": "Task completed",
-                }
-            ]
-        }
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {
+                "status": "STOPPED",
+                "desired_status": "STOPPED",
+                "stopped_reason": "Task completed",
+            }
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -135,40 +118,39 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "PENDING", "desiredStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {
+                "status": "PENDING",
+                "desired_status": "RUNNING",
+            }
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
             assert result["status"] == "PENDING"
             assert result["desired_status"] == "RUNNING"
 
-    def test_calls_describe_tasks_with_correct_params(self, settings):
-        """Function calls describe_tasks with cluster and task ARN."""
+    def test_calls_get_task_status_with_correct_params(self, settings):
+        """Function calls TaskRunner.get_task_status with cluster and task ARN."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {"status": "RUNNING"}
+            mock_get_runner.return_value = mock_runner
 
             task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
             get_task_status(task_arn)
 
-            mock_ecs.describe_tasks.assert_called_once_with(
+            mock_runner.get_task_status.assert_called_once_with(
                 cluster="arn:aws:ecs:us-east-2:123456789:cluster/test",
-                tasks=[task_arn],
+                task_id=task_arn,
             )
 
     # -------------------------------------------------------------------------
@@ -176,34 +158,34 @@ class TestGetTaskStatus:
     # -------------------------------------------------------------------------
 
     def test_returns_none_when_cluster_not_configured(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is not set."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is not set."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
-            delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
+        if hasattr(settings, "ENGINE_ECS_CLUSTER_ARN"):
+            delattr(settings, "ENGINE_ECS_CLUSTER_ARN")
 
         result = get_task_status("arn:aws:ecs:task/abc123")
 
         assert result is None
 
     def test_returns_none_when_cluster_is_empty(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is empty."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is empty."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        settings.ENGINE_ECS_CLUSTER_ARN = ""
 
         result = get_task_status("arn:aws:ecs:task/abc123")
 
         assert result is None
 
     def test_returns_none_when_cluster_is_none(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is None."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is None."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = None
+        settings.ENGINE_ECS_CLUSTER_ARN = None
 
         result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -237,7 +219,7 @@ class TestGetTaskStatus:
         # whitespace might pass through
         result = get_task_status("   ")
 
-        # Whitespace is truthy, so it might call ECS
+        # Whitespace is truthy, so it might call the runner
         # The test documents current behavior
         assert result is None or isinstance(result, dict)
 
@@ -250,14 +232,12 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": []}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = None
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/nonexistent")
 
@@ -265,19 +245,17 @@ class TestGetTaskStatus:
             assert result["status"] == "UNKNOWN"
             assert "not found" in result.get("reason", "").lower()
 
-    def test_returns_unknown_when_tasks_key_missing(self, settings):
-        """Function handles missing 'tasks' key in response."""
+    def test_returns_unknown_when_adapter_returns_none(self, settings):
+        """Function handles None return from adapter."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = None
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -288,58 +266,49 @@ class TestGetTaskStatus:
     # Error handling - returns None on errors
     # -------------------------------------------------------------------------
 
-    def test_returns_none_on_client_error(self, settings):
-        """Function returns None when ClientError occurs."""
+    def test_returns_none_on_cloud_task_error(self, settings):
+        """Function returns None when CloudTaskError occurs."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Cluster not found"}},
-                "DescribeTasks",
-            )
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
             assert result is None
 
     def test_returns_none_on_access_denied(self, settings):
-        """Function returns None when access is denied."""
+        """Function returns None when access is denied (wrapped in CloudTaskError)."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.side_effect = ClientError(
-                {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
-                "DescribeTasks",
-            )
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.side_effect = CloudTaskError("Access Denied")
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
             assert result is None
 
-    def test_does_not_raise_on_client_error(self, settings):
-        """Function does not raise exception on ClientError."""
+    def test_does_not_raise_on_cloud_task_error(self, settings):
+        """Function does not raise exception on CloudTaskError."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.side_effect = ClientError(
-                {"Error": {"Code": "InternalError", "Message": "Internal error"}},
-                "DescribeTasks",
-            )
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.side_effect = CloudTaskError("Internal error")
+            mock_get_runner.return_value = mock_runner
 
             # Should not raise
             result = get_task_status("arn:aws:ecs:task/abc123")
@@ -349,23 +318,20 @@ class TestGetTaskStatus:
     # Logging
     # -------------------------------------------------------------------------
 
-    def test_logs_error_on_client_error(self, settings, caplog):
-        """Function logs ERROR when ClientError occurs."""
+    def test_logs_error_on_cloud_task_error(self, settings, caplog):
+        """Function logs ERROR when CloudTaskError occurs."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with (
-            patch("engine.ecs._get_ecs_client") as mock_get_client,
+            patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
         ):
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.side_effect = ClientError(
-                {"Error": {"Code": "ClusterNotFound", "Message": "Cluster not found"}},
-                "DescribeTasks",
-            )
-            mock_get_client.return_value = mock_ecs
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.side_effect = CloudTaskError("Cluster not found")
+            mock_get_runner.return_value = mock_runner
 
             get_task_status("arn:aws:ecs:task/abc123")
 
@@ -380,14 +346,12 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {"status": "RUNNING"}
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -398,24 +362,19 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         started = "2024-01-01T00:00:00Z"
         stopped = "2024-01-01T01:00:00Z"
-        mock_response = {
-            "tasks": [
-                {
-                    "lastStatus": "STOPPED",
-                    "startedAt": started,
-                    "stoppedAt": stopped,
-                }
-            ]
-        }
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {
+                "status": "STOPPED",
+                "started_at": started,
+                "stopped_at": stopped,
+            }
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -427,14 +386,12 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {"status": "RUNNING"}
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -445,18 +402,16 @@ class TestGetTaskStatus:
             assert result.get("stopped_reason") is None
 
     def test_defaults_status_to_unknown(self, settings):
-        """Status defaults to UNKNOWN when lastStatus is missing."""
+        """Status defaults to UNKNOWN when status is missing from adapter response."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {}
+            mock_get_runner.return_value = mock_runner
 
             result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -471,14 +426,12 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {"status": "RUNNING"}
+            mock_get_runner.return_value = mock_runner
 
             # Full ARN format
             result = get_task_status("arn:aws:ecs:us-east-2:123456789012:task/cluster-name/abc123def456")
@@ -491,14 +444,12 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        mock_response = {"tasks": [{"lastStatus": "RUNNING"}]}
-
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
-            mock_ecs.describe_tasks.return_value = mock_response
-            mock_get_client.return_value = mock_ecs
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.get_task_status.return_value = {"status": "RUNNING"}
+            mock_get_runner.return_value = mock_runner
 
             # Short format
             result = get_task_status("abc123")
@@ -514,20 +465,20 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
-        with patch("engine.ecs._get_ecs_client") as mock_get_client:
-            mock_ecs = MagicMock()
+        with patch("engine.ecs.get_task_runner") as mock_get_runner:
+            mock_runner = MagicMock()
 
             # First call returns RUNNING
-            mock_ecs.describe_tasks.return_value = {"tasks": [{"lastStatus": "RUNNING"}]}
-            mock_get_client.return_value = mock_ecs
+            mock_runner.get_task_status.return_value = {"status": "RUNNING"}
+            mock_get_runner.return_value = mock_runner
 
             result1 = get_task_status("arn:aws:ecs:task/task1")
             assert result1["status"] == "RUNNING"
 
             # Second call returns STOPPED
-            mock_ecs.describe_tasks.return_value = {"tasks": [{"lastStatus": "STOPPED"}]}
+            mock_runner.get_task_status.return_value = {"status": "STOPPED"}
 
             result2 = get_task_status("arn:aws:ecs:task/task2")
             assert result2["status"] == "STOPPED"

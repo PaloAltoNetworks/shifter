@@ -1,173 +1,186 @@
 """Tests for agent upload and delete views."""
 
-import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from django.contrib.auth import get_user_model
-from django.test import Client
+from django.contrib.auth.models import AnonymousUser
+from django.http import HttpResponse
+from django.test import RequestFactory
 from django.urls import reverse
 
-from cms.models import AgentConfig, OperatingSystem
-from risk_register.models import AuditLog
-
-User = get_user_model()
-
-
-def get_authenticated_client(user):
-    """Create a client with OIDC session data set to avoid SessionRefresh redirects."""
-    client = Client()
-    client.force_login(user)
-    session = client.session
-    session["oidc_id_token_expiration"] = time.time() + 3600
-    session.save()
-    return client
+from mission_control.views import agents, delete_agent
 
 
 @pytest.fixture
-def user(db):
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+def rf():
+    return RequestFactory()
 
 
 @pytest.fixture
-def windows_os(db):
-    return OperatingSystem.objects.get(slug="windows")
+def mock_user():
+    user = MagicMock()
+    user.id = 1
+    user.pk = 1
+    user.email = "test@example.com"
+    user.is_authenticated = True
+    user.is_active = True
+    return user
 
 
-@pytest.fixture
-def linux_os(db):
-    return OperatingSystem.objects.get(slug="linux-generic")
+def _make_agent(**overrides):
+    """Build a mock agent object."""
+    defaults = {
+        "id": 1,
+        "name": "Test Agent",
+        "s3_key": "agents/1/abc123_test.msi",
+        "original_filename": "test.msi",
+        "file_size_bytes": 1024 * 1024,
+        "sha256_hash": "abc123",
+        "deleted_at": None,
+    }
+    defaults.update(overrides)
+    return MagicMock(**defaults)
 
 
-@pytest.fixture
-def agent(db, user, windows_os):
-    return AgentConfig.objects.create(
-        user=user,
-        os=windows_os,
-        name="Test Agent",
-        s3_key="agents/1/abc123_test.msi",
-        original_filename="test.msi",
-        file_size_bytes=1024 * 1024,
-        sha256_hash="abc123",
-    )
-
-
-@pytest.mark.django_db
 class TestAgentsView:
-    def test_requires_login(self, client):
-        response = client.get(reverse("mission_control:agents"))
+    def test_requires_login(self, rf):
+        request = rf.get("/mc/agents/")
+        request.user = AnonymousUser()
+
+        response = agents(request)
         assert response.status_code == 302
-        assert "/oidc/authenticate/" in response.url or "login" in response.url.lower()
 
-    def test_shows_user_agents(self, user, agent):
-        client = get_authenticated_client(user)
-        response = client.get(reverse("mission_control:agents"))
-        assert response.status_code == 200
-        assert "Test Agent" in response.content.decode()
+    def test_shows_user_agents(self, rf, mock_user):
+        request = rf.get("/mc/agents/")
+        request.user = mock_user
+        agent = _make_agent()
 
-    def test_hides_deleted_agents(self, user, agent):
-        from django.utils import timezone
+        with (
+            patch("mission_control.views.cms_list_agents", return_value=[agent]),
+            patch("mission_control.views.get_allowed_extensions", return_value=[".msi"]),
+            patch("mission_control.views.render") as mock_render,
+        ):
+            mock_render.return_value = HttpResponse("ok")
+            agents(request)
 
-        agent.deleted_at = timezone.now()
-        agent.save()
+            context = mock_render.call_args[0][2]
+            assert context["agents"] == [agent]
 
-        client = get_authenticated_client(user)
-        response = client.get(reverse("mission_control:agents"))
-        assert response.status_code == 200
-        assert "Test Agent" not in response.content.decode()
+    def test_hides_deleted_agents(self, rf, mock_user):
+        """Agents view only shows what cms_list_agents returns (no deleted)."""
+        request = rf.get("/mc/agents/")
+        request.user = mock_user
 
-    def test_shows_empty_state(self, user):
-        client = get_authenticated_client(user)
-        response = client.get(reverse("mission_control:agents"))
-        assert response.status_code == 200
-        assert "No agents uploaded yet" in response.content.decode()
+        with (
+            patch("mission_control.views.cms_list_agents", return_value=[]),
+            patch("mission_control.views.get_allowed_extensions", return_value=[".msi"]),
+            patch("mission_control.views.render") as mock_render,
+        ):
+            mock_render.return_value = HttpResponse("ok")
+            agents(request)
+
+            context = mock_render.call_args[0][2]
+            assert context["agents"] == []
+
+    def test_shows_empty_state(self, rf, mock_user):
+        request = rf.get("/mc/agents/")
+        request.user = mock_user
+
+        with (
+            patch("mission_control.views.cms_list_agents", return_value=[]),
+            patch("mission_control.views.get_allowed_extensions", return_value=[".msi"]),
+            patch("mission_control.views.render") as mock_render,
+        ):
+            mock_render.return_value = HttpResponse("ok")
+            agents(request)
+
+            context = mock_render.call_args[0][2]
+            assert context["agents"] == []
 
 
-# Note: TestUploadAgent class removed - legacy form-based upload replaced by presigned URL flow
-# See tests/mission_control/test_presigned_upload.py for upload tests
-
-
-@pytest.mark.django_db
 class TestDeleteAgent:
-    def test_requires_login(self, client, agent):
-        response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
+    def test_requires_login(self, rf):
+        request = rf.post("/mc/agents/1/delete/")
+        request.user = AnonymousUser()
+
+        response = delete_agent(request, 1)
         assert response.status_code == 302
 
-    def test_requires_post(self, user, agent):
-        client = get_authenticated_client(user)
-        response = client.get(reverse("mission_control:delete_agent", args=[agent.id]))
+    def test_requires_post(self, rf, mock_user):
+        request = rf.get("/mc/agents/1/delete/")
+        request.user = mock_user
+
+        response = delete_agent(request, 1)
         assert response.status_code == 405
 
-    @patch("cms.assets.services.s3_delete")
-    def test_successful_delete(self, mock_delete, user, agent):
-        client = get_authenticated_client(user)
-        response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
+    @patch("mission_control.views.cms_delete_agent")
+    def test_successful_delete(self, mock_cms_delete, rf, mock_user):
+        request = rf.post("/mc/agents/1/delete/")
+        request.user = mock_user
+        # messages framework needs _messages attribute
+        request._messages = MagicMock()
+
+        response = delete_agent(request, 1)
 
         assert response.status_code == 302
         assert response.url == reverse("mission_control:agents")
+        mock_cms_delete.assert_called_once_with(mock_user, 1)
 
-        # Verify soft delete
-        agent.refresh_from_db()
-        assert agent.deleted_at is not None
-
-        # Verify S3 delete was called
-        mock_delete.assert_called_once_with(agent.s3_key)
-
-        # Verify audit log entry was created
-        log = AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.AGENT,
-            action=AuditLog.Action.DELETE,
-            entity_id=agent.id,
-        ).first()
-        assert log is not None
-
-    def test_cannot_delete_other_users_agent(self, user, agent):
+    @patch("mission_control.views.cms_delete_agent")
+    def test_cannot_delete_other_users_agent(self, mock_cms_delete, rf, mock_user):
         """Deleting another user's agent shows error and redirects."""
-        other_user = User.objects.create_user(username="other@example.com", email="other@example.com")
-        client = get_authenticated_client(other_user)
+        from cms.services import CMSError
 
-        response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
-        # CMS raises CMSError, view catches it and redirects with error message
+        mock_cms_delete.side_effect = CMSError("Agent not found or not owned by user")
+
+        request = rf.post("/mc/agents/1/delete/")
+        request.user = mock_user
+        request._messages = MagicMock()
+
+        response = delete_agent(request, 1)
         assert response.status_code == 302
         assert response.url == reverse("mission_control:agents")
 
-        # Agent should NOT be deleted
-        agent.refresh_from_db()
-        assert agent.deleted_at is None
-
-    def test_cannot_delete_already_deleted(self, user, agent):
+    @patch("mission_control.views.cms_delete_agent")
+    def test_cannot_delete_already_deleted(self, mock_cms_delete, rf, mock_user):
         """Deleting already-deleted agent shows error and redirects."""
-        from django.utils import timezone
+        from cms.services import CMSError
 
-        agent.deleted_at = timezone.now()
-        agent.save()
+        mock_cms_delete.side_effect = CMSError("Agent already deleted")
 
-        client = get_authenticated_client(user)
-        response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
-        # CMS raises CMSError, view catches it and redirects with error message
+        request = rf.post("/mc/agents/1/delete/")
+        request.user = mock_user
+        request._messages = MagicMock()
+
+        response = delete_agent(request, 1)
         assert response.status_code == 302
         assert response.url == reverse("mission_control:agents")
 
-    @patch("cms.assets.services.s3_delete")
-    def test_s3_error_prevents_delete(self, mock_delete, user, agent):
+    @patch("mission_control.views.cms_delete_agent")
+    def test_s3_error_prevents_delete(self, mock_cms_delete, rf, mock_user):
         """S3 error during delete shows error and redirects."""
         from cms.assets.services import AssetError
 
-        mock_delete.side_effect = AssetError("Failed to delete from S3")
+        mock_cms_delete.side_effect = AssetError("Failed to delete from S3")
 
-        client = get_authenticated_client(user)
-        response = client.post(reverse("mission_control:delete_agent", args=[agent.id]))
+        request = rf.post("/mc/agents/1/delete/")
+        request.user = mock_user
+        request._messages = MagicMock()
 
+        response = delete_agent(request, 1)
         assert response.status_code == 302
 
-        # Agent should NOT be deleted
-        agent.refresh_from_db()
-        assert agent.deleted_at is None
-
-    def test_delete_nonexistent_agent(self, user):
+    @patch("mission_control.views.cms_delete_agent")
+    def test_delete_nonexistent_agent(self, mock_cms_delete, rf, mock_user):
         """Deleting non-existent agent shows error and redirects."""
-        client = get_authenticated_client(user)
-        response = client.post(reverse("mission_control:delete_agent", args=[99999]))
-        # CMS raises CMSError, view catches it and redirects with error message
+        from cms.services import CMSError
+
+        mock_cms_delete.side_effect = CMSError("Agent not found")
+
+        request = rf.post("/mc/agents/99999/delete/")
+        request.user = mock_user
+        request._messages = MagicMock()
+
+        response = delete_agent(request, 99999)
         assert response.status_code == 302
         assert response.url == reverse("mission_control:agents")

@@ -9,17 +9,17 @@ output "portal_ecr_arn" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner ECR Outputs
+# Engine Provisioner ECR Outputs
 # ------------------------------------------------------------------------------
 
-output "pulumi_provisioner_ecr_url" {
-  description = "ECR repository URL for the Pulumi provisioner"
-  value       = module.pulumi_provisioner_ecr.repository_url
+output "engine_provisioner_ecr_url" {
+  description = "ECR repository URL for the engine provisioner"
+  value       = module.engine_provisioner_ecr.repository_url
 }
 
-output "pulumi_provisioner_ecr_arn" {
-  description = "ECR repository ARN for the Pulumi provisioner"
-  value       = module.pulumi_provisioner_ecr.repository_arn
+output "engine_provisioner_ecr_arn" {
+  description = "ECR repository ARN for the engine provisioner"
+  value       = module.engine_provisioner_ecr.repository_arn
 }
 
 # ------------------------------------------------------------------------------

@@ -214,17 +214,14 @@ def get_range_connection_info(
 
 
 def _get_instance_ssh_key(instance_data: dict) -> str | None:
-    """Retrieve SSH key from Secrets Manager for a provisioned instance."""
+    """Retrieve SSH key from secrets store for a provisioned instance."""
     secret_arn = instance_data.get("ssh_key_secret_arn")
     if not secret_arn:
         return None
     try:
-        import boto3
-        from django.conf import settings
+        from shared.cloud import get_secrets_store
 
-        client = boto3.client("secretsmanager", region_name=settings.AWS_REGION)
-        response = client.get_secret_value(SecretId=secret_arn)
-        return response.get("SecretString")
+        return get_secrets_store().get_secret(secret_arn)
     except Exception:
         logger.warning("Failed to retrieve SSH key from %s", secret_arn)
         return None

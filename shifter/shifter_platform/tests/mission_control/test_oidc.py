@@ -285,7 +285,6 @@ class TestProviderLogoutUrl:
 # =============================================================================
 
 
-@pytest.mark.django_db
 class TestShifterOIDCBackendUpdateCognitoSub:
     """Tests for ShifterOIDCBackend._update_cognito_sub method."""
 

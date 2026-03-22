@@ -46,14 +46,19 @@ module "vpc" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi State Backend (S3 + DynamoDB)
+# Engine State Backend (S3 + DynamoDB)
 # ------------------------------------------------------------------------------
 
-module "pulumi_state" {
-  source = "../../../modules/pulumi-state"
+module "engine_state" {
+  source = "../../../modules/engine-state"
 
   name_prefix        = local.name_prefix
   environment        = var.environment
   tags               = var.tags
   log_retention_days = var.log_retention_days
+}
+
+moved {
+  from = module.pulumi_state
+  to   = module.engine_state
 }

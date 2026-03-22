@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLASSIFIED // POLARIS-7 OVERHEAD IMAGERY</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Share Tech Mono', 'Courier New', monospace; }
+  #webgl-canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+  #hud-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 10; pointer-events: none; overflow: hidden;
+  }
+  .classification-banner {
+    position: absolute; left: 0; width: 100%; height: 32px;
+    background: #c41e1e; color: #fff; font-size: 13px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center;
+    letter-spacing: 4px; text-transform: uppercase;
+    font-family: 'Share Tech Mono', monospace;
+    text-shadow: 0 0 4px rgba(255,255,255,0.3);
+    z-index: 100;
+  }
+  .classification-banner.top { top: 0; }
+  .classification-banner.bottom { bottom: 0; }
+
+  #coord-readout {
+    position: absolute; bottom: 52px; right: 16px;
+    color: #8fbc6a; font-size: 11px; line-height: 1.5;
+    text-shadow: 0 0 6px rgba(143,188,106,0.5);
+    text-align: right;
+    background: rgba(0,0,0,0.6); padding: 6px 10px;
+    border: 1px solid rgba(143,188,106,0.3);
+  }
+
+  #satellite-info {
+    position: absolute; top: 44px; left: 16px;
+    color: #8fbc6a; font-size: 11px; line-height: 1.6;
+    text-shadow: 0 0 6px rgba(143,188,106,0.5);
+    background: rgba(0,0,0,0.5); padding: 8px 12px;
+    border: 1px solid rgba(143,188,106,0.3);
+  }
+
+  #timestamp-info {
+    position: absolute; top: 44px; right: 16px;
+    color: #8fbc6a; font-size: 11px; line-height: 1.6;
+    text-shadow: 0 0 6px rgba(143,188,106,0.5);
+    text-align: right;
+    background: rgba(0,0,0,0.5); padding: 8px 12px;
+    border: 1px solid rgba(143,188,106,0.3);
+  }
+
+  #thermal-note {
+    position: absolute; bottom: 120px; left: 16px;
+    color: #ff4444; font-size: 11px; line-height: 1.6;
+    text-shadow: 0 0 8px rgba(255,68,68,0.6);
+    background: rgba(40,0,0,0.7); padding: 10px 14px;
+    border: 1px solid rgba(255,68,68,0.5);
+    max-width: 380px;
+    animation: pulse-border 2s ease-in-out infinite;
+  }
+  @keyframes pulse-border {
+    0%, 100% { border-color: rgba(255,68,68,0.5); }
+    50% { border-color: rgba(255,68,68,1.0); }
+  }
+
+  #zoom-indicator {
+    position: absolute; bottom: 52px; left: 16px;
+    color: #8fbc6a; font-size: 11px;
+    text-shadow: 0 0 6px rgba(143,188,106,0.5);
+  }
+
+  .scanline-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none; z-index: 50;
+  }
+
+  #glitch-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 40; opacity: 0;
+    background: rgba(0, 255, 100, 0.03);
+  }
+
+  #annotation-layer {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 15;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="webgl-canvas"></canvas>
+
+<div id="hud-overlay">
+  <div class="classification-banner top">TOP SECRET // POLARIS // NOFORN</div>
+  <div class="classification-banner bottom">TOP SECRET // POLARIS // NOFORN</div>
+
+  <div id="satellite-info">
+    SAT: POLARIS-7 (KH-14 BLOCK IV)<br>
+    ORBIT: 263km / 97.4&deg; INCL<br>
+    SENSOR: MULTISPECTRAL + THERMAL IR<br>
+    RESOLUTION: 0.12m GSD<br>
+    BAND: VISIBLE + MWIR COMPOSITE
+  </div>
+
+  <div id="timestamp-info">
+    <span id="datetime-display"></span><br>
+    PASS: 4471 / REV 22819<br>
+    DWELL: 4.2s / SLEW: -2.1&deg;<br>
+    CLOUD COVER: 12% (FILTERED)<br>
+    <span id="frame-counter">FRAME: 0000</span>
+  </div>
+
+  <div id="coord-readout">
+    <span id="cursor-coords">---.------N  ---.------E</span><br>
+    <span id="cursor-mgrs">MGRS: ---</span><br>
+    <span id="cursor-alt">ALT: --- m</span>
+  </div>
+
+  <div id="thermal-note">
+    &#9888; ANALYST NOTE (TS//POLARIS)<br>
+    ________________________<br><br>
+    THERMAL ANOMALY: +340&deg;C ABOVE AMBIENT<br>
+    SUBTERRANEAN HEAT SOURCE CONFIRMED<br>
+    DIAMETER: ~120m / DEPTH: UNKNOWN<br>
+    CONSISTENT WITH DEEP-BORE REACTOR<br>
+    OR HEAVY INDUSTRIAL PROCESS<br><br>
+    SPECTRAL MATCH: 94% Pu-239 SIGNATURE<br>
+    <br>
+    SEE ANNEX C / REF: POLARIS-7-4471-TC<br>
+    PRIORITY: CRITIC // FLASH PRECEDENCE
+  </div>
+
+  <div id="zoom-indicator">ZOOM: 1.00x</div>
+
+  <div class="scanline-overlay"></div>
+  <div id="glitch-overlay"></div>
+</div>
+
+<canvas id="annotation-layer"></canvas>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ============================================================
+// GLOBAL STATE
+// ============================================================
+let camera, scene, renderer, clock;
+let terrainMesh, hatchMesh, hatchGlowMesh;
+let panOffset = new THREE.Vector2(0, 0);
+let zoomLevel = 1.0;
+let isDragging = false;
+let dragStart = new THREE.Vector2();
+let panStart = new THREE.Vector2();
+let mouseScreen = new THREE.Vector2(-1000, -1000);
+let frameCount = 0;
+let glitchTimer = 0;
+let nextGlitch = Math.random() * 8 + 4;
+
+const BASE_LAT = 71.342847;
+const BASE_LON = 68.917234;
+
+// ============================================================
+// PERLIN / SIMPLEX NOISE (compact implementation)
+// ============================================================
+class SimplexNoise {
+  constructor(seed = 0) {
+    this.grad3 = [
+      [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+      [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+      [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
+    ];
+    this.perm = new Uint8Array(512);
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    let s = seed;
+    for (let i = 255; i > 0; i--) {
+      s = (s * 16807 + 0) % 2147483647;
+      const j = s % (i + 1);
+      [p[i], p[j]] = [p[j], p[i]];
+    }
+    for (let i = 0; i < 512; i++) this.perm[i] = p[i & 255];
+  }
+  dot3(g, x, y) { return g[0]*x + g[1]*y; }
+  noise2D(xin, yin) {
+    const F2 = 0.5*(Math.sqrt(3.0)-1.0);
+    const G2 = (3.0-Math.sqrt(3.0))/6.0;
+    const s = (xin+yin)*F2;
+    const i = Math.floor(xin+s);
+    const j = Math.floor(yin+s);
+    const t = (i+j)*G2;
+    const X0 = i-t, Y0 = j-t;
+    const x0 = xin-X0, y0 = yin-Y0;
+    let i1, j1;
+    if(x0>y0) { i1=1; j1=0; } else { i1=0; j1=1; }
+    const x1 = x0-i1+G2, y1 = y0-j1+G2;
+    const x2 = x0-1.0+2.0*G2, y2 = y0-1.0+2.0*G2;
+    const ii = i & 255, jj = j & 255;
+    const gi0 = this.perm[ii+this.perm[jj]] % 12;
+    const gi1 = this.perm[ii+i1+this.perm[jj+j1]] % 12;
+    const gi2 = this.perm[ii+1+this.perm[jj+1]] % 12;
+    let n0 = 0, n1 = 0, n2 = 0;
+    let t0 = 0.5 - x0*x0-y0*y0;
+    if(t0>=0) { t0*=t0; n0 = t0*t0*this.dot3(this.grad3[gi0], x0, y0); }
+    let t1 = 0.5 - x1*x1-y1*y1;
+    if(t1>=0) { t1*=t1; n1 = t1*t1*this.dot3(this.grad3[gi1], x1, y1); }
+    let t2 = 0.5 - x2*x2-y2*y2;
+    if(t2>=0) { t2*=t2; n2 = t2*t2*this.dot3(this.grad3[gi2], x2, y2); }
+    return 70.0*(n0+n1+n2);
+  }
+  fbm(x, y, octaves = 6, lacunarity = 2.0, gain = 0.5) {
+    let sum = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      sum += this.noise2D(x * freq, y * freq) * amp;
+      max += amp;
+      amp *= gain;
+      freq *= lacunarity;
+    }
+    return sum / max;
+  }
+}
+
+const simplex = new SimplexNoise(42);
+const simplex2 = new SimplexNoise(137);
+
+// ============================================================
+// SCENE SETUP
+// ============================================================
+function init() {
+  // Renderer
+  renderer = new THREE.WebGLRenderer({
+    canvas: document.getElementById('webgl-canvas'),
+    antialias: true,
+    alpha: false
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.9;
+
+  // Scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1c18);
+  scene.fog = new THREE.FogExp2(0x1a1c18, 0.0003);
+
+  // Camera -- near top-down with a slight tilt
+  camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 1, 5000);
+  camera.position.set(0, 800, 120);
+  camera.lookAt(0, 0, 0);
+
+  clock = new THREE.Clock();
+
+  // Lighting -- simulating high-angle sunlight for satellite shadow casting
+  const sunLight = new THREE.DirectionalLight(0xfff5e6, 2.0);
+  sunLight.position.set(200, 600, -300);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.width = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near = 1;
+  sunLight.shadow.camera.far = 2000;
+  sunLight.shadow.camera.left = -600;
+  sunLight.shadow.camera.right = 600;
+  sunLight.shadow.camera.top = 600;
+  sunLight.shadow.camera.bottom = -600;
+  sunLight.shadow.bias = -0.001;
+  scene.add(sunLight);
+
+  const ambientLight = new THREE.AmbientLight(0x4466aa, 0.4);
+  scene.add(ambientLight);
+
+  const fillLight = new THREE.DirectionalLight(0x8899cc, 0.3);
+  fillLight.position.set(-100, 400, 200);
+  scene.add(fillLight);
+
+  createTerrain();
+  createCompound();
+  createHatch();
+  createTrees();
+  createVehicleTracks();
+
+  // Post-processing via custom shader pass (rendered as fullscreen quad)
+  createPostProcessing();
+
+  window.addEventListener('resize', onResize);
+  setupControls();
+  updateDatetime();
+  setInterval(updateDatetime, 1000);
+
+  animate();
+}
+
+// ============================================================
+// TERRAIN -- large procedural plane with snow/tundra shader
+// ============================================================
+function createTerrain() {
+  const size = 2000;
+  const segments = 512;
+  const geo = new THREE.PlaneGeometry(size, size, segments, segments);
+  geo.rotateX(-Math.PI / 2);
+
+  // Displace vertices with noise for realistic terrain
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const height = simplex.fbm(x * 0.003, z * 0.003, 6) * 12
+                 + simplex2.fbm(x * 0.012, z * 0.012, 4) * 3;
+    // Flatten the compound area
+    const distFromCenter = Math.sqrt(x*x + z*z);
+    const flattenFactor = Math.max(0, 1 - Math.pow(Math.max(0, distFromCenter - 180) / 80, 2));
+    pos.setY(i, height * (1 - flattenFactor * 0.9));
+  }
+  geo.computeVertexNormals();
+
+  const terrainMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uSunDir: { value: new THREE.Vector3(0.3, 0.8, -0.5).normalize() }
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vNormal;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vNormal = normalize(normalMatrix * normal);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3 uSunDir;
+      varying vec3 vWorldPos;
+      varying vec3 vNormal;
+      varying vec2 vUv;
+
+      // Noise functions for procedural detail
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f*f*(3.0-2.0*f);
+        float a = hash(i);
+        float b = hash(i + vec2(1,0));
+        float c = hash(i + vec2(0,1));
+        float d = hash(i + vec2(1,1));
+        return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+      }
+      float fbm(vec2 p) {
+        float f = 0.0, a = 0.5;
+        for(int i = 0; i < 6; i++) {
+          f += a * noise(p);
+          p *= 2.02;
+          a *= 0.48;
+        }
+        return f;
+      }
+
+      void main() {
+        // Base snow/tundra colors
+        float n1 = fbm(vWorldPos.xz * 0.05);
+        float n2 = fbm(vWorldPos.xz * 0.15 + 31.7);
+        float n3 = fbm(vWorldPos.xz * 0.4 + 77.3);
+
+        // Mix between snow white and tundra gray/brown
+        vec3 snowColor = vec3(0.82, 0.84, 0.86);
+        vec3 tundraColor = vec3(0.45, 0.44, 0.40);
+        vec3 dirtColor = vec3(0.35, 0.32, 0.28);
+        vec3 iceColor = vec3(0.7, 0.75, 0.82);
+
+        float snowMask = smoothstep(0.35, 0.65, n1 + n2 * 0.3);
+        vec3 baseColor = mix(tundraColor, snowColor, snowMask);
+
+        // Add dirt patches
+        float dirtMask = smoothstep(0.55, 0.7, n2) * (1.0 - snowMask * 0.7);
+        baseColor = mix(baseColor, dirtColor, dirtMask * 0.5);
+
+        // Ice patches
+        float iceMask = smoothstep(0.6, 0.8, n3) * snowMask;
+        baseColor = mix(baseColor, iceColor, iceMask * 0.3);
+
+        // Micro detail
+        float micro = noise(vWorldPos.xz * 2.0) * 0.08;
+        baseColor += micro;
+
+        // Lighting
+        float ndotl = max(dot(vNormal, uSunDir), 0.0);
+        float ambient = 0.35;
+        float diffuse = ndotl * 0.65;
+        vec3 lit = baseColor * (ambient + diffuse);
+
+        // Slight blue tint in shadows (atmospheric scattering for satellite imagery)
+        vec3 shadowTint = vec3(0.6, 0.65, 0.8);
+        lit = mix(lit * shadowTint, lit, smoothstep(0.0, 0.3, ndotl));
+
+        // Distance fade to simulate atmospheric haze
+        float dist = length(vWorldPos.xz);
+        float haze = smoothstep(400.0, 1000.0, dist);
+        lit = mix(lit, vec3(0.55, 0.57, 0.62), haze * 0.5);
+
+        // Compound area -- cleared/compacted snow
+        float compoundDist = length(vWorldPos.xz);
+        float cleared = 1.0 - smoothstep(140.0, 200.0, compoundDist);
+        vec3 clearedColor = mix(vec3(0.52, 0.51, 0.48), vec3(0.6, 0.6, 0.58), n3);
+        lit = mix(lit, clearedColor * (ambient + diffuse), cleared * 0.7);
+
+        // Paths between buildings -- darkened packed snow
+        // Main path (N-S)
+        float pathNS = smoothstep(4.0, 2.0, abs(vWorldPos.x - 0.0)) * step(-80.0, vWorldPos.z) * step(vWorldPos.z, 80.0);
+        // Path to research building
+        float pathEW = smoothstep(4.0, 2.0, abs(vWorldPos.z + 20.0)) * step(-100.0, vWorldPos.x) * step(vWorldPos.x, 100.0);
+        // Path to hatch
+        float pathToHatch = smoothstep(5.0, 3.0, abs(vWorldPos.x - 55.0)) * step(-90.0, vWorldPos.z) * step(vWorldPos.z, -20.0);
+        float pathMask = max(max(pathNS, pathEW), pathToHatch);
+        vec3 pathColor = vec3(0.38, 0.37, 0.34);
+        lit = mix(lit, pathColor * (ambient + diffuse * 0.8), pathMask * 0.6);
+
+        gl_FragColor = vec4(lit, 1.0);
+      }
+    `,
+    side: THREE.FrontSide
+  });
+  terrainMat.receiveShadow = true;
+
+  terrainMesh = new THREE.Mesh(geo, terrainMat);
+  terrainMesh.receiveShadow = true;
+  scene.add(terrainMesh);
+
+  // Shadow-receiving ground plane (for Three.js shadow system)
+  const shadowGround = new THREE.Mesh(
+    new THREE.PlaneGeometry(2000, 2000),
+    new THREE.ShadowMaterial({ opacity: 0.35 })
+  );
+  shadowGround.rotation.x = -Math.PI / 2;
+  shadowGround.position.y = 0.1;
+  shadowGround.receiveShadow = true;
+  scene.add(shadowGround);
+}
+
+// ============================================================
+// COMPOUND -- buildings, fence, guard towers
+// ============================================================
+function createCompound() {
+  const bldgMat = new THREE.MeshStandardMaterial({
+    color: 0x5a5a5a, roughness: 0.8, metalness: 0.2
+  });
+  const roofMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4a4a, roughness: 0.7, metalness: 0.3
+  });
+  const concreteMat = new THREE.MeshStandardMaterial({
+    color: 0x6b6b6b, roughness: 0.9, metalness: 0.1
+  });
+
+  // Main building -- large rectangular footprint
+  const mainBldg = new THREE.Group();
+  const mainBody = new THREE.Mesh(
+    new THREE.BoxGeometry(60, 14, 35),
+    bldgMat
+  );
+  mainBody.position.set(-30, 7, 30);
+  mainBody.castShadow = true;
+  mainBody.receiveShadow = true;
+  mainBldg.add(mainBody);
+
+  // Roof detail -- slightly smaller box on top
+  const mainRoof = new THREE.Mesh(
+    new THREE.BoxGeometry(56, 1.5, 31),
+    roofMat
+  );
+  mainRoof.position.set(-30, 14.5, 30);
+  mainRoof.castShadow = true;
+  mainBldg.add(mainRoof);
+
+  // HVAC units on roof
+  for (let i = 0; i < 4; i++) {
+    const hvac = new THREE.Mesh(
+      new THREE.BoxGeometry(4, 3, 4),
+      new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.6, metalness: 0.4 })
+    );
+    hvac.position.set(-45 + i * 12, 16.5, 30);
+    hvac.castShadow = true;
+    mainBldg.add(hvac);
+  }
+
+  // Entrance canopy
+  const canopy = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 0.5, 6),
+    concreteMat
+  );
+  canopy.position.set(-30, 10, 48.5);
+  canopy.castShadow = true;
+  mainBldg.add(canopy);
+
+  scene.add(mainBldg);
+
+  // Research building -- smaller, L-shaped
+  const resBldg = new THREE.Group();
+  const resMain = new THREE.Mesh(
+    new THREE.BoxGeometry(40, 10, 25),
+    bldgMat
+  );
+  resMain.position.set(60, 5, -30);
+  resMain.castShadow = true;
+  resMain.receiveShadow = true;
+  resBldg.add(resMain);
+
+  const resWing = new THREE.Mesh(
+    new THREE.BoxGeometry(15, 10, 20),
+    bldgMat
+  );
+  resWing.position.set(87.5, 5, -10);
+  resWing.castShadow = true;
+  resBldg.add(resWing);
+
+  const resRoof = new THREE.Mesh(
+    new THREE.BoxGeometry(38, 1, 23),
+    roofMat
+  );
+  resRoof.position.set(60, 10.5, -30);
+  resRoof.castShadow = true;
+  resBldg.add(resRoof);
+
+  // Satellite dish on research building
+  const dishBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(1, 1, 4, 8),
+    new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.6 })
+  );
+  dishBase.position.set(70, 13, -30);
+  dishBase.castShadow = true;
+  resBldg.add(dishBase);
+
+  const dish = new THREE.Mesh(
+    new THREE.SphereGeometry(4, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.4),
+    new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.7, side: THREE.DoubleSide })
+  );
+  dish.position.set(70, 15, -30);
+  dish.rotation.x = Math.PI * 0.1;
+  dish.castShadow = true;
+  resBldg.add(dish);
+
+  scene.add(resBldg);
+
+  // Generator / utility building
+  const genBldg = new THREE.Mesh(
+    new THREE.BoxGeometry(15, 6, 12),
+    concreteMat
+  );
+  genBldg.position.set(-80, 3, -20);
+  genBldg.castShadow = true;
+  genBldg.receiveShadow = true;
+  scene.add(genBldg);
+
+  // Small storage shed
+  const shed = new THREE.Mesh(
+    new THREE.BoxGeometry(8, 4, 6),
+    bldgMat
+  );
+  shed.position.set(-60, 2, 55);
+  shed.castShadow = true;
+  scene.add(shed);
+
+  // ---- PERIMETER FENCE ----
+  const fenceRadius = 170;
+  const fencePoints = 80;
+  const fenceMat = new THREE.MeshStandardMaterial({
+    color: 0x555555, roughness: 0.7, metalness: 0.5
+  });
+
+  // Fence as a series of thin posts connected by wire
+  // Simplified as thin box segments around perimeter
+  for (let i = 0; i < fencePoints; i++) {
+    const angle1 = (i / fencePoints) * Math.PI * 2;
+    const angle2 = ((i + 1) / fencePoints) * Math.PI * 2;
+
+    // Make it slightly rectangular
+    const r1x = fenceRadius * 1.2;
+    const r1z = fenceRadius * 0.9;
+
+    const x1 = Math.cos(angle1) * r1x;
+    const z1 = Math.sin(angle1) * r1z;
+    const x2 = Math.cos(angle2) * r1x;
+    const z2 = Math.sin(angle2) * r1z;
+
+    const mx = (x1 + x2) / 2;
+    const mz = (z1 + z2) / 2;
+    const len = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
+    const angle = Math.atan2(z2 - z1, x2 - x1);
+
+    // Fence segment
+    const seg = new THREE.Mesh(
+      new THREE.BoxGeometry(len, 3.5, 0.3),
+      fenceMat
+    );
+    seg.position.set(mx, 1.75, mz);
+    seg.rotation.y = -angle;
+    seg.castShadow = true;
+    scene.add(seg);
+
+    // Fence post every 4 segments
+    if (i % 4 === 0) {
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(0.4, 4.5, 0.4),
+        fenceMat
+      );
+      post.position.set(x1, 2.25, z1);
+      post.castShadow = true;
+      scene.add(post);
+    }
+  }
+
+  // ---- GUARD TOWERS at corners ----
+  const towerPositions = [
+    { x: fenceRadius * 1.2, z: fenceRadius * 0.9 },
+    { x: -fenceRadius * 1.2, z: fenceRadius * 0.9 },
+    { x: fenceRadius * 1.2, z: -fenceRadius * 0.9 },
+    { x: -fenceRadius * 1.2, z: -fenceRadius * 0.9 },
+    // Gate towers
+    { x: 0, z: fenceRadius * 0.9 + 2 },
+    { x: 0, z: -(fenceRadius * 0.9 + 2) }
+  ];
+
+  const towerMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4a4a, roughness: 0.8, metalness: 0.3
+  });
+
+  towerPositions.forEach(tp => {
+    const towerGroup = new THREE.Group();
+    // Legs
+    const legGeo = new THREE.BoxGeometry(1, 12, 1);
+    [[-2, -2], [2, -2], [-2, 2], [2, 2]].forEach(([dx, dz]) => {
+      const leg = new THREE.Mesh(legGeo, towerMat);
+      leg.position.set(dx, 6, dz);
+      leg.castShadow = true;
+      towerGroup.add(leg);
+    });
+    // Platform
+    const platform = new THREE.Mesh(
+      new THREE.BoxGeometry(7, 0.5, 7),
+      towerMat
+    );
+    platform.position.y = 12;
+    platform.castShadow = true;
+    towerGroup.add(platform);
+    // Cabin
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(5, 3, 5),
+      new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.7, metalness: 0.2 })
+    );
+    cabin.position.y = 13.75;
+    cabin.castShadow = true;
+    towerGroup.add(cabin);
+    // Roof
+    const towerRoof = new THREE.Mesh(
+      new THREE.BoxGeometry(6, 0.3, 6),
+      roofMat
+    );
+    towerRoof.position.y = 15.5;
+    towerRoof.castShadow = true;
+    towerGroup.add(towerRoof);
+
+    // Searchlight
+    const lightMount = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.5, 1, 8),
+      new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.6 })
+    );
+    lightMount.position.set(0, 15.8, 3);
+    towerGroup.add(lightMount);
+
+    towerGroup.position.set(tp.x, 0, tp.z);
+    scene.add(towerGroup);
+  });
+
+  // ---- GATE at south fence ----
+  const gateMat = new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.5, roughness: 0.6 });
+  const gatePost1 = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1), gateMat);
+  gatePost1.position.set(-6, 2.5, fenceRadius * 0.9);
+  gatePost1.castShadow = true;
+  scene.add(gatePost1);
+  const gatePost2 = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1), gateMat);
+  gatePost2.position.set(6, 2.5, fenceRadius * 0.9);
+  gatePost2.castShadow = true;
+  scene.add(gatePost2);
+  const gateBar = new THREE.Mesh(new THREE.BoxGeometry(12, 0.4, 0.3), gateMat);
+  gateBar.position.set(0, 5, fenceRadius * 0.9);
+  scene.add(gateBar);
+
+  // ---- VEHICLES (parked near main building) ----
+  const vehicleMat = new THREE.MeshStandardMaterial({ color: 0x3a3f2e, roughness: 0.8 });
+  const vehiclePositions = [
+    { x: -15, z: 52, rot: 0.1 },
+    { x: -8, z: 53, rot: -0.05 },
+    { x: -22, z: 54, rot: 0.15 },
+    { x: 45, z: -45, rot: 0.8 },  // near research
+    { x: 50, z: -48, rot: 0.75 },
+  ];
+  vehiclePositions.forEach(vp => {
+    const vehicle = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 2, 6),
+      vehicleMat
+    );
+    vehicle.position.set(vp.x, 1, vp.z);
+    vehicle.rotation.y = vp.rot;
+    vehicle.castShadow = true;
+    scene.add(vehicle);
+  });
+}
+
+// ============================================================
+// HATCH -- massive 120m diameter with thermal glow
+// ============================================================
+function createHatch() {
+  const hatchRadius = 60;
+
+  // Hatch rim -- concrete ring
+  const rimGeo = new THREE.RingGeometry(hatchRadius - 3, hatchRadius + 4, 64);
+  rimGeo.rotateX(-Math.PI / 2);
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: 0x555555, roughness: 0.9, metalness: 0.2, side: THREE.DoubleSide
+  });
+  const rim = new THREE.Mesh(rimGeo, rimMat);
+  rim.position.set(0, 0.5, -60);
+  rim.receiveShadow = true;
+  scene.add(rim);
+
+  // Hatch surface -- dark metal with shader
+  const hatchGeo = new THREE.CircleGeometry(hatchRadius - 3, 64);
+  hatchGeo.rotateX(-Math.PI / 2);
+  const hatchMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f*f*(3.0-2.0*f);
+        return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                   mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+      }
+
+      void main() {
+        vec2 center = vec2(0.0, -60.0);
+        float dist = length(vWorldPos.xz - center);
+        float radius = 57.0;
+        float normalDist = dist / radius;
+
+        // Base dark metal
+        vec3 metalColor = vec3(0.12, 0.13, 0.14);
+
+        // Concentric ring pattern (hatch segments)
+        float rings = sin(dist * 0.5) * 0.5 + 0.5;
+        float radialLines = sin(atan(vWorldPos.z + 60.0, vWorldPos.x) * 8.0) * 0.5 + 0.5;
+        metalColor += vec3(0.02) * rings * radialLines;
+
+        // Surface detail noise
+        float n = noise(vWorldPos.xz * 0.3);
+        metalColor += vec3(0.015) * n;
+
+        // Rust / wear patches
+        float rust = noise(vWorldPos.xz * 0.08 + 42.0);
+        vec3 rustColor = vec3(0.18, 0.12, 0.08);
+        metalColor = mix(metalColor, rustColor, smoothstep(0.55, 0.75, rust) * 0.3);
+
+        // Thermal glow -- center is hottest
+        float thermalIntensity = (1.0 - normalDist);
+        thermalIntensity = pow(thermalIntensity, 2.0);
+
+        // Pulsing thermal anomaly
+        float pulse = sin(uTime * 0.8) * 0.15 + 0.85;
+        thermalIntensity *= pulse;
+
+        // Thermal turbulence
+        float turbulence = noise(vWorldPos.xz * 0.05 + uTime * 0.1);
+        thermalIntensity *= (0.8 + turbulence * 0.4);
+
+        // Hot color ramp
+        vec3 thermalColor = mix(
+          vec3(0.4, 0.05, 0.0),   // dark red at edges
+          vec3(1.0, 0.4, 0.05),   // bright orange at center
+          thermalIntensity
+        );
+        // White-hot core
+        thermalColor = mix(thermalColor, vec3(1.0, 0.85, 0.6), pow(thermalIntensity, 3.0));
+
+        // Blend thermal with metal
+        float thermalMask = smoothstep(0.95, 0.3, normalDist) * 0.6;
+        vec3 finalColor = mix(metalColor, thermalColor, thermalMask);
+
+        // Edge darkening
+        float edge = smoothstep(0.85, 1.0, normalDist);
+        finalColor = mix(finalColor, vec3(0.05), edge * 0.5);
+
+        gl_FragColor = vec4(finalColor, 1.0);
+      }
+    `
+  });
+
+  hatchMesh = new THREE.Mesh(hatchGeo, hatchMat);
+  hatchMesh.position.set(0, 0.3, -60);
+  scene.add(hatchMesh);
+
+  // Thermal bloom / glow effect -- additive blended circle above hatch
+  const glowGeo = new THREE.CircleGeometry(hatchRadius + 20, 64);
+  glowGeo.rotateX(-Math.PI / 2);
+  const glowMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 }
+    },
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+      float noise(vec2 p) {
+        vec2 i=floor(p),f=fract(p);
+        f=f*f*(3.0-2.0*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
+      }
+
+      void main() {
+        vec2 center = vec2(0.0, -60.0);
+        float dist = length(vWorldPos.xz - center);
+        float maxR = 80.0;
+        float t = dist / maxR;
+
+        // Bloom falloff
+        float bloom = exp(-t * 2.5) * 0.25;
+
+        // Shimmer
+        float shimmer = noise(vWorldPos.xz * 0.1 + uTime * 0.3) * 0.3;
+        bloom += shimmer * exp(-t * 3.0) * 0.08;
+
+        // Pulse
+        bloom *= 0.85 + sin(uTime * 1.2) * 0.15;
+
+        vec3 glowColor = mix(vec3(1.0, 0.3, 0.05), vec3(1.0, 0.6, 0.2), t);
+        float alpha = bloom * smoothstep(1.0, 0.7, t);
+
+        gl_FragColor = vec4(glowColor * bloom * 2.0, alpha);
+      }
+    `
+  });
+
+  hatchGlowMesh = new THREE.Mesh(glowGeo, glowMat);
+  hatchGlowMesh.position.set(0, 1.5, -60);
+  scene.add(hatchGlowMesh);
+
+  // Hatch support structures -- radial beams visible from above
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const beamLen = hatchRadius * 0.8;
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(beamLen, 0.8, 2),
+      new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.5 })
+    );
+    beam.position.set(
+      Math.cos(angle) * beamLen * 0.4,
+      0.6,
+      -60 + Math.sin(angle) * beamLen * 0.4
+    );
+    beam.rotation.y = -angle;
+    beam.castShadow = true;
+    scene.add(beam);
+  }
+
+  // Center mechanism
+  const centerHub = new THREE.Mesh(
+    new THREE.CylinderGeometry(8, 8, 2, 32),
+    new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.4 })
+  );
+  centerHub.position.set(0, 1, -60);
+  centerHub.castShadow = true;
+  scene.add(centerHub);
+}
+
+// ============================================================
+// TREES along perimeter
+// ============================================================
+function createTrees() {
+  const treeMat = new THREE.MeshStandardMaterial({ color: 0x2a3a20, roughness: 0.9 });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
+
+  // Scatter trees outside fence
+  for (let i = 0; i < 300; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 200 + Math.random() * 500;
+    const x = Math.cos(angle) * dist * (0.9 + Math.random() * 0.3);
+    const z = Math.sin(angle) * dist * (0.7 + Math.random() * 0.3);
+
+    // Skip if too close to compound
+    if (Math.sqrt(x * x + z * z) < 190) continue;
+
+    const height = 4 + Math.random() * 8;
+    const group = new THREE.Group();
+
+    // Trunk
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.5, height * 0.4, 6),
+      trunkMat
+    );
+    trunk.position.y = height * 0.2;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    // Conifer crown (cone shape -- Siberian larch/spruce)
+    const crown = new THREE.Mesh(
+      new THREE.ConeGeometry(height * 0.25, height * 0.7, 8),
+      treeMat
+    );
+    crown.position.y = height * 0.65;
+    crown.castShadow = true;
+    group.add(crown);
+
+    group.position.set(x, 0, z);
+    scene.add(group);
+  }
+
+  // Dense tree line just outside fence (cleared zone gap)
+  for (let i = 0; i < 120; i++) {
+    const angle = (i / 120) * Math.PI * 2;
+    const dist = 210 + Math.random() * 30;
+    const x = Math.cos(angle) * dist * 1.2;
+    const z = Math.sin(angle) * dist * 0.9;
+
+    const height = 6 + Math.random() * 6;
+    const group = new THREE.Group();
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.5, height * 0.4, 6),
+      trunkMat
+    );
+    trunk.position.y = height * 0.2;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    const crown = new THREE.Mesh(
+      new THREE.ConeGeometry(height * 0.22, height * 0.65, 8),
+      treeMat
+    );
+    crown.position.y = height * 0.6;
+    crown.castShadow = true;
+    group.add(crown);
+
+    group.position.set(x, 0, z);
+    scene.add(group);
+  }
+}
+
+// ============================================================
+// VEHICLE TRACKS in snow
+// ============================================================
+function createVehicleTracks() {
+  // Tracks rendered as flat dark strips on the ground
+  const trackMat = new THREE.MeshStandardMaterial({
+    color: 0x3a3830,
+    roughness: 0.95,
+    depthWrite: true
+  });
+
+  // Main road approaching from south gate
+  const roadGeo = new THREE.PlaneGeometry(8, 300);
+  roadGeo.rotateX(-Math.PI / 2);
+  const road = new THREE.Mesh(roadGeo, trackMat);
+  road.position.set(0, 0.15, 300);
+  scene.add(road);
+
+  // Curved tire tracks near buildings -- simple flat quads
+  const trackGeo = new THREE.PlaneGeometry(1.5, 40);
+  trackGeo.rotateX(-Math.PI / 2);
+
+  // Track set 1 -- approaching main building
+  const track1a = new THREE.Mesh(trackGeo, trackMat);
+  track1a.position.set(-3, 0.12, 80);
+  track1a.rotation.y = 0.05;
+  scene.add(track1a);
+
+  const track1b = new THREE.Mesh(trackGeo, trackMat);
+  track1b.position.set(1, 0.12, 80);
+  track1b.rotation.y = -0.03;
+  scene.add(track1b);
+
+  // Track set 2 -- veering toward research building
+  const track2Geo = new THREE.PlaneGeometry(1.5, 60);
+  track2Geo.rotateX(-Math.PI / 2);
+  const track2a = new THREE.Mesh(track2Geo, trackMat);
+  track2a.position.set(30, 0.12, 30);
+  track2a.rotation.y = 0.7;
+  scene.add(track2a);
+
+  const track2b = new THREE.Mesh(track2Geo, trackMat);
+  track2b.position.set(33, 0.12, 28);
+  track2b.rotation.y = 0.72;
+  scene.add(track2b);
+
+  // Perimeter patrol tracks (around inside of fence)
+  const patrolSegments = 60;
+  for (let i = 0; i < patrolSegments; i++) {
+    const angle1 = (i / patrolSegments) * Math.PI * 2;
+    const angle2 = ((i + 1) / patrolSegments) * Math.PI * 2;
+    const r = 155;
+    const rx = r * 1.15;
+    const rz = r * 0.85;
+
+    const x1 = Math.cos(angle1) * rx;
+    const z1 = Math.sin(angle1) * rz;
+    const x2 = Math.cos(angle2) * rx;
+    const z2 = Math.sin(angle2) * rz;
+    const len = Math.sqrt((x2-x1)**2 + (z2-z1)**2);
+    const ang = Math.atan2(z2-z1, x2-x1);
+
+    const seg = new THREE.Mesh(
+      new THREE.PlaneGeometry(len + 0.5, 3),
+      trackMat
+    );
+    seg.rotation.x = -Math.PI / 2;
+    seg.rotation.z = -ang;
+    seg.position.set((x1+x2)/2, 0.12, (z1+z2)/2);
+    scene.add(seg);
+  }
+}
+
+// ============================================================
+// POST-PROCESSING -- fullscreen quad with film grain, chromatic aberration, vignette
+// ============================================================
+let postScene, postCamera, postQuad, renderTarget;
+
+function createPostProcessing() {
+  renderTarget = new THREE.WebGLRenderTarget(
+    window.innerWidth * Math.min(window.devicePixelRatio, 2),
+    window.innerHeight * Math.min(window.devicePixelRatio, 2)
+  );
+
+  postScene = new THREE.Scene();
+  postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  const postMat = new THREE.ShaderMaterial({
+    uniforms: {
+      tDiffuse: { value: renderTarget.texture },
+      uTime: { value: 0 },
+      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uGlitch: { value: 0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform float uTime;
+      uniform vec2 uResolution;
+      uniform float uGlitch;
+      varying vec2 vUv;
+
+      float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+
+      void main() {
+        vec2 uv = vUv;
+
+        // ---- GLITCH EFFECT ----
+        float glitchOffset = 0.0;
+        if (uGlitch > 0.0) {
+          // Horizontal displacement bands
+          float band = floor(uv.y * 40.0 + uTime * 100.0);
+          float bandNoise = hash(vec2(band, floor(uTime * 20.0)));
+          if (bandNoise > 0.7) {
+            glitchOffset = (bandNoise - 0.7) * 0.1 * uGlitch;
+            uv.x += glitchOffset * sign(bandNoise - 0.85);
+          }
+          // Vertical tear
+          float tear = step(0.95, hash(vec2(floor(uTime * 30.0), 0.0))) * uGlitch;
+          uv.y += tear * 0.02 * sin(uv.x * 50.0);
+        }
+
+        // ---- CHROMATIC ABERRATION ----
+        float caStrength = 0.002 + uGlitch * 0.008;
+        vec2 caDir = (uv - 0.5) * caStrength;
+        float r = texture2D(tDiffuse, uv + caDir).r;
+        float g = texture2D(tDiffuse, uv).g;
+        float b = texture2D(tDiffuse, uv - caDir).b;
+        vec3 color = vec3(r, g, b);
+
+        // ---- SATELLITE IMAGERY COLOR GRADE ----
+        // Slight desaturation
+        float lum = dot(color, vec3(0.299, 0.587, 0.114));
+        color = mix(vec3(lum), color, 0.7);
+
+        // Cool/blue tint shift (typical of overhead multispectral composites)
+        color.r *= 0.92;
+        color.b *= 1.08;
+
+        // Contrast boost
+        color = (color - 0.5) * 1.15 + 0.5;
+
+        // ---- VIGNETTE ----
+        float vigDist = length(uv - 0.5) * 1.4;
+        float vig = 1.0 - vigDist * vigDist * 0.6;
+        color *= vig;
+
+        // ---- FILM GRAIN ----
+        float grain = hash(uv * uResolution + fract(uTime * 173.17)) - 0.5;
+        color += grain * 0.08;
+
+        // ---- SCAN LINE hint ----
+        float scanline = sin(uv.y * uResolution.y * 1.5) * 0.02;
+        color -= scanline;
+
+        // ---- SUBTLE NOISE BANDS (satellite interference) ----
+        float noiseBand = sin(uv.y * 800.0 + uTime * 2.0) * 0.005;
+        color += noiseBand;
+
+        // Clamp
+        color = clamp(color, 0.0, 1.0);
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `
+  });
+
+  postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat);
+  postScene.add(postQuad);
+}
+
+// ============================================================
+// ANNOTATION LAYER (2D canvas overlay for boxes, lines, labels)
+// ============================================================
+const annotCanvas = document.getElementById('annotation-layer');
+const annotCtx = annotCanvas.getContext('2d');
+
+function resizeAnnotationCanvas() {
+  annotCanvas.width = window.innerWidth;
+  annotCanvas.height = window.innerHeight;
+  annotCanvas.style.position = 'absolute';
+  annotCanvas.style.top = '0';
+  annotCanvas.style.left = '0';
+  annotCanvas.style.zIndex = '15';
+  annotCanvas.style.pointerEvents = 'none';
+}
+resizeAnnotationCanvas();
+
+function worldToScreen(worldPos) {
+  const vec = new THREE.Vector3(worldPos.x, worldPos.y, worldPos.z);
+  vec.project(camera);
+  return {
+    x: (vec.x * 0.5 + 0.5) * window.innerWidth,
+    y: (-vec.y * 0.5 + 0.5) * window.innerHeight
+  };
+}
+
+function drawAnnotations() {
+  const w = annotCanvas.width;
+  const h = annotCanvas.height;
+  annotCtx.clearRect(0, 0, w, h);
+
+  annotCtx.font = '11px "Share Tech Mono", monospace';
+  annotCtx.textBaseline = 'top';
+
+  // Helper: draw analyst annotation box
+  function drawAnnotBox(worldCenter, label, sublabel, color = '#8fbc6a') {
+    const halfW = arguments[4] || 40;
+    const halfH = arguments[5] || 25;
+
+    const corners = [
+      worldToScreen({ x: worldCenter.x - halfW, y: worldCenter.y || 0, z: worldCenter.z - halfH }),
+      worldToScreen({ x: worldCenter.x + halfW, y: worldCenter.y || 0, z: worldCenter.z - halfH }),
+      worldToScreen({ x: worldCenter.x + halfW, y: worldCenter.y || 0, z: worldCenter.z + halfH }),
+      worldToScreen({ x: worldCenter.x - halfW, y: worldCenter.y || 0, z: worldCenter.z + halfH }),
+    ];
+
+    annotCtx.strokeStyle = color;
+    annotCtx.lineWidth = 1.5;
+    annotCtx.setLineDash([6, 4]);
+    annotCtx.beginPath();
+    annotCtx.moveTo(corners[0].x, corners[0].y);
+    for (let i = 1; i < 4; i++) annotCtx.lineTo(corners[i].x, corners[i].y);
+    annotCtx.closePath();
+    annotCtx.stroke();
+    annotCtx.setLineDash([]);
+
+    // Corner tick marks
+    const tickLen = 8;
+    corners.forEach((c, idx) => {
+      annotCtx.beginPath();
+      annotCtx.strokeStyle = color;
+      annotCtx.lineWidth = 2;
+      const nx = idx === 0 || idx === 3 ? 1 : -1;
+      const ny = idx < 2 ? 1 : -1;
+      annotCtx.moveTo(c.x, c.y);
+      annotCtx.lineTo(c.x + tickLen * nx, c.y);
+      annotCtx.moveTo(c.x, c.y);
+      annotCtx.lineTo(c.x, c.y + tickLen * ny);
+      annotCtx.stroke();
+    });
+
+    // Label above box
+    const topCenter = {
+      x: (corners[0].x + corners[1].x) / 2,
+      y: Math.min(corners[0].y, corners[1].y) - 18
+    };
+
+    annotCtx.fillStyle = color;
+    annotCtx.textAlign = 'center';
+    annotCtx.fillText(label, topCenter.x, topCenter.y);
+    if (sublabel) {
+      annotCtx.fillStyle = color + '99';
+      annotCtx.fillText(sublabel, topCenter.x, topCenter.y + 14);
+    }
+  }
+
+  // Helper: draw measurement line
+  function drawMeasureLine(p1World, p2World, label, color = '#8fbc6a') {
+    const s1 = worldToScreen(p1World);
+    const s2 = worldToScreen(p2World);
+
+    annotCtx.strokeStyle = color;
+    annotCtx.lineWidth = 1;
+    annotCtx.setLineDash([3, 3]);
+    annotCtx.beginPath();
+    annotCtx.moveTo(s1.x, s1.y);
+    annotCtx.lineTo(s2.x, s2.y);
+    annotCtx.stroke();
+    annotCtx.setLineDash([]);
+
+    // End ticks
+    const angle = Math.atan2(s2.y - s1.y, s2.x - s1.x);
+    const perpAngle = angle + Math.PI / 2;
+    const tickSize = 6;
+    [s1, s2].forEach(s => {
+      annotCtx.beginPath();
+      annotCtx.moveTo(s.x - Math.cos(perpAngle) * tickSize, s.y - Math.sin(perpAngle) * tickSize);
+      annotCtx.lineTo(s.x + Math.cos(perpAngle) * tickSize, s.y + Math.sin(perpAngle) * tickSize);
+      annotCtx.stroke();
+    });
+
+    // Label at midpoint
+    const mid = { x: (s1.x + s2.x) / 2, y: (s1.y + s2.y) / 2 - 8 };
+    annotCtx.fillStyle = color;
+    annotCtx.textAlign = 'center';
+    annotCtx.fillText(label, mid.x, mid.y);
+  }
+
+  // --- Draw annotation boxes ---
+
+  // Main building
+  drawAnnotBox(
+    { x: -30, y: 16, z: 30 },
+    'BLDG-A: PRIMARY COMMAND CENTER',
+    '60m x 35m / 4 FLOORS EST.',
+    '#8fbc6a', 35, 22
+  );
+
+  // Research building
+  drawAnnotBox(
+    { x: 65, y: 12, z: -25 },
+    'BLDG-B: RESEARCH / LABORATORY',
+    'SAT UPLINK CONFIRMED / L-SHAPED',
+    '#8fbc6a', 30, 20
+  );
+
+  // Generator building
+  drawAnnotBox(
+    { x: -80, y: 8, z: -20 },
+    'BLDG-C: GENERATOR / UTILITY',
+    'DIESEL EXHAUST SIGNATURE',
+    '#8fbc6a', 12, 10
+  );
+
+  // Hatch -- red annotation
+  drawAnnotBox(
+    { x: 0, y: 2, z: -60 },
+    'OBJ ALPHA: SUBTERRANEAN HATCH',
+    'DIA: ~120m / THERMAL ANOMALY',
+    '#ff4444', 65, 65
+  );
+
+  // --- Measurement lines ---
+  drawMeasureLine(
+    { x: -60, y: 0, z: -60 },
+    { x: 60, y: 0, z: -60 },
+    '~120m',
+    '#ffaa44'
+  );
+
+  drawMeasureLine(
+    { x: -60, y: 16, z: 30 },
+    { x: 0, y: 16, z: 30 },
+    '~60m',
+    '#8fbc6a'
+  );
+
+  // Fence perimeter label
+  const fenceLabel = worldToScreen({ x: 195, y: 0, z: 0 });
+  annotCtx.fillStyle = '#8fbc6a88';
+  annotCtx.textAlign = 'left';
+  annotCtx.fillText('PERIMETER FENCE', fenceLabel.x, fenceLabel.y);
+  annotCtx.fillText('DOUBLE-WIRE / ELECTRIFIED', fenceLabel.x, fenceLabel.y + 14);
+
+  // Guard tower labels
+  const towerLabel = worldToScreen({ x: 204, y: 18, z: 153 });
+  annotCtx.fillStyle = '#8fbc6a88';
+  annotCtx.fillText('GT-1', towerLabel.x, towerLabel.y);
+
+  // Crosshair at center of hatch
+  const hatchCenter = worldToScreen({ x: 0, y: 1, z: -60 });
+  const crossSize = 12;
+  annotCtx.strokeStyle = '#ff444488';
+  annotCtx.lineWidth = 1;
+  annotCtx.beginPath();
+  annotCtx.moveTo(hatchCenter.x - crossSize, hatchCenter.y);
+  annotCtx.lineTo(hatchCenter.x + crossSize, hatchCenter.y);
+  annotCtx.moveTo(hatchCenter.x, hatchCenter.y - crossSize);
+  annotCtx.lineTo(hatchCenter.x, hatchCenter.y + crossSize);
+  annotCtx.stroke();
+
+  // Small circle
+  annotCtx.beginPath();
+  annotCtx.arc(hatchCenter.x, hatchCenter.y, 4, 0, Math.PI * 2);
+  annotCtx.stroke();
+}
+
+// ============================================================
+// CONTROLS -- pan + zoom
+// ============================================================
+function setupControls() {
+  const canvas = document.getElementById('webgl-canvas');
+
+  canvas.addEventListener('mousedown', e => {
+    isDragging = true;
+    dragStart.set(e.clientX, e.clientY);
+    panStart.copy(panOffset);
+    canvas.style.cursor = 'grabbing';
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    mouseScreen.set(e.clientX, e.clientY);
+
+    if (isDragging) {
+      const dx = (e.clientX - dragStart.x) * 0.8 / zoomLevel;
+      const dy = (e.clientY - dragStart.y) * 0.8 / zoomLevel;
+      panOffset.set(panStart.x - dx, panStart.y + dy);
+    }
+
+    updateCoordReadout(e.clientX, e.clientY);
+  });
+
+  canvas.addEventListener('mouseup', () => {
+    isDragging = false;
+    canvas.style.cursor = 'crosshair';
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    isDragging = false;
+    canvas.style.cursor = 'crosshair';
+  });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const zoomDelta = e.deltaY > 0 ? 0.92 : 1.08;
+    zoomLevel = Math.max(0.3, Math.min(5.0, zoomLevel * zoomDelta));
+    document.getElementById('zoom-indicator').textContent = `ZOOM: ${zoomLevel.toFixed(2)}x`;
+  }, { passive: false });
+
+  canvas.style.cursor = 'crosshair';
+
+  // Touch support
+  let lastTouchDist = 0;
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      dragStart.set(e.touches[0].clientX, e.touches[0].clientY);
+      panStart.copy(panOffset);
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      lastTouchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && isDragging) {
+      const dx = (e.touches[0].clientX - dragStart.x) * 0.8 / zoomLevel;
+      const dy = (e.touches[0].clientY - dragStart.y) * 0.8 / zoomLevel;
+      panOffset.set(panStart.x - dx, panStart.y + dy);
+    } else if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const scale = dist / lastTouchDist;
+      zoomLevel = Math.max(0.3, Math.min(5.0, zoomLevel * scale));
+      lastTouchDist = dist;
+      document.getElementById('zoom-indicator').textContent = `ZOOM: ${zoomLevel.toFixed(2)}x`;
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', () => { isDragging = false; });
+}
+
+// ============================================================
+// COORD READOUT -- convert mouse position to fake geographic coords
+// ============================================================
+function updateCoordReadout(mx, my) {
+  // Raycast to get world position under mouse
+  const ndc = new THREE.Vector2(
+    (mx / window.innerWidth) * 2 - 1,
+    -(my / window.innerHeight) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, camera);
+
+  // Intersect with y=0 plane
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const worldPoint = new THREE.Vector3();
+  raycaster.ray.intersectPlane(plane, worldPoint);
+
+  if (worldPoint) {
+    // Map world coords to fake geographic coords
+    // 1 unit ~ 1 meter, base coords at center
+    const lat = BASE_LAT + worldPoint.z * -0.000009;
+    const lon = BASE_LON + worldPoint.x * 0.000027;
+    const latDir = lat >= 0 ? 'N' : 'S';
+    const lonDir = lon >= 0 ? 'E' : 'W';
+
+    document.getElementById('cursor-coords').textContent =
+      `${Math.abs(lat).toFixed(6)}${latDir}  ${Math.abs(lon).toFixed(6)}${lonDir}`;
+
+    // Fake MGRS
+    const mgrsZone = '42W';
+    const mgrsE = Math.floor(300000 + worldPoint.x * 1.1);
+    const mgrsN = Math.floor(7920000 + worldPoint.z * -1.1);
+    document.getElementById('cursor-mgrs').textContent =
+      `MGRS: ${mgrsZone} ${mgrsE} ${mgrsN}`;
+
+    // Altitude from terrain (approximate)
+    const alt = simplex.fbm(worldPoint.x * 0.003, worldPoint.z * 0.003, 6) * 12 + 127;
+    document.getElementById('cursor-alt').textContent = `ELEV: ${alt.toFixed(1)}m MSL`;
+  }
+}
+
+// ============================================================
+// DATE/TIME display
+// ============================================================
+function updateDatetime() {
+  // Use a fixed "classified" timestamp that advances in real-time
+  const now = new Date();
+  // Pretend this is a capture from a specific date
+  const fakeDate = new Date('2026-02-14T03:42:17Z');
+  fakeDate.setSeconds(fakeDate.getSeconds() + Math.floor((now.getTime() % 60000) / 1000));
+
+  const dateStr = fakeDate.toISOString().replace('T', ' ').substring(0, 19) + 'Z';
+  document.getElementById('datetime-display').textContent = `ACQ: ${dateStr}`;
+}
+
+// ============================================================
+// RESIZE
+// ============================================================
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+
+  if (renderTarget) {
+    renderTarget.setSize(
+      w * Math.min(window.devicePixelRatio, 2),
+      h * Math.min(window.devicePixelRatio, 2)
+    );
+  }
+  if (postQuad) {
+    postQuad.material.uniforms.uResolution.value.set(w, h);
+  }
+
+  resizeAnnotationCanvas();
+}
+
+// ============================================================
+// ANIMATION LOOP
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+  const elapsed = clock.getElapsedTime();
+  frameCount++;
+
+  // Update camera position based on pan and zoom
+  const targetCamY = 800 / zoomLevel;
+  const targetCamZ = 120 / zoomLevel;
+  camera.position.x += (panOffset.x - camera.position.x) * 0.08;
+  camera.position.y += (targetCamY - camera.position.y) * 0.08;
+  camera.position.z += (panOffset.y + targetCamZ - camera.position.z) * 0.08;
+
+  const lookTarget = new THREE.Vector3(panOffset.x, 0, panOffset.y);
+  camera.lookAt(lookTarget);
+
+  // Update shader uniforms
+  if (terrainMesh) {
+    terrainMesh.material.uniforms.uTime.value = elapsed;
+  }
+  if (hatchMesh) {
+    hatchMesh.material.uniforms.uTime.value = elapsed;
+  }
+  if (hatchGlowMesh) {
+    hatchGlowMesh.material.uniforms.uTime.value = elapsed;
+  }
+
+  // Glitch effect
+  glitchTimer += delta;
+  let glitchIntensity = 0;
+  if (glitchTimer > nextGlitch) {
+    const glitchDuration = 0.15 + Math.random() * 0.3;
+    const glitchProgress = glitchTimer - nextGlitch;
+    if (glitchProgress < glitchDuration) {
+      glitchIntensity = Math.sin(glitchProgress / glitchDuration * Math.PI);
+      document.getElementById('glitch-overlay').style.opacity = glitchIntensity * 0.15;
+    } else {
+      document.getElementById('glitch-overlay').style.opacity = 0;
+      glitchTimer = 0;
+      nextGlitch = Math.random() * 10 + 5;
+    }
+  }
+
+  // Frame counter
+  if (frameCount % 3 === 0) {
+    document.getElementById('frame-counter').textContent =
+      `FRAME: ${String(frameCount).padStart(4, '0')}`;
+  }
+
+  // Render scene to render target
+  renderer.setRenderTarget(renderTarget);
+  renderer.render(scene, camera);
+
+  // Render post-processing pass
+  renderer.setRenderTarget(null);
+  postQuad.material.uniforms.tDiffuse.value = renderTarget.texture;
+  postQuad.material.uniforms.uTime.value = elapsed;
+  postQuad.material.uniforms.uGlitch.value = glitchIntensity;
+  renderer.render(postScene, postCamera);
+
+  // Draw 2D annotations
+  drawAnnotations();
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+init();
+
+</script>
+</body>
+</html>

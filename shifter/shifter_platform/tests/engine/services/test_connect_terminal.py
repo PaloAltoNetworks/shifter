@@ -6,7 +6,6 @@ from unittest.mock import Mock, patch
 import pytest
 
 
-@pytest.mark.django_db
 class TestConnectTerminal:
     """Tests for connect_terminal() in engine/services.py.
 

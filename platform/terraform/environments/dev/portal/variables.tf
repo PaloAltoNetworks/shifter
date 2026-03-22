@@ -276,11 +276,11 @@ variable "enable_waf_logging" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner
+# Engine Provisioner
 # ------------------------------------------------------------------------------
 
-variable "pulumi_container_tag" {
-  description = "Docker image tag for Pulumi provisioner container"
+variable "engine_container_tag" {
+  description = "Docker image tag for engine provisioner container"
   type        = string
   default     = "latest"
 }

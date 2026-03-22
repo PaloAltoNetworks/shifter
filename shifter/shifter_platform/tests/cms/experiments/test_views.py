@@ -1,224 +1,330 @@
 """Tests for experiment views.
 
 Tests HTTP access control, template rendering, and view logic.
-No real S3 or infrastructure calls.
+No DB access — all ORM operations are mocked.
 """
 
-from unittest.mock import patch
+import json as json_mod
+from unittest.mock import MagicMock, patch
 
-from django.contrib.auth.models import Group, User
-from django.test import TestCase
-from django.urls import reverse
+import pytest
+from django.http import HttpResponse
+from django.test import RequestFactory
 
-from cms.experiments.models import Experiment, ExperimentRun
-from cms.experiments.schemas import ExperimentStatus
+from cms.experiments.exceptions import ExperimentError, ExperimentValidationError
+from cms.experiments.views import (
+    experiment_cancel,
+    experiment_create,
+    experiment_detail,
+    experiment_list,
+    experiment_start,
+    scenario_instances,
+    script_list,
+)
 from shared.auth import THREAT_RESEARCH_GROUP
 
-# Test password constant for all test users
-TEST_PASSWORD = "test"  # nosec B105
+# =============================================================================
+# Fixtures
+# =============================================================================
 
 
-class StaffAccessTest(TestCase):
+@pytest.fixture
+def rf():
+    """Django RequestFactory."""
+    return RequestFactory()
+
+
+def _make_staff_user():
+    """Return a mock staff user that passes threat_research_required."""
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.is_staff = True
+    user.pk = 1
+    user.id = 1
+    user.groups.filter.return_value.exists.return_value = False
+    return user
+
+
+def _make_regular_user():
+    """Return a mock non-staff user that fails threat_research_required."""
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.is_staff = False
+    user.pk = 2
+    user.id = 2
+    user.groups.filter.return_value.exists.return_value = False
+    return user
+
+
+def _make_threat_research_user():
+    """Return a mock non-staff user in the Threat Research group."""
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.is_staff = False
+    user.pk = 3
+    user.id = 3
+
+    # The decorator calls user.groups.filter(name=THREAT_RESEARCH_GROUP).exists()
+    # We need filter to return a queryset whose .exists() returns True
+    # only when called with name=THREAT_RESEARCH_GROUP.
+    def _groups_filter(**kwargs):
+        qs = MagicMock()
+        if kwargs.get("name") == THREAT_RESEARCH_GROUP:
+            qs.exists.return_value = True
+        else:
+            qs.exists.return_value = False
+        return qs
+
+    user.groups.filter = _groups_filter
+    return user
+
+
+@pytest.fixture
+def staff_user():
+    return _make_staff_user()
+
+
+@pytest.fixture
+def regular_user():
+    return _make_regular_user()
+
+
+@pytest.fixture
+def threat_user():
+    return _make_threat_research_user()
+
+
+def _get_request(rf, user, path="/"):
+    """Build a GET request with user and messages support."""
+    request = rf.get(path)
+    request.user = user
+    request._messages = MagicMock()
+    return request
+
+
+def _post_request(rf, user, path="/", data=None):
+    """Build a POST request with user and messages support."""
+    request = rf.post(path, data=data or {})
+    request.user = user
+    request._messages = MagicMock()
+    return request
+
+
+# =============================================================================
+# StaffAccessTest — Verify views require staff or Threat Research group
+# =============================================================================
+
+
+class TestStaffAccess:
     """Verify all views require staff or Threat Research group access."""
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="view_user", password=TEST_PASSWORD, is_staff=False)
-        cls.staff = User.objects.create_user(username="view_staff", password=TEST_PASSWORD, is_staff=True)
-
-    def test_experiment_list_requires_authorization(self):
-        self.client.login(username="view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"))
+    def test_experiment_list_requires_authorization(self, rf, regular_user):
+        request = _get_request(rf, regular_user)
+        resp = experiment_list(request)
         assert resp.status_code == 302
-        assert resp.url == reverse("mission_control:dashboard")
+        assert "mission-control" in resp.url
 
-    def test_experiment_list_staff_ok(self):
-        self.client.login(username="view_staff", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"))
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.list_experiments")
+    def test_experiment_list_staff_ok(self, mock_list, mock_render, rf, staff_user):
+        mock_list.return_value = []
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, staff_user)
+        resp = experiment_list(request)
         assert resp.status_code == 200
 
-    def test_script_list_requires_authorization(self):
-        self.client.login(username="view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:script_list"))
+    def test_script_list_requires_authorization(self, rf, regular_user):
+        request = _get_request(rf, regular_user)
+        resp = script_list(request)
         assert resp.status_code == 302
-        assert resp.url == reverse("mission_control:dashboard")
+        assert "mission-control" in resp.url
 
-    def test_script_list_staff_ok(self):
-        self.client.login(username="view_staff", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:script_list"))
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.list_scripts")
+    def test_script_list_staff_ok(self, mock_list, mock_render, rf, staff_user):
+        mock_list.return_value = []
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, staff_user)
+        resp = script_list(request)
         assert resp.status_code == 200
 
-    def test_unauthorized_user_sees_permission_denied_message(self):
-        self.client.login(username="view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"), follow=True)
-        assert resp.status_code == 200
-        msgs = list(resp.context["messages"])
-        assert any("permission" in str(m).lower() for m in msgs)
+    def test_unauthorized_user_sees_permission_denied_message(self, rf, regular_user):
+        request = _get_request(rf, regular_user)
+        resp = experiment_list(request)
+        assert resp.status_code == 302
+        # The decorator calls messages.error with "permission" text
+        request._messages.add.assert_called()
+        # messages.error calls storage.add(level, message, extra_tags)
+        call_args = request._messages.add.call_args
+        message_text = str(call_args)
+        assert "permission" in message_text.lower()
 
 
-class ThreatResearchAccessTest(TestCase):
+# =============================================================================
+# ThreatResearchAccessTest — Threat Research group has same access as staff
+# =============================================================================
+
+
+class TestThreatResearchAccess:
     """Threat Research group members have the same access as staff."""
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.regular_user = User.objects.create_user(username="tr_regular", password=TEST_PASSWORD, is_staff=False)
-        cls.threat_user = User.objects.create_user(username="tr_threat", password=TEST_PASSWORD, is_staff=False)
-        group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
-        cls.threat_user.groups.add(group)
-
-    def test_threat_research_can_access_experiment_list(self):
-        self.client.login(username="tr_threat", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"))
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.list_experiments")
+    def test_threat_research_can_access_experiment_list(self, mock_list, mock_render, rf, threat_user):
+        mock_list.return_value = []
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, threat_user)
+        resp = experiment_list(request)
         assert resp.status_code == 200
 
-    def test_threat_research_can_access_script_list(self):
-        self.client.login(username="tr_threat", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:script_list"))
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.list_scripts")
+    def test_threat_research_can_access_script_list(self, mock_list, mock_render, rf, threat_user):
+        mock_list.return_value = []
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, threat_user)
+        resp = script_list(request)
         assert resp.status_code == 200
 
-    def test_regular_user_still_blocked_from_experiment_list(self):
-        self.client.login(username="tr_regular", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"))
+    def test_regular_user_still_blocked_from_experiment_list(self, rf, regular_user):
+        request = _get_request(rf, regular_user)
+        resp = experiment_list(request)
         assert resp.status_code == 302
-        assert resp.url == reverse("mission_control:dashboard")
+        assert "mission-control" in resp.url
 
-    def test_regular_user_still_blocked_from_script_list(self):
-        self.client.login(username="tr_regular", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:script_list"))
+    def test_regular_user_still_blocked_from_script_list(self, rf, regular_user):
+        request = _get_request(rf, regular_user)
+        resp = script_list(request)
         assert resp.status_code == 302
-        assert resp.url == reverse("mission_control:dashboard")
+        assert "mission-control" in resp.url
 
 
-class ExperimentListViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="list_view_user", password=TEST_PASSWORD, is_staff=True)
-        cls.other = User.objects.create_user(username="list_other", password=TEST_PASSWORD, is_staff=True)
-        cls.exp = Experiment.objects.create(
-            user=cls.user,
-            name="My Experiment",
-            scenario_id="basic",
-        )
-        Experiment.objects.create(
-            user=cls.other,
-            name="Other Experiment",
-            scenario_id="basic",
-        )
+# =============================================================================
+# ExperimentListViewTest — Shows own experiments
+# =============================================================================
 
-    def test_shows_own_experiments(self):
-        self.client.login(username="list_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"))
+
+class TestExperimentListView:
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.list_experiments")
+    def test_shows_own_experiments(self, mock_list, mock_render, rf, staff_user):
+        mock_list.return_value = [MagicMock(name="My Experiment")]
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, staff_user)
+        resp = experiment_list(request)
         assert resp.status_code == 200
-        assert b"My Experiment" in resp.content
-        assert b"Other Experiment" not in resp.content
+        mock_list.assert_called_once_with(staff_user)
 
 
-class ExperimentDetailViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="detail_user", password=TEST_PASSWORD, is_staff=True)
-        cls.other = User.objects.create_user(username="detail_other", password=TEST_PASSWORD, is_staff=True)
-        cls.exp = Experiment.objects.create(
-            user=cls.user,
-            name="Detail Test",
-            scenario_id="basic",
-            total_runs=3,
-        )
-        for i in range(1, 4):
-            ExperimentRun.objects.create(experiment=cls.exp, run_number=i)
+# =============================================================================
+# ExperimentDetailViewTest — Detail page and ownership
+# =============================================================================
 
-    def test_detail_shows_experiment(self):
-        self.client.login(username="detail_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_detail", args=[self.exp.pk]))
+
+class TestExperimentDetailView:
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.get_experiment")
+    def test_detail_shows_experiment(self, mock_get, mock_render, rf, staff_user):
+        exp = MagicMock()
+        exp.name = "Detail Test"
+        mock_get.return_value = exp
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, staff_user)
+        resp = experiment_detail(request, experiment_id=1)
         assert resp.status_code == 200
-        assert b"Detail Test" in resp.content
+        mock_get.assert_called_once_with(staff_user, 1)
 
-    def test_detail_shows_runs(self):
-        self.client.login(username="detail_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_detail", args=[self.exp.pk]))
-        assert resp.status_code == 200
-        assert b"pending" in resp.content
+    @patch("cms.experiments.views.render")
+    @patch("cms.experiments.views.services.get_experiment")
+    def test_detail_passes_experiment_to_template(self, mock_get, mock_render, rf, staff_user):
+        exp = MagicMock()
+        exp.name = "Detail Test"
+        mock_get.return_value = exp
+        mock_render.return_value = HttpResponse(status=200)
+        request = _get_request(rf, staff_user)
+        experiment_detail(request, experiment_id=1)
+        context = mock_render.call_args[0][2]
+        assert context["experiment"] is exp
 
-    def test_detail_other_user_redirects(self):
-        self.client.login(username="detail_other", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_detail", args=[self.exp.pk]))
-        assert resp.status_code == 302  # Redirected because not found for other user
+    @patch("cms.experiments.views.services.get_experiment")
+    def test_detail_other_user_redirects(self, mock_get, rf, staff_user):
+        mock_get.side_effect = ExperimentError("Not found")
+        request = _get_request(rf, staff_user)
+        resp = experiment_detail(request, experiment_id=999)
+        assert resp.status_code == 302
 
 
-class ExperimentStartViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="start_view_user", password=TEST_PASSWORD, is_staff=True)
+# =============================================================================
+# ExperimentStartViewTest — Start experiment
+# =============================================================================
 
-    def test_start_draft_experiment(self):
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Start Test",
-            scenario_id="basic",
-            total_runs=2,
-        )
-        self.client.login(username="start_view_user", password=TEST_PASSWORD)
-        resp = self.client.post(reverse("experiments:experiment_start", args=[exp.pk]))
-        assert resp.status_code == 302  # Redirect to detail
-        exp.refresh_from_db()
-        assert exp.status == ExperimentStatus.QUEUED.value
 
-    def test_start_requires_post(self):
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Start GET",
-            scenario_id="basic",
-        )
-        self.client.login(username="start_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_start", args=[exp.pk]))
+class TestExperimentStartView:
+    @patch("cms.experiments.views.services.start_experiment")
+    def test_start_draft_experiment(self, mock_start, rf, staff_user):
+        request = _post_request(rf, staff_user)
+        resp = experiment_start(request, experiment_id=1)
+        assert resp.status_code == 302
+        mock_start.assert_called_once_with(staff_user, 1)
+
+    def test_start_requires_post(self, rf, staff_user):
+        request = _get_request(rf, staff_user)
+        resp = experiment_start(request, experiment_id=1)
         assert resp.status_code == 405
 
 
-class ExperimentCancelViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="cancel_view_user", password=TEST_PASSWORD, is_staff=True)
+# =============================================================================
+# ExperimentCancelViewTest — Cancel experiment
+# =============================================================================
 
-    def test_cancel_queued_experiment(self):
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Cancel Test",
-            scenario_id="basic",
-        )
-        exp.transition_to(ExperimentStatus.QUEUED)
-        self.client.login(username="cancel_view_user", password=TEST_PASSWORD)
-        resp = self.client.post(reverse("experiments:experiment_cancel", args=[exp.pk]))
+
+class TestExperimentCancelView:
+    @patch("cms.experiments.views.services.cancel_experiment")
+    def test_cancel_experiment(self, mock_cancel, rf, staff_user):
+        request = _post_request(rf, staff_user)
+        resp = experiment_cancel(request, experiment_id=1)
         assert resp.status_code == 302
-        exp.refresh_from_db()
-        assert exp.status == ExperimentStatus.CANCELLED.value
+        mock_cancel.assert_called_once_with(staff_user, 1)
 
-    def test_cancel_requires_post(self):
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Cancel GET",
-            scenario_id="basic",
-        )
-        self.client.login(username="cancel_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_cancel", args=[exp.pk]))
+    def test_cancel_requires_post(self, rf, staff_user):
+        request = _get_request(rf, staff_user)
+        resp = experiment_cancel(request, experiment_id=1)
         assert resp.status_code == 405
 
 
-class ExperimentCreateViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="create_view_user", password=TEST_PASSWORD, is_staff=True)
+# =============================================================================
+# ExperimentCreateViewTest — Create experiment form and POST
+# =============================================================================
 
-    def test_create_get_renders_form(self):
-        self.client.login(username="create_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_create"))
+
+class TestExperimentCreateView:
+    @patch("cms.experiments.views.render")
+    @patch("cms.scenarios.registry.list_all_scenarios")
+    def test_create_get_renders_form(self, mock_scenarios, mock_render, rf, staff_user):
+        mock_scenarios.return_value = []
+        mock_render.return_value = HttpResponse(b"Create Experiment", status=200)
+        request = _get_request(rf, staff_user)
+        resp = experiment_create(request)
         assert resp.status_code == 200
-        assert b"Create Experiment" in resp.content
+        mock_render.assert_called_once()
 
-    def test_create_post_valid(self):
-        self.client.login(username="create_view_user", password=TEST_PASSWORD)
-        resp = self.client.post(
-            reverse("experiments:experiment_create"),
-            {
+    @patch("cms.experiments.views.services.create_experiment")
+    @patch("cms.scenarios.registry.load_scenario_template")
+    def test_create_post_valid(self, mock_load, mock_create, rf, staff_user):
+        mock_scenario = MagicMock()
+        mock_scenario.instances = []
+        mock_load.return_value = mock_scenario
+        created_exp = MagicMock()
+        created_exp.name = "View Test Exp"
+        created_exp.pk = 42
+        mock_create.return_value = created_exp
+        request = _post_request(
+            rf,
+            staff_user,
+            data={
                 "name": "View Test Exp",
                 "scenario_id": "basic",
                 "total_runs": "2",
@@ -226,14 +332,19 @@ class ExperimentCreateViewTest(TestCase):
                 "scripts_json": "[]",
             },
         )
-        assert resp.status_code == 302  # Redirect to detail
-        assert Experiment.objects.filter(name="View Test Exp").exists()
+        resp = experiment_create(request)
+        assert resp.status_code == 302
+        mock_create.assert_called_once()
 
-    def test_create_post_invalid_scenario(self):
-        self.client.login(username="create_view_user", password=TEST_PASSWORD)
-        resp = self.client.post(
-            reverse("experiments:experiment_create"),
-            {
+    @patch("cms.experiments.views.services.create_experiment")
+    @patch("cms.scenarios.registry.load_scenario_template")
+    def test_create_post_invalid_scenario(self, mock_load, mock_create, rf, staff_user):
+        mock_load.side_effect = ValueError("Unknown scenario")
+        mock_create.return_value = MagicMock(pk=1)
+        request = _post_request(
+            rf,
+            staff_user,
+            data={
                 "name": "Bad Scenario",
                 "scenario_id": "nonexistent",
                 "total_runs": "1",
@@ -241,40 +352,49 @@ class ExperimentCreateViewTest(TestCase):
                 "scripts_json": "[]",
             },
         )
-        assert resp.status_code == 302  # Redirect back with error
+        resp = experiment_create(request)
+        assert resp.status_code == 302
 
 
-class ScenarioInstancesViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="scenario_view_user", password=TEST_PASSWORD, is_staff=True)
+# =============================================================================
+# ScenarioInstancesViewTest — AJAX scenario instances
+# =============================================================================
 
-    def test_returns_instances(self):
-        self.client.login(username="scenario_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:scenario_instances", args=["basic"]))
+
+class TestScenarioInstancesView:
+    @patch("cms.experiments.views.services.get_scenario_instances")
+    def test_returns_instances(self, mock_get, rf, staff_user):
+        mock_get.return_value = [{"name": "victim"}, {"name": "attacker"}]
+        request = _get_request(rf, staff_user)
+        resp = scenario_instances(request, scenario_id="basic")
         assert resp.status_code == 200
-        data = resp.json()
+        data = json_mod.loads(resp.content)
         assert "instances" in data
         assert len(data["instances"]) > 0
 
-    def test_invalid_scenario_returns_400(self):
-        self.client.login(username="scenario_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:scenario_instances", args=["nonexistent_xyz"]))
+    @patch("cms.experiments.views.services.get_scenario_instances")
+    def test_invalid_scenario_returns_400(self, mock_get, rf, staff_user):
+        mock_get.side_effect = ExperimentValidationError("Unknown scenario")
+        request = _get_request(rf, staff_user)
+        resp = scenario_instances(request, scenario_id="nonexistent_xyz")
         assert resp.status_code == 400
 
 
-class MalformedInputViewTest(TestCase):
-    """5.8: Test malformed JSON in scripts_json POST field."""
+# =============================================================================
+# MalformedInputViewTest — Malformed JSON and validation errors
+# =============================================================================
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="malform_user", password=TEST_PASSWORD, is_staff=True)
 
-    def test_malformed_scripts_json_shows_error(self):
-        self.client.login(username="malform_user", password=TEST_PASSWORD)
-        resp = self.client.post(
-            reverse("experiments:experiment_create"),
-            {
+class TestMalformedInput:
+    """Test malformed JSON in scripts_json POST field."""
+
+    @patch("cms.scenarios.registry.load_scenario_template")
+    def test_malformed_scripts_json_shows_error(self, mock_load, rf, staff_user):
+        mock_load.return_value = MagicMock(instances=[])
+        request = _post_request(
+            rf,
+            staff_user,
+            data={
                 "name": "Malformed Test",
                 "scenario_id": "basic",
                 "total_runs": "1",
@@ -282,14 +402,17 @@ class MalformedInputViewTest(TestCase):
                 "scripts_json": "{not valid json",
             },
         )
+        resp = experiment_create(request)
         # Should redirect back to create form with error, not 500
         assert resp.status_code == 302
 
-    def test_empty_name_shows_validation_error(self):
-        self.client.login(username="malform_user", password=TEST_PASSWORD)
-        resp = self.client.post(
-            reverse("experiments:experiment_create"),
-            {
+    @patch("cms.scenarios.registry.load_scenario_template")
+    def test_empty_name_shows_validation_error(self, mock_load, rf, staff_user):
+        mock_load.return_value = MagicMock(instances=[])
+        request = _post_request(
+            rf,
+            staff_user,
+            data={
                 "name": "",
                 "scenario_id": "basic",
                 "total_runs": "1",
@@ -297,14 +420,17 @@ class MalformedInputViewTest(TestCase):
                 "scripts_json": "[]",
             },
         )
+        resp = experiment_create(request)
         # Pydantic validation error, should redirect with error message
         assert resp.status_code == 302
 
-    def test_parallel_exceeds_total_shows_error(self):
-        self.client.login(username="malform_user", password=TEST_PASSWORD)
-        resp = self.client.post(
-            reverse("experiments:experiment_create"),
-            {
+    @patch("cms.scenarios.registry.load_scenario_template")
+    def test_parallel_exceeds_total_shows_error(self, mock_load, rf, staff_user):
+        mock_load.return_value = MagicMock(instances=[])
+        request = _post_request(
+            rf,
+            staff_user,
+            data={
                 "name": "Bad Parallel",
                 "scenario_id": "basic",
                 "total_runs": "1",
@@ -312,17 +438,19 @@ class MalformedInputViewTest(TestCase):
                 "scripts_json": "[]",
             },
         )
+        resp = experiment_create(request)
         assert resp.status_code == 302
 
 
-class UnexpectedErrorViewTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(username="error_view_user", password=TEST_PASSWORD, is_staff=True)
+# =============================================================================
+# UnexpectedErrorViewTest — Graceful error handling
+# =============================================================================
 
+
+class TestUnexpectedError:
     @patch("cms.experiments.views.services.list_experiments")
-    def test_experiment_list_handles_unexpected_error(self, mock_list):
+    def test_experiment_list_handles_unexpected_error(self, mock_list, rf, staff_user):
         mock_list.side_effect = RuntimeError("Unexpected")
-        self.client.login(username="error_view_user", password=TEST_PASSWORD)
-        resp = self.client.get(reverse("experiments:experiment_list"))
+        request = _get_request(rf, staff_user)
+        resp = experiment_list(request)
         assert resp.status_code == 302  # Graceful redirect

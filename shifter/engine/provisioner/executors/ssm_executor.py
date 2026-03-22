@@ -17,44 +17,29 @@ from typing import ClassVar
 import boto3
 from botocore.exceptions import ClientError
 
-from executors.base import CommandResult
+from executors.base import (
+    CommandResult,
+    ExecutorCommandError,
+    ExecutorError,
+    ExecutorTimeoutError,
+)
 
 # Logger for timing info - useful for tuning timeouts
 logger = logging.getLogger(__name__)
 
 
-# Custom exceptions for clear error handling
-class SSMExecutorError(Exception):
-    """Base exception for SSM executor errors."""
-
-    pass
-
-
-class CommandError(SSMExecutorError):
-    """Raised when a command fails (non-zero exit code)."""
-
-    def __init__(self, message: str, exit_code: int = -1, stderr: str = ""):
-        self.exit_code = exit_code
-        self.stderr = stderr
-        super().__init__(f"{message} (exit_code={exit_code}, stderr={stderr})")
-
-
-class TimeoutError(SSMExecutorError):
-    """Raised when an operation times out."""
-
-    pass
+# Backward-compatible aliases for shared exception types
+SSMExecutorError = ExecutorError
+CommandError = ExecutorCommandError
+TimeoutError = ExecutorTimeoutError
 
 
 class InstanceNotFoundError(SSMExecutorError):
     """Raised when the target instance doesn't exist."""
 
-    pass
-
 
 class InstanceTerminatedError(SSMExecutorError):
     """Raised when the instance is terminated."""
-
-    pass
 
 
 class SSMExecutor:

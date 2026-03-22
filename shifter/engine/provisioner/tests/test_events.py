@@ -22,36 +22,6 @@ def mock_sns_env(monkeypatch):
     )
 
 
-class TestGetSNSClient:
-    """Tests for _get_sns_client() function."""
-
-    def test_creates_sns_client_with_region_from_env(self, monkeypatch):
-        """Client is created with AWS_REGION from environment."""
-        monkeypatch.setenv("AWS_REGION", "us-west-2")
-        monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
-
-        from events import _get_sns_client
-
-        with patch("events.boto3.client") as mock_boto:
-            mock_boto.return_value = MagicMock()
-            _get_sns_client()
-
-            mock_boto.assert_called_once_with("sns", region_name="us-west-2", endpoint_url=None)
-
-    def test_uses_default_region_when_not_set(self, monkeypatch):
-        """Client uses us-east-2 as default region."""
-        monkeypatch.delenv("AWS_REGION", raising=False)
-        monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
-
-        from events import _get_sns_client
-
-        with patch("events.boto3.client") as mock_boto:
-            mock_boto.return_value = MagicMock()
-            _get_sns_client()
-
-            mock_boto.assert_called_once_with("sns", region_name="us-east-2", endpoint_url=None)
-
-
 class TestGetSNSTopicARN:
     """Tests for _get_sns_topic_arn() function."""
 
@@ -80,14 +50,12 @@ class TestGetSNSTopicARN:
 class TestPublishEvent:
     """Tests for _publish_event() internal function."""
 
-    def test_publishes_event_to_sns_topic(self, mock_sns_env):
-        """Event is published to SNS with correct message and attributes."""
+    def test_publishes_event_via_event_bus(self, mock_sns_env):
+        """Event is published via cloud EventBus with correct args."""
         from events import _publish_event
 
-        with patch("events._get_sns_client") as mock_get_client:
-            mock_sns = MagicMock()
-            mock_get_client.return_value = mock_sns
-
+        mock_bus = MagicMock()
+        with patch("events.get_event_bus", return_value=mock_bus):
             event = {
                 "event_type": "range.status.updated",
                 "range_id": 42,
@@ -97,26 +65,21 @@ class TestPublishEvent:
 
             _publish_event(event)
 
-            mock_sns.publish.assert_called_once()
-            call_kwargs = mock_sns.publish.call_args.kwargs
+            mock_bus.publish.assert_called_once()
+            call_kwargs = mock_bus.publish.call_args.kwargs
 
             expected_arn = "arn:aws:sns:us-east-2:123456789012:dev-portal-range-events"
-            assert call_kwargs["TopicArn"] == expected_arn
-            assert json.loads(call_kwargs["Message"]) == event
-            # Message attributes for SNS filtering
-            attrs = call_kwargs["MessageAttributes"]
-            assert attrs["event_type"]["DataType"] == "String"
-            assert attrs["event_type"]["StringValue"] == "range.status.updated"
+            assert call_kwargs["topic_id"] == expected_arn
+            assert json.loads(call_kwargs["message"]) == event
+            assert call_kwargs["attributes"] == {"event_type": "range.status.updated"}
 
-    def test_does_not_raise_on_sns_failure(self, mock_sns_env):
-        """SNS publish failures are caught and logged, not raised."""
+    def test_does_not_raise_on_publish_failure(self, mock_sns_env):
+        """EventBus publish failures are caught and logged, not raised."""
         from events import _publish_event
 
-        with patch("events._get_sns_client") as mock_get_client:
-            mock_sns = MagicMock()
-            mock_sns.publish.side_effect = Exception("SNS error")
-            mock_get_client.return_value = mock_sns
-
+        mock_bus = MagicMock()
+        mock_bus.publish.side_effect = Exception("publish error")
+        with patch("events.get_event_bus", return_value=mock_bus):
             # Should not raise
             _publish_event({"event_type": "range.status.updated", "range_id": 42})
 

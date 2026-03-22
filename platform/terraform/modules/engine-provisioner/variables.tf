@@ -29,7 +29,7 @@ variable "log_retention_days" {
 # ------------------------------------------------------------------------------
 
 variable "ecr_repository_url" {
-  description = "URL of the ECR repository for the Pulumi provisioner image"
+  description = "URL of the ECR repository for the engine provisioner image"
   type        = string
 }
 
@@ -96,36 +96,36 @@ variable "rds_security_group_id" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi State Backend
+# Engine State Backend
 # ------------------------------------------------------------------------------
 
 variable "pulumi_state_bucket" {
-  description = "S3 bucket name for Pulumi state"
+  description = "S3 bucket name for engine state"
   type        = string
 }
 
 variable "pulumi_state_bucket_arn" {
-  description = "S3 bucket ARN for Pulumi state"
+  description = "S3 bucket ARN for engine state"
   type        = string
 }
 
 variable "pulumi_locks_table" {
-  description = "DynamoDB table name for Pulumi locking"
+  description = "DynamoDB table name for engine locking"
   type        = string
 }
 
 variable "pulumi_locks_table_arn" {
-  description = "DynamoDB table ARN for Pulumi locking"
+  description = "DynamoDB table ARN for engine locking"
   type        = string
 }
 
 variable "pulumi_secrets_kms_key_arn" {
-  description = "ARN of the KMS key for Pulumi secrets encryption"
+  description = "ARN of the KMS key for engine secrets encryption"
   type        = string
 }
 
 variable "pulumi_secrets_kms_key_alias" {
-  description = "Alias of the KMS key for Pulumi secrets encryption (e.g., alias/dev-range-pulumi-secrets)"
+  description = "Alias of the KMS key for engine secrets encryption (e.g., alias/dev-range-pulumi-secrets)"
   type        = string
 }
 

@@ -259,11 +259,11 @@ module "ssm" {
   domain_name    = var.domain_name
   s3_bucket_name = var.user_storage_bucket
 
-  # Pulumi provisioner configuration
-  pulumi_ecs_cluster_arn        = module.pulumi_provisioner.ecs_cluster_arn
-  pulumi_task_definition_family = module.pulumi_provisioner.task_definition_family
-  pulumi_ecs_security_group_id  = module.pulumi_provisioner.ecs_security_group_id
-  pulumi_private_subnet_ids     = join(",", module.vpc.private_subnet_ids)
+  # Engine provisioner configuration
+  engine_ecs_cluster_arn        = module.engine_provisioner.ecs_cluster_arn
+  engine_task_definition_family = module.engine_provisioner.task_definition_family
+  engine_ecs_security_group_id  = module.engine_provisioner.ecs_security_group_id
+  engine_private_subnet_ids     = join(",", module.vpc.private_subnet_ids)
 
   # Messaging configuration
   sqs_cms_url    = module.messaging.sqs_queue_urls["cms"]
@@ -310,11 +310,11 @@ module "ec2" {
   app_port         = var.app_port
   root_volume_size = var.ec2_root_volume_size
 
-  # ECS permissions for Pulumi provisioner
-  ecs_cluster_arn            = module.pulumi_provisioner.ecs_cluster_arn
-  ecs_task_definition_family = module.pulumi_provisioner.task_definition_family
-  ecs_task_role_arn          = module.pulumi_provisioner.ecs_task_role_arn
-  ecs_execution_role_arn     = module.pulumi_provisioner.ecs_execution_role_arn
+  # ECS permissions for engine provisioner
+  ecs_cluster_arn            = module.engine_provisioner.ecs_cluster_arn
+  ecs_task_definition_family = module.engine_provisioner.task_definition_family
+  ecs_task_role_arn          = module.engine_provisioner.ecs_task_role_arn
+  ecs_execution_role_arn     = module.engine_provisioner.ecs_execution_role_arn
 
   # Autoscaling configuration
   enable_autoscaling   = var.enable_autoscaling
@@ -433,12 +433,12 @@ resource "aws_route" "range_to_portal" {
 # Do not duplicate them here.
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner (ECS Fargate)
+# Engine Provisioner (ECS Fargate)
 # Note: Defined before log_aggregation so its log groups can be included
 # ------------------------------------------------------------------------------
 
-module "pulumi_provisioner" {
-  source = "../../../modules/pulumi-provisioner"
+module "engine_provisioner" {
+  source = "../../../modules/engine-provisioner"
 
   name_prefix        = local.name_prefix
   environment        = var.environment
@@ -446,8 +446,8 @@ module "pulumi_provisioner" {
   log_retention_days = var.log_retention_days
 
   # ECR
-  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.pulumi_provisioner_ecr_url
-  container_image_tag = var.pulumi_container_tag
+  ecr_repository_url  = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
+  container_image_tag = var.engine_container_tag
 
   # Networking (Portal VPC for RDS access)
   vpc_id             = module.vpc.vpc_id
@@ -462,7 +462,7 @@ module "pulumi_provisioner" {
   # RDS security group (for adding ingress rule)
   rds_security_group_id = module.rds.db_security_group_id
 
-  # Pulumi state (from Range environment)
+  # Engine state (from Range environment)
   pulumi_state_bucket          = data.terraform_remote_state.range.outputs.pulumi_state_bucket_name
   pulumi_state_bucket_arn      = data.terraform_remote_state.range.outputs.pulumi_state_bucket_arn
   pulumi_locks_table           = data.terraform_remote_state.range.outputs.pulumi_locks_table_name
@@ -520,6 +520,11 @@ module "pulumi_provisioner" {
   # Alarms
   enable_alarms = true
   alarm_email   = var.alarm_email
+}
+
+moved {
+  from = module.pulumi_provisioner
+  to   = module.engine_provisioner
 }
 
 # ------------------------------------------------------------------------------
@@ -625,8 +630,8 @@ module "log_aggregation" {
     # Phase 5: VPC flow logs and RDS logs
     var.enable_vpc_flow_logs ? [module.vpc.flow_logs_log_group_name] : [],
     var.enable_rds_log_exports ? module.rds.log_group_names : [],
-    # Pulumi provisioner logs
-    module.pulumi_provisioner.log_group_names,
+    # Engine provisioner logs
+    module.engine_provisioner.log_group_names,
     # Guacamole logs
     module.guacamole.log_group_names,
   ) : []

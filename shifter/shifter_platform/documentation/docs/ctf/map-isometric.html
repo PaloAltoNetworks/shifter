@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Facility Map - Isometric View</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e16; }
+  canvas { display: block; }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #0a0e16; color: #4a6a8a; font-family: monospace; font-size: 14px; z-index: 10;
+    transition: opacity 0.8s;
+  }
+  #loading.done { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="loading">INITIALIZING COMPOUND SURVEILLANCE...</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------------------
+//  SCENE SETUP
+// ---------------------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.85;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0e16);
+scene.fog = new THREE.FogExp2(0x101828, 0.0035);
+
+// Orthographic camera -- isometric angle
+const frustum = 120;
+const aspect = window.innerWidth / window.innerHeight;
+const camera = new THREE.OrthographicCamera(
+  -frustum * aspect, frustum * aspect,
+  frustum, -frustum,
+  -500, 1000
+);
+// Classic isometric: rotate 45 degrees around Y, then tilt ~35 degrees
+const isoDistance = 200;
+const isoAngle = Math.PI / 4;       // 45 degrees
+const isoTilt  = Math.atan(1 / Math.sqrt(2)); // ~35.26 degrees
+camera.position.set(
+  isoDistance * Math.cos(isoTilt) * Math.sin(isoAngle),
+  isoDistance * Math.sin(isoTilt),
+  isoDistance * Math.cos(isoTilt) * Math.cos(isoAngle)
+);
+camera.lookAt(0, 0, 0);
+
+// Orbit controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableRotate = true;
+controls.enablePan = true;
+controls.enableZoom = true;
+controls.minZoom = 0.3;
+controls.maxZoom = 3;
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0, 0);
+controls.maxPolarAngle = Math.PI / 2.2;
+
+// ---------------------------------------------------------------------------
+//  MATERIALS
+// ---------------------------------------------------------------------------
+const snowGroundMat = new THREE.MeshStandardMaterial({
+  color: 0xb8c4d4, roughness: 0.92, metalness: 0.0
+});
+const concreteMat = new THREE.MeshStandardMaterial({
+  color: 0x5a5e64, roughness: 0.85, metalness: 0.1
+});
+const concreteDarkMat = new THREE.MeshStandardMaterial({
+  color: 0x3a3e44, roughness: 0.85, metalness: 0.15
+});
+const metalMat = new THREE.MeshStandardMaterial({
+  color: 0x6a6e74, roughness: 0.4, metalness: 0.7
+});
+const metalDarkMat = new THREE.MeshStandardMaterial({
+  color: 0x3a3e44, roughness: 0.35, metalness: 0.8
+});
+const roofMat = new THREE.MeshStandardMaterial({
+  color: 0x3a4050, roughness: 0.7, metalness: 0.3
+});
+const roofGreenMat = new THREE.MeshStandardMaterial({
+  color: 0x2a4a3a, roughness: 0.7, metalness: 0.3
+});
+const wallMainMat = new THREE.MeshStandardMaterial({
+  color: 0x4a5568, roughness: 0.8, metalness: 0.1
+});
+const wallResearchMat = new THREE.MeshStandardMaterial({
+  color: 0x3a5a48, roughness: 0.8, metalness: 0.1
+});
+const windowWarmMat = new THREE.MeshStandardMaterial({
+  color: 0xffcc66, emissive: 0xffaa33, emissiveIntensity: 0.8,
+  roughness: 0.3, metalness: 0.0, transparent: true, opacity: 0.9
+});
+const windowGreenMat = new THREE.MeshStandardMaterial({
+  color: 0x44ff88, emissive: 0x22dd55, emissiveIntensity: 0.8,
+  roughness: 0.3, metalness: 0.0, transparent: true, opacity: 0.9
+});
+const hazardYellowMat = new THREE.MeshStandardMaterial({
+  color: 0xddbb22, roughness: 0.5, metalness: 0.2
+});
+const hazardBlackMat = new THREE.MeshStandardMaterial({
+  color: 0x1a1a1a, roughness: 0.6, metalness: 0.2
+});
+const hatchGlowMat = new THREE.MeshStandardMaterial({
+  color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 1.5,
+  roughness: 0.2, metalness: 0.0, transparent: true, opacity: 0.7
+});
+const fencePostMat = new THREE.MeshStandardMaterial({
+  color: 0x555555, roughness: 0.4, metalness: 0.7
+});
+const wireMat = new THREE.MeshStandardMaterial({
+  color: 0x888888, roughness: 0.3, metalness: 0.8
+});
+const crateMat = new THREE.MeshStandardMaterial({
+  color: 0x6a5a3a, roughness: 0.9, metalness: 0.0
+});
+const pathMat = new THREE.MeshStandardMaterial({
+  color: 0x8a8e94, roughness: 0.95, metalness: 0.0
+});
+const tireTrackMat = new THREE.MeshStandardMaterial({
+  color: 0x7a8090, roughness: 0.95, metalness: 0.0
+});
+
+// ---------------------------------------------------------------------------
+//  HELPERS
+// ---------------------------------------------------------------------------
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 16807 + 0) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function enableShadow(mesh, cast = true, receive = true) {
+  mesh.castShadow = cast;
+  mesh.receiveShadow = receive;
+  mesh.traverse(c => {
+    if (c.isMesh) { c.castShadow = cast; c.receiveShadow = receive; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+//  GROUND PLANE -- large snowy terrain
+// ---------------------------------------------------------------------------
+function createGround() {
+  const size = 400;
+  const segments = 128;
+  const geo = new THREE.PlaneGeometry(size, size, segments, segments);
+  geo.rotateX(-Math.PI / 2);
+
+  const rng = seededRandom(42);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    // Gentle terrain undulation
+    let y = 0;
+    y += Math.sin(x * 0.03) * 1.2;
+    y += Math.cos(z * 0.04) * 0.8;
+    y += Math.sin((x + z) * 0.06) * 0.5;
+    // Snow drifts -- random bumps
+    y += (rng() - 0.5) * 0.6;
+    // Flatten the compound area
+    const dist = Math.sqrt(x * x + z * z);
+    if (dist < 80) {
+      const blend = Math.max(0, (80 - dist) / 30);
+      y *= (1 - blend);
+    }
+    pos.setY(i, y);
+  }
+  geo.computeVertexNormals();
+
+  // Vertex colors for variation
+  const colors = new Float32Array(pos.count * 3);
+  const rng2 = seededRandom(137);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const dist = Math.sqrt(x * x + z * z);
+    const v = rng2();
+    // Base snow color with variation
+    let r = 0.68 + v * 0.12;
+    let g = 0.72 + v * 0.10;
+    let b = 0.80 + v * 0.08;
+    // Darker patches
+    if (v > 0.85) { r -= 0.15; g -= 0.12; b -= 0.08; }
+    // Blue tinge in drifts
+    if (v < 0.15) { r -= 0.04; g -= 0.02; b += 0.06; }
+    // Edge darkening
+    if (dist > 120) {
+      const f = Math.min(1, (dist - 120) / 60);
+      r -= f * 0.3; g -= f * 0.3; b -= f * 0.25;
+    }
+    colors[i * 3] = Math.max(0, r);
+    colors[i * 3 + 1] = Math.max(0, g);
+    colors[i * 3 + 2] = Math.max(0, b);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const groundMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.92, metalness: 0.0
+  });
+  const ground = new THREE.Mesh(geo, groundMat);
+  ground.receiveShadow = true;
+  scene.add(ground);
+}
+
+// ---------------------------------------------------------------------------
+//  BUILDINGS
+// ---------------------------------------------------------------------------
+function createBuilding(x, z, w, d, h, wallMat, roofMaterial, winMat, label, options = {}) {
+  const group = new THREE.Group();
+  const wallThickness = 0.5;
+
+  // Main body
+  const bodyGeo = new THREE.BoxGeometry(w, h, d);
+  const body = new THREE.Mesh(bodyGeo, wallMat);
+  body.position.set(x, h / 2, z);
+  enableShadow(body);
+  group.add(body);
+
+  // Roof -- slightly overhanging
+  const roofOverhang = 1.5;
+  const roofGeo = new THREE.BoxGeometry(w + roofOverhang, 1.2, d + roofOverhang);
+  const roof = new THREE.Mesh(roofGeo, roofMaterial);
+  roof.position.set(x, h + 0.6, z);
+  enableShadow(roof);
+  group.add(roof);
+
+  // Roof ridge
+  if (options.ridgeRoof) {
+    const ridgeGeo = new THREE.CylinderGeometry(0.4, 0.8, d + roofOverhang - 1, 4);
+    ridgeGeo.rotateZ(Math.PI / 4);
+    ridgeGeo.rotateY(Math.PI / 2);
+    const ridge = new THREE.Mesh(ridgeGeo, roofMaterial);
+    ridge.position.set(x, h + 1.8, z);
+    enableShadow(ridge);
+    group.add(ridge);
+  }
+
+  // Windows -- placed on walls
+  const winGeo = new THREE.PlaneGeometry(2.2, 2.8);
+  const windowPositions = [];
+
+  // Front and back windows
+  const numWinX = Math.floor(w / 5);
+  for (let i = 0; i < numWinX; i++) {
+    const wx = x - w / 2 + (i + 1) * (w / (numWinX + 1));
+    const floors = Math.floor(h / 6);
+    for (let f = 0; f < floors; f++) {
+      const wy = 3 + f * 6;
+      if (wy + 1.5 > h) continue;
+      // Front
+      const wf = new THREE.Mesh(winGeo, winMat);
+      wf.position.set(wx, wy, z + d / 2 + 0.05);
+      group.add(wf);
+      windowPositions.push({ x: wx, y: wy, z: z + d / 2 + 0.5 });
+      // Back
+      const wb = new THREE.Mesh(winGeo, winMat);
+      wb.position.set(wx, wy, z - d / 2 - 0.05);
+      wb.rotation.y = Math.PI;
+      group.add(wb);
+      windowPositions.push({ x: wx, y: wy, z: z - d / 2 - 0.5 });
+    }
+  }
+
+  // Side windows
+  const numWinZ = Math.floor(d / 5);
+  for (let i = 0; i < numWinZ; i++) {
+    const wz = z - d / 2 + (i + 1) * (d / (numWinZ + 1));
+    const floors = Math.floor(h / 6);
+    for (let f = 0; f < floors; f++) {
+      const wy = 3 + f * 6;
+      if (wy + 1.5 > h) continue;
+      // Right
+      const wr = new THREE.Mesh(winGeo, winMat);
+      wr.position.set(x + w / 2 + 0.05, wy, wz);
+      wr.rotation.y = Math.PI / 2;
+      group.add(wr);
+      windowPositions.push({ x: x + w / 2 + 0.5, y: wy, z: wz });
+      // Left
+      const wl = new THREE.Mesh(winGeo, winMat);
+      wl.position.set(x - w / 2 - 0.05, wy, wz);
+      wl.rotation.y = -Math.PI / 2;
+      group.add(wl);
+      windowPositions.push({ x: x - w / 2 - 0.5, y: wy, z: wz });
+    }
+  }
+
+  // Window point lights (a few, not all -- performance)
+  const lightPositions = windowPositions.filter((_, i) => i % 3 === 0);
+  lightPositions.forEach(pos => {
+    const color = winMat === windowGreenMat ? 0x22dd55 : 0xffaa33;
+    const light = new THREE.PointLight(color, 2.5, 15, 2);
+    light.position.set(pos.x, pos.y, pos.z);
+    group.add(light);
+  });
+
+  // Foundation strip
+  const foundGeo = new THREE.BoxGeometry(w + 0.6, 0.8, d + 0.6);
+  const found = new THREE.Mesh(foundGeo, concreteMat);
+  found.position.set(x, 0.4, z);
+  found.receiveShadow = true;
+  group.add(found);
+
+  // Door
+  if (options.doorSide !== undefined) {
+    const doorGeo = new THREE.BoxGeometry(3, 5, 0.3);
+    const doorMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2e34, roughness: 0.5, metalness: 0.4
+    });
+    const door = new THREE.Mesh(doorGeo, doorMat);
+    if (options.doorSide === 'front') {
+      door.position.set(x, 2.5, z + d / 2 + 0.15);
+    } else if (options.doorSide === 'right') {
+      door.position.set(x + w / 2 + 0.15, 2.5, z);
+      door.rotation.y = Math.PI / 2;
+    }
+    enableShadow(door);
+    group.add(door);
+
+    // Door light
+    const doorLight = new THREE.PointLight(0xffcc66, 1.5, 12, 2);
+    if (options.doorSide === 'front') {
+      doorLight.position.set(x, 6, z + d / 2 + 2);
+    } else {
+      doorLight.position.set(x + w / 2 + 2, 6, z);
+    }
+    group.add(doorLight);
+  }
+
+  scene.add(group);
+  return group;
+}
+
+// Main building -- larger, 2-floor feel
+const mainBuilding = createBuilding(-30, -15, 28, 18, 14, wallMainMat, roofMat, windowWarmMat, 'MAIN', {
+  ridgeRoof: true, doorSide: 'front'
+});
+
+// Research building -- smaller, green windows
+const researchBuilding = createBuilding(30, -8, 20, 14, 10, wallResearchMat, roofGreenMat, windowGreenMat, 'RESEARCH', {
+  doorSide: 'right'
+});
+
+// ---------------------------------------------------------------------------
+//  ANTENNA ON RESEARCH BUILDING
+// ---------------------------------------------------------------------------
+function createAntenna(x, y, z) {
+  const group = new THREE.Group();
+
+  // Main mast
+  const mastGeo = new THREE.CylinderGeometry(0.15, 0.25, 12, 6);
+  const mast = new THREE.Mesh(mastGeo, metalMat);
+  mast.position.set(x, y + 6, z);
+  enableShadow(mast);
+  group.add(mast);
+
+  // Cross bars
+  for (let i = 0; i < 3; i++) {
+    const barGeo = new THREE.CylinderGeometry(0.08, 0.08, 3 - i * 0.6, 4);
+    barGeo.rotateZ(Math.PI / 2);
+    const bar = new THREE.Mesh(barGeo, metalMat);
+    bar.position.set(x, y + 8 + i * 2.5, z);
+    enableShadow(bar);
+    group.add(bar);
+  }
+
+  // Dish
+  const dishGeo = new THREE.SphereGeometry(1.8, 12, 8, 0, Math.PI);
+  const dish = new THREE.Mesh(dishGeo, metalMat);
+  dish.position.set(x + 0.5, y + 9, z);
+  dish.rotation.z = Math.PI / 5;
+  dish.rotation.y = -Math.PI / 4;
+  enableShadow(dish);
+  group.add(dish);
+
+  // Red warning light at top
+  const lightGeo = new THREE.SphereGeometry(0.3, 8, 8);
+  const lightMat = new THREE.MeshStandardMaterial({
+    color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 2
+  });
+  const light = new THREE.Mesh(lightGeo, lightMat);
+  light.position.set(x, y + 12, z);
+  group.add(light);
+
+  const pl = new THREE.PointLight(0xff0000, 1, 10);
+  pl.position.set(x, y + 12, z);
+  group.add(pl);
+
+  scene.add(group);
+  return { group, light: pl, lightMesh: light };
+}
+
+const antenna = createAntenna(35, 10, -4);
+
+// ---------------------------------------------------------------------------
+//  THE HATCH -- centerpiece
+// ---------------------------------------------------------------------------
+function createHatch() {
+  const group = new THREE.Group();
+  const hatchX = 10, hatchZ = 20;
+  const outerRadius = 22;
+  const innerRadius = 18;
+
+  // Excavation pit -- sunken area
+  const pitGeo = new THREE.CylinderGeometry(outerRadius + 5, outerRadius + 8, 3, 48);
+  const pitMat = new THREE.MeshStandardMaterial({ color: 0x2a2520, roughness: 0.9, metalness: 0.1 });
+  const pit = new THREE.Mesh(pitGeo, pitMat);
+  pit.position.set(hatchX, -1.5, hatchZ);
+  pit.receiveShadow = true;
+  group.add(pit);
+
+  // Concrete pad
+  const padGeo = new THREE.CylinderGeometry(outerRadius + 2, outerRadius + 2, 0.6, 48);
+  const pad = new THREE.Mesh(padGeo, concreteMat);
+  pad.position.set(hatchX, 0.3, hatchZ);
+  pad.receiveShadow = true;
+  group.add(pad);
+
+  // Hazard stripes ring
+  const stripeSegments = 48;
+  for (let i = 0; i < stripeSegments; i++) {
+    const angle1 = (i / stripeSegments) * Math.PI * 2;
+    const angle2 = ((i + 1) / stripeSegments) * Math.PI * 2;
+    const shape = new THREE.Shape();
+    const r1 = outerRadius - 0.5;
+    const r2 = outerRadius + 1.5;
+    shape.moveTo(Math.cos(angle1) * r1, Math.sin(angle1) * r1);
+    shape.lineTo(Math.cos(angle1) * r2, Math.sin(angle1) * r2);
+    shape.lineTo(Math.cos(angle2) * r2, Math.sin(angle2) * r2);
+    shape.lineTo(Math.cos(angle2) * r1, Math.sin(angle2) * r1);
+    shape.closePath();
+    const stripGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.3, bevelEnabled: false });
+    stripGeo.rotateX(-Math.PI / 2);
+    const mat = i % 2 === 0 ? hazardYellowMat : hazardBlackMat;
+    const strip = new THREE.Mesh(stripGeo, mat);
+    strip.position.set(hatchX, 0.6, hatchZ);
+    group.add(strip);
+  }
+
+  // Main hatch door -- thick metallic disc
+  const hatchDoorGeo = new THREE.CylinderGeometry(innerRadius, innerRadius, 1.5, 48);
+  const hatchDoor = new THREE.Mesh(hatchDoorGeo, metalDarkMat);
+  hatchDoor.position.set(hatchX, 0.4, hatchZ);
+  hatchDoor.receiveShadow = true;
+  enableShadow(hatchDoor);
+  group.add(hatchDoor);
+
+  // Seam lines on hatch door -- cross pattern
+  const seamMat = new THREE.MeshStandardMaterial({
+    color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 0.8,
+    roughness: 0.2, metalness: 0.3
+  });
+  // Horizontal seam
+  const seamGeo1 = new THREE.BoxGeometry(innerRadius * 1.8, 0.5, 0.15);
+  const seam1 = new THREE.Mesh(seamGeo1, seamMat);
+  seam1.position.set(hatchX, 1.2, hatchZ);
+  group.add(seam1);
+  // Vertical seam
+  const seamGeo2 = new THREE.BoxGeometry(0.15, 0.5, innerRadius * 1.8);
+  const seam2 = new THREE.Mesh(seamGeo2, seamMat);
+  seam2.position.set(hatchX, 1.2, hatchZ);
+  group.add(seam2);
+
+  // Bolts around the edge
+  const boltCount = 24;
+  const boltGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.6, 8);
+  for (let i = 0; i < boltCount; i++) {
+    const a = (i / boltCount) * Math.PI * 2;
+    const bolt = new THREE.Mesh(boltGeo, metalMat);
+    bolt.position.set(
+      hatchX + Math.cos(a) * (innerRadius - 1.5),
+      1.2,
+      hatchZ + Math.sin(a) * (innerRadius - 1.5)
+    );
+    group.add(bolt);
+  }
+
+  // Center mechanism -- large industrial circle
+  const centerGeo = new THREE.CylinderGeometry(3, 3, 0.8, 24);
+  const center = new THREE.Mesh(centerGeo, metalMat);
+  center.position.set(hatchX, 1.3, hatchZ);
+  group.add(center);
+
+  // Inner glow ring
+  const glowRingGeo = new THREE.TorusGeometry(2, 0.4, 8, 32);
+  glowRingGeo.rotateX(Math.PI / 2);
+  const glowRing = new THREE.Mesh(glowRingGeo, hatchGlowMat);
+  glowRing.position.set(hatchX, 1.5, hatchZ);
+  group.add(glowRing);
+
+  // Center core glow
+  const coreGeo = new THREE.SphereGeometry(1.2, 16, 16);
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0xff6600, emissive: 0xff3300, emissiveIntensity: 3,
+    roughness: 0.0, metalness: 0.0
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.set(hatchX, 1.5, hatchZ);
+  group.add(core);
+
+  // Warning lights around the hatch
+  const warningLights = [];
+  const warningCount = 12;
+  for (let i = 0; i < warningCount; i++) {
+    const a = (i / warningCount) * Math.PI * 2;
+    const lGeo = new THREE.SphereGeometry(0.35, 8, 8);
+    const lMat = new THREE.MeshStandardMaterial({
+      color: 0xff2200, emissive: 0xff1100, emissiveIntensity: 2,
+      roughness: 0.2, metalness: 0.3
+    });
+    const lMesh = new THREE.Mesh(lGeo, lMat);
+    const lx = hatchX + Math.cos(a) * (innerRadius * 0.65);
+    const lz = hatchZ + Math.sin(a) * (innerRadius * 0.65);
+    lMesh.position.set(lx, 1.3, lz);
+    group.add(lMesh);
+    warningLights.push({ mesh: lMesh, mat: lMat, angle: a });
+  }
+
+  // Underglow -- the ominous light from below
+  const underGlow = new THREE.PointLight(0xff3300, 8, 50, 1.5);
+  underGlow.position.set(hatchX, -1, hatchZ);
+  group.add(underGlow);
+
+  // Secondary underglow for color spread
+  const underGlow2 = new THREE.PointLight(0xff6600, 4, 35, 2);
+  underGlow2.position.set(hatchX, 2, hatchZ);
+  group.add(underGlow2);
+
+  // Outer glow ring at ground level
+  const outerGlowGeo = new THREE.TorusGeometry(innerRadius + 0.5, 0.3, 8, 48);
+  outerGlowGeo.rotateX(Math.PI / 2);
+  const outerGlowMat = new THREE.MeshStandardMaterial({
+    color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 0.6,
+    transparent: true, opacity: 0.5, roughness: 0.2
+  });
+  const outerGlow = new THREE.Mesh(outerGlowGeo, outerGlowMat);
+  outerGlow.position.set(hatchX, 0.8, hatchZ);
+  group.add(outerGlow);
+
+  // Industrial rails / pipes around the hatch
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 8;
+    const pipeGeo = new THREE.CylinderGeometry(0.3, 0.3, 8, 8);
+    pipeGeo.rotateZ(Math.PI / 2);
+    const pipe = new THREE.Mesh(pipeGeo, metalMat);
+    const px = hatchX + Math.cos(a) * (outerRadius + 3);
+    const pz = hatchZ + Math.sin(a) * (outerRadius + 3);
+    pipe.position.set(px, 2, pz);
+    pipe.rotation.y = a;
+    enableShadow(pipe);
+    group.add(pipe);
+
+    // Vertical support posts
+    const postGeo = new THREE.CylinderGeometry(0.35, 0.35, 4, 8);
+    for (let j = -1; j <= 1; j += 2) {
+      const post = new THREE.Mesh(postGeo, metalMat);
+      post.position.set(
+        px + Math.cos(a + Math.PI / 2) * j * 3.5,
+        2,
+        pz + Math.sin(a + Math.PI / 2) * j * 3.5
+      );
+      enableShadow(post);
+      group.add(post);
+    }
+  }
+
+  scene.add(group);
+  return { group, warningLights, underGlow, underGlow2, core, coreMat, glowRing, outerGlow, outerGlowMat, seamMat };
+}
+
+const hatch = createHatch();
+
+// ---------------------------------------------------------------------------
+//  PERIMETER FENCE
+// ---------------------------------------------------------------------------
+function createFence() {
+  const group = new THREE.Group();
+  const fenceRect = { x1: -75, z1: -65, x2: 75, z2: 75 };
+  const postHeight = 8;
+  const postSpacing = 10;
+
+  function fenceSide(x1, z1, x2, z2) {
+    const dx = x2 - x1;
+    const dz = z2 - z1;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    const posts = Math.floor(length / postSpacing);
+
+    for (let i = 0; i <= posts; i++) {
+      const t = i / posts;
+      const px = x1 + dx * t;
+      const pz = z1 + dz * t;
+
+      // Post
+      const postGeo = new THREE.CylinderGeometry(0.2, 0.25, postHeight, 6);
+      const post = new THREE.Mesh(postGeo, fencePostMat);
+      post.position.set(px, postHeight / 2, pz);
+      enableShadow(post);
+      group.add(post);
+
+      // Post cap
+      const capGeo = new THREE.SphereGeometry(0.35, 6, 6);
+      const cap = new THREE.Mesh(capGeo, metalMat);
+      cap.position.set(px, postHeight, pz);
+      group.add(cap);
+
+      // Wires between posts
+      if (i < posts) {
+        const nx = x1 + dx * ((i + 1) / posts);
+        const nz = z1 + dz * ((i + 1) / posts);
+        for (let w = 0; w < 5; w++) {
+          const wireY = postHeight * (0.2 + w * 0.17);
+          const points = [];
+          const wireSegs = 8;
+          for (let s = 0; s <= wireSegs; s++) {
+            const st = s / wireSegs;
+            const wx = px + (nx - px) * st;
+            const wz = pz + (nz - pz) * st;
+            const sag = Math.sin(st * Math.PI) * 0.3;
+            points.push(new THREE.Vector3(wx, wireY - sag, wz));
+          }
+          const wireCurve = new THREE.CatmullRomCurve3(points);
+          const wireGeo = new THREE.TubeGeometry(wireCurve, 8, 0.03, 4, false);
+          const wire = new THREE.Mesh(wireGeo, wireMat);
+          group.add(wire);
+        }
+      }
+    }
+  }
+
+  fenceSide(fenceRect.x1, fenceRect.z1, fenceRect.x2, fenceRect.z1); // North
+  fenceSide(fenceRect.x2, fenceRect.z1, fenceRect.x2, fenceRect.z2); // East
+  fenceSide(fenceRect.x2, fenceRect.z2, fenceRect.x1, fenceRect.z2); // South
+  fenceSide(fenceRect.x1, fenceRect.z2, fenceRect.x1, fenceRect.z1); // West
+
+  // Gate on the south side
+  const gateX = 0;
+  const gateZ = fenceRect.z2;
+  const gatePostGeo = new THREE.CylinderGeometry(0.4, 0.5, postHeight + 2, 8);
+  for (let side = -1; side <= 1; side += 2) {
+    const gatePost = new THREE.Mesh(gatePostGeo, metalMat);
+    gatePost.position.set(gateX + side * 5, (postHeight + 2) / 2, gateZ);
+    enableShadow(gatePost);
+    group.add(gatePost);
+  }
+  // Gate crossbar
+  const crossGeo = new THREE.CylinderGeometry(0.2, 0.2, 10, 6);
+  crossGeo.rotateZ(Math.PI / 2);
+  const cross = new THREE.Mesh(crossGeo, metalMat);
+  cross.position.set(gateX, postHeight + 1.5, gateZ);
+  enableShadow(cross);
+  group.add(cross);
+
+  scene.add(group);
+}
+
+createFence();
+
+// ---------------------------------------------------------------------------
+//  CRATES AND DETAILS
+// ---------------------------------------------------------------------------
+function createCrates(x, z, count) {
+  const group = new THREE.Group();
+  const rng = seededRandom(x * 1000 + z);
+  for (let i = 0; i < count; i++) {
+    const size = 1.2 + rng() * 1.5;
+    const cGeo = new THREE.BoxGeometry(size, size * (0.6 + rng() * 0.5), size);
+    const crate = new THREE.Mesh(cGeo, crateMat);
+    crate.position.set(
+      x + (rng() - 0.5) * 6,
+      size * (0.3 + rng() * 0.25),
+      z + (rng() - 0.5) * 6
+    );
+    crate.rotation.y = rng() * Math.PI;
+    enableShadow(crate);
+    group.add(crate);
+
+    // Metal bands on crates
+    if (rng() > 0.5) {
+      const bandGeo = new THREE.BoxGeometry(size + 0.1, 0.15, size + 0.1);
+      const band = new THREE.Mesh(bandGeo, metalMat);
+      band.position.copy(crate.position);
+      band.position.y += size * 0.15;
+      band.rotation.y = crate.rotation.y;
+      group.add(band);
+    }
+  }
+  scene.add(group);
+}
+
+// Crates near main building
+createCrates(-18, -6, 5);
+// Crates near research building
+createCrates(42, -2, 3);
+// Crates near hatch
+createCrates(-5, 35, 4);
+
+// ---------------------------------------------------------------------------
+//  FOOTPATH between buildings
+// ---------------------------------------------------------------------------
+function createPath(points, width) {
+  const group = new THREE.Group();
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const dx = p2.x - p1.x;
+    const dz = p2.z - p1.z;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    const pathGeo = new THREE.BoxGeometry(len, 0.08, width);
+    const pathMesh = new THREE.Mesh(pathGeo, pathMat);
+    pathMesh.position.set((p1.x + p2.x) / 2, 0.05, (p1.z + p2.z) / 2);
+    pathMesh.rotation.y = Math.atan2(dx, dz);
+    pathMesh.receiveShadow = true;
+    group.add(pathMesh);
+  }
+  scene.add(group);
+}
+
+// Path from main building to research building
+createPath([
+  { x: -16, z: -15 },
+  { x: -5, z: -14 },
+  { x: 8, z: -12 },
+  { x: 20, z: -8 }
+], 2.5);
+
+// Path from main building toward hatch
+createPath([
+  { x: -16, z: -6 },
+  { x: -8, z: 2 },
+  { x: 0, z: 12 },
+  { x: 8, z: 18 }
+], 2.5);
+
+// Path from gate to main building
+createPath([
+  { x: 0, z: 75 },
+  { x: -2, z: 55 },
+  { x: -5, z: 35 },
+  { x: -10, z: 15 },
+  { x: -16, z: -6 }
+], 3);
+
+// ---------------------------------------------------------------------------
+//  TIRE TRACKS
+// ---------------------------------------------------------------------------
+function createTireTracks() {
+  const group = new THREE.Group();
+  const points = [
+    { x: 0, z: 75 }, { x: 2, z: 60 }, { x: 5, z: 45 },
+    { x: 8, z: 30 }, { x: 12, z: 22 }, { x: 10, z: 18 }
+  ];
+
+  for (let offset = -1; offset <= 1; offset += 2) {
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const dx = p2.x - p1.x;
+      const dz = p2.z - p1.z;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      const angle = Math.atan2(dx, dz);
+      const perpX = Math.cos(angle) * offset * 1.2;
+      const perpZ = -Math.sin(angle) * offset * 1.2;
+
+      const trackGeo = new THREE.BoxGeometry(len, 0.06, 0.8);
+      const track = new THREE.Mesh(trackGeo, tireTrackMat);
+      track.position.set(
+        (p1.x + p2.x) / 2 + perpX,
+        0.04,
+        (p1.z + p2.z) / 2 + perpZ
+      );
+      track.rotation.y = angle;
+      track.receiveShadow = true;
+      group.add(track);
+    }
+  }
+  scene.add(group);
+}
+
+createTireTracks();
+
+// ---------------------------------------------------------------------------
+//  FUEL TANKS near main building
+// ---------------------------------------------------------------------------
+function createFuelTanks(x, z) {
+  const group = new THREE.Group();
+  for (let i = 0; i < 2; i++) {
+    const tankGeo = new THREE.CylinderGeometry(1.5, 1.5, 6, 12);
+    tankGeo.rotateZ(Math.PI / 2);
+    const tank = new THREE.Mesh(tankGeo, metalMat);
+    tank.position.set(x + i * 4, 2, z);
+    enableShadow(tank);
+    group.add(tank);
+
+    // Endcaps
+    const capGeo = new THREE.SphereGeometry(1.5, 12, 8, 0, Math.PI);
+    for (let side = -1; side <= 1; side += 2) {
+      const cap = new THREE.Mesh(capGeo, metalMat);
+      cap.position.set(x + i * 4 + side * 3, 2, z);
+      cap.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+      enableShadow(cap);
+      group.add(cap);
+    }
+
+    // Support legs
+    const legGeo = new THREE.BoxGeometry(0.3, 2, 0.3);
+    for (let lx = -1; lx <= 1; lx += 2) {
+      for (let lz = -1; lz <= 1; lz += 2) {
+        const leg = new THREE.Mesh(legGeo, metalDarkMat);
+        leg.position.set(x + i * 4 + lx * 1.5, 1, z + lz * 1);
+        enableShadow(leg);
+        group.add(leg);
+      }
+    }
+  }
+  scene.add(group);
+}
+
+createFuelTanks(-48, -10);
+
+// ---------------------------------------------------------------------------
+//  GUARD TOWER at a fence corner
+// ---------------------------------------------------------------------------
+function createGuardTower(x, z) {
+  const group = new THREE.Group();
+
+  // Legs
+  const legGeo = new THREE.CylinderGeometry(0.3, 0.35, 12, 6);
+  for (let lx = -1; lx <= 1; lx += 2) {
+    for (let lz = -1; lz <= 1; lz += 2) {
+      const leg = new THREE.Mesh(legGeo, metalMat);
+      leg.position.set(x + lx * 2, 6, z + lz * 2);
+      enableShadow(leg);
+      group.add(leg);
+    }
+  }
+
+  // Platform
+  const platGeo = new THREE.BoxGeometry(6, 0.4, 6);
+  const platform = new THREE.Mesh(platGeo, concreteMat);
+  platform.position.set(x, 12, z);
+  enableShadow(platform);
+  group.add(platform);
+
+  // Cabin
+  const cabinGeo = new THREE.BoxGeometry(5, 4, 5);
+  const cabin = new THREE.Mesh(cabinGeo, wallMainMat);
+  cabin.position.set(x, 14.2, z);
+  enableShadow(cabin);
+  group.add(cabin);
+
+  // Cabin roof
+  const cabRoofGeo = new THREE.BoxGeometry(5.5, 0.4, 5.5);
+  const cabRoof = new THREE.Mesh(cabRoofGeo, roofMat);
+  cabRoof.position.set(x, 16.4, z);
+  enableShadow(cabRoof);
+  group.add(cabRoof);
+
+  // Cabin windows (all sides)
+  const cabWinGeo = new THREE.PlaneGeometry(3.5, 2);
+  for (let side = 0; side < 4; side++) {
+    const win = new THREE.Mesh(cabWinGeo, windowWarmMat);
+    const a = (side / 4) * Math.PI * 2;
+    win.position.set(
+      x + Math.sin(a) * 2.55,
+      14.5,
+      z + Math.cos(a) * 2.55
+    );
+    win.rotation.y = a;
+    group.add(win);
+  }
+
+  // Searchlight
+  const sl = new THREE.SpotLight(0xffeecc, 5, 60, Math.PI / 6, 0.5, 1.5);
+  sl.position.set(x, 16, z);
+  sl.target.position.set(x + 20, 0, z + 20);
+  sl.castShadow = true;
+  sl.shadow.mapSize.set(512, 512);
+  group.add(sl);
+  group.add(sl.target);
+
+  // Interior light
+  const il = new THREE.PointLight(0xffaa44, 2, 12);
+  il.position.set(x, 14, z);
+  group.add(il);
+
+  scene.add(group);
+  return { group, spotlight: sl };
+}
+
+const tower = createGuardTower(-72, -62);
+
+// ---------------------------------------------------------------------------
+//  SNOW MOUNDS -- small scattered geometry
+// ---------------------------------------------------------------------------
+function createSnowMounds() {
+  const rng = seededRandom(999);
+  for (let i = 0; i < 25; i++) {
+    const x = (rng() - 0.5) * 180;
+    const z = (rng() - 0.5) * 160;
+    const dist = Math.sqrt((x - 10) * (x - 10) + (z - 20) * (z - 20));
+    if (dist < 30) continue; // Avoid hatch area
+    const sx = 2 + rng() * 4;
+    const sy = 0.5 + rng() * 1.5;
+    const sz = 2 + rng() * 4;
+    const moundGeo = new THREE.SphereGeometry(1, 8, 6);
+    moundGeo.scale(sx, sy, sz);
+    const mound = new THREE.Mesh(moundGeo, snowGroundMat);
+    mound.position.set(x, sy * 0.3, z);
+    mound.receiveShadow = true;
+    mound.castShadow = true;
+    scene.add(mound);
+  }
+}
+
+createSnowMounds();
+
+// ---------------------------------------------------------------------------
+//  LIGHTING
+// ---------------------------------------------------------------------------
+
+// Arctic twilight -- low directional light (moonlight / low sun)
+const dirLight = new THREE.DirectionalLight(0x8899bb, 1.2);
+dirLight.position.set(-60, 80, -40);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.left = -120;
+dirLight.shadow.camera.right = 120;
+dirLight.shadow.camera.top = 120;
+dirLight.shadow.camera.bottom = -120;
+dirLight.shadow.camera.near = 1;
+dirLight.shadow.camera.far = 300;
+dirLight.shadow.bias = -0.001;
+scene.add(dirLight);
+
+// Secondary dim warm directional (opposite side -- horizon glow)
+const dirLight2 = new THREE.DirectionalLight(0x443355, 0.3);
+dirLight2.position.set(50, 20, 60);
+scene.add(dirLight2);
+
+// Ambient fill -- deep blue arctic night
+const ambientLight = new THREE.AmbientLight(0x1a2844, 0.6);
+scene.add(ambientLight);
+
+// Hemisphere light -- sky/ground color
+const hemiLight = new THREE.HemisphereLight(0x2a3a5a, 0x1a1a2a, 0.4);
+scene.add(hemiLight);
+
+// ---------------------------------------------------------------------------
+//  SNOW PARTICLE SYSTEM
+// ---------------------------------------------------------------------------
+function createSnowParticles() {
+  const count = 4000;
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  const rng = seededRandom(12345);
+
+  const spread = 250;
+  const height = 120;
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (rng() - 0.5) * spread;
+    positions[i * 3 + 1] = rng() * height;
+    positions[i * 3 + 2] = (rng() - 0.5) * spread;
+
+    velocities[i * 3] = (rng() - 0.5) * 0.08 - 0.03; // slight wind
+    velocities[i * 3 + 1] = -(0.05 + rng() * 0.15);   // falling
+    velocities[i * 3 + 2] = (rng() - 0.5) * 0.06;
+
+    sizes[i] = 0.3 + rng() * 0.8;
+  }
+
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  const snowMat = new THREE.PointsMaterial({
+    color: 0xdde4f0,
+    size: 0.6,
+    transparent: true,
+    opacity: 0.6,
+    sizeAttenuation: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+
+  const points = new THREE.Points(geo, snowMat);
+  scene.add(points);
+
+  return { points, positions, velocities, count, spread, height, geo };
+}
+
+const snowSystem = createSnowParticles();
+
+// ---------------------------------------------------------------------------
+//  GROUND FOG -- low-lying mist particles
+// ---------------------------------------------------------------------------
+function createGroundFog() {
+  const count = 800;
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const rng = seededRandom(7777);
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (rng() - 0.5) * 200;
+    positions[i * 3 + 1] = rng() * 3 + 0.5;
+    positions[i * 3 + 2] = (rng() - 0.5) * 200;
+  }
+
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const fogMat = new THREE.PointsMaterial({
+    color: 0x8899aa,
+    size: 5,
+    transparent: true,
+    opacity: 0.12,
+    sizeAttenuation: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending
+  });
+
+  const fog = new THREE.Points(geo, fogMat);
+  scene.add(fog);
+  return { fog, positions, count, geo };
+}
+
+const groundFog = createGroundFog();
+
+// ---------------------------------------------------------------------------
+//  ANIMATION LOOP
+// ---------------------------------------------------------------------------
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const dt = clock.getDelta();
+
+  controls.update();
+
+  // --- Snow particle animation ---
+  const sp = snowSystem.positions;
+  const sv = snowSystem.velocities;
+  for (let i = 0; i < snowSystem.count; i++) {
+    sp[i * 3] += sv[i * 3] + Math.sin(t * 0.5 + i * 0.1) * 0.01;
+    sp[i * 3 + 1] += sv[i * 3 + 1];
+    sp[i * 3 + 2] += sv[i * 3 + 2] + Math.cos(t * 0.3 + i * 0.07) * 0.01;
+
+    // Reset particles that fall below ground
+    if (sp[i * 3 + 1] < 0) {
+      sp[i * 3] = (Math.random() - 0.5) * snowSystem.spread;
+      sp[i * 3 + 1] = snowSystem.height;
+      sp[i * 3 + 2] = (Math.random() - 0.5) * snowSystem.spread;
+    }
+  }
+  snowSystem.geo.attributes.position.needsUpdate = true;
+
+  // --- Ground fog drift ---
+  const fp = groundFog.positions;
+  for (let i = 0; i < groundFog.count; i++) {
+    fp[i * 3] += Math.sin(t * 0.15 + i * 0.3) * 0.02;
+    fp[i * 3 + 2] += Math.cos(t * 0.12 + i * 0.2) * 0.02;
+    fp[i * 3 + 1] = 0.5 + Math.sin(t * 0.3 + i * 0.5) * 1.5;
+  }
+  groundFog.geo.attributes.position.needsUpdate = true;
+
+  // --- Hatch pulsing effects ---
+  const pulse = 0.5 + 0.5 * Math.sin(t * 2);
+  const fastPulse = 0.5 + 0.5 * Math.sin(t * 4);
+
+  hatch.underGlow.intensity = 6 + pulse * 6;
+  hatch.underGlow2.intensity = 3 + pulse * 3;
+  hatch.coreMat.emissiveIntensity = 2 + pulse * 3;
+  hatch.outerGlowMat.opacity = 0.3 + pulse * 0.4;
+  hatch.seamMat.emissiveIntensity = 0.4 + pulse * 1.2;
+
+  // Warning lights -- sequential blinking
+  hatch.warningLights.forEach((wl, i) => {
+    const on = Math.sin(t * 3 + i * 0.8) > 0.2;
+    wl.mat.emissiveIntensity = on ? 2 + fastPulse : 0.1;
+    wl.mat.opacity = on ? 1 : 0.3;
+  });
+
+  // --- Antenna warning light blink ---
+  const antennaOn = Math.sin(t * 2) > 0;
+  antenna.light.intensity = antennaOn ? 2 : 0;
+  antenna.lightMesh.material.emissiveIntensity = antennaOn ? 3 : 0.1;
+
+  // --- Guard tower searchlight sweep ---
+  const sweepAngle = t * 0.3;
+  tower.spotlight.target.position.set(
+    -72 + Math.sin(sweepAngle) * 40,
+    0,
+    -62 + Math.cos(sweepAngle) * 40
+  );
+
+  renderer.render(scene, camera);
+}
+
+// ---------------------------------------------------------------------------
+//  RESIZE HANDLER
+// ---------------------------------------------------------------------------
+window.addEventListener('resize', () => {
+  const aspect = window.innerWidth / window.innerHeight;
+  camera.left = -frustum * aspect;
+  camera.right = frustum * aspect;
+  camera.top = frustum;
+  camera.bottom = -frustum;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------------------------------------------------------------------------
+//  START
+// ---------------------------------------------------------------------------
+// Hide loading screen once first frame renders
+requestAnimationFrame(() => {
+  document.getElementById('loading').classList.add('done');
+  setTimeout(() => {
+    const el = document.getElementById('loading');
+    if (el) el.remove();
+  }, 1000);
+});
+
+animate();
+</script>
+</body>
+</html>

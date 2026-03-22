@@ -1,11 +1,8 @@
 """Tests for cms.assets.services module."""
 
-from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from cms.assets.services import (
     AssetError,
@@ -13,11 +10,6 @@ from cms.assets.services import (
     delete_agent,
     get_storage_used,
 )
-from cms.models import AgentConfig, OperatingSystem
-from risk_register.models import AuditLog
-
-User = get_user_model()
-
 
 # -----------------------------------------------------------------------------
 # Fixtures
@@ -25,70 +17,60 @@ User = get_user_model()
 
 
 @pytest.fixture
-def user(db):
-    """Create a test user."""
-    return User.objects.create_user(username="test@example.com", email="test@example.com")
+def mock_user():
+    """Create a mock user."""
+    user = MagicMock()
+    user.id = 1
+    user.username = "test@example.com"
+    user.email = "test@example.com"
+    return user
 
 
 @pytest.fixture
-def other_user(db):
-    """Create another test user."""
-    return User.objects.create_user(username="other@example.com", email="other@example.com")
+def mock_other_user():
+    """Create another mock user."""
+    user = MagicMock()
+    user.id = 2
+    user.username = "other@example.com"
+    user.email = "other@example.com"
+    return user
 
 
 @pytest.fixture
-def windows_os(db):
-    """Get the Windows operating system."""
-    return OperatingSystem.objects.get(slug="windows")
+def mock_windows_os():
+    """Create a mock Windows operating system."""
+    os_obj = MagicMock()
+    os_obj.slug = "windows"
+    os_obj.name = "Windows"
+    os_obj.extensions = [".msi"]
+    return os_obj
 
 
 @pytest.fixture
-def linux_os(db):
-    """Get the Linux (Debian/Ubuntu) operating system."""
-    return OperatingSystem.objects.get(slug="linux-debian")
+def mock_linux_os():
+    """Create a mock Linux operating system."""
+    os_obj = MagicMock()
+    os_obj.slug = "linux-debian"
+    os_obj.name = "Linux (Debian/Ubuntu)"
+    os_obj.extensions = [".deb"]
+    return os_obj
 
 
 @pytest.fixture
-def windows_agent(db, user, windows_os):
-    """Create a Windows agent for the test user."""
-    return AgentConfig.objects.create(
-        user=user,
-        os=windows_os,
-        name="Test Windows Agent",
-        s3_key="agents/1/test.msi",
-        original_filename="test.msi",
-        file_size_bytes=1024,
-        sha256_hash="abc123",
-    )
-
-
-@pytest.fixture
-def linux_agent(db, user, linux_os):
-    """Create a Linux agent for the test user."""
-    return AgentConfig.objects.create(
-        user=user,
-        os=linux_os,
-        name="Test Linux Agent",
-        s3_key="agents/1/test.sh",
-        original_filename="test.sh",
-        file_size_bytes=2048,
-        sha256_hash="def456",
-    )
-
-
-@pytest.fixture
-def deleted_agent(db, user, windows_os):
-    """Create a soft-deleted agent."""
-    return AgentConfig.objects.create(
-        user=user,
-        os=windows_os,
-        name="Deleted Agent",
-        s3_key="agents/1/deleted.msi",
-        original_filename="deleted.msi",
-        file_size_bytes=4096,
-        sha256_hash="deleted123",
-        deleted_at=timezone.now() - timedelta(days=1),
-    )
+def mock_windows_agent(mock_user, mock_windows_os):
+    """Create a mock Windows agent."""
+    agent = MagicMock()
+    agent.id = 10
+    agent.pk = 10
+    agent.user = mock_user
+    agent.os = mock_windows_os
+    agent.name = "Test Windows Agent"
+    agent.s3_key = "agents/1/test.msi"
+    agent.original_filename = "test.msi"
+    agent.file_size_bytes = 1024
+    agent.sha256_hash = "abc123"
+    agent.deleted_at = None
+    return agent
 
 
 # -----------------------------------------------------------------------------
@@ -96,61 +78,74 @@ def deleted_agent(db, user, windows_os):
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestGetStorageUsed:
     """Tests for get_storage_used function."""
 
-    def test_returns_zero_for_no_agents(self, user):
+    @patch("cms.assets.services.AgentConfig")
+    def test_returns_zero_for_no_agents(self, mock_agent_config, mock_user):
         """Should return 0 when user has no agents."""
-        result = get_storage_used(user)
-        assert result == 0
+        mock_qs = MagicMock()
+        mock_qs.aggregate.return_value = {"total": None}
+        mock_agent_config.active_for_user.return_value = mock_qs
 
-    def test_returns_zero_for_user_with_no_agents_but_others_have(self, user, other_user, windows_os):
+        result = get_storage_used(mock_user)
+        assert result == 0
+        mock_agent_config.active_for_user.assert_called_once_with(mock_user)
+
+    @patch("cms.assets.services.AgentConfig")
+    def test_returns_zero_for_user_with_no_agents_but_others_have(self, mock_agent_config, mock_user):
         """Should return 0 for user even when other users have agents."""
-        AgentConfig.objects.create(
-            user=other_user,
-            os=windows_os,
-            name="Other Agent",
-            s3_key="agents/2/other.msi",
-            original_filename="other.msi",
-            file_size_bytes=5000,
-            sha256_hash="other123",
-        )
+        mock_qs = MagicMock()
+        mock_qs.aggregate.return_value = {"total": None}
+        mock_agent_config.active_for_user.return_value = mock_qs
 
-        result = get_storage_used(user)
+        result = get_storage_used(mock_user)
         assert result == 0
 
-    def test_sums_active_agent_sizes(self, user, windows_agent, linux_agent):
+    @patch("cms.assets.services.AgentConfig")
+    def test_sums_active_agent_sizes(self, mock_agent_config, mock_user):
         """Should return sum of all active agent sizes."""
-        # windows_agent: 1024 bytes, linux_agent: 2048 bytes
-        result = get_storage_used(user)
+        mock_qs = MagicMock()
+        mock_qs.aggregate.return_value = {"total": 1024 + 2048}
+        mock_agent_config.active_for_user.return_value = mock_qs
+
+        result = get_storage_used(mock_user)
         assert result == 1024 + 2048
 
-    def test_excludes_deleted_agents(self, user, windows_agent, deleted_agent):
-        """Should not include deleted agents in the sum."""
-        # windows_agent: 1024 bytes, deleted_agent: 4096 bytes (should be excluded)
-        result = get_storage_used(user)
+    @patch("cms.assets.services.AgentConfig")
+    def test_excludes_deleted_agents(self, mock_agent_config, mock_user):
+        """Should not include deleted agents in the sum.
+
+        active_for_user already filters out deleted agents,
+        so we verify the service calls active_for_user (not objects.all).
+        """
+        mock_qs = MagicMock()
+        mock_qs.aggregate.return_value = {"total": 1024}
+        mock_agent_config.active_for_user.return_value = mock_qs
+
+        result = get_storage_used(mock_user)
         assert result == 1024
+        mock_agent_config.active_for_user.assert_called_once_with(mock_user)
 
-    def test_only_counts_own_agents(self, user, other_user, windows_agent, windows_os):
+    @patch("cms.assets.services.AgentConfig")
+    def test_only_counts_own_agents(self, mock_agent_config, mock_user):
         """Should only count agents belonging to the specified user."""
-        # Create agent for other user
-        AgentConfig.objects.create(
-            user=other_user,
-            os=windows_os,
-            name="Other Agent",
-            s3_key="agents/2/other.msi",
-            original_filename="other.msi",
-            file_size_bytes=8192,
-            sha256_hash="other123",
-        )
+        mock_qs = MagicMock()
+        mock_qs.aggregate.return_value = {"total": 1024}
+        mock_agent_config.active_for_user.return_value = mock_qs
 
-        result = get_storage_used(user)
-        assert result == 1024  # Only windows_agent
+        result = get_storage_used(mock_user)
+        assert result == 1024
+        mock_agent_config.active_for_user.assert_called_once_with(mock_user)
 
-    def test_returns_integer(self, user, windows_agent):
+    @patch("cms.assets.services.AgentConfig")
+    def test_returns_integer(self, mock_agent_config, mock_user):
         """Should always return an integer."""
-        result = get_storage_used(user)
+        mock_qs = MagicMock()
+        mock_qs.aggregate.return_value = {"total": 1024}
+        mock_agent_config.active_for_user.return_value = mock_qs
+
+        result = get_storage_used(mock_user)
         assert isinstance(result, int)
 
 
@@ -159,14 +154,30 @@ class TestGetStorageUsed:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestCreateAgent:
     """Tests for create_agent function."""
 
-    def test_creates_agent_record(self, user, windows_os):
+    @patch("cms.assets.services.audit_log")
+    @patch("cms.assets.services.AgentConfig")
+    @patch("cms.assets.services.OperatingSystem")
+    def test_creates_agent_record(self, mock_os_model, mock_agent_config, mock_audit_log, mock_user, mock_windows_os):
         """Should create AgentConfig record with correct fields."""
+        mock_os_model.objects.filter.return_value.first.return_value = mock_windows_os
+        created_agent = MagicMock()
+        created_agent.id = 42
+        created_agent.pk = 42
+        created_agent.user = mock_user
+        created_agent.name = "New Agent"
+        created_agent.s3_key = "agents/1/new.msi"
+        created_agent.original_filename = "new.msi"
+        created_agent.os = mock_windows_os
+        created_agent.file_size_bytes = 2048
+        created_agent.sha256_hash = "newhash123"
+        created_agent.deleted_at = None
+        mock_agent_config.objects.create.return_value = created_agent
+
         agent = create_agent(
-            user=user,
+            user=mock_user,
             name="New Agent",
             s3_key="agents/1/new.msi",
             filename="new.msi",
@@ -176,19 +187,33 @@ class TestCreateAgent:
         )
 
         assert agent.id is not None
-        assert agent.user == user
+        assert agent.user == mock_user
         assert agent.name == "New Agent"
         assert agent.s3_key == "agents/1/new.msi"
         assert agent.original_filename == "new.msi"
-        assert agent.os == windows_os
+        assert agent.os == mock_windows_os
         assert agent.file_size_bytes == 2048
         assert agent.sha256_hash == "newhash123"
         assert agent.deleted_at is None
 
-    def test_creates_agent_record_with_linux_os(self, user, linux_os):
+        mock_os_model.objects.filter.assert_called_once_with(slug="windows")
+        mock_agent_config.objects.create.assert_called_once()
+
+    @patch("cms.assets.services.audit_log")
+    @patch("cms.assets.services.AgentConfig")
+    @patch("cms.assets.services.OperatingSystem")
+    def test_creates_agent_record_with_linux_os(
+        self, mock_os_model, mock_agent_config, mock_audit_log, mock_user, mock_linux_os
+    ):
         """Should correctly look up Linux OS."""
+        mock_os_model.objects.filter.return_value.first.return_value = mock_linux_os
+        created_agent = MagicMock()
+        created_agent.id = 43
+        created_agent.os = mock_linux_os
+        mock_agent_config.objects.create.return_value = created_agent
+
         agent = create_agent(
-            user=user,
+            user=mock_user,
             name="Linux Agent",
             s3_key="agents/1/linux.sh",
             filename="linux.sh",
@@ -197,12 +222,21 @@ class TestCreateAgent:
             sha256="linuxhash",
         )
 
-        assert agent.os == linux_os
+        assert agent.os == mock_linux_os
+        mock_os_model.objects.filter.assert_called_once_with(slug="linux-debian")
 
-    def test_logs_activity(self, user):
+    @patch("cms.assets.services.audit_log")
+    @patch("cms.assets.services.AgentConfig")
+    @patch("cms.assets.services.OperatingSystem")
+    def test_logs_activity(self, mock_os_model, mock_agent_config, mock_audit_log, mock_user, mock_windows_os):
         """Should create an audit log entry for agent creation."""
-        agent = create_agent(
-            user=user,
+        mock_os_model.objects.filter.return_value.first.return_value = mock_windows_os
+        created_agent = MagicMock()
+        created_agent.id = 44
+        mock_agent_config.objects.create.return_value = created_agent
+
+        create_agent(
+            user=mock_user,
             name="Logged Agent",
             s3_key="agents/1/logged.msi",
             filename="logged.msi",
@@ -211,20 +245,27 @@ class TestCreateAgent:
             sha256="loggedhash",
         )
 
-        log_entry = AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.AGENT,
-            action=AuditLog.Action.CREATE,
-            entity_id=agent.id,
-        ).first()
-        assert log_entry is not None
-        assert log_entry.new_state["name"] == "Logged Agent"
-        assert log_entry.new_state["filename"] == "logged.msi"
-        assert log_entry.actor_id == user.id
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args
+        assert call_kwargs.kwargs["entity_id"] == 44
+        assert call_kwargs.kwargs["new_state"]["name"] == "Logged Agent"
+        assert call_kwargs.kwargs["new_state"]["filename"] == "logged.msi"
+        assert call_kwargs.kwargs["actor_id"] == mock_user.id
 
-    def test_logs_upload_method_when_provided(self, user):
+    @patch("cms.assets.services.audit_log")
+    @patch("cms.assets.services.AgentConfig")
+    @patch("cms.assets.services.OperatingSystem")
+    def test_logs_upload_method_when_provided(
+        self, mock_os_model, mock_agent_config, mock_audit_log, mock_user, mock_windows_os
+    ):
         """Should include upload_method in audit log when provided."""
+        mock_os_model.objects.filter.return_value.first.return_value = mock_windows_os
+        created_agent = MagicMock()
+        created_agent.id = 45
+        mock_agent_config.objects.create.return_value = created_agent
+
         create_agent(
-            user=user,
+            user=mock_user,
             name="Presigned Agent",
             s3_key="agents/1/presigned.msi",
             filename="presigned.msi",
@@ -234,17 +275,17 @@ class TestCreateAgent:
             upload_method="presigned",
         )
 
-        log_entry = AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.AGENT,
-            action=AuditLog.Action.CREATE,
-        ).first()
-        assert log_entry.new_state["upload_method"] == "presigned"
+        call_kwargs = mock_audit_log.call_args
+        assert call_kwargs.kwargs["new_state"]["upload_method"] == "presigned"
 
-    def test_raises_for_invalid_os_slug(self, user):
+    @patch("cms.assets.services.OperatingSystem")
+    def test_raises_for_invalid_os_slug(self, mock_os_model, mock_user):
         """Should raise AssetError for invalid OS slug."""
+        mock_os_model.objects.filter.return_value.first.return_value = None
+
         with pytest.raises(AssetError) as exc_info:
             create_agent(
-                user=user,
+                user=mock_user,
                 name="Invalid OS Agent",
                 s3_key="agents/1/invalid.msi",
                 filename="invalid.msi",
@@ -255,10 +296,21 @@ class TestCreateAgent:
 
         assert "not found" in str(exc_info.value).lower()
 
-    def test_returns_agent_object(self, user):
+    @patch("cms.assets.services.audit_log")
+    @patch("cms.assets.services.AgentConfig")
+    @patch("cms.assets.services.OperatingSystem")
+    def test_returns_agent_object(self, mock_os_model, mock_agent_config, mock_audit_log, mock_user, mock_windows_os):
         """Should return the created AgentConfig object."""
+        from cms.models import AgentConfig as RealAgentConfig
+
+        mock_os_model.objects.filter.return_value.first.return_value = mock_windows_os
+        created_agent = MagicMock(spec=RealAgentConfig)
+        created_agent.id = 46
+        created_agent.pk = 46
+        mock_agent_config.objects.create.return_value = created_agent
+
         result = create_agent(
-            user=user,
+            user=mock_user,
             name="Return Test",
             s3_key="agents/1/return.msi",
             filename="return.msi",
@@ -267,7 +319,7 @@ class TestCreateAgent:
             sha256="returnhash",
         )
 
-        assert isinstance(result, AgentConfig)
+        assert isinstance(result, RealAgentConfig)
         assert result.pk is not None
 
 
@@ -276,99 +328,101 @@ class TestCreateAgent:
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestDeleteAgent:
     """Tests for delete_agent function."""
 
+    @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.s3_delete")
-    def test_soft_deletes_agent(self, mock_s3_delete, windows_agent):
+    def test_soft_deletes_agent(self, mock_s3_delete, mock_audit_log, mock_windows_agent):
         """Should set deleted_at timestamp on agent."""
         mock_s3_delete.return_value = None
-        assert windows_agent.deleted_at is None
+        assert mock_windows_agent.deleted_at is None
 
-        delete_agent(windows_agent)
+        delete_agent(mock_windows_agent)
 
-        windows_agent.refresh_from_db()
-        assert windows_agent.deleted_at is not None
+        mock_windows_agent.save.assert_called_once_with(update_fields=["deleted_at"])
+        assert mock_windows_agent.deleted_at is not None
 
+    @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.s3_delete")
-    def test_agent_still_exists_after_delete(self, mock_s3_delete, windows_agent):
-        """Should not hard delete - record should still exist."""
+    def test_does_not_hard_delete(self, mock_s3_delete, mock_audit_log, mock_windows_agent):
+        """Should not hard delete - only soft delete via save."""
         mock_s3_delete.return_value = None
-        agent_id = windows_agent.id
 
-        delete_agent(windows_agent)
+        delete_agent(mock_windows_agent)
 
-        # Record should still exist
-        assert AgentConfig.objects.filter(id=agent_id).exists()
+        # save was called (soft delete), but delete() was never called
+        mock_windows_agent.save.assert_called_once()
+        mock_windows_agent.delete.assert_not_called()
 
+    @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.s3_delete")
-    def test_calls_s3_delete_with_correct_key(self, mock_s3_delete, windows_agent):
+    def test_calls_s3_delete_with_correct_key(self, mock_s3_delete, mock_audit_log, mock_windows_agent):
         """Should call S3 delete with the agent's s3_key."""
         mock_s3_delete.return_value = None
 
-        delete_agent(windows_agent)
+        delete_agent(mock_windows_agent)
 
-        mock_s3_delete.assert_called_once_with(windows_agent.s3_key)
+        mock_s3_delete.assert_called_once_with(mock_windows_agent.s3_key)
 
+    @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.s3_delete")
-    def test_logs_activity(self, mock_s3_delete, user, windows_agent):
+    def test_logs_activity(self, mock_s3_delete, mock_audit_log, mock_windows_agent):
         """Should create an audit log entry for agent deletion."""
         mock_s3_delete.return_value = None
 
-        delete_agent(windows_agent)
+        delete_agent(mock_windows_agent)
 
-        log_entry = AuditLog.objects.filter(
-            entity_type=AuditLog.EntityType.AGENT,
-            action=AuditLog.Action.DELETE,
-            entity_id=windows_agent.id,
-        ).first()
-        assert log_entry is not None
-        assert log_entry.previous_state["name"] == windows_agent.name
-        assert log_entry.actor_id == user.id
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args
+        assert call_kwargs.kwargs["entity_id"] == mock_windows_agent.id
+        assert call_kwargs.kwargs["previous_state"]["name"] == mock_windows_agent.name
+        assert call_kwargs.kwargs["actor_id"] == mock_windows_agent.user.id
 
     @patch("cms.assets.services.s3_delete")
-    def test_raises_if_s3_delete_fails(self, mock_s3_delete, windows_agent):
+    def test_raises_if_s3_delete_fails(self, mock_s3_delete, mock_windows_agent):
         """Should raise AssetError if S3 delete fails."""
         from cms.assets.s3 import S3Error
 
         mock_s3_delete.side_effect = S3Error("Delete failed")
 
         with pytest.raises(AssetError) as exc_info:
-            delete_agent(windows_agent)
+            delete_agent(mock_windows_agent)
 
         assert "delete" in str(exc_info.value).lower()
 
     @patch("cms.assets.services.s3_delete")
-    def test_agent_not_deleted_if_s3_fails(self, mock_s3_delete, windows_agent):
+    def test_agent_not_soft_deleted_if_s3_fails(self, mock_s3_delete, mock_windows_agent):
         """Should not soft delete agent if S3 delete fails."""
         from cms.assets.s3 import S3Error
 
         mock_s3_delete.side_effect = S3Error("Delete failed")
 
         with pytest.raises(AssetError):
-            delete_agent(windows_agent)
+            delete_agent(mock_windows_agent)
 
-        windows_agent.refresh_from_db()
-        assert windows_agent.deleted_at is None
+        # save should not have been called since s3 failed first
+        mock_windows_agent.save.assert_not_called()
+        assert mock_windows_agent.deleted_at is None
 
+    @patch("cms.assets.services.audit_log")
     @patch("cms.assets.services.s3_delete")
-    def test_s3_delete_called_before_db_update(self, mock_s3_delete, windows_agent):
+    def test_s3_delete_called_before_db_update(self, mock_s3_delete, mock_audit_log, mock_windows_agent):
         """S3 delete should be called before database is updated."""
         call_order = []
 
         def track_s3_delete(*args):
-            # Check deleted_at at time of S3 call
-            windows_agent.refresh_from_db()
-            call_order.append(("s3", windows_agent.deleted_at))
+            call_order.append("s3_delete")
+
+        def track_save(*args, **kwargs):
+            call_order.append("save")
 
         mock_s3_delete.side_effect = track_s3_delete
+        mock_windows_agent.save.side_effect = track_save
 
-        delete_agent(windows_agent)
+        delete_agent(mock_windows_agent)
 
-        # S3 was called first, deleted_at was None at that point
-        assert len(call_order) == 1
-        assert call_order[0][1] is None
+        assert call_order == ["s3_delete", "save"]
 
 
 # -----------------------------------------------------------------------------

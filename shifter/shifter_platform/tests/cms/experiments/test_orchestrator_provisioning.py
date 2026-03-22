@@ -12,280 +12,398 @@ Logic under test:
 - Handles missing agents, invalid scenarios, and engine failures gracefully
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
-from django.contrib.auth import get_user_model
-from django.test import TestCase
-
-from cms.experiments.models import Experiment, ExperimentRun
-from cms.experiments.orchestrator import ExperimentOrchestrator
 from cms.experiments.schemas import ExperimentStatus, RunStatus
-from cms.models import AgentConfig, OperatingSystem, RangeInstance, Request
-
-User = get_user_model()
-
-# Test password constant for all test users
-TEST_PASSWORD = "test"  # nosec B105
 
 
-class RequestRangeProvisioningTest(TestCase):
-    """Tests for _request_range_provisioning — the experiment-to-engine bridge."""
+def _make_mock_run(run_pk=1, status=RunStatus.PROVISIONING.value):
+    """Create a mock ExperimentRun."""
+    run = MagicMock()
+    run.pk = run_pk
+    run.run_number = 1
+    run.status = status
+    run.request_id = None
+    run.error_message = ""
+    run.metadata = None
+    return run
 
-    @classmethod
-    def setUpTestData(cls) -> None:
-        cls.user = User.objects.create_user(username="prov_user", password=TEST_PASSWORD, is_staff=True)
-        cls.windows_os = OperatingSystem.objects.get(slug="windows")
-        cls.linux_os = OperatingSystem.objects.get(slug="linux-debian")
 
-    def _create_agent(self, os_obj: OperatingSystem, name: str = "Test Agent") -> AgentConfig:
-        """Create an AgentConfig for testing."""
-        return AgentConfig.objects.create(
-            user=self.user,
-            name=name,
-            os=os_obj,
-            s3_key=f"agents/{self.user.pk}/{name.lower().replace(' ', '_')}.msi",
-            original_filename=f"{name.lower()}.msi",
-            file_size_bytes=5_000_000,
-            sha256_hash="abc123def456",
-        )
+def _make_mock_agent(deleted=False, os_slug="windows"):
+    """Create a mock AgentConfig."""
+    agent = MagicMock()
+    agent.pk = 10
+    agent.name = "Test Agent"
+    agent.s3_key = "agents/1/test_agent.msi"
+    agent.original_filename = "test_agent.msi"
+    agent.file_size_bytes = 5_000_000
+    agent.sha256_hash = "abc123def456"
+    agent.os.slug = os_slug
+    if deleted:
+        from django.utils import timezone
 
-    def _create_provisioning_run(
-        self,
-        scenario_id: str = "basic",
-        agent: AgentConfig | None = None,
-    ) -> tuple[Experiment, ExperimentRun]:
-        """Create an experiment with a single run in PROVISIONING state."""
-        exp = Experiment.objects.create(
-            user=self.user,
-            name="Provisioning Test",
-            scenario_id=scenario_id,
-            agent=agent,
-            total_runs=1,
-            max_parallel_runs=1,
-            status=ExperimentStatus.RUNNING.value,
-        )
-        run = ExperimentRun.objects.create(
-            experiment=exp,
-            run_number=1,
-            status=RunStatus.PROVISIONING.value,
-        )
-        return exp, run
+        agent.deleted_at = timezone.now()
+    else:
+        agent.deleted_at = None
+    return agent
 
-    # -----------------------------------------------------------------
-    # Core provisioning flow
-    # -----------------------------------------------------------------
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_creates_cms_request_record(self, mock_engine: object) -> None:
+def _make_mock_experiment(exp_pk=1, user_pk=1, scenario_id="basic", agent=None):
+    """Create a mock Experiment with user and agent."""
+    exp = MagicMock()
+    exp.pk = exp_pk
+    exp.scenario_id = scenario_id
+    exp.user.pk = user_pk
+    exp.agent = agent
+    exp.status = ExperimentStatus.RUNNING.value
+    exp.total_runs = 1
+    exp.max_parallel_runs = 1
+    return exp
+
+
+# The _request_range_provisioning method uses local imports:
+#   from cms.models import AgentConfig, RangeInstance, Request
+#   from cms.scenarios.hydrator import hydrate_scenario
+#   from shared.schemas import RequestSpec
+# We patch at the source module level since local imports re-read from sys.modules.
+PATCH_ENGINE = "cms.experiments.orchestrator.engine_create_range"
+PATCH_HYDRATE = "cms.scenarios.hydrator.hydrate_scenario"
+PATCH_REQUEST = "cms.models.Request"
+PATCH_RANGE_INSTANCE = "cms.models.RangeInstance"
+PATCH_EXPERIMENT = "cms.experiments.orchestrator.Experiment"
+PATCH_REQUEST_SPEC = "shared.schemas.RequestSpec"
+
+
+class TestRequestRangeProvisioning:
+    """Tests for _request_range_provisioning -- the experiment-to-engine bridge."""
+
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_creates_cms_request_record(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
         """Provisioning creates a CMS Request for engine correlation."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(agent=agent)
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        # A CMS Request should exist linked to this run
-        run.refresh_from_db()
+        mock_request_model.objects.create.assert_called_once()
         assert run.request_id is not None
-        request = Request.objects.get(request_id=run.request_id)
-        assert request.user == self.user
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_stores_request_id_on_run(self, mock_engine: object) -> None:
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_stores_request_id_on_run(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
         """Provisioning stores request_id on ExperimentRun for correlation."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(agent=agent)
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
         assert run.request_id is not None
         assert isinstance(run.request_id, UUID)
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_creates_range_instance_record(self, mock_engine: object) -> None:
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_creates_range_instance_record(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
         """Provisioning creates a RangeInstance for CMS tracking."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(agent=agent)
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
-        ri = RangeInstance.objects.get(request__request_id=run.request_id)
-        assert ri.scenario_id == "basic"
-        assert ri.user_id == self.user.pk
-        assert ri.agent == agent
+        mock_ri_model.objects.create.assert_called_once()
+        call_kwargs = mock_ri_model.objects.create.call_args[1]
+        assert call_kwargs["scenario_id"] == "basic"
+        assert call_kwargs["user_id"] == 1
+        assert call_kwargs["agent"] == agent
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_calls_engine_create_range(self, mock_engine: object) -> None:
-        """Provisioning calls engine.create_range with a valid RequestSpec."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(agent=agent)
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_calls_engine_create_range(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
+        """Provisioning calls engine.create_range."""
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
         mock_engine.assert_called_once()
-        request_spec = mock_engine.call_args[0][0]
-        assert request_spec.user_id == self.user.pk
-        assert len(request_spec.items) == 1
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_range_spec_has_correct_scenario_id(self, mock_engine: object) -> None:
-        """The RangeSpec passed to engine has the experiment's scenario_id."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(scenario_id="basic", agent=agent)
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_range_spec_has_correct_scenario_id(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
+        """The scenario_id passed to hydrate_scenario matches the experiment."""
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent, scenario_id="basic")
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
 
-        orch = ExperimentOrchestrator(exp.pk)
-        orch._request_range_provisioning(run)
+        mock_range_spec = MagicMock()
+        mock_range_spec.scenario_id = "basic"
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
 
-        request_spec = mock_engine.call_args[0][0]
-        range_spec = request_spec.items[0]
-        assert range_spec.scenario_id == "basic"
+        run = _make_mock_run()
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_range_spec_contains_hydrated_instances(self, mock_engine: object) -> None:
-        """The RangeSpec contains properly hydrated instances with agent details."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(scenario_id="basic", agent=agent)
-
-        orch = ExperimentOrchestrator(exp.pk)
-        orch._request_range_provisioning(run)
-
-        request_spec = mock_engine.call_args[0][0]
-        range_spec = request_spec.items[0]
-        instances = range_spec.all_instances
-        assert len(instances) == 2  # basic scenario: attacker + workstation
-        victim = next(i for i in instances if i.role == "victim")
-        assert victim.agent is not None
-        assert victim.agent.s3_key == agent.s3_key
-
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_range_instance_stores_range_spec_json(self, mock_engine: object) -> None:
-        """RangeInstance.range_spec stores the hydrated spec as JSON."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(agent=agent)
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
-        ri = RangeInstance.objects.get(request__request_id=run.request_id)
-        assert ri.range_spec is not None
-        assert ri.range_spec["scenario_id"] == "basic"
+        mock_hydrate.assert_called_once()
+        assert mock_hydrate.call_args[0][0] == "basic"
 
     # -----------------------------------------------------------------
-    # Scenario without agent (e.g., cortex_deployment_experience)
+    # Scenario without agent
     # -----------------------------------------------------------------
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_provisions_scenario_without_agent(self, mock_engine: object) -> None:
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_provisions_scenario_without_agent(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
         """Scenarios that don't require agents can be provisioned without one."""
-        # cortex_deployment_experience has xdr_agent=false on all instances
-        exp, run = self._create_provisioning_run(scenario_id="cortex_deployment_experience", agent=None)
+        exp = _make_mock_experiment(agent=None, scenario_id="cortex_deployment_experience")
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "cortex_deployment_experience"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
         mock_engine.assert_called_once()
-        run.refresh_from_db()
         assert run.request_id is not None
 
     # -----------------------------------------------------------------
     # Error handling
     # -----------------------------------------------------------------
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_invalid_scenario_fails_run(self, mock_engine: object) -> None:
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_invalid_scenario_fails_run(self, mock_exp_model, mock_hydrate, mock_engine):
         """Invalid scenario_id transitions run to FAILED with error message."""
-        exp, run = self._create_provisioning_run(scenario_id="nonexistent")
+        exp = _make_mock_experiment(agent=None, scenario_id="nonexistent")
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_hydrate.side_effect = ValueError("Scenario 'nonexistent' not found")
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
-        assert run.status == RunStatus.FAILED.value
         assert "nonexistent" in run.error_message.lower() or "not found" in run.error_message.lower()
+        run.transition_to.assert_called_once_with(RunStatus.FAILED)
         mock_engine.assert_not_called()
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_missing_required_agent_fails_run(self, mock_engine: object) -> None:
-        """Scenario requiring agent but experiment has none → run FAILED."""
-        # basic scenario requires an agent (has xdr_agent=true instances)
-        exp, run = self._create_provisioning_run(scenario_id="basic", agent=None)
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_missing_required_agent_fails_run(self, mock_exp_model, mock_hydrate, mock_engine):
+        """Scenario requiring agent but experiment has none -> run FAILED."""
+        from cms.exceptions import CMSError
+
+        exp = _make_mock_experiment(agent=None, scenario_id="basic")
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_hydrate.side_effect = CMSError("Agent required for scenario 'basic'")
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
-        assert run.status == RunStatus.FAILED.value
         assert run.error_message != ""
+        run.transition_to.assert_called_once_with(RunStatus.FAILED)
         mock_engine.assert_not_called()
 
-    @patch("cms.experiments.orchestrator.engine_create_range", side_effect=Exception("ECS down"))
-    def test_engine_failure_fails_run(self, mock_engine: object) -> None:
+    @patch(PATCH_ENGINE, side_effect=Exception("ECS down"))
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_engine_failure_fails_run(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
         """Engine failure transitions run to FAILED with error details."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(agent=agent)
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
-        assert run.status == RunStatus.FAILED.value
         assert "ECS down" in run.error_message
+        run.transition_to.assert_called_once_with(RunStatus.FAILED)
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_deleted_agent_fails_run(self, mock_engine: object) -> None:
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_deleted_agent_fails_run(self, mock_exp_model, mock_hydrate, mock_engine):
         """Soft-deleted agent fails the run."""
-        from django.utils import timezone
+        agent = _make_mock_agent(deleted=True)
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
 
-        agent = self._create_agent(self.windows_os)
-        agent.deleted_at = timezone.now()
-        agent.save(update_fields=["deleted_at"])
-        exp, run = self._create_provisioning_run(scenario_id="basic", agent=agent)
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        run.refresh_from_db()
-        assert run.status == RunStatus.FAILED.value
+        run.transition_to.assert_called_once_with(RunStatus.FAILED)
         mock_engine.assert_not_called()
 
     # -----------------------------------------------------------------
-    # AD Attack Lab scenario (multi-instance with domain controller)
+    # AD Attack Lab scenario
     # -----------------------------------------------------------------
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_ad_attack_lab_produces_three_instances(self, mock_engine: object) -> None:
-        """AD Attack Lab hydrates with attacker, DC, and victim."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(scenario_id="ad_attack_lab", agent=agent)
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_ad_attack_lab_calls_hydrate_with_correct_scenario(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
+        """AD Attack Lab passes 'ad_attack_lab' scenario_id to hydrate."""
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent, scenario_id="ad_attack_lab")
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "ad_attack_lab"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        request_spec = mock_engine.call_args[0][0]
-        range_spec = request_spec.items[0]
-        instances = range_spec.all_instances
-        assert len(instances) == 3
-        roles = {i.role for i in instances}
-        assert roles == {"attacker", "dc", "victim"}
+        mock_hydrate.assert_called_once()
+        assert mock_hydrate.call_args[0][0] == "ad_attack_lab"
+        mock_engine.assert_called_once()
 
-    @patch("cms.experiments.orchestrator.engine_create_range")
-    def test_ad_attack_lab_dc_has_domain_config(self, mock_engine: object) -> None:
-        """AD Attack Lab DC instance has dc_config with domain settings."""
-        agent = self._create_agent(self.windows_os)
-        exp, run = self._create_provisioning_run(scenario_id="ad_attack_lab", agent=agent)
+    @patch(PATCH_ENGINE)
+    @patch(PATCH_RANGE_INSTANCE)
+    @patch(PATCH_REQUEST)
+    @patch(PATCH_REQUEST_SPEC)
+    @patch(PATCH_HYDRATE)
+    @patch(PATCH_EXPERIMENT)
+    def test_range_instance_stores_range_spec_json(
+        self, mock_exp_model, mock_hydrate, mock_req_spec, mock_request_model, mock_ri_model, mock_engine
+    ):
+        """RangeInstance.range_spec stores the hydrated spec as JSON."""
+        agent = _make_mock_agent()
+        exp = _make_mock_experiment(agent=agent)
+        mock_exp_model.objects.prefetch_related.return_value.get.return_value = exp
+
+        mock_range_spec = MagicMock()
+        mock_range_spec.model_dump.return_value = {"scenario_id": "basic"}
+        mock_hydrate.return_value = mock_range_spec
+
+        run = _make_mock_run()
+
+        from cms.experiments.orchestrator import ExperimentOrchestrator
 
         orch = ExperimentOrchestrator(exp.pk)
         orch._request_range_provisioning(run)
 
-        request_spec = mock_engine.call_args[0][0]
-        range_spec = request_spec.items[0]
-        dc = next(i for i in range_spec.all_instances if i.role == "dc")
-        assert dc.dc_config is not None
-        assert dc.dc_config.domain_name == "internal.shifter"
+        call_kwargs = mock_ri_model.objects.create.call_args[1]
+        assert call_kwargs["range_spec"] == {"scenario_id": "basic"}

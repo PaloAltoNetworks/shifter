@@ -7,7 +7,8 @@ These tests verify the OperatingSystem model is:
 - Has correct meta options (ordering, verbose_name)
 """
 
-import pytest
+from unittest.mock import MagicMock, patch
+
 from django.db import models
 
 # -----------------------------------------------------------------------------
@@ -15,7 +16,6 @@ from django.db import models
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
 class TestOperatingSystemModel:
     """Tests for OperatingSystem model structure."""
 
@@ -70,81 +70,101 @@ class TestOperatingSystemModel:
 
 
 # -----------------------------------------------------------------------------
-# Test OperatingSystem Behavior
+# Test OperatingSystem Properties (no DB needed)
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.django_db
-class TestOperatingSystemBehavior:
-    """Tests for OperatingSystem model behavior."""
+class TestOperatingSystemProperties:
+    """Tests for OperatingSystem model properties using in-memory construction."""
 
     def test_str_returns_name(self):
         """__str__ should return the OS name."""
         from cms.models import OperatingSystem
 
-        os = OperatingSystem.objects.create(
-            slug="test-os-str",
-            name="Test OS",
-            extensions=[".test"],
-        )
+        os = OperatingSystem(slug="test", name="Test OS", extensions=[".test"])
 
         assert str(os) == "Test OS"
+
+
+# -----------------------------------------------------------------------------
+# Test OperatingSystem Behavior (mocked DB)
+# -----------------------------------------------------------------------------
+
+
+class TestOperatingSystemBehavior:
+    """Tests for OperatingSystem model behavior with mocked database access."""
 
     def test_get_for_extension_finds_os(self):
         """get_for_extension should find OS by extension."""
         from cms.models import OperatingSystem
 
-        test_os = OperatingSystem.objects.create(
+        test_os = OperatingSystem(
             slug="test-os-ext",
             name="Test OS",
             extensions=[".testmsi", ".testexe"],
         )
 
-        result = OperatingSystem.get_for_extension(".testmsi")
-        assert result == test_os
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([test_os])
+
+        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
+            result = OperatingSystem.get_for_extension(".testmsi")
+            assert result == test_os
 
     def test_get_for_extension_handles_missing_dot(self):
         """get_for_extension should work with or without leading dot."""
         from cms.models import OperatingSystem
 
-        test_os = OperatingSystem.objects.create(
+        test_os = OperatingSystem(
             slug="test-os-nodot",
             name="Test OS",
             extensions=[".nodot"],
         )
 
-        result = OperatingSystem.get_for_extension("nodot")
-        assert result == test_os
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([test_os])
+
+        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
+            result = OperatingSystem.get_for_extension("nodot")
+            assert result == test_os
 
     def test_get_for_extension_case_insensitive(self):
         """get_for_extension should be case-insensitive."""
         from cms.models import OperatingSystem
 
-        test_os = OperatingSystem.objects.create(
+        test_os = OperatingSystem(
             slug="test-os-case",
             name="Test OS",
             extensions=[".casemsi"],
         )
 
-        result = OperatingSystem.get_for_extension(".CASEMSI")
-        assert result == test_os
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([test_os])
+
+        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
+            result = OperatingSystem.get_for_extension(".CASEMSI")
+            assert result == test_os
 
     def test_get_for_extension_returns_none_for_unknown(self):
         """get_for_extension should return None for unknown extensions."""
         from cms.models import OperatingSystem
 
-        OperatingSystem.objects.create(
+        test_os = OperatingSystem(
             slug="test-os-unknown",
             name="Test OS",
             extensions=[".msi", ".exe"],
         )
 
-        result = OperatingSystem.get_for_extension(".unknown")
-        assert result is None
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([test_os])
+
+        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
+            result = OperatingSystem.get_for_extension(".unknown")
+            assert result is None
 
     def test_extensions_defaults_to_empty_list(self):
         """extensions field should default to empty list."""
         from cms.models import OperatingSystem
 
-        os = OperatingSystem.objects.create(slug="custom", name="Custom OS")
+        os = OperatingSystem(slug="custom", name="Custom OS")
         assert os.extensions == []

@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARES MACROTECHNOLOGY - Site 7 Siberian Compound [CLASSIFIED]</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050809; }
+  canvas { display: block; }
+  #loading {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #050809; color: #1a3a3a; font-family: 'Courier New', monospace;
+    font-size: 13px; z-index: 10; transition: opacity 1.2s;
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading .bar {
+    width: 300px; height: 2px; background: #0a1a1a; margin-top: 16px; overflow: hidden;
+  }
+  #loading .bar-inner {
+    width: 0%; height: 100%; background: #00ffcc; transition: width 0.3s;
+  }
+  #hud {
+    position: fixed; top: 16px; left: 16px; color: #1a5a5a;
+    font-family: 'Courier New', monospace; font-size: 10px;
+    letter-spacing: 1px; text-transform: uppercase; z-index: 5;
+    pointer-events: none; line-height: 1.6; opacity: 0;
+    transition: opacity 1.5s;
+  }
+  #hud.visible { opacity: 0.7; }
+  #hud .accent { color: #00ccaa; }
+  #hud .warn { color: #ff3366; }
+  #corp-logo {
+    position: fixed; bottom: 16px; right: 16px;
+    font-family: 'Courier New', monospace; font-size: 9px;
+    color: #1a2a2a; letter-spacing: 3px; text-transform: uppercase;
+    z-index: 5; pointer-events: none; opacity: 0; transition: opacity 1.5s;
+    text-align: right; line-height: 1.5;
+  }
+  #corp-logo.visible { opacity: 0.5; }
+  #corp-logo .logo-accent { color: #00aa88; }
+</style>
+</head>
+<body>
+<div id="loading">
+  <div>ESTABLISHING SATELLITE UPLINK...</div>
+  <div class="bar"><div class="bar-inner" id="load-bar"></div></div>
+</div>
+<div id="hud">
+  <div><span class="accent">SITE-7</span> // ARES MACROTECHNOLOGY</div>
+  <div>CLASSIFICATION: <span class="warn">BLACK</span></div>
+  <div>LAT: 71.2906N // LON: 124.0531E</div>
+  <div>AMBIENT: -38C // WIND: 47KPH NNW</div>
+  <div>STATUS: <span class="accent">OPERATIONAL</span></div>
+</div>
+<div id="corp-logo">
+  <div><span class="logo-accent">ARES</span> MACROTECHNOLOGY</div>
+  <div>GLOBAL ARMAMENTS DIVISION</div>
+  <div>PROJECT FENRIS // SITE-7</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+// =========================================================================
+//  LOADING
+// =========================================================================
+const loadBar = document.getElementById('load-bar');
+let loadProgress = 0;
+function advanceLoad(pct) {
+  loadProgress = Math.min(loadProgress + pct, 100);
+  loadBar.style.width = loadProgress + '%';
+}
+
+// =========================================================================
+//  RENDERER
+// =========================================================================
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.65;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+advanceLoad(10);
+
+// =========================================================================
+//  SCENE
+// =========================================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050809);
+scene.fog = new THREE.FogExp2(0x080c10, 0.004);
+
+// =========================================================================
+//  CAMERA (Orthographic Isometric)
+// =========================================================================
+const frustum = 110;
+const aspect = window.innerWidth / window.innerHeight;
+const camera = new THREE.OrthographicCamera(
+  -frustum * aspect, frustum * aspect,
+  frustum, -frustum,
+  -500, 1000
+);
+const isoDistance = 200;
+const isoAngle = Math.PI / 4;
+const isoTilt = Math.atan(1 / Math.sqrt(2));
+camera.position.set(
+  isoDistance * Math.cos(isoTilt) * Math.sin(isoAngle),
+  isoDistance * Math.sin(isoTilt),
+  isoDistance * Math.cos(isoTilt) * Math.cos(isoAngle)
+);
+camera.lookAt(0, 0, 0);
+
+// =========================================================================
+//  CONTROLS
+// =========================================================================
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableRotate = true;
+controls.enablePan = true;
+controls.enableZoom = true;
+controls.minZoom = 0.3;
+controls.maxZoom = 3;
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0, 0);
+advanceLoad(10);
+
+// =========================================================================
+//  MATERIALS LIBRARY
+// =========================================================================
+const mat = {
+  // Ground -- frozen tundra / concrete pad
+  ground: new THREE.MeshStandardMaterial({
+    color: 0x0c1214, roughness: 0.85, metalness: 0.1
+  }),
+  // Wet concrete
+  concrete: new THREE.MeshStandardMaterial({
+    color: 0x1a1e22, roughness: 0.55, metalness: 0.05
+  }),
+  concreteDark: new THREE.MeshStandardMaterial({
+    color: 0x111518, roughness: 0.6, metalness: 0.05
+  }),
+  // Building walls -- brutalist megacorp
+  wallMain: new THREE.MeshStandardMaterial({
+    color: 0x161a1e, roughness: 0.45, metalness: 0.15
+  }),
+  wallDark: new THREE.MeshStandardMaterial({
+    color: 0x0e1114, roughness: 0.5, metalness: 0.1
+  }),
+  // Metal -- industrial panels, hatches
+  metalDark: new THREE.MeshStandardMaterial({
+    color: 0x1a1e24, roughness: 0.3, metalness: 0.8
+  }),
+  metalRusty: new THREE.MeshStandardMaterial({
+    color: 0x2a1e16, roughness: 0.7, metalness: 0.4
+  }),
+  metalClean: new THREE.MeshStandardMaterial({
+    color: 0x2a2e34, roughness: 0.25, metalness: 0.85
+  }),
+  // Neon accents
+  neonTeal: new THREE.MeshStandardMaterial({
+    color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 2.0,
+    roughness: 0.2, metalness: 0.0
+  }),
+  neonMagenta: new THREE.MeshStandardMaterial({
+    color: 0xff1a66, emissive: 0xff1a66, emissiveIntensity: 2.5,
+    roughness: 0.2, metalness: 0.0
+  }),
+  neonAmber: new THREE.MeshStandardMaterial({
+    color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 2.0,
+    roughness: 0.2, metalness: 0.0
+  }),
+  // Hatch glow
+  hatchGlow: new THREE.MeshStandardMaterial({
+    color: 0xff2244, emissive: 0xff2244, emissiveIntensity: 1.5,
+    roughness: 0.3, metalness: 0.5
+  }),
+  hatchMetal: new THREE.MeshStandardMaterial({
+    color: 0x1e2228, roughness: 0.25, metalness: 0.9
+  }),
+  // Windows
+  windowDark: new THREE.MeshStandardMaterial({
+    color: 0x0a2030, roughness: 0.1, metalness: 0.3
+  }),
+  windowLit: new THREE.MeshStandardMaterial({
+    color: 0x1a4a5a, emissive: 0x1a4a5a, emissiveIntensity: 0.8,
+    roughness: 0.1, metalness: 0.2
+  }),
+  // Fence
+  fence: new THREE.MeshStandardMaterial({
+    color: 0x2a2e34, roughness: 0.4, metalness: 0.7,
+    side: THREE.DoubleSide
+  }),
+  // Puddle (reflective)
+  puddle: new THREE.MeshStandardMaterial({
+    color: 0x0a1418, roughness: 0.05, metalness: 0.9
+  }),
+  // Warning stripes
+  warning: new THREE.MeshStandardMaterial({
+    color: 0xccaa00, emissive: 0x332200, emissiveIntensity: 0.3,
+    roughness: 0.5, metalness: 0.2
+  }),
+  // Roof
+  roof: new THREE.MeshStandardMaterial({
+    color: 0x121618, roughness: 0.65, metalness: 0.2
+  }),
+  // Cable
+  cable: new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a, roughness: 0.6, metalness: 0.3
+  }),
+  // Vehicle paint
+  vehiclePaint: new THREE.MeshStandardMaterial({
+    color: 0x0e1214, roughness: 0.2, metalness: 0.6
+  }),
+  // Glass
+  glass: new THREE.MeshStandardMaterial({
+    color: 0x1a3040, roughness: 0.05, metalness: 0.3,
+    transparent: true, opacity: 0.6
+  }),
+};
+
+// =========================================================================
+//  HELPER: create a box mesh
+// =========================================================================
+function box(w, h, d, material, castShadow = true, receiveShadow = true) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.Mesh(g, material);
+  m.castShadow = castShadow;
+  m.receiveShadow = receiveShadow;
+  return m;
+}
+
+function cylinder(rTop, rBot, h, segs, material) {
+  const g = new THREE.CylinderGeometry(rTop, rBot, h, segs);
+  const m = new THREE.Mesh(g, material);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+// =========================================================================
+//  GROUND PLANE
+// =========================================================================
+function buildGround() {
+  // Tundra ground
+  const ground = box(400, 1, 400, mat.ground, false, true);
+  ground.position.set(0, -0.5, 0);
+  scene.add(ground);
+
+  // Concrete pad inside perimeter
+  const pad = box(180, 0.5, 180, mat.concrete, false, true);
+  pad.position.set(0, 0.25, 0);
+  scene.add(pad);
+
+  // Inner concrete areas with slight height variation
+  const innerPad = box(160, 0.3, 160, mat.concreteDark, false, true);
+  innerPad.position.set(0, 0.65, 0);
+  scene.add(innerPad);
+
+  // Puddles scattered around
+  const puddlePositions = [
+    [-30, 15], [20, -40], [-50, 30], [40, 50], [-15, -55],
+    [55, -20], [-60, -30], [10, 65], [-45, -50], [35, 25],
+    [60, 40], [-25, 60], [-55, -10], [0, -30], [50, -50],
+    [-40, 45], [25, -15], [-10, -65]
+  ];
+  puddlePositions.forEach(([x, z]) => {
+    const pw = 3 + Math.random() * 8;
+    const pd = 2 + Math.random() * 6;
+    const p = box(pw, 0.05, pd, mat.puddle, false, true);
+    p.position.set(x, 0.82, z);
+    p.rotation.y = Math.random() * Math.PI;
+    scene.add(p);
+  });
+}
+
+// =========================================================================
+//  PERIMETER FENCE
+// =========================================================================
+function buildFence() {
+  const fenceGroup = new THREE.Group();
+  const size = 88;
+  const postHeight = 8;
+  const postSpacing = 8;
+  const sides = [
+    { start: [-size, -size], end: [size, -size] },
+    { start: [size, -size], end: [size, size] },
+    { start: [size, size], end: [-size, size] },
+    { start: [-size, size], end: [-size, -size] },
+  ];
+
+  sides.forEach(side => {
+    const dx = side.end[0] - side.start[0];
+    const dz = side.end[1] - side.start[1];
+    const len = Math.sqrt(dx * dx + dz * dz);
+    const numPosts = Math.floor(len / postSpacing);
+
+    for (let i = 0; i <= numPosts; i++) {
+      const t = i / numPosts;
+      const x = side.start[0] + dx * t;
+      const z = side.start[1] + dz * t;
+
+      // Fence post
+      const post = box(0.6, postHeight, 0.6, mat.metalDark);
+      post.position.set(x, postHeight / 2 + 0.8, z);
+      fenceGroup.add(post);
+
+      // Top bar for razor wire suggestion
+      if (i < numPosts) {
+        const nx = side.start[0] + dx * (i + 1) / numPosts;
+        const nz = side.start[1] + dz * (i + 1) / numPosts;
+        const barLen = postSpacing;
+        const bar = box(barLen, 0.15, 0.15, mat.metalClean);
+        bar.position.set((x + nx) / 2, postHeight + 0.8, (z + nz) / 2);
+        bar.rotation.y = Math.atan2(dz, dx);
+        fenceGroup.add(bar);
+
+        // Mid horizontal bars
+        for (let h = 2; h < postHeight; h += 2) {
+          const midBar = box(barLen, 0.1, 0.1, mat.metalDark);
+          midBar.position.set((x + nx) / 2, h + 0.8, (z + nz) / 2);
+          midBar.rotation.y = Math.atan2(dz, dx);
+          fenceGroup.add(midBar);
+        }
+      }
+
+      // Occasional warning light on posts
+      if (i % 4 === 0) {
+        const light = box(0.4, 0.4, 0.4, mat.neonMagenta);
+        light.position.set(x, postHeight + 1.5, z);
+        fenceGroup.add(light);
+
+        const pl = new THREE.PointLight(0xff1a66, 0.5, 15);
+        pl.position.copy(light.position);
+        fenceGroup.add(pl);
+      }
+    }
+  });
+
+  // Gate on south side
+  const gateWidth = 16;
+  const gatePillarL = box(1.5, 10, 1.5, mat.metalClean);
+  gatePillarL.position.set(-gateWidth / 2, 5.8, -size);
+  fenceGroup.add(gatePillarL);
+
+  const gatePillarR = box(1.5, 10, 1.5, mat.metalClean);
+  gatePillarR.position.set(gateWidth / 2, 5.8, -size);
+  fenceGroup.add(gatePillarR);
+
+  // Gate crossbar
+  const gateCross = box(gateWidth, 0.8, 0.8, mat.metalDark);
+  gateCross.position.set(0, 10.8, -size);
+  fenceGroup.add(gateCross);
+
+  // Gate neon strip
+  const gateNeon = box(gateWidth - 2, 0.15, 0.15, mat.neonTeal);
+  gateNeon.position.set(0, 11.5, -size);
+  fenceGroup.add(gateNeon);
+
+  // "ARES" signage at gate
+  const signBacking = box(10, 2.5, 0.3, mat.wallDark);
+  signBacking.position.set(0, 13, -size);
+  fenceGroup.add(signBacking);
+  const signGlow = box(8, 0.2, 0.35, mat.neonTeal);
+  signGlow.position.set(0, 13, -size + 0.2);
+  fenceGroup.add(signGlow);
+
+  // Security booth at gate
+  const booth = box(5, 4, 4, mat.wallMain);
+  booth.position.set(gateWidth / 2 + 5, 2.8, -size + 2);
+  fenceGroup.add(booth);
+  const boothWindow = box(3, 1.5, 0.1, mat.windowLit);
+  boothWindow.position.set(gateWidth / 2 + 5, 3.5, -size + 0.05);
+  fenceGroup.add(boothWindow);
+  const boothRoof = box(6, 0.4, 5, mat.roof);
+  boothRoof.position.set(gateWidth / 2 + 5, 5, -size + 2);
+  fenceGroup.add(boothRoof);
+
+  // Access panel
+  const accessPanel = box(0.8, 1.2, 0.2, mat.metalClean);
+  accessPanel.position.set(-gateWidth / 2 - 1.5, 3.5, -size + 0.2);
+  fenceGroup.add(accessPanel);
+  const cardReader = box(0.3, 0.15, 0.25, mat.neonTeal);
+  cardReader.position.set(-gateWidth / 2 - 1.5, 3.8, -size + 0.35);
+  fenceGroup.add(cardReader);
+
+  scene.add(fenceGroup);
+  return fenceGroup;
+}
+
+// =========================================================================
+//  MAIN BUILDING -- Command & Operations Center
+// =========================================================================
+function buildMainBuilding() {
+  const group = new THREE.Group();
+
+  // Main body -- brutalist concrete block
+  const body = box(50, 16, 35, mat.wallMain);
+  body.position.set(-25, 8.8, -20);
+  group.add(body);
+
+  // Upper setback floor
+  const upper = box(44, 6, 30, mat.wallDark);
+  upper.position.set(-25, 19.8, -20);
+  group.add(upper);
+
+  // Roof
+  const roofSlab = box(48, 1, 33, mat.roof);
+  roofSlab.position.set(-25, 23.3, -20);
+  group.add(roofSlab);
+
+  // Rooftop structures
+  const hvac1 = box(6, 4, 4, mat.metalDark);
+  hvac1.position.set(-35, 25.3, -25);
+  group.add(hvac1);
+  const hvac2 = box(4, 3, 6, mat.metalDark);
+  hvac2.position.set(-15, 25.3, -15);
+  group.add(hvac2);
+
+  // Rooftop antenna / satellite dish base
+  const antBase = cylinder(1.5, 2, 3, 8, mat.metalClean);
+  antBase.position.set(-40, 26, -30);
+  group.add(antBase);
+  const antPole = cylinder(0.2, 0.2, 6, 6, mat.metalDark);
+  antPole.position.set(-40, 30, -30);
+  group.add(antPole);
+
+  // Facade details -- horizontal concrete bands
+  for (let i = 0; i < 3; i++) {
+    const band = box(51, 0.4, 0.3, mat.concreteDark);
+    band.position.set(-25, 4 + i * 5, -37.65);
+    group.add(band);
+  }
+
+  // Windows -- grid pattern on south face
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 8; col++) {
+      const isLit = Math.random() > 0.4;
+      const win = box(3.5, 2, 0.15, isLit ? mat.windowLit : mat.windowDark);
+      win.position.set(-45 + col * 6, 5 + row * 6, -37.6);
+      group.add(win);
+    }
+  }
+
+  // Windows on east face
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 5; col++) {
+      const isLit = Math.random() > 0.5;
+      const win = box(0.15, 2, 3.5, isLit ? mat.windowLit : mat.windowDark);
+      win.position.set(-0.1, 5 + row * 6, -32 + col * 6);
+      group.add(win);
+    }
+  }
+
+  // Entrance -- south face
+  const entranceSurround = box(8, 6, 1, mat.metalClean);
+  entranceSurround.position.set(-25, 3.8, -37.8);
+  group.add(entranceSurround);
+  const entranceDoor = box(5, 5, 0.2, mat.windowDark);
+  entranceDoor.position.set(-25, 3.3, -38.2);
+  group.add(entranceDoor);
+
+  // Entrance neon strip
+  const entranceNeon = box(6, 0.15, 0.15, mat.neonTeal);
+  entranceNeon.position.set(-25, 6.8, -38.5);
+  group.add(entranceNeon);
+
+  // Entrance light
+  const entranceLight = new THREE.PointLight(0x00ffcc, 1.2, 20);
+  entranceLight.position.set(-25, 7, -40);
+  group.add(entranceLight);
+
+  // Side access card reader
+  const sidePanel = box(0.6, 1, 0.2, mat.metalClean);
+  sidePanel.position.set(-20, 3.5, -38.3);
+  group.add(sidePanel);
+  const sideReader = box(0.25, 0.12, 0.25, mat.neonAmber);
+  sideReader.position.set(-20, 3.8, -38.5);
+  group.add(sideReader);
+
+  // Security cameras
+  const camPositions = [
+    { pos: [-50, 15, -20], rot: Math.PI / 2 },
+    { pos: [-25, 15, -37.5], rot: 0 },
+    { pos: [0, 15, -20], rot: -Math.PI / 2 },
+  ];
+  camPositions.forEach(({ pos, rot }) => {
+    const camGroup = new THREE.Group();
+    const mount = box(0.5, 0.5, 1.5, mat.metalClean);
+    mount.position.set(0, 0, 0);
+    camGroup.add(mount);
+    const lens = box(0.6, 0.6, 0.4, mat.metalDark);
+    lens.position.set(0, 0, -0.9);
+    camGroup.add(lens);
+    const indicator = box(0.15, 0.15, 0.15, mat.neonMagenta);
+    indicator.position.set(0, 0.3, -0.7);
+    camGroup.add(indicator);
+    camGroup.position.set(...pos);
+    camGroup.rotation.y = rot;
+    group.add(camGroup);
+  });
+
+  // Cable runs along wall base
+  for (let i = 0; i < 3; i++) {
+    const cable = box(50, 0.15, 0.15, mat.cable);
+    cable.position.set(-25, 1 + i * 0.3, -37.9);
+    group.add(cable);
+  }
+
+  // Corporate logo panel on wall (south face, upper)
+  const logoBacking = box(12, 3, 0.2, mat.metalDark);
+  logoBacking.position.set(-25, 20, -37.7);
+  group.add(logoBacking);
+  const logoGlow = box(10, 0.2, 0.25, mat.neonTeal);
+  logoGlow.position.set(-25, 20, -37.85);
+  group.add(logoGlow);
+  const logoGlow2 = box(0.2, 2.5, 0.25, mat.neonTeal);
+  logoGlow2.position.set(-30, 20, -37.85);
+  group.add(logoGlow2);
+
+  scene.add(group);
+  return group;
+}
+
+// =========================================================================
+//  RESEARCH BUILDING -- Lab / R&D
+// =========================================================================
+function buildResearchBuilding() {
+  const group = new THREE.Group();
+
+  // Main body -- slightly smaller, more sealed
+  const body = box(35, 12, 28, mat.wallDark);
+  body.position.set(35, 6.8, 25);
+  group.add(body);
+
+  // Upper section
+  const upper = box(30, 5, 24, mat.wallMain);
+  upper.position.set(35, 15.3, 25);
+  group.add(upper);
+
+  // Roof
+  const roofSlab = box(33, 0.8, 26, mat.roof);
+  roofSlab.position.set(35, 18.2, 25);
+  group.add(roofSlab);
+
+  // Rooftop ventilation array
+  for (let i = 0; i < 4; i++) {
+    const vent = cylinder(1.5, 1.5, 2.5, 8, mat.metalDark);
+    vent.position.set(25 + i * 7, 19.8, 25);
+    group.add(vent);
+    const ventCap = cylinder(1.8, 1.8, 0.3, 8, mat.metalClean);
+    ventCap.position.set(25 + i * 7, 21.2, 25);
+    group.add(ventCap);
+  }
+
+  // Biohazard warning panel
+  const bioPanel = box(4, 4, 0.2, mat.warning);
+  bioPanel.position.set(35, 10, 11.1);
+  group.add(bioPanel);
+  const bioCross = box(3, 0.4, 0.25, mat.neonAmber);
+  bioCross.position.set(35, 10, 11.0);
+  group.add(bioCross);
+  const bioCross2 = box(0.4, 3, 0.25, mat.neonAmber);
+  bioCross2.position.set(35, 10, 11.0);
+  group.add(bioCross2);
+
+  // Windows -- narrow slits (more secure)
+  for (let col = 0; col < 5; col++) {
+    const win = box(1.5, 4, 0.15, Math.random() > 0.5 ? mat.windowLit : mat.windowDark);
+    win.position.set(22 + col * 7, 8, 11.1);
+    group.add(win);
+  }
+
+  // Loading dock on east side
+  const dock = box(8, 5, 2, mat.concreteDark);
+  dock.position.set(52.5, 3.3, 25);
+  group.add(dock);
+  const dockDoor = box(6, 4.5, 0.2, mat.metalDark);
+  dockDoor.position.set(52.6, 3.55, 25);
+  group.add(dockDoor);
+  const dockLight = box(6, 0.2, 0.2, mat.neonAmber);
+  dockLight.position.set(52.7, 5.8, 25);
+  group.add(dockLight);
+
+  // Entrance
+  const entranceSurround = box(6, 5, 0.8, mat.metalClean);
+  entranceSurround.position.set(35, 3.3, 11);
+  group.add(entranceSurround);
+  const entranceDoor = box(4, 4, 0.2, mat.windowDark);
+  entranceDoor.position.set(35, 2.8, 10.7);
+  group.add(entranceDoor);
+  const entranceNeon = box(5, 0.12, 0.15, mat.neonMagenta);
+  entranceNeon.position.set(35, 5.8, 10.7);
+  group.add(entranceNeon);
+
+  // Access card reader
+  const reader = box(0.5, 0.8, 0.2, mat.metalClean);
+  reader.position.set(38.5, 3.5, 10.8);
+  group.add(reader);
+  const readerLight = box(0.2, 0.1, 0.22, mat.neonMagenta);
+  readerLight.position.set(38.5, 3.8, 10.7);
+  group.add(readerLight);
+
+  // Research entrance point light
+  const researchLight = new THREE.PointLight(0xff1a66, 0.8, 18);
+  researchLight.position.set(35, 6, 9);
+  group.add(researchLight);
+
+  // Security cameras
+  const cam1 = new THREE.Group();
+  const camMount1 = box(0.4, 0.4, 1.2, mat.metalClean);
+  cam1.add(camMount1);
+  const camLens1 = box(0.5, 0.5, 0.3, mat.metalDark);
+  camLens1.position.set(0, 0, -0.7);
+  cam1.add(camLens1);
+  const camInd1 = box(0.12, 0.12, 0.12, mat.neonMagenta);
+  camInd1.position.set(0, 0.25, -0.5);
+  cam1.add(camInd1);
+  cam1.position.set(35, 12, 11);
+  group.add(cam1);
+
+  // External pipes/conduits
+  for (let i = 0; i < 2; i++) {
+    const pipe = cylinder(0.3, 0.3, 12, 6, mat.metalRusty);
+    pipe.position.set(17.3, 6.8, 18 + i * 14);
+    group.add(pipe);
+  }
+
+  // Cable tray
+  const tray = box(0.3, 0.3, 28, mat.metalDark);
+  tray.position.set(17.6, 11, 25);
+  group.add(tray);
+
+  scene.add(group);
+  return group;
+}
+
+// =========================================================================
+//  THE HATCH -- Project Fenris Emergence Bay
+// =========================================================================
+function buildHatch() {
+  const group = new THREE.Group();
+  const hatchX = -20;
+  const hatchZ = 40;
+
+  // Massive hatch base ring / platform
+  const platformRadius = 30;
+  const platform = new THREE.Mesh(
+    new THREE.CylinderGeometry(platformRadius, platformRadius + 2, 2, 32),
+    mat.hatchMetal
+  );
+  platform.position.set(hatchX, 0.8, hatchZ);
+  platform.castShadow = true;
+  platform.receiveShadow = true;
+  group.add(platform);
+
+  // Hatch doors (two semicircular halves suggested as rectangles)
+  const hatchDoorL = box(28, 1.5, 55, mat.hatchMetal);
+  hatchDoorL.position.set(hatchX - 14.5, 1.9, hatchZ);
+  group.add(hatchDoorL);
+  const hatchDoorR = box(28, 1.5, 55, mat.hatchMetal);
+  hatchDoorR.position.set(hatchX + 14.5, 1.9, hatchZ);
+  group.add(hatchDoorR);
+
+  // Central seam / gap with glow
+  const seam = box(1.5, 0.2, 50, mat.hatchGlow);
+  seam.position.set(hatchX, 2.7, hatchZ);
+  group.add(seam);
+
+  // Cross seam
+  const seamCross = box(50, 0.2, 1.5, mat.hatchGlow);
+  seamCross.position.set(hatchX, 2.7, hatchZ);
+  group.add(seamCross);
+
+  // Concentric ring detail
+  const ringRadii = [25, 20, 15, 10];
+  ringRadii.forEach(r => {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(r, 0.3, 8, 48),
+      mat.metalDark
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(hatchX, 2.75, hatchZ);
+    ring.receiveShadow = true;
+    group.add(ring);
+  });
+
+  // Glow ring at center
+  const glowRing = new THREE.Mesh(
+    new THREE.TorusGeometry(5, 0.5, 8, 32),
+    mat.hatchGlow
+  );
+  glowRing.rotation.x = -Math.PI / 2;
+  glowRing.position.set(hatchX, 2.8, hatchZ);
+  group.add(glowRing);
+
+  // Central point light (the glow from below)
+  const hatchLight = new THREE.PointLight(0xff2244, 3, 40);
+  hatchLight.position.set(hatchX, 5, hatchZ);
+  group.add(hatchLight);
+
+  // Secondary subtle glow
+  const hatchLight2 = new THREE.PointLight(0xff4422, 1.5, 60);
+  hatchLight2.position.set(hatchX, 1, hatchZ);
+  group.add(hatchLight2);
+
+  // Warning markings around perimeter
+  const warningCount = 12;
+  for (let i = 0; i < warningCount; i++) {
+    const angle = (i / warningCount) * Math.PI * 2;
+    const wx = hatchX + Math.cos(angle) * (platformRadius - 2);
+    const wz = hatchZ + Math.sin(angle) * (platformRadius - 2);
+    const stripe = box(3, 0.15, 1, mat.warning);
+    stripe.position.set(wx, 2.0, wz);
+    stripe.rotation.y = angle;
+    group.add(stripe);
+  }
+
+  // Heavy industrial bollards around hatch
+  const bollardCount = 8;
+  for (let i = 0; i < bollardCount; i++) {
+    const angle = (i / bollardCount) * Math.PI * 2;
+    const bx = hatchX + Math.cos(angle) * (platformRadius + 3);
+    const bz = hatchZ + Math.sin(angle) * (platformRadius + 3);
+    const bollard = cylinder(1, 1.2, 4, 8, mat.metalRusty);
+    bollard.position.set(bx, 2.8, bz);
+    group.add(bollard);
+
+    // Amber warning light on every other bollard
+    if (i % 2 === 0) {
+      const bLight = box(0.5, 0.5, 0.5, mat.neonAmber);
+      bLight.position.set(bx, 5, bz);
+      group.add(bLight);
+      const bPl = new THREE.PointLight(0xffaa00, 0.4, 10);
+      bPl.position.set(bx, 5.5, bz);
+      group.add(bPl);
+    }
+  }
+
+  // Hydraulic arms (suggest the massive mechanism)
+  const armPositions = [
+    { x: hatchX - 28, z: hatchZ - 20, rot: 0.3 },
+    { x: hatchX + 28, z: hatchZ - 20, rot: -0.3 },
+    { x: hatchX - 28, z: hatchZ + 20, rot: -0.3 },
+    { x: hatchX + 28, z: hatchZ + 20, rot: 0.3 },
+  ];
+  armPositions.forEach(({ x, z, rot }) => {
+    const armBase = box(4, 6, 4, mat.metalDark);
+    armBase.position.set(x, 3.8, z);
+    group.add(armBase);
+    const armPiston = cylinder(0.8, 0.8, 8, 8, mat.metalClean);
+    armPiston.position.set(x, 8, z);
+    armPiston.rotation.z = rot;
+    group.add(armPiston);
+  });
+
+  // Control station near hatch
+  const controlStation = box(5, 3, 3, mat.metalClean);
+  controlStation.position.set(hatchX + 35, 2.3, hatchZ - 15);
+  group.add(controlStation);
+  const controlScreen = box(2, 1.5, 0.15, mat.windowLit);
+  controlScreen.position.set(hatchX + 35, 3, hatchZ - 16.6);
+  group.add(controlScreen);
+  const controlNeon = box(3, 0.1, 0.1, mat.neonTeal);
+  controlNeon.position.set(hatchX + 35, 4, hatchZ - 16.6);
+  group.add(controlNeon);
+
+  scene.add(group);
+  return { group, hatchLight, hatchLight2, glowRing, seam, seamCross };
+}
+
+// =========================================================================
+//  DETAILS: Security cameras, vehicles, misc
+// =========================================================================
+function buildDetails() {
+  const group = new THREE.Group();
+
+  // Parked armored corporate vehicle -- south area near gate
+  const vehicleGroup = new THREE.Group();
+
+  // Body
+  const vBody = box(10, 3, 5, mat.vehiclePaint);
+  vBody.position.set(0, 2.3, 0);
+  vehicleGroup.add(vBody);
+  // Cabin
+  const vCabin = box(5, 2.5, 4.5, mat.vehiclePaint);
+  vCabin.position.set(-1.5, 4.55, 0);
+  vehicleGroup.add(vCabin);
+  // Windshield
+  const vWindshield = box(0.15, 1.8, 3.8, mat.glass);
+  vWindshield.position.set(1.6, 4.5, 0);
+  vehicleGroup.add(vWindshield);
+  // Wheels
+  const wheelPositions = [[3.5, 0.7, 2.8], [3.5, 0.7, -2.8], [-3.5, 0.7, 2.8], [-3.5, 0.7, -2.8]];
+  wheelPositions.forEach(([wx, wy, wz]) => {
+    const wheel = cylinder(0.9, 0.9, 0.6, 8, mat.metalDark);
+    wheel.position.set(wx, wy, wz);
+    wheel.rotation.x = Math.PI / 2;
+    vehicleGroup.add(wheel);
+  });
+  // Headlights
+  const hlL = box(0.15, 0.5, 0.5, mat.neonAmber);
+  hlL.position.set(5.1, 2.5, 1.5);
+  vehicleGroup.add(hlL);
+  const hlR = box(0.15, 0.5, 0.5, mat.neonAmber);
+  hlR.position.set(5.1, 2.5, -1.5);
+  vehicleGroup.add(hlR);
+  // Corp logo stripe
+  const stripe = box(8, 0.1, 0.15, mat.neonTeal);
+  stripe.position.set(0, 3.9, 2.55);
+  vehicleGroup.add(stripe);
+
+  vehicleGroup.position.set(25, 0.8, -78);
+  vehicleGroup.rotation.y = 0.1;
+  group.add(vehicleGroup);
+
+  // Second vehicle -- farther in compound
+  const vehicle2 = vehicleGroup.clone();
+  vehicle2.position.set(-55, 0.8, -60);
+  vehicle2.rotation.y = Math.PI * 0.7;
+  group.add(vehicle2);
+
+  // Cargo containers near research building
+  const containerPositions = [
+    { pos: [58, 3, 45], rot: 0.2, color: 0x1a2228 },
+    { pos: [60, 3, 52], rot: 0.15, color: 0x182020 },
+    { pos: [58, 7, 48], rot: 0.18, color: 0x1e2426 },
+  ];
+  containerPositions.forEach(({ pos, rot, color }) => {
+    const container = box(12, 5, 5, new THREE.MeshStandardMaterial({
+      color, roughness: 0.6, metalness: 0.4
+    }));
+    container.position.set(...pos);
+    container.rotation.y = rot;
+    group.add(container);
+    // Container number panel
+    const panel = box(2, 1, 0.1, mat.metalClean);
+    panel.position.set(pos[0], pos[1] + 1, pos[2] - 2.6);
+    panel.rotation.y = rot;
+    group.add(panel);
+  });
+
+  // Light poles scattered around compound
+  const poleLights = [
+    [-60, -50], [-30, -70], [30, -60], [60, -40],
+    [-70, 10], [70, 10], [-60, 60], [60, 60],
+    [0, 0], [-35, 10], [10, -10]
+  ];
+  poleLights.forEach(([x, z]) => {
+    const pole = cylinder(0.3, 0.4, 12, 6, mat.metalDark);
+    pole.position.set(x, 6.8, z);
+    group.add(pole);
+    const lampHead = box(2, 0.5, 2, mat.metalClean);
+    lampHead.position.set(x, 13, z);
+    group.add(lampHead);
+    const lampGlow = box(1.5, 0.15, 1.5, mat.neonTeal);
+    lampGlow.position.set(x, 12.7, z);
+    group.add(lampGlow);
+    const pl = new THREE.PointLight(0x00ccaa, 0.6, 25);
+    pl.position.set(x, 12.5, z);
+    pl.castShadow = false;
+    group.add(pl);
+  });
+
+  // Walkway paths (slightly raised concrete)
+  // From gate to main building
+  const walkGateToMain = box(4, 0.2, 52, mat.concreteDark);
+  walkGateToMain.position.set(-25, 0.9, -62);
+  group.add(walkGateToMain);
+  // From main building to research
+  const walkMainToRes = box(60, 0.2, 3, mat.concreteDark);
+  walkMainToRes.position.set(5, 0.9, 5);
+  group.add(walkMainToRes);
+  // From main to hatch area
+  const walkMainToHatch = box(3, 0.2, 50, mat.concreteDark);
+  walkMainToHatch.position.set(-20, 0.9, 12);
+  group.add(walkMainToHatch);
+
+  // Transformer / power unit
+  const transformer = box(4, 6, 3, mat.metalRusty);
+  transformer.position.set(-70, 3.8, -10);
+  group.add(transformer);
+  const xfrmrInsulator = cylinder(0.3, 0.3, 2, 6, mat.metalClean);
+  xfrmrInsulator.position.set(-70, 7, -10);
+  group.add(xfrmrInsulator);
+  const sparkBox = box(0.3, 0.3, 0.3, mat.neonAmber);
+  sparkBox.position.set(-70, 8.2, -10);
+  group.add(sparkBox);
+
+  // Fuel tanks
+  const fuelTank1 = cylinder(3, 3, 8, 12, mat.metalDark);
+  fuelTank1.rotation.x = Math.PI / 2;
+  fuelTank1.position.set(70, 4.8, -20);
+  group.add(fuelTank1);
+  const fuelTank2 = cylinder(3, 3, 8, 12, mat.metalDark);
+  fuelTank2.rotation.x = Math.PI / 2;
+  fuelTank2.position.set(70, 4.8, -10);
+  group.add(fuelTank2);
+  // Hazard stripe
+  const fuelStripe = box(0.15, 1, 6, mat.warning);
+  fuelStripe.position.set(73.1, 4.8, -15);
+  group.add(fuelStripe);
+
+  // Misc ground clutter -- junction boxes, vents
+  const jBoxPositions = [
+    [-45, 1.2, -5], [15, 1.2, -45], [50, 1.2, -10], [-10, 1.2, 15]
+  ];
+  jBoxPositions.forEach(pos => {
+    const jbox = box(1.5, 1.5, 1, mat.metalClean);
+    jbox.position.set(...pos);
+    group.add(jbox);
+    const indicator = box(0.2, 0.2, 0.05, mat.neonTeal);
+    indicator.position.set(pos[0], pos[1] + 0.5, pos[2] - 0.55);
+    group.add(indicator);
+  });
+
+  // Ground vents
+  const ventPositions = [[-55, 20], [-10, -25], [20, 15], [45, -30]];
+  ventPositions.forEach(([x, z]) => {
+    const vent = box(3, 0.4, 3, mat.metalDark);
+    vent.position.set(x, 0.9, z);
+    group.add(vent);
+  });
+
+  scene.add(group);
+  return group;
+}
+
+// =========================================================================
+//  LIGHTING
+// =========================================================================
+function setupLighting() {
+  // Ambient -- very low, arctic night
+  const ambient = new THREE.AmbientLight(0x101820, 0.3);
+  scene.add(ambient);
+
+  // Moon / overcast sky fill
+  const hemi = new THREE.HemisphereLight(0x0a1520, 0x050808, 0.2);
+  scene.add(hemi);
+
+  // Main directional -- moonlight through overcast
+  const dirLight = new THREE.DirectionalLight(0x1a2a3a, 0.4);
+  dirLight.position.set(50, 80, -30);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 2048;
+  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.camera.left = -120;
+  dirLight.shadow.camera.right = 120;
+  dirLight.shadow.camera.top = 120;
+  dirLight.shadow.camera.bottom = -120;
+  dirLight.shadow.camera.near = 0.5;
+  dirLight.shadow.camera.far = 300;
+  dirLight.shadow.bias = -0.001;
+  scene.add(dirLight);
+
+  // Subtle blue backlight for depth
+  const backLight = new THREE.DirectionalLight(0x0a1a30, 0.2);
+  backLight.position.set(-60, 40, 60);
+  scene.add(backLight);
+}
+
+// =========================================================================
+//  RAIN PARTICLE SYSTEM
+// =========================================================================
+function createRain() {
+  const rainCount = 15000;
+  const positions = new Float32Array(rainCount * 3);
+  const velocities = new Float32Array(rainCount);
+
+  for (let i = 0; i < rainCount; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 350;
+    positions[i * 3 + 1] = Math.random() * 150;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 350;
+    velocities[i] = 1.5 + Math.random() * 2.5;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const material = new THREE.PointsMaterial({
+    color: 0x4a6a8a,
+    size: 0.3,
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+  });
+
+  const rain = new THREE.Points(geometry, material);
+  scene.add(rain);
+
+  return { rain, velocities };
+}
+
+// =========================================================================
+//  POST-PROCESSING
+// =========================================================================
+function setupPostProcessing() {
+  const composer = new EffectComposer(renderer);
+
+  // Render pass
+  const renderPass = new RenderPass(scene, camera);
+  composer.addPass(renderPass);
+
+  // Bloom
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.35,  // strength
+    0.6,   // radius
+    0.7    // threshold
+  );
+  composer.addPass(bloomPass);
+
+  // Film grain + vignette shader
+  const filmGrainShader = {
+    uniforms: {
+      tDiffuse: { value: null },
+      time: { value: 0 },
+      grainIntensity: { value: 0.08 },
+      vignetteIntensity: { value: 0.4 },
+      scanlineIntensity: { value: 0.03 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform float time;
+      uniform float grainIntensity;
+      uniform float vignetteIntensity;
+      uniform float scanlineIntensity;
+      varying vec2 vUv;
+
+      float rand(vec2 co) {
+        return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      }
+
+      void main() {
+        vec4 color = texture2D(tDiffuse, vUv);
+
+        // Film grain
+        float grain = rand(vUv * time) * grainIntensity;
+        color.rgb += grain - grainIntensity * 0.5;
+
+        // Vignette
+        vec2 center = vUv - 0.5;
+        float dist = length(center);
+        float vignette = 1.0 - smoothstep(0.4, 0.9, dist) * vignetteIntensity;
+        color.rgb *= vignette;
+
+        // Subtle scanlines
+        float scanline = sin(vUv.y * 800.0) * scanlineIntensity;
+        color.rgb -= scanline;
+
+        // Slight teal color shift
+        color.r *= 0.95;
+        color.g *= 1.02;
+        color.b *= 1.05;
+
+        gl_FragColor = color;
+      }
+    `
+  };
+
+  const filmPass = new ShaderPass(filmGrainShader);
+  composer.addPass(filmPass);
+
+  // Output pass
+  const outputPass = new OutputPass();
+  composer.addPass(outputPass);
+
+  return { composer, filmPass, bloomPass };
+}
+
+// =========================================================================
+//  BUILD EVERYTHING
+// =========================================================================
+buildGround();
+advanceLoad(15);
+
+buildFence();
+advanceLoad(15);
+
+buildMainBuilding();
+advanceLoad(15);
+
+buildResearchBuilding();
+advanceLoad(10);
+
+const hatchData = buildHatch();
+advanceLoad(10);
+
+buildDetails();
+advanceLoad(5);
+
+setupLighting();
+advanceLoad(5);
+
+const rainData = createRain();
+advanceLoad(3);
+
+const postProc = setupPostProcessing();
+advanceLoad(2);
+
+// =========================================================================
+//  ANIMATED ELEMENTS TRACKING
+// =========================================================================
+const animState = {
+  clock: new THREE.Clock(),
+  // Neon flicker targets (collect neon elements)
+  flickerTargets: [],
+};
+
+// Collect all neon meshes for flickering by scanning the scene
+scene.traverse(child => {
+  if (child.isMesh && child.material && child.material.emissiveIntensity > 1.0) {
+    animState.flickerTargets.push({
+      mesh: child,
+      baseIntensity: child.material.emissiveIntensity,
+      flickerSpeed: 0.5 + Math.random() * 3,
+      flickerPhase: Math.random() * Math.PI * 2,
+      isNeon: true,
+    });
+  }
+});
+
+// =========================================================================
+//  ANIMATION LOOP
+// =========================================================================
+function animate() {
+  requestAnimationFrame(animate);
+
+  const elapsed = animState.clock.getElapsedTime();
+  const delta = animState.clock.getDelta();
+
+  // --- Rain animation ---
+  const rainPositions = rainData.rain.geometry.attributes.position.array;
+  const rainCount = rainPositions.length / 3;
+  for (let i = 0; i < rainCount; i++) {
+    rainPositions[i * 3 + 1] -= rainData.velocities[i];
+    // Wind drift
+    rainPositions[i * 3] += 0.05;
+    rainPositions[i * 3 + 2] -= 0.02;
+
+    if (rainPositions[i * 3 + 1] < 0) {
+      rainPositions[i * 3 + 1] = 130 + Math.random() * 20;
+      rainPositions[i * 3] = (Math.random() - 0.5) * 350;
+      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 350;
+    }
+  }
+  rainData.rain.geometry.attributes.position.needsUpdate = true;
+
+  // --- Hatch glow pulsing ---
+  const hatchPulse = 1.0 + 0.6 * Math.sin(elapsed * 1.2) + 0.3 * Math.sin(elapsed * 2.7);
+  hatchData.hatchLight.intensity = 3 * hatchPulse;
+  hatchData.hatchLight2.intensity = 1.5 * hatchPulse;
+  if (hatchData.glowRing.material) {
+    hatchData.glowRing.material.emissiveIntensity = 1.5 * hatchPulse;
+  }
+  if (hatchData.seam.material) {
+    hatchData.seam.material.emissiveIntensity = 1.5 * hatchPulse;
+  }
+  if (hatchData.seamCross.material) {
+    hatchData.seamCross.material.emissiveIntensity = 1.5 * hatchPulse;
+  }
+
+  // --- Neon flicker ---
+  animState.flickerTargets.forEach(target => {
+    // Occasional full flicker
+    const flicker = Math.sin(elapsed * target.flickerSpeed + target.flickerPhase);
+    const randomDrop = Math.random() > 0.995 ? 0.1 : 1.0;
+    const intensity = target.baseIntensity * (0.7 + 0.3 * flicker) * randomDrop;
+    // Clone material to avoid shared material issues for flicker
+    // (We accept shared material flicker as a stylistic choice -- they pulse together by group)
+    target.mesh.material.emissiveIntensity = intensity;
+  });
+
+  // --- Film grain time update ---
+  postProc.filmPass.uniforms.time.value = elapsed;
+
+  // --- Puddle shimmer (subtle position wobble of puddle reflections via metalness) ---
+  // Done cheaply: vary puddle material metalness slightly
+  mat.puddle.metalness = 0.85 + 0.1 * Math.sin(elapsed * 0.8);
+
+  controls.update();
+  postProc.composer.render();
+}
+
+// =========================================================================
+//  RESIZE HANDLER
+// =========================================================================
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const a = w / h;
+  camera.left = -frustum * a;
+  camera.right = frustum * a;
+  camera.top = frustum;
+  camera.bottom = -frustum;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  postProc.composer.setSize(w, h);
+});
+
+// =========================================================================
+//  LOADING COMPLETE
+// =========================================================================
+advanceLoad(100);
+setTimeout(() => {
+  document.getElementById('loading').classList.add('done');
+  document.getElementById('hud').classList.add('visible');
+  document.getElementById('corp-logo').classList.add('visible');
+}, 600);
+
+animate();
+
+</script>
+</body>
+</html>

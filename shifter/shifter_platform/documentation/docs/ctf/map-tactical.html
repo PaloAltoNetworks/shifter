@@ -1,0 +1,2585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TACSAT-7 // COMPOUND WHISKEY-4 // CLASSIFIED</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; cursor: crosshair; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+    font-family: 'Courier New', monospace;
+    color: #00e850;
+    text-shadow: 0 0 8px rgba(0,232,80,0.7), 0 0 20px rgba(0,200,60,0.3);
+  }
+  #hud-tl { position: absolute; top: 16px; left: 16px; font-size: 13px; line-height: 1.8; background: rgba(0,0,0,0.75); padding: 12px 16px; border-left: 2px solid rgba(0,232,80,0.7); }
+  #hud-tr { position: absolute; top: 16px; right: 16px; font-size: 13px; line-height: 1.8; text-align: right; background: rgba(0,0,0,0.75); padding: 12px 16px; border-right: 2px solid rgba(0,232,80,0.7); }
+  #hud-bl { position: absolute; bottom: 16px; left: 16px; font-size: 12px; line-height: 1.8; background: rgba(0,0,0,0.75); padding: 10px 14px; border-left: 2px solid rgba(0,232,80,0.5); }
+  #hud-br { position: absolute; bottom: 16px; right: 16px; font-size: 12px; line-height: 1.8; text-align: right; background: rgba(0,0,0,0.75); padding: 10px 14px; border-right: 2px solid rgba(0,232,80,0.5); }
+  #hud-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; opacity: 0.4; }
+  .warn { color: #ff4a18; text-shadow: 0 0 10px rgba(255,70,20,0.8), 0 0 25px rgba(255,40,0,0.4); }
+  .amber { color: #ffb828; text-shadow: 0 0 8px rgba(255,180,40,0.6); }
+  .dim { opacity: 0.85; }
+  .blink { animation: blink 1.2s step-end infinite; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+  #scanlines {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 20;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.06) 2px,
+      rgba(0, 0, 0, 0.06) 4px
+    );
+  }
+  #vignette {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 15;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,3,0,0.6) 100%);
+  }
+  #noise-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 18; opacity: 0.04; mix-blend-mode: screen;
+  }
+  .comms-panel {
+    position: fixed;
+    top: 20px;
+    z-index: 25;
+    display: none;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+    max-width: 44%;
+  }
+  #comms-pilot { left: 16px; top: 180px; }
+  #comms-ground { right: 16px; top: 180px; }
+  .comms-inner {
+    background: rgba(0,0,0,0.85);
+    border: 1px solid rgba(0,232,80,0.5);
+    border-top: 2px solid rgba(0,232,80,0.8);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #comms-ground .comms-inner {
+    border-color: rgba(80,200,232,0.5);
+    border-top-color: rgba(80,200,232,0.8);
+  }
+  .comms-avatar {
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(0,232,80,0.5);
+    background: rgba(0,20,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #comms-ground .comms-avatar {
+    border-color: rgba(80,200,232,0.5);
+    background: rgba(0,10,20,0.6);
+  }
+  .comms-avatar svg { width: 28px; height: 28px; }
+  .comms-text { flex: 1; min-width: 0; }
+  .comms-callsign {
+    font-size: 9px;
+    color: rgba(0,232,80,0.6);
+    letter-spacing: 2px;
+    margin-bottom: 3px;
+  }
+  #comms-ground .comms-callsign { color: rgba(80,200,232,0.6); }
+  .comms-freq {
+    font-size: 8px;
+    color: rgba(0,232,80,0.35);
+    float: right;
+  }
+  #comms-ground .comms-freq { color: rgba(80,200,232,0.35); }
+  .comms-message {
+    font-size: 12px;
+    color: #00e850;
+    text-shadow: 0 0 8px rgba(0,232,80,0.6);
+    min-height: 16px;
+  }
+  #comms-ground .comms-message {
+    color: #50c8e8;
+    text-shadow: 0 0 8px rgba(80,200,232,0.6);
+  }
+  .comms-bar {
+    height: 2px;
+    background: rgba(0,232,80,0.3);
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  #comms-ground .comms-bar { background: rgba(80,200,232,0.3); }
+  .comms-bar-fill {
+    height: 100%;
+    background: #00e850;
+    width: 0%;
+    box-shadow: 0 0 6px rgba(0,232,80,0.8);
+  }
+  #comms-ground .comms-bar-fill {
+    background: #50c8e8;
+    box-shadow: 0 0 6px rgba(80,200,232,0.8);
+  }
+  .comms-indicator {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #00e850;
+    box-shadow: 0 0 6px rgba(0,232,80,0.8);
+    animation: comms-pulse 0.6s ease-in-out infinite alternate;
+    flex-shrink: 0;
+  }
+  #comms-ground .comms-indicator {
+    background: #50c8e8;
+    box-shadow: 0 0 6px rgba(80,200,232,0.8);
+  }
+  @keyframes comms-pulse { from { opacity: 0.4; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div id="hud-tl">
+    TACSAT-7 ORBITAL RECONNAISSANCE<br>
+    <span class="dim">SITE: COMPOUND WHISKEY-4 // SIBERIAN ARCTIC</span><br>
+    <span class="dim">LAT: 67.4521N &nbsp; LON: 134.8903E</span><br>
+    <span class="dim">ELEV: 342m &nbsp; TEMP: -31C &nbsp; WIND: 24kts NNW</span><br>
+    <span class="dim">BAND: MULTISPECTRAL+THERMAL &nbsp; RES: 0.3m/px</span>
+  </div>
+  <div id="hud-tr">
+    <span id="clock"></span><br>
+    <span class="warn blink">THREAT LEVEL: CRITICAL</span><br>
+    <span class="amber">SEISMIC ANOMALY: +2.4 RICHTER</span><br>
+    <span class="dim">THERMAL BLOOM: HATCH ALPHA</span><br>
+    <span class="dim">CLASSIFICATION: TOP SECRET // SCI</span>
+  </div>
+  <div id="hud-bl">
+    <span class="dim">ORBIT: 412km SSO &nbsp; PASS: 14 of 23</span><br>
+    <span class="dim">DWELL: 4m 12s REMAINING</span><br>
+    <span class="dim">DOWNLINK: ENCRYPTED AES-256</span><br>
+    <span class="dim" id="fps-counter">FPS: --</span>
+  </div>
+  <div id="hud-br">
+    <span class="dim">DRAG: ORBIT &nbsp; SCROLL: ZOOM</span><br>
+    <span class="dim">SHIFT+DRAG: PAN</span><br>
+    <span class="amber" id="status-line">ACQUIRING SIGNAL...</span>
+  </div>
+  <div id="hud-center">+</div>
+</div>
+<div id="comms-pilot" class="comms-panel">
+  <div class="comms-inner">
+    <div class="comms-indicator"></div>
+    <div class="comms-avatar">
+      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="11" r="6" stroke="#00e850" stroke-width="1.5" fill="none"/>
+        <path d="M6 28c0-5.5 4.5-10 10-10s10 4.5 10 10" stroke="#00e850" stroke-width="1.5" fill="none"/>
+        <line x1="12" y1="4" x2="10" y2="1" stroke="#00e850" stroke-width="1"/>
+        <line x1="20" y1="4" x2="22" y2="1" stroke="#00e850" stroke-width="1"/>
+        <line x1="10" y1="1" x2="22" y2="1" stroke="#00e850" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="comms-text">
+      <div class="comms-callsign">WRAITH 6-1 <span class="comms-freq">FREQ 243.0</span></div>
+      <div class="comms-message" id="pilot-message"></div>
+      <div class="comms-bar"><div class="comms-bar-fill" id="pilot-bar-fill"></div></div>
+    </div>
+  </div>
+</div>
+<div id="comms-ground" class="comms-panel">
+  <div class="comms-inner">
+    <div class="comms-indicator"></div>
+    <div class="comms-avatar">
+      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="12" r="5" stroke="#50c8e8" stroke-width="1.5" fill="none"/>
+        <path d="M7 28c0-5 4-9 9-9s9 4 9 9" stroke="#50c8e8" stroke-width="1.5" fill="none"/>
+        <circle cx="16" cy="5" r="3" stroke="#50c8e8" stroke-width="1" fill="none"/>
+        <line x1="16" y1="2" x2="16" y2="0" stroke="#50c8e8" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="comms-text">
+      <div class="comms-callsign">SABRE 1 <span class="comms-freq">FREQ 147.5</span></div>
+      <div class="comms-message" id="ground-message"></div>
+      <div class="comms-bar"><div class="comms-bar-fill" id="ground-bar-fill"></div></div>
+    </div>
+  </div>
+</div>
+<div id="scanlines"></div>
+<div id="vignette"></div>
+<canvas id="noise-overlay"></canvas>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+// ============================================================
+// SCENE SETUP
+// ============================================================
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.25;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050a05);
+scene.fog = new THREE.FogExp2(0x0a120a, 0.003);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+camera.position.set(0, 280, 180);
+camera.lookAt(0, 0, 0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 60;
+controls.maxDistance = 600;
+controls.maxPolarAngle = Math.PI / 2.15;
+controls.target.set(0, 0, 0);
+controls.update();
+
+// ============================================================
+// LIGHTING
+// ============================================================
+const ambientLight = new THREE.AmbientLight(0x1a2a1a, 0.4);
+scene.add(ambientLight);
+
+// Cold moonlight from above-left
+const moonLight = new THREE.DirectionalLight(0x4466aa, 0.6);
+moonLight.position.set(-100, 200, -80);
+moonLight.castShadow = true;
+moonLight.shadow.mapSize.set(2048, 2048);
+moonLight.shadow.camera.left = -200;
+moonLight.shadow.camera.right = 200;
+moonLight.shadow.camera.top = 200;
+moonLight.shadow.camera.bottom = -200;
+scene.add(moonLight);
+
+// Faint green overhead (satellite NV effect)
+const greenOverhead = new THREE.DirectionalLight(0x225533, 0.3);
+greenOverhead.position.set(0, 300, 0);
+scene.add(greenOverhead);
+
+// ============================================================
+// TERRAIN SHADER
+// ============================================================
+const terrainSize = 600;
+const terrainVertShader = `
+  varying vec2 vUv;
+  varying vec3 vWorldPos;
+  varying float vElevation;
+
+  // Simplex-like hash
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+  float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+    vec2 i = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m; m = m*m;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+    vec3 g;
+    g.x = a0.x * x0.x + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+  }
+
+  void main() {
+    vUv = uv;
+    vec3 pos = position;
+
+    // Multi-octave terrain displacement
+    float n1 = snoise(pos.xz * 0.008) * 8.0;
+    float n2 = snoise(pos.xz * 0.02) * 3.0;
+    float n3 = snoise(pos.xz * 0.06) * 1.0;
+    float elevation = n1 + n2 + n3;
+
+    // Flatten the compound area
+    float distFromCenter = length(pos.xz);
+    float flattenFactor = smoothstep(80.0, 140.0, distFromCenter);
+    // Also flatten the airfield area (west) -- elongated along runway (z axis)
+    vec2 afOffset = pos.xz - vec2(-140.0, 0.0);
+    float distFromAirfield = length(afOffset * vec2(1.0, 0.6));
+    float airfieldFlatten = smoothstep(30.0, 60.0, distFromAirfield);
+    flattenFactor *= airfieldFlatten;
+
+    // Flatten along the access road (gate west to off-map)
+    // Approximate road as segments and find min distance
+    float roadDist = 9999.0;
+    // Segment: gate to curve
+    {
+      vec2 a = vec2(0.0, -85.0); vec2 b = vec2(-30.0, -105.0);
+      vec2 ab = b - a; vec2 ap = pos.xz - a;
+      float t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+      roadDist = min(roadDist, length(ap - ab * t));
+    }
+    {
+      vec2 a = vec2(-30.0, -105.0); vec2 b = vec2(-100.0, -108.0);
+      vec2 ab = b - a; vec2 ap = pos.xz - a;
+      float t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+      roadDist = min(roadDist, length(ap - ab * t));
+    }
+    {
+      vec2 a = vec2(-100.0, -108.0); vec2 b = vec2(-180.0, -95.0);
+      vec2 ab = b - a; vec2 ap = pos.xz - a;
+      float t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+      roadDist = min(roadDist, length(ap - ab * t));
+    }
+    {
+      vec2 a = vec2(-180.0, -95.0); vec2 b = vec2(-350.0, -88.0);
+      vec2 ab = b - a; vec2 ap = pos.xz - a;
+      float t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+      roadDist = min(roadDist, length(ap - ab * t));
+    }
+    float roadFlatten = smoothstep(5.0, 18.0, roadDist);
+    flattenFactor *= roadFlatten;
+
+    elevation *= flattenFactor;
+
+    pos.y += elevation;
+    vElevation = elevation;
+    vWorldPos = (modelMatrix * vec4(pos, 1.0)).xyz;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  }
+`;
+
+const terrainFragShader = `
+  uniform float uTime;
+  varying vec2 vUv;
+  varying vec3 vWorldPos;
+  varying float vElevation;
+
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+  float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+    vec2 i = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m; m = m*m;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+    vec3 g;
+    g.x = a0.x * x0.x + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+  }
+
+  void main() {
+    vec2 worldXZ = vWorldPos.xz;
+    float distFromCenter = length(worldXZ);
+
+    // Base snow color with variation
+    float n1 = snoise(worldXZ * 0.05) * 0.5 + 0.5;
+    float n2 = snoise(worldXZ * 0.15) * 0.5 + 0.5;
+    float n3 = snoise(worldXZ * 0.4) * 0.5 + 0.5;
+
+    vec3 snowWhite = vec3(0.12, 0.14, 0.13);
+    vec3 snowGray = vec3(0.07, 0.09, 0.08);
+    vec3 tundraGreen = vec3(0.04, 0.07, 0.04);
+    vec3 dirtBrown = vec3(0.06, 0.05, 0.03);
+
+    // Mix terrain colors
+    vec3 baseColor = mix(snowWhite, snowGray, n1);
+    baseColor = mix(baseColor, tundraGreen, smoothstep(0.4, 0.6, n2) * 0.3);
+    baseColor = mix(baseColor, dirtBrown, smoothstep(0.55, 0.7, n3) * 0.2);
+
+    // Compound area: flatten and darken slightly (trampled snow, gravel)
+    float compoundMask = 1.0 - smoothstep(70.0, 100.0, distFromCenter);
+    vec3 compoundColor = vec3(0.06, 0.07, 0.06);
+    baseColor = mix(baseColor, compoundColor, compoundMask * 0.6);
+
+    // Vehicle tracks (procedural lines)
+    float trackNoise = snoise(vec2(worldXZ.x * 0.3, worldXZ.y * 0.01));
+    float track1 = smoothstep(0.02, 0.0, abs(worldXZ.x - 35.0 + trackNoise * 5.0)) * step(-120.0, worldXZ.y) * step(worldXZ.y, 60.0);
+    float track2 = smoothstep(0.02, 0.0, abs(worldXZ.x + 30.0 + trackNoise * 3.0)) * step(-80.0, worldXZ.y) * step(worldXZ.y, 90.0);
+    float trackY1 = smoothstep(0.02, 0.0, abs(worldXZ.y - 25.0 + snoise(vec2(worldXZ.y * 0.01, worldXZ.x * 0.3)) * 4.0)) * step(-50.0, worldXZ.x) * step(worldXZ.x, 50.0);
+    float tracks = max(max(track1, track2), trackY1);
+    baseColor = mix(baseColor, vec3(0.04, 0.045, 0.04), tracks * 0.7);
+
+    // Thermal bloom near hatch (warm area)
+    float hatchDist = length(worldXZ - vec2(0.0, 20.0));
+    float thermalBloom = exp(-hatchDist * hatchDist / 1200.0);
+    float thermalPulse = 0.7 + 0.3 * sin(uTime * 1.5 + hatchDist * 0.1);
+    vec3 thermalColor = vec3(0.15, 0.03, 0.0) * thermalPulse;
+    baseColor += thermalColor * thermalBloom;
+
+    // Night vision green tint
+    baseColor = baseColor * vec3(0.7, 1.0, 0.75);
+
+    // Distance fade
+    float fade = smoothstep(280.0, 200.0, distFromCenter);
+    baseColor *= fade;
+
+    gl_FragColor = vec4(baseColor, 1.0);
+  }
+`;
+
+const terrainMaterial = new THREE.ShaderMaterial({
+  vertexShader: terrainVertShader,
+  fragmentShader: terrainFragShader,
+  uniforms: {
+    uTime: { value: 0 }
+  }
+});
+
+const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, 256, 256);
+terrainGeo.rotateX(-Math.PI / 2);
+const terrain = new THREE.Mesh(terrainGeo, terrainMaterial);
+terrain.receiveShadow = true;
+scene.add(terrain);
+
+// ============================================================
+// COMPOUND STRUCTURES
+// ============================================================
+
+function createBuilding(width, depth, height, x, z, opts = {}) {
+  const group = new THREE.Group();
+
+  // Main structure
+  const geo = new THREE.BoxGeometry(width, height, depth);
+  const mat = new THREE.MeshStandardMaterial({
+    color: opts.color || 0x1a1f1a,
+    roughness: 0.85,
+    metalness: 0.2,
+    emissive: opts.emissive || 0x0a0f0a,
+    emissiveIntensity: 0.15
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = height / 2;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+
+  // Roof detail (flat roof with equipment)
+  const roofMat = new THREE.MeshStandardMaterial({
+    color: 0x151a15,
+    roughness: 0.9,
+    metalness: 0.3
+  });
+
+  // AC unit / vent boxes on roof
+  if (opts.roofDetails !== false) {
+    for (let i = 0; i < 3; i++) {
+      const ventGeo = new THREE.BoxGeometry(2 + Math.random() * 2, 1.5, 2 + Math.random() * 2);
+      const vent = new THREE.Mesh(ventGeo, roofMat);
+      vent.position.set(
+        (Math.random() - 0.5) * width * 0.6,
+        height + 0.75,
+        (Math.random() - 0.5) * depth * 0.6
+      );
+      vent.castShadow = true;
+      group.add(vent);
+    }
+  }
+
+  // Heat signature glow on roof
+  const heatGeo = new THREE.PlaneGeometry(width * 0.8, depth * 0.8);
+  const heatMat = new THREE.MeshBasicMaterial({
+    color: opts.heatColor || 0x331100,
+    transparent: true,
+    opacity: 0.15,
+    side: THREE.DoubleSide
+  });
+  const heatPlane = new THREE.Mesh(heatGeo, heatMat);
+  heatPlane.position.y = height + 0.2;
+  heatPlane.rotation.x = -Math.PI / 2;
+  group.add(heatPlane);
+
+  group.position.set(x, 0, z);
+  return group;
+}
+
+// Main building (command center)
+const mainBuilding = createBuilding(40, 28, 8, -25, -20, {
+  color: 0x1a1f1a,
+  heatColor: 0x332200,
+  emissive: 0x0a120a
+});
+scene.add(mainBuilding);
+
+// Annex wing
+const annexWing = createBuilding(15, 20, 6, -5, -18, {
+  color: 0x181d18,
+  heatColor: 0x221100
+});
+scene.add(annexWing);
+
+// Research building
+const researchBuilding = createBuilding(30, 22, 10, 35, -25, {
+  color: 0x151f15,
+  heatColor: 0x442200,
+  emissive: 0x0a150a
+});
+scene.add(researchBuilding);
+
+// Guard house (near gate)
+const guardHouse = createBuilding(8, 6, 4, -2, -75, {
+  color: 0x1a1a1a,
+  heatColor: 0x553300,
+  roofDetails: false
+});
+scene.add(guardHouse);
+
+// Generator building
+const generatorBuilding = createBuilding(12, 10, 5, -55, 10, {
+  color: 0x1d1d18,
+  heatColor: 0x663300,
+  emissive: 0x151008
+});
+scene.add(generatorBuilding);
+
+// Storage bunkers
+for (let i = 0; i < 3; i++) {
+  const bunker = createBuilding(10, 8, 3, 50 + i * 14, 15, {
+    color: 0x181818,
+    heatColor: 0x110800,
+    roofDetails: false
+  });
+  scene.add(bunker);
+}
+
+// ============================================================
+// THE HATCH - Centerpiece
+// ============================================================
+const hatchGroup = new THREE.Group();
+hatchGroup.position.set(0, 0.2, 45);
+
+// Hatch outer ring (concrete pad)
+const hatchPadGeo = new THREE.CylinderGeometry(35, 36, 1.5, 64);
+const hatchPadMat = new THREE.MeshStandardMaterial({
+  color: 0x1a1a18,
+  roughness: 0.95,
+  metalness: 0.1
+});
+const hatchPad = new THREE.Mesh(hatchPadGeo, hatchPadMat);
+hatchPad.receiveShadow = true;
+hatchGroup.add(hatchPad);
+
+// Hatch door (massive steel)
+const hatchDoorGeo = new THREE.CylinderGeometry(28, 28, 2, 64);
+const hatchDoorMat = new THREE.MeshStandardMaterial({
+  color: 0x222218,
+  roughness: 0.6,
+  metalness: 0.7,
+  emissive: 0x1a0800,
+  emissiveIntensity: 0.3
+});
+const hatchDoor = new THREE.Mesh(hatchDoorGeo, hatchDoorMat);
+hatchDoor.position.y = 0.8;
+hatchGroup.add(hatchDoor);
+
+// Hatch seam cross pattern
+const seamMat = new THREE.MeshBasicMaterial({ color: 0x331100, transparent: true, opacity: 0.6 });
+const seam1Geo = new THREE.BoxGeometry(54, 0.5, 0.8);
+const seam1 = new THREE.Mesh(seam1Geo, seamMat);
+seam1.position.y = 2.0;
+hatchGroup.add(seam1);
+const seam2 = seam1.clone();
+seam2.rotation.y = Math.PI / 2;
+hatchGroup.add(seam2);
+
+// Inner ring
+const innerRingGeo = new THREE.RingGeometry(12, 14, 48);
+const innerRingMat = new THREE.MeshBasicMaterial({
+  color: 0x552200,
+  transparent: true,
+  opacity: 0.4,
+  side: THREE.DoubleSide
+});
+const innerRing = new THREE.Mesh(innerRingGeo, innerRingMat);
+innerRing.rotation.x = -Math.PI / 2;
+innerRing.position.y = 2.1;
+hatchGroup.add(innerRing);
+
+// Center bolt cluster
+const centerBoltGeo = new THREE.CylinderGeometry(3, 3, 1, 16);
+const centerBoltMat = new THREE.MeshStandardMaterial({
+  color: 0x333322,
+  metalness: 0.9,
+  roughness: 0.3,
+  emissive: 0x221100,
+  emissiveIntensity: 0.4
+});
+const centerBolt = new THREE.Mesh(centerBoltGeo, centerBoltMat);
+centerBolt.position.y = 2.2;
+hatchGroup.add(centerBolt);
+
+// Perimeter bolts around hatch
+for (let i = 0; i < 24; i++) {
+  const angle = (i / 24) * Math.PI * 2;
+  const boltGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.8, 8);
+  const bolt = new THREE.Mesh(boltGeo, centerBoltMat);
+  bolt.position.set(Math.cos(angle) * 26, 2.0, Math.sin(angle) * 26);
+  hatchGroup.add(bolt);
+}
+
+// Thermal glow shader plane
+const hatchGlowVertShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const hatchGlowFragShader = `
+  uniform float uTime;
+  varying vec2 vUv;
+
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+  float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+    vec2 i = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m; m = m*m;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+    vec3 g;
+    g.x = a0.x * x0.x + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+  }
+
+  void main() {
+    vec2 centered = vUv - 0.5;
+    float dist = length(centered);
+
+    // Radial falloff
+    float glow = 1.0 - smoothstep(0.0, 0.5, dist);
+    glow = glow * glow;
+
+    // Turbulent thermal noise
+    float n1 = snoise(centered * 4.0 + uTime * 0.3) * 0.5 + 0.5;
+    float n2 = snoise(centered * 8.0 - uTime * 0.5) * 0.5 + 0.5;
+    float n3 = snoise(centered * 16.0 + uTime * 0.2) * 0.5 + 0.5;
+    float turb = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+
+    // Pulsing
+    float pulse = 0.6 + 0.4 * sin(uTime * 1.2 + dist * 6.0);
+
+    // Color: deep red/orange thermal
+    float intensity = glow * turb * pulse;
+    vec3 color = mix(
+      vec3(0.4, 0.05, 0.0),
+      vec3(1.0, 0.3, 0.05),
+      intensity
+    ) * intensity * 2.5;
+
+    // Seam glow lines
+    float seamX = smoothstep(0.015, 0.0, abs(centered.x)) * glow;
+    float seamY = smoothstep(0.015, 0.0, abs(centered.y)) * glow;
+    color += vec3(0.8, 0.2, 0.0) * (seamX + seamY) * pulse * 0.5;
+
+    float alpha = intensity * 0.8 + (seamX + seamY) * 0.3;
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+const hatchGlowMat = new THREE.ShaderMaterial({
+  vertexShader: hatchGlowVertShader,
+  fragmentShader: hatchGlowFragShader,
+  uniforms: { uTime: { value: 0 } },
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending
+});
+const hatchGlowGeo = new THREE.PlaneGeometry(80, 80);
+const hatchGlowPlane = new THREE.Mesh(hatchGlowGeo, hatchGlowMat);
+hatchGlowPlane.rotation.x = -Math.PI / 2;
+hatchGlowPlane.position.y = 2.5;
+hatchGroup.add(hatchGlowPlane);
+
+// Point light for hatch thermal
+const hatchLight = new THREE.PointLight(0xff3300, 3, 80, 2);
+hatchLight.position.set(0, 5, 0);
+hatchGroup.add(hatchLight);
+
+// Secondary softer glow
+const hatchLight2 = new THREE.PointLight(0xff6600, 1.5, 120, 2);
+hatchLight2.position.set(0, 2, 0);
+hatchGroup.add(hatchLight2);
+
+scene.add(hatchGroup);
+
+// ============================================================
+// PERIMETER FENCE
+// ============================================================
+function createFence(points, height = 4) {
+  const group = new THREE.Group();
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.5 });
+  const wireMat = new THREE.LineBasicMaterial({ color: 0x1a3a1a, transparent: true, opacity: 0.6 });
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const next = points[(i + 1) % points.length];
+
+    // Post
+    const postGeo = new THREE.CylinderGeometry(0.3, 0.3, height, 6);
+    const post = new THREE.Mesh(postGeo, postMat);
+    post.position.set(p.x, height / 2, p.z);
+    post.castShadow = true;
+    group.add(post);
+
+    // Wire between posts
+    const wireGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x, height * 0.9, p.z),
+      new THREE.Vector3(next.x, height * 0.9, next.z)
+    ]);
+    group.add(new THREE.Line(wireGeo, wireMat));
+
+    const wire2Geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x, height * 0.5, p.z),
+      new THREE.Vector3(next.x, height * 0.5, next.z)
+    ]);
+    group.add(new THREE.Line(wire2Geo, wireMat));
+
+    const wire3Geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x, height * 0.2, p.z),
+      new THREE.Vector3(next.x, height * 0.2, next.z)
+    ]);
+    group.add(new THREE.Line(wire3Geo, wireMat));
+  }
+  return group;
+}
+
+// Rectangular perimeter
+const fenceRadius = 85;
+const fencePosts = [];
+const fenceCorners = [
+  { x: -fenceRadius, z: -fenceRadius },
+  { x: fenceRadius, z: -fenceRadius },
+  { x: fenceRadius, z: fenceRadius },
+  { x: -fenceRadius, z: fenceRadius }
+];
+
+// Add intermediate posts along each side
+for (let c = 0; c < 4; c++) {
+  const start = fenceCorners[c];
+  const end = fenceCorners[(c + 1) % 4];
+  const segments = 12;
+  for (let i = 0; i < segments; i++) {
+    fencePosts.push({
+      x: start.x + (end.x - start.x) * (i / segments),
+      z: start.z + (end.z - start.z) * (i / segments)
+    });
+  }
+}
+
+const fence = createFence(fencePosts, 4);
+scene.add(fence);
+
+// Gate opening (visual gap in fence near guard house)
+const gateLightL = new THREE.PointLight(0x00ff44, 0.5, 15, 2);
+gateLightL.position.set(-4, 3, -fenceRadius);
+scene.add(gateLightL);
+const gateLightR = new THREE.PointLight(0xff2200, 0.5, 15, 2);
+gateLightR.position.set(4, 3, -fenceRadius);
+scene.add(gateLightR);
+
+// ============================================================
+// ANTENNA ARRAYS & COMMS
+// ============================================================
+function createAntenna(x, z, height) {
+  const group = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5, metalness: 0.7 });
+
+  // Main pole
+  const poleGeo = new THREE.CylinderGeometry(0.3, 0.5, height, 8);
+  const pole = new THREE.Mesh(poleGeo, poleMat);
+  pole.position.y = height / 2;
+  pole.castShadow = true;
+  group.add(pole);
+
+  // Dish at top
+  const dishGeo = new THREE.SphereGeometry(2, 16, 8, 0, Math.PI);
+  const dishMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.3, metalness: 0.8, side: THREE.DoubleSide });
+  const dish = new THREE.Mesh(dishGeo, dishMat);
+  dish.position.y = height;
+  dish.rotation.x = Math.PI * 0.3;
+  dish.rotation.y = Math.random() * Math.PI * 2;
+  group.add(dish);
+
+  // Blinking light
+  const lightGeo = new THREE.SphereGeometry(0.4, 8, 8);
+  const lightMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  const light = new THREE.Mesh(lightGeo, lightMat);
+  light.position.y = height + 1;
+  light.userData.blinkPhase = Math.random() * Math.PI * 2;
+  group.add(light);
+
+  group.position.set(x, 0, z);
+  return group;
+}
+
+const antenna1 = createAntenna(-60, -35, 18);
+scene.add(antenna1);
+const antenna2 = createAntenna(55, -40, 22);
+scene.add(antenna2);
+const antenna3 = createAntenna(-40, 55, 15);
+scene.add(antenna3);
+
+// Radio mast cluster
+const mastGroup = new THREE.Group();
+const mastMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.6, roughness: 0.5 });
+for (let i = 0; i < 4; i++) {
+  const h = 12 + Math.random() * 8;
+  const mastGeo = new THREE.CylinderGeometry(0.15, 0.2, h, 6);
+  const mast = new THREE.Mesh(mastGeo, mastMat);
+  mast.position.set(i * 3 - 4.5, h / 2, 0);
+  mast.castShadow = true;
+  mastGroup.add(mast);
+}
+mastGroup.position.set(60, 0, -15);
+scene.add(mastGroup);
+
+// ============================================================
+// GUARD PATROL PATHS (glowing lines on ground)
+// ============================================================
+function createPatrolPath(points, color = 0x003311) {
+  const linePoints = points.map(p => new THREE.Vector3(p.x, 0.3, p.z));
+  const geo = new THREE.BufferGeometry().setFromPoints(linePoints);
+  const mat = new THREE.LineDashedMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0.3,
+    dashSize: 2,
+    gapSize: 1
+  });
+  const line = new THREE.Line(geo, mat);
+  line.computeLineDistances();
+  return line;
+}
+
+// Perimeter patrol
+const perimeterPatrol = [];
+for (let i = 0; i <= 40; i++) {
+  const angle = (i / 40) * Math.PI * 2;
+  perimeterPatrol.push({ x: Math.cos(angle) * 78, z: Math.sin(angle) * 78 });
+}
+scene.add(createPatrolPath(perimeterPatrol, 0x004422));
+
+// Inner patrol around hatch
+const hatchPatrol = [];
+for (let i = 0; i <= 24; i++) {
+  const angle = (i / 24) * Math.PI * 2;
+  hatchPatrol.push({ x: Math.cos(angle) * 38 + 0, z: Math.sin(angle) * 38 + 45 });
+}
+scene.add(createPatrolPath(hatchPatrol, 0x442200));
+
+// ============================================================
+// GUARD DOTS (moving along patrol paths)
+// ============================================================
+const guards = [];
+function createGuard(pathPoints, speed, offset) {
+  const geo = new THREE.SphereGeometry(1, 8, 8);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = 1.5;
+  scene.add(mesh);
+
+  // Direction indicator
+  const dirGeo = new THREE.ConeGeometry(0.5, 1.5, 6);
+  const dirMat = new THREE.MeshBasicMaterial({ color: 0x00aa33, transparent: true, opacity: 0.6 });
+  const dir = new THREE.Mesh(dirGeo, dirMat);
+  dir.rotation.x = Math.PI / 2;
+  dir.position.z = 1.2;
+  mesh.add(dir);
+
+  guards.push({ mesh, path: pathPoints, speed, offset, t: offset });
+  return mesh;
+}
+
+createGuard(perimeterPatrol, 0.15, 0);
+createGuard(perimeterPatrol, 0.15, 20);
+createGuard(hatchPatrol, 0.1, 0);
+createGuard(hatchPatrol, 0.1, 12);
+
+// ============================================================
+// VEHICLE (parked)
+// ============================================================
+function createVehicle(x, z, rotY) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1f1a, roughness: 0.7, metalness: 0.4 });
+
+  // Truck body
+  const bodyGeo = new THREE.BoxGeometry(4, 2.5, 8);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 2;
+  body.castShadow = true;
+  group.add(body);
+
+  // Cab
+  const cabGeo = new THREE.BoxGeometry(3.5, 2, 3);
+  const cab = new THREE.Mesh(cabGeo, bodyMat);
+  cab.position.set(0, 3.5, -2);
+  cab.castShadow = true;
+  group.add(cab);
+
+  // Heat signature
+  const heatGeo = new THREE.PlaneGeometry(5, 9);
+  const heatMat = new THREE.MeshBasicMaterial({
+    color: 0x221100,
+    transparent: true,
+    opacity: 0.2,
+    side: THREE.DoubleSide
+  });
+  const heat = new THREE.Mesh(heatGeo, heatMat);
+  heat.rotation.x = -Math.PI / 2;
+  heat.position.y = 4;
+  group.add(heat);
+
+  group.position.set(x, 0, z);
+  group.rotation.y = rotY;
+  return group;
+}
+
+scene.add(createVehicle(-15, -55, 0.3));
+scene.add(createVehicle(-22, -58, 0.1));
+scene.add(createVehicle(20, -50, -0.5));
+
+// ============================================================
+// SEARCH LIGHTS
+// ============================================================
+const searchLights = [];
+function createSearchLight(x, z, color = 0x88ff88) {
+  const group = new THREE.Group();
+
+  // Tower base
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.5 });
+  const baseGeo = new THREE.CylinderGeometry(1, 1.5, 10, 8);
+  const base = new THREE.Mesh(baseGeo, baseMat);
+  base.position.y = 5;
+  base.castShadow = true;
+  group.add(base);
+
+  // Light cone (volumetric feel)
+  const coneGeo = new THREE.ConeGeometry(15, 40, 16, 1, true);
+  const coneMat = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0.03,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.position.y = -10;
+  cone.rotation.x = Math.PI;
+
+  const lightHead = new THREE.Group();
+  lightHead.position.y = 10;
+  lightHead.add(cone);
+  group.add(lightHead);
+
+  // Actual spotlight
+  const spotLight = new THREE.SpotLight(color, 2, 80, Math.PI / 6, 0.5, 2);
+  spotLight.position.y = 10;
+  spotLight.target.position.set(x + 30, 0, z);
+  group.add(spotLight);
+  group.add(spotLight.target);
+
+  group.position.set(x, 0, z);
+  searchLights.push({ group, head: lightHead, spotLight, phase: Math.random() * Math.PI * 2 });
+  return group;
+}
+
+scene.add(createSearchLight(-fenceRadius, -fenceRadius));
+scene.add(createSearchLight(fenceRadius, -fenceRadius, 0x88ff88));
+scene.add(createSearchLight(fenceRadius, fenceRadius, 0x88ff88));
+scene.add(createSearchLight(-fenceRadius, fenceRadius));
+
+// ============================================================
+// TREES (sparse boreal treeline at perimeter edges)
+// ============================================================
+function createTree(x, z) {
+  const group = new THREE.Group();
+
+  // Trunk
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x1a1510, roughness: 0.9 });
+  const trunkGeo = new THREE.CylinderGeometry(0.3, 0.5, 4 + Math.random() * 3, 6);
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+  trunk.position.y = 2;
+  trunk.castShadow = true;
+  group.add(trunk);
+
+  // Conifer shape (stacked cones)
+  const foliageMat = new THREE.MeshStandardMaterial({
+    color: 0x0a1a0a,
+    roughness: 0.95
+  });
+  const layers = 3 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < layers; i++) {
+    const h = 3 - i * 0.3;
+    const r = 2.5 - i * 0.5;
+    const coneGeo = new THREE.ConeGeometry(r, h, 6);
+    const cone = new THREE.Mesh(coneGeo, foliageMat);
+    cone.position.y = 4 + i * 1.8;
+    cone.castShadow = true;
+    group.add(cone);
+  }
+
+  // Snow on top
+  const snowMat = new THREE.MeshBasicMaterial({ color: 0x1a2a1a, transparent: true, opacity: 0.4 });
+  const snowGeo = new THREE.ConeGeometry(1.5, 1, 6);
+  const snow = new THREE.Mesh(snowGeo, snowMat);
+  snow.position.y = 4 + layers * 1.8;
+  group.add(snow);
+
+  const scale = 0.6 + Math.random() * 0.8;
+  group.scale.set(scale, scale, scale);
+  group.position.set(x, 0, z);
+  group.rotation.y = Math.random() * Math.PI * 2;
+  return group;
+}
+
+// Treeline around perimeter
+const treeRadius = 120;
+for (let i = 0; i < 120; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = treeRadius + Math.random() * 80;
+  const x = Math.cos(angle) * dist;
+  const z = Math.sin(angle) * dist;
+  // Skip trees in the airfield area
+  const afDx = x - (-140);
+  const afDz = z - 0;
+  if (Math.abs(afDx) < 20 && Math.abs(afDz) < 60) continue;
+  scene.add(createTree(x, z));
+}
+
+// ============================================================
+// SNOW PARTICLES
+// ============================================================
+const snowCount = 3000;
+const snowGeo = new THREE.BufferGeometry();
+const snowPositions = new Float32Array(snowCount * 3);
+const snowVelocities = [];
+for (let i = 0; i < snowCount; i++) {
+  snowPositions[i * 3] = (Math.random() - 0.5) * 400;
+  snowPositions[i * 3 + 1] = Math.random() * 150;
+  snowPositions[i * 3 + 2] = (Math.random() - 0.5) * 400;
+  snowVelocities.push({
+    x: -0.02 - Math.random() * 0.05,
+    y: -0.1 - Math.random() * 0.15,
+    z: -0.01 - Math.random() * 0.03
+  });
+}
+snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+const snowMat = new THREE.PointsMaterial({
+  color: 0x88aa99,
+  size: 0.8,
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending
+});
+const snowParticles = new THREE.Points(snowGeo, snowMat);
+scene.add(snowParticles);
+
+// ============================================================
+// FOG / CLOUD COVER DRIFTING
+// ============================================================
+const fogPlanes = [];
+function createFogLayer(y, opacity, scale) {
+  const fogGeo = new THREE.PlaneGeometry(500, 500);
+  const fogVertShader = `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  const fogFragShader = `
+    uniform float uTime;
+    uniform float uOpacity;
+    varying vec2 vUv;
+
+    vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+    float snoise(vec2 v) {
+      const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+      vec2 i = floor(v + dot(v, C.yy));
+      vec2 x0 = v - i + dot(i, C.xx);
+      vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+      vec4 x12 = x0.xyxy + C.xxzz;
+      x12.xy -= i1;
+      i = mod289(i);
+      vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+      vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+      m = m*m; m = m*m;
+      vec3 x = 2.0 * fract(p * C.www) - 1.0;
+      vec3 h = abs(x) - 0.5;
+      vec3 ox = floor(x + 0.5);
+      vec3 a0 = x - ox;
+      m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+      vec3 g;
+      g.x = a0.x * x0.x + h.x * x0.y;
+      g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+      return 130.0 * dot(m, g);
+    }
+
+    void main() {
+      vec2 uv = vUv;
+      float n1 = snoise((uv + uTime * 0.02) * 3.0) * 0.5 + 0.5;
+      float n2 = snoise((uv + uTime * 0.035) * 6.0) * 0.5 + 0.5;
+      float cloud = n1 * 0.6 + n2 * 0.4;
+      cloud = smoothstep(0.35, 0.7, cloud);
+
+      // Fade at edges
+      float edgeFade = 1.0 - smoothstep(0.3, 0.5, length(uv - 0.5));
+
+      float alpha = cloud * uOpacity * edgeFade;
+      vec3 color = vec3(0.05, 0.08, 0.06);
+      gl_FragColor = vec4(color, alpha);
+    }
+  `;
+  const fogMat = new THREE.ShaderMaterial({
+    vertexShader: fogVertShader,
+    fragmentShader: fogFragShader,
+    uniforms: {
+      uTime: { value: 0 },
+      uOpacity: { value: opacity }
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  const plane = new THREE.Mesh(fogGeo, fogMat);
+  plane.rotation.x = -Math.PI / 2;
+  plane.position.y = y;
+  plane.scale.set(scale, scale, scale);
+  fogPlanes.push(plane);
+  return plane;
+}
+
+scene.add(createFogLayer(30, 0.15, 1.2));
+scene.add(createFogLayer(50, 0.1, 1.5));
+scene.add(createFogLayer(80, 0.08, 2.0));
+
+
+// ============================================================
+// LANDING PAD (helipad)
+// ============================================================
+const helipadGroup = new THREE.Group();
+const helipadGeo = new THREE.CylinderGeometry(12, 12, 0.3, 32);
+const helipadMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9, metalness: 0.1 });
+const helipad = new THREE.Mesh(helipadGeo, helipadMat);
+helipad.receiveShadow = true;
+helipadGroup.add(helipad);
+
+// H marking
+const hGeo = new THREE.PlaneGeometry(8, 10);
+const hCanvas = document.createElement('canvas');
+hCanvas.width = 64; hCanvas.height = 80;
+const hCtx = hCanvas.getContext('2d');
+hCtx.fillStyle = 'rgba(0, 80, 40, 0.8)';
+hCtx.fillRect(8, 5, 12, 70);
+hCtx.fillRect(44, 5, 12, 70);
+hCtx.fillRect(8, 32, 48, 12);
+const hTexture = new THREE.CanvasTexture(hCanvas);
+const hMat = new THREE.MeshBasicMaterial({ map: hTexture, transparent: true, depthWrite: false });
+const hMesh = new THREE.Mesh(hGeo, hMat);
+hMesh.rotation.x = -Math.PI / 2;
+hMesh.position.y = 0.2;
+helipadGroup.add(hMesh);
+
+// Circle marking
+const circleGeo = new THREE.RingGeometry(10, 11, 32);
+const circleMat = new THREE.MeshBasicMaterial({ color: 0x003d1a, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+const circleMesh = new THREE.Mesh(circleGeo, circleMat);
+circleMesh.rotation.x = -Math.PI / 2;
+circleMesh.position.y = 0.2;
+helipadGroup.add(circleMesh);
+
+// Corner lights
+for (let i = 0; i < 4; i++) {
+  const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+  const lGeo = new THREE.SphereGeometry(0.5, 8, 8);
+  const lMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
+  const l = new THREE.Mesh(lGeo, lMat);
+  l.position.set(Math.cos(a) * 11, 0.5, Math.sin(a) * 11);
+  l.userData.blinkPhase = i * 1.5;
+  helipadGroup.add(l);
+}
+
+helipadGroup.position.set(-55, 0.1, -50);
+scene.add(helipadGroup);
+
+// ============================================================
+// ACCESS ROAD (gate -> west, off map)
+// ============================================================
+{
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x1a1a18, roughness: 0.95, metalness: 0.05, side: THREE.DoubleSide });
+  const roadCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-350, 0.15, -88),
+    new THREE.Vector3(-280, 0.15, -90),
+    new THREE.Vector3(-200, 0.15, -94),
+    new THREE.Vector3(-140, 0.15, -100),
+    new THREE.Vector3(-100, 0.15, -108),
+    new THREE.Vector3(-60, 0.15, -110),
+    new THREE.Vector3(-30, 0.15, -105),
+    new THREE.Vector3(-10, 0.15, -97),
+    new THREE.Vector3(-10, 0.15, -90),
+    new THREE.Vector3(-10, 0.15, -85),
+  ]);
+
+  // Build a flat ribbon along the curve
+  const roadWidth = 3.5;
+  const segments = 80;
+  const positions = [];
+  const indices = [];
+  const uvs = [];
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const point = roadCurve.getPointAt(t);
+    const tangent = roadCurve.getTangentAt(t);
+    // Perpendicular in xz plane
+    const perp = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+
+    const left = point.clone().add(perp.clone().multiplyScalar(roadWidth));
+    const right = point.clone().add(perp.clone().multiplyScalar(-roadWidth));
+
+    positions.push(left.x, 0.15, left.z);
+    positions.push(right.x, 0.15, right.z);
+    uvs.push(0, t);
+    uvs.push(1, t);
+
+    if (i < segments) {
+      const base = i * 2;
+      indices.push(base, base + 1, base + 2);
+      indices.push(base + 1, base + 3, base + 2);
+    }
+  }
+
+  const roadGeo = new THREE.BufferGeometry();
+  roadGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  roadGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  roadGeo.setIndex(indices);
+  roadGeo.computeVertexNormals();
+
+  const road = new THREE.Mesh(roadGeo, roadMat);
+  road.receiveShadow = true;
+  scene.add(road);
+}
+
+// ============================================================
+// COMMS JUNCTION BOX (near hatch, NE side)
+// ============================================================
+{
+  const jboxMat = new THREE.MeshStandardMaterial({ color: 0x2a3a2a, roughness: 0.7, metalness: 0.4 });
+  const jbox = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2, 1), jboxMat);
+  jbox.position.set(hatchGroup.position.x + 32, 1, hatchGroup.position.z - 10);
+  jbox.castShadow = true;
+  scene.add(jbox);
+  // Small indicator light on the box
+  const jlight = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x00ff44, emissive: 0x00cc33, emissiveIntensity: 1 }));
+  jlight.position.set(hatchGroup.position.x + 32, 2.2, hatchGroup.position.z - 10);
+  jlight.userData.powered = true;
+  scene.add(jlight);
+}
+
+// ============================================================
+// AIRFIELD (west, outside compound)
+// ============================================================
+{
+  const afX = -140; // west of fence (-85)
+  const afZ = 0;
+  const afY = 0.5; // raised above terrain
+
+  // Runway
+  const runwayMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1c, roughness: 0.9, metalness: 0.05 });
+  const runway = new THREE.Mesh(new THREE.PlaneGeometry(12, 100), runwayMat);
+  runway.rotation.x = -Math.PI / 2;
+  runway.position.set(afX, afY, afZ);
+  runway.receiveShadow = true;
+  scene.add(runway);
+
+  // Runway center line dashes
+  const dashMat = new THREE.MeshStandardMaterial({ color: 0x555545, roughness: 0.9 });
+  for (let i = -10; i <= 10; i++) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 3), dashMat);
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(afX, afY + 0.02, afZ + i * 4.5);
+    scene.add(dash);
+  }
+
+  // Runway threshold markings
+  for (let end = -1; end <= 1; end += 2) {
+    for (let s = -2; s <= 2; s++) {
+      const mark = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 4), dashMat);
+      mark.rotation.x = -Math.PI / 2;
+      mark.position.set(afX + s * 2, afY + 0.02, afZ + end * 46);
+      scene.add(mark);
+    }
+  }
+
+  // Runway edge lights
+  const edgeLightGeo = new THREE.SphereGeometry(0.3, 6, 6);
+  for (let i = -10; i <= 10; i++) {
+    for (let side = -1; side <= 1; side += 2) {
+      const lMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, emissive: 0xaaaaff, emissiveIntensity: 0.8
+      });
+      const light = new THREE.Mesh(edgeLightGeo, lMat);
+      light.position.set(afX + side * 6.5, afY + 0.3, afZ + i * 4.5);
+      light.userData.runwayLight = true;
+      light.userData.powered = true;
+      light.userData.blinkIdx = i;
+      scene.add(light);
+    }
+  }
+
+  // Threshold lights (green at one end, red at the other)
+  for (let s = -3; s <= 3; s++) {
+    const gMat = new THREE.MeshStandardMaterial({ color: 0x00ff44, emissive: 0x00cc33, emissiveIntensity: 1 });
+    const gl = new THREE.Mesh(edgeLightGeo, gMat);
+    gl.position.set(afX + s * 1.8, afY + 0.3, afZ - 50);
+    gl.userData.powered = true;
+    scene.add(gl);
+
+    const rMat = new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xcc1100, emissiveIntensity: 1 });
+    const rl = new THREE.Mesh(edgeLightGeo, rMat);
+    rl.position.set(afX + s * 1.8, afY + 0.3, afZ + 50);
+    rl.userData.powered = true;
+    scene.add(rl);
+  }
+
+
+  // Windsock pole
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.5 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 8, 6), poleMat);
+  pole.position.set(afX - 10, 4, afZ + 30);
+  pole.castShadow = true;
+  scene.add(pole);
+  // Windsock (cone)
+  const sockMat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0x882200, emissiveIntensity: 0.2, roughness: 0.8 });
+  const sock = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 6), sockMat);
+  sock.position.set(afX - 10, 8, afZ + 30);
+  sock.rotation.z = Math.PI / 2 + 0.3;
+  scene.add(sock);
+}
+
+// ============================================================
+// POST-PROCESSING
+// ============================================================
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+// Bloom
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.8,   // strength
+  0.4,   // radius
+  0.2    // threshold
+);
+composer.addPass(bloomPass);
+
+// Custom film grain + color grading + vignette shader
+const filmGrainShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uIntensity: { value: 0.08 },
+    uVignetteStrength: { value: 0.7 }
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uIntensity;
+    uniform float uVignetteStrength;
+    varying vec2 vUv;
+
+    float random(vec2 co) {
+      return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    void main() {
+      vec4 color = texture2D(tDiffuse, vUv);
+
+      // Film grain
+      float grain = random(vUv + fract(uTime)) * 2.0 - 1.0;
+      color.rgb += grain * uIntensity;
+
+      // Night vision green tint / color grading
+      float lum = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+      vec3 greenTint = vec3(lum * 0.6, lum * 1.0, lum * 0.7);
+      color.rgb = mix(color.rgb, greenTint, 0.25);
+
+      // Vignette
+      vec2 centered = vUv - 0.5;
+      float vignette = 1.0 - dot(centered, centered) * uVignetteStrength * 2.0;
+      vignette = clamp(vignette, 0.0, 1.0);
+      color.rgb *= vignette;
+
+      // Brightness + contrast
+      color.rgb *= 1.4;
+      color.rgb = pow(color.rgb, vec3(0.95));
+
+      // Scanline hint in 3D pass too
+      float scanline = 0.97 + 0.03 * sin(vUv.y * 800.0);
+      color.rgb *= scanline;
+
+      gl_FragColor = color;
+    }
+  `
+};
+
+const filmGrainPass = new ShaderPass(filmGrainShader);
+composer.addPass(filmGrainPass);
+
+// ============================================================
+// FILM GRAIN NOISE CANVAS (CSS overlay)
+// ============================================================
+const noiseCanvas = document.getElementById('noise-overlay');
+const noiseCtx = noiseCanvas.getContext('2d');
+
+function updateNoiseOverlay() {
+  const w = 128, h = 128;
+  noiseCanvas.width = window.innerWidth;
+  noiseCanvas.height = window.innerHeight;
+  const imageData = noiseCtx.createImageData(w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const v = Math.random() * 255;
+    data[i] = v;
+    data[i + 1] = v;
+    data[i + 2] = v;
+    data[i + 3] = 255;
+  }
+  noiseCtx.putImageData(imageData, 0, 0);
+  // Scale up for full screen coverage with pixelated look
+  noiseCtx.imageSmoothingEnabled = false;
+  noiseCtx.drawImage(noiseCanvas, 0, 0, w, h, 0, 0, noiseCanvas.width, noiseCanvas.height);
+}
+
+// ============================================================
+// HUD UPDATE
+// ============================================================
+const clockEl = document.getElementById('clock');
+const fpsEl = document.getElementById('fps-counter');
+const statusEl = document.getElementById('status-line');
+let frameCount = 0, lastFpsTime = performance.now(), currentFps = 0;
+
+const statusMessages = [
+  'SIGNAL LOCKED',
+  'TRACKING ACTIVE',
+  'THERMAL SCAN IN PROGRESS',
+  'SEISMIC SENSOR ONLINE',
+  'ANALYZING THERMAL BLOOM',
+  'COMPOUND ACTIVITY DETECTED',
+  'MOTION ALERT: SECTOR 4',
+  'IR ANOMALY: HATCH ALPHA',
+  'DATALINK NOMINAL'
+];
+let statusIdx = 0;
+
+function updateHUD() {
+  const now = new Date();
+  clockEl.textContent = now.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+
+  frameCount++;
+  const elapsed = performance.now() - lastFpsTime;
+  if (elapsed > 1000) {
+    currentFps = Math.round(frameCount * 1000 / elapsed);
+    fpsEl.textContent = 'FPS: ' + currentFps;
+    frameCount = 0;
+    lastFpsTime = performance.now();
+  }
+
+  if (Math.random() < 0.005) {
+    statusIdx = (statusIdx + 1) % statusMessages.length;
+    statusEl.textContent = statusMessages[statusIdx];
+  }
+}
+
+
+// ============================================================
+// HATCH AVOIDANCE PATHFINDING
+// ============================================================
+const hatchCenter = { x: 0, z: 45 };
+const hatchAvoidRadius = 34; // door (28) + buffer
+
+// Does line segment from A to B intersect the hatch circle?
+function lineIntersectsHatch(ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const fx = ax - hatchCenter.x, fz = az - hatchCenter.z;
+  const a = dx * dx + dz * dz;
+  const b = 2 * (fx * dx + fz * dz);
+  const c = fx * fx + fz * fz - hatchAvoidRadius * hatchAvoidRadius;
+  let disc = b * b - 4 * a * c;
+  if (disc < 0) return false;
+  disc = Math.sqrt(disc);
+  const t1 = (-b - disc) / (2 * a);
+  const t2 = (-b + disc) / (2 * a);
+  return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1) || (t1 < 0 && t2 > 1);
+}
+
+// Build waypoints from start to end, routing around hatch if needed
+function pathAroundHatch(sx, sz, ex, ez) {
+  if (!lineIntersectsHatch(sx, sz, ex, ez)) {
+    return [{ x: sx, z: sz }, { x: ex, z: ez }];
+  }
+  // Find angles from hatch center to start and end
+  const aStart = Math.atan2(sz - hatchCenter.z, sx - hatchCenter.x);
+  const aEnd = Math.atan2(ez - hatchCenter.z, ex - hatchCenter.x);
+  // Choose shorter arc direction
+  let diff = aEnd - aStart;
+  if (diff > Math.PI) diff -= Math.PI * 2;
+  if (diff < -Math.PI) diff += Math.PI * 2;
+  // Generate waypoints along the arc
+  const steps = Math.max(3, Math.ceil(Math.abs(diff) / 0.4));
+  const waypoints = [{ x: sx, z: sz }];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const angle = aStart + diff * t;
+    waypoints.push({
+      x: hatchCenter.x + Math.cos(angle) * (hatchAvoidRadius + 2),
+      z: hatchCenter.z + Math.sin(angle) * (hatchAvoidRadius + 2)
+    });
+  }
+  waypoints.push({ x: ex, z: ez });
+  return waypoints;
+}
+
+// ============================================================
+// ANIMATION LOOP
+// ============================================================
+const clock = new THREE.Clock();
+let noiseTimer = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+  const elapsed = clock.getElapsedTime();
+
+  // Update controls
+  controls.update();
+
+  // Update terrain shader
+  terrainMaterial.uniforms.uTime.value = elapsed;
+
+  // Update hatch glow
+  hatchGlowMat.uniforms.uTime.value = elapsed;
+
+  // Hatch light pulsing
+  const hatchPulse = 0.6 + 0.4 * Math.sin(elapsed * 1.5);
+  hatchLight.intensity = 3 * hatchPulse;
+  hatchLight2.intensity = 1.5 * hatchPulse;
+
+  // Update fog
+  fogPlanes.forEach(fp => {
+    fp.material.uniforms.uTime.value = elapsed;
+  });
+
+  // Update snow
+  const positions = snowParticles.geometry.attributes.position.array;
+  for (let i = 0; i < snowCount; i++) {
+    const v = snowVelocities[i];
+    positions[i * 3] += v.x;
+    positions[i * 3 + 1] += v.y;
+    positions[i * 3 + 2] += v.z;
+    if (positions[i * 3 + 1] < 0) {
+      positions[i * 3] = (Math.random() - 0.5) * 400;
+      positions[i * 3 + 1] = 120 + Math.random() * 30;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 400;
+    }
+  }
+  snowParticles.geometry.attributes.position.needsUpdate = true;
+
+  // Update guards
+  guards.forEach(g => {
+    if (g.rushing) {
+      g.rushTimer += delta;
+      if (g.rushTimer < g.rushDuration) {
+        // Follow multi-waypoint path
+        const totalSegs = g.rushPath.length - 1;
+        const progressPerSeg = g.rushDuration / totalSegs;
+        const segIdx = Math.min(Math.floor(g.rushTimer / progressPerSeg), totalSegs - 1);
+        const segT = Math.min(1, (g.rushTimer - segIdx * progressPerSeg) / progressPerSeg);
+        const wp1 = g.rushPath[segIdx];
+        const wp2 = g.rushPath[Math.min(segIdx + 1, totalSegs)];
+        g.mesh.position.x = wp1.x + (wp2.x - wp1.x) * segT;
+        g.mesh.position.z = wp1.z + (wp2.z - wp1.z) * segT;
+        // Face direction of movement
+        const dx = wp2.x - wp1.x;
+        const dz = wp2.z - wp1.z;
+        if (Math.abs(dx) + Math.abs(dz) > 0.01) {
+          g.mesh.rotation.y = Math.atan2(dx, dz);
+        }
+      } else {
+        // Arrived -- stand around watching the fire from their spread position
+        g.mesh.position.x = g.rushTo.x + Math.sin(elapsed * 0.3 + g.rushPhase) * 1.5;
+        g.mesh.position.z = g.rushTo.z + Math.cos(elapsed * 0.25 + g.rushPhase) * 1.5;
+        // Face the fire
+        const dx = -55 - g.mesh.position.x;
+        const dz = 10 - g.mesh.position.z;
+        g.mesh.rotation.y = Math.atan2(dx, dz);
+      }
+    } else {
+      g.t += delta * g.speed;
+      const idx = Math.floor(g.t) % g.path.length;
+      const nextIdx = (idx + 1) % g.path.length;
+      const frac = g.t - Math.floor(g.t);
+      const p = g.path[idx];
+      const n = g.path[nextIdx];
+      g.mesh.position.x = p.x + (n.x - p.x) * frac;
+      g.mesh.position.z = p.z + (n.z - p.z) * frac;
+      const dx = n.x - p.x;
+      const dz = n.z - p.z;
+      if (Math.abs(dx) + Math.abs(dz) > 0.01) {
+        g.mesh.rotation.y = Math.atan2(dx, dz);
+      }
+    }
+  });
+
+  if (!explosion.powerOut) {
+    // Search light rotation
+    searchLights.forEach(sl => {
+      const angle = elapsed * 0.3 + sl.phase;
+      sl.spotLight.target.position.x = sl.group.position.x + Math.cos(angle) * 40;
+      sl.spotLight.target.position.z = sl.group.position.z + Math.sin(angle) * 40;
+    });
+
+    // Gate lights blink
+    gateLightL.intensity = 0.5 * (Math.sin(elapsed * 3) > 0 ? 1 : 0.2);
+    gateLightR.intensity = 0.5 * (Math.sin(elapsed * 3 + Math.PI) > 0 ? 1 : 0.2);
+
+    // Antenna lights blink
+    [antenna1, antenna2, antenna3].forEach(a => {
+      a.children.forEach(c => {
+        if (c.userData.blinkPhase !== undefined) {
+          c.material.opacity = Math.sin(elapsed * 4 + c.userData.blinkPhase) > 0.7 ? 1 : 0.1;
+          c.material.transparent = true;
+        }
+      });
+    });
+
+    // Helipad lights
+    helipadGroup.children.forEach(c => {
+      if (c.userData.blinkPhase !== undefined) {
+        c.material.opacity = Math.sin(elapsed * 2 + c.userData.blinkPhase) > 0.3 ? 1 : 0.15;
+        c.material.transparent = true;
+      }
+    });
+  }
+
+  // Post-processing uniforms
+  filmGrainPass.uniforms.uTime.value = elapsed;
+
+  // Noise overlay (update infrequently)
+  noiseTimer += delta;
+  if (noiseTimer > 0.1) {
+    noiseTimer = 0;
+    updateNoiseOverlay();
+  }
+
+  // HUD
+  updateHUD();
+
+  // Helicopter sequence
+  updateHeloSequence(delta);
+
+  // Comms panels tied to helo phases
+  if (heloSequence.active && heloSequence.phase !== lastCommsPhase) {
+    lastCommsPhase = heloSequence.phase;
+    const script = commsScript[heloSequence.phase];
+    if (script) {
+      showComms(script.who, script.text);
+    }
+  }
+  if (!heloSequence.active && lastCommsPhase !== 'idle') {
+    lastCommsPhase = 'idle';
+    setTimeout(hideAllComms, 2000);
+  }
+  updateComms(delta);
+
+  // Explosion + fire
+  updateExplosion(delta);
+
+  // Highlight labels
+  updateLabelPositions();
+
+  // Render
+  composer.render();
+}
+
+// ============================================================
+// RESIZE HANDLER
+// ============================================================
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  bloomPass.setSize(w, h);
+});
+
+// ============================================================
+// 'H' KEY -- HIGHLIGHT AND LABEL BUILDINGS
+// ============================================================
+let highlightsVisible = false;
+const highlightGroup = new THREE.Group();
+highlightGroup.visible = false;
+scene.add(highlightGroup);
+
+// Outline box helper (3D, stays in scene)
+function createOutline(w, d, h, x, z) {
+  const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d));
+  const mat = new THREE.LineBasicMaterial({ color: 0x00e850, linewidth: 2, transparent: true, opacity: 0.8, depthTest: false });
+  const edges = new THREE.LineSegments(geo, mat);
+  edges.position.set(x, h / 2, z);
+  edges.renderOrder = 999;
+  return edges;
+}
+
+function createRingOutline(radius, x, z) {
+  const ringGeo = new THREE.RingGeometry(radius - 1, radius + 1, 48);
+  ringGeo.rotateX(-Math.PI / 2);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x00e850, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthTest: false });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.set(x, 1.5, z);
+  ring.renderOrder = 999;
+  return ring;
+}
+
+// Outlines
+highlightGroup.add(createOutline(40, 28, 8, -25, -20));   // Main building
+highlightGroup.add(createOutline(15, 20, 6, -5, -18));    // Annex (part of main)
+highlightGroup.add(createOutline(30, 22, 10, 35, -25));   // Research lab
+highlightGroup.add(createOutline(8, 6, 4, -2, -75));      // Guard house
+highlightGroup.add(createOutline(12, 10, 5, -55, 10));    // Generator
+highlightGroup.add(createOutline(10, 8, 3, 50, 15));      // Storage bunker 1
+highlightGroup.add(createOutline(10, 8, 3, 64, 15));      // Storage bunker 2
+highlightGroup.add(createOutline(10, 8, 3, 78, 15));      // Storage bunker 3
+highlightGroup.add(createRingOutline(27, 0, 45));          // Hatch
+highlightGroup.add(createRingOutline(12, -55, -50));       // Helipad
+
+// HTML label overlay (screen-space, always sharp)
+const labelOverlay = document.createElement('div');
+labelOverlay.id = 'label-overlay';
+labelOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:12;display:none;';
+document.body.appendChild(labelOverlay);
+
+const labelDefs = [
+  { text: 'MAIN BUILDING', wx: -15, wy: 12, wz: -20 },
+  { text: 'RESEARCH LAB', wx: 35, wy: 14, wz: -25 },
+  { text: 'GUARD HOUSE', wx: -2, wy: 8, wz: -75 },
+  { text: 'GENERATOR', wx: -55, wy: 9, wz: 10 },
+  { text: 'STORAGE BUNKERS', wx: 64, wy: 7, wz: 15 },
+  { text: 'HATCH ALPHA', wx: 0, wy: 8, wz: 45 },
+  { text: 'HELIPAD', wx: -55, wy: 6, wz: -50 },
+  { text: 'AIRSTRIP', wx: -140, wy: 6, wz: 0 },
+];
+
+const labelEls = labelDefs.map(d => {
+  const el = document.createElement('div');
+  el.textContent = d.text;
+  el.style.cssText = 'position:absolute;font-family:Courier New,monospace;font-size:13px;font-weight:bold;color:#00e850;text-shadow:0 0 8px rgba(0,232,80,0.8),0 0 20px rgba(0,200,60,0.4);background:rgba(0,0,0,0.75);padding:4px 10px;border:1px solid rgba(0,232,80,0.6);white-space:nowrap;transform:translate(-50%,-100%);';
+  labelOverlay.appendChild(el);
+  return { el, world: new THREE.Vector3(d.wx, d.wy, d.wz) };
+});
+
+function updateLabelPositions() {
+  if (!highlightsVisible) return;
+  labelEls.forEach(l => {
+    const projected = l.world.clone().project(camera);
+    const x = (projected.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-projected.y * 0.5 + 0.5) * window.innerHeight;
+    l.el.style.left = x + 'px';
+    l.el.style.top = y + 'px';
+  });
+}
+
+// ============================================================
+// HELICOPTER INSERTION SEQUENCE (Q key)
+// ============================================================
+const heloSequence = {
+  active: false,
+  phase: 'idle', // idle, inbound, landing, deploying, moving, working, returning, boarding, exfil
+  timer: 0,
+  helo: null,
+  operators: [],
+  rotorAngle: 0,
+};
+
+// Build helicopter mesh
+{
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a2a1a, roughness: 0.6, metalness: 0.5 });
+
+  // Fuselage
+  const fuse = new THREE.Mesh(new THREE.BoxGeometry(3, 2.5, 8), bodyMat);
+  fuse.position.y = 1.25;
+  fuse.castShadow = true;
+  g.add(fuse);
+
+  // Nose taper
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2, 3), bodyMat);
+  nose.position.set(0, 1, -5);
+  nose.castShadow = true;
+  g.add(nose);
+
+  // Tail boom
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 7), bodyMat);
+  tail.position.set(0, 2, 7);
+  tail.castShadow = true;
+  g.add(tail);
+
+  // Tail fin
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 1.5), bodyMat);
+  fin.position.set(0, 3, 10);
+  fin.castShadow = true;
+  g.add(fin);
+
+  // Tail rotor
+  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(4, 0.15, 0.5), new THREE.MeshStandardMaterial({
+    color: 0x88aa88, roughness: 0.3, metalness: 0.6, transparent: true, opacity: 0.7
+  }));
+  tailRotor.position.set(0, 4.2, 10);
+  tailRotor.userData.isTailRotor = true;
+  g.add(tailRotor);
+
+  // Main rotor mast
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.5, 6), bodyMat);
+  mast.position.set(0, 3.2, 0);
+  g.add(mast);
+
+  // Main rotor blades (two crossing)
+  const bladeMat = new THREE.MeshStandardMaterial({
+    color: 0x99bb99, roughness: 0.3, metalness: 0.6, transparent: true, opacity: 0.7
+  });
+  const blade1 = new THREE.Mesh(new THREE.BoxGeometry(20, 0.15, 1.2), bladeMat);
+  blade1.position.set(0, 4, 0);
+  blade1.userData.isMainRotor = true;
+  g.add(blade1);
+  const blade2 = new THREE.Mesh(new THREE.BoxGeometry(20, 0.15, 1.2), bladeMat);
+  blade2.position.set(0, 4, 0);
+  blade2.rotation.y = Math.PI / 2;
+  blade2.userData.isMainRotor = true;
+  g.add(blade2);
+
+  // Rotor disc glow (visible spinning disc effect)
+  const discGeo = new THREE.CircleGeometry(10, 32);
+  const discMat = new THREE.MeshBasicMaterial({
+    color: 0x88aa88, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false
+  });
+  const disc = new THREE.Mesh(discGeo, discMat);
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.set(0, 4.05, 0);
+  g.add(disc);
+
+  // Skids
+  const skidMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5, metalness: 0.6 });
+  for (let side = -1; side <= 1; side += 2) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 7), skidMat);
+    skid.position.set(side * 1.8, -0.15, -0.5);
+    g.add(skid);
+    // Struts
+    for (let sz = -1; sz <= 1; sz += 2) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2, 0.15), skidMat);
+      strut.position.set(side * 1.5, 0.4, sz * 2);
+      g.add(strut);
+    }
+  }
+
+  // Navigation lights
+  const navGreen = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x00ff44, emissive: 0x00cc33, emissiveIntensity: 1.5 }));
+  navGreen.position.set(1.6, 1, -3);
+  g.add(navGreen);
+  const navRed = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xcc1100, emissiveIntensity: 1.5 }));
+  navRed.position.set(-1.6, 1, -3);
+  g.add(navRed);
+
+  // Headlight
+  const headlight = new THREE.PointLight(0xffffcc, 2, 30);
+  headlight.position.set(0, 0.5, -6);
+  g.add(headlight);
+
+  g.visible = false;
+  scene.add(g);
+  heloSequence.helo = g;
+}
+
+// Operator dots
+for (let i = 0; i < 4; i++) {
+  const geo = new THREE.SphereGeometry(0.8, 8, 8);
+  const mat = new THREE.MeshBasicMaterial({ color: i === 0 ? 0x00ffaa : 0x00ff44 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = 1;
+  mesh.visible = false;
+  scene.add(mesh);
+  heloSequence.operators.push({ mesh, target: null, working: false });
+}
+
+// Positions
+const lz = { x: 55, z: 65 };          // landing zone, SE of hatch
+const hatchPos = { x: 0, z: 45 };     // hatch center
+const hatchRadius = 28;               // edge of hatch
+const heloStart = { x: 250, y: 40, z: -120 }; // inbound from ENE
+const heloApproach = { x: 100, y: 20, z: -20 }; // approach waypoint
+const heloHover = { x: lz.x, y: 12, z: lz.z };
+const heloLanded = { x: lz.x, y: 0.5, z: lz.z };
+
+// Operator positions at hatch EDGE (SE side) -- initial breach attempt
+const opHatchPositions = [
+  { x: hatchPos.x + hatchRadius * 0.7, z: hatchPos.z + hatchRadius * 0.7 },  // worker (SE edge)
+  { x: hatchPos.x + hatchRadius * 0.7 + 6, z: hatchPos.z + hatchRadius * 0.7 - 5 }, // cover E
+  { x: hatchPos.x + hatchRadius * 0.7 - 5, z: hatchPos.z + hatchRadius * 0.7 + 6 }, // cover S
+  { x: hatchPos.x + hatchRadius * 0.7 + 6, z: hatchPos.z + hatchRadius * 0.7 + 6 }, // cover SE
+];
+
+// Comms junction position -- NE side of hatch, around the rim
+const commsJunction = { x: hatchPos.x + hatchRadius + 4, z: hatchPos.z - 10 };
+const opCommsPositions = [
+  { x: commsJunction.x, z: commsJunction.z },           // splicer (at the junction)
+  { x: commsJunction.x + 6, z: commsJunction.z - 4 },   // cover
+  { x: commsJunction.x + 4, z: commsJunction.z + 6 },   // cover
+  { x: commsJunction.x - 4, z: commsJunction.z - 5 },   // cover
+];
+const opLzPositions = [
+  { x: lz.x + 4, z: lz.z - 4 },
+  { x: lz.x - 4, z: lz.z - 4 },
+  { x: lz.x + 4, z: lz.z + 4 },
+  { x: lz.x - 4, z: lz.z + 4 },
+];
+
+function lerpVal(a, b, t) { return a + (b - a) * Math.min(1, Math.max(0, t)); }
+
+// Comms panels
+const pilotPanel = document.getElementById('comms-pilot');
+const groundPanel = document.getElementById('comms-ground');
+const pilotMsg = document.getElementById('pilot-message');
+const groundMsg = document.getElementById('ground-message');
+const pilotBarFill = document.getElementById('pilot-bar-fill');
+const groundBarFill = document.getElementById('ground-bar-fill');
+
+// Per-panel typing state
+const commsState = {
+  pilot:  { typing: false, target: '', current: '', idx: 0, timer: 0 },
+  ground: { typing: false, target: '', current: '', idx: 0, timer: 0 },
+};
+
+// Phase -> which panel speaks, what they say
+const commsScript = {
+  inbound:    { who: 'pilot',  text: 'POLARIS Actual, Wraith 6-1 inbound. Two minutes.' },
+  landing:    { who: 'pilot',  text: 'LZ is cold. Descending.' },
+  deploying:  { who: 'ground', text: 'Boots on the ground. Four pax. Moving to objective.' },
+  moving:     { who: 'ground', text: 'Approaching hatch. Overwatch set.' },
+  working:    { who: 'ground', text: 'Negative on breach. Hatch is hardened. Going to Plan B.' },
+  reposition: { who: 'ground', text: 'Found a comms junction. Setting the splice.' },
+  tap:        { who: 'ground', text: 'Splice is live. Signal confirmed. POLARIS, you have eyes.' },
+  returning:  { who: 'ground', text: 'Collapsing to LZ.' },
+  boarding:   { who: 'pilot',  text: 'All pax aboard. Spooling up.' },
+  liftoff:    { who: 'pilot',  text: 'Lifting. Good hunting, POLARIS.' },
+  exfil:      { who: 'pilot',  text: 'Wraith 6-1 departing. Out.' },
+};
+
+function showComms(who, text) {
+  const panel = who === 'pilot' ? pilotPanel : groundPanel;
+  const state = commsState[who];
+  panel.style.display = 'block';
+  state.target = text;
+  state.current = '';
+  state.idx = 0;
+  state.timer = 0;
+  state.typing = true;
+  (who === 'pilot' ? pilotMsg : groundMsg).textContent = '';
+  (who === 'pilot' ? pilotBarFill : groundBarFill).style.width = '0%';
+}
+
+function hideAllComms() {
+  pilotPanel.style.display = 'none';
+  groundPanel.style.display = 'none';
+  commsState.pilot.typing = false;
+  commsState.ground.typing = false;
+}
+
+function updateComms(delta) {
+  const charsPerSec = 30;
+  ['pilot', 'ground'].forEach(who => {
+    const s = commsState[who];
+    if (!s.typing) return;
+    s.timer += delta;
+    while (s.timer > 1 / charsPerSec && s.idx < s.target.length) {
+      s.timer -= 1 / charsPerSec;
+      s.idx++;
+      s.current = s.target.substring(0, s.idx);
+      const msgEl = who === 'pilot' ? pilotMsg : groundMsg;
+      msgEl.textContent = s.current + (s.idx < s.target.length ? '_' : '');
+    }
+    if (s.idx >= s.target.length) {
+      (who === 'pilot' ? pilotMsg : groundMsg).textContent = s.current;
+      s.typing = false;
+    }
+    (who === 'pilot' ? pilotBarFill : groundBarFill).style.width =
+      (s.idx / s.target.length * 100) + '%';
+  });
+}
+
+let lastCommsPhase = 'idle';
+
+function updateHeloSequence(delta) {
+  if (!heloSequence.active) return;
+  const hs = heloSequence;
+  hs.timer += delta;
+
+  // Spin rotors
+  hs.rotorAngle += delta * 25;
+  hs.helo.traverse(c => {
+    if (c.userData.isMainRotor) c.rotation.y = hs.rotorAngle;
+    if (c.userData.isTailRotor) c.rotation.z = hs.rotorAngle * 1.5;
+  });
+
+  const h = hs.helo;
+
+  if (hs.phase === 'inbound') {
+    // Two-leg approach: start -> approach waypoint -> hover over LZ
+    const totalTime = 7;
+    const t = hs.timer / totalTime;
+    const leg1End = 0.5; // first half: start to approach
+    let px, py, pz, lookX, lookZ;
+    if (t < leg1End) {
+      const lt = t / leg1End;
+      px = lerpVal(heloStart.x, heloApproach.x, lt);
+      py = lerpVal(heloStart.y, heloApproach.y, lt);
+      pz = lerpVal(heloStart.z, heloApproach.z, lt);
+      lookX = heloApproach.x; lookZ = heloApproach.z;
+    } else {
+      const lt = (t - leg1End) / (1 - leg1End);
+      px = lerpVal(heloApproach.x, heloHover.x, lt);
+      py = lerpVal(heloApproach.y, heloHover.y, lt);
+      pz = lerpVal(heloApproach.z, heloHover.z, lt);
+      lookX = heloHover.x; lookZ = heloHover.z;
+    }
+    h.position.set(px, py, pz);
+    // Face direction of travel (nose forward = -Z in local space)
+    const ahead = Math.min(t + 0.02, 1);
+    let ax, az;
+    if (ahead < leg1End) {
+      const lt = ahead / leg1End;
+      ax = lerpVal(heloStart.x, heloApproach.x, lt);
+      az = lerpVal(heloStart.z, heloApproach.z, lt);
+    } else {
+      const lt = (ahead - leg1End) / (1 - leg1End);
+      ax = lerpVal(heloApproach.x, heloHover.x, lt);
+      az = lerpVal(heloApproach.z, heloHover.z, lt);
+    }
+    h.lookAt(ax, py, az);
+    h.rotateY(Math.PI);
+    if (t >= 1) { hs.phase = 'landing'; hs.timer = 0; }
+  }
+  else if (hs.phase === 'landing') {
+    // Descend to ground (3 seconds)
+    const t = hs.timer / 3;
+    h.position.set(heloLanded.x, lerpVal(heloHover.y, heloLanded.y, t), heloLanded.z);
+    if (t >= 1) {
+      hs.phase = 'deploying';
+      hs.timer = 0;
+      // Show operators at LZ positions
+      hs.operators.forEach((op, i) => {
+        op.mesh.visible = true;
+        op.mesh.position.set(heloLanded.x, 1, heloLanded.z);
+      });
+    }
+  }
+  else if (hs.phase === 'deploying') {
+    // Operators move from helo to spread positions near LZ (2 seconds)
+    const t = hs.timer / 2;
+    hs.operators.forEach((op, i) => {
+      op.mesh.position.set(
+        lerpVal(heloLanded.x, opLzPositions[i].x, t),
+        1,
+        lerpVal(heloLanded.z, opLzPositions[i].z, t)
+      );
+    });
+    if (t >= 1) {
+      hs.phase = 'moving'; hs.timer = 0;
+      // Precompute paths around hatch
+      hs.movePaths = hs.operators.map((op, i) =>
+        pathAroundHatch(opLzPositions[i].x, opLzPositions[i].z, opHatchPositions[i].x, opHatchPositions[i].z)
+      );
+    }
+  }
+  else if (hs.phase === 'moving') {
+    // Operators follow paths to hatch positions (4 seconds)
+    const duration = 4;
+    const t = hs.timer / duration;
+    hs.operators.forEach((op, i) => {
+      const path = hs.movePaths[i];
+      const totalSegs = path.length - 1;
+      const segDur = duration / totalSegs;
+      const segIdx = Math.min(Math.floor(hs.timer / segDur), totalSegs - 1);
+      const segT = Math.min(1, (hs.timer - segIdx * segDur) / segDur);
+      const wp1 = path[segIdx], wp2 = path[Math.min(segIdx + 1, totalSegs)];
+      op.mesh.position.set(lerpVal(wp1.x, wp2.x, segT), 1, lerpVal(wp1.z, wp2.z, segT));
+    });
+    if (t >= 1) { hs.phase = 'working'; hs.timer = 0; }
+  }
+  else if (hs.phase === 'working') {
+    // Worker tries to breach -- pulses red/fail (4 seconds)
+    const worker = hs.operators[0];
+    worker.mesh.material.color.setHex(
+      Math.sin(hs.timer * 8) > 0 ? 0xff4444 : 0x551111
+    );
+    if (hs.timer >= 4) {
+      worker.mesh.material.color.setHex(0x00ffaa);
+      hs.phase = 'reposition';
+      hs.timer = 0;
+      hs.repositionPaths = hs.operators.map((op, i) =>
+        pathAroundHatch(opHatchPositions[i].x, opHatchPositions[i].z, opCommsPositions[i].x, opCommsPositions[i].z)
+      );
+    }
+  }
+  else if (hs.phase === 'reposition') {
+    // Move around the hatch to comms junction (4 seconds)
+    const duration = 4;
+    const t = hs.timer / duration;
+    hs.operators.forEach((op, i) => {
+      const path = hs.repositionPaths[i];
+      const totalSegs = path.length - 1;
+      const segDur = duration / totalSegs;
+      const segIdx = Math.min(Math.floor(hs.timer / segDur), totalSegs - 1);
+      const segT = Math.min(1, (hs.timer - segIdx * segDur) / segDur);
+      const wp1 = path[segIdx], wp2 = path[Math.min(segIdx + 1, totalSegs)];
+      op.mesh.position.set(lerpVal(wp1.x, wp2.x, segT), 1, lerpVal(wp1.z, wp2.z, segT));
+    });
+    if (t >= 1) { hs.phase = 'tap'; hs.timer = 0; }
+  }
+  else if (hs.phase === 'tap') {
+    // Splicer works on junction -- pulses cyan (6 seconds)
+    const splicer = hs.operators[0];
+    splicer.mesh.material.color.setHex(
+      Math.sin(hs.timer * 5) > 0 ? 0x00ffcc : 0x004433
+    );
+    if (hs.timer >= 6) {
+      splicer.mesh.material.color.setHex(0x00ffaa);
+      hs.phase = 'returning';
+      hs.timer = 0;
+      hs.returnPaths = hs.operators.map((op, i) =>
+        pathAroundHatch(opCommsPositions[i].x, opCommsPositions[i].z, opLzPositions[i].x, opLzPositions[i].z)
+      );
+    }
+  }
+  else if (hs.phase === 'returning') {
+    // Operators follow paths from comms junction back to LZ (4 seconds)
+    const duration = 4;
+    const t = hs.timer / duration;
+    hs.operators.forEach((op, i) => {
+      const path = hs.returnPaths[i];
+      const totalSegs = path.length - 1;
+      const segDur = duration / totalSegs;
+      const segIdx = Math.min(Math.floor(hs.timer / segDur), totalSegs - 1);
+      const segT = Math.min(1, (hs.timer - segIdx * segDur) / segDur);
+      const wp1 = path[segIdx], wp2 = path[Math.min(segIdx + 1, totalSegs)];
+      op.mesh.position.set(lerpVal(wp1.x, wp2.x, segT), 1, lerpVal(wp1.z, wp2.z, segT));
+    });
+    if (t >= 1) { hs.phase = 'boarding'; hs.timer = 0; }
+  }
+  else if (hs.phase === 'boarding') {
+    // Operators converge on helo (2 seconds)
+    const t = hs.timer / 2;
+    hs.operators.forEach((op, i) => {
+      op.mesh.position.set(
+        lerpVal(opLzPositions[i].x, heloLanded.x, t),
+        1,
+        lerpVal(opLzPositions[i].z, heloLanded.z, t)
+      );
+    });
+    if (t >= 1) {
+      hs.operators.forEach(op => op.mesh.visible = false);
+      hs.phase = 'liftoff';
+      hs.timer = 0;
+    }
+  }
+  else if (hs.phase === 'liftoff') {
+    // Rise to hover (3 seconds)
+    const t = hs.timer / 3;
+    h.position.y = lerpVal(heloLanded.y, heloHover.y, t);
+    if (t >= 1) { hs.phase = 'exfil'; hs.timer = 0; }
+  }
+  else if (hs.phase === 'exfil') {
+    // Fly away ENE (5 seconds)
+    const t = hs.timer / 5;
+    const exitX = 300, exitY = 50, exitZ = -150;
+    h.position.set(
+      lerpVal(heloHover.x, exitX, t),
+      lerpVal(heloHover.y, exitY, t),
+      lerpVal(heloHover.z, exitZ, t)
+    );
+    const at = Math.min(t + 0.02, 1);
+    h.lookAt(
+      lerpVal(heloHover.x, exitX, at),
+      lerpVal(heloHover.y, exitY, at),
+      lerpVal(heloHover.z, exitZ, at)
+    );
+    h.rotateY(Math.PI);
+    if (t >= 1) {
+      h.visible = false;
+      hs.active = false;
+      hs.phase = 'idle';
+    }
+  }
+}
+
+// ============================================================
+// GENERATOR EXPLOSION + FIRE (B key)
+// ============================================================
+const explosion = {
+  active: false,
+  phase: 'idle', // idle, blast, burning
+  timer: 0,
+  particles: [],
+  fireParticles: [],
+  fireLight: null,
+  smokeParticles: [],
+};
+
+// Fire light (persistent after explosion)
+explosion.fireLight = new THREE.PointLight(0xff4400, 0, 40, 2);
+explosion.fireLight.position.set(-55, 8, 10);
+scene.add(explosion.fireLight);
+
+// Blast flash light
+const blastLight = new THREE.PointLight(0xffaa44, 0, 80, 1.5);
+blastLight.position.set(-55, 15, 10);
+scene.add(blastLight);
+
+function killCompoundPower() {
+  // Lights to keep: fire, blast, hatch thermal, moonlight, ambient, overhead
+  const keepLights = new Set([
+    explosion.fireLight, blastLight, hatchLight, hatchLight2,
+    moonLight, ambientLight, greenOverhead
+  ]);
+
+  scene.traverse(c => {
+    if ((c.isPointLight || c.isSpotLight) && !keepLights.has(c)) {
+      c.userData.originalIntensity = c.intensity;
+      c.intensity = 0;
+      c.userData.poweredOff = true;
+    }
+    // Kill emissive window glow and tagged powered meshes
+    if (c.isMesh && c.material && c.material.emissiveIntensity > 0
+        && c.material.emissive && c !== hatchDoor) {
+      // Don't kill hatch glow materials (unless explicitly tagged as powered)
+      if (!c.userData.powered) {
+        const e = c.material.emissive;
+        if (e.r > 0.5 && e.g < 0.2) return; // orange/red = hatch, keep
+      }
+      c.userData.originalEmissive = c.material.emissiveIntensity;
+      c.userData.originalOpacity = c.material.opacity;
+      c.material.emissiveIntensity = 0;
+      c.material.opacity = c.material.transparent ? 0.15 : c.material.opacity;
+      c.userData.poweredOff = true;
+    }
+  });
+
+  explosion.powerOut = true;
+}
+
+function triggerExplosion() {
+  if (explosion.active) return;
+  explosion.active = true;
+  explosion.phase = 'blast';
+  explosion.timer = 0;
+
+  // Kill all compound power after a brief delay (lights flicker then die)
+  setTimeout(killCompoundPower, 300);
+
+  // Guards rush to the fire (staggered, 1-2 sec delay per guard)
+  const firePos = { x: -55, z: 10 };
+  guards.forEach((g, i) => {
+    setTimeout(() => {
+      g.rushing = true;
+      g.rushTimer = 0;
+      g.rushFrom = { x: g.mesh.position.x, z: g.mesh.position.z };
+      const spreadAngle = (i / guards.length) * Math.PI * 2;
+      g.rushTo = { x: firePos.x + Math.cos(spreadAngle) * 14, z: firePos.z + Math.sin(spreadAngle) * 14 };
+      g.rushPath = pathAroundHatch(g.rushFrom.x, g.rushFrom.z, g.rushTo.x, g.rushTo.z);
+      g.rushDuration = 5 + g.rushPath.length * 0.8 + Math.random() * 2;
+      g.rushPhase = i * 1.7;
+    }, 500 + i * 800); // staggered response
+  });
+
+  // Destroy generator building visually
+  generatorBuilding.traverse(c => {
+    if (c.isMesh) {
+      c.material = new THREE.MeshStandardMaterial({
+        color: 0x1a1008, roughness: 0.95, metalness: 0.2
+      });
+      // Scatter the pieces
+      c.position.x += (Math.random() - 0.5) * 4;
+      c.position.y += Math.random() * 3;
+      c.position.z += (Math.random() - 0.5) * 4;
+      c.rotation.x = (Math.random() - 0.5) * 0.5;
+      c.rotation.z = (Math.random() - 0.5) * 0.5;
+      c.scale.y *= 0.4 + Math.random() * 0.3;
+    }
+  });
+
+  // Spawn blast particles
+  for (let i = 0; i < 60; i++) {
+    const geo = new THREE.SphereGeometry(0.5 + Math.random() * 1.5, 6, 6);
+    const mat = new THREE.MeshBasicMaterial({
+      color: Math.random() > 0.5 ? 0xff6600 : 0xffaa22,
+      transparent: true, opacity: 1
+    });
+    const p = new THREE.Mesh(geo, mat);
+    p.position.set(-55, 3 + Math.random() * 4, 10);
+    scene.add(p);
+    explosion.particles.push({
+      mesh: p,
+      vx: (Math.random() - 0.5) * 40,
+      vy: 10 + Math.random() * 30,
+      vz: (Math.random() - 0.5) * 40,
+      life: 1,
+      decay: 0.4 + Math.random() * 0.6
+    });
+  }
+}
+
+function updateExplosion(delta) {
+  if (!explosion.active) return;
+  explosion.timer += delta;
+
+  if (explosion.phase === 'blast') {
+    // Flash
+    const bt = explosion.timer;
+    blastLight.intensity = Math.max(0, (1 - bt * 2)) * 60;
+
+    // Blast particles fly outward and fade
+    for (let i = explosion.particles.length - 1; i >= 0; i--) {
+      const p = explosion.particles[i];
+      p.mesh.position.x += p.vx * delta;
+      p.mesh.position.y += p.vy * delta;
+      p.mesh.position.z += p.vz * delta;
+      p.vy -= 30 * delta; // gravity
+      p.life -= p.decay * delta;
+      p.mesh.material.opacity = Math.max(0, p.life);
+      if (p.life <= 0) {
+        scene.remove(p.mesh);
+        explosion.particles.splice(i, 1);
+      }
+    }
+
+    if (bt > 2) {
+      explosion.phase = 'burning';
+      explosion.timer = 0;
+      blastLight.intensity = 0;
+    }
+  }
+
+  if (explosion.phase === 'burning') {
+    // After 4 minutes, fire dies down and guards return
+    if (explosion.timer > 240 && !explosion.extinguished) {
+      explosion.extinguished = true;
+      explosion.phase = 'dying';
+      explosion.dyingTimer = 0;
+    }
+
+    // Persistent fire light flicker
+    const flicker = 0.5 + 0.5 * Math.sin(explosion.timer * 15) * Math.sin(explosion.timer * 7.3);
+    explosion.fireLight.intensity = 4 + flicker * 4;
+    explosion.fireLight.color.setHex(Math.random() > 0.3 ? 0xff4400 : 0xff6600);
+
+    // Spawn fire particles
+    if (Math.random() < 0.4) {
+      const geo = new THREE.SphereGeometry(0.3 + Math.random() * 0.8, 6, 6);
+      const isFlame = Math.random() > 0.3;
+      const mat = new THREE.MeshBasicMaterial({
+        color: isFlame ? (Math.random() > 0.5 ? 0xff4400 : 0xff8800) : 0x444444,
+        transparent: true, opacity: isFlame ? 0.8 : 0.4
+      });
+      const p = new THREE.Mesh(geo, mat);
+      p.position.set(
+        -55 + (Math.random() - 0.5) * 8,
+        2 + Math.random() * 3,
+        10 + (Math.random() - 0.5) * 6
+      );
+      scene.add(p);
+      explosion.fireParticles.push({
+        mesh: p,
+        vy: 3 + Math.random() * 5,
+        vx: (Math.random() - 0.5) * 2,
+        life: 1,
+        decay: isFlame ? (1.2 + Math.random()) : (0.4 + Math.random() * 0.3),
+        isSmoke: !isFlame
+      });
+    }
+
+    // Update fire/smoke particles
+    for (let i = explosion.fireParticles.length - 1; i >= 0; i--) {
+      const p = explosion.fireParticles[i];
+      p.mesh.position.y += p.vy * delta;
+      p.mesh.position.x += p.vx * delta;
+      if (p.isSmoke) {
+        p.mesh.position.x += Math.sin(explosion.timer * 2 + i) * 0.5 * delta;
+        p.vy *= 0.99;
+      }
+      p.life -= p.decay * delta;
+      p.mesh.material.opacity = Math.max(0, p.life * (p.isSmoke ? 0.3 : 0.8));
+      p.mesh.scale.setScalar(1 + (1 - p.life) * (p.isSmoke ? 3 : 1));
+      if (p.life <= 0) {
+        scene.remove(p.mesh);
+        explosion.fireParticles.splice(i, 1);
+      }
+    }
+  }
+
+  if (explosion.phase === 'dying') {
+    explosion.dyingTimer += delta;
+    // Fade fire over 10 seconds
+    const fade = Math.max(0, 1 - explosion.dyingTimer / 10);
+    explosion.fireLight.intensity = fade * 6;
+
+    // Stop spawning new fire, let existing particles die naturally
+    // Clean up remaining fire particles
+    for (let i = explosion.fireParticles.length - 1; i >= 0; i--) {
+      const p = explosion.fireParticles[i];
+      p.mesh.position.y += p.vy * delta;
+      p.mesh.position.x += p.vx * delta;
+      p.life -= p.decay * delta * 2; // die faster
+      p.mesh.material.opacity = Math.max(0, p.life * 0.5);
+      if (p.life <= 0) {
+        scene.remove(p.mesh);
+        explosion.fireParticles.splice(i, 1);
+      }
+    }
+
+    // After fire is out, send guards back to patrol
+    if (explosion.dyingTimer > 10 && !explosion.guardsReturned) {
+      explosion.guardsReturned = true;
+      explosion.fireLight.intensity = 0;
+
+      // Restore power
+      explosion.powerOut = false;
+      scene.traverse(c => {
+        if (c.userData && c.userData.poweredOff) {
+          if (c.isPointLight || c.isSpotLight) c.intensity = c.userData.originalIntensity || 0.5;
+          if (c.isMesh && c.material) {
+            c.material.emissiveIntensity = c.userData.originalEmissive || 0.8;
+            if (c.material.transparent) c.material.opacity = c.userData.originalOpacity || 0.9;
+          }
+        }
+      });
+
+      // Send guards back to their patrols
+      guards.forEach((g, i) => {
+        const patrolPoint = g.path[0];
+        g.rushTo = patrolPoint;
+        g.rushFrom = { x: g.mesh.position.x, z: g.mesh.position.z };
+        g.rushPath = pathAroundHatch(g.rushFrom.x, g.rushFrom.z, patrolPoint.x, patrolPoint.z);
+        g.rushTimer = 0;
+        g.rushDuration = 5 + g.rushPath.length * 0.8;
+        // After they arrive, resume normal patrol
+        setTimeout(() => {
+          g.rushing = false;
+          g.t = i * (g.path.length / guards.length);
+        }, (g.rushDuration + 1) * 1000);
+      });
+    }
+  }
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'h' || e.key === 'H') {
+    highlightsVisible = !highlightsVisible;
+    highlightGroup.visible = highlightsVisible;
+    labelOverlay.style.display = highlightsVisible ? 'block' : 'none';
+  }
+  if ((e.key === 'q' || e.key === 'Q') && !heloSequence.active) {
+    heloSequence.active = true;
+    heloSequence.phase = 'inbound';
+    heloSequence.timer = 0;
+    heloSequence.helo.visible = true;
+    heloSequence.helo.position.set(heloStart.x, heloStart.y, heloStart.z);
+  }
+  if (e.key === 'b' || e.key === 'B') {
+    triggerExplosion();
+  }
+});
+
+// ============================================================
+// START
+// ============================================================
+updateNoiseOverlay();
+animate();
+
+// Signal acquisition sequence
+setTimeout(() => {
+  statusEl.textContent = 'SIGNAL LOCKED';
+  statusEl.classList.remove('amber');
+  statusEl.classList.add('dim');
+}, 2000);
+
+</script>
+</body>
+</html>

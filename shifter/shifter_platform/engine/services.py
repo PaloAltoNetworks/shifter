@@ -453,10 +453,9 @@ def pause_range(request_id: UUID) -> bool:
         True if pause initiated or already paused.
         False if range not found, not in pausable state, or ECS call failed.
     """
-    from botocore.exceptions import ClientError
-
     from engine.ecs import start_range_operation
     from engine.models import Range
+    from shared.cloud.exceptions import CloudTaskError
 
     logger.debug("pause_range: request_id=%s", request_id)
 
@@ -487,8 +486,8 @@ def pause_range(request_id: UUID) -> bool:
     # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
     try:
         task_arn = start_range_operation(request_id, "pause")
-    except ClientError:
-        logger.exception("pause_range: ECS ClientError request_id=%s", request_id)
+    except CloudTaskError:
+        logger.exception("pause_range: ECS CloudTaskError request_id=%s", request_id)
         range_obj.status = ResourceStatus.READY.value
         range_obj.save(update_fields=["status", "updated_at"])
         return False
@@ -517,10 +516,9 @@ def resume_range(request_id: UUID) -> bool:
         True if resume initiated or already ready.
         False if range not found, not in resumable state, or ECS call failed.
     """
-    from botocore.exceptions import ClientError
-
     from engine.ecs import start_range_operation
     from engine.models import Range
+    from shared.cloud.exceptions import CloudTaskError
 
     logger.debug("resume_range: request_id=%s", request_id)
 
@@ -551,8 +549,8 @@ def resume_range(request_id: UUID) -> bool:
     # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
     try:
         task_arn = start_range_operation(request_id, "resume")
-    except ClientError:
-        logger.exception("resume_range: ECS ClientError request_id=%s", request_id)
+    except CloudTaskError:
+        logger.exception("resume_range: ECS CloudTaskError request_id=%s", request_id)
         range_obj.status = ResourceStatus.PAUSED.value
         range_obj.save(update_fields=["status", "updated_at"])
         return False

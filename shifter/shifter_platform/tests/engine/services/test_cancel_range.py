@@ -1,7 +1,7 @@
 """Tests for cancel_range() in engine/services.py."""
 
 import logging
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -10,7 +10,6 @@ from shared.enums import ResourceStatus
 from shared.schemas import RangeContext
 
 
-@pytest.mark.django_db
 class TestCancelRange:
     """Tests for cancel_range() in engine/services.py.
 
@@ -21,6 +20,12 @@ class TestCancelRange:
     - Errors: TypeError for None/invalid type, ValueError for invalid range_id
     - Logging: DEBUG on entry, INFO on success, ERROR on validation failures
     """
+
+    @pytest.fixture(autouse=True)
+    def _mock_range_lookup(self):
+        """Mock Range.objects.get — unit tests don't need real DB lookups."""
+        with patch("engine.models.Range.objects.get", return_value=Mock()):
+            yield
 
     # -------------------------------------------------------------------------
     # Input validation - range_ctx type
@@ -159,7 +164,6 @@ class TestCancelRange:
         assert "none" in caplog.text.lower()
 
 
-@pytest.mark.django_db
 class TestCancelRangeByRequest:
     """Tests for cancel_range_by_request() in engine/services.py.
 

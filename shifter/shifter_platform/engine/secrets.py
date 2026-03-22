@@ -2,9 +2,8 @@
 
 import logging
 
-import boto3
-from botocore.exceptions import ClientError
-from django.conf import settings
+from shared.cloud import get_secrets_store
+from shared.cloud.exceptions import CloudSecretsError
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +31,7 @@ def get_ssh_key(secret_arn: str) -> str:
         raise SecretsError("Secret ARN is required")
 
     try:
-        client = boto3.client("secretsmanager", region_name=settings.AWS_REGION)
-        response = client.get_secret_value(SecretId=secret_arn)
-
-        # Secret can be stored as string or binary
-        if "SecretString" in response:
-            return response["SecretString"]
-        else:
-            # Binary secrets are base64-encoded
-            import base64
-
-            return base64.b64decode(response["SecretBinary"]).decode("utf-8")
-
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "Unknown")
-        logger.exception("Failed to retrieve secret %s: %s", secret_arn, error_code)
-        raise SecretsError(f"Failed to retrieve SSH key: {error_code}") from e
+        return get_secrets_store().get_secret(secret_arn)
+    except CloudSecretsError as e:
+        logger.exception("Failed to retrieve secret %s", secret_arn)
+        raise SecretsError(f"Failed to retrieve SSH key: {e}") from e

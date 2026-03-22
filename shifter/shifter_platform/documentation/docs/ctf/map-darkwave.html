@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DARKWAVE // Compound Sigma-7 // Tactical Overlay</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  #crt-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.12) 0px,
+      rgba(0,0,0,0.12) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  }
+  #crt-curve {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 11;
+    box-shadow: inset 0 0 150px rgba(0,0,0,0.9), inset 0 0 80px rgba(0,0,0,0.5);
+    border-radius: 18px;
+  }
+  #phosphor-glow {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 9;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%);
+  }
+  #barrel-warp {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 12;
+    background: radial-gradient(ellipse at center,
+      transparent 60%,
+      rgba(30, 0, 50, 0.08) 75%,
+      rgba(20, 0, 40, 0.15) 90%,
+      rgba(10, 0, 20, 0.3) 100%
+    );
+  }
+  #loading {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #000; z-index: 100;
+    font-family: 'Press Start 2P', monospace; color: #ff00ff; font-size: 11px;
+    letter-spacing: 2px; gap: 16px;
+  }
+  #loading .sub { color: #00d4ff; font-size: 7px; opacity: 0.6; }
+  #loading.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="loading">
+  ESTABLISHING UPLINK...
+  <div class="sub">COMPOUND SIGMA-7 // TACTICAL OVERLAY</div>
+</div>
+<canvas id="scene"></canvas>
+<div id="crt-overlay"></div>
+<div id="phosphor-glow"></div>
+<div id="barrel-warp"></div>
+<div id="crt-curve"></div>
+<script>
+(function() {
+  'use strict';
+
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+  let W, H, time = 0;
+
+  // --- Camera state (pan + zoom) ---
+  let camX = 0, camY = 0, camZoom = 1.0;
+  let isDragging = false, dragStartX = 0, dragStartY = 0, dragCamStartX = 0, dragCamStartY = 0;
+  const MIN_ZOOM = 0.4, MAX_ZOOM = 3.0;
+
+  // --- Compound world coordinates (centered at 0,0) ---
+  // All compound geometry is defined in world space.
+  // The compound is roughly 1200 x 900 world units.
+  const COMPOUND = {
+    // Perimeter fence
+    fence: { x: -600, y: -450, w: 1200, h: 900, cornerR: 30 },
+    // Main building (command center)
+    mainBuilding: { x: -280, y: -220, w: 260, h: 180 },
+    // Research building
+    researchBuilding: { x: 80, y: -180, w: 200, h: 150 },
+    // The Hatch
+    hatch: { x: -80, y: 140, w: 160, h: 160 },
+    // Guard towers (corners of fence)
+    guardTowers: [
+      { x: -580, y: -430 },
+      { x: 560, y: -430 },
+      { x: -580, y: 410 },
+      { x: 560, y: 410 },
+    ],
+    // Generator shed
+    genShed: { x: -480, y: 80, w: 80, h: 60 },
+    // Fuel tanks
+    fuelTanks: { x: 340, y: 60, w: 120, h: 80 },
+    // Helipad
+    helipad: { x: 300, y: -340, r: 70 },
+    // Comm tower
+    commTower: { x: -420, y: -300, r: 20 },
+    // Vehicle depot
+    vehicleDepot: { x: -480, y: -100, w: 100, h: 70 },
+    // Paths between buildings
+    paths: [
+      // Main to Research
+      { x1: -20, y1: -130, x2: 80, y2: -130, w: 12 },
+      // Main to Hatch
+      { x1: -150, y1: -40, x2: -150, y2: 140, w: 12 },
+      // Main to Hatch (second path)
+      { x1: 0, y1: -40, x2: 0, y2: 140, w: 12 },
+      // Research to Fuel
+      { x1: 280, y1: -30, x2: 340, y2: 60, w: 10 },
+      // Main entrance road
+      { x1: -150, y1: -450, x2: -150, y2: -220, w: 16 },
+      // Perimeter patrol road (inner)
+      { x1: -560, y1: -400, x2: 560, y2: -400, w: 8 },
+      { x1: -560, y1: 380, x2: 560, y2: 380, w: 8 },
+      { x1: -560, y1: -400, x2: -560, y2: 380, w: 8 },
+      { x1: 540, y1: -400, x2: 540, y2: 380, w: 8 },
+    ],
+  };
+
+  // --- Digital rain / data particles ---
+  const DATA_PARTICLES = [];
+  const DATA_PARTICLE_COUNT = 180;
+  const GLITCH_CHARS = 'ABCDEF0123456789@#$%&*!<>{}[]|/\\~^';
+
+  // --- Ambient floating data fragments ---
+  const DATA_FRAGMENTS = [];
+  const FRAGMENT_COUNT = 40;
+
+  // --- Seeded RNG for deterministic elements ---
+  let rngState = 42;
+  function seededRandom() {
+    rngState = (rngState * 16807 + 0) % 2147483647;
+    return (rngState & 0x7fffffff) / 2147483647;
+  }
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+  }
+
+  // --- World to screen transform ---
+  function worldToScreen(wx, wy) {
+    return {
+      x: W / 2 + (wx - camX) * camZoom,
+      y: H / 2 + (wy - camY) * camZoom,
+    };
+  }
+
+  function screenToWorld(sx, sy) {
+    return {
+      x: (sx - W / 2) / camZoom + camX,
+      y: (sy - H / 2) / camZoom + camY,
+    };
+  }
+
+  // --- Init particles ---
+  function initDataParticles() {
+    for (let i = 0; i < DATA_PARTICLE_COUNT; i++) {
+      DATA_PARTICLES.push(resetDataParticle({}));
+    }
+  }
+
+  function resetDataParticle(p) {
+    // These drift in screen space
+    p.x = Math.random() * W;
+    p.y = Math.random() * H;
+    p.vy = 0.3 + Math.random() * 1.2;
+    p.vx = (Math.random() - 0.5) * 0.3;
+    p.char = GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
+    p.opacity = 0.05 + Math.random() * 0.25;
+    p.size = 7 + Math.random() * 6;
+    p.changeRate = 3 + Math.floor(Math.random() * 15);
+    p.color = Math.random() > 0.7 ? 'magenta' : 'cyan';
+    return p;
+  }
+
+  function initDataFragments() {
+    for (let i = 0; i < FRAGMENT_COUNT; i++) {
+      DATA_FRAGMENTS.push({
+        x: (Math.random() - 0.5) * 1600,
+        y: (Math.random() - 0.5) * 1200,
+        text: generateFragmentText(),
+        opacity: 0.04 + Math.random() * 0.12,
+        drift: Math.random() * Math.PI * 2,
+        speed: 0.1 + Math.random() * 0.3,
+        size: 6 + Math.random() * 4,
+      });
+    }
+  }
+
+  function generateFragmentText() {
+    const templates = [
+      'SYS.LOAD 0x', 'MEM.ALLOC 0x', 'SEC.CHK ', 'FREQ:', 'NODE:', 'PKT:', 'ERR:', 'ACK:',
+      'UPLINK:', 'DNLINK:', 'SYNC:', 'AUTH:', 'KEY:', 'HASH:', 'REF:', 'IDX:',
+    ];
+    let t = templates[Math.floor(Math.random() * templates.length)];
+    const hexLen = 2 + Math.floor(Math.random() * 6);
+    for (let i = 0; i < hexLen; i++) {
+      t += '0123456789ABCDEF'[Math.floor(Math.random() * 16)];
+    }
+    return t;
+  }
+
+  // ========================================
+  //  DRAWING: HOLOGRAPHIC GRID TERRAIN
+  // ========================================
+  function drawHolographicGrid() {
+    const gridSpacing = 60;
+    const gridExtent = 1200;
+
+    // Grid lines with perspective-like fade from center
+    for (let gx = -gridExtent; gx <= gridExtent; gx += gridSpacing) {
+      const s1 = worldToScreen(gx, -gridExtent);
+      const s2 = worldToScreen(gx, gridExtent);
+      const dist = Math.abs(gx) / gridExtent;
+      const alpha = (0.08 - dist * 0.05) * (0.7 + Math.sin(time * 0.01 + gx * 0.01) * 0.3);
+      if (alpha <= 0) continue;
+      ctx.strokeStyle = `rgba(100, 40, 180, ${Math.max(0, alpha)})`;
+      ctx.lineWidth = dist < 0.1 ? 1.2 : 0.6;
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y);
+      ctx.lineTo(s2.x, s2.y);
+      ctx.stroke();
+    }
+
+    for (let gy = -gridExtent; gy <= gridExtent; gy += gridSpacing) {
+      const s1 = worldToScreen(-gridExtent, gy);
+      const s2 = worldToScreen(gridExtent, gy);
+      const dist = Math.abs(gy) / gridExtent;
+      const alpha = (0.08 - dist * 0.05) * (0.7 + Math.sin(time * 0.012 + gy * 0.01) * 0.3);
+      if (alpha <= 0) continue;
+      ctx.strokeStyle = `rgba(100, 40, 180, ${Math.max(0, alpha)})`;
+      ctx.lineWidth = dist < 0.1 ? 1.2 : 0.6;
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y);
+      ctx.lineTo(s2.x, s2.y);
+      ctx.stroke();
+    }
+
+    // Grid intersection dots (subtle)
+    for (let gx = -gridExtent; gx <= gridExtent; gx += gridSpacing * 2) {
+      for (let gy = -gridExtent; gy <= gridExtent; gy += gridSpacing * 2) {
+        const s = worldToScreen(gx, gy);
+        if (s.x < -20 || s.x > W + 20 || s.y < -20 || s.y > H + 20) continue;
+        const dist = Math.sqrt(gx * gx + gy * gy) / gridExtent;
+        const alpha = 0.12 - dist * 0.08;
+        if (alpha <= 0) continue;
+        ctx.fillStyle = `rgba(160, 80, 220, ${alpha})`;
+        ctx.fillRect(s.x - 1, s.y - 1, 2, 2);
+      }
+    }
+  }
+
+  // ========================================
+  //  DRAWING: TERRAIN NOISE OVERLAY
+  // ========================================
+  function drawTerrainNoise() {
+    // Very subtle noise pattern to suggest arctic terrain texture
+    rngState = 7919; // reset for deterministic terrain
+    const step = Math.max(16, Math.floor(30 / camZoom));
+    for (let sx = 0; sx < W; sx += step) {
+      for (let sy = 0; sy < H; sy += step) {
+        const wc = screenToWorld(sx, sy);
+        // Simple value noise approximation
+        const n = Math.sin(wc.x * 0.008 + 1.3) * Math.cos(wc.y * 0.006 + 0.7)
+                + Math.sin(wc.x * 0.015 - 2.1) * Math.cos(wc.y * 0.012 + 3.2) * 0.5;
+        const v = n * 0.5 + 0.5;
+        if (v > 0.55) {
+          ctx.fillStyle = `rgba(140, 150, 180, ${(v - 0.55) * 0.06})`;
+          ctx.fillRect(sx, sy, step, step);
+        }
+      }
+    }
+  }
+
+  // ========================================
+  //  DRAWING: PERIMETER FENCE
+  // ========================================
+  function drawFence() {
+    const f = COMPOUND.fence;
+    const s = worldToScreen(f.x, f.y);
+    const sw = f.w * camZoom;
+    const sh = f.h * camZoom;
+
+    // Fence post dots along perimeter
+    const postSpacing = 30;
+    const postDots = [];
+    for (let px = f.x; px <= f.x + f.w; px += postSpacing) {
+      postDots.push({ x: px, y: f.y });
+      postDots.push({ x: px, y: f.y + f.h });
+    }
+    for (let py = f.y; py <= f.y + f.h; py += postSpacing) {
+      postDots.push({ x: f.x, y: py });
+      postDots.push({ x: f.x + f.w, y: py });
+    }
+
+    // Fence line glow
+    const fencePulse = Math.sin(time * 0.02) * 0.15 + 0.5;
+    ctx.strokeStyle = `rgba(180, 60, 220, ${fencePulse * 0.25})`;
+    ctx.lineWidth = 3 * camZoom;
+    ctx.setLineDash([6 * camZoom, 4 * camZoom]);
+    ctx.strokeRect(s.x, s.y, sw, sh);
+    ctx.setLineDash([]);
+
+    // Sharper inner line
+    ctx.strokeStyle = `rgba(200, 80, 255, ${fencePulse * 0.5})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(s.x, s.y, sw, sh);
+
+    // Fence posts
+    if (camZoom > 0.5) {
+      for (const pd of postDots) {
+        const ps = worldToScreen(pd.x, pd.y);
+        if (ps.x < -10 || ps.x > W + 10 || ps.y < -10 || ps.y > H + 10) continue;
+        ctx.fillStyle = `rgba(200, 100, 255, ${fencePulse * 0.6})`;
+        const dotSize = Math.max(1, 2 * camZoom);
+        ctx.fillRect(ps.x - dotSize / 2, ps.y - dotSize / 2, dotSize, dotSize);
+      }
+    }
+
+    // Electrified fence warning pulses traveling along wire
+    const pulsePos = (time * 3) % (2 * (f.w + f.h));
+    let px2, py2;
+    if (pulsePos < f.w) {
+      px2 = f.x + pulsePos; py2 = f.y;
+    } else if (pulsePos < f.w + f.h) {
+      px2 = f.x + f.w; py2 = f.y + (pulsePos - f.w);
+    } else if (pulsePos < 2 * f.w + f.h) {
+      px2 = f.x + f.w - (pulsePos - f.w - f.h); py2 = f.y + f.h;
+    } else {
+      px2 = f.x; py2 = f.y + f.h - (pulsePos - 2 * f.w - f.h);
+    }
+    const pulseS = worldToScreen(px2, py2);
+    const pulseGrad = ctx.createRadialGradient(pulseS.x, pulseS.y, 0, pulseS.x, pulseS.y, 20 * camZoom);
+    pulseGrad.addColorStop(0, 'rgba(220, 100, 255, 0.8)');
+    pulseGrad.addColorStop(0.5, 'rgba(180, 60, 220, 0.2)');
+    pulseGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = pulseGrad;
+    ctx.fillRect(pulseS.x - 25 * camZoom, pulseS.y - 25 * camZoom, 50 * camZoom, 50 * camZoom);
+  }
+
+  // ========================================
+  //  DRAWING: PATHS / ROADS
+  // ========================================
+  function drawPaths() {
+    for (const p of COMPOUND.paths) {
+      const s1 = worldToScreen(p.x1, p.y1);
+      const s2 = worldToScreen(p.x2, p.y2);
+      const pw = p.w * camZoom;
+
+      // Dark path base
+      ctx.strokeStyle = 'rgba(30, 25, 50, 0.6)';
+      ctx.lineWidth = pw;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y);
+      ctx.lineTo(s2.x, s2.y);
+      ctx.stroke();
+
+      // Dim edge lines
+      ctx.strokeStyle = 'rgba(100, 60, 160, 0.15)';
+      ctx.lineWidth = 1;
+      // Calculate perpendicular offset
+      const dx = s2.x - s1.x;
+      const dy = s2.y - s1.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 1) continue;
+      const nx = -dy / len * pw / 2;
+      const ny = dx / len * pw / 2;
+      ctx.beginPath();
+      ctx.moveTo(s1.x + nx, s1.y + ny);
+      ctx.lineTo(s2.x + nx, s2.y + ny);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s1.x - nx, s1.y - ny);
+      ctx.lineTo(s2.x - nx, s2.y - ny);
+      ctx.stroke();
+    }
+  }
+
+  // ========================================
+  //  DRAWING: BUILDING UTILITY
+  // ========================================
+  function drawBuildingTopDown(bx, by, bw, bh, config) {
+    const s = worldToScreen(bx, by);
+    const sw = bw * camZoom;
+    const sh = bh * camZoom;
+
+    // Building shadow (offset)
+    const shadowOff = 6 * camZoom;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(s.x + shadowOff, s.y + shadowOff, sw, sh);
+
+    // Building fill
+    const bGrad = ctx.createLinearGradient(s.x, s.y, s.x + sw, s.y + sh);
+    bGrad.addColorStop(0, config.fillDark || '#0a0818');
+    bGrad.addColorStop(0.5, config.fillMid || '#0e0c20');
+    bGrad.addColorStop(1, config.fillLight || '#0a0818');
+    ctx.fillStyle = bGrad;
+    ctx.fillRect(s.x, s.y, sw, sh);
+
+    // Inner structure lines (roof details)
+    if (camZoom > 0.5) {
+      ctx.strokeStyle = `rgba(${config.innerR || 80}, ${config.innerG || 60}, ${config.innerB || 120}, 0.2)`;
+      ctx.lineWidth = 1;
+      // Cross lines
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(s.x + sw, s.y + sh);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s.x + sw, s.y);
+      ctx.lineTo(s.x, s.y + sh);
+      ctx.stroke();
+      // Inner rectangle
+      const inset = 8 * camZoom;
+      ctx.strokeStyle = `rgba(${config.innerR || 80}, ${config.innerG || 60}, ${config.innerB || 120}, 0.15)`;
+      ctx.strokeRect(s.x + inset, s.y + inset, sw - inset * 2, sh - inset * 2);
+    }
+
+    // Neon edge glow - layered for bloom effect
+    const edgePulse = Math.sin(time * (config.pulseSpeed || 0.025) + (config.pulseOffset || 0)) * 0.2 + 0.8;
+    const c = config.edgeColor || { r: 255, g: 0, b: 255 };
+
+    // Outer glow (wide, dim)
+    ctx.shadowColor = `rgba(${c.r}, ${c.g}, ${c.b}, ${edgePulse * 0.5})`;
+    ctx.shadowBlur = 15 * camZoom;
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${edgePulse * 0.15})`;
+    ctx.lineWidth = 4 * camZoom;
+    ctx.strokeRect(s.x, s.y, sw, sh);
+
+    // Mid glow
+    ctx.shadowBlur = 8 * camZoom;
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${edgePulse * 0.4})`;
+    ctx.lineWidth = 2 * camZoom;
+    ctx.strokeRect(s.x, s.y, sw, sh);
+
+    // Sharp edge
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${edgePulse * 0.8})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(s.x, s.y, sw, sh);
+    ctx.shadowColor = 'transparent';
+
+    // Corner accents
+    const cornerLen = Math.min(sw, sh) * 0.2;
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${edgePulse})`;
+    ctx.lineWidth = 2;
+    // TL
+    ctx.beginPath(); ctx.moveTo(s.x, s.y + cornerLen); ctx.lineTo(s.x, s.y); ctx.lineTo(s.x + cornerLen, s.y); ctx.stroke();
+    // TR
+    ctx.beginPath(); ctx.moveTo(s.x + sw - cornerLen, s.y); ctx.lineTo(s.x + sw, s.y); ctx.lineTo(s.x + sw, s.y + cornerLen); ctx.stroke();
+    // BL
+    ctx.beginPath(); ctx.moveTo(s.x, s.y + sh - cornerLen); ctx.lineTo(s.x, s.y + sh); ctx.lineTo(s.x + cornerLen, s.y + sh); ctx.stroke();
+    // BR
+    ctx.beginPath(); ctx.moveTo(s.x + sw - cornerLen, s.y + sh); ctx.lineTo(s.x + sw, s.y + sh); ctx.lineTo(s.x + sw, s.y + sh - cornerLen); ctx.stroke();
+  }
+
+  // ========================================
+  //  DRAWING: MAIN BUILDING
+  // ========================================
+  function drawMainBuilding() {
+    const b = COMPOUND.mainBuilding;
+    drawBuildingTopDown(b.x, b.y, b.w, b.h, {
+      fillDark: '#0c0620',
+      fillMid: '#100a28',
+      fillLight: '#0c0620',
+      edgeColor: { r: 255, g: 0, b: 255 },
+      pulseSpeed: 0.025,
+      pulseOffset: 0,
+      innerR: 120, innerG: 40, innerB: 160,
+    });
+
+    const s = worldToScreen(b.x, b.y);
+    const sw = b.w * camZoom;
+    const sh = b.h * camZoom;
+
+    // Label
+    if (camZoom > 0.45) {
+      const labelPulse = Math.sin(time * 0.04) * 0.2 + 0.8;
+      const labelFlicker = Math.random() > 0.96 ? 0.3 : 1;
+      ctx.save();
+      ctx.font = `${Math.max(7, 10 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // Glow
+      ctx.shadowColor = `rgba(255, 0, 255, ${labelPulse * 0.6 * labelFlicker})`;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = `rgba(255, 0, 255, ${labelPulse * 0.9 * labelFlicker})`;
+      ctx.fillText('COMMAND', s.x + sw / 2, s.y + sh / 2 - 6 * camZoom);
+      ctx.shadowBlur = 0;
+      // Sub-label
+      ctx.font = `${Math.max(5, 6 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.fillStyle = `rgba(200, 100, 255, ${labelPulse * 0.4 * labelFlicker})`;
+      ctx.fillText('PRIMARY OPS CENTER', s.x + sw / 2, s.y + sh / 2 + 8 * camZoom);
+      ctx.restore();
+    }
+
+    // Windows as small lit rectangles along edges (top-down view shows roof features)
+    if (camZoom > 0.7) {
+      const winGlow = Math.sin(time * 0.03) * 0.2 + 0.6;
+      for (let i = 0; i < 6; i++) {
+        const wx = b.x + 20 + i * 38;
+        const wy1 = b.y + 12;
+        const wy2 = b.y + b.h - 18;
+        for (const wy of [wy1, wy2]) {
+          const ws = worldToScreen(wx, wy);
+          const lit = Math.sin(time * 0.02 + i * 1.7 + wy * 0.01) > -0.3;
+          ctx.fillStyle = lit
+            ? `rgba(68, 136, 255, ${winGlow * 0.5})`
+            : 'rgba(30, 50, 80, 0.3)';
+          ctx.fillRect(ws.x - 3 * camZoom, ws.y - 2 * camZoom, 6 * camZoom, 4 * camZoom);
+          if (lit) {
+            ctx.fillStyle = `rgba(68, 136, 255, ${winGlow * 0.08})`;
+            ctx.fillRect(ws.x - 8 * camZoom, ws.y - 6 * camZoom, 16 * camZoom, 12 * camZoom);
+          }
+        }
+      }
+    }
+
+    // Antenna on roof
+    const antS = worldToScreen(b.x + b.w * 0.3, b.y + b.h * 0.3);
+    ctx.fillStyle = 'rgba(80, 80, 120, 0.5)';
+    ctx.fillRect(antS.x - 1, antS.y - 1, 3, 3);
+    // Blinking antenna light
+    if (Math.sin(time * 0.1) > 0.7) {
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
+      ctx.fillRect(antS.x - 1, antS.y - 1, 3, 3);
+      const antGlow = ctx.createRadialGradient(antS.x, antS.y, 0, antS.x, antS.y, 10 * camZoom);
+      antGlow.addColorStop(0, 'rgba(255, 0, 0, 0.3)');
+      antGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = antGlow;
+      ctx.fillRect(antS.x - 12 * camZoom, antS.y - 12 * camZoom, 24 * camZoom, 24 * camZoom);
+    }
+  }
+
+  // ========================================
+  //  DRAWING: RESEARCH BUILDING
+  // ========================================
+  function drawResearchBuilding() {
+    const b = COMPOUND.researchBuilding;
+    drawBuildingTopDown(b.x, b.y, b.w, b.h, {
+      fillDark: '#060a18',
+      fillMid: '#081020',
+      fillLight: '#060a18',
+      edgeColor: { r: 0, g: 212, b: 255 },
+      pulseSpeed: 0.03,
+      pulseOffset: 1.5,
+      innerR: 40, innerG: 120, innerB: 180,
+    });
+
+    const s = worldToScreen(b.x, b.y);
+    const sw = b.w * camZoom;
+    const sh = b.h * camZoom;
+
+    // Biohazard warning stripe on one edge
+    if (camZoom > 0.5) {
+      const stripeY = s.y + 3 * camZoom;
+      for (let i = 0; i < Math.floor(sw / (10 * camZoom)); i++) {
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 170, 0, 0.5)' : 'rgba(20, 20, 30, 0.5)';
+        ctx.fillRect(s.x + i * 10 * camZoom, stripeY, 5 * camZoom, 3 * camZoom);
+      }
+    }
+
+    // Label
+    if (camZoom > 0.45) {
+      const labelPulse = Math.sin(time * 0.035 + 1) * 0.2 + 0.8;
+      const labelFlicker = Math.random() > 0.95 ? 0.2 : 1;
+      ctx.save();
+      ctx.font = `${Math.max(7, 10 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = `rgba(0, 212, 255, ${labelPulse * 0.6 * labelFlicker})`;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = `rgba(0, 212, 255, ${labelPulse * 0.9 * labelFlicker})`;
+      ctx.fillText('RESEARCH', s.x + sw / 2, s.y + sh / 2 - 6 * camZoom);
+      ctx.shadowBlur = 0;
+      ctx.font = `${Math.max(5, 6 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.fillStyle = `rgba(80, 200, 255, ${labelPulse * 0.4 * labelFlicker})`;
+      ctx.fillText('BIO-WEAPONS LAB', s.x + sw / 2, s.y + sh / 2 + 8 * camZoom);
+      ctx.restore();
+    }
+
+    // Green-tinted windows
+    if (camZoom > 0.7) {
+      const winGlow = Math.sin(time * 0.025) * 0.2 + 0.5;
+      for (let i = 0; i < 4; i++) {
+        const wx = b.x + 20 + i * 44;
+        const wy = b.y + b.h / 2;
+        const ws = worldToScreen(wx, wy);
+        const lit = Math.sin(time * 0.03 + i * 2.2) > -0.4;
+        ctx.fillStyle = lit
+          ? `rgba(34, 170, 102, ${winGlow * 0.5})`
+          : 'rgba(17, 68, 51, 0.3)';
+        ctx.fillRect(ws.x - 3 * camZoom, ws.y - 2 * camZoom, 6 * camZoom, 4 * camZoom);
+      }
+    }
+
+    // Satellite dish on roof
+    const dishS = worldToScreen(b.x + b.w * 0.75, b.y + b.h * 0.25);
+    ctx.strokeStyle = 'rgba(120, 140, 180, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(dishS.x, dishS.y, 8 * camZoom, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(dishS.x, dishS.y, 3 * camZoom, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(120, 140, 180, 0.3)';
+    ctx.fillRect(dishS.x - 1, dishS.y - 1, 2, 2);
+  }
+
+  // ========================================
+  //  DRAWING: THE HATCH (ominous glow)
+  // ========================================
+  function drawHatch() {
+    const h = COMPOUND.hatch;
+    const s = worldToScreen(h.x, h.y);
+    const sw = h.w * camZoom;
+    const sh = h.h * camZoom;
+    const cx = s.x + sw / 2;
+    const cy = s.y + sh / 2;
+
+    // Deep underground glow bleeding through cracks
+    const hatchPulse = Math.sin(time * 0.015) * 0.25 + 0.75;
+    const hatchBreath = Math.sin(time * 0.008) * 0.1 + 0.9;
+    const glowR = 60 * camZoom * hatchBreath;
+
+    // Outermost glow - very wide, very dim orange/red
+    const outerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR * 3);
+    outerGlow.addColorStop(0, `rgba(180, 40, 0, ${hatchPulse * 0.08})`);
+    outerGlow.addColorStop(0.4, `rgba(120, 20, 0, ${hatchPulse * 0.04})`);
+    outerGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = outerGlow;
+    ctx.fillRect(cx - glowR * 3, cy - glowR * 3, glowR * 6, glowR * 6);
+
+    // Mid glow - deep red/orange
+    const midGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR * 1.8);
+    midGlow.addColorStop(0, `rgba(255, 80, 0, ${hatchPulse * 0.2})`);
+    midGlow.addColorStop(0.3, `rgba(200, 40, 0, ${hatchPulse * 0.12})`);
+    midGlow.addColorStop(0.7, `rgba(150, 20, 0, ${hatchPulse * 0.05})`);
+    midGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = midGlow;
+    ctx.fillRect(cx - glowR * 2, cy - glowR * 2, glowR * 4, glowR * 4);
+
+    // Hatch platform base
+    ctx.fillStyle = 'rgba(15, 10, 20, 0.8)';
+    ctx.fillRect(s.x, s.y, sw, sh);
+
+    // Hatch doors - two halves with gap
+    const gapSize = (3 + Math.sin(time * 0.005) * 1.5) * camZoom;
+    // Left door
+    ctx.fillStyle = '#1a1828';
+    ctx.fillRect(s.x + 4 * camZoom, s.y + 4 * camZoom, sw / 2 - gapSize - 4 * camZoom, sh - 8 * camZoom);
+    // Right door
+    ctx.fillRect(cx + gapSize, s.y + 4 * camZoom, sw / 2 - gapSize - 4 * camZoom, sh - 8 * camZoom);
+
+    // Door plating details
+    if (camZoom > 0.5) {
+      ctx.strokeStyle = 'rgba(50, 40, 70, 0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 6; i++) {
+        const ly = s.y + (sh / 6) * i;
+        ctx.beginPath();
+        ctx.moveTo(s.x + 6 * camZoom, ly);
+        ctx.lineTo(cx - gapSize, ly);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx + gapSize, ly);
+        ctx.lineTo(s.x + sw - 6 * camZoom, ly);
+        ctx.stroke();
+      }
+      // Bolts
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = 0; dy < 2; dy++) {
+          const boltX = s.x + 10 * camZoom + dx * (sw - 20 * camZoom);
+          const boltY = s.y + 10 * camZoom + dy * (sh - 20 * camZoom);
+          ctx.fillStyle = 'rgba(80, 70, 100, 0.4)';
+          ctx.fillRect(boltX - 2, boltY - 2, 4, 4);
+        }
+      }
+    }
+
+    // Crack glow (bright line in gap)
+    const crackGlow = ctx.createLinearGradient(cx - gapSize, s.y, cx + gapSize, s.y);
+    crackGlow.addColorStop(0, 'transparent');
+    crackGlow.addColorStop(0.3, `rgba(255, 100, 0, ${hatchPulse * 0.7})`);
+    crackGlow.addColorStop(0.5, `rgba(255, 160, 40, ${hatchPulse * 0.9})`);
+    crackGlow.addColorStop(0.7, `rgba(255, 100, 0, ${hatchPulse * 0.7})`);
+    crackGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = crackGlow;
+    ctx.fillRect(cx - gapSize * 2, s.y + 4 * camZoom, gapSize * 4, sh - 8 * camZoom);
+
+    // Cross crack (horizontal)
+    const crossGlow = ctx.createLinearGradient(s.x, cy - gapSize, s.x, cy + gapSize);
+    crossGlow.addColorStop(0, 'transparent');
+    crossGlow.addColorStop(0.3, `rgba(255, 80, 0, ${hatchPulse * 0.5})`);
+    crossGlow.addColorStop(0.5, `rgba(255, 140, 30, ${hatchPulse * 0.7})`);
+    crossGlow.addColorStop(0.7, `rgba(255, 80, 0, ${hatchPulse * 0.5})`);
+    crossGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = crossGlow;
+    ctx.fillRect(s.x + 4 * camZoom, cy - gapSize * 2, sw - 8 * camZoom, gapSize * 4);
+
+    // Hatch frame - industrial heavy border
+    ctx.strokeStyle = `rgba(255, 80, 0, ${hatchPulse * 0.3})`;
+    ctx.lineWidth = 3 * camZoom;
+    ctx.strokeRect(s.x, s.y, sw, sh);
+    ctx.strokeStyle = `rgba(255, 120, 20, ${hatchPulse * 0.6})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(s.x, s.y, sw, sh);
+
+    // Warning lights at corners
+    const warnPhase1 = Math.sin(time * 0.08) > 0;
+    const warnPhase2 = !warnPhase1;
+    const warnCorners = [
+      { x: h.x - 10, y: h.y - 10, on: warnPhase1 },
+      { x: h.x + h.w + 4, y: h.y - 10, on: warnPhase2 },
+      { x: h.x - 10, y: h.y + h.h + 4, on: warnPhase2 },
+      { x: h.x + h.w + 4, y: h.y + h.h + 4, on: warnPhase1 },
+    ];
+    for (const wc of warnCorners) {
+      const ws = worldToScreen(wc.x, wc.y);
+      if (wc.on) {
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
+        ctx.fillRect(ws.x - 2, ws.y - 2, 5, 5);
+        const wGlow = ctx.createRadialGradient(ws.x, ws.y, 0, ws.x, ws.y, 15 * camZoom);
+        wGlow.addColorStop(0, 'rgba(255, 0, 0, 0.25)');
+        wGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = wGlow;
+        ctx.fillRect(ws.x - 18 * camZoom, ws.y - 18 * camZoom, 36 * camZoom, 36 * camZoom);
+      } else {
+        ctx.fillStyle = 'rgba(100, 0, 0, 0.4)';
+        ctx.fillRect(ws.x - 2, ws.y - 2, 4, 4);
+      }
+    }
+
+    // Hazard label
+    if (camZoom > 0.45) {
+      ctx.save();
+      ctx.font = `${Math.max(5, 7 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const hzFlicker = Math.random() > 0.92 ? 0.2 : 1;
+      ctx.fillStyle = `rgba(255, 60, 0, ${0.7 * hzFlicker * hatchPulse})`;
+      ctx.fillText('RESTRICTED', cx, s.y - 10 * camZoom);
+
+      const blink = Math.sin(time * 0.06) > 0;
+      if (blink) {
+        ctx.font = `${Math.max(4, 5 * camZoom)}px "Press Start 2P", monospace`;
+        ctx.fillStyle = `rgba(255, 170, 0, ${0.5 * hzFlicker})`;
+        ctx.fillText('[ HATCH SIGMA ]', cx, s.y + sh + 12 * camZoom);
+      }
+      ctx.restore();
+    }
+
+    // Hydraulic pistons (4 around the hatch)
+    const pistonPositions = [
+      { x: h.x - 16, y: h.y + h.h * 0.3 },
+      { x: h.x - 16, y: h.y + h.h * 0.7 },
+      { x: h.x + h.w + 6, y: h.y + h.h * 0.3 },
+      { x: h.x + h.w + 6, y: h.y + h.h * 0.7 },
+    ];
+    for (const pp of pistonPositions) {
+      const ps = worldToScreen(pp.x, pp.y);
+      ctx.fillStyle = 'rgba(60, 55, 80, 0.6)';
+      ctx.fillRect(ps.x - 3 * camZoom, ps.y - 5 * camZoom, 6 * camZoom, 10 * camZoom);
+      ctx.fillStyle = 'rgba(90, 85, 110, 0.4)';
+      ctx.fillRect(ps.x - 1 * camZoom, ps.y - 7 * camZoom, 2 * camZoom, 4 * camZoom);
+    }
+
+    // Underground mech hint: occasional rumble effect / heat shimmer
+    if (Math.sin(time * 0.01) > 0.8) {
+      const shimmerAlpha = (Math.sin(time * 0.01) - 0.8) * 2.5;
+      ctx.fillStyle = `rgba(255, 60, 0, ${shimmerAlpha * 0.06})`;
+      ctx.fillRect(cx - 80 * camZoom, cy - 80 * camZoom, 160 * camZoom, 160 * camZoom);
+    }
+  }
+
+  // ========================================
+  //  DRAWING: UNDERGROUND MECH HINT (thermal)
+  // ========================================
+  function drawMechThermalSignature() {
+    const h = COMPOUND.hatch;
+    const cx = h.x + h.w / 2;
+    const cy = h.y + h.h / 2;
+    const s = worldToScreen(cx, cy);
+
+    // Periodic deep rumble -- a vague, massive shape beneath the hatch
+    const mechPulse = Math.sin(time * 0.012) * 0.5 + 0.5;
+    if (mechPulse < 0.3) return;
+
+    const alpha = (mechPulse - 0.3) * 0.15;
+
+    // Mech silhouette as vague thermal blob
+    // Torso area
+    const tGrad = ctx.createRadialGradient(s.x, s.y + 10 * camZoom, 5 * camZoom, s.x, s.y + 10 * camZoom, 40 * camZoom);
+    tGrad.addColorStop(0, `rgba(180, 30, 0, ${alpha * 0.6})`);
+    tGrad.addColorStop(0.4, `rgba(120, 15, 0, ${alpha * 0.3})`);
+    tGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = tGrad;
+    ctx.fillRect(s.x - 50 * camZoom, s.y - 40 * camZoom, 100 * camZoom, 100 * camZoom);
+
+    // Two "eyes" - red pinpoints
+    const eyeAlpha = mechPulse > 0.7 ? (mechPulse - 0.7) * 3.3 : 0;
+    if (eyeAlpha > 0) {
+      const eyeFlicker = Math.random() > 0.8 ? 0.5 : 1;
+      for (const ex of [-12, 12]) {
+        const es = worldToScreen(cx + ex, cy - 15);
+        ctx.fillStyle = `rgba(255, 0, 0, ${eyeAlpha * 0.7 * eyeFlicker})`;
+        ctx.fillRect(es.x - 1.5, es.y - 1, 3, 2);
+        const eGlow = ctx.createRadialGradient(es.x, es.y, 0, es.x, es.y, 8 * camZoom);
+        eGlow.addColorStop(0, `rgba(255, 0, 0, ${eyeAlpha * 0.3 * eyeFlicker})`);
+        eGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = eGlow;
+        ctx.fillRect(es.x - 10 * camZoom, es.y - 10 * camZoom, 20 * camZoom, 20 * camZoom);
+      }
+
+      // Reactor core glow (green)
+      const rcS = worldToScreen(cx, cy + 5);
+      const rcPulse = Math.sin(time * 0.04) * 0.3 + 0.7;
+      const rcGlow = ctx.createRadialGradient(rcS.x, rcS.y, 0, rcS.x, rcS.y, 10 * camZoom);
+      rcGlow.addColorStop(0, `rgba(0, 255, 136, ${eyeAlpha * rcPulse * 0.35})`);
+      rcGlow.addColorStop(0.5, `rgba(0, 200, 100, ${eyeAlpha * rcPulse * 0.1})`);
+      rcGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = rcGlow;
+      ctx.fillRect(rcS.x - 14 * camZoom, rcS.y - 14 * camZoom, 28 * camZoom, 28 * camZoom);
+    }
+  }
+
+  // ========================================
+  //  DRAWING: GUARD TOWERS
+  // ========================================
+  function drawGuardTowers() {
+    for (let i = 0; i < COMPOUND.guardTowers.length; i++) {
+      const gt = COMPOUND.guardTowers[i];
+      const s = worldToScreen(gt.x, gt.y);
+
+      // Tower base (square footprint)
+      const tSize = 24 * camZoom;
+      ctx.fillStyle = 'rgba(20, 18, 35, 0.8)';
+      ctx.fillRect(s.x - tSize / 2, s.y - tSize / 2, tSize, tSize);
+
+      // Tower edge glow
+      ctx.strokeStyle = 'rgba(180, 80, 255, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(s.x - tSize / 2, s.y - tSize / 2, tSize, tSize);
+
+      // Searchlight cone
+      const searchAngle = time * 0.008 + i * Math.PI / 2;
+      const searchLen = 120 * camZoom;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(searchAngle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-15 * camZoom, searchLen);
+      ctx.lineTo(15 * camZoom, searchLen);
+      ctx.closePath();
+      const slGrad = ctx.createLinearGradient(0, 0, 0, searchLen);
+      slGrad.addColorStop(0, 'rgba(255, 255, 200, 0.08)');
+      slGrad.addColorStop(0.5, 'rgba(255, 255, 200, 0.03)');
+      slGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = slGrad;
+      ctx.fill();
+      ctx.restore();
+
+      // Tower center dot
+      ctx.fillStyle = 'rgba(255, 200, 0, 0.6)';
+      ctx.fillRect(s.x - 2, s.y - 2, 4, 4);
+    }
+  }
+
+  // ========================================
+  //  DRAWING: SUPPORT STRUCTURES
+  // ========================================
+  function drawSupportStructures() {
+    // Generator shed
+    const gs = COMPOUND.genShed;
+    drawBuildingTopDown(gs.x, gs.y, gs.w, gs.h, {
+      fillDark: '#080614',
+      fillMid: '#0a081a',
+      fillLight: '#080614',
+      edgeColor: { r: 255, g: 170, b: 0 },
+      pulseSpeed: 0.04,
+      pulseOffset: 2.5,
+    });
+    if (camZoom > 0.5) {
+      const gsS = worldToScreen(gs.x + gs.w / 2, gs.y + gs.h / 2);
+      ctx.save();
+      ctx.font = `${Math.max(4, 6 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255, 170, 0, 0.5)';
+      ctx.fillText('GEN', gsS.x, gsS.y);
+      ctx.restore();
+    }
+
+    // Fuel tanks
+    const ft = COMPOUND.fuelTanks;
+    const ftS = worldToScreen(ft.x, ft.y);
+    const ftSW = ft.w * camZoom;
+    const ftSH = ft.h * camZoom;
+    // Tank shadows
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(ftS.x + 4, ftS.y + 4, ftSW, ftSH);
+    // Tank fill
+    ctx.fillStyle = 'rgba(12, 10, 22, 0.8)';
+    ctx.fillRect(ftS.x, ftS.y, ftSW, ftSH);
+    // Individual tanks as circles
+    const tankPositions = [
+      { x: ft.x + 30, y: ft.y + 40, r: 22 },
+      { x: ft.x + 75, y: ft.y + 30, r: 18 },
+      { x: ft.x + 60, y: ft.y + 60, r: 16 },
+    ];
+    for (const tp of tankPositions) {
+      const ts = worldToScreen(tp.x, tp.y);
+      const tr = tp.r * camZoom;
+      ctx.strokeStyle = 'rgba(255, 170, 0, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(ts.x, ts.y, tr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(20, 15, 30, 0.6)';
+      ctx.beginPath();
+      ctx.arc(ts.x, ts.y, tr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (camZoom > 0.5) {
+      const ftCenter = worldToScreen(ft.x + ft.w / 2, ft.y + ft.h / 2);
+      ctx.save();
+      ctx.font = `${Math.max(4, 5 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255, 170, 0, 0.4)';
+      ctx.fillText('FUEL', ftCenter.x, ftCenter.y + ftSH / 2 + 10 * camZoom);
+      ctx.restore();
+    }
+
+    // Vehicle depot
+    const vd = COMPOUND.vehicleDepot;
+    drawBuildingTopDown(vd.x, vd.y, vd.w, vd.h, {
+      fillDark: '#080612',
+      fillMid: '#0a0818',
+      fillLight: '#080612',
+      edgeColor: { r: 140, g: 100, b: 200 },
+      pulseSpeed: 0.02,
+      pulseOffset: 4,
+    });
+    if (camZoom > 0.5) {
+      const vdS = worldToScreen(vd.x + vd.w / 2, vd.y + vd.h / 2);
+      ctx.save();
+      ctx.font = `${Math.max(4, 5 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(140, 100, 200, 0.4)';
+      ctx.fillText('DEPOT', vdS.x, vdS.y);
+      ctx.restore();
+    }
+
+    // Helipad
+    const hp = COMPOUND.helipad;
+    const hpS = worldToScreen(hp.x, hp.y);
+    const hpR = hp.r * camZoom;
+    // Helipad circle
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.25)';
+    ctx.lineWidth = 2 * camZoom;
+    ctx.setLineDash([6 * camZoom, 4 * camZoom]);
+    ctx.beginPath();
+    ctx.arc(hpS.x, hpS.y, hpR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Inner circle
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(hpS.x, hpS.y, hpR * 0.6, 0, Math.PI * 2);
+    ctx.stroke();
+    // H marking
+    if (camZoom > 0.4) {
+      ctx.save();
+      ctx.font = `${Math.max(8, 16 * camZoom)}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.2)';
+      ctx.fillText('H', hpS.x, hpS.y);
+      ctx.restore();
+    }
+    // Corner lights
+    for (let a = 0; a < 4; a++) {
+      const angle = a * Math.PI / 2 + Math.PI / 4;
+      const lx = hpS.x + Math.cos(angle) * hpR;
+      const ly = hpS.y + Math.sin(angle) * hpR;
+      const on = Math.sin(time * 0.06 + a) > 0;
+      ctx.fillStyle = on ? 'rgba(0, 212, 255, 0.7)' : 'rgba(0, 80, 120, 0.3)';
+      ctx.fillRect(lx - 2, ly - 2, 4, 4);
+    }
+
+    // Comm tower
+    const ct = COMPOUND.commTower;
+    const ctS = worldToScreen(ct.x, ct.y);
+    const ctR = ct.r * camZoom;
+    // Tower structure (concentric rings)
+    ctx.strokeStyle = 'rgba(180, 80, 255, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(ctS.x, ctS.y, ctR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ctS.x, ctS.y, ctR * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+    // Tower cross
+    ctx.beginPath();
+    ctx.moveTo(ctS.x - ctR, ctS.y);
+    ctx.lineTo(ctS.x + ctR, ctS.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ctS.x, ctS.y - ctR);
+    ctx.lineTo(ctS.x, ctS.y + ctR);
+    ctx.stroke();
+    // Signal rings (emanating)
+    const sigPhase = (time * 0.03) % (Math.PI * 2);
+    for (let ring = 0; ring < 3; ring++) {
+      const ringR = (ctR * 1.5 + ring * 18 * camZoom + sigPhase * 20 * camZoom) % (60 * camZoom);
+      const ringAlpha = 0.15 * (1 - ringR / (60 * camZoom));
+      if (ringAlpha > 0) {
+        ctx.strokeStyle = `rgba(180, 80, 255, ${ringAlpha})`;
+        ctx.beginPath();
+        ctx.arc(ctS.x, ctS.y, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // Center light
+    const ctBlink = Math.sin(time * 0.12) > 0.5;
+    ctx.fillStyle = ctBlink ? 'rgba(255, 0, 0, 0.8)' : 'rgba(100, 0, 0, 0.3)';
+    ctx.fillRect(ctS.x - 2, ctS.y - 2, 4, 4);
+  }
+
+  // ========================================
+  //  DRAWING: CABLES / CONNECTIONS
+  // ========================================
+  function drawConnections() {
+    // Cables between main and research buildings
+    const mb = COMPOUND.mainBuilding;
+    const rb = COMPOUND.researchBuilding;
+    const cableStart = worldToScreen(mb.x + mb.w, mb.y + mb.h * 0.4);
+    const cableEnd = worldToScreen(rb.x, rb.y + rb.h * 0.4);
+
+    for (let c = 0; c < 3; c++) {
+      const offset = (c - 1) * 6 * camZoom;
+      ctx.strokeStyle = `rgba(80, 60, 120, ${0.2 - c * 0.04})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cableStart.x, cableStart.y + offset);
+      ctx.quadraticCurveTo(
+        (cableStart.x + cableEnd.x) / 2,
+        cableStart.y + offset + 15 * camZoom,
+        cableEnd.x, cableEnd.y + offset
+      );
+      ctx.stroke();
+    }
+
+    // Data flow pulses along cables
+    const flowPos = (time * 2) % 100 / 100;
+    const flowX = cableStart.x + (cableEnd.x - cableStart.x) * flowPos;
+    const flowY = cableStart.y + (cableEnd.y - cableStart.y) * flowPos
+                  + Math.sin(flowPos * Math.PI) * 15 * camZoom;
+    ctx.fillStyle = 'rgba(0, 212, 255, 0.6)';
+    ctx.fillRect(flowX - 2, flowY - 2, 4, 4);
+
+    // Pipes from fuel to research
+    const pipeStart = worldToScreen(COMPOUND.fuelTanks.x, COMPOUND.fuelTanks.y + COMPOUND.fuelTanks.h / 2);
+    const pipeEnd = worldToScreen(rb.x + rb.w, rb.y + rb.h * 0.7);
+    ctx.strokeStyle = 'rgba(100, 60, 30, 0.2)';
+    ctx.lineWidth = 2 * camZoom;
+    ctx.beginPath();
+    ctx.moveTo(pipeStart.x, pipeStart.y);
+    ctx.lineTo(pipeEnd.x, pipeEnd.y);
+    ctx.stroke();
+
+    // Power lines from gen shed
+    const genCenter = worldToScreen(
+      COMPOUND.genShed.x + COMPOUND.genShed.w,
+      COMPOUND.genShed.y + COMPOUND.genShed.h / 2
+    );
+    const mainTarget = worldToScreen(mb.x, mb.y + mb.h * 0.7);
+    ctx.strokeStyle = 'rgba(255, 170, 0, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3 * camZoom, 5 * camZoom]);
+    ctx.beginPath();
+    ctx.moveTo(genCenter.x, genCenter.y);
+    ctx.lineTo(mainTarget.x, mainTarget.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // ========================================
+  //  DRAWING: DIGITAL RAIN / DATA PARTICLES
+  // ========================================
+  function drawDataParticles() {
+    ctx.save();
+    ctx.font = '8px monospace';
+    for (const p of DATA_PARTICLES) {
+      p.y += p.vy;
+      p.x += p.vx;
+      if (p.y > H + 20) { p.y = -20; p.x = Math.random() * W; }
+      if (p.x < -20 || p.x > W + 20) { p.x = Math.random() * W; }
+
+      if (time % p.changeRate === 0) {
+        p.char = GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
+      }
+
+      const c = p.color === 'magenta' ? '255, 0, 255' : '0, 212, 255';
+      ctx.fillStyle = `rgba(${c}, ${p.opacity})`;
+      ctx.font = `${p.size}px monospace`;
+      ctx.fillText(p.char, p.x, p.y);
+    }
+    ctx.restore();
+  }
+
+  // ========================================
+  //  DRAWING: FLOATING DATA FRAGMENTS
+  // ========================================
+  function drawDataFragments() {
+    if (camZoom < 0.5) return;
+
+    ctx.save();
+    for (const f of DATA_FRAGMENTS) {
+      f.drift += 0.003;
+      const wx = f.x + Math.sin(f.drift) * 20;
+      const wy = f.y + Math.cos(f.drift * 0.7) * 15;
+      const s = worldToScreen(wx, wy);
+
+      if (s.x < -100 || s.x > W + 100 || s.y < -50 || s.y > H + 50) continue;
+
+      const flicker = Math.random() > 0.97 ? 0.02 : 1;
+      ctx.font = `${f.size * camZoom}px monospace`;
+      ctx.fillStyle = `rgba(0, 212, 255, ${f.opacity * flicker})`;
+      ctx.fillText(f.text, s.x, s.y);
+    }
+    ctx.restore();
+  }
+
+  // ========================================
+  //  DRAWING: GLITCH EFFECTS
+  // ========================================
+  function drawGlitchEffects() {
+    // Occasional horizontal glitch bars
+    if (Math.random() > 0.97) {
+      const glitchY = Math.random() * H;
+      const glitchH = 1 + Math.random() * 4;
+      const glitchOffset = (Math.random() - 0.5) * 20;
+
+      ctx.save();
+      // Grab a strip and redraw offset
+      ctx.fillStyle = `rgba(${Math.random() > 0.5 ? '255, 0, 255' : '0, 212, 255'}, 0.06)`;
+      ctx.fillRect(0, glitchY, W, glitchH);
+
+      // RGB split hint
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.015)';
+      ctx.fillRect(glitchOffset, glitchY - 1, W, glitchH);
+      ctx.fillStyle = 'rgba(0, 255, 255, 0.015)';
+      ctx.fillRect(-glitchOffset, glitchY + 1, W, glitchH);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    }
+
+    // Occasional full-screen flash
+    if (Math.random() > 0.998) {
+      ctx.fillStyle = 'rgba(255, 0, 255, 0.02)';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Small glitch blocks
+    if (Math.random() > 0.96) {
+      const bx = Math.random() * W;
+      const by = Math.random() * H;
+      const bw = 5 + Math.random() * 30;
+      const bh = 2 + Math.random() * 8;
+      ctx.fillStyle = `rgba(${Math.random() > 0.5 ? '180, 60, 220' : '0, 180, 220'}, ${0.02 + Math.random() * 0.04})`;
+      ctx.fillRect(bx, by, bw, bh);
+    }
+  }
+
+  // ========================================
+  //  DRAWING: HUD OVERLAY
+  // ========================================
+  function drawHUD() {
+    ctx.save();
+
+    // Top-left classification stamp
+    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.textAlign = 'left';
+    const stampFlicker = Math.random() > 0.96 ? 0.3 : 0.7;
+    ctx.fillStyle = `rgba(255, 0, 0, ${stampFlicker})`;
+    ctx.fillText('CLASSIFIED // EYES ONLY', 20, 30);
+
+    ctx.font = '7px "Press Start 2P", monospace';
+    ctx.fillStyle = 'rgba(0, 212, 255, 0.5)';
+    ctx.fillText('COMPOUND SIGMA-7 // 68.4N 87.2E', 20, 48);
+    ctx.fillStyle = 'rgba(255, 0, 255, 0.4)';
+    ctx.fillText('SIBERIAN ARCTIC SECTOR', 20, 62);
+    ctx.fillStyle = 'rgba(100, 80, 160, 0.35)';
+    ctx.fillText('TOP-DOWN TACTICAL OVERLAY', 20, 76);
+
+    // Timestamp
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(0, 212, 255, 0.4)';
+    const d = new Date();
+    const ts = d.toISOString().replace('T', ' // ').slice(0, 22);
+    ctx.fillText(ts, W - 20, 30);
+
+    // Temperature / environment data
+    ctx.fillStyle = 'rgba(200, 210, 240, 0.4)';
+    ctx.fillText('-47C // WIND: 35KPH NNW', W - 20, 48);
+    ctx.fillStyle = 'rgba(200, 210, 240, 0.3)';
+    ctx.fillText('VISIBILITY: 200M // BLIZZARD', W - 20, 62);
+
+    // Zoom level
+    ctx.fillStyle = 'rgba(0, 212, 255, 0.3)';
+    ctx.fillText(`ZOOM: ${(camZoom * 100).toFixed(0)}%`, W - 20, 76);
+
+    // Bottom text
+    ctx.textAlign = 'center';
+    ctx.font = '6px "Press Start 2P", monospace';
+    ctx.fillStyle = 'rgba(255, 0, 255, 0.3)';
+    ctx.fillText('PROJECT DARKWAVE // THREAT LEVEL: OMEGA', W / 2, H - 30);
+
+    const blink = Math.sin(time * 0.06) > 0;
+    if (blink) {
+      ctx.fillStyle = 'rgba(255, 51, 0, 0.5)';
+      ctx.fillText('[ MECH ASSEMBLY: 78% COMPLETE ]', W / 2, H - 16);
+    }
+
+    // Side data readouts
+    drawSideReadouts();
+
+    // Border frame
+    ctx.strokeStyle = 'rgba(255, 0, 255, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(10, 10, W - 20, H - 20);
+
+    // Corner brackets
+    const bLen = 30;
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.25)';
+    ctx.lineWidth = 2;
+    // TL
+    ctx.beginPath(); ctx.moveTo(10, 10 + bLen); ctx.lineTo(10, 10); ctx.lineTo(10 + bLen, 10); ctx.stroke();
+    // TR
+    ctx.beginPath(); ctx.moveTo(W - 10, 10 + bLen); ctx.lineTo(W - 10, 10); ctx.lineTo(W - 10 - bLen, 10); ctx.stroke();
+    // BL
+    ctx.beginPath(); ctx.moveTo(10, H - 10 - bLen); ctx.lineTo(10, H - 10); ctx.lineTo(10 + bLen, H - 10); ctx.stroke();
+    // BR
+    ctx.beginPath(); ctx.moveTo(W - 10, H - 10 - bLen); ctx.lineTo(W - 10, H - 10); ctx.lineTo(W - 10 - bLen, H - 10); ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ========================================
+  //  DRAWING: SIDE DATA READOUTS
+  // ========================================
+  function drawSideReadouts() {
+    // Left side - system status
+    const leftX = 20;
+    let leftY = H * 0.35;
+    ctx.font = '6px "Press Start 2P", monospace';
+    ctx.textAlign = 'left';
+
+    const statuses = [
+      { label: 'PERIMETER', value: 'ELECTRIFIED', color: '0, 255, 100' },
+      { label: 'SEISMIC', value: formatSeismic(), color: '255, 170, 0' },
+      { label: 'COMMS', value: 'ENCRYPTED', color: '0, 212, 255' },
+      { label: 'REACTOR', value: 'NOMINAL', color: '0, 255, 136' },
+      { label: 'HATCH', value: 'SEALED', color: '255, 60, 0' },
+      { label: 'MECH SIG', value: 'DETECTED', color: '255, 0, 0' },
+    ];
+
+    for (const st of statuses) {
+      const flicker = Math.random() > 0.95 ? 0.3 : 0.7;
+      ctx.fillStyle = `rgba(${st.color}, ${0.3 * flicker})`;
+      ctx.fillText(`${st.label}: `, leftX, leftY);
+      const labelWidth = ctx.measureText(`${st.label}: `).width;
+      ctx.fillStyle = `rgba(${st.color}, ${0.5 * flicker})`;
+      ctx.fillText(st.value, leftX + labelWidth, leftY);
+      leftY += 16;
+    }
+
+    // Right side - mini waveform
+    const rightX = W - 130;
+    const waveY = H * 0.35;
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < 100; i++) {
+      const x = rightX + i;
+      const y = waveY + Math.sin((i + time) * 0.15) * 8 + Math.sin((i + time * 0.7) * 0.08) * 4;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Waveform label
+    ctx.font = '5px "Press Start 2P", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
+    ctx.fillText('SEISMIC FEED', W - 20, waveY - 12);
+
+    // Below waveform - thermal readout bar
+    const barY = waveY + 25;
+    ctx.fillStyle = 'rgba(40, 30, 60, 0.4)';
+    ctx.fillRect(rightX, barY, 100, 6);
+    const thermalLevel = 0.4 + Math.sin(time * 0.015) * 0.15;
+    const thermalGrad = ctx.createLinearGradient(rightX, barY, rightX + 100, barY);
+    thermalGrad.addColorStop(0, 'rgba(0, 100, 255, 0.5)');
+    thermalGrad.addColorStop(0.5, 'rgba(255, 170, 0, 0.5)');
+    thermalGrad.addColorStop(1, 'rgba(255, 0, 0, 0.5)');
+    ctx.fillStyle = thermalGrad;
+    ctx.fillRect(rightX, barY, 100 * thermalLevel, 6);
+    ctx.fillStyle = 'rgba(255, 170, 0, 0.3)';
+    ctx.fillText('THERMAL', W - 20, barY - 3);
+
+    // Binary/hex data stream on bottom left
+    if (time % 5 === 0) {
+      // This creates the impression of streaming data
+    }
+    ctx.font = '5px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(100, 60, 160, 0.2)';
+    for (let i = 0; i < 4; i++) {
+      let hex = '';
+      rngState = Math.floor(time / 3) * 7 + i * 31;
+      for (let j = 0; j < 16; j++) {
+        hex += '0123456789ABCDEF'[Math.floor(seededRandom() * 16)];
+        if (j % 4 === 3 && j < 15) hex += ' ';
+      }
+      ctx.fillText(hex, 20, H - 60 + i * 8);
+    }
+  }
+
+  function formatSeismic() {
+    const val = (2.1 + Math.sin(time * 0.02) * 0.8).toFixed(1);
+    return `${val} Hz`;
+  }
+
+  // ========================================
+  //  DRAWING: SCAN LINE EFFECT (animated)
+  // ========================================
+  function drawScanLine() {
+    // Vertical scan line sweeping across the view
+    const scanX = (time * 1.5) % (W + 200) - 100;
+    const scanGrad = ctx.createLinearGradient(scanX - 40, 0, scanX + 40, 0);
+    scanGrad.addColorStop(0, 'transparent');
+    scanGrad.addColorStop(0.4, 'rgba(0, 212, 255, 0.03)');
+    scanGrad.addColorStop(0.5, 'rgba(0, 212, 255, 0.06)');
+    scanGrad.addColorStop(0.6, 'rgba(0, 212, 255, 0.03)');
+    scanGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = scanGrad;
+    ctx.fillRect(scanX - 40, 0, 80, H);
+
+    // Horizontal scan line (slower)
+    const scanY = (time * 0.8) % (H + 200) - 100;
+    const hScanGrad = ctx.createLinearGradient(0, scanY - 30, 0, scanY + 30);
+    hScanGrad.addColorStop(0, 'transparent');
+    hScanGrad.addColorStop(0.4, 'rgba(255, 0, 255, 0.02)');
+    hScanGrad.addColorStop(0.5, 'rgba(255, 0, 255, 0.04)');
+    hScanGrad.addColorStop(0.6, 'rgba(255, 0, 255, 0.02)');
+    hScanGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = hScanGrad;
+    ctx.fillRect(0, scanY - 30, W, 60);
+  }
+
+  // ========================================
+  //  DRAWING: BACKGROUND
+  // ========================================
+  function drawBackground() {
+    // Deep dark base
+    const bgGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+    bgGrad.addColorStop(0, '#0a0818');
+    bgGrad.addColorStop(0.5, '#060510');
+    bgGrad.addColorStop(1, '#020208');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ========================================
+  //  MAIN RENDER LOOP
+  // ========================================
+  function render() {
+    time++;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Background
+    drawBackground();
+
+    // Holographic grid terrain
+    drawHolographicGrid();
+
+    // Subtle terrain texture
+    if (camZoom > 0.6) {
+      drawTerrainNoise();
+    }
+
+    // Connections and paths (below buildings)
+    drawPaths();
+    drawConnections();
+
+    // Compound structures
+    drawFence();
+    drawGuardTowers();
+    drawSupportStructures();
+    drawResearchBuilding();
+    drawMainBuilding();
+
+    // The Hatch (most prominent feature)
+    drawHatch();
+    drawMechThermalSignature();
+
+    // Floating data fragments in world space
+    drawDataFragments();
+
+    // Screen-space effects
+    drawDataParticles();
+    drawScanLine();
+    drawGlitchEffects();
+
+    // HUD (always on top, screen space)
+    drawHUD();
+
+    requestAnimationFrame(render);
+  }
+
+  // ========================================
+  //  EVENT LISTENERS
+  // ========================================
+  window.addEventListener('resize', resize);
+
+  // Mouse drag to pan
+  canvas.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    dragCamStartX = camX;
+    dragCamStartY = camY;
+    canvas.style.cursor = 'grabbing';
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    camX = dragCamStartX - dx / camZoom;
+    camY = dragCamStartY - dy / camZoom;
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+    canvas.style.cursor = 'crosshair';
+  });
+
+  // Scroll to zoom
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.92 : 1.08;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camZoom * zoomFactor));
+
+    // Zoom toward cursor position
+    const mouseWorld = screenToWorld(e.clientX, e.clientY);
+    camZoom = newZoom;
+    const newMouseWorld = screenToWorld(e.clientX, e.clientY);
+    camX -= newMouseWorld.x - mouseWorld.x;
+    camY -= newMouseWorld.y - mouseWorld.y;
+  }, { passive: false });
+
+  // Touch support for pan
+  let touchStartX = 0, touchStartY = 0, touchCamStartX = 0, touchCamStartY = 0;
+  let lastPinchDist = 0;
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchCamStartX = camX;
+      touchCamStartY = camY;
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      lastPinchDist = Math.sqrt(dx * dx + dy * dy);
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 1 && isDragging) {
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      camX = touchCamStartX - dx / camZoom;
+      camY = touchCamStartY - dy / camZoom;
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (lastPinchDist > 0) {
+        const scale = dist / lastPinchDist;
+        camZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camZoom * scale));
+      }
+      lastPinchDist = dist;
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', () => {
+    isDragging = false;
+    lastPinchDist = 0;
+  });
+
+  // ========================================
+  //  INIT
+  // ========================================
+  function init() {
+    resize();
+    initDataParticles();
+    initDataFragments();
+
+    // Hide loading screen after font loads
+    document.fonts.ready.then(() => {
+      setTimeout(() => {
+        document.getElementById('loading').classList.add('hidden');
+        render();
+      }, 800);
+    });
+
+    // Fallback if fonts take too long
+    setTimeout(() => {
+      document.getElementById('loading').classList.add('hidden');
+      if (time === 0) render();
+    }, 3000);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

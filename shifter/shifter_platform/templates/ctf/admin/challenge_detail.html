@@ -261,6 +261,129 @@
             {% endif %}
         </div>
 
+        <!-- Files -->
+        <div class="card">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                Files
+                {% if event.is_content_modifiable %}
+                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('upload-file-form').style.display = document.getElementById('upload-file-form').style.display === 'none' ? 'block' : 'none'">
+                    Upload File
+                </button>
+                {% endif %}
+            </div>
+            {% if challenge_files %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Size</th>
+                        <th>Type</th>
+                        {% if event.is_content_modifiable %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for file in challenge_files %}
+                    <tr>
+                        <td>
+                            <a href="#" onclick="downloadFile('{% url 'ctf:api_file_download' file_id=file.pk %}'); return false;">{{ file.display }}</a>
+                        </td>
+                        <td>{{ file.file_size_display }}</td>
+                        <td>{{ file.content_type }}</td>
+                        {% if event.is_content_modifiable %}
+                        <td>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="removeFile('{{ file.pk }}')">Remove</button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-message">
+                No files attached.
+            </div>
+            {% endif %}
+
+            {% if event.is_content_modifiable %}
+            <div id="upload-file-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
+                <form method="post" enctype="multipart/form-data" action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
+                    {% csrf_token %}
+                    <div style="margin-bottom: 8px;">
+                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">File</label>
+                        <input type="file" name="file" class="form-control" required>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Display Name (optional)</label>
+                        <input type="text" name="display_name" class="form-control" placeholder="Friendly name for download">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Upload</button>
+                    <span class="text-muted text-small" style="margin-left: 8px;">Max 50 MB</span>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Prerequisites -->
+        <div class="card">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                Prerequisites
+                {% if event.is_content_modifiable %}
+                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('add-prereq-form').style.display = document.getElementById('add-prereq-form').style.display === 'none' ? 'block' : 'none'">
+                    Add Prerequisite
+                </button>
+                {% endif %}
+            </div>
+            {% if prerequisites %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Required Challenge</th>
+                        <th>Category</th>
+                        <th>Points</th>
+                        {% if event.is_content_modifiable %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for prereq in prerequisites %}
+                    <tr>
+                        <td>{{ prereq.required_challenge.name }}</td>
+                        <td><span class="badge badge-category">{{ prereq.required_challenge.category|title }}</span></td>
+                        <td>{{ prereq.required_challenge.points }}</td>
+                        {% if event.is_content_modifiable %}
+                        <td>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="removePrerequisite('{{ prereq.pk }}')">Remove</button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-message">
+                No prerequisites. This challenge is available immediately.
+            </div>
+            {% endif %}
+
+            {% if event.is_content_modifiable %}
+            <div id="add-prereq-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
+                <div style="margin-bottom: 8px;">
+                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Required Challenge</label>
+                    <select id="prereq-challenge-select" class="form-control">
+                        <option value="">Select a challenge...</option>
+                        {% for ch in other_challenges %}
+                        <option value="{{ ch.pk }}">{{ ch.name }} ({{ ch.category|title }}, {{ ch.points }} pts)</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="button" class="btn btn-primary" onclick="addPrerequisite()">Add</button>
+            </div>
+            {% endif %}
+        </div>
+
         <!-- Recent Submissions -->
         <div class="card">
             <div class="card-title">Recent Submissions</div>
@@ -368,6 +491,17 @@
         </div>
     </div>
 </div>
+<script>
+function downloadFile(apiUrl) {
+    fetch(apiUrl, {headers: {'X-CSRFToken': '{{ csrf_token }}'}})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.url) { window.location.href = data.url; }
+            else if (data.error) { alert(data.error); }
+        })
+        .catch(function() { alert('Download failed.'); });
+}
+</script>
 {% if event.is_content_modifiable %}
 <script>
 function addFlag() {
@@ -387,6 +521,43 @@ const REMOVE_FLAG_URL = "{% url 'ctf:api_remove_flag' flag_id='00000000-0000-000
 function removeFlag(flagId) {
     if (!confirm('Remove this flag?')) return;
     const url = REMOVE_FLAG_URL.replace('00000000-0000-0000-0000-000000000000', flagId);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    }).then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+
+const REMOVE_FILE_URL = "{% url 'ctf:api_challenge_file_delete' file_id='00000000-0000-0000-0000-000000000000' %}";
+function removeFile(fileId) {
+    if (!confirm('Remove this file?')) return;
+    const url = REMOVE_FILE_URL.replace('00000000-0000-0000-0000-000000000000', fileId);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    }).then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+
+function addPrerequisite() {
+    const select = document.getElementById('prereq-challenge-select');
+    const challengeId = select.value;
+    if (!challengeId) { alert('Select a challenge'); return; }
+    fetch("{% url 'ctf:api_challenge_prerequisites' challenge_id=challenge.pk %}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({required_challenge_id: challengeId})
+    }).then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+
+const REMOVE_PREREQ_URL = "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
+function removePrerequisite(prereqId) {
+    if (!confirm('Remove this prerequisite?')) return;
+    const url = REMOVE_PREREQ_URL.replace('00000000-0000-0000-0000-000000000000', prereqId);
     fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},

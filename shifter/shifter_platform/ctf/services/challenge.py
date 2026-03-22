@@ -9,14 +9,16 @@ import hashlib
 import logging
 import re
 import secrets
+from collections import deque
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.db import transaction
 from django.db.models import QuerySet
+from django.utils import timezone
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFEvent, CTFFlag
+from ctf.models import CTFChallenge, CTFChallengePrerequisite, CTFEvent, CTFFlag
 
 if TYPE_CHECKING:
     pass
@@ -527,7 +529,10 @@ def delete_challenge(challenge_id: UUID) -> None:
             },
         )
 
-    challenge.delete(soft=True)
+    with transaction.atomic():
+        # Soft-delete prerequisite links where this challenge is required
+        CTFChallengePrerequisite.objects.filter(required_challenge=challenge).update(deleted_at=timezone.now())
+        challenge.delete(soft=True)
     logger.info("Deleted challenge %s", challenge_id)
 
 
@@ -552,24 +557,49 @@ def get_challenge(challenge_id: UUID) -> CTFChallenge:
         ) from None
 
 
-def get_available_challenges(event_id: UUID, include_unreleased: bool = False) -> QuerySet[CTFChallenge]:
+def get_available_challenges(
+    event_id: UUID,
+    include_unreleased: bool = False,
+    participant_id: UUID | None = None,
+) -> QuerySet[CTFChallenge]:
     """Get challenges available for an event.
 
     Args:
         event_id: UUID of the event.
         include_unreleased: If True, include challenges with future release times.
+        participant_id: If provided, exclude challenges with unmet prerequisites.
 
     Returns:
         QuerySet of CTFChallenge instances.
     """
     from django.db.models import Q
-    from django.utils import timezone
 
     qs = CTFChallenge.objects.filter(event_id=event_id)
 
     if not include_unreleased:
         now = timezone.now()
         qs = qs.filter(Q(release_time__isnull=True) | Q(release_time__lte=now))
+
+    if participant_id is not None:
+        from ctf.models import CTFSubmission
+
+        solved_ids = set(
+            CTFSubmission.objects.filter(
+                participant_id=participant_id,
+                is_correct=True,
+            ).values_list("challenge_id", flat=True)
+        )
+        # Exclude challenges that have active prerequisites not yet solved
+        challenges_with_unmet = set()
+        prereqs = CTFChallengePrerequisite.objects.filter(
+            challenge__event_id=event_id,
+        ).values_list("challenge_id", "required_challenge_id")
+        for challenge_id, required_id in prereqs:
+            if required_id not in solved_ids:
+                challenges_with_unmet.add(challenge_id)
+
+        if challenges_with_unmet:
+            qs = qs.exclude(id__in=challenges_with_unmet)
 
     return qs.order_by("category", "order", "name")
 
@@ -584,3 +614,219 @@ def list_challenges_for_event(event_id: UUID) -> QuerySet[CTFChallenge]:
         QuerySet of CTFChallenge instances.
     """
     return CTFChallenge.objects.filter(event_id=event_id).order_by("category", "order", "name")
+
+
+# -----------------------------------------------------------------------------
+# Prerequisite Operations
+# -----------------------------------------------------------------------------
+
+
+def add_prerequisite(challenge_id: UUID, required_challenge_id: UUID) -> CTFChallengePrerequisite:
+    """Add a prerequisite to a challenge.
+
+    Args:
+        challenge_id: UUID of the dependent challenge.
+        required_challenge_id: UUID of the required challenge.
+
+    Returns:
+        The created CTFChallengePrerequisite instance.
+
+    Raises:
+        CTFNotFoundError: If either challenge doesn't exist.
+        CTFStateError: If event is not content-modifiable.
+        CTFValidationError: If prerequisite is invalid (self-ref, different event, circular).
+    """
+    try:
+        challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
+    except CTFChallenge.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Challenge {challenge_id} not found",
+            details={"challenge_id": str(challenge_id)},
+        ) from None
+
+    try:
+        required = CTFChallenge.objects.select_related("event").get(pk=required_challenge_id)
+    except CTFChallenge.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Required challenge {required_challenge_id} not found",
+            details={"required_challenge_id": str(required_challenge_id)},
+        ) from None
+
+    if not challenge.event.is_content_modifiable:
+        raise CTFStateError(
+            f"Cannot modify challenge in event with status {challenge.event.status}",
+            details={"challenge_id": str(challenge_id), "event_status": challenge.event.status},
+        )
+
+    # Validate same event
+    if challenge.event_id != required.event_id:
+        raise CTFValidationError(
+            "Prerequisites must be in the same event",
+            details={
+                "challenge_event": str(challenge.event_id),
+                "required_event": str(required.event_id),
+            },
+        )
+
+    # Self-reference
+    if challenge_id == required_challenge_id:
+        raise CTFValidationError(
+            "A challenge cannot be a prerequisite of itself",
+            details={"challenge_id": str(challenge_id)},
+        )
+
+    # Check duplicate
+    if CTFChallengePrerequisite.objects.filter(
+        challenge=challenge,
+        required_challenge=required,
+    ).exists():
+        raise CTFValidationError(
+            "This prerequisite already exists",
+            details={
+                "challenge_id": str(challenge_id),
+                "required_challenge_id": str(required_challenge_id),
+            },
+        )
+
+    # Circular dependency check (BFS)
+    if _would_create_cycle(challenge_id, required_challenge_id):
+        raise CTFValidationError(
+            "Adding this prerequisite would create a circular dependency",
+            details={
+                "challenge_id": str(challenge_id),
+                "required_challenge_id": str(required_challenge_id),
+            },
+        )
+
+    prereq = CTFChallengePrerequisite.objects.create(
+        challenge=challenge,
+        required_challenge=required,
+    )
+
+    logger.info(
+        "Added prerequisite: %s requires %s",
+        challenge_id,
+        required_challenge_id,
+    )
+    return prereq
+
+
+def _would_create_cycle(challenge_id: UUID, required_challenge_id: UUID) -> bool:
+    """Check if adding challenge_id -> required_challenge_id would create a cycle.
+
+    We check if required_challenge_id can reach challenge_id through existing
+    prerequisite links. If so, adding this edge creates a cycle.
+
+    Args:
+        challenge_id: The dependent challenge.
+        required_challenge_id: The proposed required challenge.
+
+    Returns:
+        True if adding this prerequisite would create a cycle.
+    """
+    # BFS from required_challenge_id following prerequisites
+    # If we can reach challenge_id, there's a cycle
+    visited: set[UUID] = set()
+    queue: deque[UUID] = deque([required_challenge_id])
+
+    while queue:
+        current = queue.popleft()
+        if current == challenge_id:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+
+        # Get all challenges that 'current' requires
+        prereq_ids = CTFChallengePrerequisite.objects.filter(
+            challenge_id=current,
+        ).values_list("required_challenge_id", flat=True)
+        queue.extend(prereq_ids)
+
+    return False
+
+
+def remove_prerequisite(prerequisite_id: UUID) -> None:
+    """Remove a prerequisite.
+
+    Args:
+        prerequisite_id: UUID of the prerequisite to remove.
+
+    Raises:
+        CTFNotFoundError: If prerequisite doesn't exist.
+        CTFStateError: If event is not content-modifiable.
+    """
+    try:
+        prereq = CTFChallengePrerequisite.objects.select_related("challenge__event").get(pk=prerequisite_id)
+    except CTFChallengePrerequisite.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Prerequisite {prerequisite_id} not found",
+            details={"prerequisite_id": str(prerequisite_id)},
+        ) from None
+
+    if not prereq.challenge.event.is_content_modifiable:
+        raise CTFStateError(
+            f"Cannot modify challenge in event with status {prereq.challenge.event.status}",
+            details={"prerequisite_id": str(prerequisite_id), "event_status": prereq.challenge.event.status},
+        )
+
+    prereq.delete(soft=True)
+    logger.info("Removed prerequisite %s", prerequisite_id)
+
+
+def get_prerequisites(challenge_id: UUID) -> QuerySet[CTFChallengePrerequisite]:
+    """Get prerequisites for a challenge.
+
+    Args:
+        challenge_id: UUID of the challenge.
+
+    Returns:
+        QuerySet of CTFChallengePrerequisite instances.
+    """
+    return CTFChallengePrerequisite.objects.filter(
+        challenge_id=challenge_id,
+    ).select_related("required_challenge")
+
+
+def get_dependents(challenge_id: UUID) -> QuerySet[CTFChallengePrerequisite]:
+    """Get challenges that depend on this challenge.
+
+    Args:
+        challenge_id: UUID of the required challenge.
+
+    Returns:
+        QuerySet of CTFChallengePrerequisite instances.
+    """
+    return CTFChallengePrerequisite.objects.filter(
+        required_challenge_id=challenge_id,
+    ).select_related("challenge")
+
+
+def check_prerequisites_met(challenge_id: UUID, participant_id: UUID) -> tuple[bool, list[CTFChallenge]]:
+    """Check if a participant has met all prerequisites for a challenge.
+
+    Args:
+        challenge_id: UUID of the challenge.
+        participant_id: UUID of the participant.
+
+    Returns:
+        Tuple of (all_met, list of unmet required challenges).
+    """
+    from ctf.models import CTFSubmission
+
+    prereqs = CTFChallengePrerequisite.objects.filter(
+        challenge_id=challenge_id,
+    ).select_related("required_challenge")
+
+    if not prereqs.exists():
+        return True, []
+
+    solved_ids = set(
+        CTFSubmission.objects.filter(
+            participant_id=participant_id,
+            is_correct=True,
+        ).values_list("challenge_id", flat=True)
+    )
+
+    unmet = [p.required_challenge for p in prereqs if p.required_challenge_id not in solved_ids]
+    return len(unmet) == 0, unmet

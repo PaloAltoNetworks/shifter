@@ -1,6 +1,6 @@
-"""Instance component tests for Shifter Engine.
+"""Instance utilities tests for Shifter Engine.
 
-Unit tests for instance component utilities:
+Unit tests for instance utilities:
 - SSH keypair generation (RSA 4096)
 - S3 path validation for shell injection prevention
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Import the real functions and classes we're testing
+# Import the real functions we're testing
 from components.instance import validate_s3_path
 from utils.crypto import generate_ssh_keypair
 
@@ -132,13 +132,3 @@ class TestValidateS3Path:
     def test_valid_nested_path(self):
         """Deeply nested path should be valid."""
         assert validate_s3_path("a/b/c/d/e/file.tar.gz") is True
-
-
-class TestCleanupVerification:
-    """Tests to verify cleanup of orphaned code."""
-
-    def test_no_orphaned_generate_secure_password_method(self):
-        """_generate_secure_password should not exist - DC uses env password."""
-        from components.instance import InstanceComponent
-
-        assert not hasattr(InstanceComponent, "_generate_secure_password")

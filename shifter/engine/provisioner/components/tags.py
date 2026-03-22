@@ -14,7 +14,7 @@ Tagging Standard:
     - shifter:user_id - always
     - shifter:environment - always
     - shifter:system - always ("shifter")
-    - ManagedBy - always ("pulumi")
+    - ManagedBy - always ("terraform")
 
     Plus component-specific tags:
     - NetworkComponent: shifter:subnet_uuid, shifter:subnet_name
@@ -117,7 +117,7 @@ def build_common_tags(
         "shifter:environment": environment,
         "shifter:request_uuid": request_uuid,
         "shifter:system": "shifter",
-        "ManagedBy": "pulumi",
+        "ManagedBy": "terraform",
     }
 
     # Add optional range_id

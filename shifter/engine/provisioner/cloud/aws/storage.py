@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 import logging
-import os
-from typing import Any
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from cloud.aws.base import BaseAWSAdapter
 from cloud.exceptions import CloudStorageError
 
 logger = logging.getLogger(__name__)
 
 
-class AWSObjectStorage:
+class AWSObjectStorage(BaseAWSAdapter):
     """S3 implementation of ObjectStorage protocol for provisioner."""
 
-    def _get_client(self) -> Any:
-        region: str = os.environ.get("AWS_REGION", "us-east-2")
-        endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL") or None
-        return boto3.client("s3", region_name=region, endpoint_url=endpoint_url)
+    _service_name = "s3"
 
     def generate_presigned_download_url(
         self,

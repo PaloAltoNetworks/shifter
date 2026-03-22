@@ -11,17 +11,14 @@ import subprocess
 import tempfile
 import time
 
-from executors.base import CommandResult
+from executors.base import CommandResult, ExecutorError, ExecutorTimeoutError
 
 logger = logging.getLogger(__name__)
 
 
-class NGFWExecutorError(Exception):
-    """Base exception for NGFW executor errors."""
-
-
-class NGFWTimeoutError(NGFWExecutorError):
-    """Raised when an operation times out."""
+# Backward-compatible aliases for shared exception types
+NGFWExecutorError = ExecutorError
+NGFWTimeoutError = ExecutorTimeoutError
 
 
 class NGFWConnectionError(NGFWExecutorError):
@@ -51,13 +48,12 @@ class NGFWExecutor:
         self._port = port
         self._poll_interval = poll_interval_seconds
 
-        # Write PEM key to temp file with correct permissions
+        # Write PEM key to temp file — mkstemp creates with 0o600 (owner-only r/w)
         fd, self._key_path = tempfile.mkstemp(prefix="ngfw_key_", suffix=".pem")
         try:
             os.write(fd, private_key.encode())
         finally:
             os.close(fd)
-        os.chmod(self._key_path, 0o600)
 
     def close(self):
         """Remove temp key file."""
@@ -70,6 +66,10 @@ class NGFWExecutor:
     def __exit__(self, *args):
         self.close()
 
+    def __del__(self):
+        """Fallback cleanup if close() was not called."""
+        self.close()
+
     def _build_ssh_args(self, host: str) -> list[str]:
         """Build the ssh command arguments."""
         return [
@@ -79,7 +79,7 @@ class NGFWExecutor:
             "-p",
             str(self._port),
             "-o",
-            "StrictHostKeyChecking=no",
+            "StrictHostKeyChecking=no",  # NOSONAR — freshly provisioned VMs in isolated VPC
             "-o",
             "UserKnownHostsFile=/dev/null",
             "-o",
@@ -129,7 +129,7 @@ class NGFWExecutor:
         logger.info("Piping command to %s: %s", host, command_input[:100])
 
         try:
-            result = subprocess.run(  # noqa: S603 — trusted ssh binary with controlled args
+            result = subprocess.run(  # noqa: S603  # NOSONAR — trusted ssh binary with controlled args
                 ssh_args,
                 input=command_input.encode(),
                 capture_output=True,

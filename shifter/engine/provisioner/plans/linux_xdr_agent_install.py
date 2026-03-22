@@ -21,7 +21,7 @@ DOWNLOAD_XDR_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 presigned_url="{{ agent_presigned_url }}"
-installer_path="/tmp/agent-installer"
+installer_path="$(mktemp /tmp/agent-installer.XXXXXX)"
 
 echo "Downloading XDR agent installer..."
 
@@ -31,6 +31,8 @@ curl -sSf -o "$installer_path" "$presigned_url"
 if [ -f "$installer_path" ]; then
     file_size=$(stat -c%s "$installer_path" 2>/dev/null || stat -f%z "$installer_path")
     echo "Download complete: $installer_path ($file_size bytes)"
+    # Store path for install step
+    echo "$installer_path" > /tmp/.xdr_installer_path
 else
     echo "ERROR: Failed to download installer"
     exit 1
@@ -44,8 +46,14 @@ exit 0
 INSTALL_XDR_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
-installer_path="/tmp/agent-installer"
-extract_dir="/tmp/agent-extract"
+# Read installer path from download step, fall back to legacy path
+if [ -f /tmp/.xdr_installer_path ]; then
+    installer_path="$(cat /tmp/.xdr_installer_path)"
+    rm -f /tmp/.xdr_installer_path
+else
+    installer_path="/tmp/agent-installer"
+fi
+extract_dir="$(mktemp -d /tmp/agent-extract.XXXXXX)"
 
 echo "Installing XDR agent..."
 

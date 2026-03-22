@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.31.0] - 2026-03-22
+
+### Added
+- **Provisioner**: `terraform_base.py` — shared Terraform runner helpers extracted from duplicate code in `terraform_runner.py` and `range_terraform_runner.py`
+- **Provisioner**: `cloud/aws/base.py` — `BaseAWSAdapter` base class with shared `_get_client()` for all AWS adapters
+- **Provisioner**: Shared executor exceptions (`ExecutorError`, `ExecutorCommandError`, `ExecutorTimeoutError`) in `executors/base.py`
+
+### Changed
+- **Provisioner**: `terraform_runner.py` and `range_terraform_runner.py` are now thin wrappers around `terraform_base.py`, eliminating ~550 lines of exact duplication
+- **Provisioner**: All 5 AWS adapters (`secrets`, `db_auth`, `config_store`, `event_bus`, `storage`) inherit `BaseAWSAdapter` instead of duplicating `_get_client()`
+- **Provisioner**: SSM, SSH, and NGFW executors use shared exception base classes from `executors/base.py` with backward-compatible aliases
+- **Provisioner**: `main.py` SQL query construction uses `psycopg.sql` module for safe identifier composition instead of f-string formatting
+- **Provisioner**: `linux_xdr_agent_install.py` bash scripts use `mktemp` for unpredictable temp file paths instead of hardcoded `/tmp` paths
+- **Provisioner**: NGFW executor temp key file cleanup improved with `__del__` fallback; removed redundant `os.chmod` (mkstemp already creates with 0o600)
+
+### Security
+- **Provisioner**: Added `# NOSONAR` annotations for reviewed security hotspots (subprocess calls, Paramiko AutoAddPolicy, SSH StrictHostKeyChecking, test credentials)
+
 ## [3.30.0] - 2026-03-21
 
 ### Added

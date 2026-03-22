@@ -277,23 +277,24 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
     logger.debug("update_range_status: range_id=%s status=%s kwargs=%s", range_id, status, list(kwargs.keys()))
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            updates = ["status = %s", "updated_at = NOW()"]
+            assignments = [
+                sql.SQL("{} = %s").format(sql.Identifier("status")),
+                sql.SQL("{} = NOW()").format(sql.Identifier("updated_at")),
+            ]
             values: list = [status]
 
             for key, value in kwargs.items():
                 if value is not None:
                     # Handle special SQL expressions
                     if value == "NOW()":
-                        updates.append(f"{key} = NOW()")
+                        assignments.append(sql.SQL("{} = NOW()").format(sql.Identifier(key)))
                     else:
-                        updates.append(f"{key} = %s")
+                        assignments.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
                         values.append(value)
 
             values.append(range_id)
-            # Security: Column names in 'updates' are from hardcoded kwargs keys in calling code,
-            # not user input. Values are parameterized via %s placeholders.
-            sql = f"UPDATE mission_control_range SET {', '.join(updates)} WHERE id = %s"  # nosec B608  # noqa: S608
-            cur.execute(sql, values)
+            query = sql.SQL("UPDATE mission_control_range SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments))
+            cur.execute(query, values)
         conn.commit()
 
 

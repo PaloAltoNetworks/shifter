@@ -173,37 +173,37 @@ output "redis_port" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner
+# Engine Provisioner
 # ------------------------------------------------------------------------------
 
-output "pulumi_ecs_cluster_arn" {
-  description = "ARN of the Pulumi provisioner ECS cluster"
-  value       = module.pulumi_provisioner.ecs_cluster_arn
+output "engine_ecs_cluster_arn" {
+  description = "ARN of the engine provisioner ECS cluster"
+  value       = module.engine_provisioner.ecs_cluster_arn
 }
 
-output "pulumi_task_definition_arn" {
-  description = "ARN of the Pulumi provisioner ECS task definition"
-  value       = module.pulumi_provisioner.task_definition_arn
+output "engine_task_definition_arn" {
+  description = "ARN of the engine provisioner ECS task definition"
+  value       = module.engine_provisioner.task_definition_arn
 }
 
-output "pulumi_ecs_security_group_id" {
-  description = "ID of the Pulumi provisioner ECS security group"
-  value       = module.pulumi_provisioner.ecs_security_group_id
+output "engine_ecs_security_group_id" {
+  description = "ID of the engine provisioner ECS security group"
+  value       = module.engine_provisioner.ecs_security_group_id
 }
 
-output "pulumi_private_subnet_ids" {
-  description = "Private subnet IDs for Pulumi provisioner ECS tasks"
-  value       = module.pulumi_provisioner.private_subnet_ids
+output "engine_private_subnet_ids" {
+  description = "Private subnet IDs for engine provisioner ECS tasks"
+  value       = module.engine_provisioner.private_subnet_ids
 }
 
-output "pulumi_ecs_execution_role_arn" {
-  description = "ARN of the Pulumi provisioner ECS execution role"
-  value       = module.pulumi_provisioner.ecs_execution_role_arn
+output "engine_ecs_execution_role_arn" {
+  description = "ARN of the engine provisioner ECS execution role"
+  value       = module.engine_provisioner.ecs_execution_role_arn
 }
 
-output "pulumi_ecs_task_role_arn" {
-  description = "ARN of the Pulumi provisioner ECS task role"
-  value       = module.pulumi_provisioner.ecs_task_role_arn
+output "engine_ecs_task_role_arn" {
+  description = "ARN of the engine provisioner ECS task role"
+  value       = module.engine_provisioner.ecs_task_role_arn
 }
 
 # ------------------------------------------------------------------------------

@@ -11,13 +11,13 @@ module "portal_ecr" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner ECR Repository
+# Engine Provisioner ECR Repository
 # ------------------------------------------------------------------------------
 
-module "pulumi_provisioner_ecr" {
+module "engine_provisioner_ecr" {
   source = "../../modules/ecr"
 
-  repository_name      = var.pulumi_provisioner_repository_name
+  repository_name      = var.engine_provisioner_repository_name
   image_tag_mutability = "MUTABLE"
   scan_on_push         = true
 
@@ -39,8 +39,13 @@ module "pulumi_provisioner_ecr" {
   })
 
   tags = {
-    Component = "pulumi-provisioner"
+    Component = "engine-provisioner"
   }
+}
+
+moved {
+  from = module.pulumi_provisioner_ecr
+  to   = module.engine_provisioner_ecr
 }
 
 # ------------------------------------------------------------------------------

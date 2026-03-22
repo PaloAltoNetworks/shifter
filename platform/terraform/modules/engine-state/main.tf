@@ -1,13 +1,13 @@
 # ------------------------------------------------------------------------------
-# Pulumi State Backend Infrastructure
+# Engine State Backend Infrastructure
 # ------------------------------------------------------------------------------
-# This module creates S3 bucket and DynamoDB table for Pulumi state management.
+# This module creates S3 bucket and DynamoDB table for engine state management.
 # S3 stores the state files, DynamoDB provides locking for concurrent operations.
 # ------------------------------------------------------------------------------
 
 locals {
   common_tags = merge(var.tags, {
-    Module = "pulumi-state"
+    Module = "engine-state"
   })
 }
 
@@ -15,7 +15,7 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 # ------------------------------------------------------------------------------
-# S3 Bucket for Pulumi State
+# S3 Bucket for Engine State
 # ------------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "pulumi_state" {
@@ -90,16 +90,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "pulumi_state" {
 }
 
 # ------------------------------------------------------------------------------
-# KMS Key for Pulumi Secrets Encryption
+# KMS Key for Engine Secrets Encryption
 # ------------------------------------------------------------------------------
-# Pulumi encrypts sensitive config values before storing in state.
+# Engine encrypts sensitive config values before storing in state.
 # Using a dedicated CMK provides:
 # - Defense in depth (secrets encrypted even if S3 leaks)
 # - CloudTrail audit trail for all encrypt/decrypt operations
 # - Least privilege access control via key policy
 
 resource "aws_kms_key" "pulumi_secrets" {
-  description             = "Encrypts Pulumi stack secrets"
+  description             = "Encrypts engine stack secrets"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
@@ -154,7 +154,7 @@ resource "aws_kms_alias" "pulumi_secrets" {
 }
 
 # ------------------------------------------------------------------------------
-# DynamoDB Table for Pulumi Locking
+# DynamoDB Table for Engine Locking
 # ------------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "pulumi_locks" {

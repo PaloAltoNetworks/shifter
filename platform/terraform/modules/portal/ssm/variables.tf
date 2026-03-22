@@ -95,26 +95,26 @@ variable "s3_bucket_name" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner Configuration
+# Engine Provisioner Configuration
 # ------------------------------------------------------------------------------
 
-variable "pulumi_ecs_cluster_arn" {
-  description = "ARN of ECS cluster for Pulumi provisioner"
+variable "engine_ecs_cluster_arn" {
+  description = "ARN of ECS cluster for engine provisioner"
   type        = string
 }
 
-variable "pulumi_task_definition_family" {
-  description = "ECS task definition family name for Pulumi provisioner"
+variable "engine_task_definition_family" {
+  description = "ECS task definition family name for engine provisioner"
   type        = string
 }
 
-variable "pulumi_ecs_security_group_id" {
-  description = "Security group ID for Pulumi ECS tasks"
+variable "engine_ecs_security_group_id" {
+  description = "Security group ID for engine ECS tasks"
   type        = string
 }
 
-variable "pulumi_private_subnet_ids" {
-  description = "Comma-separated list of private subnet IDs for Pulumi ECS"
+variable "engine_private_subnet_ids" {
+  description = "Comma-separated list of private subnet IDs for engine ECS"
   type        = string
 }
 

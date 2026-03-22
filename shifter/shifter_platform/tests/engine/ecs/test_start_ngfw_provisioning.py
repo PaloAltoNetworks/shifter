@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared.cloud.exceptions import CloudTaskError
 
@@ -98,8 +97,8 @@ class TestStartNgfwProvisioning:
         with pytest.raises(TypeError):
             start_ngfw_provisioning(request_id=None)
 
-    def test_raises_client_error_on_task_failure(self, settings):
-        """Raises ClientError when the ECS task runner fails."""
+    def test_raises_cloud_task_error_on_task_failure(self, settings):
+        """Raises CloudTaskError when the ECS task runner fails."""
         from engine.ecs import start_ngfw_provisioning
 
         settings.LOCAL_PROVISIONER = None
@@ -113,5 +112,5 @@ class TestStartNgfwProvisioning:
             mock_runner.run_task.side_effect = CloudTaskError("Task launch failed")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 start_ngfw_provisioning(request_id=TEST_REQUEST_ID)

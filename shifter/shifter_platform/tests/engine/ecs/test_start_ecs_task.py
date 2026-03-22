@@ -4,7 +4,6 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared.cloud.exceptions import CloudTaskError
 
@@ -16,7 +15,7 @@ class TestStartEcsTask:
     - Inputs: range_id (int), user_id (int), command (str)
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
     - Side effects: Calls TaskRunner.run_task via get_task_runner()
-    - Errors: Raises ClientError if ECS task fails to start
+    - Errors: Raises CloudTaskError if ECS task fails to start
     - Logging: WARNING when config incomplete, ERROR on failures, INFO on success
     """
 
@@ -291,8 +290,8 @@ class TestStartEcsTask:
     # Error handling
     # -------------------------------------------------------------------------
 
-    def test_raises_client_error_when_run_task_fails(self, settings):
-        """Function raises ClientError when TaskRunner.run_task fails."""
+    def test_raises_cloud_task_error_when_run_task_fails(self, settings):
+        """Function raises CloudTaskError when TaskRunner.run_task fails."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -306,11 +305,11 @@ class TestStartEcsTask:
             mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 _start_ecs_task(range_id=42, user_id=7, command="provision")
 
-    def test_raises_client_error_when_no_tasks_returned(self, settings):
-        """Function raises ClientError when adapter reports no tasks started."""
+    def test_raises_cloud_task_error_when_no_tasks_returned(self, settings):
+        """Function raises CloudTaskError when adapter reports no tasks started."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -324,7 +323,7 @@ class TestStartEcsTask:
             mock_runner.run_task.side_effect = CloudTaskError("No tasks started: ['RESOURCE:CPU']")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 _start_ecs_task(range_id=42, user_id=7, command="provision")
 
     def test_propagates_get_task_runner_error(self, settings):
@@ -411,7 +410,7 @@ class TestStartEcsTask:
         with (
             patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
-            pytest.raises(ClientError),
+            pytest.raises(CloudTaskError),
         ):
             mock_runner = MagicMock()
             mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
@@ -422,7 +421,7 @@ class TestStartEcsTask:
         assert "error" in caplog.text.lower() or "failed" in caplog.text.lower()
 
     def test_logs_error_when_no_tasks_returned(self, settings, caplog):
-        """Function logs ERROR when adapter reports no tasks started."""
+        """Function logs ERROR when adapter reports no tasks started (CloudTaskError)."""
         from engine.ecs import _start_ecs_task
 
         settings.AWS_REGION = "us-east-2"
@@ -434,7 +433,7 @@ class TestStartEcsTask:
         with (
             patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
-            pytest.raises(ClientError),
+            pytest.raises(CloudTaskError),
         ):
             mock_runner = MagicMock()
             mock_runner.run_task.side_effect = CloudTaskError("No tasks started: ['RESOURCE:CPU']")

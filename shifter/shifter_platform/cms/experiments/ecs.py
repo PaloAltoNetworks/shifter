@@ -36,25 +36,25 @@ def _get_ecs_config() -> tuple[str, str, str, list[str]] | None:
         Tuple of (cluster_arn, task_def_arn, security_group_id, subnet_ids)
         or None if configuration is incomplete.
     """
-    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", "")
     task_def_arn: str = getattr(settings, "EXPERIMENT_TASK_DEFINITION_ARN", "") or getattr(
-        settings, "PULUMI_TASK_DEFINITION_ARN", ""
+        settings, "ENGINE_TASK_DEFINITION_ARN", ""
     )
-    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
-    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", "")
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "")
 
     if not all([cluster_arn, task_def_arn, security_group_id, subnet_ids_str]):
         logger.warning(
             "ECS configuration incomplete for experiment tasks. "
-            "Required: PULUMI_ECS_CLUSTER_ARN, EXPERIMENT_TASK_DEFINITION_ARN "
-            "(or PULUMI_TASK_DEFINITION_ARN), PULUMI_ECS_SECURITY_GROUP_ID, "
-            "PULUMI_PRIVATE_SUBNET_IDS."
+            "Required: ENGINE_ECS_CLUSTER_ARN, EXPERIMENT_TASK_DEFINITION_ARN "
+            "(or ENGINE_TASK_DEFINITION_ARN), ENGINE_ECS_SECURITY_GROUP_ID, "
+            "ENGINE_PRIVATE_SUBNET_IDS."
         )
         return None
 
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
     if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
     return cluster_arn, task_def_arn, security_group_id, subnet_ids

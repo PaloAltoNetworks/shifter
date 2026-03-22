@@ -123,9 +123,10 @@ resource "aws_ssm_parameter" "guacamole_api_base_url" {
   tags = local.common_tags
 }
 
+# Legacy SSM parameters (keep during transition, remove after deployment confirms new names work)
 resource "aws_ssm_parameter" "pulumi_ecs_cluster_arn" {
   name        = "${local.ps_prefix}/pulumi-ecs-cluster-arn"
-  description = "ECS cluster ARN for Pulumi provisioner"
+  description = "DEPRECATED - use engine-ecs-cluster-arn"
   type        = "String"
   value       = var.pulumi_ecs_cluster_arn
 
@@ -134,7 +135,7 @@ resource "aws_ssm_parameter" "pulumi_ecs_cluster_arn" {
 
 resource "aws_ssm_parameter" "pulumi_task_definition_arn" {
   name        = "${local.ps_prefix}/pulumi-task-definition-arn"
-  description = "ECS task definition family for Pulumi provisioner"
+  description = "DEPRECATED - use engine-task-definition-arn"
   type        = "String"
   value       = var.pulumi_task_definition_family
 
@@ -143,7 +144,7 @@ resource "aws_ssm_parameter" "pulumi_task_definition_arn" {
 
 resource "aws_ssm_parameter" "pulumi_ecs_security_group_id" {
   name        = "${local.ps_prefix}/pulumi-ecs-security-group-id"
-  description = "Security group ID for Pulumi ECS tasks"
+  description = "DEPRECATED - use engine-ecs-security-group-id"
   type        = "String"
   value       = var.pulumi_ecs_security_group_id
 
@@ -152,7 +153,44 @@ resource "aws_ssm_parameter" "pulumi_ecs_security_group_id" {
 
 resource "aws_ssm_parameter" "pulumi_private_subnet_ids" {
   name        = "${local.ps_prefix}/pulumi-private-subnet-ids"
-  description = "Private subnet IDs for Pulumi ECS tasks"
+  description = "DEPRECATED - use engine-private-subnet-ids"
+  type        = "String"
+  value       = var.pulumi_private_subnet_ids
+
+  tags = local.common_tags
+}
+
+# New SSM parameters with ENGINE_ naming
+resource "aws_ssm_parameter" "engine_ecs_cluster_arn" {
+  name        = "${local.ps_prefix}/engine-ecs-cluster-arn"
+  description = "ECS cluster ARN for engine provisioner"
+  type        = "String"
+  value       = var.pulumi_ecs_cluster_arn
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "engine_task_definition_arn" {
+  name        = "${local.ps_prefix}/engine-task-definition-arn"
+  description = "ECS task definition family for engine provisioner"
+  type        = "String"
+  value       = var.pulumi_task_definition_family
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "engine_ecs_security_group_id" {
+  name        = "${local.ps_prefix}/engine-ecs-security-group-id"
+  description = "Security group ID for engine ECS tasks"
+  type        = "String"
+  value       = var.pulumi_ecs_security_group_id
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "engine_private_subnet_ids" {
+  name        = "${local.ps_prefix}/engine-private-subnet-ids"
+  description = "Private subnet IDs for engine ECS tasks"
   type        = "String"
   value       = var.pulumi_private_subnet_ids
 

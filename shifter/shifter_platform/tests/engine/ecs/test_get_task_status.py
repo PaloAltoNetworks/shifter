@@ -26,7 +26,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -50,7 +50,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -77,7 +77,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -97,7 +97,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -118,7 +118,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -138,7 +138,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -158,34 +158,34 @@ class TestGetTaskStatus:
     # -------------------------------------------------------------------------
 
     def test_returns_none_when_cluster_not_configured(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is not set."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is not set."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
-            delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
+        if hasattr(settings, "ENGINE_ECS_CLUSTER_ARN"):
+            delattr(settings, "ENGINE_ECS_CLUSTER_ARN")
 
         result = get_task_status("arn:aws:ecs:task/abc123")
 
         assert result is None
 
     def test_returns_none_when_cluster_is_empty(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is empty."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is empty."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
+        settings.ENGINE_ECS_CLUSTER_ARN = ""
 
         result = get_task_status("arn:aws:ecs:task/abc123")
 
         assert result is None
 
     def test_returns_none_when_cluster_is_none(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is None."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is None."""
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = None
+        settings.ENGINE_ECS_CLUSTER_ARN = None
 
         result = get_task_status("arn:aws:ecs:task/abc123")
 
@@ -232,7 +232,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -250,7 +250,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -271,7 +271,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -287,7 +287,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -303,7 +303,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -323,7 +323,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with (
             patch("engine.ecs.get_task_runner") as mock_get_runner,
@@ -346,7 +346,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -362,7 +362,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         started = "2024-01-01T00:00:00Z"
         stopped = "2024-01-01T01:00:00Z"
@@ -386,7 +386,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -406,7 +406,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -426,7 +426,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -444,7 +444,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -465,7 +465,7 @@ class TestGetTaskStatus:
         from engine.ecs import get_task_status
 
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()

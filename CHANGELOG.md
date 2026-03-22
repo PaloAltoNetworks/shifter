@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.32.0] - 2026-03-22
+
+### Changed
+- **Platform**: Rename `PULUMI_ECS_CLUSTER_ARN`, `PULUMI_TASK_DEFINITION_ARN`, `PULUMI_ECS_SECURITY_GROUP_ID`, `PULUMI_PRIVATE_SUBNET_IDS` to `ENGINE_*` prefix across settings, application code, tests, Terraform SSM, deployment scripts, and CI/CD
+- **Platform**: Rename `PULUMI_BACKEND_URL` to `STATE_BUCKET_URL` in task definition and local provisioner script
+- **Platform**: Settings use fallback pattern (`ENGINE_*` || `PULUMI_*`) for zero-downtime transition
+- **Terraform**: Add new `engine-*` SSM parameters alongside deprecated `pulumi-*` parameters for transition
+
+### Removed
+- **Platform**: Remove `PULUMI_SECRETS_PROVIDER` env var (dead after Pulumi removal)
+- **Platform**: Remove `PULUMI_BACKEND_URL`/`PULUMI_SECRETS_PROVIDER` from `_run_local_provisioner()` and `.env.example`
+- **Platform**: Remove mock-pulumi PATH injection from local provisioner
+
 ## [3.31.0] - 2026-03-22
 
 ### Added
@@ -19,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Provisioner**: `main.py` SQL query construction uses `psycopg.sql` module for safe identifier composition instead of f-string formatting
 - **Provisioner**: `linux_xdr_agent_install.py` bash scripts use `mktemp` for unpredictable temp file paths instead of hardcoded `/tmp` paths
 - **Provisioner**: NGFW executor temp key file cleanup improved with `__del__` fallback; removed redundant `os.chmod` (mkstemp already creates with 0o600)
+
+### Removed
+- **Provisioner**: Remove `pulumi` and `pulumi_aws` from `requirements.txt` (already removed from `pyproject.toml`)
 
 ### Security
 - **Provisioner**: Added `# NOSONAR` annotations for reviewed security hotspots (subprocess calls, Paramiko AutoAddPolicy, SSH StrictHostKeyChecking, test credentials)

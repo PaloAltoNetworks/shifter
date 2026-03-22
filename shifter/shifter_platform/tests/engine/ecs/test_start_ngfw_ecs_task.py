@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared.cloud.exceptions import CloudTaskError
 
@@ -20,7 +19,7 @@ class TestStartNgfwEcsTask:
     - Inputs: request_id (UUID), command (list[str])
     - Outputs: ECS task ARN (str) if successful, None if ECS not configured
     - Side effects: Calls TaskRunner.run_task via get_task_runner()
-    - Errors: TypeError if request_id not UUID, ClientError if ECS fails
+    - Errors: TypeError if request_id not UUID, CloudTaskError if ECS fails
     - Logging: WARNING when config incomplete, ERROR on failures
     """
 
@@ -167,8 +166,8 @@ class TestStartNgfwEcsTask:
     # Error handling
     # -------------------------------------------------------------------------
 
-    def test_raises_client_error_when_run_task_fails(self, settings):
-        """Function raises ClientError when TaskRunner.run_task fails."""
+    def test_raises_cloud_task_error_when_run_task_fails(self, settings):
+        """Function raises CloudTaskError when TaskRunner.run_task fails."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
@@ -183,14 +182,14 @@ class TestStartNgfwEcsTask:
             mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 _start_ngfw_ecs_task(
                     request_id=TEST_REQUEST_ID,
                     command=["ngfw", "provision"],
                 )
 
-    def test_raises_client_error_when_no_tasks_returned(self, settings):
-        """Function raises ClientError when adapter reports no tasks started."""
+    def test_raises_cloud_task_error_when_no_tasks_returned(self, settings):
+        """Function raises CloudTaskError when adapter reports no tasks started."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
@@ -205,7 +204,7 @@ class TestStartNgfwEcsTask:
             mock_runner.run_task.side_effect = CloudTaskError("No tasks started: ['RESOURCE:CPU']")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 _start_ngfw_ecs_task(
                     request_id=TEST_REQUEST_ID,
                     command=["ngfw", "provision"],
@@ -275,7 +274,7 @@ class TestStartNgfwEcsTask:
         with (
             patch("engine.ecs.get_task_runner") as mock_get_runner,
             caplog.at_level(logging.ERROR, logger="engine.ecs"),
-            pytest.raises(ClientError),
+            pytest.raises(CloudTaskError),
         ):
             mock_runner = MagicMock()
             mock_runner.run_task.side_effect = CloudTaskError("Cluster not found")

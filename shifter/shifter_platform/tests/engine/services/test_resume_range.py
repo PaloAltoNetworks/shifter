@@ -273,18 +273,16 @@ class TestResumeRange:
 
             assert mock_range.status == ResourceStatus.PAUSED.value
 
-    def test_reverts_status_on_client_error(self):
-        """Service reverts status to PAUSED when ECS raises ClientError."""
-        from botocore.exceptions import ClientError
-
+    def test_reverts_status_on_cloud_task_error(self):
+        """Service reverts status to PAUSED when ECS raises CloudTaskError."""
         from engine.models import Range
         from engine.services import resume_range
+        from shared.cloud.exceptions import CloudTaskError
 
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
 
-        error_response = {"Error": {"Code": "ClusterNotFoundException", "Message": "not found"}}
-        client_error = ClientError(error_response, "RunTask")
+        cloud_error = CloudTaskError("Cluster not found")
 
         with (
             patch.object(
@@ -293,24 +291,22 @@ class TestResumeRange:
                 return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
             ),
             patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", side_effect=client_error),
+            patch("engine.ecs.start_range_operation", side_effect=cloud_error),
         ):
             resume_range(request_id)
 
             assert mock_range.status == ResourceStatus.PAUSED.value
 
-    def test_returns_false_on_client_error(self):
-        """Service returns False when ECS raises ClientError."""
-        from botocore.exceptions import ClientError
-
+    def test_returns_false_on_cloud_task_error(self):
+        """Service returns False when ECS raises CloudTaskError."""
         from engine.models import Range
         from engine.services import resume_range
+        from shared.cloud.exceptions import CloudTaskError
 
         request_id = uuid4()
         mock_range = Mock(spec=Range, id=42, status=ResourceStatus.PAUSED.value)
 
-        error_response = {"Error": {"Code": "ClusterNotFoundException", "Message": "not found"}}
-        client_error = ClientError(error_response, "RunTask")
+        cloud_error = CloudTaskError("Cluster not found")
 
         with (
             patch.object(
@@ -319,7 +315,7 @@ class TestResumeRange:
                 return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=mock_range)))),
             ),
             patch("django.db.transaction.atomic"),
-            patch("engine.ecs.start_range_operation", side_effect=client_error),
+            patch("engine.ecs.start_range_operation", side_effect=cloud_error),
         ):
             result = resume_range(request_id)
             assert result is False

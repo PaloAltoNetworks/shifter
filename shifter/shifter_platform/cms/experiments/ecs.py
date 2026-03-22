@@ -17,7 +17,6 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from botocore.exceptions import ClientError
 from django.conf import settings
 
 from shared.cloud import get_task_runner
@@ -87,7 +86,7 @@ def start_experiment_task(
     Raises:
         TypeError: If required parameters are None or wrong type.
         ValueError: If command is not a valid operation.
-        ClientError: If the ECS RunTask API call fails.
+        CloudTaskError: If the ECS RunTask API call fails.
     """
     if experiment_id is None or not isinstance(experiment_id, int):
         raise TypeError(f"experiment_id must be an int, got {type(experiment_id).__name__}")
@@ -154,13 +153,10 @@ def start_experiment_task(
             task_arn,
         )
         return task_arn
-    except CloudTaskError as e:
+    except CloudTaskError:
         logger.exception(
             "Failed to start experiment ECS task: experiment=%d run=%d",
             experiment_id,
             run_id,
         )
-        raise ClientError(
-            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
-            "RunTask",
-        ) from e
+        raise

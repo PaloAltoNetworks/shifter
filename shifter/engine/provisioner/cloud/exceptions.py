@@ -30,3 +30,7 @@ class CloudDBAuthError(CloudError):
 
 class CloudStorageError(CloudError):
     """Error during object storage operations."""
+
+
+class CloudSecretsError(CloudError):
+    """Error during secrets retrieval operations."""

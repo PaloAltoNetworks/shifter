@@ -42,6 +42,13 @@ class DBAuth(Protocol):
 
 
 @runtime_checkable
+class SecretsStore(Protocol):
+    """Protocol for secrets retrieval (Secrets Manager, Secret Manager, etc.)."""
+
+    def get_secret(self, secret_id: str) -> str: ...
+
+
+@runtime_checkable
 class ObjectStorage(Protocol):
     """Protocol for object storage operations in the provisioner context."""
 
@@ -51,3 +58,7 @@ class ObjectStorage(Protocol):
         key: str,
         expires_in: int = 3600,
     ) -> str: ...
+
+    def object_exists(self, bucket: str, key: str) -> bool: ...
+
+    def delete_object(self, bucket: str, key: str) -> None: ...

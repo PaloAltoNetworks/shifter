@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import boto3
+from cloud import get_object_storage
 
 logger = logging.getLogger(__name__)
 
@@ -97,18 +97,10 @@ def has_terraform_state(request_uuid: str) -> bool:
         return False
 
     state_key = _get_state_key(request_uuid)
-    s3_client = boto3.client("s3")
-
-    try:
-        s3_client.head_object(Bucket=bucket, Key=state_key)
-        logger.debug("Terraform state exists for range request %s", request_uuid)
-        return True
-    except s3_client.exceptions.ClientError as e:
-        if e.response.get("Error", {}).get("Code") == "404":
-            logger.debug("No Terraform state for range request %s", request_uuid)
-            return False
-        # Re-raise other errors (permissions, etc.)
-        raise
+    storage = get_object_storage()
+    result = storage.object_exists(bucket=bucket, key=state_key)
+    logger.debug("Terraform state %s for range request %s", "exists" if result else "not found", request_uuid)
+    return result
 
 
 def _run_terraform(
@@ -326,17 +318,17 @@ def cleanup_range_state(request_uuid: str) -> None:
 
     logger.info("Deleting Range Terraform state: s3://%s/%s", bucket, state_key)
 
-    s3_client = boto3.client("s3")
+    storage = get_object_storage()
 
     # Delete state file
     try:
-        s3_client.delete_object(Bucket=bucket, Key=state_key)
+        storage.delete_object(bucket=bucket, key=state_key)
     except Exception as e:
         logger.warning("Failed to delete state file: %s", e)
 
     # Delete lock file if exists
     lock_key = f"{state_key}.tflock"
     with contextlib.suppress(Exception):
-        s3_client.delete_object(Bucket=bucket, Key=lock_key)
+        storage.delete_object(bucket=bucket, key=lock_key)
 
     logger.info("Range Terraform state cleanup completed")

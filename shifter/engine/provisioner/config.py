@@ -16,7 +16,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import boto3
 import psycopg
 import pulumi
 from cryptography.fernet import Fernet
@@ -235,12 +234,15 @@ def get_db_connection() -> psycopg.Connection:
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
     logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
-    client = boto3.client("rds")
-    token = client.generate_db_auth_token(
-        DBHostname=db_host,
-        Port=db_port,
-        DBUsername=db_user,
-        Region=aws_region,
+    assert db_host is not None  # validated above
+    assert db_user is not None  # validated above
+    from cloud import get_db_auth
+
+    auth = get_db_auth()
+    token = auth.generate_auth_token(
+        hostname=db_host,
+        port=db_port,
+        username=db_user,
     )
     return psycopg.connect(
         host=db_host,

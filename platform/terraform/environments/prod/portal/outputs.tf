@@ -173,47 +173,47 @@ output "redis_port" {
 }
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner (ECS)
+# Engine Provisioner (ECS)
 # ------------------------------------------------------------------------------
 
-output "pulumi_ecs_cluster_arn" {
-  description = "ARN of the Pulumi provisioner ECS cluster"
-  value       = module.pulumi_provisioner.ecs_cluster_arn
+output "engine_ecs_cluster_arn" {
+  description = "ARN of the engine provisioner ECS cluster"
+  value       = module.engine_provisioner.ecs_cluster_arn
 }
 
-output "pulumi_ecs_cluster_name" {
-  description = "Name of the Pulumi provisioner ECS cluster"
-  value       = module.pulumi_provisioner.ecs_cluster_name
+output "engine_ecs_cluster_name" {
+  description = "Name of the engine provisioner ECS cluster"
+  value       = module.engine_provisioner.ecs_cluster_name
 }
 
-output "pulumi_task_definition_arn" {
-  description = "ARN of the Pulumi provisioner ECS task definition"
-  value       = module.pulumi_provisioner.task_definition_arn
+output "engine_task_definition_arn" {
+  description = "ARN of the engine provisioner ECS task definition"
+  value       = module.engine_provisioner.task_definition_arn
 }
 
-output "pulumi_task_definition_family" {
-  description = "Family of the Pulumi provisioner ECS task definition"
-  value       = module.pulumi_provisioner.task_definition_family
+output "engine_task_definition_family" {
+  description = "Family of the engine provisioner ECS task definition"
+  value       = module.engine_provisioner.task_definition_family
 }
 
-output "pulumi_ecs_security_group_id" {
-  description = "ID of the Pulumi provisioner ECS task security group"
-  value       = module.pulumi_provisioner.ecs_security_group_id
+output "engine_ecs_security_group_id" {
+  description = "ID of the engine provisioner ECS task security group"
+  value       = module.engine_provisioner.ecs_security_group_id
 }
 
-output "pulumi_private_subnet_ids" {
+output "engine_private_subnet_ids" {
   description = "List of private subnet IDs for ECS tasks"
-  value       = module.pulumi_provisioner.private_subnet_ids
+  value       = module.engine_provisioner.private_subnet_ids
 }
 
-output "pulumi_ecs_execution_role_arn" {
+output "engine_ecs_execution_role_arn" {
   description = "ARN of the ECS execution role"
-  value       = module.pulumi_provisioner.ecs_execution_role_arn
+  value       = module.engine_provisioner.ecs_execution_role_arn
 }
 
-output "pulumi_ecs_task_role_arn" {
+output "engine_ecs_task_role_arn" {
   description = "ARN of the ECS task role"
-  value       = module.pulumi_provisioner.ecs_task_role_arn
+  value       = module.engine_provisioner.ecs_task_role_arn
 }
 
 # ------------------------------------------------------------------------------

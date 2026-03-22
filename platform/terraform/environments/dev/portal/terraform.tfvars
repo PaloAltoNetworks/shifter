@@ -119,10 +119,10 @@ enable_rds_log_exports = true
 enable_waf_logging     = true
 
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner
+# Engine Provisioner
 # ------------------------------------------------------------------------------
 
-pulumi_container_tag = "latest"
+engine_container_tag = "latest"
 
 # Windows/DC AMIs also managed via SSM Parameter Store
 

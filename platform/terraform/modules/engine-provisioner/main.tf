@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
-# Pulumi Provisioner Module
+# Engine Provisioner Module
 # ------------------------------------------------------------------------------
-# This module creates ECS Fargate infrastructure for running Pulumi-based
+# This module creates ECS Fargate infrastructure for running engine-based
 # range provisioning tasks. It includes:
 # - ECS cluster with Fargate capacity provider
 # - CloudWatch log groups for ECS tasks
@@ -23,7 +23,7 @@ data "aws_region" "current" {}
 
 locals {
   common_tags = merge(var.tags, {
-    Module = "pulumi-provisioner"
+    Module = "engine-provisioner"
   })
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.id

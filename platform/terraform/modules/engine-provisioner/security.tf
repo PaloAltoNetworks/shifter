@@ -4,7 +4,7 @@
 
 resource "aws_security_group" "ecs_task" {
   name        = "${var.name_prefix}-pulumi-ecs-sg"
-  description = "Security group for Pulumi provisioner ECS tasks"
+  description = "Security group for engine provisioner ECS tasks"
   vpc_id      = var.vpc_id
 
   tags = merge(local.common_tags, {
@@ -81,5 +81,5 @@ resource "aws_security_group_rule" "rds_from_ecs" {
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.ecs_task.id
   security_group_id        = var.rds_security_group_id
-  description              = "PostgreSQL from Pulumi ECS tasks"
+  description              = "PostgreSQL from engine ECS tasks"
 }

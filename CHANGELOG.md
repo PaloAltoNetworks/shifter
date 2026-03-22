@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Platform**: Rename `PULUMI_ECS_CLUSTER_ARN`, `PULUMI_TASK_DEFINITION_ARN`, `PULUMI_ECS_SECURITY_GROUP_ID`, `PULUMI_PRIVATE_SUBNET_IDS` to `ENGINE_*` prefix across settings, application code, tests, Terraform SSM, deployment scripts, and CI/CD
 - **Platform**: Rename `PULUMI_BACKEND_URL` to `STATE_BUCKET_URL` in task definition and local provisioner script
 - **Platform**: Settings use fallback pattern (`ENGINE_*` || `PULUMI_*`) for zero-downtime transition
+- **Terraform**: Rename module directories `modules/pulumi-provisioner/` to `modules/engine-provisioner/` and `modules/pulumi-state/` to `modules/engine-state/`
+- **Terraform**: Rename module blocks `pulumi_provisioner` to `engine_provisioner`, `pulumi_state` to `engine_state`, `pulumi_provisioner_ecr` to `engine_provisioner_ecr` with `moved` blocks for state continuity
+- **Terraform**: Rename variables `pulumi_provisioner_repository_name` to `engine_provisioner_repository_name`, `pulumi_container_tag` to `engine_container_tag`, and SSM module variables `pulumi_ecs_*`/`pulumi_task_*`/`pulumi_private_*` to `engine_*`
+- **Terraform**: Rename outputs `pulumi_provisioner_ecr_*` to `engine_provisioner_ecr_*` and portal outputs `pulumi_ecs_*`/`pulumi_task_*`/`pulumi_private_*` to `engine_*`
+- **Terraform**: Update all `module.pulumi_provisioner.*` and `module.pulumi_state.*` references to `module.engine_provisioner.*` and `module.engine_state.*` across environments
+- **Terraform**: Update comments, descriptions, and tags from "Pulumi" to "Engine" in module internals (resource names unchanged for state compatibility)
 - **Terraform**: Add new `engine-*` SSM parameters alongside deprecated `pulumi-*` parameters for transition
 
 ### Removed

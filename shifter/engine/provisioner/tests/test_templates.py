@@ -50,7 +50,7 @@ class TestDCTemplateRendering:
         """Standard context for DC template tests."""
         return {
             "public_key": "ssh-rsa test-key",
-            "admin_password": "TestPassword123!",
+            "admin_password": "TestPassword123!",  # nosec B105  # NOSONAR — test fixture
         }
 
     def test_dc_template_renders_without_error(self, dc_template, dc_template_context):

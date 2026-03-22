@@ -34,13 +34,13 @@ class TestDomainJoinPlan:
         dc_config = {
             "dc_ip": "10.1.100.10",
             "domain_name": "range42.lab",
-            "domain_admin_password": "TestPassword123!",
+            "domain_admin_password": "TestPassword123!",  # nosec B105  # NOSONAR — test fixture
         }
         context = plan.get_context(dc_config)
 
         assert context["dc_ip"] == "10.1.100.10"
         assert context["domain_name"] == "range42.lab"
-        assert context["domain_admin_password"] == "TestPassword123!"
+        assert context["domain_admin_password"] == "TestPassword123!"  # nosec B105  # NOSONAR
         assert context["domain_admin_user"] == "Administrator"
 
     def test_dns_polling_has_generous_retry_config(self):
@@ -66,7 +66,7 @@ class TestDomainJoinErrorHandling:
             {
                 "dc_ip": "10.1.100.10",
                 "domain_name": "range42.lab",
-                "domain_admin_password": "TestPassword123!",
+                "domain_admin_password": "TestPassword123!",  # nosec B105  # NOSONAR
             }
         )
 

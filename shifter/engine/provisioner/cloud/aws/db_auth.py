@@ -4,23 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from cloud.aws.base import BaseAWSAdapter
 from cloud.exceptions import CloudDBAuthError
 
 logger = logging.getLogger(__name__)
 
 
-class AWSDBAuth:
+class AWSDBAuth(BaseAWSAdapter):
     """RDS IAM implementation of DBAuth protocol."""
 
-    def _get_client(self) -> Any:
-        region: str = os.environ.get("AWS_REGION", "us-east-2")
-        endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL") or None
-        return boto3.client("rds", region_name=region, endpoint_url=endpoint_url)
+    _service_name = "rds"
 
     def generate_auth_token(
         self,

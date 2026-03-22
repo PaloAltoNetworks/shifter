@@ -328,11 +328,17 @@ AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
 # SNS Topic for publishing events (provisioner -> workers)
 SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
 
-# Shifter Engine (ECS Fargate)
-PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
-PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
-PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
+# Shifter Engine (ECS Fargate) — PULUMI_ fallbacks removed after infra deploys new names
+ENGINE_ECS_CLUSTER_ARN = os.environ.get("ENGINE_ECS_CLUSTER_ARN") or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
+ENGINE_TASK_DEFINITION_ARN = os.environ.get("ENGINE_TASK_DEFINITION_ARN") or os.environ.get(
+    "PULUMI_TASK_DEFINITION_ARN", ""
+)
+ENGINE_ECS_SECURITY_GROUP_ID = os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID") or os.environ.get(
+    "PULUMI_ECS_SECURITY_GROUP_ID", ""
+)
+ENGINE_PRIVATE_SUBNET_IDS = os.environ.get("ENGINE_PRIVATE_SUBNET_IDS") or os.environ.get(
+    "PULUMI_PRIVATE_SUBNET_IDS", ""
+)
 
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")

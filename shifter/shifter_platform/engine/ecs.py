@@ -6,7 +6,6 @@ The Shifter Engine writes directly to RDS, so no callback endpoint is needed.
 Local Development:
     Set LOCAL_PROVISIONER=subprocess in settings to run the provisioner locally
     instead of triggering ECS. This requires:
-    - Pulumi CLI installed locally
     - AWS credentials configured
     - PROVISIONER_PATH setting pointing to the provisioner directory
 """
@@ -72,12 +71,6 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("DB_PASSWORD", str(db_config.get("PASSWORD", "")))
         env.setdefault("DB_NAME", str(db_config.get("NAME", "shifter")))
 
-    # Pulumi config
-    pulumi_backend = getattr(settings, "PULUMI_BACKEND_URL", "")
-    pulumi_secrets = getattr(settings, "PULUMI_SECRETS_PROVIDER", "")
-    env.setdefault("PULUMI_BACKEND_URL", pulumi_backend)
-    env.setdefault("PULUMI_SECRETS_PROVIDER", pulumi_secrets)
-
     # SNS config (for event publishing - LocalStack support)
     sns_arn = getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
     aws_endpoint = getattr(settings, "AWS_ENDPOINT_URL", "")
@@ -85,13 +78,6 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("SNS_RANGE_EVENTS_ARN", sns_arn)
     if aws_endpoint:
         env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
-
-    # Put mock-pulumi first in PATH to intercept real pulumi
-    # This prevents any actual infrastructure from being created
-    mock_pulumi_dir = provisioner_path
-    current_path = env.get("PATH", "")
-    env["PATH"] = f"{mock_pulumi_dir}:{current_path}"
-    logger.info("Using mock pulumi - NO INFRA WILL BE CREATED")
 
     full_command = ["python", main_py, *command]
     logger.info(f"Starting local provisioner: {' '.join(full_command)}")
@@ -149,16 +135,16 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     if not command.strip():
         raise ValueError("command must be a non-empty string")
 
-    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "") or ""
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
 
     if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
         logger.warning(
             "ECS configuration incomplete, skipping ECS task. "
-            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
-            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
+            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
+            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
         )
         return None
 
@@ -166,7 +152,7 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
 
     if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
     logger.info(f"Starting ECS task for range_id={range_id} command={command}")
@@ -281,16 +267,16 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
-    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "") or ""
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
 
     if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
         logger.warning(
             "ECS configuration incomplete, skipping Range ECS task. "
-            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
-            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
+            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
+            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
         )
         return None
 
@@ -298,7 +284,7 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
 
     if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
     command_list = ["range", command, "--request-id", str(request_id)]
@@ -421,16 +407,16 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
         return _run_local_provisioner(command)
 
-    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "") or ""
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
 
     if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
         logger.warning(
             "ECS configuration incomplete, skipping NGFW ECS task. "
-            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
-            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
+            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
+            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
         )
         return None
 
@@ -438,7 +424,7 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
 
     if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
     logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
@@ -546,7 +532,7 @@ def get_task_status(task_arn: str) -> dict | None:
     if not task_arn:
         return None
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
+    cluster_arn = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None)
     if not cluster_arn:
         return None
 

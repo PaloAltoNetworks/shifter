@@ -10,7 +10,6 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-import psycopg
 from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
@@ -170,76 +169,6 @@ class RangeConfig:
     ssm_endpoints_subnet_cidr: str = ""
 
 
-def get_db_connection() -> psycopg.Connection:
-    """Get database connection.
-
-    Uses password auth if DB_PASSWORD is set (local dev), otherwise RDS IAM auth.
-    """
-    db_host = os.environ.get("DB_HOST")
-    db_port = int(os.environ.get("DB_PORT", 5432))
-    db_user = os.environ.get("DB_USER")
-    db_name = os.environ.get("DB_NAME")
-    db_password = os.environ.get("DB_PASSWORD")
-
-    # Local dev mode: use password auth
-    if db_password:
-        if not all([db_host, db_user, db_name]):
-            missing = [
-                k
-                for k, v in [
-                    ("DB_HOST", db_host),
-                    ("DB_USER", db_user),
-                    ("DB_NAME", db_name),
-                ]
-                if not v
-            ]
-            raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
-
-        logger.debug("get_db_connection: password auth to %s:%s/%s", db_host, db_port, db_name)
-        return psycopg.connect(
-            host=db_host,
-            port=db_port,
-            dbname=db_name,
-            user=db_user,
-            password=db_password,
-        )
-
-    # Production mode: use RDS IAM auth
-    aws_region = os.environ.get("AWS_REGION")
-    if not all([db_host, db_user, db_name, aws_region]):
-        missing = [
-            k
-            for k, v in [
-                ("DB_HOST", db_host),
-                ("DB_USER", db_user),
-                ("DB_NAME", db_name),
-                ("AWS_REGION", aws_region),
-            ]
-            if not v
-        ]
-        raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
-
-    logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
-    assert db_host is not None  # validated above
-    assert db_user is not None  # validated above
-    from cloud import get_db_auth
-
-    auth = get_db_auth()
-    token = auth.generate_auth_token(
-        hostname=db_host,
-        port=db_port,
-        username=db_user,
-    )
-    return psycopg.connect(
-        host=db_host,
-        port=db_port,
-        dbname=db_name,
-        user=db_user,
-        password=token,
-        sslmode="require",
-    )
-
-
 def get_range_from_db(range_id: int) -> dict[str, Any]:
     """Load range configuration from database.
 
@@ -259,6 +188,8 @@ def get_range_from_db(range_id: int) -> dict[str, Any]:
         ValueError: If range not found.
     """
     logger.debug("Loading range %d from database", range_id)
+
+    from main import get_db_connection
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(

@@ -27,8 +27,9 @@ from ctf.services.attachment import (
 
 
 @pytest.fixture
-def mock_s3():
+def mock_s3(settings):
     """Mock S3 operations for CTF file attachments."""
+    settings.AWS_S3_BUCKET_NAME = "test-bucket"
     mock_client = MagicMock()
     mock_client.generate_presigned_url.return_value = (
         "https://s3.us-east-2.amazonaws.com/bucket/key?X-Amz-Signature=test"

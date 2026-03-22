@@ -9,11 +9,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.contrib import admin
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, F, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils.html import format_html
 
 from ctf.models import (
+    CTFAward,
     CTFChallenge,
     CTFEvent,
     CTFNotification,
@@ -98,6 +99,17 @@ class CTFSubmissionInline(admin.TabularInline):
     ordering = ["-submitted_at"]
 
 
+class CTFAwardInline(admin.TabularInline):
+    """Inline admin for awards within an event or participant."""
+
+    model = CTFAward
+    extra = 0
+    fields = ["participant", "points", "reason", "granted_by", "created_at"]
+    readonly_fields = ["created_at"]
+    show_change_link = True
+    ordering = ["-created_at"]
+
+
 # -----------------------------------------------------------------------------
 # Model Admins
 # -----------------------------------------------------------------------------
@@ -175,7 +187,7 @@ class CTFEventAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         ),
     ]
 
-    inlines = [CTFChallengeInline, CTFTeamInline, CTFParticipantInline, CTFScheduledTaskInline]
+    inlines = [CTFChallengeInline, CTFTeamInline, CTFParticipantInline, CTFAwardInline, CTFScheduledTaskInline]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
         """Annotate queryset with counts."""
@@ -320,17 +332,19 @@ class CTFTeamAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     ]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        """Annotate queryset with member count and score."""
+        """Annotate queryset with member count and score (submissions + awards)."""
         qs = super().get_queryset(request)
         return qs.annotate(
             _member_count=Count("members", distinct=True),
-            _total_score=Coalesce(
+            _submission_score=Coalesce(
                 Sum(
                     "members__submissions__points_awarded",
                     filter=Q(members__submissions__is_correct=True),
                 ),
                 0,
             ),
+            _award_score=Coalesce(Sum("members__awards__points"), 0),
+            _total_score=F("_submission_score") + F("_award_score"),
         )
 
     @admin.display(description="Members", ordering="_member_count")
@@ -423,19 +437,21 @@ class CTFParticipantAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         ),
     ]
 
-    inlines = [CTFSubmissionInline]
+    inlines = [CTFSubmissionInline, CTFAwardInline]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        """Annotate queryset with score and solve count."""
+        """Annotate queryset with score (submissions + awards) and solve count."""
         qs = super().get_queryset(request)
         return qs.annotate(
-            _total_score=Coalesce(
+            _submission_score=Coalesce(
                 Sum(
                     "submissions__points_awarded",
                     filter=Q(submissions__is_correct=True),
                 ),
                 0,
             ),
+            _award_score=Coalesce(Sum("awards__points"), 0),
+            _total_score=F("_submission_score") + F("_award_score"),
             _solved_count=Count(
                 "submissions",
                 filter=Q(submissions__is_correct=True),
@@ -520,6 +536,51 @@ class CTFSubmissionAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     def is_correct_display(self, obj: CTFSubmission) -> bool:
         """Display correctness as icon."""
         return obj.is_correct
+
+
+@admin.register(CTFAward)
+class CTFAwardAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    """Admin for CTF awards."""
+
+    list_display = [
+        "participant",
+        "event",
+        "points",
+        "reason_short",
+        "granted_by",
+        "created_at",
+        "is_deleted_display",
+    ]
+    list_filter = ["event", "granted_by", "deleted_at"]
+    search_fields = ["participant__name", "participant__email", "reason", "event__name"]
+    ordering = ["-created_at"]
+    readonly_fields = ["id", "created_at", "updated_at", "deleted_at"]
+
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": ["event", "participant", "points", "reason", "granted_by"],
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["id", "created_at", "updated_at", "deleted_at"],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    @admin.display(description="Reason")
+    def reason_short(self, obj: CTFAward) -> str:
+        """Display truncated reason."""
+        return obj.reason[:80] + "..." if len(obj.reason) > 80 else obj.reason
+
+    @admin.display(description="Deleted", boolean=True)
+    def is_deleted_display(self, obj: CTFAward) -> bool:
+        """Display soft delete status."""
+        return obj.is_deleted
 
 
 @admin.register(CTFNotification)

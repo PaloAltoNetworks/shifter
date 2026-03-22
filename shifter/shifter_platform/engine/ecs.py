@@ -6,7 +6,6 @@ The Shifter Engine writes directly to RDS, so no callback endpoint is needed.
 Local Development:
     Set LOCAL_PROVISIONER=subprocess in settings to run the provisioner locally
     instead of triggering ECS. This requires:
-    - Pulumi CLI installed locally
     - AWS credentials configured
     - PROVISIONER_PATH setting pointing to the provisioner directory
 """
@@ -18,10 +17,10 @@ import os
 import subprocess  # nosec B404 - used for local dev provisioner only
 from typing import TYPE_CHECKING
 
-import boto3
-from botocore.exceptions import ClientError
 from django.conf import settings
 
+from shared.cloud import get_task_runner
+from shared.cloud.exceptions import CloudTaskError
 from shared.enums import ResourceType
 
 if TYPE_CHECKING:
@@ -71,12 +70,6 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("DB_PASSWORD", str(db_config.get("PASSWORD", "")))
         env.setdefault("DB_NAME", str(db_config.get("NAME", "shifter")))
 
-    # Pulumi config
-    pulumi_backend = getattr(settings, "PULUMI_BACKEND_URL", "")
-    pulumi_secrets = getattr(settings, "PULUMI_SECRETS_PROVIDER", "")
-    env.setdefault("PULUMI_BACKEND_URL", pulumi_backend)
-    env.setdefault("PULUMI_SECRETS_PROVIDER", pulumi_secrets)
-
     # SNS config (for event publishing - LocalStack support)
     sns_arn = getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
     aws_endpoint = getattr(settings, "AWS_ENDPOINT_URL", "")
@@ -84,13 +77,6 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("SNS_RANGE_EVENTS_ARN", sns_arn)
     if aws_endpoint:
         env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
-
-    # Put mock-pulumi first in PATH to intercept real pulumi
-    # This prevents any actual infrastructure from being created
-    mock_pulumi_dir = provisioner_path
-    current_path = env.get("PATH", "")
-    env["PATH"] = f"{mock_pulumi_dir}:{current_path}"
-    logger.info("Using mock pulumi - NO INFRA WILL BE CREATED")
 
     full_command = ["python", main_py, *command]
     logger.info(f"Starting local provisioner: {' '.join(full_command)}")
@@ -119,27 +105,33 @@ def _is_local_provisioner_enabled() -> bool:
     return mode in ("subprocess", "docker")
 
 
-def _get_ecs_client():
-    """Get boto3 ECS client."""
-    from botocore.client import BaseClient
+def _get_engine_ecs_config() -> tuple[str, str, str, list[str]] | None:
+    """Read Engine ECS configuration from settings.
 
-    region = settings.AWS_REGION
-    if not region:
-        logger.error("AWS_REGION is not configured")
-        raise ValueError("AWS_REGION is required")
+    Returns:
+        Tuple of (cluster_arn, task_def_arn, security_group_id, subnet_ids)
+        or None if configuration is incomplete.
+    """
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
 
-    try:
-        client = boto3.client("ecs", region_name=region)
-    except Exception:
-        logger.error(f"Failed to create ECS client for region {region}")
-        raise
+    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
+        logger.warning(
+            "ECS configuration incomplete, skipping ECS task. "
+            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
+            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
+        )
+        return None
 
-    if not isinstance(client, BaseClient):
-        logger.error(f"Invalid ECS client returned: {type(client)}")
-        raise TypeError(f"Expected BaseClient, got {type(client)}")
+    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
 
-    logger.debug(f"Created ECS client for region {region}")
-    return client
+    if not subnet_ids:
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
+        return None
+
+    return cluster_arn, task_definition_arn, security_group_id, subnet_ids
 
 
 def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
@@ -156,7 +148,7 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     Raises:
         TypeError: If range_id is not an integer or user_id is not an integer or command is not a string
         ValueError: If range_id is negative or user_id is negative or command is empty
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     if range_id is None or not isinstance(range_id, int):
         raise TypeError("range_id must be an integer")
@@ -171,74 +163,43 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     if not command.strip():
         raise ValueError("command must be a non-empty string")
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
-    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
-    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
-    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
-
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
-        logger.warning(
-            "ECS configuration incomplete, skipping ECS task. "
-            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
-            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
-        )
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
         return None
 
-    # Parse subnet IDs (comma-separated string)
-    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
-    if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
-        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
 
     logger.info(f"Starting ECS task for range_id={range_id} command={command}")
 
-    ecs = _get_ecs_client()
+    command_list = [
+        ResourceType.RANGE.value,
+        command,
+        "--range-id",
+        str(range_id),
+        "--user-id",
+        str(user_id),
+    ]
+
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
 
     try:
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_definition_arn,
             cluster=cluster_arn,
-            taskDefinition=task_definition_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": "pulumi-provisioner",
-                        "command": [
-                            ResourceType.RANGE.value,
-                            command,
-                            "--range-id",
-                            str(range_id),
-                            "--user-id",
-                            str(user_id),
-                        ],
-                    }
-                ]
-            },
+            command=command_list,
+            container_name="pulumi-provisioner",
+            network_config=network_config,
         )
-
-        # Check if task was started successfully
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(f"ECS task failed to start: {failure_reasons}")
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn = response["tasks"][0]["taskArn"]
         logger.info(f"Started ECS task: range_id={range_id} command={command} task_arn={task_arn}")
         return task_arn
-
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to start ECS task for range_id={range_id}: {e}")
         raise
 
@@ -254,7 +215,7 @@ def start_provisioning(range_id: int, user_id: int) -> str | None:
         (falls back to stub behavior for local dev)
 
     Raises:
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     return _start_ecs_task(range_id, user_id, "provision")
 
@@ -271,7 +232,7 @@ def start_teardown(range_id: int, user_id: int) -> str | None:
         (falls back to stub behavior for local dev)
 
     Raises:
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
 
     .. deprecated::
         Use :func:`start_range_teardown` instead.
@@ -299,7 +260,7 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If command is invalid
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID as UUIDType
 
@@ -317,68 +278,35 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
-    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
-    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
-    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
-
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
-        logger.warning(
-            "ECS configuration incomplete, skipping Range ECS task. "
-            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
-            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
-        )
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
         return None
 
-    # Parse subnet IDs (comma-separated string)
-    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
-    if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
-        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
 
     command_list = ["range", command, "--request-id", str(request_id)]
     logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
 
-    ecs = _get_ecs_client()
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
 
     try:
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_definition_arn,
             cluster=cluster_arn,
-            taskDefinition=task_definition_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": "pulumi-provisioner",
-                        "command": command_list,
-                    }
-                ]
-            },
+            command=command_list,
+            container_name="pulumi-provisioner",
+            network_config=network_config,
         )
-
-        # Check if task was started successfully
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(f"Range ECS task failed to start: {failure_reasons}")
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn = response["tasks"][0]["taskArn"]
         logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
         return task_arn
-
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
         raise
 
@@ -394,7 +322,7 @@ def start_range_provisioning(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     return _start_range_ecs_task(request_id, "provision")
 
@@ -410,7 +338,7 @@ def start_range_teardown(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     return _start_range_ecs_task(request_id, "destroy")
 
@@ -428,7 +356,7 @@ def start_range_operation(request_id: UUID, operation: str) -> str | None:
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If operation is not 'pause' or 'resume'
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID as UUIDType
 
@@ -455,7 +383,7 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
     Raises:
         TypeError: If request_id is None or command is not a list
         ValueError: If command is empty
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID
 
@@ -473,67 +401,34 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
         return _run_local_provisioner(command)
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
-    task_definition_arn = getattr(settings, "PULUMI_TASK_DEFINITION_ARN", None)
-    security_group_id = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", None)
-    subnet_ids_str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
-
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
-        logger.warning(
-            "ECS configuration incomplete, skipping NGFW ECS task. "
-            "Set PULUMI_ECS_CLUSTER_ARN, PULUMI_TASK_DEFINITION_ARN, "
-            "PULUMI_ECS_SECURITY_GROUP_ID, and PULUMI_PRIVATE_SUBNET_IDS in settings."
-        )
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
         return None
 
-    # Parse subnet IDs (comma-separated string)
-    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
-    if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
-        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
 
     logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
 
-    ecs = _get_ecs_client()
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
 
     try:
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_definition_arn,
             cluster=cluster_arn,
-            taskDefinition=task_definition_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": "pulumi-provisioner",
-                        "command": command,
-                    }
-                ]
-            },
+            command=command,
+            container_name="pulumi-provisioner",
+            network_config=network_config,
         )
-
-        # Check if task was started successfully
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(f"NGFW ECS task failed to start: {failure_reasons}")
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn = response["tasks"][0]["taskArn"]
         logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
         return task_arn
-
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
         raise
 
@@ -550,7 +445,7 @@ def start_ngfw_provisioning(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     command = ["ngfw", "provision", "--request-id", str(request_id)]
     return _start_ngfw_ecs_task(request_id, command)
@@ -568,7 +463,7 @@ def start_ngfw_teardown(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     command = ["ngfw", "deprovision", "--request-id", str(request_id)]
     return _start_ngfw_ecs_task(request_id, command)
@@ -587,7 +482,7 @@ def start_ngfw_operation(request_id: UUID, operation: str) -> str | None:
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If operation is not 'start' or 'stop'
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID
 
@@ -614,26 +509,24 @@ def get_task_status(task_arn: str) -> dict | None:
     if not task_arn:
         return None
 
-    cluster_arn = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", None)
+    cluster_arn = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None)
     if not cluster_arn:
         return None
 
-    ecs = _get_ecs_client()
-
     try:
-        response = ecs.describe_tasks(cluster=cluster_arn, tasks=[task_arn])
+        runner = get_task_runner()
+        result = runner.get_task_status(cluster=cluster_arn, task_id=task_arn)
 
-        if not response.get("tasks"):
+        if result is None:
             return {"status": "UNKNOWN", "reason": "Task not found"}
 
-        task = response["tasks"][0]
         return {
-            "status": task.get("lastStatus", "UNKNOWN"),
-            "desired_status": task.get("desiredStatus"),
-            "started_at": task.get("startedAt"),
-            "stopped_at": task.get("stoppedAt"),
-            "stopped_reason": task.get("stoppedReason"),
+            "status": result.get("status", "UNKNOWN"),
+            "desired_status": result.get("desired_status"),
+            "started_at": result.get("started_at"),
+            "stopped_at": result.get("stopped_at"),
+            "stopped_reason": result.get("stopped_reason"),
         }
-    except ClientError as e:
+    except CloudTaskError as e:
         logger.error(f"Failed to get task status: {e}")
         return None

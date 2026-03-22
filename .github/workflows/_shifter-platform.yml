@@ -385,10 +385,10 @@ jobs:
           GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
           GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
           GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" || echo "")
-          PULUMI_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/pulumi-ecs-cluster-arn")
-          PULUMI_TASK_DEFINITION_ARN=$(get_param "$PS_PREFIX/pulumi-task-definition-arn")
-          PULUMI_ECS_SECURITY_GROUP_ID=$(get_param "$PS_PREFIX/pulumi-ecs-security-group-id")
-          PULUMI_PRIVATE_SUBNET_IDS=$(get_param "$PS_PREFIX/pulumi-private-subnet-ids")
+          ENGINE_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/engine-ecs-cluster-arn")
+          ENGINE_TASK_DEFINITION_ARN=$(get_param "$PS_PREFIX/engine-task-definition-arn")
+          ENGINE_ECS_SECURITY_GROUP_ID=$(get_param "$PS_PREFIX/engine-ecs-security-group-id")
+          ENGINE_PRIVATE_SUBNET_IDS=$(get_param "$PS_PREFIX/engine-private-subnet-ids")
           SQS_CMS_URL=$(get_param "$PS_PREFIX/sqs-cms-url")
           SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
           SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
@@ -412,10 +412,10 @@ jobs:
             COMMON_ENV="$COMMON_ENV -e DJANGO_ALLOWED_HOSTS=$DOMAIN_NAME"
           fi
           COMMON_ENV="$COMMON_ENV -e DJANGO_CSRF_TRUSTED_ORIGINS=https://$DOMAIN_NAME"
-          COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e PULUMI_ECS_CLUSTER_ARN=$PULUMI_ECS_CLUSTER_ARN"
-          COMMON_ENV="$COMMON_ENV -e PULUMI_TASK_DEFINITION_ARN=$PULUMI_TASK_DEFINITION_ARN"
-          COMMON_ENV="$COMMON_ENV -e PULUMI_ECS_SECURITY_GROUP_ID=$PULUMI_ECS_SECURITY_GROUP_ID"
-          COMMON_ENV="$COMMON_ENV -e PULUMI_PRIVATE_SUBNET_IDS=$PULUMI_PRIVATE_SUBNET_IDS"
+          COMMON_ENV="$COMMON_ENV -e SITE_URL=https://$DOMAIN_NAME -e ENGINE_ECS_CLUSTER_ARN=$ENGINE_ECS_CLUSTER_ARN"
+          COMMON_ENV="$COMMON_ENV -e ENGINE_TASK_DEFINITION_ARN=$ENGINE_TASK_DEFINITION_ARN"
+          COMMON_ENV="$COMMON_ENV -e ENGINE_ECS_SECURITY_GROUP_ID=$ENGINE_ECS_SECURITY_GROUP_ID"
+          COMMON_ENV="$COMMON_ENV -e ENGINE_PRIVATE_SUBNET_IDS=$ENGINE_PRIVATE_SUBNET_IDS"
           COMMON_ENV="$COMMON_ENV -e SQS_CMS_URL=$SQS_CMS_URL -e SQS_ENGINE_URL=$SQS_ENGINE_URL -e SQS_MC_URL=$SQS_MC_URL"
           [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
           [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"

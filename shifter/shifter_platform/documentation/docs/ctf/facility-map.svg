@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" width="1200" height="900">
+  <defs>
+    <!-- Scan line overlay -->
+    <pattern id="scanlines" width="4" height="4" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="4" y2="0" stroke="#0f0" stroke-width="0.3" opacity="0.04"/>
+    </pattern>
+    <!-- Grid pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <rect width="40" height="40" fill="none"/>
+      <line x1="0" y1="0" x2="40" y2="0" stroke="#0a2a0a" stroke-width="0.5"/>
+      <line x1="0" y1="0" x2="0" y2="40" stroke="#0a2a0a" stroke-width="0.5"/>
+    </pattern>
+    <!-- Hatch glow -->
+    <radialGradient id="hatch-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff2200" stop-opacity="0.25"/>
+      <stop offset="50%" stop-color="#ff0000" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#ff0000" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Hatch surface -->
+    <radialGradient id="hatch-metal" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2a2a2a"/>
+      <stop offset="60%" stop-color="#1a1a1a"/>
+      <stop offset="100%" stop-color="#111"/>
+    </radialGradient>
+    <!-- Building glow filter -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glow-strong">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Noise texture -->
+    <filter id="noise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" result="noise"/>
+      <feColorMatrix type="saturate" values="0" in="noise" result="gray"/>
+      <feBlend in="SourceGraphic" in2="gray" mode="multiply" result="blend"/>
+    </filter>
+  </defs>
+
+  <!-- Dark background -->
+  <rect width="1200" height="900" fill="#080a08"/>
+  <!-- Grid overlay -->
+  <rect width="1200" height="900" fill="url(#grid)"/>
+  <!-- Scan lines -->
+  <rect width="1200" height="900" fill="url(#scanlines)"/>
+
+  <!-- Terrain noise (subtle ground texture) -->
+  <ellipse cx="300" cy="250" rx="200" ry="120" fill="#0a120a" opacity="0.5"/>
+  <ellipse cx="800" cy="600" rx="250" ry="140" fill="#0a120a" opacity="0.4"/>
+  <ellipse cx="600" cy="450" rx="350" ry="200" fill="#0b130b" opacity="0.3"/>
+
+  <!-- Tree line (dim green dots suggesting forest edge) -->
+  <g opacity="0.6">
+    <circle cx="30" cy="30" r="8" fill="#1a3a1a"/><circle cx="55" cy="20" r="6" fill="#1a3a1a"/><circle cx="80" cy="35" r="7" fill="#153015"/>
+    <circle cx="120" cy="25" r="8" fill="#1a3a1a"/><circle cx="150" cy="15" r="6" fill="#153015"/><circle cx="185" cy="30" r="7" fill="#1a3a1a"/>
+    <circle cx="230" cy="20" r="8" fill="#153015"/><circle cx="270" cy="28" r="6" fill="#1a3a1a"/><circle cx="310" cy="18" r="7" fill="#1a3a1a"/>
+    <circle cx="360" cy="25" r="8" fill="#153015"/><circle cx="400" cy="15" r="6" fill="#1a3a1a"/><circle cx="445" cy="30" r="7" fill="#153015"/>
+    <circle cx="500" cy="20" r="8" fill="#1a3a1a"/><circle cx="550" cy="28" r="6" fill="#153015"/><circle cx="600" cy="18" r="7" fill="#1a3a1a"/>
+    <circle cx="660" cy="25" r="8" fill="#153015"/><circle cx="710" cy="15" r="6" fill="#1a3a1a"/><circle cx="760" cy="30" r="7" fill="#1a3a1a"/>
+    <circle cx="820" cy="20" r="8" fill="#153015"/><circle cx="870" cy="28" r="6" fill="#1a3a1a"/><circle cx="920" cy="18" r="7" fill="#153015"/>
+    <circle cx="970" cy="25" r="8" fill="#1a3a1a"/><circle cx="1020" cy="15" r="6" fill="#153015"/><circle cx="1070" cy="30" r="7" fill="#1a3a1a"/>
+    <circle cx="1120" cy="22" r="8" fill="#153015"/><circle cx="1170" cy="28" r="6" fill="#1a3a1a"/>
+    <!-- Left edge -->
+    <circle cx="25" cy="80" r="7" fill="#1a3a1a"/><circle cx="15" cy="140" r="8" fill="#153015"/>
+    <circle cx="30" cy="200" r="6" fill="#1a3a1a"/><circle cx="20" cy="270" r="7" fill="#153015"/>
+    <circle cx="28" cy="340" r="8" fill="#1a3a1a"/><circle cx="15" cy="410" r="6" fill="#153015"/>
+    <circle cx="25" cy="480" r="7" fill="#1a3a1a"/><circle cx="18" cy="550" r="8" fill="#153015"/>
+    <circle cx="30" cy="620" r="6" fill="#1a3a1a"/><circle cx="22" cy="690" r="7" fill="#153015"/>
+    <!-- Right edge -->
+    <circle cx="1175" cy="80" r="7" fill="#1a3a1a"/><circle cx="1165" cy="150" r="8" fill="#153015"/>
+    <circle cx="1178" cy="220" r="6" fill="#1a3a1a"/><circle cx="1170" cy="290" r="7" fill="#153015"/>
+    <circle cx="1180" cy="360" r="8" fill="#1a3a1a"/><circle cx="1168" cy="430" r="6" fill="#153015"/>
+    <circle cx="1175" cy="500" r="7" fill="#1a3a1a"/><circle cx="1165" cy="570" r="8" fill="#153015"/>
+    <!-- Bottom edge -->
+    <circle cx="30" cy="870" r="8" fill="#1a3a1a"/><circle cx="100" cy="878" r="6" fill="#153015"/>
+    <circle cx="170" cy="865" r="7" fill="#1a3a1a"/><circle cx="250" cy="875" r="8" fill="#153015"/>
+    <circle cx="800" cy="872" r="7" fill="#1a3a1a"/><circle cx="880" cy="868" r="8" fill="#153015"/>
+    <circle cx="960" cy="878" r="6" fill="#1a3a1a"/><circle cx="1040" cy="865" r="7" fill="#153015"/>
+    <circle cx="1120" cy="875" r="8" fill="#1a3a1a"/>
+  </g>
+
+  <!-- === FENCE === -->
+  <rect x="100" y="100" width="950" height="680" rx="4" ry="4"
+        fill="none" stroke="#2a5a2a" stroke-width="2" filter="url(#glow)"/>
+  <!-- Corner markers -->
+  <rect x="95" y="95" width="10" height="10" fill="#3a7a3a" opacity="0.8"/>
+  <rect x="1045" y="95" width="10" height="10" fill="#3a7a3a" opacity="0.8"/>
+  <rect x="95" y="775" width="10" height="10" fill="#3a7a3a" opacity="0.8"/>
+  <rect x="1045" y="775" width="10" height="10" fill="#3a7a3a" opacity="0.8"/>
+
+  <!-- === MAIN BUILDING === -->
+  <rect x="200" y="500" width="280" height="160" rx="2" fill="#0a140a" stroke="#3a8a3a" stroke-width="1.5" filter="url(#glow)"/>
+  <text x="340" y="570" text-anchor="middle" font-family="monospace" font-size="13" fill="#4aea4a" font-weight="bold" filter="url(#glow)">MAIN BUILDING</text>
+
+  <!-- === RESEARCH BUILDING === -->
+  <rect x="700" y="200" width="240" height="180" rx="2" fill="#0a140a" stroke="#3a8a3a" stroke-width="1.5" filter="url(#glow)"/>
+  <text x="820" y="295" text-anchor="middle" font-family="monospace" font-size="13" fill="#4aea4a" font-weight="bold" filter="url(#glow)">RESEARCH BUILDING</text>
+
+  <!-- === THE HATCH === -->
+  <circle cx="550" cy="320" r="130" fill="url(#hatch-glow)"/>
+  <circle cx="550" cy="320" r="95" fill="none" stroke="#5a1a1a" stroke-width="1" stroke-dasharray="4,4"/>
+  <circle cx="550" cy="320" r="75" fill="url(#hatch-metal)" stroke="#aa2222" stroke-width="2" filter="url(#glow)"/>
+  <!-- Hatch segments -->
+  <line x1="550" y1="245" x2="550" y2="395" stroke="#661111" stroke-width="1.5"/>
+  <line x1="475" y1="320" x2="625" y2="320" stroke="#661111" stroke-width="1.5"/>
+  <line x1="497" y1="267" x2="603" y2="373" stroke="#661111" stroke-width="1"/>
+  <line x1="603" y1="267" x2="497" y2="373" stroke="#661111" stroke-width="1"/>
+  <!-- Bolts -->
+  <circle cx="550" cy="250" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="590" cy="260" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="618" cy="290" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="625" cy="320" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="618" cy="350" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="590" cy="380" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="550" cy="390" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="510" cy="380" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="482" cy="350" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="475" cy="320" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="482" cy="290" r="3" fill="#aa2222" opacity="0.8"/>
+  <circle cx="510" cy="260" r="3" fill="#aa2222" opacity="0.8"/>
+  <!-- Center -->
+  <circle cx="550" cy="320" r="16" fill="#1a0a0a" stroke="#aa2222" stroke-width="1.5"/>
+  <circle cx="550" cy="320" r="6" fill="#cc3333" opacity="0.6"/>
+  <text x="550" y="320" text-anchor="middle" font-family="monospace" font-size="10" fill="#ff4444" font-weight="bold" dominant-baseline="middle" filter="url(#glow-strong)">HATCH</text>
+
+</svg>

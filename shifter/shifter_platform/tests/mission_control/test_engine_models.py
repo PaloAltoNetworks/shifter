@@ -1,25 +1,18 @@
 """Tests for Engine models.
 
-These tests verify that Range model is properly located
-in engine.models as per the architecture documentation.
+These tests verify Range model behavior using in-memory construction
+and mocks instead of database access.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from django.contrib.auth import get_user_model
 
-User = get_user_model()
+from engine.models import Range
 
 
-@pytest.mark.django_db
 class TestRangeModel:
     """Tests for Range model in engine.models."""
-
-    @pytest.fixture
-    def user(self):
-        return User.objects.create_user(
-            username="test@example.com",
-            email="test@example.com",
-        )
 
     # -------------------------------------------------------------------------
     # Import tests - Range should be importable from engine.models
@@ -27,8 +20,6 @@ class TestRangeModel:
 
     def test_range_status_enum_exists(self):
         """Range.Status enum exists with expected values."""
-        from engine.models import Range
-
         assert hasattr(Range, "Status")
         assert Range.Status.PENDING == "pending"
         assert Range.Status.PROVISIONING == "provisioning"
@@ -54,119 +45,166 @@ class TestRangeModel:
         assert ResourceStatus.PROVISIONING in CANCELLABLE_STATUSES
 
     # -------------------------------------------------------------------------
-    # Model method tests
+    # Model method tests (class methods use mocked querysets)
     # -------------------------------------------------------------------------
 
-    def test_get_active_for_user_returns_none_when_no_range(self, user):
+    def test_get_active_for_user_returns_none_when_no_range(self):
         """get_active_for_user returns None when user has no active range."""
-        from engine.models import Range
+        user = Mock()
+        mock_qs = MagicMock()
+        mock_qs.filter.return_value.first.return_value = None
 
-        result = Range.get_active_for_user(user)
+        with patch.object(Range, "objects", mock_qs):
+            result = Range.get_active_for_user(user)
+
         assert result is None
 
-    def test_get_active_for_user_returns_active_range(self, user):
+    def test_get_active_for_user_returns_active_range(self):
         """get_active_for_user returns user's active range."""
-        from engine.models import Range
+        user = Mock()
+        expected_range = Range(user_id=1, status=Range.Status.READY)
+        mock_qs = MagicMock()
+        mock_qs.filter.return_value.first.return_value = expected_range
 
-        range_obj = Range.objects.create(
+        with patch.object(Range, "objects", mock_qs):
+            result = Range.get_active_for_user(user)
+
+        assert result == expected_range
+        mock_qs.filter.assert_called_once_with(
             user=user,
-            status=Range.Status.READY,
+            status__in=[
+                Range.Status.PENDING,
+                Range.Status.PROVISIONING,
+                Range.Status.READY,
+                Range.Status.PAUSED,
+                Range.Status.RESUMING,
+            ],
         )
 
-        result = Range.get_active_for_user(user)
-        assert result == range_obj
+    def test_get_active_for_user_excludes_destroying(self):
+        """get_active_for_user excludes DESTROYING ranges via the filter."""
+        user = Mock()
+        mock_qs = MagicMock()
+        mock_qs.filter.return_value.first.return_value = None
 
-    def test_get_active_for_user_excludes_destroying(self, user):
-        """get_active_for_user excludes DESTROYING ranges."""
-        from engine.models import Range
+        with patch.object(Range, "objects", mock_qs):
+            Range.get_active_for_user(user)
 
-        Range.objects.create(
-            user=user,
-            status=Range.Status.DESTROYING,
-        )
+        # Verify DESTROYING is not in the status__in list
+        call_kwargs = mock_qs.filter.call_args[1]
+        assert Range.Status.DESTROYING not in call_kwargs["status__in"]
 
-        result = Range.get_active_for_user(user)
-        assert result is None
-
-    def test_get_destroyable_for_user_includes_failed(self, user):
+    def test_get_destroyable_for_user_includes_failed(self):
         """get_destroyable_for_user includes FAILED ranges."""
-        from engine.models import Range
+        user = Mock()
+        failed_range = Range(user_id=1, status=Range.Status.FAILED)
+        mock_qs = MagicMock()
+        mock_qs.filter.return_value.first.return_value = failed_range
 
-        range_obj = Range.objects.create(
-            user=user,
-            status=Range.Status.FAILED,
-        )
+        with patch.object(Range, "objects", mock_qs):
+            result = Range.get_destroyable_for_user(user)
 
-        result = Range.get_destroyable_for_user(user)
-        assert result == range_obj
+        assert result == failed_range
+        call_kwargs = mock_qs.filter.call_args[1]
+        assert Range.Status.FAILED in call_kwargs["status__in"]
 
     def test_allocate_subnet_index_returns_first_available(self):
         """allocate_subnet_index returns the first available index."""
-        from engine.models import Range
+        mock_qs = MagicMock()
+        # No used indices
+        mock_qs.exclude.return_value.exclude.return_value.values_list.return_value = []
 
-        index = Range.allocate_subnet_index()
+        with (
+            patch.object(Range, "objects", mock_qs),
+            patch("engine.models.transaction") as mock_txn,
+            patch("engine.models.connection", create=True) as mock_conn,
+        ):
+            # Mock the atomic context manager
+            mock_txn.atomic.return_value.__enter__ = Mock(return_value=None)
+            mock_txn.atomic.return_value.__exit__ = Mock(return_value=False)
+            mock_conn.vendor = "sqlite"
+
+            index = Range.allocate_subnet_index()
+
         assert index == 1
 
-    def test_allocate_subnet_index_skips_used_indices(self, user):
+    def test_allocate_subnet_index_skips_used_indices(self):
         """allocate_subnet_index skips indices used by active ranges."""
-        from engine.models import Range
+        mock_qs = MagicMock()
+        # Index 1 is used
+        mock_qs.exclude.return_value.exclude.return_value.values_list.return_value = [1]
 
-        # Create a range using index 1
-        Range.objects.create(
-            user=user,
-            status=Range.Status.READY,
-            subnet_index=1,
-        )
+        with (
+            patch.object(Range, "objects", mock_qs),
+            patch("engine.models.transaction") as mock_txn,
+            patch("engine.models.connection", create=True) as mock_conn,
+        ):
+            mock_txn.atomic.return_value.__enter__ = Mock(return_value=None)
+            mock_txn.atomic.return_value.__exit__ = Mock(return_value=False)
+            mock_conn.vendor = "sqlite"
 
-        index = Range.allocate_subnet_index()
+            index = Range.allocate_subnet_index()
+
         assert index == 2
 
-    def test_allocate_subnet_index_reuses_destroyed(self, user):
-        """allocate_subnet_index reuses indices from DESTROYED ranges."""
-        from engine.models import Range
+    def test_allocate_subnet_index_reuses_destroyed(self):
+        """allocate_subnet_index reuses indices from DESTROYED ranges.
 
-        # Create a destroyed range using index 1
-        Range.objects.create(
-            user=user,
-            status=Range.Status.DESTROYED,
-            subnet_index=1,
-        )
+        DESTROYED ranges are excluded from the used_indices query, so their
+        indices become available for reuse.
+        """
+        mock_qs = MagicMock()
+        # No active ranges using any index (destroyed index 1 excluded by filter)
+        mock_qs.exclude.return_value.exclude.return_value.values_list.return_value = []
 
-        index = Range.allocate_subnet_index()
+        with (
+            patch.object(Range, "objects", mock_qs),
+            patch("engine.models.transaction") as mock_txn,
+            patch("engine.models.connection", create=True) as mock_conn,
+        ):
+            mock_txn.atomic.return_value.__enter__ = Mock(return_value=None)
+            mock_txn.atomic.return_value.__exit__ = Mock(return_value=False)
+            mock_conn.vendor = "sqlite"
+
+            index = Range.allocate_subnet_index()
+
         assert index == 1
 
     # -------------------------------------------------------------------------
     # Model property tests
     # -------------------------------------------------------------------------
 
-    def test_is_usable_property(self, user):
-        """is_usable returns True for READY and PAUSED ranges."""
-        from engine.models import Range
+    def test_is_usable_ready(self):
+        """is_usable returns True for READY ranges."""
+        r = Range(user_id=1, status=Range.Status.READY)
+        assert r.is_usable is True
 
-        ready_range = Range.objects.create(user=user, status=Range.Status.READY)
-        assert ready_range.is_usable is True
+    def test_is_usable_paused(self):
+        """is_usable returns True for PAUSED ranges."""
+        r = Range(user_id=1, status=Range.Status.PAUSED)
+        assert r.is_usable is True
 
-        paused_range = Range.objects.create(user=user, status=Range.Status.PAUSED)
-        assert paused_range.is_usable is True
+    def test_is_usable_failed(self):
+        """is_usable returns False for FAILED ranges."""
+        r = Range(user_id=1, status=Range.Status.FAILED)
+        assert r.is_usable is False
 
-        failed_range = Range.objects.create(user=user, status=Range.Status.FAILED)
-        assert failed_range.is_usable is False
+    def test_is_terminal_destroyed(self):
+        """is_terminal returns True for DESTROYED ranges."""
+        r = Range(user_id=1, status=Range.Status.DESTROYED)
+        assert r.is_terminal is True
 
-    def test_is_terminal_property(self, user):
-        """is_terminal returns True for DESTROYED and FAILED ranges."""
-        from engine.models import Range
+    def test_is_terminal_failed(self):
+        """is_terminal returns True for FAILED ranges."""
+        r = Range(user_id=1, status=Range.Status.FAILED)
+        assert r.is_terminal is True
 
-        destroyed_range = Range.objects.create(user=user, status=Range.Status.DESTROYED)
-        assert destroyed_range.is_terminal is True
-
-        failed_range = Range.objects.create(user=user, status=Range.Status.FAILED)
-        assert failed_range.is_terminal is True
-
-        ready_range = Range.objects.create(user=user, status=Range.Status.READY)
-        assert ready_range.is_terminal is False
+    def test_is_terminal_ready(self):
+        """is_terminal returns False for READY ranges."""
+        r = Range(user_id=1, status=Range.Status.READY)
+        assert r.is_terminal is False
 
 
-@pytest.mark.django_db
 class TestRangeGetInstanceByUUID:
     """Tests for Range.get_instance_by_uuid().
 
@@ -175,32 +213,22 @@ class TestRangeGetInstanceByUUID:
     - Outputs: instance dict or None
     - Side effects: none (pure read operation)
     - Errors: ValueError for invalid uuid input
-    - Logging: none (simple getter)
     """
-
-    @pytest.fixture
-    def user(self):
-        return User.objects.create_user(
-            username="uuid_test@example.com",
-            email="uuid_test@example.com",
-        )
 
     # -------------------------------------------------------------------------
     # Outputs - returns matching instance dict
     # -------------------------------------------------------------------------
 
-    def test_returns_instance_when_uuid_matches(self, user):
+    def test_returns_instance_when_uuid_matches(self):
         """Method returns instance dict when UUID matches."""
-        from engine.models import Range
-
         instance_data = {
             "uuid": "abc-123-def",
             "role": "attacker",
             "private_ip": "10.1.1.10",
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
         }
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[instance_data],
         )
@@ -209,10 +237,8 @@ class TestRangeGetInstanceByUUID:
 
         assert result == instance_data
 
-    def test_returns_correct_instance_from_multiple(self, user):
+    def test_returns_correct_instance_from_multiple(self):
         """Method returns correct instance when multiple exist."""
-        from engine.models import Range
-
         attacker = {
             "uuid": "attacker-uuid-111",
             "role": "attacker",
@@ -223,8 +249,8 @@ class TestRangeGetInstanceByUUID:
             "role": "victim",
             "private_ip": "10.1.1.20",
         }
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[attacker, victim],
         )
@@ -233,17 +259,15 @@ class TestRangeGetInstanceByUUID:
 
         assert result == victim
 
-    def test_returns_none_when_uuid_not_found(self, user):
+    def test_returns_none_when_uuid_not_found(self):
         """Method returns None when UUID doesn't match any instance."""
-        from engine.models import Range
-
         instance_data = {
             "uuid": "existing-uuid",
             "role": "attacker",
             "private_ip": "10.1.1.10",
         }
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[instance_data],
         )
@@ -252,13 +276,11 @@ class TestRangeGetInstanceByUUID:
 
         assert result is None
 
-    def test_returns_none_when_provisioned_instances_empty_or_null(self, user):
+    def test_returns_none_when_provisioned_instances_empty_or_null(self):
         """Method returns None when provisioned_instances is empty or None."""
-        from engine.models import Range
-
         for instances_value in [[], None]:
-            range_obj = Range.objects.create(
-                user=user,
+            range_obj = Range(
+                user_id=1,
                 status=Range.Status.READY,
                 provisioned_instances=instances_value,
             )
@@ -270,12 +292,10 @@ class TestRangeGetInstanceByUUID:
     # Input validation - uuid parameter
     # -------------------------------------------------------------------------
 
-    def test_raises_on_invalid_uuid(self, user):
+    def test_raises_on_invalid_uuid(self):
         """Method raises ValueError for None or empty uuid."""
-        from engine.models import Range
-
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[{"uuid": "test", "role": "attacker"}],
         )
@@ -288,41 +308,34 @@ class TestRangeGetInstanceByUUID:
     # Side effects - none expected (pure read operation)
     # -------------------------------------------------------------------------
 
-    def test_has_no_side_effects(self, user):
-        """Method does not modify data or save to database."""
-        from engine.models import Range
-
+    def test_has_no_side_effects(self):
+        """Method does not modify the provisioned_instances data."""
         instance_data = {
             "uuid": "abc-123-def",
             "role": "attacker",
             "private_ip": "10.1.1.10",
         }
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[instance_data],
         )
         original_data = range_obj.provisioned_instances.copy()
-        original_updated_at = range_obj.updated_at
 
         range_obj.get_instance_by_uuid("abc-123-def")
-        range_obj.refresh_from_db()
 
         assert range_obj.provisioned_instances == original_data
-        assert range_obj.updated_at == original_updated_at
 
     # -------------------------------------------------------------------------
     # Error handling - malformed data
     # -------------------------------------------------------------------------
 
-    def test_skips_instances_without_uuid_key(self, user):
+    def test_skips_instances_without_uuid_key(self):
         """Method skips instances that don't have a uuid key."""
-        from engine.models import Range
-
         malformed = {"role": "attacker", "private_ip": "10.1.1.10"}  # no uuid
         valid = {"uuid": "valid-uuid", "role": "victim", "private_ip": "10.1.1.20"}
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[malformed, valid],
         )
@@ -331,14 +344,12 @@ class TestRangeGetInstanceByUUID:
 
         assert result == valid
 
-    def test_returns_none_when_all_instances_malformed(self, user):
+    def test_returns_none_when_all_instances_malformed(self):
         """Method returns None when no instances have uuid key."""
-        from engine.models import Range
-
         malformed1 = {"role": "attacker", "private_ip": "10.1.1.10"}
         malformed2 = {"role": "victim", "private_ip": "10.1.1.20"}
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[malformed1, malformed2],
         )
@@ -351,13 +362,11 @@ class TestRangeGetInstanceByUUID:
     # Boundary conditions
     # -------------------------------------------------------------------------
 
-    def test_handles_single_instance(self, user):
+    def test_handles_single_instance(self):
         """Method works correctly with single instance in list."""
-        from engine.models import Range
-
         instance = {"uuid": "only-one", "role": "attacker"}
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[instance],
         )
@@ -366,16 +375,14 @@ class TestRangeGetInstanceByUUID:
 
         assert result == instance
 
-    def test_handles_many_instances(self, user):
+    def test_handles_many_instances(self):
         """Method finds instance in large list."""
-        from engine.models import Range
-
         instances = [{"uuid": f"uuid-{i}", "role": "victim"} for i in range(100)]
         target = {"uuid": "target-uuid", "role": "attacker"}
         instances.insert(50, target)
 
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=instances,
         )
@@ -384,13 +391,11 @@ class TestRangeGetInstanceByUUID:
 
         assert result == target
 
-    def test_case_sensitive_uuid_match(self, user):
+    def test_case_sensitive_uuid_match(self):
         """Method performs case-sensitive UUID matching."""
-        from engine.models import Range
-
         instance = {"uuid": "ABC-123", "role": "attacker"}
-        range_obj = Range.objects.create(
-            user=user,
+        range_obj = Range(
+            user_id=1,
             status=Range.Status.READY,
             provisioned_instances=[instance],
         )

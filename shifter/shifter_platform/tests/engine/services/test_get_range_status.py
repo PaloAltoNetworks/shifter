@@ -4,10 +4,7 @@ import logging
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
-import pytest
 
-
-@pytest.mark.django_db
 class TestGetResourceStatus:
     """Tests for get_range_status() in engine/services.py.
 

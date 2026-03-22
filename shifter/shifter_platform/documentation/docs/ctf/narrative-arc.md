@@ -124,7 +124,25 @@ The central tension builds: **what is PROJECT LEVIATHAN?** Fragments of informat
 
 The mystery is the engine of the middle act. Every piece of intelligence deepens the question.
 
-And then the Watchtower falls. Cameras go dark. The entrance to the underground is unguarded. JTF-2 gets the green light.
+### Act 3.5: The Generator
+
+The Watchtower doesn't fall on its own. Someone has to kill the power.
+
+Site BOREAS runs on a dedicated generator complex -- diesel turbines feeding the entire compound. The generator's control system is on the facility network, accessible from the Front Office side if you know where to look. It's an industrial controller running a decades-old SCADA interface with authentication that was never meant to face a real adversary.
+
+An operator who has pushed deep enough into the network -- past the corporate IT, into the operational technology segment -- finds the generator's management interface. The controls are straightforward: fuel injection rates, cooling system valves, thermal safeties. The thermal safeties are the key. They exist to prevent the diesel turbines from overheating. They can be disabled.
+
+With the safeties off, the fuel injection rate can be pushed past redline. The cooling system can be throttled. The generator begins to heat up. Thermal sensors climb. Warnings fire in the Watchtower -- but the warnings look like a malfunction, not an attack. The security team dispatches guards to investigate.
+
+Then the generator explodes.
+
+The blast kills compound power. Every light goes dark. The Watchtower's cameras, access control systems, electronic locks -- all dead. The security team is scrambling, rushing to the fire, trying to understand what happened. For a few critical minutes, the facility is blind.
+
+This is the opening. JTF-2 gets the green light.
+
+A helicopter inbound from the northeast. A special operations team deploys near the hatch. They attempt a direct breach -- negative, the hatch is hardened, mechanical locks that don't need power. They reposition to a communications junction on the hatch perimeter, splice into the facility's internal wiring, and establish a covert relay back to POLARIS. The operators now have a narrow, fragile network path into the Bunker's control systems.
+
+The team exfiltrates before the guards return from the fire. The splice holds. The door to the underground is open -- not physically, but digitally.
 
 ### Act 4: The Bunker
 

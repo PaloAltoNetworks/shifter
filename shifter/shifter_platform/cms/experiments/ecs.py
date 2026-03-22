@@ -15,33 +15,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import boto3
-from botocore.exceptions import ClientError
 from django.conf import settings
+
+from shared.cloud import get_task_runner
+from shared.cloud.exceptions import CloudTaskError
 
 if TYPE_CHECKING:
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
-
-
-def _get_ecs_client() -> Any:
-    """Get boto3 ECS client.
-
-    Returns:
-        Boto3 ECS client for the configured AWS region.
-
-    Raises:
-        ValueError: If AWS_REGION is not configured.
-    """
-    region: str = getattr(settings, "AWS_REGION", "")
-    if not region:
-        logger.error("AWS_REGION is not configured")
-        raise ValueError("AWS_REGION is required for ECS operations")
-
-    return boto3.client("ecs", region_name=region)
 
 
 def _get_ecs_config() -> tuple[str, str, str, list[str]] | None:
@@ -51,25 +35,25 @@ def _get_ecs_config() -> tuple[str, str, str, list[str]] | None:
         Tuple of (cluster_arn, task_def_arn, security_group_id, subnet_ids)
         or None if configuration is incomplete.
     """
-    cluster_arn: str = getattr(settings, "PULUMI_ECS_CLUSTER_ARN", "")
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", "")
     task_def_arn: str = getattr(settings, "EXPERIMENT_TASK_DEFINITION_ARN", "") or getattr(
-        settings, "PULUMI_TASK_DEFINITION_ARN", ""
+        settings, "ENGINE_TASK_DEFINITION_ARN", ""
     )
-    security_group_id: str = getattr(settings, "PULUMI_ECS_SECURITY_GROUP_ID", "")
-    subnet_ids_str: str = getattr(settings, "PULUMI_PRIVATE_SUBNET_IDS", "")
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", "")
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "")
 
     if not all([cluster_arn, task_def_arn, security_group_id, subnet_ids_str]):
         logger.warning(
             "ECS configuration incomplete for experiment tasks. "
-            "Required: PULUMI_ECS_CLUSTER_ARN, EXPERIMENT_TASK_DEFINITION_ARN "
-            "(or PULUMI_TASK_DEFINITION_ARN), PULUMI_ECS_SECURITY_GROUP_ID, "
-            "PULUMI_PRIVATE_SUBNET_IDS."
+            "Required: ENGINE_ECS_CLUSTER_ARN, EXPERIMENT_TASK_DEFINITION_ARN "
+            "(or ENGINE_TASK_DEFINITION_ARN), ENGINE_ECS_SECURITY_GROUP_ID, "
+            "ENGINE_PRIVATE_SUBNET_IDS."
         )
         return None
 
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
     if not subnet_ids:
-        logger.error("PULUMI_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
         return None
 
     return cluster_arn, task_def_arn, security_group_id, subnet_ids
@@ -102,7 +86,7 @@ def start_experiment_task(
     Raises:
         TypeError: If required parameters are None or wrong type.
         ValueError: If command is not a valid operation.
-        ClientError: If the ECS RunTask API call fails.
+        CloudTaskError: If the ECS RunTask API call fails.
     """
     if experiment_id is None or not isinstance(experiment_id, int):
         raise TypeError(f"experiment_id must be an int, got {type(experiment_id).__name__}")
@@ -132,14 +116,9 @@ def start_experiment_task(
     ]
 
     # Build environment overrides for payload
-    env_overrides: list[dict[str, str]] = []
+    env_overrides: dict[str, str] | None = None
     if payload is not None:
-        env_overrides.append(
-            {
-                "name": "EXPERIMENT_PAYLOAD",
-                "value": json.dumps(payload),
-            }
-        )
+        env_overrides = {"EXPERIMENT_PAYLOAD": json.dumps(payload)}
 
     logger.info(
         "Starting experiment ECS task: experiment=%d run=%d request_id=%s command=%s",
@@ -149,47 +128,24 @@ def start_experiment_task(
         command,
     )
 
-    ecs = _get_ecs_client()
-
-    container_override: dict = {
-        "name": "experiment-executor",
-        "command": container_command,
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
     }
-    if env_overrides:
-        container_override["environment"] = env_overrides
 
     try:
-        # Boto3 automatically retries transient failures (network errors, throttling)
-        # with exponential backoff (default: 5 attempts). No additional retry logic needed.
-        response = ecs.run_task(
+        runner = get_task_runner()
+        task_arn = runner.run_task(
+            task_definition=task_def_arn,
             cluster=cluster_arn,
-            taskDefinition=task_def_arn,
-            launchType="FARGATE",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": subnet_ids,
-                    "securityGroups": [security_group_id],
-                    "assignPublicIp": "DISABLED",
-                }
-            },
-            overrides={"containerOverrides": [container_override]},
+            command=container_command,
+            container_name="experiment-executor",
+            env_overrides=env_overrides,
+            network_config=network_config,
         )
-
-        if not response.get("tasks"):
-            failures = response.get("failures", [])
-            failure_reasons = [f.get("reason", "unknown") for f in failures]
-            logger.error(
-                "Experiment ECS task failed to start: %s (experiment=%d run=%d)",
-                failure_reasons,
-                experiment_id,
-                run_id,
-            )
-            raise ClientError(
-                {"Error": {"Code": "TaskStartFailed", "Message": str(failure_reasons)}},
-                "RunTask",
-            )
-
-        task_arn: str = response["tasks"][0]["taskArn"]
         logger.info(
             "Started experiment ECS task: experiment=%d run=%d task_arn=%s",
             experiment_id,
@@ -197,8 +153,7 @@ def start_experiment_task(
             task_arn,
         )
         return task_arn
-
-    except ClientError:
+    except CloudTaskError:
         logger.exception(
             "Failed to start experiment ECS task: experiment=%d run=%d",
             experiment_id,

@@ -18,8 +18,8 @@ class MockDCInstance:
 
     domain_name: str = "shifter.local"
     netbios_name: str = "SHIFTER"
-    dsrm_password: str = "DsrmPass123!"
-    domain_admin_password: str = "AdminPass456!"
+    dsrm_password: str = "DsrmPass123!"  # nosec B105  # NOSONAR — test fixture
+    domain_admin_password: str = "AdminPass456!"  # nosec B105  # NOSONAR — test fixture
 
 
 class TestDCSetupPlan:

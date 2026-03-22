@@ -304,22 +304,41 @@ SHIFTER_SUPPORT_EMAIL = os.environ.get("SHIFTER_SUPPORT_EMAIL", "noreply@shifter
 PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 
 # ------------------------------------------------------------------------------
+# Cloud Provider Configuration
+# ------------------------------------------------------------------------------
+
+# Which cloud provider to use: "aws" (default) or "gcp" (future)
+CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
+
+# Generic names — adapters use these; AWS-specific names kept as fallbacks
+CLOUD_REGION = (
+    os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
+)
+STORAGE_BUCKET_NAME = os.environ.get("STORAGE_BUCKET_NAME") or os.environ.get("AWS_S3_BUCKET_NAME", "")
+
+# ------------------------------------------------------------------------------
 # AWS S3 Configuration
 # ------------------------------------------------------------------------------
 
-AWS_S3_BUCKET_NAME = os.environ.get("AWS_S3_BUCKET_NAME", "")
-AWS_S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_S3_REGION", "us-east-2")
-AWS_REGION = AWS_S3_REGION  # Alias for consistency
+AWS_S3_BUCKET_NAME = STORAGE_BUCKET_NAME  # Backward compat alias
+AWS_S3_REGION = CLOUD_REGION  # Backward compat alias
+AWS_REGION = CLOUD_REGION  # Backward compat alias
 AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
 
 # SNS Topic for publishing events (provisioner -> workers)
 SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
 
-# Shifter Engine (ECS Fargate)
-PULUMI_ECS_CLUSTER_ARN = os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-PULUMI_TASK_DEFINITION_ARN = os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
-PULUMI_ECS_SECURITY_GROUP_ID = os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
-PULUMI_PRIVATE_SUBNET_IDS = os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
+# Shifter Engine (ECS Fargate) — PULUMI_ fallbacks removed after infra deploys new names
+ENGINE_ECS_CLUSTER_ARN = os.environ.get("ENGINE_ECS_CLUSTER_ARN") or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
+ENGINE_TASK_DEFINITION_ARN = os.environ.get("ENGINE_TASK_DEFINITION_ARN") or os.environ.get(
+    "PULUMI_TASK_DEFINITION_ARN", ""
+)
+ENGINE_ECS_SECURITY_GROUP_ID = os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID") or os.environ.get(
+    "PULUMI_ECS_SECURITY_GROUP_ID", ""
+)
+ENGINE_PRIVATE_SUBNET_IDS = os.environ.get("ENGINE_PRIVATE_SUBNET_IDS") or os.environ.get(
+    "PULUMI_PRIVATE_SUBNET_IDS", ""
+)
 
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")

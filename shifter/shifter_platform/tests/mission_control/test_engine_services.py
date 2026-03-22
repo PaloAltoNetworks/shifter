@@ -4,12 +4,12 @@ Tests verify service layer behavior with mocked model layer.
 """
 
 import logging
+from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 import pytest
 
 
-@pytest.mark.django_db
 class TestGetResourceStatus:
     """Tests for get_range_status() in engine/services.py.
 
@@ -262,7 +262,6 @@ class TestGetResourceStatus:
             assert result is None
 
 
-@pytest.mark.django_db
 class TestCreateRange:
     """Tests for create_range() in engine/services.py.
 
@@ -318,6 +317,12 @@ class TestCreateRange:
                 )
             ],
         )
+
+    @pytest.fixture(autouse=True)
+    def mock_transaction_atomic(self):
+        """Keep these tests unit-level by skipping real DB transaction setup."""
+        with patch("engine.services.transaction.atomic", return_value=nullcontext()):
+            yield
 
     # -------------------------------------------------------------------------
     # Service creates Range correctly
@@ -579,7 +584,6 @@ class TestCreateRange:
             create_range({"user_id": 1, "scenario_id": "test"})
 
 
-@pytest.mark.django_db
 class TestDestroyRange:
     """Tests for destroy_range() in engine/services.py.
 
@@ -770,7 +774,6 @@ class TestDestroyRange:
             destroy_range(range_context)
 
 
-@pytest.mark.django_db
 class TestCancelRange:
     """Tests for cancel_range() in engine/services.py.
 

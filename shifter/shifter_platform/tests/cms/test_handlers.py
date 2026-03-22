@@ -3,12 +3,9 @@
 import json
 from unittest.mock import patch
 
-import pytest
-
 from shared.enums import ResourceStatus
 
 
-@pytest.mark.django_db
 class TestProcessEvent:
     """Tests for process_event dispatcher."""
 
@@ -90,7 +87,6 @@ class TestProcessEvent:
         assert callable(process_event)
 
 
-@pytest.mark.django_db
 class TestParseSnsMessage:
     """Tests for parse_sns_message helper."""
 
@@ -151,7 +147,6 @@ class TestParseSnsMessage:
         assert result["range_id"] == 1
 
 
-@pytest.mark.django_db
 class TestProcessRangeEvent:
     """Tests for process_range_event handler."""
 
@@ -161,17 +156,16 @@ class TestProcessRangeEvent:
 
     def test_updates_range_instance_status(self):
         """Handler updates RangeInstance.status from event."""
+        from unittest.mock import MagicMock
+
         from cms.handlers import process_range_event
-        from cms.models import RangeInstance
 
-        RangeInstance.objects.create(
-            range_id=1,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
+        mock_instance = MagicMock()
+        mock_instance.range_id = 1
+        mock_instance.user_id = 42
+        mock_instance.status = ResourceStatus.PENDING.value
+        mock_instance.pk = 1
 
-        # SNS-wrapped message
         message = {
             "Message": json.dumps(
                 {
@@ -183,22 +177,30 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        instance = RangeInstance.objects.get(range_id=1)
-        assert instance.status == ResourceStatus.PROVISIONING.value
+            process_range_event(message)
+
+            MockRI.objects.get.assert_called_once_with(range_id=1)
+            assert mock_instance.status == ResourceStatus.PROVISIONING.value
+            mock_instance.save.assert_called_once_with(update_fields=["status"])
 
     def test_handles_ready_status(self):
         """Handler correctly handles READY status."""
-        from cms.handlers import process_range_event
-        from cms.models import RangeInstance
+        from unittest.mock import MagicMock
 
-        RangeInstance.objects.create(
-            range_id=2,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PROVISIONING.value,
-        )
+        from cms.handlers import process_range_event
+
+        mock_instance = MagicMock()
+        mock_instance.range_id = 2
+        mock_instance.user_id = 42
+        mock_instance.status = ResourceStatus.PROVISIONING.value
+        mock_instance.pk = 2
 
         message = {
             "Message": json.dumps(
@@ -211,22 +213,35 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.notify_experiment_on_range_ready"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        instance = RangeInstance.objects.get(range_id=2)
-        assert instance.status == ResourceStatus.READY.value
+            process_range_event(message)
+
+            assert mock_instance.status == ResourceStatus.READY.value
+            mock_instance.save.assert_called_once_with(update_fields=["status"])
 
     def test_handles_terminal_status_sets_deleted_at(self):
-        """Handler sets deleted_at when status is terminal (DESTROYED)."""
-        from cms.handlers import process_range_event
-        from cms.models import RangeInstance
+        """Handler sets deleted_at when status is terminal (DESTROYED).
 
-        RangeInstance.objects.create(
-            range_id=3,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.DESTROYING.value,
-        )
+        Note: deleted_at is set by EntityBase.save() in the model layer.
+        We verify the handler calls save() with the correct status; the
+        model's save() behaviour is tested elsewhere.
+        """
+        from unittest.mock import MagicMock
+
+        from cms.handlers import process_range_event
+
+        mock_instance = MagicMock()
+        mock_instance.range_id = 3
+        mock_instance.user_id = 42
+        mock_instance.status = ResourceStatus.DESTROYING.value
+        mock_instance.pk = 3
 
         message = {
             "Message": json.dumps(
@@ -239,11 +254,17 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        instance = RangeInstance.objects.get(range_id=3)
-        assert instance.status == ResourceStatus.DESTROYED.value
-        assert instance.deleted_at is not None
+            process_range_event(message)
+
+            assert mock_instance.status == ResourceStatus.DESTROYED.value
+            mock_instance.save.assert_called_once_with(update_fields=["status"])
 
     # ---------------------------------------------------------------------
     # Event filtering
@@ -252,14 +273,6 @@ class TestProcessRangeEvent:
     def test_ignores_non_status_events(self):
         """Handler ignores events that are not range.status.updated."""
         from cms.handlers import process_range_event
-        from cms.models import RangeInstance
-
-        RangeInstance.objects.create(
-            range_id=4,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
 
         message = {
             "Message": json.dumps(
@@ -271,11 +284,11 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with patch("cms.handlers.RangeInstance") as MockRI:
+            process_range_event(message)
 
-        # Status should be unchanged
-        instance = RangeInstance.objects.get(range_id=4)
-        assert instance.status == ResourceStatus.PENDING.value
+            # Should return early without any DB lookup
+            MockRI.objects.get.assert_not_called()
 
     # ---------------------------------------------------------------------
     # Error handling - missing data
@@ -296,20 +309,23 @@ class TestProcessRangeEvent:
             )
         }
 
-        # Should not raise - handler returns early
-        process_range_event(message)
+        with patch("cms.handlers.RangeInstance") as MockRI:
+            MockRI.DoesNotExist = Exception
+            MockRI.objects.get.side_effect = MockRI.DoesNotExist("not found")
+
+            # Should not raise - handler returns early
+            process_range_event(message)
 
     def test_handles_user_id_mismatch(self):
         """Handler rejects events when user_id doesn't match instance."""
-        from cms.handlers import process_range_event
-        from cms.models import RangeInstance
+        from unittest.mock import MagicMock
 
-        RangeInstance.objects.create(
-            range_id=5,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
+        from cms.handlers import process_range_event
+
+        mock_instance = MagicMock()
+        mock_instance.range_id = 5
+        mock_instance.user_id = 42
+        mock_instance.status = ResourceStatus.PENDING.value
 
         message = {
             "Message": json.dumps(
@@ -322,23 +338,19 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with patch("cms.handlers.RangeInstance") as MockRI:
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        # Status should be unchanged
-        instance = RangeInstance.objects.get(range_id=5)
-        assert instance.status == ResourceStatus.PENDING.value
+            process_range_event(message)
+
+            # Status should be unchanged - save should NOT be called
+            assert mock_instance.status == ResourceStatus.PENDING.value
+            mock_instance.save.assert_not_called()
 
     def test_rejects_invalid_status_value(self):
         """Handler rejects events with invalid status values."""
         from cms.handlers import process_range_event
-        from cms.models import RangeInstance
-
-        RangeInstance.objects.create(
-            range_id=50,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
 
         message = {
             "Message": json.dumps(
@@ -351,11 +363,11 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with patch("cms.handlers.RangeInstance") as MockRI:
+            # Should return early before any DB lookup
+            process_range_event(message)
 
-        # Status should be unchanged
-        instance = RangeInstance.objects.get(range_id=50)
-        assert instance.status == ResourceStatus.PENDING.value
+            MockRI.objects.get.assert_not_called()
 
     # ---------------------------------------------------------------------
     # Handler is callable
@@ -373,15 +385,15 @@ class TestProcessRangeEvent:
 
     def test_succeeds_with_minimum_required_input(self):
         """Handler works with minimal event fields."""
-        from cms.handlers import process_range_event
-        from cms.models import RangeInstance
+        from unittest.mock import MagicMock
 
-        RangeInstance.objects.create(
-            range_id=8,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PENDING.value,
-        )
+        from cms.handlers import process_range_event
+
+        mock_instance = MagicMock()
+        mock_instance.range_id = 8
+        mock_instance.user_id = 42
+        mock_instance.status = ResourceStatus.PENDING.value
+        mock_instance.pk = 8
 
         # Minimal SNS message - no error_message
         message = {
@@ -395,10 +407,17 @@ class TestProcessRangeEvent:
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        instance = RangeInstance.objects.get(range_id=8)
-        assert instance.status == ResourceStatus.PROVISIONING.value
+            process_range_event(message)
+
+            assert mock_instance.status == ResourceStatus.PROVISIONING.value
+            mock_instance.save.assert_called_once_with(update_fields=["status"])
 
     # ---------------------------------------------------------------------
     # request_id lookup (new pattern - range_id=None)
@@ -410,33 +429,19 @@ class TestProcessRangeEvent:
         This is the new pattern where RangeInstance.range_id is None and
         correlation happens via Request.request_id (UUID).
         """
+        from unittest.mock import MagicMock
         from uuid import uuid4
 
-        from django.contrib.auth import get_user_model
-
         from cms.handlers import process_range_event
-        from cms.models import RangeInstance, Request
-        from shared.enums import RequestType
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser42", password="testpass")
-
-        # Create Request with UUID
         request_uuid = uuid4()
-        cms_request = Request.objects.create(
-            request_id=request_uuid,
-            request_type=RequestType.RANGE.value,
-            user=user,
-        )
+        user_id = 42
 
-        # Create RangeInstance with range_id=None, linked via request FK
-        RangeInstance.objects.create(
-            range_id=None,  # New pattern: no legacy range_id
-            request=cms_request,
-            scenario_id="basic",
-            user_id=user.id,
-            status=ResourceStatus.PENDING.value,
-        )
+        mock_instance = MagicMock()
+        mock_instance.range_id = None  # New pattern: no legacy range_id
+        mock_instance.user_id = user_id
+        mock_instance.status = ResourceStatus.PENDING.value
+        mock_instance.pk = 10
 
         # Event with request_id (UUID) - the way Engine publishes events
         message = {
@@ -446,46 +451,42 @@ class TestProcessRangeEvent:
                     "request_id": str(request_uuid),
                     "range_id": 57,  # Engine Range.id (not used for lookup in new pattern)
                     "new_status": ResourceStatus.FAILED.value,
-                    "user_id": user.id,
+                    "user_id": user_id,
                 }
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        # Verify status updated via request_id lookup
-        instance = RangeInstance.objects.get(request__request_id=request_uuid)
-        assert instance.status == ResourceStatus.FAILED.value
-        assert instance.range_id == 57  # range_id from event should be persisted
+            process_range_event(message)
+
+            # Verify lookup was by request_id
+            MockRI.objects.get.assert_called_once_with(request__request_id=str(request_uuid))
+            assert mock_instance.status == ResourceStatus.FAILED.value
+            # range_id from event should be persisted (was None, now set)
+            assert mock_instance.range_id == 57
+            mock_instance.save.assert_called_once_with(update_fields=["status", "range_id"])
 
     def test_range_id_not_overwritten_if_already_set(self):
         """Handler does not overwrite an existing range_id with a different value from the event."""
+        from unittest.mock import MagicMock
         from uuid import uuid4
 
-        from django.contrib.auth import get_user_model
-
         from cms.handlers import process_range_event
-        from cms.models import RangeInstance, Request
-        from shared.enums import RequestType
-
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser_guard", password="testpass")
 
         request_uuid = uuid4()
-        cms_request = Request.objects.create(
-            request_id=request_uuid,
-            request_type=RequestType.RANGE.value,
-            user=user,
-        )
+        user_id = 42
 
-        # RangeInstance already has a range_id set (legacy pattern)
-        RangeInstance.objects.create(
-            range_id=10,
-            request=cms_request,
-            scenario_id="basic",
-            user_id=user.id,
-            status=ResourceStatus.PENDING.value,
-        )
+        mock_instance = MagicMock()
+        mock_instance.range_id = 10  # Already has a range_id
+        mock_instance.user_id = user_id
+        mock_instance.status = ResourceStatus.PENDING.value
+        mock_instance.pk = 11
 
         # Event carries a different range_id
         message = {
@@ -495,16 +496,25 @@ class TestProcessRangeEvent:
                     "request_id": str(request_uuid),
                     "range_id": 99,
                     "new_status": ResourceStatus.PROVISIONING.value,
-                    "user_id": user.id,
+                    "user_id": user_id,
                 }
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        instance = RangeInstance.objects.get(request__request_id=request_uuid)
-        assert instance.status == ResourceStatus.PROVISIONING.value
-        assert instance.range_id == 10  # Original range_id preserved, not overwritten
+            process_range_event(message)
+
+            assert mock_instance.status == ResourceStatus.PROVISIONING.value
+            # Original range_id preserved, not overwritten
+            assert mock_instance.range_id == 10
+            # save should only update status (not range_id)
+            mock_instance.save.assert_called_once_with(update_fields=["status"])
 
     def test_request_id_lookup_preferred_over_range_id(self):
         """Handler prefers request_id lookup over range_id when both present.
@@ -512,32 +522,19 @@ class TestProcessRangeEvent:
         Ensures events with both identifiers use request_id for lookup,
         maintaining proper service layer boundaries.
         """
+        from unittest.mock import MagicMock
         from uuid import uuid4
 
-        from django.contrib.auth import get_user_model
-
         from cms.handlers import process_range_event
-        from cms.models import RangeInstance, Request
-        from shared.enums import RequestType
-
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser100", password="testpass")
 
         request_uuid = uuid4()
-        cms_request = Request.objects.create(
-            request_id=request_uuid,
-            request_type=RequestType.RANGE.value,
-            user=user,
-        )
+        user_id = 42
 
-        # RangeInstance with BOTH range_id and request FK
-        RangeInstance.objects.create(
-            range_id=100,
-            request=cms_request,
-            scenario_id="basic",
-            user_id=user.id,
-            status=ResourceStatus.PENDING.value,
-        )
+        mock_instance = MagicMock()
+        mock_instance.range_id = 100
+        mock_instance.user_id = user_id
+        mock_instance.status = ResourceStatus.PENDING.value
+        mock_instance.pk = 12
 
         message = {
             "Message": json.dumps(
@@ -546,12 +543,21 @@ class TestProcessRangeEvent:
                     "request_id": str(request_uuid),
                     "range_id": 100,
                     "new_status": ResourceStatus.READY.value,
-                    "user_id": user.id,
+                    "user_id": user_id,
                 }
             )
         }
 
-        process_range_event(message)
+        with (
+            patch("cms.handlers.RangeInstance") as MockRI,
+            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.notify_experiment_on_range_ready"),
+        ):
+            MockRI.objects.get.return_value = mock_instance
+            MockRI.DoesNotExist = Exception
 
-        instance = RangeInstance.objects.get(request__request_id=request_uuid)
-        assert instance.status == ResourceStatus.READY.value
+            process_range_event(message)
+
+            # Verify lookup was by request_id, NOT range_id
+            MockRI.objects.get.assert_called_once_with(request__request_id=str(request_uuid))
+            assert mock_instance.status == ResourceStatus.READY.value

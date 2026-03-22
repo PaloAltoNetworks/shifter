@@ -1,26 +1,33 @@
 """Tests for shared.context_processors."""
 
-from django.contrib.auth.models import AnonymousUser, Group, User
-from django.test import RequestFactory, TestCase
+from unittest.mock import MagicMock
+
+from django.contrib.auth.models import AnonymousUser
+from django.test import RequestFactory
 
 from shared.auth import THREAT_RESEARCH_GROUP
 from shared.context_processors import user_permissions
 
-TEST_PASSWORD = "test"  # nosec B105
+
+def _make_user(is_staff=False, is_active=True, groups=None):
+    """Create a mock user with the given properties."""
+    user = MagicMock()
+    user.is_staff = is_staff
+    user.is_active = is_active
+    user.is_authenticated = True
+    user.is_anonymous = False
+    user.pk = 1
+    if groups:
+        user.groups.filter.return_value.exists.return_value = True
+    else:
+        user.groups.filter.return_value.exists.return_value = False
+    return user
 
 
-class UserPermissionsContextProcessorTest(TestCase):
+class TestUserPermissionsContextProcessor:
     """Unit tests for the user_permissions context processor."""
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.staff = User.objects.create_user(username="cp_staff", password=TEST_PASSWORD, is_staff=True)
-        cls.threat_user = User.objects.create_user(username="cp_threat", password=TEST_PASSWORD, is_staff=False)
-        group, _ = Group.objects.get_or_create(name=THREAT_RESEARCH_GROUP)
-        cls.threat_user.groups.add(group)
-        cls.regular = User.objects.create_user(username="cp_regular", password=TEST_PASSWORD, is_staff=False)
-
-    def setUp(self):
+    def setup_method(self):
         self.factory = RequestFactory()
 
     def _make_request(self, user=None):
@@ -33,13 +40,13 @@ class UserPermissionsContextProcessorTest(TestCase):
         assert result == {"can_access_threat_research": False}
 
     def test_staff_returns_true(self):
-        result = user_permissions(self._make_request(self.staff))
+        result = user_permissions(self._make_request(_make_user(is_staff=True)))
         assert result == {"can_access_threat_research": True}
 
     def test_threat_research_member_returns_true(self):
-        result = user_permissions(self._make_request(self.threat_user))
+        result = user_permissions(self._make_request(_make_user(is_staff=False, groups=[THREAT_RESEARCH_GROUP])))
         assert result == {"can_access_threat_research": True}
 
     def test_regular_user_returns_false(self):
-        result = user_permissions(self._make_request(self.regular))
+        result = user_permissions(self._make_request(_make_user(is_staff=False)))
         assert result == {"can_access_threat_research": False}

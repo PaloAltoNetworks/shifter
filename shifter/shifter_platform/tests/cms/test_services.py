@@ -1,15 +1,46 @@
 """Tests for CMS services."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from django.utils import timezone
 
 from shared.constants import USER_CANNOT_BE_NONE
 from shared.enums import ResourceStatus
 
 
-@pytest.mark.django_db
+@pytest.fixture
+def mock_user():
+    """Create a mock user with an id attribute."""
+    user = MagicMock()
+    user.id = 42
+    return user
+
+
+@pytest.fixture
+def mock_range_instance():
+    """Create a mock RangeInstance returned from queryset."""
+    inst = MagicMock()
+    inst.range_id = 1
+    inst.scenario_id = "basic"
+    inst.user_id = 42
+    inst.status = ResourceStatus.READY.value
+    inst.range_spec = None
+    inst.agent = None
+    inst.request = MagicMock()
+    inst.request.request_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    return inst
+
+
+def _patch_active_queryset(return_value):
+    """Create a patch context that mocks the RangeInstance.active queryset chain.
+
+    Returns (patch_context, mock_active) so callers can further inspect the mock.
+    """
+    mock_active = MagicMock()
+    mock_active.filter.return_value.exclude.return_value.order_by.return_value.first.return_value = return_value
+    return patch("cms.services.RangeInstance.active", mock_active), mock_active
+
+
 class TestGetActiveRange:
     """Tests for get_active_range service."""
 
@@ -17,24 +48,14 @@ class TestGetActiveRange:
     # Happy path
     # ---------------------------------------------------------------------
 
-    def test_returns_active_range(self):
+    def test_returns_active_range(self, mock_user, mock_range_instance):
         """Returns RangeContext for non-deleted, non-terminal range."""
-        from cms.models import RangeInstance
         from cms.services import get_active_range
         from shared.schemas import RangeContext
 
-        user = MagicMock()
-        user.id = 42
-
-        # Create an active range
-        RangeInstance.objects.create(
-            range_id=1,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.READY.value,
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(mock_range_instance)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is not None
         assert isinstance(result, RangeContext)
@@ -42,35 +63,28 @@ class TestGetActiveRange:
         assert result.user_id == 42
         assert result.status == ResourceStatus.READY
 
-    def test_returns_provisioning_range(self):
+    def test_returns_provisioning_range(self, mock_user, mock_range_instance):
         """Returns RangeContext for range in PROVISIONING status."""
-        from cms.models import RangeInstance
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
+        mock_range_instance.range_id = 2
+        mock_range_instance.status = ResourceStatus.PROVISIONING.value
 
-        RangeInstance.objects.create(
-            range_id=2,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.PROVISIONING.value,
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(mock_range_instance)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is not None
         assert result.range_id == 2
         assert result.status == ResourceStatus.PROVISIONING
 
-    def test_returns_none_when_no_ranges(self):
+    def test_returns_none_when_no_ranges(self, mock_user):
         """Returns None when user has no ranges."""
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 999
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(None)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is None
 
@@ -78,109 +92,60 @@ class TestGetActiveRange:
     # Filtering behavior
     # ---------------------------------------------------------------------
 
-    def test_excludes_deleted_ranges(self):
-        """Does not return soft-deleted ranges."""
-        from cms.models import RangeInstance
+    def test_excludes_deleted_ranges(self, mock_user):
+        """Returns None when queryset returns no match (deleted ranges filtered out)."""
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
-
-        # Create only a deleted range
-        RangeInstance.objects.create(
-            range_id=3,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.READY.value,
-            deleted_at=timezone.now(),
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(None)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is None
 
-    def test_excludes_destroyed_ranges(self):
-        """Does not return ranges with DESTROYED status."""
-        from cms.models import RangeInstance
+    def test_excludes_destroyed_ranges(self, mock_user):
+        """Returns None when queryset returns no match (DESTROYED filtered out)."""
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
-
-        RangeInstance.objects.create(
-            range_id=4,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.DESTROYED.value,
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(None)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is None
 
-    def test_excludes_failed_ranges(self):
-        """Does not return ranges with FAILED status."""
-        from cms.models import RangeInstance
+    def test_excludes_failed_ranges(self, mock_user):
+        """Returns None when queryset returns no match (FAILED filtered out)."""
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
-
-        RangeInstance.objects.create(
-            range_id=5,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.FAILED.value,
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(None)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is None
 
-    def test_excludes_destroying_ranges(self):
-        """Does not return ranges with DESTROYING status (user can create new range)."""
-        from cms.models import RangeInstance
+    def test_excludes_destroying_ranges(self, mock_user):
+        """Verifies DESTROYING status is excluded from the queryset."""
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
+        ctx, mock_active = _patch_active_queryset(None)
+        with ctx:
+            get_active_range(mock_user)
 
-        RangeInstance.objects.create(
-            range_id=6,
-            scenario_id="basic",
-            user_id=42,
-            status=ResourceStatus.DESTROYING.value,
-        )
+        # Verify .exclude() was called with DESTROYING status
+        mock_active.filter.return_value.exclude.assert_called_once_with(status=ResourceStatus.DESTROYING.value)
 
-        result = get_active_range(user)
-
-        assert result is None
-
-    def test_returns_most_recent_active_range(self):
+    def test_returns_most_recent_active_range(self, mock_user, mock_range_instance):
         """Returns RangeContext for the most recently created active range."""
-        from cms.models import RangeInstance
         from cms.services import get_active_range
 
-        user = MagicMock()
-        user.id = 42
+        mock_range_instance.range_id = 11
+        mock_range_instance.scenario_id = "new"
 
-        # Create two active ranges with different range_ids
-        RangeInstance.objects.create(
-            range_id=10,
-            scenario_id="old",
-            user_id=42,
-            status=ResourceStatus.READY.value,
-        )
-        RangeInstance.objects.create(
-            range_id=11,
-            scenario_id="new",
-            user_id=42,
-            status=ResourceStatus.READY.value,
-        )
+        ctx, mock_active = _patch_active_queryset(mock_range_instance)
+        with ctx:
+            result = get_active_range(mock_user)
 
-        result = get_active_range(user)
-
-        # Should return the most recent one (identified by range_id)
+        # Verify order_by("-created_at") was used
+        mock_active.filter.return_value.exclude.return_value.order_by.assert_called_once_with("-created_at")
         assert result is not None
         assert result.range_id == 11
 
@@ -206,78 +171,53 @@ class TestGetActiveRange:
     # Error handling - database failures
     # ---------------------------------------------------------------------
 
-    def test_propagates_database_error(self):
+    def test_propagates_database_error(self, mock_user):
         """Propagates database errors to caller."""
-        from unittest.mock import patch
-
         from django.db import DatabaseError
 
         from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 42
 
         with (
             patch("cms.services.RangeInstance.active") as mock_active,
             pytest.raises(DatabaseError, match="DB connection failed"),
         ):
             mock_active.filter.side_effect = DatabaseError("DB connection failed")
-            get_active_range(user)
+            get_active_range(mock_user)
 
     # ---------------------------------------------------------------------
     # Validation - RangeContext validates on creation
     # ---------------------------------------------------------------------
 
-    def test_validates_range_context_on_creation(self):
+    def test_validates_range_context_on_creation(self, mock_user):
         """RangeContext validates data (range_id must be positive)."""
-        from unittest.mock import patch
-
         from pydantic import ValidationError
 
         from cms.services import get_active_range
-
-        user = MagicMock()
-        user.id = 42
 
         # Create a mock instance with invalid range_id
         mock_instance = MagicMock()
         mock_instance.range_id = 0  # Invalid: must be positive
         mock_instance.user_id = 42
         mock_instance.status = ResourceStatus.READY.value
+        mock_instance.range_spec = None
+        mock_instance.agent = None
+        mock_instance.request = MagicMock()
+        mock_instance.request.request_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 
-        mock_queryset = MagicMock()
-        mock_queryset.exclude.return_value.order_by.return_value.first.return_value = mock_instance
-
-        with (
-            patch("cms.services.RangeInstance.active") as mock_active,
-            pytest.raises(ValidationError, match="range_id"),
-        ):
-            mock_active.filter.return_value = mock_queryset
-            get_active_range(user)
+        ctx, _ = _patch_active_queryset(mock_instance)
+        with ctx, pytest.raises(ValidationError, match="range_id"):
+            get_active_range(mock_user)
 
     # ---------------------------------------------------------------------
     # Instance extraction from range_spec
     # ---------------------------------------------------------------------
 
-    def test_extracts_instances_from_nested_subnets_format(self):
+    def test_extracts_instances_from_nested_subnets_format(self, mock_user, mock_range_instance):
         """Extracts instances from range_spec with nested subnets format."""
-        from django.contrib.auth import get_user_model
-
-        from cms.models import RangeInstance, Request
         from cms.services import get_active_range
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser_nested", password="testpass")
-
-        # Create request for the FK
-        request = Request.objects.create(
-            request_id="11111111-1111-1111-1111-111111111111",
-            request_type="range",
-            user=user,
-        )
-
-        # New nested format: instances under subnets
-        range_spec = {
+        mock_range_instance.range_id = 100
+        mock_range_instance.range_spec = {
             "subnets": [
                 {
                     "name": "core",
@@ -289,16 +229,9 @@ class TestGetActiveRange:
             ]
         }
 
-        RangeInstance.objects.create(
-            request=request,
-            range_id=100,
-            scenario_id="basic",
-            user_id=user.id,
-            status="ready",
-            range_spec=range_spec,
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(mock_range_instance)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is not None
         assert len(result.instances) == 2
@@ -307,39 +240,20 @@ class TestGetActiveRange:
         assert result.instances[1].uuid == "vic-uuid"
         assert result.instances[1].role == "victim"
 
-    def test_extracts_instances_from_legacy_flat_format(self):
+    def test_extracts_instances_from_legacy_flat_format(self, mock_user, mock_range_instance):
         """Extracts instances from range_spec with legacy flat format."""
-        from django.contrib.auth import get_user_model
-
-        from cms.models import RangeInstance, Request
         from cms.services import get_active_range
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser_legacy", password="testpass")
-
-        request = Request.objects.create(
-            request_id="22222222-2222-2222-2222-222222222222",
-            request_type="range",
-            user=user,
-        )
-
-        # Legacy flat format: instances directly at top level
-        range_spec = {
+        mock_range_instance.range_id = 101
+        mock_range_instance.range_spec = {
             "instances": [
                 {"uuid": "leg-att", "role": "attacker", "os_type": "kali", "join_domain": False},
             ]
         }
 
-        RangeInstance.objects.create(
-            request=request,
-            range_id=101,
-            scenario_id="basic",
-            user_id=user.id,
-            status="ready",
-            range_spec=range_spec,
-        )
-
-        result = get_active_range(user)
+        ctx, _ = _patch_active_queryset(mock_range_instance)
+        with ctx:
+            result = get_active_range(mock_user)
 
         assert result is not None
         assert len(result.instances) == 1

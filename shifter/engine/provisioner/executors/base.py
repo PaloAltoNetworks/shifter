@@ -1,11 +1,38 @@
-"""Base executor protocol and shared types.
+"""Base executor protocol, shared types, and common exceptions.
 
 Defines the Executor protocol that all executors (SSM, SSH, AWS) must implement,
-and the CommandResult dataclass for returning execution results.
+the CommandResult dataclass for returning execution results, and shared exception
+classes used across all executors.
 """
 
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+# =============================================================================
+# Shared Exceptions
+# =============================================================================
+
+
+class ExecutorError(Exception):
+    """Base exception for all executors."""
+
+
+class ExecutorCommandError(ExecutorError):
+    """Raised when a command fails (non-zero exit code)."""
+
+    def __init__(self, message: str, exit_code: int = -1, stderr: str = ""):
+        self.exit_code = exit_code
+        self.stderr = stderr
+        super().__init__(f"{message} (exit_code={exit_code})")
+
+
+class ExecutorTimeoutError(ExecutorError):
+    """Raised when an operation times out."""
+
+
+# =============================================================================
+# Shared Types
+# =============================================================================
 
 
 @dataclass

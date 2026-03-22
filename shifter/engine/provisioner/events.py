@@ -48,7 +48,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-import boto3
+from cloud import get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +72,6 @@ STATUS_RESUMING = "resuming"
 STATUS_FAILED = "failed"
 STATUS_DESTROYING = "destroying"
 STATUS_DESTROYED = "destroyed"
-
-
-def _get_sns_client() -> Any:
-    """Get SNS client with region from environment.
-
-    Supports LocalStack via AWS_ENDPOINT_URL environment variable.
-
-    Returns:
-        boto3 SNS client configured for the appropriate region.
-    """
-    region = os.environ.get("AWS_REGION", "us-east-2")
-    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
-    logger.debug("_get_sns_client: region=%s endpoint=%s", region, endpoint_url or "AWS")
-    return boto3.client("sns", region_name=region, endpoint_url=endpoint_url)
 
 
 def _get_sns_topic_arn() -> str:
@@ -143,22 +129,16 @@ def _publish_event(event: dict[str, Any]) -> None:
         event: Event dictionary to publish.
     """
     try:
-        sns = _get_sns_client()
         topic_arn = _get_sns_topic_arn()
-
-        sns.publish(
-            TopicArn=topic_arn,
-            Message=json.dumps(event),
-            MessageAttributes={
-                "event_type": {
-                    "DataType": "String",
-                    "StringValue": event.get("event_type", "unknown"),
-                }
-            },
+        bus = get_event_bus()
+        bus.publish(
+            topic_id=topic_arn,
+            message=json.dumps(event),
+            attributes={"event_type": event.get("event_type", "unknown")},
         )
 
         logger.debug(
-            "Published event to SNS: request_id=%s range_id=%s event_type=%s",
+            "Published event: request_id=%s range_id=%s event_type=%s",
             event.get("request_id"),
             event.get("range_id"),
             event.get("event_type"),
@@ -166,7 +146,7 @@ def _publish_event(event: dict[str, Any]) -> None:
 
     except Exception as e:
         logger.error(
-            "Failed to publish event to SNS: request_id=%s range_id=%s error=%s",
+            "Failed to publish event: request_id=%s range_id=%s error=%s",
             event.get("request_id"),
             event.get("range_id"),
             str(e),

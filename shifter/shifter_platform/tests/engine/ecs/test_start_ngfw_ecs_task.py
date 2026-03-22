@@ -34,10 +34,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
@@ -59,10 +59,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
@@ -83,16 +83,16 @@ class TestStartNgfwEcsTask:
     # -------------------------------------------------------------------------
 
     def test_returns_none_when_cluster_arn_missing(self, settings):
-        """Function returns None when PULUMI_ECS_CLUSTER_ARN is not set."""
+        """Function returns None when ENGINE_ECS_CLUSTER_ARN is not set."""
         from engine.ecs import _start_ngfw_ecs_task
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
-            delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        if hasattr(settings, "ENGINE_ECS_CLUSTER_ARN"):
+            delattr(settings, "ENGINE_ECS_CLUSTER_ARN")
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         result = _start_ngfw_ecs_task(
             request_id=TEST_REQUEST_ID,
@@ -107,10 +107,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "   ,   ,   "
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "   ,   ,   "
 
         result = _start_ngfw_ecs_task(
             request_id=TEST_REQUEST_ID,
@@ -129,10 +129,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         invalid_ids = [None, str(TEST_REQUEST_ID), 42]
         for invalid_id in invalid_ids:
@@ -149,10 +149,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         # TypeError for None and string
         for invalid_cmd in [None, "ngfw provision"]:
@@ -173,10 +173,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -195,10 +195,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()
@@ -221,8 +221,8 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        if hasattr(settings, "PULUMI_ECS_CLUSTER_ARN"):
-            delattr(settings, "PULUMI_ECS_CLUSTER_ARN")
+        if hasattr(settings, "ENGINE_ECS_CLUSTER_ARN"):
+            delattr(settings, "ENGINE_ECS_CLUSTER_ARN")
 
         with caplog.at_level(logging.WARNING, logger="engine.ecs"):
             _start_ngfw_ecs_task(
@@ -239,10 +239,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
@@ -267,10 +267,10 @@ class TestStartNgfwEcsTask:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         with (
             patch("engine.ecs.get_task_runner") as mock_get_runner,

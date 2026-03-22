@@ -23,25 +23,26 @@ logger = logging.getLogger(__name__)
 def get_state_bucket() -> str:
     """Get the S3 bucket name for Terraform state.
 
-    Uses PULUMI_BACKEND_URL environment variable and extracts the bucket name.
-    Falls back to TF_STATE_BUCKET if set.
+    Uses TF_STATE_BUCKET environment variable. Falls back to STATE_BUCKET_URL
+    or legacy PULUMI_BACKEND_URL (s3://bucket-name format) for backward
+    compatibility during rollout.
 
     Returns:
         S3 bucket name
 
     Raises:
-        ValueError: If neither env var is set
+        ValueError: If no state bucket env var is set
     """
     # Check for explicit TF_STATE_BUCKET first
     if bucket := os.environ.get("TF_STATE_BUCKET"):
         return bucket
 
-    # Extract from PULUMI_BACKEND_URL (format: s3://bucket-name)
-    pulumi_url = os.environ.get("PULUMI_BACKEND_URL", "")
-    if pulumi_url.startswith("s3://"):
-        return pulumi_url[5:]  # Strip "s3://"
+    # Extract from STATE_BUCKET_URL or legacy PULUMI_BACKEND_URL (format: s3://bucket-name)
+    bucket_url = os.environ.get("STATE_BUCKET_URL") or os.environ.get("PULUMI_BACKEND_URL", "")
+    if bucket_url.startswith("s3://"):
+        return bucket_url[5:]  # Strip "s3://"
 
-    raise ValueError("TF_STATE_BUCKET or PULUMI_BACKEND_URL environment variable is required")
+    raise ValueError("TF_STATE_BUCKET, STATE_BUCKET_URL, or PULUMI_BACKEND_URL environment variable is required")
 
 
 def get_locks_table() -> str:

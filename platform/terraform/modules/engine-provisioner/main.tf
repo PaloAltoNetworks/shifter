@@ -33,7 +33,7 @@ locals {
 # ECS Cluster
 # ------------------------------------------------------------------------------
 
-resource "aws_ecs_cluster" "pulumi" {
+resource "aws_ecs_cluster" "engine" {
   name = "${var.name_prefix}-pulumi"
 
   setting {
@@ -46,8 +46,8 @@ resource "aws_ecs_cluster" "pulumi" {
   })
 }
 
-resource "aws_ecs_cluster_capacity_providers" "pulumi" {
-  cluster_name       = aws_ecs_cluster.pulumi.name
+resource "aws_ecs_cluster_capacity_providers" "engine" {
+  cluster_name       = aws_ecs_cluster.engine.name
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 
   default_capacity_provider_strategy {

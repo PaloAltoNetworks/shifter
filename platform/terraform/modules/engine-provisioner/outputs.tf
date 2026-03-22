@@ -4,22 +4,22 @@
 
 output "ecs_cluster_arn" {
   description = "ARN of the ECS cluster"
-  value       = aws_ecs_cluster.pulumi.arn
+  value       = aws_ecs_cluster.engine.arn
 }
 
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster"
-  value       = aws_ecs_cluster.pulumi.name
+  value       = aws_ecs_cluster.engine.name
 }
 
 output "task_definition_arn" {
   description = "ARN of the ECS task definition"
-  value       = aws_ecs_task_definition.pulumi_provisioner.arn
+  value       = aws_ecs_task_definition.engine_provisioner.arn
 }
 
 output "task_definition_family" {
   description = "Family of the ECS task definition"
-  value       = aws_ecs_task_definition.pulumi_provisioner.family
+  value       = aws_ecs_task_definition.engine_provisioner.family
 }
 
 # ------------------------------------------------------------------------------

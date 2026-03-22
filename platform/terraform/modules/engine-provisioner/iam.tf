@@ -70,7 +70,7 @@ resource "aws_iam_role" "ecs_task" {
 # Task Role Policy - Engine State
 # ------------------------------------------------------------------------------
 
-resource "aws_iam_role_policy" "pulumi_state" {
+resource "aws_iam_role_policy" "engine_state" {
   name = "pulumi-state"
   role = aws_iam_role.ecs_task.id
 
@@ -86,8 +86,8 @@ resource "aws_iam_role_policy" "pulumi_state" {
           "s3:ListBucket"
         ]
         Resource = [
-          var.pulumi_state_bucket_arn,
-          "${var.pulumi_state_bucket_arn}/*"
+          var.engine_state_bucket_arn,
+          "${var.engine_state_bucket_arn}/*"
         ]
       },
       {
@@ -97,7 +97,7 @@ resource "aws_iam_role_policy" "pulumi_state" {
           "dynamodb:PutItem",
           "dynamodb:DeleteItem"
         ]
-        Resource = var.pulumi_locks_table_arn
+        Resource = var.engine_locks_table_arn
       }
     ]
   })
@@ -503,7 +503,7 @@ resource "aws_iam_role_policy" "ssm_parameters" {
         Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/shifter/ami/*"
       },
       {
-        # DescribeParameters required by Pulumi/Terraform for metadata lookup
+        # DescribeParameters required by Terraform for metadata lookup
         # Must be * resource per AWS API requirements
         Sid      = "SSMDescribeParameters"
         Effect   = "Allow"
@@ -534,7 +534,7 @@ resource "aws_iam_role_policy" "ssm_parameters" {
 # ------------------------------------------------------------------------------
 # Task Role Policy - SSM Run Command (for DC setup orchestration)
 # ------------------------------------------------------------------------------
-# Pulumi uses SSM Run Command to orchestrate DC setup:
+# Engine provisioner uses SSM Run Command to orchestrate DC setup:
 # - Install AD DS feature
 # - Reboot and wait for instance
 # - Promote to Domain Controller
@@ -589,9 +589,9 @@ resource "aws_iam_role_policy" "ssm_run_command" {
 }
 
 # ------------------------------------------------------------------------------
-# Task Role Policy - KMS (for Pulumi secrets encryption)
+# Task Role Policy - KMS (for engine secrets encryption)
 # ------------------------------------------------------------------------------
-# Pulumi's awskms:// secrets provider calls KMS directly (not via Secrets Manager),
+# The engine's awskms:// secrets provider calls KMS directly (not via Secrets Manager),
 # so we need separate statements for each use case.
 
 resource "aws_iam_role_policy" "kms" {
@@ -602,7 +602,7 @@ resource "aws_iam_role_policy" "kms" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "PulumiSecretsEncryption"
+        Sid    = "EngineSecretsEncryption"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -610,8 +610,8 @@ resource "aws_iam_role_policy" "kms" {
           "kms:GenerateDataKey",
           "kms:DescribeKey"
         ]
-        # Dedicated CMK for Pulumi stack secrets encryption
-        Resource = var.pulumi_secrets_kms_key_arn
+        # Dedicated CMK for engine stack secrets encryption
+        Resource = var.engine_secrets_kms_key_arn
       },
       {
         Sid    = "SecretsManagerKMSAccess"

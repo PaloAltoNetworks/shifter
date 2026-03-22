@@ -99,33 +99,33 @@ variable "rds_security_group_id" {
 # Engine State Backend
 # ------------------------------------------------------------------------------
 
-variable "pulumi_state_bucket" {
+variable "engine_state_bucket" {
   description = "S3 bucket name for engine state"
   type        = string
 }
 
-variable "pulumi_state_bucket_arn" {
+variable "engine_state_bucket_arn" {
   description = "S3 bucket ARN for engine state"
   type        = string
 }
 
-variable "pulumi_locks_table" {
+variable "engine_locks_table" {
   description = "DynamoDB table name for engine locking"
   type        = string
 }
 
-variable "pulumi_locks_table_arn" {
+variable "engine_locks_table_arn" {
   description = "DynamoDB table ARN for engine locking"
   type        = string
 }
 
-variable "pulumi_secrets_kms_key_arn" {
+variable "engine_secrets_kms_key_arn" {
   description = "ARN of the KMS key for engine secrets encryption"
   type        = string
 }
 
-variable "pulumi_secrets_kms_key_alias" {
-  description = "Alias of the KMS key for engine secrets encryption (e.g., alias/dev-range-pulumi-secrets)"
+variable "engine_secrets_kms_key_alias" {
+  description = "Alias of the KMS key for engine secrets encryption"
   type        = string
 }
 

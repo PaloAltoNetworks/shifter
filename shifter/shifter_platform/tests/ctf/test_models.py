@@ -379,7 +379,12 @@ class TestCTFParticipantModel:
         p = make_participant()
         mock_submissions = MagicMock()
         mock_submissions.filter.return_value.aggregate.return_value = {"total": aggregate_total}
-        with patch.object(type(p), "submissions", new_callable=lambda: property(lambda self: mock_submissions)):
+        mock_awards = MagicMock()
+        mock_awards.aggregate.return_value = {"total": 0}
+        with (
+            patch.object(type(p), "submissions", new_callable=lambda: property(lambda self: mock_submissions)),
+            patch.object(type(p), "awards", new_callable=lambda: property(lambda self: mock_awards)),
+        ):
             assert p.total_score == expected
         mock_submissions.filter.assert_called_once_with(is_correct=True)
 

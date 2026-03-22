@@ -232,6 +232,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exception bridging: `CloudStorageError` caught and re-raised as `S3Error` for backward compatibility
   - All existing function signatures, import paths, and caller contracts preserved
 
+## [3.18.0] - 2026-03-20
+
+### Added
+- Programmable flag validation (CTF-118) — flags can use registered Python validator functions or HTTP callbacks for custom pass/fail logic
+- New flag types: `programmable` (server-side validator registry) and `http` (external endpoint validation)
+- Validator registry module (`ctf/validators.py`) with `register_validator` / `get_validator` API
+- Built-in example validators: `always_true`, `contains_substring`
+- `validator_config` JSONField on `CTFFlag` model for per-flag configuration
+
+### Changed
+- `CTFFlag.flag_type` max_length increased from 10 to 20 to accommodate new type names
+
+## [3.17.0] - 2026-03-20
+
+### Added
+- CTF awards system (CTF-206) — organizers can grant point bonuses or deductions to participants via `CTFAward` model
+- Award service (`grant_award`, `revoke_award`, `get_participant_awards`, `get_event_awards`)
+- Score calculation now includes awards: `calculate_score`, `get_scoreboard`, `get_team_scoreboard`, model `total_score` properties, and admin annotations all reflect submission points + award points
+- `get_event_statistics` includes `total_awards` count
+- Award admin interface with inline views on participant and event admin pages
+
 ## [3.16.1] - 2026-03-20
 
 ### Changed

@@ -6,10 +6,17 @@ This package contains service modules for CTF business logic:
 - participant: Participant management
 - submission: Flag submission and scoring
 - scoring: Score calculation and leaderboards
+- award: Organizer-granted awards
 - range: Range provisioning integration
 - notification: Email notifications
 """
 
+from ctf.services.award import (
+    get_event_awards,
+    get_participant_awards,
+    grant_award,
+    revoke_award,
+)
 from ctf.services.challenge import (
     add_flag,
     create_challenge,
@@ -79,15 +86,11 @@ __all__ = [
     "activate_event",
     "add_flag",
     "bulk_import_participants",
-    # Scoring services
     "calculate_score",
     "cancel_event",
-    # Range services
     "cleanup_event_ranges",
     "complete_event",
-    # Challenge services
     "create_challenge",
-    # Event services
     "create_event",
     "delete_challenge",
     "delete_event",
@@ -101,10 +104,12 @@ __all__ = [
     "get_challenge_submissions",
     "get_correct_submissions",
     "get_event",
+    "get_event_awards",
     "get_event_statistics",
     "get_event_stats",
     "get_organizer_events",
     "get_participant",
+    "get_participant_awards",
     "get_participant_by_user",
     "get_participant_rank",
     "get_participant_submissions",
@@ -112,8 +117,8 @@ __all__ = [
     "get_range_status",
     "get_scoreboard",
     "get_team_scoreboard",
+    "grant_award",
     "hash_flag",
-    # Participant services
     "invite_participant",
     "list_challenges_for_event",
     "list_events_for_organizer",
@@ -122,9 +127,9 @@ __all__ = [
     "provision_participant_range",
     "remove_flag",
     "resend_invite",
+    "revoke_award",
     "schedule_event",
     "start_event",
-    # Submission services
     "submit_flag",
     "update_challenge",
     "update_event",

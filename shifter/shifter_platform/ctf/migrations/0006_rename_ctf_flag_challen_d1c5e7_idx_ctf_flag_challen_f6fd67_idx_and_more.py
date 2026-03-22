@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('ctf', '0003_ctf_flag_model'),
+        ('ctf', '0005_ctf_programmable_flag_validation'),
     ]
 
     operations = [

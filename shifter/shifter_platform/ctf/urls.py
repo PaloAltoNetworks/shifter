@@ -116,6 +116,12 @@ admin_patterns = [
         views.admin_analytics,
         name="admin_analytics",
     ),
+    # Challenge file upload (from admin detail page)
+    path(
+        "admin/challenges/<uuid:challenge_id>/upload/",
+        views.admin_challenge_file_upload,
+        name="admin_challenge_file_upload",
+    ),
 ]
 
 # -----------------------------------------------------------------------------
@@ -227,6 +233,33 @@ api_patterns = [
         "api/flags/<uuid:flag_id>/remove/",
         views.api_remove_flag,
         name="api_remove_flag",
+    ),
+    # File attachment APIs
+    path(
+        "api/challenges/<uuid:challenge_id>/files/",
+        views.api_challenge_files,
+        name="api_challenge_files",
+    ),
+    path(
+        "api/files/<uuid:file_id>/delete/",
+        views.api_challenge_file_delete,
+        name="api_challenge_file_delete",
+    ),
+    path(
+        "api/files/<uuid:file_id>/download/",
+        views.api_file_download,
+        name="api_file_download",
+    ),
+    # Prerequisite APIs
+    path(
+        "api/challenges/<uuid:challenge_id>/prerequisites/",
+        views.api_challenge_prerequisites,
+        name="api_challenge_prerequisites",
+    ),
+    path(
+        "api/prerequisites/<uuid:prerequisite_id>/delete/",
+        views.api_prerequisite_delete,
+        name="api_prerequisite_delete",
     ),
 ]
 

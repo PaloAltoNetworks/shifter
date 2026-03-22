@@ -7,10 +7,17 @@ This package contains service modules for CTF business logic:
 - submission: Flag submission and scoring
 - scoring: Score calculation and leaderboards
 - award: Organizer-granted awards
+- attachment: Challenge file attachments
 - range: Range provisioning integration
 - notification: Email notifications
 """
 
+from ctf.services.attachment import (
+    add_challenge_file,
+    get_challenge_files,
+    get_download_url,
+    remove_challenge_file,
+)
 from ctf.services.award import (
     get_event_awards,
     get_participant_awards,
@@ -19,13 +26,18 @@ from ctf.services.award import (
 )
 from ctf.services.challenge import (
     add_flag,
+    add_prerequisite,
+    check_prerequisites_met,
     create_challenge,
     delete_challenge,
     get_available_challenges,
     get_challenge,
+    get_dependents,
+    get_prerequisites,
     hash_flag,
     list_challenges_for_event,
     remove_flag,
+    remove_prerequisite,
     update_challenge,
     verify_flag,
     verify_single_flag,
@@ -84,10 +96,13 @@ from ctf.services.submission import (
 __all__ = [
     "EventNotModifiableError",
     "activate_event",
+    "add_challenge_file",
     "add_flag",
+    "add_prerequisite",
     "bulk_import_participants",
     "calculate_score",
     "cancel_event",
+    "check_prerequisites_met",
     "cleanup_event_ranges",
     "complete_event",
     "create_challenge",
@@ -100,9 +115,12 @@ __all__ = [
     "end_event",
     "get_available_challenges",
     "get_challenge",
+    "get_challenge_files",
     "get_challenge_statistics",
     "get_challenge_submissions",
     "get_correct_submissions",
+    "get_dependents",
+    "get_download_url",
     "get_event",
     "get_event_awards",
     "get_event_statistics",
@@ -113,6 +131,7 @@ __all__ = [
     "get_participant_by_user",
     "get_participant_rank",
     "get_participant_submissions",
+    "get_prerequisites",
     "get_range_access_url",
     "get_range_status",
     "get_scoreboard",
@@ -125,7 +144,9 @@ __all__ = [
     "list_participants_for_event",
     "provision_event_ranges",
     "provision_participant_range",
+    "remove_challenge_file",
     "remove_flag",
+    "remove_prerequisite",
     "resend_invite",
     "revoke_award",
     "schedule_event",

@@ -1,7 +1,6 @@
 """Shared test fixtures for Shifter Engine tests.
 
 This module provides:
-- Pulumi runtime mocks for component tests
 - Mocked database connections
 - Mocked boto3 clients
 - Sample configuration objects
@@ -11,8 +10,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,173 +18,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import InstanceConfig, RangeConfig, SubnetConfig
-
-# =============================================================================
-# Global Mocks (autouse - applies to all tests)
-# =============================================================================
-
-
-@pytest.fixture(autouse=True)
-def mock_pulumi_executable():
-    """Always mock shutil.which for pulumi to avoid CI failures.
-
-    This fixture runs automatically for ALL tests. It ensures that
-    _get_pulumi_path() returns a fake path instead of failing when
-    pulumi isn't installed (like in CI environments).
-
-    We patch both the module and where it's used in main.py to ensure
-    the mock is applied regardless of import order.
-    """
-    with (
-        patch("shutil.which", return_value="/usr/bin/pulumi"),
-        patch("main.shutil.which", return_value="/usr/bin/pulumi"),
-    ):
-        yield
-
-
-# =============================================================================
-# Pulumi Mocking Infrastructure
-# =============================================================================
-
-
-class PulumiMocks:
-    """Mock implementation for Pulumi runtime.
-
-    This class implements the Pulumi mock interface to simulate AWS resource
-    creation without making actual API calls.
-    """
-
-    def __init__(self):
-        self.resources = {}
-        self.calls = []
-
-    def new_resource(
-        self,
-        args: Any,
-    ) -> tuple[str, dict]:
-        """Mock resource creation.
-
-        Args:
-            args: Pulumi MockResourceArgs containing type_, name, inputs, etc.
-
-        Returns:
-            Tuple of (resource_id, outputs).
-        """
-        resource_type = args.typ
-        name = args.name
-        inputs = args.inputs
-
-        # Generate mock ID
-        resource_id = f"{name}-mock-id"
-
-        # Store resource for inspection
-        self.resources[name] = {
-            "type": resource_type,
-            "inputs": inputs,
-            "id": resource_id,
-        }
-
-        # Return appropriate outputs based on resource type
-        outputs = {"id": resource_id}
-
-        if resource_type == "aws:ec2/subnet:Subnet":
-            outputs["cidrBlock"] = inputs.get("cidrBlock", "10.1.1.0/24")
-            outputs["vpcId"] = inputs.get("vpcId", "vpc-mock")
-            outputs["availabilityZone"] = inputs.get("availabilityZone", "us-east-2a")
-
-        elif resource_type == "aws:ec2/instance:Instance":
-            outputs["privateIp"] = "10.1.1.100"
-            outputs["publicIp"] = ""
-            outputs["instanceType"] = inputs.get("instanceType", "t3.micro")
-            outputs["ami"] = inputs.get("ami", "ami-mock")
-            outputs["tags"] = inputs.get("tags", {})
-
-        elif resource_type == "aws:secretsmanager/secret:Secret":
-            outputs["arn"] = f"arn:aws:secretsmanager:us-east-2:123456789012:secret:{name}"
-            outputs["name"] = inputs.get("name", name)
-
-        elif resource_type == "aws:secretsmanager/secretVersion:SecretVersion":
-            outputs["arn"] = f"arn:aws:secretsmanager:us-east-2:123456789012:secret:{name}"
-            outputs["versionId"] = "mock-version-id"
-
-        elif resource_type == "aws:ec2/routeTableAssociation:RouteTableAssociation":
-            outputs["subnetId"] = inputs.get("subnetId", "subnet-mock")
-            outputs["routeTableId"] = inputs.get("routeTableId", "rtb-mock")
-
-        elif resource_type == "aws:ssm/parameter:Parameter":
-            param_name = inputs.get("name", f"/mock/param/{name}")
-            outputs["arn"] = f"arn:aws:ssm:us-east-2:123456789012:parameter{param_name}"
-            outputs["name"] = param_name
-            outputs["type"] = inputs.get("type", "String")
-            outputs["value"] = inputs.get("value", "{}")
-
-        elif resource_type == "aws:lb/loadBalancer:LoadBalancer":
-            outputs["arn"] = f"arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/gwy/{name}"
-            outputs["dnsName"] = f"{name}.elb.us-east-2.amazonaws.com"
-            outputs["loadBalancerType"] = inputs.get("loadBalancerType", "gateway")
-
-        elif resource_type == "aws:lb/targetGroup:TargetGroup":
-            outputs["arn"] = f"arn:aws:elasticloadbalancing:us-east-2:123456789012:targetgroup/{name}"
-            outputs["protocol"] = inputs.get("protocol", "GENEVE")
-            outputs["port"] = inputs.get("port", 6081)
-
-        elif resource_type == "aws:lb/listener:Listener":
-            outputs["arn"] = f"arn:aws:elasticloadbalancing:us-east-2:123456789012:listener/{name}"
-
-        elif resource_type == "aws:ec2/vpcEndpointService:VpcEndpointService":
-            outputs["serviceName"] = f"com.amazonaws.vpce.us-east-2.vpce-svc-{name[:8]}"
-            outputs["acceptanceRequired"] = inputs.get("acceptanceRequired", True)
-
-        elif resource_type == "aws:ec2/networkInterface:NetworkInterface":
-            private_ips = inputs.get("privateIps", ["10.1.1.50"])
-            outputs["privateIp"] = private_ips[0] if private_ips else "10.1.1.50"
-            outputs["subnetId"] = inputs.get("subnetId", "subnet-mock")
-            outputs["sourceDestCheck"] = inputs.get("sourceDestCheck", True)
-
-        elif resource_type == "aws:s3/bucketObject:BucketObject":
-            outputs["bucket"] = inputs.get("bucket", "mock-bucket")
-            outputs["key"] = inputs.get("key", "mock-key")
-            outputs["etag"] = "mock-etag-123"
-
-        return resource_id, outputs
-
-    def call(self, args: Any) -> dict:
-        """Mock Pulumi function calls (e.g., aws.getAmi).
-
-        Args:
-            args: Pulumi MockCallArgs containing token and inputs.
-
-        Returns:
-            Dictionary of outputs.
-        """
-        token = args.token
-        call_args = args.args
-
-        self.calls.append({"token": token, "args": call_args})
-
-        # Return appropriate outputs based on function
-        if token == "aws:ec2/getAmi:getAmi":
-            return {"id": "ami-mock-lookup", "name": "mock-ami"}
-
-        return {}
-
-
-@pytest.fixture
-def pulumi_mocks():
-    """Fixture that sets up Pulumi mocking for component tests.
-
-    This fixture patches the Pulumi runtime to use our mock implementation,
-    allowing tests to verify resource creation without actual AWS calls.
-
-    Yields:
-        PulumiMocks: The mock instance for assertions.
-    """
-    import pulumi
-
-    mocks = PulumiMocks()
-    pulumi.runtime.set_mocks(mocks, preview=False)
-    yield mocks
-
 
 # =============================================================================
 # Database Mocking
@@ -269,9 +100,6 @@ def mock_boto3_clients(mocker):
 @pytest.fixture
 def mock_subprocess(mocker):
     """Fixture providing mocked subprocess.run.
-
-    Note: shutil.which is already mocked by the autouse mock_pulumi_executable
-    fixture, so tests don't need to worry about pulumi path lookup.
 
     Returns:
         tuple: (mock_run, mock_result) for subprocess assertions.
@@ -600,7 +428,6 @@ def mock_env_vars(mocker):
         "DB_USER": "shifter_app",
         "AWS_REGION": "us-east-2",
         "ENVIRONMENT": "dev",
-        "PULUMI_SECRETS_PROVIDER": "awskms://alias/test-pulumi-secrets",
         "RANGE_VPC_ID": "vpc-test",
         "RANGE_VPC_CIDR": "10.1.0.0/16",
         "RANGE_ROUTE_TABLE_ID": "rtb-test",
@@ -794,38 +621,3 @@ def sample_db_range_row_multi_subnet():
             ],
         },
     )
-
-
-@pytest.fixture
-def mock_pulumi_config(mocker):
-    """Mock Pulumi Config object with required values for load_config tests."""
-    mock_config = MagicMock()
-
-    mock_config.require.side_effect = lambda key: {
-        "environment": "dev",
-        "rangeVpcId": "vpc-test123",
-        "rangeVpcCidr": "10.1.0.0/16",
-        "rangeRouteTableId": "rtb-test123",
-        "kaliSecurityGroupId": "sg-kali-test",
-        "victimSecurityGroupId": "sg-victim-test",
-        "kaliAmiId": "ami-kali-test",
-        "victimAmiId": "ami-victim-test",
-        "availabilityZone": "us-east-2a",
-    }.get(key, f"mock-{key}")
-
-    mock_config.require_int.side_effect = lambda key: {
-        "rangeId": 42,
-    }.get(key, 0)
-
-    mock_config.get.side_effect = lambda key: {
-        "agentS3Bucket": "test-agents-bucket",
-        "windowsAmiId": "ami-windows-test",
-        "dcAmiId": "ami-dc-test",
-        "dcSecurityGroupId": "sg-dc-test",
-        "rangeInstanceProfileName": "test-profile",
-        "portalVpcCidr": "10.0.0.0/16",
-        "portalVpcPeeringId": "pcx-test123",
-    }.get(key)
-
-    mocker.patch("pulumi.Config", return_value=mock_config)
-    return mock_config

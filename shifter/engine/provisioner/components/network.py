@@ -65,12 +65,15 @@ def _get_db_connection() -> psycopg.Connection:
     if not aws_region:
         raise RuntimeError("Missing AWS_REGION environment variable for RDS IAM auth")
 
-    client = boto3.client("rds")
-    token = client.generate_db_auth_token(
-        DBHostname=db_host,
-        Port=db_port,
-        DBUsername=db_user,
-        Region=aws_region,
+    assert db_host is not None  # validated above
+    assert db_user is not None  # validated above
+    from cloud import get_db_auth
+
+    auth = get_db_auth()
+    token = auth.generate_auth_token(
+        hostname=db_host,
+        port=db_port,
+        username=db_user,
     )
     return psycopg.connect(
         host=db_host,

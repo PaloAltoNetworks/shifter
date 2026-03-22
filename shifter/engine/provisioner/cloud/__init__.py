@@ -6,10 +6,11 @@ the CLOUD_PROVIDER environment variable. Defaults to "aws".
 This module has no Django dependency — it reads os.environ directly.
 
 Usage:
-    from cloud import get_event_bus, get_config_store, get_db_auth
+    from cloud import get_event_bus, get_config_store, get_db_auth, get_secrets_store
     bus = get_event_bus()
     store = get_config_store()
     auth = get_db_auth()
+    secrets = get_secrets_store()
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING
 from cloud.exceptions import CloudProviderNotImplementedError
 
 if TYPE_CHECKING:
-    from cloud.types import ConfigStore, DBAuth, EventBus, ObjectStorage
+    from cloud.types import ConfigStore, DBAuth, EventBus, ObjectStorage, SecretsStore
 
 
 def _get_provider() -> str:
@@ -54,6 +55,16 @@ def get_db_auth() -> DBAuth:
         from cloud.aws.db_auth import AWSDBAuth
 
         return AWSDBAuth()
+    raise CloudProviderNotImplementedError(provider)
+
+
+def get_secrets_store() -> SecretsStore:
+    """Return a SecretsStore implementation for the configured provider."""
+    provider = _get_provider()
+    if provider == "aws":
+        from cloud.aws.secrets import AWSSecretsStore
+
+        return AWSSecretsStore()
     raise CloudProviderNotImplementedError(provider)
 
 

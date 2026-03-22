@@ -89,12 +89,17 @@ def _verify_hash(submitted_flag: str, stored_hash: str, context_id: UUID) -> boo
         ).hex()
         return secrets.compare_digest(actual_hash, expected_hash)
     elif stored_hash.startswith("sha256:"):
+        # Legacy format: single-round salted SHA-256.  Kept for backward
+        # compatibility with hashes created before PBKDF2 migration.  New
+        # flags always use bcrypt or PBKDF2 (see hash_flag()).
         parts = stored_hash.split(":", 2)
         if len(parts) != 3:
             logger.error("Invalid hash format for %s", context_id)
             return False
         _, salt, expected_hash = parts
-        actual_hash = hashlib.sha256(f"{salt}:{submitted_flag}".encode()).hexdigest()
+        actual_hash = hashlib.sha256(  # NOSONAR — legacy compat, not for new hashes
+            f"{salt}:{submitted_flag}".encode()
+        ).hexdigest()
         return secrets.compare_digest(actual_hash, expected_hash)
     else:
         logger.error("Unknown hash format for %s", context_id)

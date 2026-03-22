@@ -16,6 +16,8 @@ from django.utils.html import format_html
 from ctf.models import (
     CTFAward,
     CTFChallenge,
+    CTFChallengeFile,
+    CTFChallengePrerequisite,
     CTFEvent,
     CTFNotification,
     CTFParticipant,
@@ -86,6 +88,28 @@ class CTFScheduledTaskInline(admin.TabularInline):
     readonly_fields = ["status", "executed_at"]
     show_change_link = True
     ordering = ["scheduled_for"]
+
+
+class CTFChallengeFileInline(admin.TabularInline):
+    """Inline admin for file attachments within a challenge."""
+
+    model = CTFChallengeFile
+    extra = 0
+    fields = ["filename", "display_name", "file_size_bytes", "content_type", "order"]
+    readonly_fields = ["filename", "file_size_bytes", "content_type"]
+    show_change_link = True
+    ordering = ["order", "created_at"]
+
+
+class CTFChallengePrerequisiteInline(admin.TabularInline):
+    """Inline admin for prerequisites within a challenge."""
+
+    model = CTFChallengePrerequisite
+    fk_name = "challenge"
+    extra = 0
+    fields = ["required_challenge"]
+    show_change_link = True
+    ordering = ["created_at"]
 
 
 class CTFSubmissionInline(admin.TabularInline):
@@ -273,7 +297,7 @@ class CTFChallengeAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         ),
     ]
 
-    inlines = [CTFSubmissionInline]
+    inlines = [CTFChallengeFileInline, CTFChallengePrerequisiteInline, CTFSubmissionInline]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
         """Annotate queryset with solve count."""
@@ -707,3 +731,85 @@ class CTFScheduledTaskAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             color,
             obj.status.upper(),
         )
+
+
+@admin.register(CTFChallengeFile)
+class CTFChallengeFileAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    """Admin for CTF challenge files."""
+
+    list_display = [
+        "filename",
+        "display_name",
+        "challenge",
+        "file_size_bytes",
+        "content_type",
+        "order",
+        "is_deleted_display",
+    ]
+    list_filter = ["content_type", "challenge__event", "deleted_at"]
+    search_fields = ["filename", "display_name", "challenge__name"]
+    ordering = ["challenge", "order"]
+    readonly_fields = ["id", "s3_key", "sha256_hash", "file_size_bytes", "created_at", "updated_at", "deleted_at"]
+
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": ["challenge", "filename", "display_name"],
+            },
+        ),
+        (
+            "File Details",
+            {
+                "fields": ["s3_key", "file_size_bytes", "content_type", "sha256_hash", "order"],
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["id", "created_at", "updated_at", "deleted_at"],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    @admin.display(description="Deleted", boolean=True)
+    def is_deleted_display(self, obj: CTFChallengeFile) -> bool:
+        """Display soft delete status."""
+        return obj.is_deleted
+
+
+@admin.register(CTFChallengePrerequisite)
+class CTFChallengePrerequisiteAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    """Admin for CTF challenge prerequisites."""
+
+    list_display = [
+        "challenge",
+        "required_challenge",
+        "is_deleted_display",
+    ]
+    list_filter = ["challenge__event", "deleted_at"]
+    search_fields = ["challenge__name", "required_challenge__name"]
+    ordering = ["challenge"]
+    readonly_fields = ["id", "created_at", "updated_at", "deleted_at"]
+
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": ["challenge", "required_challenge"],
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["id", "created_at", "updated_at", "deleted_at"],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    @admin.display(description="Deleted", boolean=True)
+    def is_deleted_display(self, obj: CTFChallengePrerequisite) -> bool:
+        """Display soft delete status."""
+        return obj.is_deleted

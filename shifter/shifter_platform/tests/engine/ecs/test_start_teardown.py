@@ -7,7 +7,6 @@ validation, config checks, and error wrapping.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared.cloud.exceptions import CloudTaskError
 
@@ -73,8 +72,8 @@ class TestStartTeardown:
         with pytest.raises(exc_type):
             start_teardown(range_id=range_id, user_id=user_id)
 
-    def test_raises_client_error_on_task_failure(self, settings):
-        """Raises ClientError when the ECS task runner fails."""
+    def test_raises_cloud_task_error_on_task_failure(self, settings):
+        """Raises CloudTaskError when the ECS task runner fails."""
         from engine.ecs import start_teardown
 
         settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
@@ -87,5 +86,5 @@ class TestStartTeardown:
             mock_runner.run_task.side_effect = CloudTaskError("Task launch failed")
             mock_get_runner.return_value = mock_runner
 
-            with pytest.raises(ClientError):
+            with pytest.raises(CloudTaskError):
                 start_teardown(range_id=42, user_id=7)

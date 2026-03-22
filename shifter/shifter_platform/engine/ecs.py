@@ -17,7 +17,6 @@ import os
 import subprocess  # nosec B404 - used for local dev provisioner only
 from typing import TYPE_CHECKING
 
-from botocore.exceptions import ClientError
 from django.conf import settings
 
 from shared.cloud import get_task_runner
@@ -106,6 +105,35 @@ def _is_local_provisioner_enabled() -> bool:
     return mode in ("subprocess", "docker")
 
 
+def _get_engine_ecs_config() -> tuple[str, str, str, list[str]] | None:
+    """Read Engine ECS configuration from settings.
+
+    Returns:
+        Tuple of (cluster_arn, task_def_arn, security_group_id, subnet_ids)
+        or None if configuration is incomplete.
+    """
+    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
+    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
+    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
+
+    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
+        logger.warning(
+            "ECS configuration incomplete, skipping ECS task. "
+            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
+            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
+        )
+        return None
+
+    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
+
+    if not subnet_ids:
+        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
+        return None
+
+    return cluster_arn, task_definition_arn, security_group_id, subnet_ids
+
+
 def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     """Start an ECS Fargate task for provisioning operations.
 
@@ -120,7 +148,7 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     Raises:
         TypeError: If range_id is not an integer or user_id is not an integer or command is not a string
         ValueError: If range_id is negative or user_id is negative or command is empty
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     if range_id is None or not isinstance(range_id, int):
         raise TypeError("range_id must be an integer")
@@ -135,25 +163,11 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     if not command.strip():
         raise ValueError("command must be a non-empty string")
 
-    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
-
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
-        logger.warning(
-            "ECS configuration incomplete, skipping ECS task. "
-            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
-            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
-        )
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
         return None
 
-    # Parse subnet IDs (comma-separated string)
-    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
-    if not subnet_ids:
-        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
-        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
 
     logger.info(f"Starting ECS task for range_id={range_id} command={command}")
 
@@ -187,10 +201,7 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
         return task_arn
     except CloudTaskError as e:
         logger.error(f"Failed to start ECS task for range_id={range_id}: {e}")
-        raise ClientError(
-            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
-            "RunTask",
-        ) from e
+        raise
 
 
 def start_provisioning(range_id: int, user_id: int) -> str | None:
@@ -204,7 +215,7 @@ def start_provisioning(range_id: int, user_id: int) -> str | None:
         (falls back to stub behavior for local dev)
 
     Raises:
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     return _start_ecs_task(range_id, user_id, "provision")
 
@@ -221,7 +232,7 @@ def start_teardown(range_id: int, user_id: int) -> str | None:
         (falls back to stub behavior for local dev)
 
     Raises:
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
 
     .. deprecated::
         Use :func:`start_range_teardown` instead.
@@ -249,7 +260,7 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If command is invalid
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID as UUIDType
 
@@ -267,25 +278,11 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
-    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
-
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
-        logger.warning(
-            "ECS configuration incomplete, skipping Range ECS task. "
-            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
-            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
-        )
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
         return None
 
-    # Parse subnet IDs (comma-separated string)
-    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
-    if not subnet_ids:
-        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
-        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
 
     command_list = ["range", command, "--request-id", str(request_id)]
     logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
@@ -311,10 +308,7 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         return task_arn
     except CloudTaskError as e:
         logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
-        raise ClientError(
-            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
-            "RunTask",
-        ) from e
+        raise
 
 
 def start_range_provisioning(request_id: UUID) -> str | None:
@@ -328,7 +322,7 @@ def start_range_provisioning(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     return _start_range_ecs_task(request_id, "provision")
 
@@ -344,7 +338,7 @@ def start_range_teardown(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     return _start_range_ecs_task(request_id, "destroy")
 
@@ -362,7 +356,7 @@ def start_range_operation(request_id: UUID, operation: str) -> str | None:
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If operation is not 'pause' or 'resume'
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID as UUIDType
 
@@ -389,7 +383,7 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
     Raises:
         TypeError: If request_id is None or command is not a list
         ValueError: If command is empty
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID
 
@@ -407,25 +401,11 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
         return _run_local_provisioner(command)
 
-    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
-
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
-        logger.warning(
-            "ECS configuration incomplete, skipping NGFW ECS task. "
-            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
-            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
-        )
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
         return None
 
-    # Parse subnet IDs (comma-separated string)
-    subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
-    if not subnet_ids:
-        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
-        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
 
     logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
 
@@ -450,10 +430,7 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         return task_arn
     except CloudTaskError as e:
         logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
-        raise ClientError(
-            {"Error": {"Code": "TaskStartFailed", "Message": str(e)}},
-            "RunTask",
-        ) from e
+        raise
 
 
 def start_ngfw_provisioning(request_id: UUID) -> str | None:
@@ -468,7 +445,7 @@ def start_ngfw_provisioning(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     command = ["ngfw", "provision", "--request-id", str(request_id)]
     return _start_ngfw_ecs_task(request_id, command)
@@ -486,7 +463,7 @@ def start_ngfw_teardown(request_id: UUID) -> str | None:
 
     Raises:
         TypeError: If request_id is None or not a UUID
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     command = ["ngfw", "deprovision", "--request-id", str(request_id)]
     return _start_ngfw_ecs_task(request_id, command)
@@ -505,7 +482,7 @@ def start_ngfw_operation(request_id: UUID, operation: str) -> str | None:
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If operation is not 'start' or 'stop'
-        ClientError: If ECS task fails to start
+        CloudTaskError: If ECS task fails to start
     """
     from uuid import UUID
 

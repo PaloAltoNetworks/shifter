@@ -118,20 +118,17 @@ if [[ -n "$RDS_HOST" && "$RDS_HOST" != "None" ]]; then
     output_var "DB_HOST" "$RDS_HOST"
 fi
 
-# Get Pulumi backend URL from SSM or use default
-PULUMI_BUCKET=$(aws ssm get-parameter \
+# Get state bucket URL from SSM or use default
+STATE_BUCKET=$(aws ssm get-parameter \
     --name "/${ENV}/portal/pulumi-state-bucket" \
     --region "$REGION" \
     --profile "$PROFILE" \
     --query 'Parameter.Value' \
     --output text 2>/dev/null || echo "")
 
-if [[ -n "$PULUMI_BUCKET" && "$PULUMI_BUCKET" != "None" ]]; then
-    output_var "PULUMI_BACKEND_URL" "s3://${PULUMI_BUCKET}"
+if [[ -n "$STATE_BUCKET" && "$STATE_BUCKET" != "None" ]]; then
+    output_var "STATE_BUCKET_URL" "s3://${STATE_BUCKET}"
 fi
-
-# Secrets provider (KMS)
-output_var "PULUMI_SECRETS_PROVIDER" "awskms://alias/${ENV}-range-pulumi-secrets"
 
 echo "" >&2
 echo "# Environment variables fetched from ECS task definition" >&2

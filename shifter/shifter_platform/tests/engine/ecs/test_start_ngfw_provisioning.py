@@ -62,10 +62,10 @@ class TestStartNgfwProvisioning:
 
         settings.LOCAL_PROVISIONER = None  # Ensure ECS path is used
         settings.AWS_REGION = "us-east-2"
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123456789:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123456789:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1,subnet-2"
 
         task_arn = "arn:aws:ecs:us-east-2:123456789:task/test/abc123"
 
@@ -83,10 +83,10 @@ class TestStartNgfwProvisioning:
         from engine.ecs import start_ngfw_provisioning
 
         settings.LOCAL_PROVISIONER = None
-        settings.PULUMI_ECS_CLUSTER_ARN = ""
-        settings.PULUMI_TASK_DEFINITION_ARN = ""
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = ""
-        settings.PULUMI_PRIVATE_SUBNET_IDS = ""
+        settings.ENGINE_ECS_CLUSTER_ARN = ""
+        settings.ENGINE_TASK_DEFINITION_ARN = ""
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = ""
+        settings.ENGINE_PRIVATE_SUBNET_IDS = ""
 
         result = start_ngfw_provisioning(request_id=TEST_REQUEST_ID)
         assert result is None
@@ -103,10 +103,10 @@ class TestStartNgfwProvisioning:
         from engine.ecs import start_ngfw_provisioning
 
         settings.LOCAL_PROVISIONER = None
-        settings.PULUMI_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
-        settings.PULUMI_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
-        settings.PULUMI_ECS_SECURITY_GROUP_ID = "sg-12345678"
-        settings.PULUMI_PRIVATE_SUBNET_IDS = "subnet-1"
+        settings.ENGINE_ECS_CLUSTER_ARN = "arn:aws:ecs:us-east-2:123:cluster/test"
+        settings.ENGINE_TASK_DEFINITION_ARN = "arn:aws:ecs:us-east-2:123:task-definition/test:1"
+        settings.ENGINE_ECS_SECURITY_GROUP_ID = "sg-12345678"
+        settings.ENGINE_PRIVATE_SUBNET_IDS = "subnet-1"
 
         with patch("engine.ecs.get_task_runner") as mock_get_runner:
             mock_runner = MagicMock()

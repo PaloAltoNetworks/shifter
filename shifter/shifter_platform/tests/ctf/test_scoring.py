@@ -80,6 +80,13 @@ def mock_submission_objects():
 
 
 @pytest.fixture
+def mock_award_objects():
+    """Patch CTFAward.objects for calculate_score and statistics tests."""
+    with patch("ctf.services.scoring.CTFAward.objects") as mock_objects:
+        yield mock_objects
+
+
+@pytest.fixture
 def mock_participant_objects():
     """Patch CTFParticipant.objects for scoreboard tests."""
     with patch("ctf.services.scoring.CTFParticipant.objects") as mock_objects:
@@ -101,31 +108,43 @@ def mock_team_objects():
 class TestCalculateScore:
     """Tests for calculate_score()."""
 
-    def test_score_sums_correct_submissions_only(self, mock_submission_objects):
+    def test_score_sums_correct_submissions_only(self, mock_submission_objects, mock_award_objects):
         """Correct submissions are summed; incorrect ones are ignored."""
         pid = uuid4()
         mock_qs = MagicMock()
         mock_submission_objects.filter.return_value = mock_qs
         mock_qs.aggregate.return_value = {"total": 300}
 
+        award_qs = MagicMock()
+        mock_award_objects.filter.return_value = award_qs
+        award_qs.aggregate.return_value = {"total": 0}
+
         assert calculate_score(pid) == 300
         mock_submission_objects.filter.assert_called_once_with(participant_id=pid, is_correct=True)
 
-    def test_score_zero_with_no_submissions(self, mock_submission_objects):
+    def test_score_zero_with_no_submissions(self, mock_submission_objects, mock_award_objects):
         """Participant with no submissions scores 0."""
         pid = uuid4()
         mock_qs = MagicMock()
         mock_submission_objects.filter.return_value = mock_qs
         mock_qs.aggregate.return_value = {"total": 0}
 
+        award_qs = MagicMock()
+        mock_award_objects.filter.return_value = award_qs
+        award_qs.aggregate.return_value = {"total": 0}
+
         assert calculate_score(pid) == 0
 
-    def test_score_zero_with_only_incorrect(self, mock_submission_objects):
+    def test_score_zero_with_only_incorrect(self, mock_submission_objects, mock_award_objects):
         """Participant with only incorrect submissions scores 0 (Coalesce returns 0)."""
         pid = uuid4()
         mock_qs = MagicMock()
         mock_submission_objects.filter.return_value = mock_qs
         mock_qs.aggregate.return_value = {"total": 0}
+
+        award_qs = MagicMock()
+        mock_award_objects.filter.return_value = award_qs
+        award_qs.aggregate.return_value = {"total": 0}
 
         assert calculate_score(pid) == 0
 
@@ -520,19 +539,20 @@ class TestGetEventStatistics:
 
         CTFEvent and CTFChallenge are imported locally inside
         get_event_statistics, so we patch them at ctf.models.
-        CTFParticipant and CTFSubmission are module-level imports.
+        CTFParticipant, CTFSubmission, and CTFAward are module-level imports.
         """
         with (
             patch("ctf.models.CTFEvent.objects") as mock_event,
             patch("ctf.services.scoring.CTFParticipant.objects") as mock_part,
             patch("ctf.models.CTFChallenge.objects") as mock_chal,
             patch("ctf.services.scoring.CTFSubmission.objects") as mock_sub,
+            patch("ctf.services.scoring.CTFAward.objects") as mock_award,
         ):
-            yield mock_event, mock_part, mock_chal, mock_sub
+            yield mock_event, mock_part, mock_chal, mock_sub, mock_award
 
     def test_basic_event_stats(self, mock_event_models):
         """Returns correct participant count, challenge count, submissions."""
-        mock_event, mock_part, mock_chal, mock_sub = mock_event_models
+        mock_event, mock_part, mock_chal, mock_sub, mock_award = mock_event_models
         eid = uuid4()
 
         mock_event.get.return_value = MagicMock()
@@ -559,6 +579,11 @@ class TestGetEventStatistics:
         correct_qs.count.return_value = 2
         correct_qs.aggregate.return_value = {"total": 200}
 
+        # Awards
+        award_qs = MagicMock()
+        mock_award.filter.return_value = award_qs
+        award_qs.count.return_value = 0
+
         stats = get_event_statistics(eid)
 
         assert stats["event_id"] == str(eid)
@@ -568,6 +593,7 @@ class TestGetEventStatistics:
         assert stats["total_submissions"] == 3
         assert stats["correct_submissions"] == 2
         assert stats["total_points_awarded"] == 200
+        assert stats["total_awards"] == 0
 
     def test_nonexistent_event(self):
         """Non-existent event returns empty dict."""
@@ -579,7 +605,7 @@ class TestGetEventStatistics:
 
     def test_event_with_no_activity(self, mock_event_models):
         """Event with no participants/submissions returns zero counts."""
-        mock_event, mock_part, mock_chal, mock_sub = mock_event_models
+        mock_event, mock_part, mock_chal, mock_sub, mock_award = mock_event_models
         eid = uuid4()
 
         mock_event.get.return_value = MagicMock()
@@ -603,12 +629,18 @@ class TestGetEventStatistics:
         correct_qs.count.return_value = 0
         correct_qs.aggregate.return_value = {"total": 0}
 
+        # Awards
+        award_qs = MagicMock()
+        mock_award.filter.return_value = award_qs
+        award_qs.count.return_value = 0
+
         stats = get_event_statistics(eid)
 
         assert stats["participant_count"] == 0
         assert stats["challenge_count"] == 0
         assert stats["total_submissions"] == 0
         assert stats["total_points_awarded"] == 0
+        assert stats["total_awards"] == 0
 
 
 # -----------------------------------------------------------------------------

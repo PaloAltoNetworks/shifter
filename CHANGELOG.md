@@ -5,12 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.34.0] - 2026-03-22
+
+### Changed
+- **Terraform**: Rename remaining `pulumi_state_*`, `pulumi_locks_*`, `pulumi_secrets_*` variable names in `modules/engine-provisioner/variables.tf` to `engine_state_*`, `engine_locks_*`, `engine_secrets_*`
+- **Terraform**: Rename remaining `pulumi_state_*`, `pulumi_locks_*`, `pulumi_secrets_*` output names in `environments/*/range/outputs.tf` to `engine_*` equivalents
+- **Terraform**: Update all `data.terraform_remote_state.range.outputs.pulumi_*` references in `environments/*/portal/main.tf` to match renamed outputs
+- **Terraform**: Rename Terraform resource identifiers (with `moved` blocks) in `modules/engine-state/` (`aws_s3_bucket.pulumi_state` → `engine_state`, `aws_kms_key.pulumi_secrets` → `engine_secrets`, `aws_dynamodb_table.pulumi_locks` → `engine_locks`, plus sub-resources)
+- **Terraform**: Rename Terraform resource identifiers (with `moved` blocks) in `modules/engine-provisioner/` (`aws_ecs_cluster.pulumi` → `engine`, `aws_ecs_task_definition.pulumi_provisioner` → `engine_provisioner`, `aws_iam_role_policy.pulumi_state` → `engine_state`)
+- **Terraform**: Update comments and descriptions referencing "Pulumi" to "engine" in `modules/engine-provisioner/iam.tf` and `variables.tf`
+
+### Removed
+- **Terraform**: Remove deprecated `pulumi-*` SSM parameters from `modules/portal/ssm/main.tf` (confirmed no application code references them; `engine-*` parameters already active)
+
 ## [3.33.0] - 2026-03-22
 
 ### Changed
 - **Platform**: ECS modules (`engine/ecs.py`, `cms/experiments/ecs.py`) now propagate `CloudTaskError` instead of catching it and re-raising as `botocore.exceptions.ClientError`
 - **Platform**: `engine/services.py` callers (`pause_range`, `resume_range`) catch `CloudTaskError` instead of `ClientError`
 - **Platform**: Extract `_get_engine_ecs_config()` helper in `engine/ecs.py` to DRY up config reading from 3 internal functions
+
+### Fixed
+- **Terraform**: Portal `ecr_repository_url` uses `try()` fallback for foundation output rename (`engine_provisioner_ecr_url` || `pulumi_provisioner_ecr_url`) so portal plan succeeds regardless of foundation apply order
 
 ### Removed
 - **Platform**: Remove `from botocore.exceptions import ClientError` from `engine/ecs.py` and `cms/experiments/ecs.py`

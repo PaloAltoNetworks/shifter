@@ -2,7 +2,7 @@
 # ECS Task Definition
 # ------------------------------------------------------------------------------
 
-resource "aws_ecs_task_definition" "pulumi_provisioner" {
+resource "aws_ecs_task_definition" "engine_provisioner" {
   family                   = "${var.name_prefix}-pulumi-provisioner"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
@@ -23,7 +23,7 @@ resource "aws_ecs_task_definition" "pulumi_provisioner" {
       { name = "DB_PORT", value = tostring(var.db_port) },
       { name = "DB_NAME", value = var.db_name },
       { name = "DB_USER", value = "provisioner_lambda" },
-      { name = "STATE_BUCKET_URL", value = "s3://${var.pulumi_state_bucket}" },
+      { name = "STATE_BUCKET_URL", value = "s3://${var.engine_state_bucket}" },
       { name = "RANGE_VPC_ID", value = var.range_vpc_id },
       { name = "RANGE_VPC_CIDR", value = var.range_vpc_cidr },
       { name = "RANGE_ROUTE_TABLE_ID", value = var.range_route_table_id },

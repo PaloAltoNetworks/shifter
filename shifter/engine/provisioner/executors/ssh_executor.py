@@ -11,36 +11,24 @@ import time
 
 import paramiko
 
-from executors.base import CommandResult
+from executors.base import (
+    CommandResult,
+    ExecutorCommandError,
+    ExecutorError,
+    ExecutorTimeoutError,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class SSHExecutorError(Exception):
-    """Base exception for SSH executor errors."""
-
-    pass
-
-
-class CommandError(SSHExecutorError):
-    """Raised when a command fails."""
-
-    def __init__(self, message: str, exit_code: int = -1, stderr: str = ""):
-        self.exit_code = exit_code
-        self.stderr = stderr
-        super().__init__(f"{message} (exit_code={exit_code})")
-
-
-class TimeoutError(SSHExecutorError):
-    """Raised when an operation times out."""
-
-    pass
+# Backward-compatible aliases for shared exception types
+SSHExecutorError = ExecutorError
+CommandError = ExecutorCommandError
+TimeoutError = ExecutorTimeoutError
 
 
 class ConnectionError(SSHExecutorError):
     """Raised when SSH connection fails."""
-
-    pass
 
 
 class SSHExecutor:
@@ -138,7 +126,7 @@ class SSHExecutor:
         # Security context: AutoAddPolicy is acceptable because we connect to freshly
         # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
         client.set_missing_host_key_policy(
-            paramiko.AutoAddPolicy()  # noqa: S507
+            paramiko.AutoAddPolicy()  # noqa: S507  # NOSONAR — freshly provisioned VMs in isolated VPC
         )  # nosec B507
 
         # Build the full command to send via stdin
@@ -165,8 +153,8 @@ class SSHExecutor:
 
             # Send commands
             logger.info(f"Sending command: {commands[:100]}")
-            channel.send("set cli pager off\n")  # nosec B601 - disable pager for full output
-            channel.send(commands + "\n")  # nosec B601
+            channel.send("set cli pager off\n")  # nosec B601  # NOSONAR — hardcoded operational command
+            channel.send(commands + "\n")  # nosec B601  # NOSONAR — operational data, not user input
             channel.send("exit\n")
             channel.shutdown_write()
 
@@ -327,7 +315,7 @@ class SSHExecutor:
             client = paramiko.SSHClient()
             # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
             client.set_missing_host_key_policy(
-                paramiko.AutoAddPolicy()  # noqa: S507
+                paramiko.AutoAddPolicy()  # noqa: S507  # NOSONAR — freshly provisioned VMs in isolated VPC
             )  # nosec B507
             client.connect(
                 hostname=host,
@@ -343,7 +331,7 @@ class SSHExecutor:
             # Use interactive shell - PAN-OS does not support SSH exec channel
             channel = client.invoke_shell()
             time.sleep(2)
-            channel.send("show system info\n")  # nosec B601
+            channel.send("show system info\n")  # nosec B601  # NOSONAR — hardcoded diagnostic command
             time.sleep(3)
 
             output = ""

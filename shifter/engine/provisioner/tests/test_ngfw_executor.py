@@ -8,6 +8,7 @@ import stat
 
 from executors.ngfw_executor import NGFWExecutor
 
+# Test-only fixture — not a real key  # nosec B105  # NOSONAR
 FAKE_PEM_KEY = """-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
 QyNTUxOQAAACBfRkB0BI5GkNx7JgveB2oUMBJn7wCfHt9gzGJI4MAN6gAAAJA0YH1WNGB9

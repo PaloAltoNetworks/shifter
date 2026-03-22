@@ -18,7 +18,7 @@ data "aws_region" "current" {}
 # S3 Bucket for Engine State
 # ------------------------------------------------------------------------------
 
-resource "aws_s3_bucket" "pulumi_state" {
+resource "aws_s3_bucket" "engine_state" {
   bucket = "${var.name_prefix}-pulumi-state"
 
   # State is critical - do not allow accidental deletion
@@ -29,16 +29,16 @@ resource "aws_s3_bucket" "pulumi_state" {
   })
 }
 
-resource "aws_s3_bucket_versioning" "pulumi_state" {
-  bucket = aws_s3_bucket.pulumi_state.id
+resource "aws_s3_bucket_versioning" "engine_state" {
+  bucket = aws_s3_bucket.engine_state.id
 
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "pulumi_state" {
-  bucket = aws_s3_bucket.pulumi_state.id
+resource "aws_s3_bucket_server_side_encryption_configuration" "engine_state" {
+  bucket = aws_s3_bucket.engine_state.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -49,8 +49,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "pulumi_state" {
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "pulumi_state" {
-  bucket = aws_s3_bucket.pulumi_state.id
+resource "aws_s3_bucket_public_access_block" "engine_state" {
+  bucket = aws_s3_bucket.engine_state.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -58,8 +58,8 @@ resource "aws_s3_bucket_public_access_block" "pulumi_state" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "pulumi_state" {
-  bucket = aws_s3_bucket.pulumi_state.id
+resource "aws_s3_bucket_lifecycle_configuration" "engine_state" {
+  bucket = aws_s3_bucket.engine_state.id
 
   rule {
     id     = "abort-incomplete-multipart"
@@ -98,7 +98,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "pulumi_state" {
 # - CloudTrail audit trail for all encrypt/decrypt operations
 # - Least privilege access control via key policy
 
-resource "aws_kms_key" "pulumi_secrets" {
+resource "aws_kms_key" "engine_secrets" {
   description             = "Encrypts engine stack secrets"
   deletion_window_in_days = 7
   enable_key_rotation     = true
@@ -148,16 +148,16 @@ resource "aws_kms_key" "pulumi_secrets" {
   })
 }
 
-resource "aws_kms_alias" "pulumi_secrets" {
+resource "aws_kms_alias" "engine_secrets" {
   name          = "alias/${var.name_prefix}-pulumi-secrets"
-  target_key_id = aws_kms_key.pulumi_secrets.key_id
+  target_key_id = aws_kms_key.engine_secrets.key_id
 }
 
 # ------------------------------------------------------------------------------
 # DynamoDB Table for Engine Locking
 # ------------------------------------------------------------------------------
 
-resource "aws_dynamodb_table" "pulumi_locks" {
+resource "aws_dynamodb_table" "engine_locks" {
   name         = "${var.name_prefix}-pulumi-locks"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"

@@ -20,7 +20,7 @@ class TestBuildCommonTags:
         assert tags["shifter:environment"] == "dev"
         assert tags["shifter:request_uuid"] == "abc-123-def"
         assert tags["shifter:system"] == "shifter"
-        assert tags["ManagedBy"] == "pulumi"
+        assert tags["ManagedBy"] == "terraform"
         # Should not have optional tags
         assert "shifter:range_id" not in tags
         assert "shifter:subnet_uuid" not in tags

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.35.0] - 2026-03-22
+
+### Added
+- File attachments for CTF challenges (CTF-001) — organizers can upload downloadable files (binaries, pcaps, images, etc.) to challenges; participants download via presigned S3 URLs
+- Challenge prerequisites (CTF-001) — challenges can require other challenges to be solved first, with BFS cycle detection, locked challenge display, and submission gating
+- `CTFChallengeFile` model with S3 storage, SHA256 integrity, size/extension validation (50 MB max, 10 files per challenge)
+- `CTFChallengePrerequisite` model with same-event validation, self-reference prevention, and circular dependency detection
+- Attachment service (`add_challenge_file`, `remove_challenge_file`, `get_challenge_files`, `get_download_url`)
+- Prerequisite service functions (`add_prerequisite`, `remove_prerequisite`, `get_prerequisites`, `get_dependents`, `check_prerequisites_met`)
+- API endpoints for file management and prerequisite management
+- Admin challenge detail UI sections for managing files and prerequisites
+- Participant challenge views show downloadable files and prerequisite lock/gate UI
+
+### Changed
+- `get_available_challenges()` accepts optional `participant_id` to exclude challenges with unmet prerequisites
+- `submit_flag()` checks prerequisites before accepting submissions
+- `delete_challenge()` cascades soft-delete to prerequisite links where the challenge is required
+
 ## [3.34.0] - 2026-03-22
 
 ### Changed

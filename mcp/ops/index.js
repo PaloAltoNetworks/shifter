@@ -1155,18 +1155,21 @@ server.tool(
     try {
       const profile = getProfile(env);
 
-      // 1. Get all running shifter range instances from EC2 (exclude portal, ngfw)
-      const filters = buildInstanceFilters({ name_filter: "shifter-*" });
+      // 1. Get all running range instances from EC2 (filtered by shifter:range_id tag).
+      // The shifter:range_id tag is set by Terraform common_tags on all range resources
+      // and is absent from NGFW/portal instances, so it naturally scopes to ranges only.
+      const filters = [
+        { Name: "tag:shifter:range_id", Values: ["*"] },
+        { Name: "instance-state-name", Values: ["running"] },
+      ];
       const filtersJson = JSON.stringify(JSON.stringify(filters));
       const ec2Result = aws(
         profile,
-        `ec2 describe-instances --filters ${filtersJson} --query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==\`Name\`].Value|[0]}'`
+        `ec2 describe-instances --filters ${filtersJson} --query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==\`Name\`].Value|[0],RangeId:Tags[?Key==\`shifter:range_id\`].Value|[0]}'`
       );
 
-      // Only include EC2s matching shifter-{role}-{range_id} pattern (range instances)
-      const rangeNamePattern = /^shifter-\w+-\d+$/;
       const runningEc2s = ec2Result.filter(
-        (i) => i.State === "running" && rangeNamePattern.test(i.Name)
+        (i) => i.State === "running" && i.RangeId
       );
 
       if (runningEc2s.length === 0) {
@@ -1209,9 +1212,10 @@ server.tool(
             const db = dbMap[ec2.InstanceId];
             if (!db) {
               // No engine_instance matched by aws_instance_id.
-              // Parse range_id from EC2 Name tag (format: shifter-{role}-{range_id})
-              const nameMatch = ec2.Name?.match(/^shifter-\w+-(\d+)$/);
-              const parsedRangeId = nameMatch ? parseInt(nameMatch[1], 10) : null;
+              // Use range_id from EC2 tag (set by Terraform on all range instances).
+              const parsedRangeId = ec2.RangeId
+                ? parseInt(ec2.RangeId, 10)
+                : null;
 
               // Look up the range and its engine_instances by parsed range_id
               const rangeResult = await client.query(
@@ -1261,6 +1265,19 @@ server.tool(
                   range_id: null,
                 });
               }
+            } else if (db.range_status == null) {
+              // LEFT JOIN found engine_instance but no matching range — orphan
+              found.push({
+                ec2_id: ec2.InstanceId,
+                ec2_name: ec2.Name,
+                reason:
+                  "engine_instance exists but no associated range found",
+                engine_instance_id: db.engine_instance_id,
+                engine_request_id: db.engine_request_id,
+                range_id: null,
+                instance_status: db.instance_status,
+                role: db.role,
+              });
             } else if (
               db.range_status === "failed" ||
               db.range_status === "destroyed"

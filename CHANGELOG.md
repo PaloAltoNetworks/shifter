@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.35.1] - 2026-03-22
+
+### Fixed
+- `reconcile_ranges` now detects all running range EC2 instances, including those with custom Name tags or hyphenated roles, by filtering on `shifter:range_id` tag instead of Name tag pattern (#796)
+- `reconcile_ranges` now flags orphan instances when engine_instance exists but has no associated range (NULL range_status from LEFT JOIN)
+
 ## [3.35.0] - 2026-03-22
 
 ### Added

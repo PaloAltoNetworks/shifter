@@ -341,8 +341,13 @@ class CTFEvent(CTFBaseModel):
 
     @property
     def is_upcoming(self) -> bool:
-        """Return True if event is scheduled but not started."""
-        return self.status == EventStatus.SCHEDULED.value and self.event_start > timezone.now()
+        """Return True if event is in registration but not started."""
+        return self.status == EventStatus.REGISTRATION.value and self.event_start > timezone.now()
+
+    @property
+    def is_paused(self) -> bool:
+        """Return True if event is currently paused."""
+        return self.status == EventStatus.PAUSED.value
 
     @property
     def is_modifiable(self) -> bool:
@@ -356,11 +361,11 @@ class CTFEvent(CTFBaseModel):
     def is_content_modifiable(self) -> bool:
         """Return True if event content (challenges, etc.) can be modified.
 
-        Content is only modifiable in DRAFT and SCHEDULED states.
+        Content is only modifiable in DRAFT and REGISTRATION states.
         Active events should not have their challenges changed.
         """
         try:
-            return EventStatus(self.status) in {EventStatus.DRAFT, EventStatus.SCHEDULED}
+            return EventStatus(self.status) in {EventStatus.DRAFT, EventStatus.REGISTRATION}
         except ValueError:
             return False
 

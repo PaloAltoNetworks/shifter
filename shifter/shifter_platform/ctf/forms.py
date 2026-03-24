@@ -455,9 +455,12 @@ class EventStatusForm(forms.Form):
 
     action = forms.ChoiceField(
         choices=[
-            ("schedule", "Schedule Event"),
+            ("schedule", "Open Registration"),
             ("activate", "Activate Event"),
-            ("complete", "Complete Event"),
+            ("pause", "Pause Event"),
+            ("resume", "Resume Event"),
+            ("complete", "End Event"),
+            ("archive", "Archive Event"),
             ("cancel", "Cancel Event"),
         ],
     )
@@ -479,10 +482,18 @@ class EventStatusForm(forms.Form):
             status = event.status
 
             if status == EventStatus.DRAFT.value:
-                available_actions = [("schedule", "Schedule Event"), ("cancel", "Cancel Event")]
-            elif status == EventStatus.SCHEDULED.value:
+                available_actions = [("schedule", "Open Registration"), ("cancel", "Cancel Event")]
+            elif status == EventStatus.REGISTRATION.value:
                 available_actions = [("activate", "Activate Event"), ("cancel", "Cancel Event")]
             elif status == EventStatus.ACTIVE.value:
-                available_actions = [("complete", "Complete Event"), ("cancel", "Cancel Event")]
+                available_actions = [
+                    ("pause", "Pause Event"),
+                    ("complete", "End Event"),
+                    ("cancel", "Cancel Event"),
+                ]
+            elif status == EventStatus.PAUSED.value:
+                available_actions = [("resume", "Resume Event"), ("cancel", "Cancel Event")]
+            elif status == EventStatus.ENDED.value:
+                available_actions = [("archive", "Archive Event")]
 
             self.fields["action"].choices = available_actions

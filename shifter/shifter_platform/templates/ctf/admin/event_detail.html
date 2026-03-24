@@ -88,14 +88,18 @@
         <div class="mt-sm flex-row gap-sm">
             {% if event.status == 'draft' %}
             <span class="status status-provisioning"><span class="status-dot"></span> Draft</span>
-            {% elif event.status == 'scheduled' %}
-            <span class="status status-paused"><span class="status-dot"></span> Scheduled</span>
+            {% elif event.status == 'registration' %}
+            <span class="status status-paused"><span class="status-dot"></span> Registration</span>
             {% elif event.status == 'active' %}
             <span class="status status-active"><span class="status-dot"></span> Active</span>
-            {% elif event.status == 'completed' %}
-            <span class="status status-offline"><span class="status-dot"></span> Completed</span>
+            {% elif event.status == 'paused' %}
+            <span class="status status-paused"><span class="status-dot"></span> Paused</span>
+            {% elif event.status == 'ended' %}
+            <span class="status status-offline"><span class="status-dot"></span> Ended</span>
             {% elif event.status == 'cancelled' %}
             <span class="status status-error"><span class="status-dot"></span> Cancelled</span>
+            {% elif event.status == 'archived' %}
+            <span class="status status-offline"><span class="status-dot"></span> Archived</span>
             {% endif %}
             {% if event.team_mode %}
             <span class="status status-paused"><span class="status-dot"></span> Team Mode</span>

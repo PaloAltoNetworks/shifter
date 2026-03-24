@@ -12,17 +12,24 @@ class EventStatus(str, Enum):
     """CTF event lifecycle status.
 
     Events progress through these states:
-        draft -> scheduled -> active -> completed
-                    |
-                    v
-                cancelled
+        draft -> registration -> active -> ended -> archived
+                     |            |  ^       |
+                     |            v  |       |
+                     |          paused       |
+                     |            |          |
+                     v            v          v
+                          cancelled
+
+    Valid transitions are defined in VALID_TRANSITIONS below.
     """
 
     DRAFT = "draft"
-    SCHEDULED = "scheduled"
+    REGISTRATION = "registration"
     ACTIVE = "active"
-    COMPLETED = "completed"
+    PAUSED = "paused"
+    ENDED = "ended"
     CANCELLED = "cancelled"
+    ARCHIVED = "archived"
 
     def __str__(self) -> str:
         """Return the string value for database storage."""
@@ -214,10 +221,26 @@ class UserType(str, Enum):
         return [(t.value, labels.get(t.value, t.name)) for t in cls]
 
 
-# Terminal statuses that indicate completion
-EVENT_TERMINAL_STATUSES = frozenset({EventStatus.COMPLETED, EventStatus.CANCELLED})
+# Terminal statuses — no further transitions possible
+EVENT_TERMINAL_STATUSES = frozenset({EventStatus.ENDED, EventStatus.CANCELLED, EventStatus.ARCHIVED})
 
 PARTICIPANT_TERMINAL_STATUSES = frozenset({ParticipantStatus.COMPLETED, ParticipantStatus.DISQUALIFIED})
 
-# Statuses that allow modifications
-EVENT_MODIFIABLE_STATUSES = frozenset({EventStatus.DRAFT, EventStatus.SCHEDULED})
+# Statuses that allow content modifications (challenges, files, etc.)
+EVENT_MODIFIABLE_STATUSES = frozenset({EventStatus.DRAFT, EventStatus.REGISTRATION})
+
+# Valid state transitions for event lifecycle (CTF-701)
+VALID_TRANSITIONS: dict[EventStatus, frozenset[EventStatus]] = {
+    EventStatus.DRAFT: frozenset({EventStatus.REGISTRATION, EventStatus.CANCELLED}),
+    EventStatus.REGISTRATION: frozenset({EventStatus.ACTIVE, EventStatus.CANCELLED}),
+    EventStatus.ACTIVE: frozenset({EventStatus.PAUSED, EventStatus.ENDED, EventStatus.CANCELLED}),
+    EventStatus.PAUSED: frozenset({EventStatus.ACTIVE, EventStatus.CANCELLED}),
+    EventStatus.ENDED: frozenset({EventStatus.ARCHIVED}),
+    EventStatus.CANCELLED: frozenset(),
+    EventStatus.ARCHIVED: frozenset(),
+}
+
+
+def validate_transition(current: EventStatus, target: EventStatus) -> bool:
+    """Return True if transitioning from current to target is valid."""
+    return target in VALID_TRANSITIONS.get(current, frozenset())

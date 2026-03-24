@@ -524,7 +524,7 @@ def admin_dashboard(request: HttpRequest) -> HttpResponse:
     from ctf.enums import EventStatus
 
     active_count = all_events.filter(status=EventStatus.ACTIVE.value).count()
-    upcoming_count = all_events.filter(status=EventStatus.SCHEDULED.value).count()
+    upcoming_count = all_events.filter(status=EventStatus.REGISTRATION.value).count()
     draft_count = all_events.filter(status=EventStatus.DRAFT.value).count()
 
     # Get recent 5 events for display
@@ -609,10 +609,13 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
     from ctf.forms import EventStatusForm
     from ctf.services import (
         activate_event,
+        archive_event,
         cancel_event,
         complete_event,
         get_event,
         get_event_stats,
+        pause_event,
+        resume_event,
         schedule_event,
     )
 
@@ -636,8 +639,14 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
                 success = schedule_event(event)
             elif action == "activate":
                 success = activate_event(event)
+            elif action == "pause":
+                success = pause_event(event)
+            elif action == "resume":
+                success = resume_event(event)
             elif action == "complete":
                 success = complete_event(event)
+            elif action == "archive":
+                success = archive_event(event)
             elif action == "cancel":
                 success = cancel_event(event)
 

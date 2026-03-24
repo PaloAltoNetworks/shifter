@@ -117,7 +117,7 @@ def mock_event():
     event.pk = EVENT_ID
     event.created_by_id = OWNER_PK
     event.name = "Test CTF Event"
-    event.status = "scheduled"
+    event.status = "registration"
     event.team_mode = False
     event.scenario_id = "basic"
     return event

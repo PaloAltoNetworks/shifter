@@ -78,7 +78,7 @@ class _MockEvent:
         *,
         name="Test CTF Event",
         description="A test CTF event",
-        status=EventStatus.SCHEDULED.value,
+        status=EventStatus.REGISTRATION.value,
         created_by_id=1,
         pk=None,
         is_modifiable=True,
@@ -116,7 +116,7 @@ def _make_mock_event(**kwargs):
 @pytest.fixture
 def mock_event():
     """A scheduled event owned by user pk=1."""
-    return _make_mock_event(status=EventStatus.SCHEDULED.value)
+    return _make_mock_event(status=EventStatus.REGISTRATION.value)
 
 
 @pytest.fixture
@@ -557,7 +557,7 @@ class TestEventEditView:
         """Editing a completed event should be blocked."""
         completed_event = _make_mock_event(
             name="Completed Event",
-            status=EventStatus.COMPLETED.value,
+            status=EventStatus.ENDED.value,
             is_modifiable=False,
         )
         with (
@@ -588,7 +588,7 @@ class TestEventStatusTransitions:
 
             result = schedule_event(mock_event_draft)
         assert result is True
-        assert mock_event_draft.status == EventStatus.SCHEDULED.value
+        assert mock_event_draft.status == EventStatus.REGISTRATION.value
         mock_event_draft.save.assert_called_once()
 
     def test_activate_scheduled_event(self, mock_event):
@@ -606,7 +606,7 @@ class TestEventStatusTransitions:
 
         result = complete_event(mock_event_active)
         assert result is True
-        assert mock_event_active.status == EventStatus.COMPLETED.value
+        assert mock_event_active.status == EventStatus.ENDED.value
         mock_event_active.save.assert_called_once()
 
     def test_cancel_draft_event(self, mock_event_draft):
@@ -649,14 +649,116 @@ class TestEventStatusTransitions:
         result = schedule_event(mock_event_active)
         assert result is False
 
-    def test_cannot_modify_completed_event(self):
-        """Completed events should not be modifiable."""
-        completed_event = _make_mock_event(
-            name="Completed",
-            status=EventStatus.COMPLETED.value,
+    def test_cannot_modify_ended_event(self):
+        """Ended events should not be modifiable."""
+        ended_event = _make_mock_event(
+            name="Ended",
+            status=EventStatus.ENDED.value,
             is_modifiable=False,
         )
-        assert completed_event.is_modifiable is False
+        assert ended_event.is_modifiable is False
+
+    def test_pause_active_event(self, mock_event_active):
+        """Should be able to pause an active event."""
+        from ctf.services import pause_event
+
+        result = pause_event(mock_event_active)
+        assert result is True
+        assert mock_event_active.status == EventStatus.PAUSED.value
+        mock_event_active.save.assert_called_once()
+
+    def test_resume_paused_event(self):
+        """Should be able to resume a paused event."""
+        from ctf.services import resume_event
+
+        paused_event = _make_mock_event(status=EventStatus.PAUSED.value)
+        result = resume_event(paused_event)
+        assert result is True
+        assert paused_event.status == EventStatus.ACTIVE.value
+
+    def test_archive_ended_event(self):
+        """Should be able to archive an ended event."""
+        from ctf.services import archive_event
+
+        ended_event = _make_mock_event(status=EventStatus.ENDED.value)
+        result = archive_event(ended_event)
+        assert result is True
+        assert ended_event.status == EventStatus.ARCHIVED.value
+
+    def test_cannot_pause_draft_event(self, mock_event_draft):
+        """Should not be able to pause a draft event."""
+        from ctf.services import pause_event
+
+        result = pause_event(mock_event_draft)
+        assert result is False
+        assert mock_event_draft.status == EventStatus.DRAFT.value
+
+    def test_cannot_resume_active_event(self, mock_event_active):
+        """Should not be able to resume an already active event."""
+        from ctf.services import resume_event
+
+        result = resume_event(mock_event_active)
+        assert result is False
+        assert mock_event_active.status == EventStatus.ACTIVE.value
+
+    def test_cannot_archive_active_event(self, mock_event_active):
+        """Should not be able to archive an active event."""
+        from ctf.services import archive_event
+
+        result = archive_event(mock_event_active)
+        assert result is False
+        assert mock_event_active.status == EventStatus.ACTIVE.value
+
+    def test_cannot_transition_past_ended(self):
+        """Ended event cannot go back to active."""
+        from ctf.services import activate_event
+
+        ended_event = _make_mock_event(status=EventStatus.ENDED.value)
+        result = activate_event(ended_event)
+        assert result is False
+        assert ended_event.status == EventStatus.ENDED.value
+
+    def test_cannot_transition_from_archived(self):
+        """Archived is terminal; no transitions out."""
+        from ctf.services import activate_event
+
+        archived_event = _make_mock_event(status=EventStatus.ARCHIVED.value)
+        result = activate_event(archived_event)
+        assert result is False
+        assert archived_event.status == EventStatus.ARCHIVED.value
+
+    def test_cancel_paused_event(self):
+        """Should be able to cancel a paused event."""
+        from ctf.services import cancel_event
+
+        paused_event = _make_mock_event(status=EventStatus.PAUSED.value)
+        with (
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+        ):
+            result = cancel_event(paused_event)
+        assert result is True
+        assert paused_event.status == EventStatus.CANCELLED.value
+
+    def test_cancel_registration_event(self):
+        """Should be able to cancel an event in registration."""
+        from ctf.services import cancel_event
+
+        reg_event = _make_mock_event(status=EventStatus.REGISTRATION.value)
+        with (
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+        ):
+            result = cancel_event(reg_event)
+        assert result is True
+        assert reg_event.status == EventStatus.CANCELLED.value
+
+    def test_valid_transitions_covers_all_states(self):
+        """Every EventStatus value should be a key in VALID_TRANSITIONS."""
+        from ctf.enums import VALID_TRANSITIONS
+
+        for status in EventStatus:
+            assert status in VALID_TRANSITIONS, f"{status} missing from VALID_TRANSITIONS"
 
 
 # ---------------------------------------------------------------------------
@@ -776,7 +878,7 @@ class TestEventServices:
 
         completed_event = _make_mock_event(
             name="Completed",
-            status=EventStatus.COMPLETED.value,
+            status=EventStatus.ENDED.value,
             is_modifiable=False,
         )
 

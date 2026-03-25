@@ -92,17 +92,7 @@
                     </a>
                 </td>
                 <td>
-                    {% if event.status == 'draft' %}
-                    <span class="status status-provisioning"><span class="status-dot"></span> Draft</span>
-                    {% elif event.status == 'scheduled' %}
-                    <span class="status status-paused"><span class="status-dot"></span> Scheduled</span>
-                    {% elif event.status == 'active' %}
-                    <span class="status status-active"><span class="status-dot"></span> Active</span>
-                    {% elif event.status == 'completed' %}
-                    <span class="status status-offline"><span class="status-dot"></span> Completed</span>
-                    {% elif event.status == 'cancelled' %}
-                    <span class="status status-error"><span class="status-dot"></span> Cancelled</span>
-                    {% endif %}
+                    {% include "ctf/includes/event_status_badge.html" %}
                 </td>
                 <td>{{ event.event_start|date:"M d, Y H:i" }}</td>
                 <td>{{ event.event_end|date:"M d, Y H:i" }}</td>

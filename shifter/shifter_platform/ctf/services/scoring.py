@@ -6,6 +6,7 @@ Provides business logic for score calculation and leaderboards.
 from __future__ import annotations
 
 import logging
+import statistics
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -261,7 +262,7 @@ def get_event_statistics(event_id: UUID) -> dict[str, Any]:
         event_id: UUID of the event.
 
     Returns:
-        Dict with participant count, submission count, etc.
+        Dict with participant count, submission count, score stats, etc.
     """
     from ctf.models import CTFChallenge, CTFEvent
 
@@ -275,15 +276,35 @@ def get_event_statistics(event_id: UUID) -> dict[str, Any]:
     submissions = CTFSubmission.objects.filter(participant__event=event)
     awards = CTFAward.objects.filter(event=event)
 
+    total_submissions = submissions.count()
+    correct_submissions = submissions.filter(is_correct=True).count()
+
+    # Active participants: those with at least one submission
+    active_participants = participants.filter(submissions__isnull=False).distinct().count()
+
+    # Challenges with zero solves
+    challenge_count = challenges.count()
+    challenges_with_solves = submissions.filter(is_correct=True).values("challenge_id").distinct().count()
+    challenges_with_zero_solves = challenge_count - challenges_with_solves
+
+    # Compute per-participant scores for average/median
+    scoreboard = get_scoreboard(event_id)
+    scores = [entry["score"] for entry in scoreboard]
+    average_score = round(statistics.mean(scores), 1) if scores else 0
+    median_score = round(statistics.median(scores), 1) if scores else 0
+
     return {
         "event_id": str(event_id),
         "participant_count": participants.count(),
-        "active_participants": participants.filter(
-            status__in=[ParticipantStatus.ACTIVE.value, ParticipantStatus.REGISTERED.value]
-        ).count(),
-        "challenge_count": challenges.count(),
-        "total_submissions": submissions.count(),
-        "correct_submissions": submissions.filter(is_correct=True).count(),
+        "active_participants": active_participants,
+        "challenge_count": challenge_count,
+        "challenges_with_zero_solves": challenges_with_zero_solves,
+        "total_submissions": total_submissions,
+        "correct_submissions": correct_submissions,
+        "incorrect_submissions": total_submissions - correct_submissions,
+        "average_score": average_score,
+        "median_score": median_score,
+        "event_duration_hours": event.duration_hours,
         "total_points_awarded": submissions.filter(is_correct=True).aggregate(total=Coalesce(Sum("points_awarded"), 0))[
             "total"
         ],

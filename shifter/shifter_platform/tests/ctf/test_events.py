@@ -732,7 +732,10 @@ class TestEventStatusTransitions:
         from ctf.services import cancel_event
 
         paused_event = _make_mock_event(status=EventStatus.PAUSED.value)
-        with patch("ctf.services.event._cancel_event_tasks"):
+        with (
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+        ):
             result = cancel_event(paused_event)
         assert result is True
         assert paused_event.status == EventStatus.CANCELLED.value
@@ -742,7 +745,10 @@ class TestEventStatusTransitions:
         from ctf.services import cancel_event
 
         reg_event = _make_mock_event(status=EventStatus.REGISTRATION.value)
-        with patch("ctf.services.event._cancel_event_tasks"):
+        with (
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+        ):
             result = cancel_event(reg_event)
         assert result is True
         assert reg_event.status == EventStatus.CANCELLED.value

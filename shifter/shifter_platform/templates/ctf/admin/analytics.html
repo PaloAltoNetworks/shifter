@@ -65,16 +65,34 @@
         <div class="stat-label">Participants</div>
     </div>
     <div class="card stat-card">
+        <div class="stat-value">{{ event_stats.active_participants }}</div>
+        <div class="stat-label">Active Participants</div>
+    </div>
+    <div class="card stat-card">
         <div class="stat-value">{{ event_stats.challenge_count }}</div>
         <div class="stat-label">Challenges</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-value">{{ event_stats.challenges_with_zero_solves }}</div>
+        <div class="stat-label">Zero-Solve Challenges</div>
+    </div>
+</div>
+<div class="stats-grid mb-lg">
+    <div class="card stat-card">
+        <div class="stat-value">{{ event_stats.average_score }}</div>
+        <div class="stat-label">Average Score</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-value">{{ event_stats.median_score }}</div>
+        <div class="stat-label">Median Score</div>
     </div>
     <div class="card stat-card">
         <div class="stat-value">{{ event_stats.total_submissions }}</div>
         <div class="stat-label">Total Submissions</div>
     </div>
     <div class="card stat-card">
-        <div class="stat-value">{{ event_stats.correct_submissions }}</div>
-        <div class="stat-label">Correct Submissions</div>
+        <div class="stat-value">{{ event_stats.event_duration_hours }}h</div>
+        <div class="stat-label">Event Duration</div>
     </div>
 </div>
 

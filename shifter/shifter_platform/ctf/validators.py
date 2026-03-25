@@ -151,6 +151,12 @@ def validate_http(
         logger.error("HTTP validator missing 'url' in config")
         return False
 
+    # Enforce HTTPS at runtime (not just at config validation time) to
+    # prevent requests to cloud metadata endpoints via DNS rebinding.
+    if not url.startswith("https://"):
+        logger.error("HTTP validator URL must use HTTPS for challenge %s", challenge_id)
+        return False
+
     if is_blocked_url(url):
         logger.error("HTTP validator URL blocked (private/reserved address) for challenge %s", challenge_id)
         return False
@@ -168,10 +174,11 @@ def validate_http(
     }
 
     try:
+        # Disable redirects to prevent SSRF via 302 to internal endpoints.
         if method == "GET":
-            resp = requests.get(url, params=payload, headers=headers, timeout=timeout)
+            resp = requests.get(url, params=payload, headers=headers, timeout=timeout, allow_redirects=False)
         else:
-            resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            resp = requests.post(url, json=payload, headers=headers, timeout=timeout, allow_redirects=False)
 
         if resp.status_code != 200:
             logger.warning(

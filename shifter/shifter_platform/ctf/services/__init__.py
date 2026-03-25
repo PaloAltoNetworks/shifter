@@ -43,7 +43,6 @@ from ctf.services.challenge import (
     verify_single_flag,
 )
 from ctf.services.event import (
-    EventNotModifiableError,
     activate_event,
     archive_event,
     cancel_event,
@@ -98,7 +97,6 @@ from ctf.services.submission import (
 )
 
 __all__ = [
-    "EventNotModifiableError",
     "activate_event",
     "add_challenge_file",
     "add_flag",

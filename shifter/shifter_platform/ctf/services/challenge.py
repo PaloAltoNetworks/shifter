@@ -25,6 +25,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Fields that organizers may set when creating or updating challenges.
+# All other fields (event, flag_hash, id, timestamps, etc.) are
+# controlled internally and must not be overwritten by user input.
+_CHALLENGE_MUTABLE_FIELDS = frozenset(
+    {
+        "name",
+        "description",
+        "category",
+        "points",
+        "difficulty",
+        "flag_format",
+        "hint",
+        "hint_penalty",
+        "max_attempts",
+        "release_time",
+        "order",
+    }
+)
+
 # Use bcrypt for flag hashing (secure and includes salt)
 try:
     import bcrypt
@@ -425,10 +444,16 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any]) -> CTFChall
         else:
             data["flag_hash"] = first_type if first_type in ("programmable", "http") else "multi-flag"
 
+    # Filter to allowed fields only — prevent mass assignment of event,
+    # flag_hash (set internally above), id, timestamps, etc.
+    safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
+    if "flag_hash" in data:
+        safe_data["flag_hash"] = data["flag_hash"]
+
     with transaction.atomic():
         challenge = CTFChallenge.objects.create(
             event=event,
-            **data,
+            **safe_data,
         )
 
         # Create CTFFlag records if flags list provided
@@ -489,8 +514,14 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any]) -> CTFC
         plaintext_flag = data.pop("flag")
         data["flag_hash"] = hash_flag(plaintext_flag)
 
+    # Filter to allowed fields only — prevent mass assignment of event,
+    # id, timestamps, etc.
+    safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
+    if "flag_hash" in data:
+        safe_data["flag_hash"] = data["flag_hash"]
+
     with transaction.atomic():
-        for key, value in data.items():
+        for key, value in safe_data.items():
             setattr(challenge, key, value)
         challenge.save()
 

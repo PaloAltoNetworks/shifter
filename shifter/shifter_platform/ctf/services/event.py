@@ -21,11 +21,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class EventNotModifiableError(Exception):
-    """Raised when attempting to modify an event that cannot be modified."""
-
-    pass
+# Fields that organizers may set when creating or updating events.
+# All other fields (status, created_by, id, timestamps, etc.) are
+# controlled internally and must not be overwritten by user input.
+_EVENT_MUTABLE_FIELDS = frozenset(
+    {
+        "name",
+        "description",
+        "event_start",
+        "event_end",
+        "registration_deadline",
+        "scenario_id",
+        "auto_cleanup",
+        "cleanup_delay_hours",
+        "max_participants",
+        "team_mode",
+        "team_size_limit",
+        "range_spinup_minutes",
+        "range_config",
+    }
+)
 
 
 def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
@@ -61,17 +76,18 @@ def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
             code="CTF_INVALID_DATES",
         )
 
+    # Filter to allowed fields only — prevent mass assignment of status,
+    # created_by, id, timestamps, etc.
+    safe_data = {k: v for k, v in event_data.items() if k in _EVENT_MUTABLE_FIELDS}
+
     with transaction.atomic():
         event = CTFEvent.objects.create(
             created_by=user,
-            **event_data,
+            status=EventStatus.DRAFT.value,
+            **safe_data,
         )
 
         logger.info("Created CTF event %s: %s", event.id, event.name)
-
-        # Schedule tasks if event is being opened for registration
-        if event.status == EventStatus.REGISTRATION.value:
-            _schedule_event_tasks(event)
 
     return event
 
@@ -117,14 +133,18 @@ def update_event(event_id: UUID, event_data: dict[str, Any]) -> CTFEvent:
             code="CTF_INVALID_DATES",
         )
 
+    # Filter to allowed fields only — prevent mass assignment of status,
+    # created_by, id, timestamps, etc.
+    safe_data = {k: v for k, v in event_data.items() if k in _EVENT_MUTABLE_FIELDS}
+
     with transaction.atomic():
         # Track if we need to reschedule tasks
-        schedule_changed = ("event_start" in event_data and event_data["event_start"] != event.event_start) or (
-            "event_end" in event_data and event_data["event_end"] != event.event_end
+        schedule_changed = ("event_start" in safe_data and safe_data["event_start"] != event.event_start) or (
+            "event_end" in safe_data and safe_data["event_end"] != event.event_end
         )
 
-        # Update fields
-        for key, value in event_data.items():
+        # Update only allowed fields
+        for key, value in safe_data.items():
             setattr(event, key, value)
         event.save()
 
@@ -313,9 +333,9 @@ open_registration = schedule_event
 
 
 def activate_event(event: CTFEvent) -> bool:
-    """Activate an event (transition to active).
+    """Activate a registration event (transition to active).
 
-    Valid from registration or paused states.
+    For resuming a paused event, use ``resume_event`` instead.
 
     Args:
         event: The CTFEvent to activate.
@@ -325,14 +345,17 @@ def activate_event(event: CTFEvent) -> bool:
     """
     logger.info("Activating CTF event %s", event.id)
 
-    try:
-        _transition_event(event, EventStatus.ACTIVE)
-    except CTFStateError:
+    if event.status != EventStatus.REGISTRATION.value:
         logger.warning(
-            "Cannot activate event %s: invalid state (current: %s)",
+            "Cannot activate event %s: not in registration state (current: %s)",
             event.id,
             event.status,
         )
+        return False
+
+    try:
+        _transition_event(event, EventStatus.ACTIVE)
+    except CTFStateError:
         return False
 
     logger.info("Activated CTF event %s", event.id)
@@ -418,7 +441,9 @@ def cancel_event(event: CTFEvent) -> bool:
     logger.info("Cancelling CTF event %s", event.id)
 
     try:
-        _transition_event(event, EventStatus.CANCELLED)
+        with transaction.atomic():
+            _transition_event(event, EventStatus.CANCELLED)
+            _cancel_event_tasks(event)
     except CTFStateError:
         logger.warning(
             "Cannot cancel event %s: in terminal state %s",
@@ -426,9 +451,6 @@ def cancel_event(event: CTFEvent) -> bool:
             event.status,
         )
         return False
-
-    # Cancel scheduled tasks
-    _cancel_event_tasks(event)
 
     logger.info("Cancelled CTF event %s", event.id)
     return True
@@ -552,9 +574,8 @@ def _transition_event(event: CTFEvent, target: EventStatus) -> None:
 def _schedule_event_tasks(event: CTFEvent) -> None:
     """Schedule automated tasks for an event.
 
-    Note: Tasks are recorded in the database only. There is no background
-    worker (e.g. Celery) that executes them automatically. A future
-    management command or cron job will be needed to poll and run due tasks.
+    Tasks are recorded in the database and executed by the
+    ``run_ctf_scheduler`` management command.
     """
     from datetime import timedelta
 

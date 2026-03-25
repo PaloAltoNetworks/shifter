@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.37.0] - 2026-03-25
+
+### Changed
+- Completed event statistics for CTF analytics dashboard (CTF-1304) — added active participants (submission-based), challenges with zero solves, average score, median score, incorrect submissions, and event duration metrics
+- Fixed `active_participants` in `get_event_statistics()` to count participants with at least one submission instead of filtering by status
+- Expanded analytics template from 4 to 8 stat cards
+
 ## [3.36.0] - 2026-03-24
 
 ### Changed

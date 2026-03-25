@@ -72,8 +72,8 @@ class TestCTFEventModel:
         [
             pytest.param(EventStatus.ACTIVE.value, True, id="active"),
             pytest.param(EventStatus.DRAFT.value, False, id="draft"),
-            pytest.param(EventStatus.SCHEDULED.value, False, id="scheduled"),
-            pytest.param(EventStatus.COMPLETED.value, False, id="completed"),
+            pytest.param(EventStatus.REGISTRATION.value, False, id="registration"),
+            pytest.param(EventStatus.ENDED.value, False, id="ended"),
         ],
     )
     def test_event_is_active_property(self, status, expected):
@@ -84,7 +84,7 @@ class TestCTFEventModel:
     def test_event_is_upcoming_property(self):
         """Test is_upcoming property for scheduled event with future start."""
         event = make_ctf_event(
-            status=EventStatus.SCHEDULED.value,
+            status=EventStatus.REGISTRATION.value,
             event_start=timezone.now() + timedelta(days=1),
         )
         assert event.is_upcoming is True
@@ -93,8 +93,8 @@ class TestCTFEventModel:
         "status,expected",
         [
             pytest.param(EventStatus.DRAFT.value, True, id="draft"),
-            pytest.param(EventStatus.SCHEDULED.value, True, id="scheduled"),
-            pytest.param(EventStatus.COMPLETED.value, False, id="completed"),
+            pytest.param(EventStatus.REGISTRATION.value, True, id="registration"),
+            pytest.param(EventStatus.ENDED.value, False, id="ended"),
         ],
     )
     def test_event_is_modifiable(self, status, expected):

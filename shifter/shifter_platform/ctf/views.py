@@ -128,6 +128,13 @@ def _get_client_ip(request):
     return request.META.get("REMOTE_ADDR")
 
 
+def _check_event_ownership(event, user) -> JsonResponse | None:
+    """Return a 403 JsonResponse if the user does not own the event, else None."""
+    if event.created_by_id != user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+    return None
+
+
 # -----------------------------------------------------------------------------
 # Participant Views (CTF Competitors)
 # -----------------------------------------------------------------------------
@@ -524,7 +531,7 @@ def admin_dashboard(request: HttpRequest) -> HttpResponse:
     from ctf.enums import EventStatus
 
     active_count = all_events.filter(status=EventStatus.ACTIVE.value).count()
-    upcoming_count = all_events.filter(status=EventStatus.SCHEDULED.value).count()
+    upcoming_count = all_events.filter(status=EventStatus.REGISTRATION.value).count()
     draft_count = all_events.filter(status=EventStatus.DRAFT.value).count()
 
     # Get recent 5 events for display
@@ -609,10 +616,13 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
     from ctf.forms import EventStatusForm
     from ctf.services import (
         activate_event,
+        archive_event,
         cancel_event,
         complete_event,
         get_event,
         get_event_stats,
+        pause_event,
+        resume_event,
         schedule_event,
     )
 
@@ -636,8 +646,14 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
                 success = schedule_event(event)
             elif action == "activate":
                 success = activate_event(event)
+            elif action == "pause":
+                success = pause_event(event)
+            elif action == "resume":
+                success = resume_event(event)
             elif action == "complete":
                 success = complete_event(event)
+            elif action == "archive":
+                success = archive_event(event)
             elif action == "cancel":
                 success = cancel_event(event)
 
@@ -1621,9 +1637,13 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
     from ctf.services import create_challenge, get_event, list_challenges_for_event
 
     try:
-        get_event(event_id)
+        event = get_event(event_id)
     except CTFNotFoundError:
         return JsonResponse({"error": "Event not found"}, status=404)
+
+    forbidden = _check_event_ownership(event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     if request.method == "GET":
         challenges = list_challenges_for_event(event_id)
@@ -1681,6 +1701,10 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
         challenge = get_challenge(challenge_id)
     except CTFNotFoundError:
         return JsonResponse({"error": "Challenge not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     if request.method == "GET":
         return JsonResponse(
@@ -2467,7 +2491,16 @@ def api_add_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
         challenge_id: UUID of the challenge.
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-    from ctf.services.challenge import add_flag
+    from ctf.services.challenge import add_flag, get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Challenge not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     try:
         body = json.loads(request.body)
@@ -2518,7 +2551,17 @@ def api_remove_flag(request: HttpRequest, flag_id: UUID) -> JsonResponse:
         flag_id: UUID of the flag.
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError
+    from ctf.models import CTFFlag
     from ctf.services.challenge import remove_flag
+
+    try:
+        flag_obj = CTFFlag.objects.select_related("challenge__event").get(pk=flag_id)
+    except CTFFlag.DoesNotExist:
+        return JsonResponse({"error": "Flag not found"}, status=404)
+
+    forbidden = _check_event_ownership(flag_obj.challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     try:
         remove_flag(flag_id)
@@ -2545,6 +2588,16 @@ def api_challenge_files(request: HttpRequest, challenge_id: UUID) -> JsonRespons
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
     from ctf.services.attachment import add_challenge_file, get_challenge_files
+    from ctf.services.challenge import get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Challenge not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     if request.method == "GET":
         files = get_challenge_files(challenge_id)
@@ -2612,7 +2665,17 @@ def api_challenge_file_delete(request: HttpRequest, file_id: UUID) -> JsonRespon
         file_id: UUID of the file to delete.
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError
+    from ctf.models import CTFChallengeFile
     from ctf.services.attachment import remove_challenge_file
+
+    try:
+        challenge_file = CTFChallengeFile.objects.select_related("challenge__event").get(pk=file_id)
+    except CTFChallengeFile.DoesNotExist:
+        return JsonResponse({"error": "File not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge_file.challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     try:
         remove_challenge_file(file_id)
@@ -2682,6 +2745,15 @@ def admin_challenge_file_upload(request: HttpRequest, challenge_id: UUID) -> Htt
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
     from ctf.services.attachment import add_challenge_file
+    from ctf.services.challenge import get_challenge
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
+
+    if challenge.event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden", status=403)
 
     if not request.FILES.get("file"):
         return redirect("ctf:admin_challenge_detail", challenge_id=challenge_id)
@@ -2720,7 +2792,16 @@ def api_challenge_prerequisites(request: HttpRequest, challenge_id: UUID) -> Jso
     POST: Add a prerequisite to a challenge.
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-    from ctf.services.challenge import add_prerequisite, get_prerequisites
+    from ctf.services.challenge import add_prerequisite, get_challenge, get_prerequisites
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Challenge not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     if request.method == "GET":
         prereqs = get_prerequisites(challenge_id)
@@ -2777,7 +2858,17 @@ def api_prerequisite_delete(request: HttpRequest, prerequisite_id: UUID) -> Json
         prerequisite_id: UUID of the prerequisite to remove.
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError
+    from ctf.models import CTFChallengePrerequisite
     from ctf.services.challenge import remove_prerequisite
+
+    try:
+        prereq = CTFChallengePrerequisite.objects.select_related("challenge__event").get(pk=prerequisite_id)
+    except CTFChallengePrerequisite.DoesNotExist:
+        return JsonResponse({"error": "Prerequisite not found"}, status=404)
+
+    forbidden = _check_event_ownership(prereq.challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
 
     try:
         remove_prerequisite(prerequisite_id)

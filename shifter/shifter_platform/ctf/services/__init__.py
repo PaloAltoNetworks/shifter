@@ -43,8 +43,8 @@ from ctf.services.challenge import (
     verify_single_flag,
 )
 from ctf.services.event import (
-    EventNotModifiableError,
     activate_event,
+    archive_event,
     cancel_event,
     complete_event,
     create_event,
@@ -54,6 +54,9 @@ from ctf.services.event import (
     get_event_stats,
     get_organizer_events,
     list_events_for_organizer,
+    open_registration,
+    pause_event,
+    resume_event,
     schedule_event,
     start_event,
     update_event,
@@ -94,11 +97,11 @@ from ctf.services.submission import (
 )
 
 __all__ = [
-    "EventNotModifiableError",
     "activate_event",
     "add_challenge_file",
     "add_flag",
     "add_prerequisite",
+    "archive_event",
     "bulk_import_participants",
     "calculate_score",
     "cancel_event",
@@ -142,12 +145,15 @@ __all__ = [
     "list_challenges_for_event",
     "list_events_for_organizer",
     "list_participants_for_event",
+    "open_registration",
+    "pause_event",
     "provision_event_ranges",
     "provision_participant_range",
     "remove_challenge_file",
     "remove_flag",
     "remove_prerequisite",
     "resend_invite",
+    "resume_event",
     "revoke_award",
     "schedule_event",
     "start_event",

@@ -12,7 +12,7 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import QuerySet
 
-from ctf.enums import EventStatus
+from ctf.enums import VALID_TRANSITIONS, EventStatus, validate_transition
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFEvent
 
@@ -21,11 +21,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class EventNotModifiableError(Exception):
-    """Raised when attempting to modify an event that cannot be modified."""
-
-    pass
+# Fields that organizers may set when creating or updating events.
+# All other fields (status, created_by, id, timestamps, etc.) are
+# controlled internally and must not be overwritten by user input.
+_EVENT_MUTABLE_FIELDS = frozenset(
+    {
+        "name",
+        "description",
+        "event_start",
+        "event_end",
+        "registration_deadline",
+        "scenario_id",
+        "auto_cleanup",
+        "cleanup_delay_hours",
+        "max_participants",
+        "team_mode",
+        "team_size_limit",
+        "range_spinup_minutes",
+        "range_config",
+    }
+)
 
 
 def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
@@ -61,17 +76,18 @@ def create_event(user: User, event_data: dict[str, Any]) -> CTFEvent:
             code="CTF_INVALID_DATES",
         )
 
+    # Filter to allowed fields only — prevent mass assignment of status,
+    # created_by, id, timestamps, etc.
+    safe_data = {k: v for k, v in event_data.items() if k in _EVENT_MUTABLE_FIELDS}
+
     with transaction.atomic():
         event = CTFEvent.objects.create(
             created_by=user,
-            **event_data,
+            status=EventStatus.DRAFT.value,
+            **safe_data,
         )
 
         logger.info("Created CTF event %s: %s", event.id, event.name)
-
-        # Schedule tasks if event is being scheduled
-        if event.status == EventStatus.SCHEDULED.value:
-            _schedule_event_tasks(event)
 
     return event
 
@@ -117,21 +133,25 @@ def update_event(event_id: UUID, event_data: dict[str, Any]) -> CTFEvent:
             code="CTF_INVALID_DATES",
         )
 
+    # Filter to allowed fields only — prevent mass assignment of status,
+    # created_by, id, timestamps, etc.
+    safe_data = {k: v for k, v in event_data.items() if k in _EVENT_MUTABLE_FIELDS}
+
     with transaction.atomic():
         # Track if we need to reschedule tasks
-        schedule_changed = ("event_start" in event_data and event_data["event_start"] != event.event_start) or (
-            "event_end" in event_data and event_data["event_end"] != event.event_end
+        schedule_changed = ("event_start" in safe_data and safe_data["event_start"] != event.event_start) or (
+            "event_end" in safe_data and safe_data["event_end"] != event.event_end
         )
 
-        # Update fields
-        for key, value in event_data.items():
+        # Update only allowed fields
+        for key, value in safe_data.items():
             setattr(event, key, value)
         event.save()
 
         logger.info("Updated CTF event %s", event.id)
 
         # Reschedule tasks if schedule changed
-        if schedule_changed and event.status == EventStatus.SCHEDULED.value:
+        if schedule_changed and event.status == EventStatus.REGISTRATION.value:
             _reschedule_event_tasks(event)
 
     return event
@@ -216,7 +236,7 @@ def start_event(event_id: UUID) -> CTFEvent:
 
     event = get_event(event_id)
 
-    if event.status != EventStatus.SCHEDULED.value:
+    if event.status != EventStatus.REGISTRATION.value:
         raise CTFStateError(
             f"Cannot start event in {event.status} state",
             details={"event_id": str(event_id), "status": event.status},
@@ -252,7 +272,7 @@ def end_event(event_id: UUID) -> CTFEvent:
             details={"event_id": str(event_id), "status": event.status},
         )
 
-    event.status = EventStatus.COMPLETED.value
+    event.status = EventStatus.ENDED.value
     event.save(update_fields=["status", "updated_at"])
 
     logger.info("Ended CTF event %s", event_id)
@@ -282,35 +302,40 @@ def get_organizer_events(
 
 
 def schedule_event(event: CTFEvent) -> bool:
-    """Schedule a draft event (transition to scheduled).
+    """Open registration for a draft event (transition to registration).
 
     Args:
-        event: The CTFEvent to schedule.
+        event: The CTFEvent to open registration for.
 
     Returns:
         True if transition succeeded, False otherwise.
     """
-    logger.info("Scheduling CTF event %s", event.id)
+    logger.info("Opening registration for CTF event %s", event.id)
 
-    if event.status != EventStatus.DRAFT.value:
+    try:
+        _transition_event(event, EventStatus.REGISTRATION)
+    except CTFStateError:
         logger.warning(
-            "Cannot schedule event %s: not in draft state (current: %s)",
+            "Cannot open registration for event %s: not in draft state (current: %s)",
             event.id,
             event.status,
         )
         return False
 
-    event.status = EventStatus.SCHEDULED.value
-    event.save(update_fields=["status", "updated_at"])
-
     _schedule_event_tasks(event)
 
-    logger.info("Scheduled CTF event %s", event.id)
+    logger.info("Opened registration for CTF event %s", event.id)
     return True
 
 
+# Alias with clearer name
+open_registration = schedule_event
+
+
 def activate_event(event: CTFEvent) -> bool:
-    """Activate a scheduled event (transition to active).
+    """Activate a registration event (transition to active).
+
+    For resuming a paused event, use ``resume_event`` instead.
 
     Args:
         event: The CTFEvent to activate.
@@ -320,44 +345,45 @@ def activate_event(event: CTFEvent) -> bool:
     """
     logger.info("Activating CTF event %s", event.id)
 
-    if event.status != EventStatus.SCHEDULED.value:
+    if event.status != EventStatus.REGISTRATION.value:
         logger.warning(
-            "Cannot activate event %s: not in scheduled state (current: %s)",
+            "Cannot activate event %s: not in registration state (current: %s)",
             event.id,
             event.status,
         )
         return False
 
-    event.status = EventStatus.ACTIVE.value
-    event.save(update_fields=["status", "updated_at"])
+    try:
+        _transition_event(event, EventStatus.ACTIVE)
+    except CTFStateError:
+        return False
 
     logger.info("Activated CTF event %s", event.id)
     return True
 
 
 def complete_event(event: CTFEvent) -> bool:
-    """Complete an active event (transition to completed).
+    """End an active event (transition to ended).
 
     Args:
-        event: The CTFEvent to complete.
+        event: The CTFEvent to end.
 
     Returns:
         True if transition succeeded, False otherwise.
     """
-    logger.info("Completing CTF event %s", event.id)
+    logger.info("Ending CTF event %s", event.id)
 
-    if event.status != EventStatus.ACTIVE.value:
+    try:
+        _transition_event(event, EventStatus.ENDED)
+    except CTFStateError:
         logger.warning(
-            "Cannot complete event %s: not in active state (current: %s)",
+            "Cannot end event %s: not in active state (current: %s)",
             event.id,
             event.status,
         )
         return False
 
-    event.status = EventStatus.COMPLETED.value
-    event.save(update_fields=["status", "updated_at"])
-
-    logger.info("Completed CTF event %s", event.id)
+    logger.info("Ended CTF event %s", event.id)
     return True
 
 
@@ -404,8 +430,7 @@ def get_event_stats(event: CTFEvent) -> dict:
 def cancel_event(event: CTFEvent) -> bool:
     """Cancel a CTF event.
 
-    Accepts an event instance and returns bool for consistency with
-    other transition functions.
+    Cancellation is valid from draft, registration, active, or paused states.
 
     Args:
         event: The CTFEvent to cancel.
@@ -416,11 +441,10 @@ def cancel_event(event: CTFEvent) -> bool:
     logger.info("Cancelling CTF event %s", event.id)
 
     try:
-        status = EventStatus(event.status)
-    except ValueError:
-        status = None
-
-    if status in {EventStatus.COMPLETED, EventStatus.CANCELLED}:
+        with transaction.atomic():
+            _transition_event(event, EventStatus.CANCELLED)
+            _cancel_event_tasks(event)
+    except CTFStateError:
         logger.warning(
             "Cannot cancel event %s: in terminal state %s",
             event.id,
@@ -428,15 +452,84 @@ def cancel_event(event: CTFEvent) -> bool:
         )
         return False
 
-    with transaction.atomic():
-        event.status = EventStatus.CANCELLED.value
-        event.save(update_fields=["status", "updated_at"])
+    logger.info("Cancelled CTF event %s", event.id)
+    return True
 
-        # Cancel scheduled tasks
-        _cancel_event_tasks(event)
 
-        logger.info("Cancelled CTF event %s", event.id)
+def pause_event(event: CTFEvent) -> bool:
+    """Pause an active event (transition to paused).
 
+    Submissions are not accepted while paused.
+
+    Args:
+        event: The CTFEvent to pause.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Pausing CTF event %s", event.id)
+
+    try:
+        _transition_event(event, EventStatus.PAUSED)
+    except CTFStateError:
+        logger.warning(
+            "Cannot pause event %s: not in active state (current: %s)",
+            event.id,
+            event.status,
+        )
+        return False
+
+    logger.info("Paused CTF event %s", event.id)
+    return True
+
+
+def resume_event(event: CTFEvent) -> bool:
+    """Resume a paused event (transition back to active).
+
+    Args:
+        event: The CTFEvent to resume.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Resuming CTF event %s", event.id)
+
+    try:
+        _transition_event(event, EventStatus.ACTIVE)
+    except CTFStateError:
+        logger.warning(
+            "Cannot resume event %s: not in paused state (current: %s)",
+            event.id,
+            event.status,
+        )
+        return False
+
+    logger.info("Resumed CTF event %s", event.id)
+    return True
+
+
+def archive_event(event: CTFEvent) -> bool:
+    """Archive an ended event (transition to archived).
+
+    Args:
+        event: The CTFEvent to archive.
+
+    Returns:
+        True if transition succeeded, False otherwise.
+    """
+    logger.info("Archiving CTF event %s", event.id)
+
+    try:
+        _transition_event(event, EventStatus.ARCHIVED)
+    except CTFStateError:
+        logger.warning(
+            "Cannot archive event %s: not in ended state (current: %s)",
+            event.id,
+            event.status,
+        )
+        return False
+
+    logger.info("Archived CTF event %s", event.id)
     return True
 
 
@@ -445,12 +538,44 @@ def cancel_event(event: CTFEvent) -> bool:
 # -----------------------------------------------------------------------------
 
 
+def _transition_event(event: CTFEvent, target: EventStatus) -> None:
+    """Perform a validated state transition.
+
+    Args:
+        event: The event to transition.
+        target: The target status.
+
+    Raises:
+        CTFStateError: If the transition is invalid.
+    """
+    try:
+        current = EventStatus(event.status)
+    except ValueError:
+        raise CTFStateError(
+            f"Unknown event status: {event.status}",
+            details={"event_id": str(event.id), "status": event.status},
+        ) from None
+
+    if not validate_transition(current, target):
+        raise CTFStateError(
+            f"Cannot transition from {current.value} to {target.value}",
+            details={
+                "event_id": str(event.id),
+                "current_status": current.value,
+                "target_status": target.value,
+                "valid_targets": [s.value for s in VALID_TRANSITIONS.get(current, frozenset())],
+            },
+        )
+
+    event.status = target.value
+    event.save(update_fields=["status", "updated_at"])
+
+
 def _schedule_event_tasks(event: CTFEvent) -> None:
     """Schedule automated tasks for an event.
 
-    Note: Tasks are recorded in the database only. There is no background
-    worker (e.g. Celery) that executes them automatically. A future
-    management command or cron job will be needed to poll and run due tasks.
+    Tasks are recorded in the database and executed by the
+    ``run_ctf_scheduler`` management command.
     """
     from datetime import timedelta
 

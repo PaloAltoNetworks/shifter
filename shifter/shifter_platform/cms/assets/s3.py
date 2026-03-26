@@ -7,14 +7,13 @@ import paths are preserved for backward compatibility.
 
 import hashlib
 import logging
-import os
-import re
 import uuid
 
 from django.conf import settings
 
 from shared.cloud import get_object_storage
 from shared.cloud.exceptions import CloudStorageError
+from shared.s3 import get_s3_client, sanitize_s3_filename  # noqa: F401 — re-exported for backward compat
 
 logger = logging.getLogger(__name__)
 
@@ -23,59 +22,6 @@ class S3Error(Exception):
     """Raised when S3 operations fail."""
 
     pass
-
-
-def get_s3_client():
-    """Get boto3 S3 client configured for the region.
-
-    .. deprecated::
-        Kept for backward compatibility. New code should use
-        ``get_object_storage()`` from ``shared.cloud`` instead.
-    """
-    import boto3
-    from botocore.config import Config
-
-    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
-    if not endpoint_url:
-        endpoint_url = f"https://s3.{settings.AWS_S3_REGION}.amazonaws.com"
-
-    config = Config(
-        s3={"addressing_style": "virtual"},
-        signature_version="s3v4",
-    )
-    return boto3.client(
-        "s3",
-        region_name=settings.AWS_S3_REGION,
-        endpoint_url=endpoint_url,
-        config=config,
-    )
-
-
-def sanitize_s3_filename(filename: str) -> str:
-    """
-    Sanitize filename for S3 key generation (defense in depth).
-
-    Removes path components, control characters, and limits length.
-    Caller should have already used os.path.basename(), this is extra protection.
-    """
-    # Strip path components
-    filename = os.path.basename(filename)
-
-    # Remove null bytes and control characters
-    filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
-
-    # Replace remaining path separators
-    filename = filename.replace("/", "_").replace("\\", "_")
-
-    # Remove leading dots (hidden files / traversal)
-    filename = filename.lstrip(".")
-
-    # Limit length (preserve extension)
-    if len(filename) > 200:
-        name, ext = os.path.splitext(filename)
-        filename = name[: 200 - len(ext)] + ext
-
-    return filename or "unnamed"
 
 
 def upload_agent(file_obj, user_id: int, filename: str) -> tuple[str, str, int]:

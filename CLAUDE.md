@@ -76,3 +76,7 @@ Write for technical audience (no marketing language).
 3. NEVER merge branches - the user controls all merges
 
 Understand your tasks in the overall context of the project and sound architecture. If something seems wrong or odd, bring it to the user's attention.
+
+Do not guess URLs. Search.
+
+Always prefer official documentation over other sources. Do not trust unverified sources.

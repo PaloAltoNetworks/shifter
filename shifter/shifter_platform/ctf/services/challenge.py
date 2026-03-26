@@ -41,6 +41,7 @@ _CHALLENGE_MUTABLE_FIELDS = frozenset(
         "max_attempts",
         "release_time",
         "order",
+        "visibility",
     }
 )
 
@@ -614,6 +615,8 @@ def get_available_challenges(
 
     if not include_unreleased:
         now = timezone.now()
+        # Exclude hidden challenges and those not yet released
+        qs = qs.exclude(visibility="hidden")
         qs = qs.filter(Q(release_time__isnull=True) | Q(release_time__lte=now))
 
     if participant_id is not None:

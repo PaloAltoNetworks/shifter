@@ -5,6 +5,7 @@
  * - Bulk provisioning all participant ranges
  * - Individual participant range provisioning
  * - Individual participant range destruction
+ * - Individual participant range stop/start/restart
  * - Status polling after provisioning
  */
 
@@ -42,6 +43,27 @@ class CTFRangeManager {
             btn.addEventListener('click', function() {
                 var participantId = this.getAttribute('data-participant-id');
                 self.destroyOne(participantId, this);
+            });
+        });
+
+        document.querySelectorAll('.btn-stop').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var participantId = this.getAttribute('data-participant-id');
+                self.stopOne(participantId, this);
+            });
+        });
+
+        document.querySelectorAll('.btn-start').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var participantId = this.getAttribute('data-participant-id');
+                self.startOne(participantId, this);
+            });
+        });
+
+        document.querySelectorAll('.btn-restart').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var participantId = this.getAttribute('data-participant-id');
+                self.restartOne(participantId, this);
             });
         });
     }
@@ -141,6 +163,49 @@ class CTFRangeManager {
         } catch (err) {
             alert('Error destroying range: ' + err.message);
             this._clearButtonLoading(btn, 'Destroy');
+        }
+    }
+
+    async stopOne(participantId, btn) {
+        if (!confirm('Stop this participant\'s range?')) return;
+        await this._rangeAction(participantId, btn, 'stop', 'Stopping...', 'Stop');
+    }
+
+    async startOne(participantId, btn) {
+        if (!confirm('Start this participant\'s range?')) return;
+        await this._rangeAction(participantId, btn, 'start', 'Starting...', 'Start');
+    }
+
+    async restartOne(participantId, btn) {
+        if (!confirm('Restart this participant\'s range?')) return;
+        await this._rangeAction(participantId, btn, 'restart', 'Restarting...', 'Restart');
+    }
+
+    async _rangeAction(participantId, btn, action, loadingText, fallbackText) {
+        this._setButtonLoading(btn, loadingText);
+
+        try {
+            var url = '/ctf/api/participants/' + participantId + '/range/' + action + '/';
+            var response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': this.csrfToken,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            var data = await response.json();
+
+            if (!response.ok) {
+                alert('Error: ' + (data.error || action + ' failed'));
+                this._clearButtonLoading(btn, fallbackText);
+                return;
+            }
+
+            this._reload();
+        } catch (err) {
+            alert('Error: ' + err.message);
+            this._clearButtonLoading(btn, fallbackText);
         }
     }
 

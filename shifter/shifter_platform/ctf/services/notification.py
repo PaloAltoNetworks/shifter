@@ -374,6 +374,61 @@ def schedule_notification(
     return notification
 
 
+def notify_organizer_provision_failure(
+    event_id: UUID,
+    failures: list[dict[str, str]],
+) -> None:
+    """Notify the event organizer of provisioning failures.
+
+    Args:
+        event_id: UUID of the event.
+        failures: List of dicts with participant_id and error.
+    """
+    if not failures:
+        return
+
+    logger.info("Notifying organizer of %d provisioning failures for event %s", len(failures), event_id)
+
+    try:
+        event = CTFEvent.objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        logger.error("Cannot notify: event %s not found", event_id)
+        return
+
+    organizer = event.created_by
+    if not organizer or not organizer.email:
+        logger.warning("Cannot notify: event %s has no organizer email", event_id)
+        return
+
+    html_content, text_content = _render_email(
+        "provision_failure",
+        {
+            "event": event,
+            "failures": failures,
+            "failure_count": len(failures),
+        },
+    )
+
+    success = _send_email(
+        recipient=organizer.email,
+        subject=f"Range provisioning failures: {event.name}",
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+    if success:
+        CTFNotification.objects.create(
+            event=event,
+            notification_type=NotificationType.PROVISION_FAILURE.value,
+            subject=f"Provisioning failures for {event.name}",
+            body=f"{len(failures)} participant(s) failed provisioning",
+            status=NotificationStatus.SENT.value,
+            recipient_filter="organizer",
+            sent_count=1,
+            created_by=organizer,
+        )
+
+
 # -----------------------------------------------------------------------------
 # Private helpers
 # -----------------------------------------------------------------------------

@@ -213,10 +213,27 @@ def _handle_send_reminder(task: CTFScheduledTask, shutdown_check=None) -> None:
     )
 
 
+def _handle_release_challenge(task: CTFScheduledTask, shutdown_check=None) -> None:
+    from ctf.services.challenge import release_challenge
+
+    challenge_id = task.metadata.get("challenge_id")
+    if not challenge_id:
+        raise ValueError("RELEASE_CHALLENGE task missing challenge_id in metadata")
+
+    result = release_challenge(challenge_id)
+    logger.info(
+        "RELEASE_CHALLENGE for event %s: challenge %s (%s)",
+        task.event_id,
+        challenge_id,
+        result.name,
+    )
+
+
 TASK_HANDLERS: dict[str, Any] = {
     ScheduledTaskType.SPIN_UP_RANGES.value: _handle_spin_up_ranges,
     ScheduledTaskType.CLEANUP_RANGES.value: _handle_cleanup_ranges,
     ScheduledTaskType.EVENT_START.value: _handle_event_start,
     ScheduledTaskType.EVENT_END.value: _handle_event_end,
     ScheduledTaskType.SEND_REMINDER.value: _handle_send_reminder,
+    ScheduledTaskType.RELEASE_CHALLENGE.value: _handle_release_challenge,
 }

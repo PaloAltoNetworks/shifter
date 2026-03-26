@@ -33,7 +33,7 @@ from django.apps import apps
 from django.core.management.base import BaseCommand
 
 # All service layers
-ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control"]
+ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf"]
 
 # Apps that are allowed to be referenced from any layer
 ALLOWED_EXTERNAL_APPS = {"auth", "contenttypes", "sessions", "admin"}

@@ -85,7 +85,7 @@ class TestSSHConsumerConnect:
         """
         consumer.scope = authenticated_scope
 
-        with patch("engine.connect_terminal", side_effect=ValueError("Instance not found")):
+        with patch("engine.services.connect_terminal", side_effect=ValueError("Instance not found")):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
@@ -95,7 +95,7 @@ class TestSSHConsumerConnect:
         """PermissionError from connect_terminal returns PERMISSION_DENIED."""
         consumer.scope = authenticated_scope
 
-        with patch("engine.connect_terminal", side_effect=PermissionError("Not authorized")):
+        with patch("engine.services.connect_terminal", side_effect=PermissionError("Not authorized")):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.PERMISSION_DENIED)
@@ -107,7 +107,7 @@ class TestSSHConsumerConnect:
         mock_ssh = AsyncMock()
         mock_ssh.connect.side_effect = ConnectionError("SSH failed")
 
-        with patch("engine.connect_terminal", return_value=mock_ssh):
+        with patch("engine.services.connect_terminal", return_value=mock_ssh):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.SSH_CONNECTION_FAILED)
@@ -119,7 +119,7 @@ class TestSSHConsumerConnect:
         mock_ssh = AsyncMock()
 
         with (
-            patch("engine.connect_terminal", return_value=mock_ssh),
+            patch("engine.services.connect_terminal", return_value=mock_ssh),
             patch("asyncio.create_task") as mock_create_task,
         ):
             mock_create_task.return_value = MagicMock()

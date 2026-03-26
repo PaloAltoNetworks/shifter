@@ -31,7 +31,7 @@ from cms.experiments.schemas import (
     RunStatus,
     ScriptType,
 )
-from engine import create_range as engine_create_range
+from engine.services import create_range as engine_create_range
 from risk_register.models import AuditLog
 from risk_register.services import audit_log_system_event
 

@@ -16,11 +16,11 @@ from cms.assets.services import delete_agent as assets_delete_agent
 from cms.assets.validation import get_allowed_extensions as _get_allowed_extensions
 from cms.exceptions import CMSError
 from cms.models import AgentConfig, RangeInstance
-from engine import cancel_range_by_request as engine_cancel_range_by_request
-from engine import create_range as engine_create_range
-from engine import destroy_range_by_request as engine_destroy_range_by_request
-from engine import pause_range as engine_pause_range
-from engine import resume_range as engine_resume_range
+from engine.services import cancel_range_by_request as engine_cancel_range_by_request
+from engine.services import create_range as engine_create_range
+from engine.services import destroy_range_by_request as engine_destroy_range_by_request
+from engine.services import pause_range as engine_pause_range
+from engine.services import resume_range as engine_resume_range
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
@@ -3422,7 +3422,7 @@ def create_ngfw(
 
     from cms.models import AppType, Instance, InstanceType, Request
     from cms.scenarios.hydrator import hydrate_ngfw
-    from engine import create_ngfw as engine_create_ngfw
+    from engine.services import create_ngfw as engine_create_ngfw
     from shared.enums import RequestType
     from shared.schemas import RequestSpec
 
@@ -3536,8 +3536,8 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
     """
     from django.utils import timezone
 
+    import engine.services as engine_services
     from cms.models import App
-    from engine import services as engine_services
     from shared.schemas.app import NGFWAppRef
 
     _validate_ngfw_user(user)
@@ -3612,3 +3612,73 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
         instance_id=instance.id,
         is_deleted=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Range lookup functions (system-level, no user-ownership enforcement)
+# Used by CTF to query range state without requiring the range owner's User.
+# ---------------------------------------------------------------------------
+
+
+def get_range_status_by_id(range_instance_id: int) -> str:
+    """Get the current status of a RangeInstance by its PK.
+
+    Returns:
+        Status string, or ``"unknown"`` if not found.
+    """
+    try:
+        return RangeInstance.objects.values_list("status", flat=True).get(pk=range_instance_id)
+    except RangeInstance.DoesNotExist:
+        return "unknown"
+
+
+def get_range_spec_by_id(range_instance_id: int) -> dict | None:
+    """Get the range_spec dict from a RangeInstance by its PK.
+
+    Returns:
+        The range_spec dict, or ``None`` if not found.
+    """
+    try:
+        return RangeInstance.objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
+    except RangeInstance.DoesNotExist:
+        return None
+
+
+def find_range_instance_id_by_request(request_id: Any) -> int | None:
+    """Find a RangeInstance PK by its provisioning request ID.
+
+    Returns:
+        The RangeInstance PK, or ``None`` if not found.
+    """
+    return (
+        RangeInstance.objects.filter(
+            request__request_id=request_id,
+        )
+        .values_list("pk", flat=True)
+        .first()
+    )
+
+
+def get_range_target_instances(user_id: int) -> list[dict[str, str]]:
+    """Get non-attacker provisioned instances for a user's ready range.
+
+    Args:
+        user_id: PK of the user.
+
+    Returns:
+        List of dicts with name, private_ip, os_type for each target instance.
+    """
+    from engine.services import get_user_ready_range_instances
+
+    return [inst for inst in get_user_ready_range_instances(user_id) if inst.get("role") != "attacker"]
+
+
+# ---------------------------------------------------------------------------
+# Re-exports: public API for external layers
+# ---------------------------------------------------------------------------
+from cms.experiments.exceptions import ScriptUploadError as ScriptUploadError  # noqa: E402
+from cms.experiments.services import complete_script_upload as complete_script_upload  # noqa: E402
+from cms.experiments.services import delete_script as delete_script  # noqa: E402
+from cms.experiments.services import initiate_script_upload as initiate_script_upload  # noqa: E402
+from cms.experiments.services import list_scripts as list_scripts  # noqa: E402
+from cms.signals import range_status_changed as range_status_changed  # noqa: E402

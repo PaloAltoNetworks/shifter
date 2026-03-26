@@ -184,7 +184,7 @@ class TestSendCredentials:
         with (
             patch.object(notification, "_send_email", return_value=True),
             patch.object(notification, "_render_email", return_value=("<html>", "text")),
-            patch("ctf.services.range.get_range_access_url", return_value="https://example.com"),
+            patch("django.urls.reverse", return_value="/ctf/range/"),
         ):
             result = notification.send_credentials(ctf_event.pk)
 

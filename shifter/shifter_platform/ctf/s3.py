@@ -11,7 +11,7 @@ from uuid import uuid4
 from botocore.exceptions import ClientError
 from django.conf import settings
 
-from cms.assets.s3 import get_s3_client, sanitize_s3_filename
+from shared.s3 import get_s3_client, sanitize_s3_filename
 
 logger = logging.getLogger(__name__)
 

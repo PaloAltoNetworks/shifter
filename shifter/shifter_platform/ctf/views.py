@@ -1790,7 +1790,10 @@ def api_submit_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     except CTFValidationError as e:
         return JsonResponse({"error": str(e)}, status=400)
     except CTFRateLimitError as e:
-        return JsonResponse({"error": str(e)}, status=429)
+        response = JsonResponse({"error": str(e), "details": e.details}, status=429)
+        if e.details.get("retry_after_seconds"):
+            response["Retry-After"] = str(e.details["retry_after_seconds"])
+        return response
     except CTFStateError as e:
         return JsonResponse({"error": str(e)}, status=400)
 

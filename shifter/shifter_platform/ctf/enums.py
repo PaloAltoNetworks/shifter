@@ -131,6 +131,7 @@ class NotificationType(str, Enum):
     ANNOUNCEMENT = "announcement"
     EVENT_START = "event_start"
     EVENT_END = "event_end"
+    PROVISION_FAILURE = "provision_failure"
 
     def __str__(self) -> str:
         """Return the string value for database storage."""

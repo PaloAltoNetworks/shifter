@@ -1,0 +1,9 @@
+Range Provisioning Failures
+
+{{ failure_count }} participant range(s) failed to provision for {{ event.name }}.
+
+{% for f in failures %}
+- Participant {{ f.participant_id }}: {{ f.error }}
+{% endfor %}
+
+You can retry provisioning from the Range Management page.

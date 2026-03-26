@@ -198,6 +198,13 @@ def _handle_event_end(task: CTFScheduledTask, shutdown_check=None) -> None:
 
     complete_event(task.event)
 
+    # Also trigger cleanup if auto_cleanup is enabled
+    if task.event.auto_cleanup:
+        from ctf.services.range import cleanup_event_ranges
+
+        result = cleanup_event_ranges(task.event_id)
+        logger.info("EVENT_END cleanup for event %s: %s", task.event_id, result)
+
 
 def _handle_send_reminder(task: CTFScheduledTask, shutdown_check=None) -> None:
     logger.warning(

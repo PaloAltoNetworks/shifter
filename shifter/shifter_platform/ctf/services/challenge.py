@@ -469,6 +469,8 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any]) -> CTFChall
             challenge.name,
         )
 
+    _sync_release_task(challenge)
+
     return challenge
 
 
@@ -534,7 +536,85 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any]) -> CTFC
 
         logger.info("Updated challenge %s", challenge_id)
 
+    _sync_release_task(challenge)
+
     return challenge
+
+
+def release_challenge(challenge_id: UUID) -> CTFChallenge:
+    """Transition a challenge from HIDDEN to VISIBLE at its scheduled release time.
+
+    Called by the scheduler when a RELEASE_CHALLENGE task fires.
+
+    Args:
+        challenge_id: UUID of the challenge to release.
+
+    Returns:
+        The updated CTFChallenge instance.
+
+    Raises:
+        CTFNotFoundError: If challenge doesn't exist.
+    """
+    from ctf.enums import ChallengeVisibility
+
+    try:
+        challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
+    except CTFChallenge.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Challenge {challenge_id} not found",
+            details={"challenge_id": str(challenge_id)},
+        ) from None
+
+    if challenge.visibility != ChallengeVisibility.HIDDEN.value:
+        logger.info(
+            "Challenge %s is already %s, skipping release",
+            challenge_id,
+            challenge.visibility,
+        )
+        return challenge
+
+    challenge.visibility = ChallengeVisibility.VISIBLE.value
+    challenge.save(update_fields=["visibility", "updated_at"])
+    logger.info("Released challenge %s: HIDDEN -> VISIBLE", challenge_id)
+    return challenge
+
+
+def _sync_release_task(challenge: CTFChallenge) -> None:
+    """Create or cancel the RELEASE_CHALLENGE scheduled task for a challenge.
+
+    Cancels any existing pending release task for the challenge, then creates
+    a new one if the challenge is HIDDEN with a future release_time.
+    """
+    from ctf.enums import ChallengeVisibility, ScheduledTaskStatus, ScheduledTaskType
+    from ctf.models import CTFScheduledTask
+
+    # Cancel any existing pending release task for this challenge
+    pending = CTFScheduledTask.objects.filter(
+        event=challenge.event,
+        task_type=ScheduledTaskType.RELEASE_CHALLENGE.value,
+        status=ScheduledTaskStatus.PENDING.value,
+        metadata__challenge_id=str(challenge.pk),
+    )
+    for task in pending:
+        task.mark_cancelled()
+
+    # Schedule a new release task if challenge is HIDDEN with a future release_time
+    if (
+        challenge.release_time is not None
+        and challenge.visibility == ChallengeVisibility.HIDDEN.value
+        and challenge.release_time > timezone.now()
+    ):
+        CTFScheduledTask.objects.create(
+            event=challenge.event,
+            task_type=ScheduledTaskType.RELEASE_CHALLENGE.value,
+            scheduled_for=challenge.release_time,
+            metadata={"challenge_id": str(challenge.pk)},
+        )
+        logger.info(
+            "Scheduled release for challenge %s at %s",
+            challenge.pk,
+            challenge.release_time,
+        )
 
 
 def delete_challenge(challenge_id: UUID) -> None:

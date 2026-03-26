@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.38.0] - 2026-03-26
+
+### Added
+- Range lifecycle management tied to event state (CTF-902) — ranges are destroyed when events end (if auto_cleanup) or are cancelled
+- Manual stop, start, and restart APIs for organizer range management
+- Provisioning retry with exponential backoff (3 retries, 30s base delay)
+- Organizer email notification on provisioning failures
+- Context-appropriate range action buttons in organizer UI (stop/start/restart/destroy per status)
+
+### Changed
+- Enforced strict service layer boundaries — all cross-layer imports must go through `layer.services` only
+- Added `ctf` to architecture-as-code checkers (`check_layer_imports`, `check_model_fks`)
+- Replaced `management.UserProfile.active_ctf_event` ForeignKey with soft-reference UUIDField (zero cross-layer FKs)
+- Moved `get_s3_client` and `sanitize_s3_filename` from `cms.assets.s3` to `shared.s3`
+- Moved `range_status_changed` signal from `ctf.signals` to `cms.signals` (CMS emits, CTF receives)
+- Removed duplicated Guacamole URL generation from CTF — participants use the platform's existing RDP access flow
+- Fixed 13 cross-layer import violations across cms, mission_control, and ctf
+
 ## [3.37.0] - 2026-03-25
 
 ### Changed

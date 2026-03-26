@@ -86,7 +86,19 @@ def submit_flag(
             details={"event_id": str(event.id), "status": event.status},
         )
 
-    # Check if challenge is released
+    # Check visibility state
+    if challenge.visibility == "hidden":
+        raise CTFStateError(
+            "Challenge is not available",
+            details={"challenge_id": str(challenge_id)},
+        )
+    if challenge.visibility == "locked":
+        raise CTFStateError(
+            "Challenge is locked",
+            details={"challenge_id": str(challenge_id)},
+        )
+
+    # Check if challenge is released (time-based)
     if not challenge.is_released:
         raise CTFStateError(
             "Challenge has not been released yet",

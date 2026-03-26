@@ -28,6 +28,7 @@ from ctf.enums import (
     EVENT_TERMINAL_STATUSES,
     ChallengeCategory,
     ChallengeDifficulty,
+    ChallengeVisibility,
     EventStatus,
     NotificationStatus,
     NotificationType,
@@ -479,6 +480,13 @@ class CTFChallenge(CTFBaseModel):
         default=0,
         help_text="Display order within category",
     )
+    visibility = models.CharField(
+        max_length=20,
+        choices=ChallengeVisibility.choices(),
+        default=ChallengeVisibility.VISIBLE.value,
+        db_index=True,
+        help_text="Challenge visibility state (visible, hidden, locked)",
+    )
 
     class Meta:
         db_table = "ctf_challenge"
@@ -521,10 +529,21 @@ class CTFChallenge(CTFBaseModel):
 
     @property
     def is_released(self) -> bool:
-        """Return True if challenge is visible to participants."""
+        """Return True if challenge is visible to participants.
+
+        A challenge is released if it is not hidden and its release time
+        (if set) has passed.
+        """
+        if self.visibility == ChallengeVisibility.HIDDEN.value:
+            return False
         if self.release_time is None:
             return True
         return timezone.now() >= self.release_time
+
+    @property
+    def is_visibility_locked(self) -> bool:
+        """Return True if challenge is explicitly locked by organizer."""
+        return self.visibility == ChallengeVisibility.LOCKED.value
 
     @property
     def solve_count(self) -> int:

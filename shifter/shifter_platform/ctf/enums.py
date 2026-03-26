@@ -189,6 +189,7 @@ class ScheduledTaskType(str, Enum):
     SEND_REMINDER = "send_reminder"
     EVENT_START = "event_start"
     EVENT_END = "event_end"
+    RELEASE_CHALLENGE = "release_challenge"
 
     def __str__(self) -> str:
         """Return the string value for database storage."""

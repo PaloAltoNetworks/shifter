@@ -647,7 +647,24 @@ def _reschedule_event_tasks(event: CTFEvent) -> None:
     """Reschedule tasks after event times change."""
     _cancel_event_tasks(event)
     _schedule_event_tasks(event)
+    _reschedule_challenge_release_tasks(event)
     logger.info("Rescheduled tasks for event %s", event.id)
+
+
+def _reschedule_challenge_release_tasks(event: CTFEvent) -> None:
+    """Recreate RELEASE_CHALLENGE tasks for all eligible challenges in the event."""
+    from ctf.enums import ChallengeVisibility
+    from ctf.models import CTFChallenge
+    from ctf.services.challenge import _sync_release_task
+
+    challenges = CTFChallenge.objects.filter(
+        event=event,
+        visibility=ChallengeVisibility.HIDDEN.value,
+        release_time__isnull=False,
+        deleted_at__isnull=True,
+    )
+    for challenge in challenges:
+        _sync_release_task(challenge)
 
 
 def _cancel_event_tasks(event: CTFEvent) -> None:

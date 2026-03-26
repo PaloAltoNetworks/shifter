@@ -77,6 +77,20 @@ def cms_destroy_range(user, range_instance_id: int) -> None:
     cms_services.destroy_range(user, range_instance_id)
 
 
+def cms_stop_range(user, range_instance_id: int) -> None:
+    """Stop (pause) a range via CMS."""
+    import cms.services as cms_services
+
+    cms_services.pause_range(user, range_instance_id)
+
+
+def cms_start_range(user, range_instance_id: int) -> None:
+    """Start (resume) a range via CMS."""
+    import cms.services as cms_services
+
+    cms_services.resume_range(user, range_instance_id)
+
+
 def cms_find_range_instance_id(request_id) -> int | None:
     """Find RangeInstance PK by provisioning request ID."""
     import cms.services as cms_services

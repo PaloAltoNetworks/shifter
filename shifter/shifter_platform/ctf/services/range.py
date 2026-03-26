@@ -128,7 +128,7 @@ def provision_event_ranges(event_id: UUID) -> dict[str, Any]:
 
     for participant in participants:
         try:
-            provision_participant_range(participant.pk)
+            provision_participant_range_with_retry(participant.pk)
             successful += 1
         except Exception as e:
             failed += 1
@@ -138,6 +138,12 @@ def provision_event_ranges(event_id: UUID) -> dict[str, Any]:
                 participant.pk,
                 e,
             )
+
+    # Notify organizer of failures
+    if errors:
+        from ctf.services.notification import notify_organizer_provision_failure
+
+        notify_organizer_provision_failure(event_id, errors)
 
     return {
         "event_id": str(event_id),
@@ -223,7 +229,7 @@ def provision_event_ranges_throttled(
             break
 
         try:
-            provision_participant_range(participant.pk)
+            provision_participant_range_with_retry(participant.pk)
             successful += 1
         except Exception as e:
             failed += 1
@@ -237,6 +243,12 @@ def provision_event_ranges_throttled(
         # Sleep between provisions (skip after the last one)
         if i < count - 1 and not (shutdown_check and shutdown_check()):
             time.sleep(delay)
+
+    # Notify organizer of failures
+    if errors:
+        from ctf.services.notification import notify_organizer_provision_failure
+
+        notify_organizer_provision_failure(event_id, errors)
 
     return {
         "event_id": str(event_id),
@@ -290,6 +302,130 @@ def get_range_status(participant_id: UUID) -> dict[str, Any]:
         "status": participant.range_status,
         "range_instance_id": participant.range_instance_id,
     }
+
+
+def _get_participant_with_range(participant_id: UUID) -> CTFParticipant:
+    """Load participant, validate it has a range and a linked user."""
+    try:
+        participant = CTFParticipant.objects.select_related("user").get(pk=participant_id)
+    except CTFParticipant.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Participant {participant_id} not found",
+            details={"participant_id": str(participant_id)},
+        ) from None
+
+    if not participant.range_instance_id:
+        raise CTFRangeError(
+            "No range assigned to participant",
+            details={"participant_id": str(participant_id)},
+        )
+
+    if participant.user is None:
+        raise CTFRangeError(
+            "Participant has no linked user",
+            details={"participant_id": str(participant_id)},
+        )
+
+    return participant
+
+
+def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
+    """Stop (pause) a participant's range."""
+    logger.info("Stopping range for participant %s", participant_id)
+    participant = _get_participant_with_range(participant_id)
+
+    from ctf.bridges import cms_stop_range
+
+    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
+    cms_stop_range(participant.user, participant.range_instance_id)
+    participant.range_status = "stopping"
+    participant.save(update_fields=["range_status", "updated_at"])
+    return {"participant_id": str(participant_id), "status": "stopping"}
+
+
+def start_participant_range(participant_id: UUID) -> dict[str, Any]:
+    """Start (resume) a participant's stopped range."""
+    logger.info("Starting range for participant %s", participant_id)
+    participant = _get_participant_with_range(participant_id)
+
+    from ctf.bridges import cms_start_range
+
+    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
+    cms_start_range(participant.user, participant.range_instance_id)
+    participant.range_status = "resuming"
+    participant.save(update_fields=["range_status", "updated_at"])
+    return {"participant_id": str(participant_id), "status": "resuming"}
+
+
+def restart_participant_range(participant_id: UUID) -> dict[str, Any]:
+    """Restart a participant's range (stop then start)."""
+    logger.info("Restarting range for participant %s", participant_id)
+    stop_participant_range(participant_id)
+    return start_participant_range(participant_id)
+
+
+def provision_participant_range_with_retry(
+    participant_id: UUID,
+    max_retries: int = 3,
+    base_delay: int = 30,
+) -> dict[str, Any]:
+    """Provision a range with exponential backoff retry.
+
+    Args:
+        participant_id: UUID of the participant.
+        max_retries: Maximum retry attempts after initial failure.
+        base_delay: Base delay in seconds between retries (doubled each attempt).
+
+    Returns:
+        Dict with range instance ID, status, and retry count.
+    """
+    last_error = None
+
+    for attempt in range(1 + max_retries):
+        try:
+            result = provision_participant_range(participant_id)
+            if attempt > 0:
+                logger.info(
+                    "Provisioning succeeded on attempt %d for participant %s",
+                    attempt + 1,
+                    participant_id,
+                )
+            result["retries"] = attempt
+            return result
+        except CTFRangeError as e:
+            # Don't retry validation errors (no user, already assigned)
+            if "must be registered" in str(e) or "already has a range" in str(e):
+                raise
+            last_error = e
+            if attempt < max_retries:
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    "Provisioning attempt %d failed for participant %s, retrying in %ds: %s",
+                    attempt + 1,
+                    participant_id,
+                    delay,
+                    e,
+                )
+                time.sleep(delay)
+
+    # All retries exhausted — mark as error
+    try:
+        participant = CTFParticipant.objects.get(pk=participant_id)
+        participant.range_status = "error"
+        participant.save(update_fields=["range_status", "updated_at"])
+    except CTFParticipant.DoesNotExist:
+        pass
+
+    logger.error(
+        "Provisioning failed after %d attempts for participant %s: %s",
+        1 + max_retries,
+        participant_id,
+        last_error,
+    )
+    raise CTFRangeError(
+        f"Provisioning failed after {1 + max_retries} attempts: {last_error}",
+        details={"participant_id": str(participant_id), "retries": max_retries},
+    ) from last_error
 
 
 def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:

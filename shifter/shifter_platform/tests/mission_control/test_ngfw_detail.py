@@ -22,7 +22,7 @@ class TestNGFWDetailView:
 
         mock_request = Mock(spec=HttpRequest)
         mock_request.method = "GET"
-        mock_user = Mock(id=1)
+        mock_user = Mock(id=1, pk=1)
         mock_request.user = mock_user
 
         # Mock NGFW context
@@ -34,29 +34,24 @@ class TestNGFWDetailView:
             status="ready",
         )
 
-        # Mock linked ranges
-        mock_range1 = Mock(id=205, status="ready", user=mock_user)
-        mock_range2 = Mock(id=197, status="ready", user=mock_user)
-        mock_ranges = [mock_range1, mock_range2]
+        # Mock linked ranges as list of dicts (returned by engine.services.get_ranges_for_ngfw)
+        mock_ranges = [
+            {"id": 205, "status": "ready"},
+            {"id": 197, "status": "ready"},
+        ]
 
         with (
             patch("mission_control.views.cms_get_ngfw", return_value=mock_ngfw),
-            patch("engine.models.Range") as MockRange,
+            patch("engine.services.get_ranges_for_ngfw", return_value=mock_ranges) as mock_get_ranges,
             patch("mission_control.views.render") as mock_render,
         ):
-            # Setup Range.objects.filter() to return our mock ranges
-            mock_queryset = Mock()
-            mock_queryset.order_by = Mock(return_value=mock_ranges)
-            MockRange.objects.filter = Mock(return_value=mock_queryset)
-
             # Call the view
             ngfw_detail(mock_request, str(app_id))
 
-            # Verify Range was queried with correct filters
-            MockRange.objects.filter.assert_called_once_with(
+            # Verify get_ranges_for_ngfw was called with correct args
+            mock_get_ranges.assert_called_once_with(
+                user_id=1,
                 ngfw_instance_id=597,
-                user=mock_user,
-                destroyed_at__isnull=True,
             )
 
             # Verify render was called with linked_ranges in context
@@ -74,7 +69,7 @@ class TestNGFWDetailView:
 
         mock_request = Mock(spec=HttpRequest)
         mock_request.method = "GET"
-        mock_user = Mock(id=1)
+        mock_user = Mock(id=1, pk=1)
         mock_request.user = mock_user
 
         app_id = uuid4()
@@ -87,14 +82,9 @@ class TestNGFWDetailView:
 
         with (
             patch("mission_control.views.cms_get_ngfw", return_value=mock_ngfw),
-            patch("engine.models.Range") as MockRange,
+            patch("engine.services.get_ranges_for_ngfw", return_value=[]),
             patch("mission_control.views.render") as mock_render,
         ):
-            # Setup Range.objects.filter() to return empty list
-            mock_queryset = Mock()
-            mock_queryset.order_by = Mock(return_value=[])
-            MockRange.objects.filter = Mock(return_value=mock_queryset)
-
             # Call the view
             ngfw_detail(mock_request, str(app_id))
 
@@ -106,26 +96,41 @@ class TestNGFWDetailView:
             assert context["linked_ranges"] == []
 
     def test_orders_linked_ranges_by_created_at_desc(self):
-        """View orders linked ranges by created_at descending (newest first)."""
+        """View delegates ordering to engine.services.get_ranges_for_ngfw.
+
+        The service function handles ordering internally (by -created_at),
+        so the view just passes through the results.
+        """
         from mission_control.views import ngfw_detail
 
         mock_request = Mock(spec=HttpRequest)
         mock_request.method = "GET"
-        mock_user = Mock(id=1)
+        mock_user = Mock(id=1, pk=1)
         mock_request.user = mock_user
 
         app_id = uuid4()
         mock_ngfw = Mock(app_id=app_id, instance_id=597)
 
+        # Ranges returned already ordered by service
+        mock_ranges = [
+            {"id": 300, "status": "ready", "created_at": "2026-03-25T10:00:00Z"},
+            {"id": 200, "status": "ready", "created_at": "2026-03-24T10:00:00Z"},
+        ]
+
         with (
             patch("mission_control.views.cms_get_ngfw", return_value=mock_ngfw),
-            patch("engine.models.Range") as MockRange,
-            patch("mission_control.views.render"),
+            patch("engine.services.get_ranges_for_ngfw", return_value=mock_ranges) as mock_get_ranges,
+            patch("mission_control.views.render") as mock_render,
         ):
-            mock_queryset = Mock()
-            MockRange.objects.filter = Mock(return_value=mock_queryset)
-
             ngfw_detail(mock_request, str(app_id))
 
-            # Verify order_by was called with "-created_at"
-            mock_queryset.order_by.assert_called_once_with("-created_at")
+            # Verify the service was called
+            mock_get_ranges.assert_called_once_with(
+                user_id=1,
+                ngfw_instance_id=597,
+            )
+
+            # Verify linked_ranges passed to template
+            render_args = mock_render.call_args
+            context = render_args[0][2]
+            assert context["linked_ranges"] == mock_ranges

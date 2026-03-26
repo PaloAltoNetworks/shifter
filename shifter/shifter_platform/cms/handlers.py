@@ -246,9 +246,13 @@ def _notify_ctf_range_status(
     new_status: str,
     previous_status: str,
 ) -> None:
-    """Fire the CTF range_status_changed signal if CTF app is installed."""
+    """Fire the CMS range_status_changed signal.
+
+    Any layer that depends on CMS (e.g. CTF) can register receivers
+    for this signal to react to range status changes.
+    """
     try:
-        from ctf.signals import range_status_changed
+        from cms.signals import range_status_changed
 
         range_status_changed.send(
             sender=None,
@@ -256,11 +260,9 @@ def _notify_ctf_range_status(
             new_status=new_status,
             previous_status=previous_status,
         )
-    except ImportError:
-        pass  # CTF app not installed — nothing to notify
     except Exception:
         logger.exception(
-            "Failed to notify CTF of range status change: range_instance_id=%s status=%s",
+            "Failed to send range status change signal: range_instance_id=%s status=%s",
             range_instance_id,
             new_status,
         )

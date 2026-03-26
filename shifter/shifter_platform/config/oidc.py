@@ -226,11 +226,11 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
                 event_uuid = UUID(ctf_event_id)
                 from ctf.models import CTFEvent
 
-                profile = get_user_profile(user)
                 event = CTFEvent.objects.filter(pk=event_uuid).first()
                 if event:
-                    profile.active_ctf_event = event
-                    profile.save(update_fields=["active_ctf_event"])
+                    from management.services import set_active_ctf_event
+
+                    set_active_ctf_event(user, event.pk)
                     logger.info(
                         "Set active CTF event %s for user %s",
                         ctf_event_id,

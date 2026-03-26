@@ -25,12 +25,12 @@ from pathlib import Path
 
 import yaml
 
-ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control"]
+ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf"]
 
 # Regex to match imports from our layers (including indented imports in functions)
 # Captures the full module path (e.g., "shared.exceptions" from "from shared.exceptions import X")
 IMPORT_PATTERN = re.compile(
-    r"^\s*(?:from|import)\s+((?:shared|engine|cms|management|mission_control)(?:\.\w+)*)",
+    r"^\s*(?:from|import)\s+((?:shared|engine|cms|management|mission_control|ctf)(?:\.\w+)*)",
     re.MULTILINE,
 )
 
@@ -48,6 +48,16 @@ def load_allowed_imports(config_path: Path) -> dict[str, list[str]]:
 def is_import_allowed(from_layer: str, module_path: str, allowed: dict[str, list[str]]) -> bool:
     """Check if a specific import is allowed by the config.
 
+    Rules:
+      - ``"shared"`` is the contracts layer — allows any submodule
+        (``shared.enums``, ``shared.schemas.range``, etc.).
+      - For all other layers, only ``layer.services`` is a valid
+        import target.  A rule like ``"cms.services"`` allows
+        ``cms.services`` and ``cms.services.foo``.
+      - A bare layer name like ``"engine"`` without ``.services``
+        is not valid for non-shared layers (will not match anything
+        useful since ``import engine`` alone is rare).
+
     Args:
         from_layer: The layer doing the import
         module_path: Full module path being imported (e.g., "management.services")
@@ -56,10 +66,24 @@ def is_import_allowed(from_layer: str, module_path: str, allowed: dict[str, list
     Returns:
         True if this import is explicitly allowed, False otherwise
     """
-    allowed_prefixes = allowed.get(from_layer, [])
+    allowed_entries = allowed.get(from_layer, [])
 
-    # Check if module_path matches or starts with any allowed prefix
-    return any(module_path == prefix or module_path.startswith(prefix + ".") for prefix in allowed_prefixes)
+    for entry in allowed_entries:
+        if entry == "shared":
+            # shared is the contracts layer — any submodule is allowed
+            if module_path == "shared" or module_path.startswith("shared."):
+                return True
+        elif "." in entry:
+            # Dotted path (e.g. "cms.services") — allows exact match
+            # and anything under it
+            if module_path == entry or module_path.startswith(entry + "."):
+                return True
+        else:
+            # Bare layer name — exact match only
+            if module_path == entry:
+                return True
+
+    return False
 
 
 def get_imports(layer_path: Path) -> dict[str, set[str]]:

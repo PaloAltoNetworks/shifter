@@ -85,6 +85,25 @@ class ChallengeDifficulty(str, Enum):
         return [(diff.value, diff.name.title()) for diff in cls]
 
 
+class ChallengeVisibility(str, Enum):
+    """Challenge visibility states.
+
+    Controls whether a challenge is shown to participants and whether
+    submissions are accepted.
+    """
+
+    VISIBLE = "visible"  # Shown to participants, submittable
+    HIDDEN = "hidden"  # Not shown, not submittable (organizer-only)
+    LOCKED = "locked"  # Shown but not submittable
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        return [(v.value, v.name.title()) for v in cls]
+
+
 class ChallengeCategory(str, Enum):
     """Fixed challenge categories.
 

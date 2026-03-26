@@ -131,13 +131,14 @@ def send_credentials(event_id: UUID) -> dict[str, Any]:
 
     for participant in participants:
         try:
-            # Get access URL for the participant
-            from ctf.services import range as range_service
+            # Link to the CTF range page where participants can access their range
+            # via the platform's standard Guacamole RDP flow.
+            from django.conf import settings
+            from django.urls import reverse
 
-            try:
-                access_url = range_service.get_range_access_url(participant.pk)
-            except Exception:
-                access_url = None
+            range_page_url = reverse("ctf:ctf_range")
+            base = (getattr(settings, "SITE_URL", "") or "").rstrip("/")
+            access_url = f"{base}{range_page_url}"
 
             html_content, text_content = _render_email(
                 "credentials",

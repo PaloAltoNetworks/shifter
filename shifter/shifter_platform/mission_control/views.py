@@ -15,30 +15,31 @@ from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from cms import cancel_upload as cms_cancel_upload
-from cms import complete_upload as cms_complete_upload
-from cms import create_credential as cms_create_credential
-from cms import create_range as cms_create_range
-from cms import delete_agent as cms_delete_agent
-from cms import delete_credential as cms_delete_credential
-from cms import get_active_range, get_allowed_extensions
-from cms import get_agent as cms_get_agent
-from cms import get_credential as cms_get_credential
-from cms import initiate_upload as cms_initiate_upload
-from cms import list_agents as cms_list_agents
-from cms import list_credentials as cms_list_credentials
-from cms import list_ngfws as cms_list_ngfws
-from cms import list_scenarios as cms_list_scenarios
-from cms.experiments.exceptions import ScriptUploadError
-from cms.experiments.services import (
+from cms.services import (
+    ScriptUploadError,
     complete_script_upload,
     delete_script,
+    get_active_range,
+    get_allowed_extensions,
     initiate_script_upload,
     list_scripts,
 )
+from cms.services import cancel_upload as cms_cancel_upload
+from cms.services import complete_upload as cms_complete_upload
+from cms.services import create_credential as cms_create_credential
 from cms.services import create_ngfw as cms_create_ngfw
+from cms.services import create_range as cms_create_range
+from cms.services import delete_agent as cms_delete_agent
+from cms.services import delete_credential as cms_delete_credential
 from cms.services import destroy_ngfw as cms_destroy_ngfw
+from cms.services import get_agent as cms_get_agent
+from cms.services import get_credential as cms_get_credential
 from cms.services import get_ngfw as cms_get_ngfw
+from cms.services import initiate_upload as cms_initiate_upload
+from cms.services import list_agents as cms_list_agents
+from cms.services import list_credentials as cms_list_credentials
+from cms.services import list_ngfws as cms_list_ngfws
+from cms.services import list_scenarios as cms_list_scenarios
 from mission_control.upload_session import (
     check_upload_in_progress,
     set_upload_in_progress,
@@ -77,7 +78,7 @@ def agents(request: HttpRequest) -> HttpResponse:
     context = {
         "page_title": "Agents",
         "active_nav": "agents",
-        "agents": cms_list_agents(request.user),
+        "agents": cms_list_agents(_get_user(request)),
         "allowed_extensions": ", ".join(get_allowed_extensions()),
     }
     return render(request, "mission_control/agents.html", context)
@@ -336,7 +337,7 @@ def help_page(request: HttpRequest) -> HttpResponse:
 @require_GET
 def walkthrough(request: HttpRequest) -> HttpResponse:
     """Box 0 walkthrough with copy-pasteable prompts for CTF participants."""
-    from engine.models import Range
+    from engine.services import get_user_ready_range_instances
 
     # Display names and flags per box — flags overwritten via SSM at event start
     box_info = {
@@ -351,23 +352,21 @@ def walkthrough(request: HttpRequest) -> HttpResponse:
     webshell_ip = ""
 
     # Find the user's active ready range and extract target IPs
-    user_range = Range.objects.filter(user_id=cast(int, request.user.pk), status="ready").first()
-    if user_range and user_range.provisioned_instances:
-        for inst in user_range.provisioned_instances:
-            if inst.get("role") != "attacker":
-                hostname = inst.get("name", "")
-                display_name, user_flag, root_flag = box_info.get(hostname, (hostname, "", ""))
-                target_instances.append(
-                    {
-                        "name": display_name,
-                        "private_ip": inst.get("private_ip", ""),
-                        "os_type": inst.get("os_type", ""),
-                        "user_flag": user_flag,
-                        "root_flag": root_flag,
-                    }
-                )
-                if hostname == "webdev01":
-                    webshell_ip = inst.get("private_ip", "")
+    for inst in get_user_ready_range_instances(cast(int, request.user.pk)):
+        if inst.get("role") != "attacker":
+            hostname = inst.get("name", "")
+            display_name, user_flag, root_flag = box_info.get(hostname, (hostname, "", ""))
+            target_instances.append(
+                {
+                    "name": display_name,
+                    "private_ip": inst.get("private_ip", ""),
+                    "os_type": inst.get("os_type", ""),
+                    "user_flag": user_flag,
+                    "root_flag": root_flag,
+                }
+            )
+            if hostname == "webdev01":
+                webshell_ip = inst.get("private_ip", "")
 
     context = {
         "page_title": "Walkthrough",
@@ -548,7 +547,7 @@ def get_range(request: HttpRequest) -> JsonResponse:
         - has_range: true/false
         - range: RangeContext object (if exists)
     """
-    active_range = get_active_range(request.user)
+    active_range = get_active_range(_get_user(request))
 
     if not active_range:
         return JsonResponse({"has_range": False, "range": None, "connection_urls": []})
@@ -651,7 +650,7 @@ def cancel_range(request: HttpRequest) -> JsonResponse:
 
     Only works for ranges in PENDING or PROVISIONING status.
     """
-    from cms import cancel_range as cms_cancel_range_by_id
+    from cms.services import cancel_range as cms_cancel_range_by_id
     from cms.services import cancel_range_by_request_id as cms_cancel_range_by_request
 
     user = _get_user(request)
@@ -692,7 +691,7 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
 
     Sets status to DESTROYING and triggers async resource cleanup.
     """
-    from cms import destroy_range as cms_destroy_range_by_id
+    from cms.services import destroy_range as cms_destroy_range_by_id
     from cms.services import destroy_range_by_request_id as cms_destroy_range_by_request
 
     user = _get_user(request)
@@ -733,7 +732,7 @@ def pause_range(request: HttpRequest) -> JsonResponse:
 
     Sets status to PAUSING and triggers async instance stop.
     """
-    from cms import pause_range as cms_pause_range_by_id
+    from cms.services import pause_range as cms_pause_range_by_id
     from cms.services import pause_range_by_request_id as cms_pause_range_by_request
 
     user = _get_user(request)
@@ -774,7 +773,7 @@ def resume_range(request: HttpRequest) -> JsonResponse:
 
     Sets status to RESUMING and triggers async instance start.
     """
-    from cms import resume_range as cms_resume_range_by_id
+    from cms.services import resume_range as cms_resume_range_by_id
     from cms.services import resume_range_by_request_id as cms_resume_range_by_request
 
     user = _get_user(request)
@@ -815,7 +814,7 @@ def list_agents(request: HttpRequest) -> JsonResponse:
     The os_slug field allows frontend to filter agents by OS type
     (e.g., 'windows' for DC agent dropdown in AD scenarios).
     """
-    agents = cms_list_agents(request.user)
+    agents = cms_list_agents(_get_user(request))
     return JsonResponse({"agents": agents})
 
 
@@ -828,7 +827,7 @@ def list_scenarios(request: HttpRequest) -> JsonResponse:
     Response (JSON):
         - scenarios: List of scenario dicts with agent_requirements field
     """
-    scenarios = cms_list_scenarios(request.user)
+    scenarios = cms_list_scenarios(_get_user(request))
     return JsonResponse({"scenarios": scenarios})
 
 
@@ -841,7 +840,7 @@ def list_scenarios(request: HttpRequest) -> JsonResponse:
 @require_GET
 def ngfw_list(request: HttpRequest) -> HttpResponse:
     """List user's NGFWs."""
-    ngfws = cms_list_ngfws(request.user)
+    ngfws = cms_list_ngfws(_get_user(request))
     context = {
         "page_title": "NGFWs",
         "active_nav": "ngfw",
@@ -854,7 +853,7 @@ def ngfw_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
     """View NGFW details."""
-    from engine.models import Range
+    from engine.services import get_ranges_for_ngfw
 
     user = _get_user(request)
     try:
@@ -866,11 +865,10 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
         return redirect("mission_control:ngfw_list")
 
     # Get ranges linked to this NGFW (via ngfw_instance_id)
-    linked_ranges = Range.objects.filter(
+    linked_ranges = get_ranges_for_ngfw(
+        user_id=cast(int, user.pk),
         ngfw_instance_id=int(ngfw.instance_id),
-        user=user,
-        destroyed_at__isnull=True,
-    ).order_by("-created_at")
+    )
 
     context = {
         "page_title": ngfw.name,
@@ -885,7 +883,7 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
 @require_GET
 def ngfw_wizard(request: HttpRequest) -> HttpResponse:
     """NGFW setup wizard."""
-    credentials = cms_list_credentials(request.user)
+    credentials = cms_list_credentials(_get_user(request))
 
     # Filter by type and exclude expired (is_expired computed field)
     scm_credentials = [c for c in credentials if c.credential_type == "scm" and not c.is_expired]
@@ -979,7 +977,7 @@ def api_ngfw_create(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_ngfw_list(request: HttpRequest) -> JsonResponse:
     """List user's NGFWs."""
-    ngfws = cms_list_ngfws(request.user)
+    ngfws = cms_list_ngfws(_get_user(request))
     return JsonResponse(
         {
             "ngfws": [
@@ -1030,7 +1028,7 @@ def api_ngfw_destroy(request: HttpRequest, app_id: str) -> JsonResponse:
 @require_GET
 def credentials_list(request: HttpRequest) -> HttpResponse:
     """List user's credentials."""
-    credentials = cms_list_credentials(request.user)
+    credentials = cms_list_credentials(_get_user(request))
 
     scm_count = sum(1 for c in credentials if c.credential_type == "scm")
     profile_count = sum(1 for c in credentials if c.credential_type == "deployment_profile")
@@ -1050,7 +1048,7 @@ def credentials_list(request: HttpRequest) -> HttpResponse:
 def credential_detail(request: HttpRequest, credential_id: int) -> HttpResponse:
     """View credential details."""
     try:
-        credential = cms_get_credential(request.user, credential_id)
+        credential = cms_get_credential(_get_user(request), credential_id)
     except CMSError:
         raise Http404("Credential not found") from None
 

@@ -158,11 +158,10 @@ def mock_standard_user():
 def mock_profile():
     """Reusable mock profile factory."""
 
-    def _make(user_type="standard", active_ctf_event=None):
+    def _make(user_type="standard", active_ctf_event_id=None):
         profile = MagicMock()
         profile.user_type = user_type
-        profile.active_ctf_event = active_ctf_event
-        profile.active_ctf_event_id = getattr(active_ctf_event, "pk", None)
+        profile.active_ctf_event_id = active_ctf_event_id
         return profile
 
     return _make
@@ -262,11 +261,12 @@ class TestOIDCBackendCTFUserType:
         assert not mock_organizer_user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
         assert not mock_organizer_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
 
+    @patch("management.services.set_active_ctf_event")
     @patch("ctf.models.CTFEvent.objects")
     @patch("config.oidc.Group.objects.get_or_create")
     @patch("config.oidc.get_user_profile")
     def test_update_ctf_event_from_claims(
-        self, mock_get_profile, mock_group_goc, mock_event_objects, mock_participant_user
+        self, mock_get_profile, mock_group_goc, mock_event_objects, mock_set_event, mock_participant_user
     ):
         """_update_user_type should set active_ctf_event from custom:ctf_event_id."""
         backend = self._make_backend()
@@ -275,7 +275,7 @@ class TestOIDCBackendCTFUserType:
         mock_group_goc.return_value = (mock_group, False)
 
         mock_event = MagicMock()
-        mock_event.id = "11111111-1111-1111-1111-111111111111"
+        mock_event.pk = "11111111-1111-1111-1111-111111111111"
         mock_event_objects.filter.return_value.first.return_value = mock_event
 
         profile = MagicMock(user_type="ctf_participant", active_ctf_event_id=None)
@@ -289,7 +289,7 @@ class TestOIDCBackendCTFUserType:
         backend._update_user_type(mock_participant_user, claims)
 
         assert mock_participant_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
-        assert profile.active_ctf_event == mock_event
+        mock_set_event.assert_called_once_with(mock_participant_user, mock_event.pk)
 
     @patch("config.oidc.Group.objects.get_or_create")
     @patch("config.oidc.get_user_profile")
@@ -300,7 +300,7 @@ class TestOIDCBackendCTFUserType:
         mock_group = _MockGroup(CTF_PARTICIPANT_GROUP)
         mock_group_goc.return_value = (mock_group, False)
 
-        profile = MagicMock(user_type="ctf_participant", active_ctf_event=None)
+        profile = MagicMock(user_type="ctf_participant", active_ctf_event_id=None)
         mock_get_profile.return_value = profile
 
         claims = {
@@ -311,7 +311,8 @@ class TestOIDCBackendCTFUserType:
         backend._update_user_type(mock_participant_user, claims)
 
         assert mock_participant_user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
-        assert profile.active_ctf_event is None
+        # Invalid UUID should not trigger set_active_ctf_event
+        assert profile.active_ctf_event_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +401,7 @@ class TestAccessControlDecorators:
         """ctf_organizer_required should allow organizer access."""
         from ctf.views import admin_dashboard
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = self._make_view_request(request_factory, mock_organizer_user)
 
@@ -417,7 +418,7 @@ class TestAccessControlDecorators:
         """ctf_organizer_required should block participants."""
         from ctf.views import admin_dashboard
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = self._make_view_request(request_factory, mock_participant_user)
         response = admin_dashboard(request)
@@ -428,7 +429,7 @@ class TestAccessControlDecorators:
         """ctf_organizer_required should block standard users."""
         from ctf.views import admin_dashboard
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = self._make_view_request(request_factory, mock_standard_user)
         response = admin_dashboard(request)
@@ -583,7 +584,7 @@ class TestCTFContextProcessor:
         """Context processor should provide organizer navigation data."""
         from ctf.context_processors import ctf_navigation
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = request_factory.get("/ctf/admin/")
         request.user = mock_organizer_user
@@ -598,7 +599,7 @@ class TestCTFContextProcessor:
         """Context processor should provide participant navigation data."""
         from ctf.context_processors import ctf_navigation
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = request_factory.get("/ctf/")
         request.user = mock_participant_user
@@ -613,7 +614,7 @@ class TestCTFContextProcessor:
         """Context processor should indicate non-CTF user."""
         from ctf.context_processors import ctf_navigation
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = request_factory.get("/")
         request.user = mock_standard_user
@@ -636,14 +637,19 @@ class TestCTFContextProcessor:
         assert context["is_ctf_user"] is False
 
     @patch("management.services.get_user_profile")
+    @patch("ctf.models.CTFEvent.objects")
     def test_context_includes_active_event_for_participant(
-        self, mock_get_profile, request_factory, mock_participant_user
+        self, mock_event_objects, mock_get_profile, request_factory, mock_participant_user
     ):
         """Context processor should include active event for participants."""
+        from uuid import uuid4
+
         from ctf.context_processors import ctf_navigation
 
         mock_event = MagicMock(name="Active Event")
-        mock_get_profile.return_value = MagicMock(active_ctf_event=mock_event)
+        event_id = uuid4()
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=event_id)
+        mock_event_objects.filter.return_value.first.return_value = mock_event
 
         request = request_factory.get("/ctf/")
         request.user = mock_participant_user
@@ -658,7 +664,7 @@ class TestCTFContextProcessor:
         """Pure CTF participant should have is_ctf_participant_only=True."""
         from ctf.context_processors import ctf_navigation
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = request_factory.get("/")
         request.user = mock_participant_user
@@ -675,7 +681,7 @@ class TestCTFContextProcessor:
 
         mock_participant_user.is_staff = True
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = request_factory.get("/")
         request.user = mock_participant_user
@@ -690,7 +696,7 @@ class TestCTFContextProcessor:
         """Standard (non-CTF) user should have is_ctf_participant_only=False."""
         from ctf.context_processors import ctf_navigation
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         request = request_factory.get("/")
         request.user = mock_standard_user
@@ -858,7 +864,7 @@ class TestCTFSidebar:
         """CTF organizers should see CTF admin sidebar items."""
         from ctf.views import admin_dashboard
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
         mock_render.return_value = HttpResponse("ok", status=200)
 
         request = request_factory.get("/ctf/admin/")
@@ -883,9 +889,12 @@ class TestCTFSidebar:
 class TestDualRoles:
     """Test that a user can hold both CTF Organizer and CTF Participant roles."""
 
+    @patch("ctf.models.CTFEvent.objects")
     @patch("management.services.get_user_profile")
-    def test_user_can_be_organizer_and_participant(self, mock_get_profile):
+    def test_user_can_be_organizer_and_participant(self, mock_get_profile, mock_event_objects):
         """A user in both groups should be recognized as both roles."""
+        from uuid import uuid4
+
         from ctf.bridges import get_user_role
 
         user = _make_mock_user(
@@ -893,7 +902,10 @@ class TestDualRoles:
             groups={CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP},
         )
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=MagicMock())
+        event_id = uuid4()
+        mock_event = MagicMock()
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=event_id)
+        mock_event_objects.filter.return_value.first.return_value = mock_event
 
         role = get_user_role(user)
         assert role.is_ctf_organizer is True
@@ -910,7 +922,7 @@ class TestDualRoles:
             groups={CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP},
         )
 
-        mock_get_profile.return_value = MagicMock(active_ctf_event=None)
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
         mock_render.return_value = HttpResponse("ok", status=200)
 
         request = request_factory.get("/ctf/admin/")
@@ -926,9 +938,10 @@ class TestDualRoles:
 
         assert response.status_code == 200
 
+    @patch("management.services.set_active_ctf_event")
     @patch("management.services.get_user_profile")
     @patch("django.contrib.auth.models.Group.objects")
-    def test_adding_participant_does_not_remove_organizer(self, mock_group_objects, mock_get_profile):
+    def test_adding_participant_does_not_remove_organizer(self, mock_group_objects, mock_get_profile, mock_set_event):
         """Registering as participant should not remove organizer group."""
         from ctf.services.participant import _set_ctf_participant_profile
 
@@ -943,7 +956,7 @@ class TestDualRoles:
         mock_event = MagicMock()
         mock_event.pk = "event-uuid"
 
-        mock_get_profile.return_value = MagicMock()
+        mock_get_profile.return_value = MagicMock(active_ctf_event_id=None)
 
         assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
 
@@ -951,10 +964,12 @@ class TestDualRoles:
 
         assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
         assert user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
+        mock_set_event.assert_called_once_with(user, mock_event.pk)
 
+    @patch("management.services.set_active_ctf_event")
     @patch("management.services.get_user_profile")
     @patch("django.contrib.auth.models.Group.objects")
-    def test_clearing_participant_does_not_remove_organizer(self, mock_group_objects, mock_get_profile):
+    def test_clearing_participant_does_not_remove_organizer(self, mock_group_objects, mock_get_profile, mock_set_event):
         """Clearing participant should not affect organizer group."""
         from ctf.services.participant import (
             _clear_ctf_participant_profile,
@@ -975,7 +990,6 @@ class TestDualRoles:
 
         profile = MagicMock()
         profile.active_ctf_event_id = "event-uuid"
-        profile.active_ctf_event = mock_event
         mock_get_profile.return_value = profile
 
         # First set the participant profile (adds participant group)
@@ -986,7 +1000,8 @@ class TestDualRoles:
 
         assert user.groups.filter(name=CTF_ORGANIZER_GROUP).exists()
         assert not user.groups.filter(name=CTF_PARTICIPANT_GROUP).exists()
-        assert profile.active_ctf_event is None
+        # set_active_ctf_event called with None on clear
+        mock_set_event.assert_any_call(user, None)
 
     def test_dashboard_routes_organizer_to_mission_control(self, request_factory):
         """Dashboard router should route dual-role user to Mission Control."""

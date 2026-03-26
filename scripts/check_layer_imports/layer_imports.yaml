@@ -1,8 +1,8 @@
 # Allowed cross-layer imports between service layers
 #
-# Format: from_layer -> list of allowed import targets
-# - "layer" allows the layer's public API (__init__.py exports)
-# - "layer.module" allows specific submodules only
+# Rule: Layers may ONLY import another layer's services.py.
+# shared is freely importable by all layers (contracts layer).
+# No model imports, no internal submodule imports, no __init__.py shortcuts.
 #
 # Any import not matching this config is a violation.
 
@@ -14,7 +14,7 @@ allowed:
   cms:
     - shared
     - management.services
-    - engine  # public API
+    - engine.services
 
   management:
     - shared
@@ -22,6 +22,10 @@ allowed:
   mission_control:
     - shared
     - management.services
-    - cms             # public API
     - cms.services
-    - engine          # public API
+    - engine.services
+
+  ctf:
+    - shared
+    - cms.services
+    - management.services

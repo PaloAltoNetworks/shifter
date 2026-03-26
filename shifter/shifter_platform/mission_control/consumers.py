@@ -49,7 +49,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
         Engine handles all validation: ownership, range status, instance lookup.
         """
-        from engine import connect_terminal
+        from engine.services import connect_terminal
 
         # Get client IP for audit logging
         headers = dict(self.scope.get("headers", []))
@@ -230,7 +230,7 @@ class RangeStatusConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         """Handle WebSocket connection - join range group and send initial state."""
-        from cms import get_range_by_request_id
+        from cms.services import get_range_by_request_id
         from shared.channels.groups import range_event_group
         from shared.exceptions import CMSError
 

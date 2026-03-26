@@ -604,7 +604,8 @@ class TestEventStatusTransitions:
         """Should be able to complete an active event."""
         from ctf.services import complete_event
 
-        result = complete_event(mock_event_active)
+        with patch("ctf.services.range.cleanup_event_ranges"):
+            result = complete_event(mock_event_active)
         assert result is True
         assert mock_event_active.status == EventStatus.ENDED.value
         mock_event_active.save.assert_called_once()
@@ -614,6 +615,7 @@ class TestEventStatusTransitions:
         with (
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks"),
+            patch("ctf.services.range.cleanup_event_ranges"),
         ):
             from ctf.services import cancel_event
 
@@ -626,6 +628,7 @@ class TestEventStatusTransitions:
         with (
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks"),
+            patch("ctf.services.range.cleanup_event_ranges"),
         ):
             from ctf.services import cancel_event
 
@@ -735,6 +738,7 @@ class TestEventStatusTransitions:
         with (
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks"),
+            patch("ctf.services.range.cleanup_event_ranges"),
         ):
             result = cancel_event(paused_event)
         assert result is True
@@ -748,6 +752,7 @@ class TestEventStatusTransitions:
         with (
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks"),
+            patch("ctf.services.range.cleanup_event_ranges"),
         ):
             result = cancel_event(reg_event)
         assert result is True

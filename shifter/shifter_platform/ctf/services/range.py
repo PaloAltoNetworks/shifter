@@ -304,21 +304,8 @@ def get_range_status(participant_id: UUID) -> dict[str, Any]:
     }
 
 
-def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
-    """Stop (pause) a participant's range.
-
-    Args:
-        participant_id: UUID of the participant.
-
-    Returns:
-        Dict with stop status.
-
-    Raises:
-        CTFNotFoundError: If participant doesn't exist.
-        CTFRangeError: If no range assigned or range not in stoppable state.
-    """
-    logger.info("Stopping range for participant %s", participant_id)
-
+def _get_participant_with_range(participant_id: UUID) -> CTFParticipant:
+    """Load participant, validate it has a range and a linked user."""
     try:
         participant = CTFParticipant.objects.select_related("user").get(pk=participant_id)
     except CTFParticipant.DoesNotExist:
@@ -338,79 +325,40 @@ def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
             "Participant has no linked user",
             details={"participant_id": str(participant_id)},
         )
+
+    return participant
+
+
+def stop_participant_range(participant_id: UUID) -> dict[str, Any]:
+    """Stop (pause) a participant's range."""
+    logger.info("Stopping range for participant %s", participant_id)
+    participant = _get_participant_with_range(participant_id)
 
     from ctf.bridges import cms_stop_range
 
+    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
     cms_stop_range(participant.user, participant.range_instance_id)
     participant.range_status = "stopping"
     participant.save(update_fields=["range_status", "updated_at"])
-
-    return {
-        "participant_id": str(participant_id),
-        "status": "stopping",
-    }
+    return {"participant_id": str(participant_id), "status": "stopping"}
 
 
 def start_participant_range(participant_id: UUID) -> dict[str, Any]:
-    """Start (resume) a participant's stopped range.
-
-    Args:
-        participant_id: UUID of the participant.
-
-    Returns:
-        Dict with start status.
-
-    Raises:
-        CTFNotFoundError: If participant doesn't exist.
-        CTFRangeError: If no range assigned or range not in startable state.
-    """
+    """Start (resume) a participant's stopped range."""
     logger.info("Starting range for participant %s", participant_id)
-
-    try:
-        participant = CTFParticipant.objects.select_related("user").get(pk=participant_id)
-    except CTFParticipant.DoesNotExist:
-        raise CTFNotFoundError(
-            f"Participant {participant_id} not found",
-            details={"participant_id": str(participant_id)},
-        ) from None
-
-    if not participant.range_instance_id:
-        raise CTFRangeError(
-            "No range assigned to participant",
-            details={"participant_id": str(participant_id)},
-        )
-
-    if participant.user is None:
-        raise CTFRangeError(
-            "Participant has no linked user",
-            details={"participant_id": str(participant_id)},
-        )
+    participant = _get_participant_with_range(participant_id)
 
     from ctf.bridges import cms_start_range
 
+    assert participant.range_instance_id is not None  # guaranteed by _get_participant_with_range
     cms_start_range(participant.user, participant.range_instance_id)
     participant.range_status = "resuming"
     participant.save(update_fields=["range_status", "updated_at"])
-
-    return {
-        "participant_id": str(participant_id),
-        "status": "resuming",
-    }
+    return {"participant_id": str(participant_id), "status": "resuming"}
 
 
 def restart_participant_range(participant_id: UUID) -> dict[str, Any]:
-    """Restart a participant's range (stop then start).
-
-    Args:
-        participant_id: UUID of the participant.
-
-    Returns:
-        Dict with restart status.
-
-    Raises:
-        CTFNotFoundError: If participant doesn't exist.
-        CTFRangeError: If no range assigned.
-    """
+    """Restart a participant's range (stop then start)."""
     logger.info("Restarting range for participant %s", participant_id)
     stop_participant_range(participant_id)
     return start_participant_range(participant_id)

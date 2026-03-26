@@ -916,3 +916,128 @@ class TestCreateChallengeWithFlags:
         assert challenge.flags.count() == 0
         # But verify_flag still works via legacy fallback
         assert verify_flag(challenge, "FLAG{single}") is True
+
+
+# =============================================================================
+# Visibility control
+# =============================================================================
+
+
+class TestChallengeVisibility:
+    """Tests for challenge visibility states (CTF-110)."""
+
+    @pytest.fixture
+    def event(self, db):
+        """Create an active event."""
+        from django.contrib.auth.models import User
+        from django.utils import timezone as tz
+
+        from ctf.models import CTFEvent
+
+        user = User.objects.create_user("org@test.com", "org@test.com", "pass")
+        return CTFEvent.objects.create(
+            name="Vis Test",
+            created_by=user,
+            status=EventStatus.ACTIVE.value,
+            event_start=tz.now() - timedelta(hours=1),
+            event_end=tz.now() + timedelta(hours=5),
+        )
+
+    @pytest.fixture
+    def visible_challenge(self, event):
+        return CTFChallenge.objects.create(
+            event=event,
+            name="Visible",
+            description="d",
+            category="web",
+            points=100,
+            flag_hash="x",
+            visibility="visible",
+        )
+
+    @pytest.fixture
+    def hidden_challenge(self, event):
+        return CTFChallenge.objects.create(
+            event=event,
+            name="Hidden",
+            description="d",
+            category="web",
+            points=100,
+            flag_hash="x",
+            visibility="hidden",
+        )
+
+    @pytest.fixture
+    def locked_challenge(self, event):
+        return CTFChallenge.objects.create(
+            event=event,
+            name="Locked",
+            description="d",
+            category="web",
+            points=100,
+            flag_hash="x",
+            visibility="locked",
+        )
+
+    def test_hidden_not_released(self, hidden_challenge):
+        """Hidden challenge is_released returns False."""
+        assert hidden_challenge.is_released is False
+
+    def test_visible_is_released(self, visible_challenge):
+        """Visible challenge is_released returns True."""
+        assert visible_challenge.is_released is True
+
+    def test_locked_is_released(self, locked_challenge):
+        """Locked challenge is_released returns True (shown but not submittable)."""
+        assert locked_challenge.is_released is True
+
+    def test_locked_is_visibility_locked(self, locked_challenge):
+        """Locked challenge is_visibility_locked returns True."""
+        assert locked_challenge.is_visibility_locked is True
+
+    def test_visible_not_visibility_locked(self, visible_challenge):
+        """Visible challenge is_visibility_locked returns False."""
+        assert visible_challenge.is_visibility_locked is False
+
+    def test_hidden_excluded_from_available(self, event, visible_challenge, hidden_challenge):
+        """get_available_challenges excludes hidden challenges."""
+        from ctf.services.challenge import get_available_challenges
+
+        available = list(get_available_challenges(event.pk))
+        assert visible_challenge in available
+        assert hidden_challenge not in available
+
+    def test_locked_included_in_available(self, event, visible_challenge, locked_challenge):
+        """get_available_challenges includes locked challenges."""
+        from ctf.services.challenge import get_available_challenges
+
+        available = list(get_available_challenges(event.pk))
+        assert visible_challenge in available
+        assert locked_challenge in available
+
+    def test_organizer_sees_all(self, event, visible_challenge, hidden_challenge, locked_challenge):
+        """include_unreleased=True returns all visibility states."""
+        from ctf.services.challenge import get_available_challenges
+
+        all_challenges = list(get_available_challenges(event.pk, include_unreleased=True))
+        assert visible_challenge in all_challenges
+        assert hidden_challenge in all_challenges
+        assert locked_challenge in all_challenges
+
+    def test_visibility_in_mutable_fields(self):
+        """visibility is in the mutable fields set."""
+        from ctf.services.challenge import _CHALLENGE_MUTABLE_FIELDS
+
+        assert "visibility" in _CHALLENGE_MUTABLE_FIELDS
+
+    def test_default_visibility_is_visible(self, event):
+        """New challenges default to visible."""
+        c = CTFChallenge.objects.create(
+            event=event,
+            name="Default",
+            description="d",
+            category="web",
+            points=100,
+            flag_hash="x",
+        )
+        assert c.visibility == "visible"

@@ -75,7 +75,7 @@ class TestRangeStatusConsumerConnect:
 
         consumer.scope = authenticated_scope
 
-        with patch("cms.get_range_by_request_id", side_effect=CMSError("Not found")):
+        with patch("cms.services.get_range_by_request_id", side_effect=CMSError("Not found")):
             await consumer.connect()
 
         consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
@@ -86,7 +86,7 @@ class TestRangeStatusConsumerConnect:
         consumer.scope = authenticated_scope
         mock_range = MagicMock(status=ResourceStatus.READY.value)
 
-        with patch("cms.get_range_by_request_id", return_value=mock_range):
+        with patch("cms.services.get_range_by_request_id", return_value=mock_range):
             await consumer.connect()
 
         # Should accept connection

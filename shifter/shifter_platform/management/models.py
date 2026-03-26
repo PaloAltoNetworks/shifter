@@ -35,13 +35,14 @@ class UserProfile(models.Model):
         default="standard",
         help_text="User role type for routing and access control",
     )
-    active_ctf_event = models.ForeignKey(
-        "ctf.CTFEvent",
+    # Soft reference to ctf.CTFEvent (no cross-layer FK).
+    # DB column stays "active_ctf_event_id" for backward compatibility.
+    # UUIDField because CTFEvent.pk is a UUID.
+    active_ctf_event_id = models.UUIDField(
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
-        related_name="active_participants",
-        help_text="Active CTF event for participant users",
+        db_column="active_ctf_event_id",
+        help_text="Active CTF event ID for participant users",
     )
     deleted_at = models.DateTimeField(null=True, blank=True)
     anonymized_at = models.DateTimeField(null=True, blank=True)

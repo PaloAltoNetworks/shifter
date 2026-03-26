@@ -22,8 +22,6 @@ from ctf.models import CTFEvent, CTFParticipant, CTFTeam
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from management.models import UserProfile
-
 logger = logging.getLogger(__name__)
 
 
@@ -458,7 +456,7 @@ def _auto_register_participant(participant: CTFParticipant) -> None:
     )
 
 
-def _set_ctf_participant_profile(user: User, event: CTFEvent) -> UserProfile:
+def _set_ctf_participant_profile(user: User, event: CTFEvent):
     """Set CTF Participant group and active_ctf_event for a user.
 
     Adds the user to the CTF Participant group (additive — never removes
@@ -466,21 +464,19 @@ def _set_ctf_participant_profile(user: User, event: CTFEvent) -> UserProfile:
     """
     from django.contrib.auth.models import Group
 
-    from management.services import get_user_profile
+    from management.services import get_user_profile, set_active_ctf_event
     from shared.auth import CTF_PARTICIPANT_GROUP
 
     participant_group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
     user.groups.add(participant_group)
 
-    profile = get_user_profile(user)
-    profile.active_ctf_event = event
-    profile.save(update_fields=["active_ctf_event"])
+    set_active_ctf_event(user, event.pk)
     logger.info(
         "Set CTF participant profile for user %s (event %s)",
         user.email,
         event.pk,
     )
-    return profile
+    return get_user_profile(user)
 
 
 def _clear_ctf_participant_profile(user: User, event: CTFEvent) -> None:
@@ -491,7 +487,7 @@ def _clear_ctf_participant_profile(user: User, event: CTFEvent) -> None:
     """
     from django.contrib.auth.models import Group
 
-    from management.services import get_user_profile
+    from management.services import get_user_profile, set_active_ctf_event
     from shared.auth import CTF_PARTICIPANT_GROUP
 
     profile = get_user_profile(user)
@@ -499,8 +495,7 @@ def _clear_ctf_participant_profile(user: User, event: CTFEvent) -> None:
         participant_group = Group.objects.filter(name=CTF_PARTICIPANT_GROUP).first()
         if participant_group:
             user.groups.remove(participant_group)
-        profile.active_ctf_event = None
-        profile.save(update_fields=["active_ctf_event"])
+        set_active_ctf_event(user, None)
         logger.info(
             "Cleared CTF participant profile for user %s (event %s)",
             user.email,

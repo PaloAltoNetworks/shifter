@@ -297,6 +297,11 @@ class CTFEvent(CTFBaseModel):
         blank=True,
         help_text="Range configuration (agents_by_os, ngfw_enabled, etc.)",
     )
+    submission_cooldown_seconds = models.PositiveIntegerField(
+        default=0,
+        validators=[MaxValueValidator(300)],
+        help_text="Minimum seconds between flag submissions per participant per challenge (0 = no limit)",
+    )
 
     class Meta:
         db_table = "ctf_event"

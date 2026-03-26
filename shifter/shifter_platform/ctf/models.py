@@ -492,6 +492,17 @@ class CTFChallenge(CTFBaseModel):
         db_index=True,
         help_text="Challenge visibility state (visible, hidden, locked)",
     )
+    target_instance_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Instance name for connection info (e.g. 'windows-target')",
+    )
+    target_port = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Target port for this challenge (e.g. 80, 3389)",
+    )
 
     class Meta:
         db_table = "ctf_challenge"

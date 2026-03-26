@@ -333,6 +333,22 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
 
     prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant.id)
 
+    # Resolve per-challenge connection info from participant's range
+    connection_info = None
+    if challenge.target_instance_name and participant.range_status == "ready" and participant.user:
+        from ctf.bridges import cms_get_target_instances
+
+        instances = cms_get_target_instances(participant.user.pk)
+        for inst in instances:
+            if inst.get("name") == challenge.target_instance_name:
+                connection_info = {
+                    "host": inst["private_ip"],
+                    "port": challenge.target_port,
+                    "instance_name": inst["name"],
+                    "os_type": inst.get("os_type", ""),
+                }
+                break
+
     context = {
         "participant": participant,
         "challenge": challenge,
@@ -346,6 +362,7 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "challenge_files": challenge_files,
         "prereqs_met": prereqs_met,
         "unmet_challenges": unmet_challenges,
+        "connection_info": connection_info,
     }
     return render(request, "ctf/participant/challenge_detail.html", context)
 

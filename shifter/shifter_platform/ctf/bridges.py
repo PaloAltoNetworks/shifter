@@ -112,6 +112,13 @@ def cms_get_range_spec(range_instance_id: int) -> dict | None:
     return cms_services.get_range_spec_by_id(range_instance_id)
 
 
+def cms_get_target_instances(user_id: int) -> list[dict[str, str]]:
+    """Get non-attacker target instances for a user's range."""
+    import cms.services as cms_services
+
+    return cms_services.get_range_target_instances(user_id)
+
+
 def cms_list_scenarios(user: User) -> list[tuple[str, str]]:
     """List available scenarios as (id, name) tuples for form choices.
 

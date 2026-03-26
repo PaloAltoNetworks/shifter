@@ -42,6 +42,8 @@ _CHALLENGE_MUTABLE_FIELDS = frozenset(
         "release_time",
         "order",
         "visibility",
+        "target_instance_name",
+        "target_port",
     }
 )
 

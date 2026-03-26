@@ -222,6 +222,8 @@ class CTFChallengeForm(forms.ModelForm):
             "max_attempts",
             "release_time",
             "order",
+            "target_instance_name",
+            "target_port",
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),

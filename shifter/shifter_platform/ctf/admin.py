@@ -289,6 +289,12 @@ class CTFChallengeAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             },
         ),
         (
+            "Connection",
+            {
+                "fields": ["target_instance_name", "target_port"],
+            },
+        ),
+        (
             "Metadata",
             {
                 "fields": ["id", "created_at", "updated_at", "deleted_at"],

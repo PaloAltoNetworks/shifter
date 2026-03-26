@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.42.0] - 2026-03-26
+
+### Added
+- Per-challenge connection info with participant-specific IP resolution (CTF-115)
+- `target_instance_name` and `target_port` fields on CTFChallenge link challenges to specific range services
+- Challenge detail view resolves instance name against participant's provisioned range to display actual target IP
+
 ## [3.41.0] - 2026-03-26
 
 ### Added

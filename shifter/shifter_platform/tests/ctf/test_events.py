@@ -233,6 +233,7 @@ class TestCTFEventForm:
             "cleanup_delay_hours": 24,
             "range_spinup_minutes": 30,
             "team_mode": False,
+            "submission_cooldown_seconds": 0,
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -252,6 +253,7 @@ class TestCTFEventForm:
             "range_spinup_minutes": 30,
             "team_mode": True,
             "team_size_limit": 4,
+            "submission_cooldown_seconds": 0,
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -336,6 +338,7 @@ class TestCTFEventForm:
             "max_participants": 50,
             "team_mode": True,
             "team_size_limit": 5,
+            "submission_cooldown_seconds": 10,
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors

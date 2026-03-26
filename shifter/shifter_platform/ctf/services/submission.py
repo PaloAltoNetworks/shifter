@@ -11,6 +11,7 @@ from uuid import UUID
 
 from django.db import transaction
 from django.db.models import QuerySet
+from django.utils import timezone
 
 from ctf.enums import EventStatus
 from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
@@ -151,6 +152,31 @@ def submit_flag(
                 "attempts_used": attempt_count,
             },
         )
+
+    # Check submission rate limit (time-based cooldown)
+    cooldown = participant.event.submission_cooldown_seconds
+    if cooldown > 0:
+        last_submission_time = (
+            CTFSubmission.objects.filter(
+                participant=participant,
+                challenge=challenge,
+            )
+            .order_by("-submitted_at")
+            .values_list("submitted_at", flat=True)
+            .first()
+        )
+        if last_submission_time is not None:
+            elapsed = (timezone.now() - last_submission_time).total_seconds()
+            if elapsed < cooldown:
+                retry_after = int(cooldown - elapsed) + 1
+                raise CTFRateLimitError(
+                    f"Please wait {retry_after} seconds before submitting again",
+                    details={
+                        "challenge_id": str(challenge_id),
+                        "retry_after_seconds": retry_after,
+                        "cooldown_seconds": cooldown,
+                    },
+                )
 
     # Check if hint was used
     hint_used = _check_hint_used(participant, challenge)

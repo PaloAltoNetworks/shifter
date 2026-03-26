@@ -61,6 +61,7 @@ class CTFEventForm(forms.ModelForm):
             "max_participants",
             "team_mode",
             "team_size_limit",
+            "submission_cooldown_seconds",
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),

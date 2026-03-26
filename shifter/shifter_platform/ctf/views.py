@@ -2417,6 +2417,78 @@ def api_destroy_participant_range(request: HttpRequest, participant_id: UUID) ->
 @login_required
 @ctf_organizer_required
 @require_POST
+def api_stop_participant_range(request: HttpRequest, participant_id: UUID) -> JsonResponse:
+    """API: Stop (pause) a participant's range."""
+    from ctf.exceptions import CTFNotFoundError, CTFRangeError
+    from ctf.models import CTFParticipant
+    from ctf.services import range as range_service
+
+    try:
+        participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
+    except CTFParticipant.DoesNotExist:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    if participant.event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        result = range_service.stop_participant_range(participant_id)
+        return JsonResponse(result)
+    except (CTFNotFoundError, CTFRangeError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_start_participant_range(request: HttpRequest, participant_id: UUID) -> JsonResponse:
+    """API: Start (resume) a participant's stopped range."""
+    from ctf.exceptions import CTFNotFoundError, CTFRangeError
+    from ctf.models import CTFParticipant
+    from ctf.services import range as range_service
+
+    try:
+        participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
+    except CTFParticipant.DoesNotExist:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    if participant.event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        result = range_service.start_participant_range(participant_id)
+        return JsonResponse(result)
+    except (CTFNotFoundError, CTFRangeError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_restart_participant_range(request: HttpRequest, participant_id: UUID) -> JsonResponse:
+    """API: Restart a participant's range."""
+    from ctf.exceptions import CTFNotFoundError, CTFRangeError
+    from ctf.models import CTFParticipant
+    from ctf.services import range as range_service
+
+    try:
+        participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
+    except CTFParticipant.DoesNotExist:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    if participant.event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        result = range_service.restart_participant_range(participant_id)
+        return JsonResponse(result)
+    except (CTFNotFoundError, CTFRangeError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
 def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """API: Send invitation emails to all uninvited participants.
 

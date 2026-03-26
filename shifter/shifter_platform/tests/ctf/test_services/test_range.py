@@ -139,8 +139,8 @@ class TestProvisionEventRanges:
             patch.object(CTFParticipant, "objects") as mock_part_objects,
             patch.object(
                 range_service,
-                "provision_participant_range",
-                return_value={"status": "provisioning"},
+                "provision_participant_range_with_retry",
+                return_value={"status": "provisioning", "retries": 0},
             ) as mock_provision,
         ):
             mock_event_objects.get.return_value = Mock()
@@ -181,9 +181,10 @@ class TestProvisionEventRanges:
             patch.object(CTFParticipant, "objects") as mock_part_objects,
             patch.object(
                 range_service,
-                "provision_participant_range",
+                "provision_participant_range_with_retry",
                 side_effect=RuntimeError("fail"),
             ),
+            patch("ctf.services.notification.notify_organizer_provision_failure"),
         ):
             mock_event_objects.get.return_value = Mock()
             mock_part_objects.filter.return_value = [mock_participant]

@@ -200,6 +200,21 @@ api_patterns = [
         views.api_destroy_participant_range,
         name="api_destroy_participant_range",
     ),
+    path(
+        "api/participants/<uuid:participant_id>/range/stop/",
+        views.api_stop_participant_range,
+        name="api_stop_participant_range",
+    ),
+    path(
+        "api/participants/<uuid:participant_id>/range/start/",
+        views.api_start_participant_range,
+        name="api_start_participant_range",
+    ),
+    path(
+        "api/participants/<uuid:participant_id>/range/restart/",
+        views.api_restart_participant_range,
+        name="api_restart_participant_range",
+    ),
     # Scoreboard APIs
     path(
         "api/events/<uuid:event_id>/scoreboard/",

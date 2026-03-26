@@ -365,6 +365,9 @@ def activate_event(event: CTFEvent) -> bool:
 def complete_event(event: CTFEvent) -> bool:
     """End an active event (transition to ended).
 
+    If ``auto_cleanup`` is enabled, destroys all participant ranges
+    to prevent orphaned cloud resources.
+
     Args:
         event: The CTFEvent to end.
 
@@ -382,6 +385,12 @@ def complete_event(event: CTFEvent) -> bool:
             event.status,
         )
         return False
+
+    if event.auto_cleanup:
+        from ctf.services.range import cleanup_event_ranges
+
+        result = cleanup_event_ranges(event.pk)
+        logger.info("Auto-cleanup on event end %s: %s", event.id, result)
 
     logger.info("Ended CTF event %s", event.id)
     return True
@@ -431,6 +440,7 @@ def cancel_event(event: CTFEvent) -> bool:
     """Cancel a CTF event.
 
     Cancellation is valid from draft, registration, active, or paused states.
+    Always destroys all participant ranges to prevent orphaned cloud resources.
 
     Args:
         event: The CTFEvent to cancel.
@@ -451,6 +461,12 @@ def cancel_event(event: CTFEvent) -> bool:
             event.status,
         )
         return False
+
+    # Always destroy ranges on cancel — orphaned VMs waste money
+    from ctf.services.range import cleanup_event_ranges
+
+    result = cleanup_event_ranges(event.pk)
+    logger.info("Range cleanup on event cancel %s: %s", event.id, result)
 
     logger.info("Cancelled CTF event %s", event.id)
     return True

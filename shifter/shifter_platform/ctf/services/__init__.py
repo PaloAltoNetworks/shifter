@@ -74,7 +74,6 @@ from ctf.services.participant import (
 from ctf.services.range import (
     cleanup_event_ranges,
     destroy_participant_range,
-    get_range_access_url,
     get_range_status,
     provision_event_ranges,
     provision_participant_range,
@@ -135,7 +134,6 @@ __all__ = [
     "get_participant_rank",
     "get_participant_submissions",
     "get_prerequisites",
-    "get_range_access_url",
     "get_range_status",
     "get_scoreboard",
     "get_team_scoreboard",

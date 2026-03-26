@@ -1,21 +1,17 @@
-"""CTF signals for cross-domain event propagation.
+"""CTF signal receivers for CMS events.
 
-Provides a Django signal that CMS fires when a RangeInstance status changes,
-allowing CTF to update its cached CTFParticipant.range_status without
-direct coupling from CMS → CTF models.
+Connects to CMS signals to keep CTF data in sync with range status changes.
 """
 
 from __future__ import annotations
 
 import logging
 
-from django.dispatch import Signal, receiver
+from django.dispatch import receiver
+
+from cms.services import range_status_changed
 
 logger = logging.getLogger(__name__)
-
-# Fired by CMS handlers.py after updating RangeInstance.status.
-# Kwargs: range_instance_id (int), new_status (str), previous_status (str)
-range_status_changed = Signal()
 
 
 @receiver(range_status_changed)

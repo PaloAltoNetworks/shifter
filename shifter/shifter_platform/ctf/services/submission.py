@@ -11,6 +11,7 @@ from uuid import UUID
 
 from django.db import transaction
 from django.db.models import QuerySet
+from django.utils import timezone
 
 from ctf.enums import EventStatus
 from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
@@ -165,8 +166,6 @@ def submit_flag(
             .first()
         )
         if last_submission_time is not None:
-            from django.utils import timezone
-
             elapsed = (timezone.now() - last_submission_time).total_seconds()
             if elapsed < cooldown:
                 retry_after = int(cooldown - elapsed) + 1

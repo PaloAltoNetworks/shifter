@@ -462,7 +462,7 @@ class TestCancelRange:
 
         # View does `from cms import cancel_range` locally — mock at source
         with patch(
-            "cms.cancel_range",
+            "cms.services.cancel_range",
             side_effect=CMSError("Range not found"),
         ):
             response = views.cancel_range(request)
@@ -479,7 +479,7 @@ class TestCancelRange:
         request.user = mock_user
 
         with patch(
-            "cms.cancel_range",
+            "cms.services.cancel_range",
         ) as mock_cancel:
             response = views.cancel_range(request)
 
@@ -496,7 +496,7 @@ class TestCancelRange:
         )
         request.user = mock_user
 
-        with patch("cms.cancel_range") as mock_cancel:
+        with patch("cms.services.cancel_range") as mock_cancel:
             views.cancel_range(request)
 
         mock_cancel.assert_called_once_with(mock_user, 42)
@@ -511,7 +511,7 @@ class TestCancelRange:
         request.user = other_user
 
         with patch(
-            "cms.cancel_range",
+            "cms.services.cancel_range",
             side_effect=CMSError("Range not found"),
         ):
             response = views.cancel_range(request)
@@ -544,7 +544,7 @@ class TestDestroyRange:
         request.user = mock_user
 
         with patch(
-            "cms.destroy_range",
+            "cms.services.destroy_range",
             side_effect=CMSError("Range not found"),
         ):
             response = views.destroy_range(request)
@@ -559,7 +559,7 @@ class TestDestroyRange:
         )
         request.user = mock_user
 
-        with patch("cms.destroy_range") as mock_destroy:
+        with patch("cms.services.destroy_range") as mock_destroy:
             response = views.destroy_range(request)
 
         assert response.status_code == 200
@@ -576,7 +576,7 @@ class TestDestroyRange:
         )
         request.user = mock_user
 
-        with patch("cms.destroy_range") as mock_destroy:
+        with patch("cms.services.destroy_range") as mock_destroy:
             response = views.destroy_range(request)
 
         assert response.status_code == 200

@@ -17,6 +17,8 @@ from shared.constants import USER_CANNOT_BE_NONE
 from .models import ActivityLog, UserProfile
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
@@ -200,3 +202,15 @@ def update_cognito_sub(user: User, cognito_sub: str) -> None:
     except Exception:
         logger.error("Failed to update cognito_sub for user %s", user.email)
         raise
+
+
+def set_active_ctf_event(user: User, event_id: UUID | None) -> None:
+    """Set or clear the active CTF event for a user.
+
+    Args:
+        user: The user to update.
+        event_id: CTF event UUID PK to set, or None to clear.
+    """
+    profile = get_user_profile(user)
+    profile.active_ctf_event_id = event_id
+    profile.save(update_fields=["active_ctf_event_id"])

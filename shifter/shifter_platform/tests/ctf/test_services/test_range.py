@@ -222,66 +222,6 @@ class TestGetRangeStatus:
         mock_participant.save.assert_called_once()
 
 
-class TestGetRangeAccessUrl:
-    """Tests for get_range_access_url."""
-
-    def test_not_found(self, _patch_participant_not_found):
-        """Raises CTFNotFoundError for nonexistent participant."""
-        with pytest.raises(CTFNotFoundError):
-            range_service.get_range_access_url(uuid4())
-
-    @pytest.mark.usefixtures("_patch_participant_get")
-    def test_no_range(self, mock_participant):
-        """Raises CTFRangeError when no range assigned."""
-        with pytest.raises(CTFRangeError, match="No range assigned"):
-            range_service.get_range_access_url(mock_participant.pk)
-
-    @pytest.mark.usefixtures("_patch_participant_get")
-    def test_range_not_ready(self, mock_participant):
-        """Raises CTFRangeError when range not ready."""
-        mock_participant.range_instance_id = 42
-        mock_participant.range_status = "provisioning"
-
-        with pytest.raises(CTFRangeError, match="not ready"):
-            range_service.get_range_access_url(mock_participant.pk)
-
-    @pytest.mark.usefixtures("_patch_participant_get")
-    def test_generates_url(self, mock_participant):
-        """Returns Guacamole URL when range is ready."""
-        mock_participant.range_instance_id = 42
-        mock_participant.range_status = "ready"
-
-        mock_conn_info = {
-            "private_ip": "10.0.1.5",
-            "os_type": "kali",
-            "connection_name": "ctf-42",
-            "rdp_username": "kali",
-            "rdp_password": "kali",
-            "ssh_key": None,
-            "sftp_root_directory": "/home/kali",
-        }
-
-        with (
-            patch("ctf.bridges.get_range_connection_info", return_value=mock_conn_info),
-            patch(
-                "ctf.bridges.get_guacamole_rdp_url",
-                return_value="https://guac.example.com/session",
-            ) as mock_guac,
-        ):
-            url = range_service.get_range_access_url(mock_participant.pk)
-
-        assert url == "https://guac.example.com/session"
-        mock_guac.assert_called_once_with(
-            username=mock_participant.user.email,
-            connection_name="ctf-42",
-            hostname="10.0.1.5",
-            rdp_username="kali",
-            rdp_password="kali",  # nosec B106
-            sftp_root_directory="/home/kali",
-            sftp_private_key=None,
-        )
-
-
 class TestCleanupEventRanges:
     """Tests for cleanup_event_ranges."""
 

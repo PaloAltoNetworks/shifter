@@ -363,24 +363,12 @@ def participant_range(request: HttpRequest) -> HttpResponse:
     if not participant:
         return render(request, "ctf/participant/range.html", {})
 
-    # Look up provisioned instances (with IPs) from the engine Range
+    # Look up provisioned instances (with IPs) via CMS services
     target_instances = []
-    if participant.range_instance_id and participant.range_status == "ready":
-        from engine.models import Range
+    if participant.range_instance_id and participant.range_status == "ready" and participant.user:
+        import cms.services as cms_services
 
-        try:
-            engine_range = Range.objects.get(id=participant.range_instance_id)
-            for inst in engine_range.provisioned_instances or []:
-                if inst.get("role") != "attacker":
-                    target_instances.append(
-                        {
-                            "name": inst.get("name", ""),
-                            "private_ip": inst.get("private_ip", ""),
-                            "os_type": inst.get("os_type", ""),
-                        }
-                    )
-        except Range.DoesNotExist:
-            pass
+        target_instances = cms_services.get_range_target_instances(participant.user.pk)
 
     context = {
         "participant": participant,
@@ -2139,30 +2127,20 @@ def api_range_status(request: HttpRequest) -> JsonResponse:
 @ctf_participant_required
 @require_POST
 def api_range_access(request: HttpRequest) -> JsonResponse:
-    """API: Get range access URL."""
-    from ctf.exceptions import CTFNotFoundError, CTFRangeError
-    from ctf.models import CTFParticipant
+    """API: Get range access URL.
 
-    participant = (
-        CTFParticipant.objects.filter(
-            user=_get_user(request),
-        )
-        .order_by("-event__event_start")
-        .first()
+    Delegates to mission_control's Guacamole RDP endpoint.
+    CTF participants are standard users with ranges — the platform's
+    existing RDP access flow works for them directly.
+    """
+    from django.urls import reverse
+
+    return JsonResponse(
+        {
+            "redirect": reverse("mission_control:guacamole_rdp_url"),
+            "message": "Use the mission_control RDP endpoint directly.",
+        }
     )
-
-    if not participant:
-        return JsonResponse({"error": "No active participation found"}, status=404)
-
-    from ctf.services import range as range_service
-
-    try:
-        url = range_service.get_range_access_url(participant.pk)
-        return JsonResponse({"url": url})
-    except CTFNotFoundError:
-        return JsonResponse({"error": "Participant not found"}, status=404)
-    except CTFRangeError as e:
-        return JsonResponse({"error": str(e)}, status=400)
 
 
 @login_required

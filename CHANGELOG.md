@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.41.0] - 2026-03-26
+
+### Added
+- Configurable time-based submission rate limiting per event (CTF-114)
+- `submission_cooldown_seconds` field on CTFEvent controls minimum delay between flag submissions per participant per challenge
+- Rate-limited responses include `Retry-After` header and retry details for client display
+
 ## [3.40.0] - 2026-03-26
 
 ### Added

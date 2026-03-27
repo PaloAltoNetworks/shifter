@@ -22,6 +22,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from ctf.bridges import get_user_role
@@ -333,6 +334,18 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
 
     prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant.id)
 
+    # Calculate timeout state for attempt limits
+    attempt_limit_mode = participant.event.attempt_limit_mode
+    attempts_exhausted = challenge.max_attempts > 0 and attempt_count >= challenge.max_attempts
+    timeout_retry_after = None
+    if attempts_exhausted and attempt_limit_mode == "timeout":
+        last_sub = submissions.first()
+        if last_sub:
+            cooldown = participant.event.attempt_limit_cooldown_seconds
+            elapsed = (timezone.now() - last_sub.submitted_at).total_seconds()
+            if elapsed < cooldown:
+                timeout_retry_after = int(cooldown - elapsed) + 1
+
     context = {
         "participant": participant,
         "challenge": challenge,
@@ -346,6 +359,8 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "challenge_files": challenge_files,
         "prereqs_met": prereqs_met,
         "unmet_challenges": unmet_challenges,
+        "attempt_limit_mode": attempt_limit_mode,
+        "timeout_retry_after": timeout_retry_after,
     }
     return render(request, "ctf/participant/challenge_detail.html", context)
 
@@ -1573,6 +1588,9 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "team_size_limit": event.team_size_limit,
                 "range_config": event.range_config,
                 "range_spinup_minutes": event.range_spinup_minutes,
+                "submission_cooldown_seconds": event.submission_cooldown_seconds,
+                "attempt_limit_mode": event.attempt_limit_mode,
+                "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
             }
         )
 

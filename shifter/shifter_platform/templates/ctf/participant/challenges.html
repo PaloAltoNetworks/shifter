@@ -21,6 +21,23 @@
         {% endfor %}
     </div>
 
+    <!-- Tag Filter -->
+    {% if event_tags %}
+    <div class="mb-4">
+        <small class="text-muted me-2">Tags:</small>
+        <a href="{% url 'ctf:challenges' %}{% if category_filter %}?category={{ category_filter }}{% endif %}"
+           class="btn btn-sm {% if not tag_filter %}btn-secondary{% else %}btn-outline-secondary{% endif %} me-1 mb-1">
+            All
+        </a>
+        {% for tag in event_tags %}
+        <a href="{% url 'ctf:challenges' %}?tag={{ tag.name|urlencode }}{% if category_filter %}&category={{ category_filter }}{% endif %}"
+           class="btn btn-sm {% if tag_filter == tag.name %}btn-secondary{% else %}btn-outline-secondary{% endif %} me-1 mb-1">
+            {{ tag.name }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <!-- Challenges by Category -->
     {% for category, challenges in challenges_by_category.items %}
     <div class="mb-4">
@@ -51,7 +68,10 @@
                                 <span class="badge bg-dark">Expert</span>
                                 {% endif %}
                             </div>
-                            <small class="text-muted">{{ challenge.solve_count }} solve{{ challenge.solve_count|pluralize }}</small>
+                            {% for tag in challenge.tags.all %}
+                            <span class="badge bg-secondary">{{ tag.name }}</span>
+                            {% endfor %}
+                            <small class="text-muted d-block mt-1">{{ challenge.solve_count }} solve{{ challenge.solve_count|pluralize }}</small>
                             {% if challenge.is_locked %}
                             <div class="mt-1">
                                 <small class="text-warning">

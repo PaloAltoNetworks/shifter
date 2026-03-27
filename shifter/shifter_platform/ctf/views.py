@@ -236,12 +236,17 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
         return render(request, "ctf/participant/challenges.html", {})
 
     event = participant.event
-    challenges = get_available_challenges(event.id)
+    challenges = get_available_challenges(event.id).prefetch_related("tags")
 
     # Apply category filter if provided
     category_filter = request.GET.get("category")
     if category_filter:
         challenges = challenges.filter(category=category_filter)
+
+    # Apply tag filter if provided
+    tag_filter = request.GET.get("tag")
+    if tag_filter:
+        challenges = challenges.filter(tags__name=tag_filter).distinct()
 
     # Build set of solved challenge IDs
     correct_submissions = get_participant_submissions(participant.id).filter(is_correct=True)
@@ -276,6 +281,17 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
         challenges_by_category[challenge.category].append(challenge)
 
     from ctf.enums import ChallengeCategory
+    from ctf.models import CTFChallengeTag
+
+    # Get all tags used by challenges in this event
+    event_tags = (
+        CTFChallengeTag.objects.filter(
+            event=event,
+            challenges__isnull=False,
+        )
+        .distinct()
+        .order_by("name")
+    )
 
     context = {
         "participant": participant,
@@ -283,7 +299,9 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
         "challenges": challenge_list,
         "challenges_by_category": dict(challenges_by_category),
         "category_filter": category_filter,
+        "tag_filter": tag_filter,
         "categories": ChallengeCategory,
+        "event_tags": event_tags,
         "solved_ids": solved_ids,
         "locked_ids": locked_ids,
     }
@@ -1659,7 +1677,7 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
         return forbidden
 
     if request.method == "GET":
-        challenges = list_challenges_for_event(event_id)
+        challenges = list_challenges_for_event(event_id).prefetch_related("tags")
         data = [
             {
                 "id": str(c.id),
@@ -1668,6 +1686,7 @@ def api_challenge_list(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "points": c.points,
                 "difficulty": c.difficulty,
                 "order": c.order,
+                "tags": list(c.tags.values_list("name", flat=True)),
             }
             for c in challenges
         ]
@@ -1734,6 +1753,7 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
                 "max_attempts": challenge.max_attempts,
                 "order": challenge.order,
                 "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
+                "tags": list(challenge.tags.values_list("name", flat=True)),
             }
         )
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.43.0] - 2026-03-27
+
+### Added
+- Freeform metadata tags on CTF challenges for secondary filtering (CTF-113)
+- `CTFChallengeTag` model scoped to events with unique constraint per event
+- Tag filtering on participant challenge listing via `?tag=` query parameter
+- Tags displayed as badges on challenge cards and admin detail pages
+- Tags included in challenge API responses (list and detail)
+- Comma-separated tag input on admin challenge form
+
 ## [3.42.0] - 2026-03-26
 
 ### Added

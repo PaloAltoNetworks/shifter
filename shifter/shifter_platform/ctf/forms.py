@@ -210,6 +210,13 @@ class CTFChallengeForm(forms.ModelForm):
         help_text="Enter the flag value (will be hashed for storage)",
     )
 
+    # Comma-separated tag names (M2M handled in save)
+    tag_list = forms.CharField(
+        max_length=500,
+        required=False,
+        help_text="Comma-separated tags (e.g. XDR, Linux, Windows)",
+    )
+
     class Meta:
         model = CTFChallenge
         fields = [
@@ -251,6 +258,10 @@ class CTFChallengeForm(forms.ModelForm):
                 "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M",
             ]
+
+        # Populate tag_list from existing M2M on edit
+        if self.instance.pk and not self.instance._state.adding:
+            self.fields["tag_list"].initial = ", ".join(self.instance.tags.values_list("name", flat=True))
 
         # Flag is required for new challenges
         if self.instance._state.adding:
@@ -337,6 +348,16 @@ class CTFChallengeForm(forms.ModelForm):
                         case_sensitive=True,
                         order=0,
                     )
+
+            # Handle tags (M2M)
+            tag_list_str = self.cleaned_data.get("tag_list", "")
+            if tag_list_str is not None:
+                from ctf.services.challenge import _resolve_tags
+
+                tag_names = [t.strip() for t in tag_list_str.split(",") if t.strip()]
+                event = self.event or challenge.event
+                tag_objects = _resolve_tags(event, tag_names)
+                challenge.tags.set(tag_objects)
 
         return challenge
 

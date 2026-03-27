@@ -485,6 +485,16 @@
                 <span class="detail-value">{% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}{% else %}Immediate{% endif %}</span>
             </div>
             <div class="detail-row">
+                <span class="detail-label">Tags</span>
+                <span class="detail-value">
+                    {% for tag in challenge.tags.all %}
+                    <span class="badge bg-secondary">{{ tag.name }}</span>
+                    {% empty %}
+                    <span class="text-muted">None</span>
+                    {% endfor %}
+                </span>
+            </div>
+            <div class="detail-row">
                 <span class="detail-label">Display Order</span>
                 <span class="detail-value">{{ challenge.order }}</span>
             </div>

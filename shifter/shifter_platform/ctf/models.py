@@ -504,6 +504,12 @@ class CTFChallenge(CTFBaseModel):
         db_index=True,
         help_text="Challenge visibility state (visible, hidden, locked)",
     )
+    tags: models.ManyToManyField[CTFChallengeTag, CTFChallengeTag] = models.ManyToManyField(
+        "CTFChallengeTag",
+        blank=True,
+        related_name="challenges",
+        help_text="Freeform metadata tags (e.g. XDR, Linux, Windows)",
+    )
 
     class Meta:
         db_table = "ctf_challenge"
@@ -585,6 +591,47 @@ class CTFChallenge(CTFBaseModel):
             reduction = (self.points * self.hint_penalty) // 100
             return max(1, self.points - reduction)
         return self.points
+
+
+class CTFChallengeTag(CTFBaseModel):
+    """Freeform metadata tag for challenges, scoped to an event.
+
+    Tags provide a secondary organizational axis orthogonal to categories.
+    A tag like "XDR" or "Linux" can be applied to challenges across
+    different categories within the same event.
+
+    Attributes:
+        event: The event this tag belongs to.
+        name: Tag label (e.g. "XDR", "Linux", "Windows").
+    """
+
+    event = models.ForeignKey(
+        CTFEvent,
+        on_delete=models.CASCADE,
+        related_name="tags",
+        help_text="Event this tag belongs to",
+    )
+    name = models.CharField(
+        max_length=50,
+        help_text="Tag label (e.g. XDR, Linux, Windows)",
+    )
+
+    class Meta:
+        db_table = "ctf_challenge_tag"
+        ordering = ["name"]
+        verbose_name = "CTF Challenge Tag"
+        verbose_name_plural = "CTF Challenge Tags"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "name"],
+                condition=Q(deleted_at__isnull=True),
+                name="unique_active_tag_name_per_event",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        """Return tag name."""
+        return self.name
 
 
 class CTFChallengeFile(CTFBaseModel):

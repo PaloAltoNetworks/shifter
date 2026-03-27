@@ -24,6 +24,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _count_attempts_in_current_window(
+    submissions_qs: QuerySet[CTFSubmission],
+    cooldown_seconds: int,
+) -> int:
+    """Count submissions in the current timeout window.
+
+    Walks backwards through submissions (newest first). Any gap >= cooldown
+    between consecutive submissions marks a window reset — only submissions
+    after the most recent such gap count toward the current window.
+    """
+    timestamps = list(submissions_qs.order_by("-submitted_at").values_list("submitted_at", flat=True))
+    if not timestamps:
+        return 0
+
+    # Also check gap from now to most recent submission
+    elapsed_since_last = (timezone.now() - timestamps[0]).total_seconds()
+    if elapsed_since_last >= cooldown_seconds:
+        return 0  # window has reset
+
+    count = 1  # the most recent submission
+    for i in range(len(timestamps) - 1):
+        gap = (timestamps[i] - timestamps[i + 1]).total_seconds()
+        if gap >= cooldown_seconds:
+            break  # found a reset boundary
+        count += 1
+
+    return count
+
+
 def submit_flag(
     participant_id: UUID,
     challenge_id: UUID,
@@ -138,20 +167,51 @@ def submit_flag(
         )
 
     # Check attempt limit
-    attempt_count = CTFSubmission.objects.filter(
+    all_submissions = CTFSubmission.objects.filter(
         participant=participant,
         challenge=challenge,
-    ).count()
+    )
+    total_attempt_count = all_submissions.count()
 
-    if challenge.max_attempts > 0 and attempt_count >= challenge.max_attempts:
-        raise CTFRateLimitError(
-            f"Maximum attempts ({challenge.max_attempts}) exceeded",
-            details={
-                "challenge_id": str(challenge_id),
-                "max_attempts": challenge.max_attempts,
-                "attempts_used": attempt_count,
-            },
-        )
+    if challenge.max_attempts > 0 and event.attempt_limit_mode == "timeout":
+        # Timeout mode: count only submissions in the current window.
+        # A gap >= cooldown between submissions resets the window.
+        attempt_cooldown = event.attempt_limit_cooldown_seconds
+        attempt_count = _count_attempts_in_current_window(all_submissions, attempt_cooldown)
+
+        if attempt_count >= challenge.max_attempts:
+            last_submission_time = (
+                all_submissions.order_by("-submitted_at").values_list("submitted_at", flat=True).first()
+            )
+            if last_submission_time is None:
+                # Defensive: should be unreachable since attempt_count > 0
+                attempt_count = 0
+            else:
+                elapsed = (timezone.now() - last_submission_time).total_seconds()
+                retry_after = int(attempt_cooldown - elapsed) + 1
+                raise CTFRateLimitError(
+                    f"Maximum attempts ({challenge.max_attempts}) reached. Try again in {retry_after} seconds.",
+                    details={
+                        "challenge_id": str(challenge_id),
+                        "max_attempts": challenge.max_attempts,
+                        "attempts_used": attempt_count,
+                        "retry_after_seconds": retry_after,
+                        "attempt_limit_mode": "timeout",
+                    },
+                )
+    else:
+        attempt_count = total_attempt_count
+        if challenge.max_attempts > 0 and attempt_count >= challenge.max_attempts:
+            # Lockout mode — permanent block
+            raise CTFRateLimitError(
+                f"Maximum attempts ({challenge.max_attempts}) exceeded",
+                details={
+                    "challenge_id": str(challenge_id),
+                    "max_attempts": challenge.max_attempts,
+                    "attempts_used": total_attempt_count,
+                    "attempt_limit_mode": "lockout",
+                },
+            )
 
     # Check submission rate limit (time-based cooldown)
     cooldown = participant.event.submission_cooldown_seconds

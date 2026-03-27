@@ -1041,3 +1041,121 @@ class TestChallengeVisibility:
             flag_hash="x",
         )
         assert c.visibility == "visible"
+
+
+# =============================================================================
+# Challenge Tag Tests (CTF-113)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestChallengeTags:
+    """Tests for challenge tag management (CTF-113)."""
+
+    def test_create_challenge_with_tags(self, ctf_event_draft):
+        """Creating a challenge with tags attaches them."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Tagged Challenge",
+                "description": "Has tags",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "difficulty": ChallengeDifficulty.EASY.value,
+                "flag": "FLAG{tagged}",
+                "tags": ["XDR", "Linux"],
+            },
+        )
+        tag_names = list(challenge.tags.values_list("name", flat=True))
+        assert sorted(tag_names) == ["Linux", "XDR"]
+
+    def test_update_challenge_tags(self, ctf_event_draft):
+        """Updating tags replaces the existing set."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Tag Update",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{update}",
+                "tags": ["Linux", "Windows"],
+            },
+        )
+        updated = update_challenge(challenge.id, {"tags": ["XDR"]})
+        assert list(updated.tags.values_list("name", flat=True)) == ["XDR"]
+
+    def test_tags_reusable_across_challenges(self, ctf_event_draft):
+        """Same tag can be applied to multiple challenges in the same event."""
+        c1 = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Challenge A",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{a}",
+                "tags": ["XDR"],
+            },
+        )
+        c2 = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Challenge B",
+                "description": "d",
+                "category": ChallengeCategory.CRYPTO.value,
+                "points": 200,
+                "flag": "FLAG{b}",
+                "tags": ["XDR"],
+            },
+        )
+        # Both challenges share the same tag object
+        assert c1.tags.first().pk == c2.tags.first().pk
+
+    def test_tag_unique_per_event(self, ctf_event_draft):
+        """Tags with the same name in the same event resolve to one object."""
+        from ctf.models import CTFChallengeTag
+
+        create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "First",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{1}",
+                "tags": ["XDR", "XDR"],  # duplicate in same call
+            },
+        )
+        assert CTFChallengeTag.objects.filter(event=ctf_event_draft, name="XDR").count() == 1
+
+    def test_create_challenge_without_tags(self, ctf_event_draft):
+        """Challenges without tags have empty tag set."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "No Tags",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{notags}",
+            },
+        )
+        assert challenge.tags.count() == 0
+
+    def test_clear_tags_with_empty_list(self, ctf_event_draft):
+        """Passing empty tags list clears all tags."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Clear Tags",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{clear}",
+                "tags": ["XDR", "Linux"],
+            },
+        )
+        assert challenge.tags.count() == 2
+        updated = update_challenge(challenge.id, {"tags": []})
+        assert updated.tags.count() == 0

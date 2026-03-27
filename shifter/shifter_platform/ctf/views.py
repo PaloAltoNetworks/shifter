@@ -22,6 +22,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from ctf.bridges import get_user_role
@@ -349,6 +350,25 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
                 }
                 break
 
+    # Calculate timeout state for attempt limits
+    attempt_limit_mode = participant.event.attempt_limit_mode
+    timeout_retry_after = None
+    if attempt_limit_mode == "timeout" and challenge.max_attempts > 0:
+        from ctf.services.submission import _count_attempts_in_current_window
+
+        attempt_cooldown = participant.event.attempt_limit_cooldown_seconds
+        attempt_count = _count_attempts_in_current_window(submissions, attempt_cooldown)
+        if attempt_count >= challenge.max_attempts:
+            last_sub = submissions.first()
+            if last_sub:
+                elapsed = (timezone.now() - last_sub.submitted_at).total_seconds()
+                if elapsed < attempt_cooldown:
+                    timeout_retry_after = int(attempt_cooldown - elapsed) + 1
+
+    attempts_remaining = None
+    if challenge.max_attempts:
+        attempts_remaining = max(0, challenge.max_attempts - attempt_count)
+
     context = {
         "participant": participant,
         "challenge": challenge,
@@ -358,11 +378,13 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "attempt_count": attempt_count,
         "hint_used": hint_used,
         "max_attempts": challenge.max_attempts,
-        "attempts_remaining": (challenge.max_attempts - attempt_count) if challenge.max_attempts else None,
+        "attempts_remaining": attempts_remaining,
         "challenge_files": challenge_files,
         "prereqs_met": prereqs_met,
         "unmet_challenges": unmet_challenges,
         "connection_info": connection_info,
+        "attempt_limit_mode": attempt_limit_mode,
+        "timeout_retry_after": timeout_retry_after,
     }
     return render(request, "ctf/participant/challenge_detail.html", context)
 
@@ -1590,6 +1612,9 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "team_size_limit": event.team_size_limit,
                 "range_config": event.range_config,
                 "range_spinup_minutes": event.range_spinup_minutes,
+                "submission_cooldown_seconds": event.submission_cooldown_seconds,
+                "attempt_limit_mode": event.attempt_limit_mode,
+                "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
             }
         )
 

@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-challenge connection info with participant-specific IP resolution (CTF-115)
 - `target_instance_name` and `target_port` fields on CTFChallenge link challenges to specific range services
 - Challenge detail view resolves instance name against participant's provisioned range to display actual target IP
+- Configurable attempt limit behavior per event: lockout (permanent) or timeout (temporary with cooldown) (CTF-112)
+- `attempt_limit_mode` field on CTFEvent selects behavior when max attempts reached
+- `attempt_limit_cooldown_seconds` field on CTFEvent controls timeout duration before attempts reset
+- Submission Limits section in event admin form for managing cooldown and attempt limit settings
+- Attempt limit fields exposed in event API GET response
 
 ## [3.41.0] - 2026-03-26
 

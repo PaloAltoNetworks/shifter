@@ -26,6 +26,7 @@ from django.utils import timezone
 
 from ctf.enums import (
     EVENT_TERMINAL_STATUSES,
+    AttemptLimitMode,
     ChallengeCategory,
     ChallengeDifficulty,
     ChallengeVisibility,
@@ -301,6 +302,17 @@ class CTFEvent(CTFBaseModel):
         default=0,
         validators=[MaxValueValidator(300)],
         help_text="Minimum seconds between flag submissions per participant per challenge (0 = no limit)",
+    )
+    attempt_limit_mode = models.CharField(
+        max_length=20,
+        choices=AttemptLimitMode.choices(),
+        default=AttemptLimitMode.LOCKOUT.value,
+        help_text="Behavior when max attempts reached: lockout (permanent) or timeout (temporary with cooldown)",
+    )
+    attempt_limit_cooldown_seconds = models.PositiveIntegerField(
+        default=300,
+        validators=[MaxValueValidator(3600)],
+        help_text="Seconds before attempts reset when using timeout mode (0-3600)",
     )
 
     class Meta:

@@ -39,6 +39,9 @@ _EVENT_MUTABLE_FIELDS = frozenset(
         "team_size_limit",
         "range_spinup_minutes",
         "range_config",
+        "submission_cooldown_seconds",
+        "attempt_limit_mode",
+        "attempt_limit_cooldown_seconds",
     }
 )
 

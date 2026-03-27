@@ -220,6 +220,24 @@ class ScheduledTaskStatus(str, Enum):
         return [(s.value, s.name.title()) for s in cls]
 
 
+class AttemptLimitMode(str, Enum):
+    """Behavior when a participant reaches the max submission attempts for a challenge.
+
+    LOCKOUT: Permanently locked out of that challenge.
+    TIMEOUT: Locked out for a configurable cooldown period, then attempts reset.
+    """
+
+    LOCKOUT = "lockout"
+    TIMEOUT = "timeout"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        return [(m.value, m.name.title()) for m in cls]
+
+
 class UserType(str, Enum):
     """User types for the platform."""
 

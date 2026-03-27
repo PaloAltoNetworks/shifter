@@ -27,12 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_tags(event: CTFEvent, tag_names: list[str]) -> list[CTFChallengeTag]:
-    """Get-or-create CTFChallengeTag objects for the given names within an event."""
+    """Get-or-create CTFChallengeTag objects for the given names within an event.
+
+    Tag names are normalized to lowercase to prevent duplicates like "XDR" vs "xdr".
+    """
     tags = []
+    seen: set[str] = set()
     for name in tag_names:
-        name = name.strip()
-        if not name:
+        name = name.strip().lower()
+        if not name or name in seen:
             continue
+        seen.add(name)
         tag, _ = CTFChallengeTag.objects.get_or_create(
             event=event,
             name=name,

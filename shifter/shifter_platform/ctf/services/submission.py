@@ -176,27 +176,29 @@ def submit_flag(
     if challenge.max_attempts > 0 and event.attempt_limit_mode == "timeout":
         # Timeout mode: count only submissions in the current window.
         # A gap >= cooldown between submissions resets the window.
-        cooldown = event.attempt_limit_cooldown_seconds
-        attempt_count = _count_attempts_in_current_window(all_submissions, cooldown)
+        attempt_cooldown = event.attempt_limit_cooldown_seconds
+        attempt_count = _count_attempts_in_current_window(all_submissions, attempt_cooldown)
 
         if attempt_count >= challenge.max_attempts:
             last_submission_time = (
                 all_submissions.order_by("-submitted_at").values_list("submitted_at", flat=True).first()
             )
-            # attempt_count >= max_attempts guarantees at least one submission exists
-            assert last_submission_time is not None
-            elapsed = (timezone.now() - last_submission_time).total_seconds()
-            retry_after = int(cooldown - elapsed) + 1
-            raise CTFRateLimitError(
-                f"Maximum attempts ({challenge.max_attempts}) reached. Try again in {retry_after} seconds.",
-                details={
-                    "challenge_id": str(challenge_id),
-                    "max_attempts": challenge.max_attempts,
-                    "attempts_used": attempt_count,
-                    "retry_after_seconds": retry_after,
-                    "attempt_limit_mode": "timeout",
-                },
-            )
+            if last_submission_time is None:
+                # Defensive: should be unreachable since attempt_count > 0
+                attempt_count = 0
+            else:
+                elapsed = (timezone.now() - last_submission_time).total_seconds()
+                retry_after = int(attempt_cooldown - elapsed) + 1
+                raise CTFRateLimitError(
+                    f"Maximum attempts ({challenge.max_attempts}) reached. Try again in {retry_after} seconds.",
+                    details={
+                        "challenge_id": str(challenge_id),
+                        "max_attempts": challenge.max_attempts,
+                        "attempts_used": attempt_count,
+                        "retry_after_seconds": retry_after,
+                        "attempt_limit_mode": "timeout",
+                    },
+                )
     else:
         attempt_count = total_attempt_count
         if challenge.max_attempts > 0 and attempt_count >= challenge.max_attempts:

@@ -236,7 +236,7 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
         return render(request, "ctf/participant/challenges.html", {})
 
     event = participant.event
-    challenges = get_available_challenges(event.id)
+    challenges = get_available_challenges(event.id).prefetch_related("tags")
 
     # Apply category filter if provided
     category_filter = request.GET.get("category")

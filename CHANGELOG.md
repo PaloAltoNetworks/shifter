@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.42.0] - 2026-03-26
+
+### Added
+- Configurable attempt limit behavior per event: lockout (permanent) or timeout (temporary with cooldown) (CTF-112)
+- `attempt_limit_mode` field on CTFEvent selects behavior when max attempts reached
+- `attempt_limit_cooldown_seconds` field on CTFEvent controls timeout duration before attempts reset
+- Submission Limits section in event admin form for managing cooldown and attempt limit settings
+- Attempt limit fields exposed in event API GET response
+
 ## [3.41.0] - 2026-03-26
 
 ### Added

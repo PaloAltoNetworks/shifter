@@ -30,7 +30,7 @@
             All
         </a>
         {% for tag in event_tags %}
-        <a href="{% url 'ctf:challenges' %}?tag={{ tag.name }}{% if category_filter %}&category={{ category_filter }}{% endif %}"
+        <a href="{% url 'ctf:challenges' %}?tag={{ tag.name|urlencode }}{% if category_filter %}&category={{ category_filter }}{% endif %}"
            class="btn btn-sm {% if tag_filter == tag.name %}btn-secondary{% else %}btn-outline-secondary{% endif %} me-1 mb-1">
             {{ tag.name }}
         </a>

@@ -1067,7 +1067,7 @@ class TestChallengeTags:
             },
         )
         tag_names = list(challenge.tags.values_list("name", flat=True))
-        assert sorted(tag_names) == ["Linux", "XDR"]
+        assert sorted(tag_names) == ["linux", "xdr"]
 
     def test_update_challenge_tags(self, ctf_event_draft):
         """Updating tags replaces the existing set."""
@@ -1083,7 +1083,7 @@ class TestChallengeTags:
             },
         )
         updated = update_challenge(challenge.id, {"tags": ["XDR"]})
-        assert list(updated.tags.values_list("name", flat=True)) == ["XDR"]
+        assert list(updated.tags.values_list("name", flat=True)) == ["xdr"]
 
     def test_tags_reusable_across_challenges(self, ctf_event_draft):
         """Same tag can be applied to multiple challenges in the same event."""
@@ -1127,7 +1127,7 @@ class TestChallengeTags:
                 "tags": ["XDR", "XDR"],  # duplicate in same call
             },
         )
-        assert CTFChallengeTag.objects.filter(event=ctf_event_draft, name="XDR").count() == 1
+        assert CTFChallengeTag.objects.filter(event=ctf_event_draft, name="xdr").count() == 1
 
     def test_create_challenge_without_tags(self, ctf_event_draft):
         """Challenges without tags have empty tag set."""

@@ -1754,6 +1754,7 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
                 "order": challenge.order,
                 "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
                 "tags": list(challenge.tags.values_list("name", flat=True)),
+                "solution": challenge.solution,
             }
         )
 

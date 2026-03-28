@@ -1159,3 +1159,65 @@ class TestChallengeTags:
         assert challenge.tags.count() == 2
         updated = update_challenge(challenge.id, {"tags": []})
         assert updated.tags.count() == 0
+
+
+# =============================================================================
+# Challenge Solution Tests (CTF-117)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestChallengeSolutions:
+    """Tests for challenge solution writeups (CTF-117)."""
+
+    def test_create_challenge_with_solution(self, ctf_event_draft):
+        """Creating a challenge with solution stores it."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Solution Challenge",
+                "description": "Has a solution",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "difficulty": ChallengeDifficulty.EASY.value,
+                "flag": "FLAG{solved}",
+                "solution": "Step 1: inspect the HTML source.\nStep 2: find the flag in comments.",
+            },
+        )
+        assert "Step 1" in challenge.solution
+
+    def test_solution_default_empty(self, ctf_event_draft):
+        """Challenges without solution have empty string."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "No Solution",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{nosol}",
+            },
+        )
+        assert challenge.solution == ""
+
+    def test_solution_in_mutable_fields(self):
+        """Solution is in the challenge mutable fields whitelist."""
+        from ctf.services.challenge import _CHALLENGE_MUTABLE_FIELDS
+
+        assert "solution" in _CHALLENGE_MUTABLE_FIELDS
+
+    def test_update_challenge_solution(self, ctf_event_draft):
+        """Updating solution replaces existing content."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Update Solution",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{updsol}",
+                "solution": "Original solution.",
+            },
+        )
+        updated = update_challenge(challenge.id, {"solution": "Updated solution with ```code blocks```."})
+        assert "Updated solution" in updated.solution

@@ -216,6 +216,18 @@
             </div>
             {% endif %}
 
+            <!-- Solution (visible after event ends) -->
+            {% if challenge.solution and event.status == "ended" or challenge.solution and event.status == "archived" %}
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Official Solution</h5>
+                </div>
+                <div class="card-body">
+                    <div class="challenge-description">{{ challenge.solution|linebreaks }}</div>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Challenge Stats -->
             <div class="card">
                 <div class="card-header">

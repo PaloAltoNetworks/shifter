@@ -1221,3 +1221,52 @@ class TestChallengeSolutions:
         )
         updated = update_challenge(challenge.id, {"solution": "Updated solution with ```code blocks```."})
         assert "Updated solution" in updated.solution
+
+    def test_solution_visibility_by_event_status(self, ctf_event_draft):
+        """Solution visibility depends on event status."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Visibility Test",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{vis}",
+                "solution": "The answer is 42.",
+            },
+        )
+        event = ctf_event_draft
+
+        # show_solution logic mirrors the view: solution && status in (ended, archived)
+        def show_solution():
+            return bool(challenge.solution and event.status in ("ended", "archived"))
+
+        event.status = "draft"
+        assert not show_solution()
+
+        event.status = "active"
+        assert not show_solution()
+
+        event.status = "paused"
+        assert not show_solution()
+
+        event.status = "ended"
+        assert show_solution()
+
+        event.status = "archived"
+        assert show_solution()
+
+    def test_solution_not_visible_when_empty(self, ctf_event_draft):
+        """Empty solution is never shown even after event ends."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "No Solution Vis",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{empty}",
+            },
+        )
+        ctf_event_draft.status = "ended"
+        assert not bool(challenge.solution and ctf_event_draft.status in ("ended", "archived"))

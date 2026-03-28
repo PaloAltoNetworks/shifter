@@ -386,6 +386,7 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "unmet_challenges": unmet_challenges,
         "attempt_limit_mode": attempt_limit_mode,
         "timeout_retry_after": timeout_retry_after,
+        "show_solution": bool(challenge.solution and participant.event.status in ("ended", "archived")),
     }
     return render(request, "ctf/participant/challenge_detail.html", context)
 

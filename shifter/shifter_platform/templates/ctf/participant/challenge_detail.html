@@ -217,7 +217,7 @@
             {% endif %}
 
             <!-- Solution (visible after event ends) -->
-            {% if challenge.solution and event.status == "ended" or challenge.solution and event.status == "archived" %}
+            {% if show_solution %}
             <div class="card mb-3">
                 <div class="card-header">
                     <h5 class="mb-0">Official Solution</h5>

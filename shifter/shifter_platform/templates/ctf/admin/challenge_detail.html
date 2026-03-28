@@ -191,6 +191,14 @@
         </div>
         {% endif %}
 
+        <!-- Solution -->
+        {% if challenge.solution %}
+        <div class="card">
+            <div class="card-title">Solution Writeup</div>
+            <div class="challenge-description">{{ challenge.solution|linebreaks }}</div>
+        </div>
+        {% endif %}
+
         <!-- Flags -->
         <div class="card">
             <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">

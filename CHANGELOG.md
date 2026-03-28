@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.44.0] - 2026-03-28
+
+### Added
+- Official solution writeups on CTF challenges (CTF-117)
+- `solution` TextField on CTFChallenge for rich-text Markdown content
+- Solutions visible to organizers at all times, revealed to participants after event ends
+- Solution editing in admin challenge form, display in admin challenge detail
+- Solution field in challenge API detail response
+
 ## [3.43.0] - 2026-03-27
 
 ### Added

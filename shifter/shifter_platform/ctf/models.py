@@ -484,6 +484,11 @@ class CTFChallenge(CTFBaseModel):
         validators=[MaxValueValidator(100)],
         help_text="Percentage of points deducted for using hint (0-100)",
     )
+    solution = models.TextField(
+        blank=True,
+        default="",
+        help_text="Official solution writeup (supports Markdown, visible to participants after event ends)",
+    )
     max_attempts = models.PositiveIntegerField(
         default=0,
         help_text="Maximum submission attempts (0 = unlimited)",

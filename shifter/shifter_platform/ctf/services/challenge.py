@@ -59,6 +59,7 @@ _CHALLENGE_MUTABLE_FIELDS = frozenset(
         "flag_format",
         "hint",
         "hint_penalty",
+        "solution",
         "max_attempts",
         "release_time",
         "order",

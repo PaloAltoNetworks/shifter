@@ -35,3 +35,66 @@ variable "ctfd_ami_id" {
   description = "AMI ID for the CTFd instance"
   type        = string
 }
+
+# ------------------------------------------------------------------------------
+# NGFW Variables
+# ------------------------------------------------------------------------------
+
+variable "ngfw_ami_id" {
+  description = "VM-Series AMI ID"
+  type        = string
+}
+
+variable "ngfw_instance_type" {
+  description = "NGFW EC2 instance type"
+  type        = string
+  default     = "m5.xlarge"
+}
+
+variable "ngfw_instance_profile" {
+  description = "IAM instance profile for NGFW"
+  type        = string
+  default     = "dev-range-ngfw-instance"
+}
+
+variable "ngfw_bootstrap_bucket" {
+  description = "S3 bucket for NGFW bootstrap files"
+  type        = string
+}
+
+variable "ngfw_server_subnet_id" {
+  description = "Existing dev-server subnet ID for NGFW server interface"
+  type        = string
+}
+
+variable "ngfw_scm_pin_id" {
+  description = "SCM auto-registration PIN ID (certid)"
+  type        = string
+}
+
+variable "ngfw_scm_pin_value" {
+  description = "SCM auto-registration PIN value (certsecret)"
+  type        = string
+  sensitive   = true
+}
+
+variable "ngfw_authcode" {
+  description = "VM-Series license authcode"
+  type        = string
+  sensitive   = true
+}
+
+# ------------------------------------------------------------------------------
+# Workstation Variables
+# ------------------------------------------------------------------------------
+
+variable "workstation_ami_id" {
+  description = "AMI ID for the workstation (Windows Server 2025 Desktop Experience)"
+  type        = string
+}
+
+variable "workstation_instance_type" {
+  description = "Workstation EC2 instance type"
+  type        = string
+  default     = "t3.medium"
+}

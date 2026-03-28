@@ -15,6 +15,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
   backend "s3" {}
@@ -186,7 +190,7 @@ resource "aws_instance" "ctfd" {
   iam_instance_profile   = aws_iam_instance_profile.ctfd.name
   user_data              = file("${path.module}/ctfd-userdata.sh")
 
-  associate_public_ip_address = false
+  associate_public_ip_address = true
 
   root_block_device {
     volume_size           = 50
@@ -201,7 +205,8 @@ resource "aws_instance" "ctfd" {
   }
 
   lifecycle {
-    ignore_changes = [user_data]
+    ignore_changes  = [user_data]
+    prevent_destroy = true
   }
 }
 

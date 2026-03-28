@@ -228,6 +228,7 @@ class CTFChallengeForm(forms.ModelForm):
             "flag_format",
             "hint",
             "hint_penalty",
+            "solution",
             "max_attempts",
             "release_time",
             "order",
@@ -235,6 +236,7 @@ class CTFChallengeForm(forms.ModelForm):
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
             "hint": forms.Textarea(attrs={"rows": 2}),
+            "solution": forms.Textarea(attrs={"rows": 6}),
             "release_time": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
                 format="%Y-%m-%dT%H:%M",

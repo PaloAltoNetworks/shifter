@@ -241,7 +241,16 @@ input[type="datetime-local"] {
                 <div class="form-help">Seconds before attempts reset in timeout mode (0-3600)</div>
                 <div class="field-error" id="error-attempt_limit_cooldown_seconds"></div>
             </div>
-            <div class="form-group"></div>
+            <div class="form-group">
+                <label class="form-label" for="field-rating_visibility">Challenge Rating Visibility</label>
+                <select id="field-rating_visibility" class="form-input">
+                    <option value="public">Public (participants see ratings)</option>
+                    <option value="organizer">Organizer only</option>
+                    <option value="disabled">Disabled</option>
+                </select>
+                <div class="form-help">Whether participants can see and submit challenge ratings</div>
+                <div class="field-error" id="error-rating_visibility"></div>
+            </div>
         </div>
     </div>
 
@@ -280,7 +289,7 @@ document.addEventListener('DOMContentLoaded', function() {
         'auto_cleanup', 'ngfw_enabled', 'cleanup_delay_hours',
         'max_participants', 'team_mode', 'team_size_limit',
         'submission_cooldown_seconds', 'attempt_limit_mode',
-        'attempt_limit_cooldown_seconds'
+        'attempt_limit_cooldown_seconds', 'rating_visibility'
     ];
 
     // --- Helpers ---
@@ -374,6 +383,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var attemptCooldown = getField('attempt_limit_cooldown_seconds').value;
         data.attempt_limit_cooldown_seconds = attemptCooldown ? parseInt(attemptCooldown, 10) : 300;
+
+        data.rating_visibility = getField('rating_visibility').value;
 
         // Pack ngfw_enabled into range_config
         data.range_config = {
@@ -526,6 +537,7 @@ document.addEventListener('DOMContentLoaded', function() {
             getField('submission_cooldown_seconds').value = event.submission_cooldown_seconds || 0;
             getField('attempt_limit_mode').value = event.attempt_limit_mode || 'lockout';
             getField('attempt_limit_cooldown_seconds').value = event.attempt_limit_cooldown_seconds || 300;
+            getField('rating_visibility').value = event.rating_visibility || 'public';
             toggleCooldownVisibility();
 
             // ngfw_enabled from range_config

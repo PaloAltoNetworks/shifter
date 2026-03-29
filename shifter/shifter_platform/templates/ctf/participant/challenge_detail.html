@@ -54,6 +54,11 @@
                         {% if first_blood and first_blood.participant.pk == participant.pk %}
                         <strong>First Blood!</strong>
                         {% endif %}
+                        {% if challenge.next_challenge %}
+                        <div class="mt-2">
+                            Next: <a href="{% url 'ctf:challenge_detail' challenge_id=challenge.next_challenge.pk %}" class="alert-link">{{ challenge.next_challenge.name }} &rarr;</a>
+                        </div>
+                        {% endif %}
                     </div>
                     {% endif %}
 

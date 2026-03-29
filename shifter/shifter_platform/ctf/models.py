@@ -516,6 +516,14 @@ class CTFChallenge(CTFBaseModel):
         related_name="challenges",
         help_text="Knowledge areas or attack techniques (controlled vocabulary)",
     )
+    next_challenge = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suggested_by",
+        help_text="Suggested follow-up challenge after solving (non-blocking)",
+    )
 
     class Meta:
         db_table = "ctf_challenge"
@@ -548,6 +556,14 @@ class CTFChallenge(CTFBaseModel):
                 errors.setdefault("release_time", []).append("Release time cannot be before event start.")
             if self.release_time > self.event.event_end:
                 errors.setdefault("release_time", []).append("Release time cannot be after event end.")
+
+        # Validate next_challenge
+        if self.next_challenge_id:
+            if self.pk and self.next_challenge_id == self.pk:
+                errors.setdefault("next_challenge", []).append("A challenge cannot be its own next challenge.")
+            nc = self.next_challenge
+            if self.event_id and nc is not None and nc.event_id != self.event_id:
+                errors.setdefault("next_challenge", []).append("Next challenge must belong to the same event.")
 
         if errors:
             raise ValidationError(errors)

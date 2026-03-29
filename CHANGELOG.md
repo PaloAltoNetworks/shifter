@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.46.0] - 2026-03-28
+
+### Added
+- Participant challenge ratings on a 1-5 scale (CTF-120)
+- `CTFChallengeRating` model with unique constraint per participant per challenge
+- `rating_visibility` event-level config: public, organizer-only, or disabled
+- API endpoint `POST /api/challenges/<id>/rate/` for submitting ratings
+- Average rating and count displayed in admin and participant challenge detail
+- Rating visibility dropdown in event admin form
+
 ## [3.45.0] - 2026-03-28
 
 ### Added

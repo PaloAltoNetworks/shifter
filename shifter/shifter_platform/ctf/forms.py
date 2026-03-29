@@ -234,8 +234,6 @@ class CTFChallengeForm(forms.ModelForm):
             "points",
             "difficulty",
             "flag_format",
-            "hint",
-            "hint_penalty",
             "solution",
             "max_attempts",
             "release_time",
@@ -243,7 +241,6 @@ class CTFChallengeForm(forms.ModelForm):
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
-            "hint": forms.Textarea(attrs={"rows": 2}),
             "solution": forms.Textarea(attrs={"rows": 6}),
             "release_time": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
@@ -291,16 +288,7 @@ class CTFChallengeForm(forms.ModelForm):
         if cleaned_data is None:
             return {}
 
-        hint = cleaned_data.get("hint")
-        hint_penalty = cleaned_data.get("hint_penalty")
         release_time = cleaned_data.get("release_time")
-
-        # Validate hint penalty requires hint
-        if hint_penalty and hint_penalty > 0 and not hint:
-            self.add_error(
-                "hint_penalty",
-                "Hint penalty requires a hint to be set.",
-            )
 
         # Validate release time within event bounds
         if release_time and self.event:

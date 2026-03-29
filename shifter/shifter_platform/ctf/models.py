@@ -435,8 +435,6 @@ class CTFChallenge(CTFBaseModel):
         difficulty: Challenge difficulty level.
         flag_hash: Hashed flag value (bcrypt).
         flag_format: Optional format hint (e.g., "FLAG{...}").
-        hint: Optional hint text.
-        hint_penalty: Points deducted for using hint.
         max_attempts: Maximum submission attempts (0 = unlimited).
         release_time: When challenge becomes visible (null = immediately).
         order: Display order within category.
@@ -480,16 +478,6 @@ class CTFChallenge(CTFBaseModel):
         blank=True,
         default="",
         help_text="Optional format hint (e.g., 'FLAG{...}')",
-    )
-    hint = models.TextField(
-        blank=True,
-        default="",
-        help_text="Optional hint text",
-    )
-    hint_penalty = models.PositiveIntegerField(
-        default=0,
-        validators=[MaxValueValidator(100)],
-        help_text="Percentage of points deducted for using hint (0-100)",
     )
     solution = models.TextField(
         blank=True,
@@ -554,10 +542,6 @@ class CTFChallenge(CTFBaseModel):
         """Validate challenge data."""
         errors: dict[str, list[str]] = {}
 
-        # Validate hint penalty
-        if self.hint_penalty > 0 and not self.hint:
-            errors.setdefault("hint_penalty", []).append("Hint penalty requires a hint to be set.")
-
         # Validate release time
         if self.release_time and hasattr(self, "event") and self.event_id:
             if self.release_time < self.event.event_start:
@@ -596,17 +580,18 @@ class CTFChallenge(CTFBaseModel):
         """Return first correct submission, if any."""
         return self.submissions.filter(is_correct=True).order_by("submitted_at").first()
 
-    def calculate_points_with_penalty(self, hint_used: bool) -> int:
-        """Calculate points after hint penalty.
+    def calculate_points_with_penalty(self, total_hint_penalty: int) -> int:
+        """Calculate points after cumulative hint penalty.
 
         Args:
-            hint_used: Whether the participant used the hint.
+            total_hint_penalty: Sum of penalties of all unlocked hints (0-100+).
 
         Returns:
-            Points to award (reduced if hint was used).
+            Points to award (minimum 1).
         """
-        if hint_used and self.hint_penalty > 0:
-            reduction = (self.points * self.hint_penalty) // 100
+        if total_hint_penalty > 0:
+            capped = min(total_hint_penalty, 100)
+            reduction = (self.points * capped) // 100
             return max(1, self.points - reduction)
         return self.points
 
@@ -1173,7 +1158,6 @@ class CTFSubmission(CTFBaseModel):
         submitted_flag: The flag value submitted.
         is_correct: Whether the submission was correct.
         points_awarded: Points awarded (0 if incorrect).
-        hint_used: Whether the hint was used before submission.
         attempt_number: Which attempt this is for this challenge.
         ip_address: Client IP address for audit.
         submitted_at: When the submission was made.
@@ -1203,10 +1187,6 @@ class CTFSubmission(CTFBaseModel):
     points_awarded = models.PositiveIntegerField(
         default=0,
         help_text="Points awarded for this submission",
-    )
-    hint_used = models.BooleanField(
-        default=False,
-        help_text="Whether the hint was used",
     )
     attempt_number = models.PositiveIntegerField(
         default=1,
@@ -1376,6 +1356,99 @@ class CTFChallengeRating(CTFBaseModel):
     def __str__(self) -> str:
         """Return rating description."""
         return f"{self.participant.name} rated {self.challenge.name}: {self.value}/5"
+
+
+class CTFHint(CTFBaseModel):
+    """Progressive hint for a CTF challenge.
+
+    Hints are revealed in order. Each hint has its own text and penalty.
+    Cumulative penalty = sum of penalties of all unlocked hints.
+
+    Attributes:
+        challenge: The challenge this hint belongs to.
+        text: The hint text content.
+        penalty: Percentage of challenge points deducted for this hint (0-100).
+        order: Reveal order (lower = earlier).
+    """
+
+    challenge = models.ForeignKey(
+        CTFChallenge,
+        on_delete=models.CASCADE,
+        related_name="hints",
+        help_text="Challenge this hint belongs to",
+    )
+    text = models.TextField(
+        help_text="Hint text content",
+    )
+    penalty = models.PositiveIntegerField(
+        default=0,
+        validators=[MaxValueValidator(100)],
+        help_text="Percentage of points deducted for using this hint (0-100)",
+    )
+    order = models.PositiveIntegerField(
+        default=0,
+        help_text="Reveal order (lower = earlier)",
+    )
+
+    class Meta:
+        db_table = "ctf_hint"
+        ordering = ["order", "created_at"]
+        verbose_name = "CTF Hint"
+        verbose_name_plural = "CTF Hints"
+        indexes = [
+            models.Index(fields=["challenge", "order"]),
+        ]
+
+    def __str__(self) -> str:
+        """Return hint description."""
+        return f"Hint #{self.order} for {self.challenge.name}"
+
+
+class CTFHintUsage(CTFBaseModel):
+    """Records which hints a participant has unlocked.
+
+    Attributes:
+        participant: The participant who unlocked the hint.
+        hint: The hint that was unlocked.
+        unlocked_at: When the hint was unlocked.
+    """
+
+    participant = models.ForeignKey(
+        CTFParticipant,
+        on_delete=models.CASCADE,
+        related_name="hint_usages",
+        help_text="Participant who unlocked the hint",
+    )
+    hint = models.ForeignKey(
+        CTFHint,
+        on_delete=models.CASCADE,
+        related_name="usages",
+        help_text="The hint that was unlocked",
+    )
+    unlocked_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the hint was unlocked",
+    )
+
+    class Meta:
+        db_table = "ctf_hint_usage"
+        ordering = ["unlocked_at"]
+        verbose_name = "CTF Hint Usage"
+        verbose_name_plural = "CTF Hint Usages"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["participant", "hint"],
+                condition=Q(deleted_at__isnull=True),
+                name="unique_active_hint_usage",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["participant", "hint"]),
+        ]
+
+    def __str__(self) -> str:
+        """Return usage description."""
+        return f"{self.participant.name} unlocked {self.hint}"
 
 
 class CTFNotification(CTFBaseModel):

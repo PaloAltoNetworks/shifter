@@ -189,29 +189,36 @@
 
         <!-- Sidebar -->
         <div class="col-md-4 mb-4">
-            <!-- Hint Section -->
-            {% if challenge.hint %}
+            <!-- Progressive Hints -->
+            {% if hints %}
             <div class="card mb-3">
                 <div class="card-header">
-                    <h5 class="mb-0">Hint</h5>
+                    <h5 class="mb-0">Hints ({{ hints|length }})</h5>
                 </div>
                 <div class="card-body">
-                    {% if hint_used %}
-                    <div class="alert alert-info mb-0">
-                        {{ challenge.hint }}
+                    {% if total_hint_penalty > 0 %}
+                    <small class="text-warning d-block mb-2">Hint penalty applied: {{ total_hint_penalty }}%</small>
+                    {% endif %}
+                    {% for hint in hints %}
+                    <div class="{% if not forloop.last %}mb-2 pb-2 border-bottom{% endif %}">
+                        {% if hint.id in unlocked_hint_ids %}
+                        <div class="alert alert-info mb-0 py-2">
+                            <strong>Hint {{ forloop.counter }}:</strong> {{ hint.text }}
+                        </div>
+                        {% elif hint.id == next_hint.id %}
+                        <div id="hint-result-{{ hint.id }}" style="display: none;"></div>
+                        <p class="text-muted mb-1">Hint {{ forloop.counter }} available</p>
+                        {% if hint.penalty > 0 %}
+                        <small class="text-warning d-block mb-1">Penalty: {{ hint.penalty }}% of points</small>
+                        {% endif %}
+                        <button type="button" class="btn btn-outline-warning btn-sm" onclick="useHint('{{ hint.id }}')">
+                            Reveal Hint {{ forloop.counter }}
+                        </button>
+                        {% else %}
+                        <p class="text-muted mb-0"><small>Hint {{ forloop.counter }} — locked (unlock previous hints first)</small></p>
+                        {% endif %}
                     </div>
-                    {% else %}
-                    <p class="text-muted mb-2">A hint is available for this challenge.</p>
-                    {% if challenge.hint_penalty > 0 %}
-                    <p class="text-warning mb-3">
-                        <strong>Warning:</strong> Using the hint will reduce your points by {{ challenge.hint_penalty }}%.
-                    </p>
-                    {% endif %}
-                    <div id="hint-result" style="display: none;"></div>
-                    <button type="button" class="btn btn-outline-warning btn-sm" id="hint-btn" onclick="useHint()">
-                        Reveal Hint
-                    </button>
-                    {% endif %}
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
@@ -347,16 +354,10 @@ function submitFlag(e) {
     return false;
 }
 
-function useHint() {
-    var btn = document.getElementById('hint-btn');
-    var resultDiv = document.getElementById('hint-result');
-
-    if (!confirm('Are you sure you want to reveal the hint?{% if challenge.hint_penalty > 0 %} This will reduce your points by {{ challenge.hint_penalty }}%.{% endif %}')) {
+function useHint(hintId) {
+    if (!confirm('Are you sure you want to reveal this hint? A penalty may apply.')) {
         return;
     }
-
-    btn.disabled = true;
-    btn.textContent = 'Loading...';
 
     fetch("{% url 'ctf:api_use_hint' challenge_id=challenge.pk %}", {
         method: 'POST',
@@ -364,28 +365,18 @@ function useHint() {
             'Content-Type': 'application/json',
             'X-CSRFToken': getCookie('csrftoken'),
         },
+        body: JSON.stringify({hint_id: hintId}),
     })
     .then(function(response) { return response.json(); })
     .then(function(data) {
-        if (data.hint) {
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'alert alert-info';
-            resultDiv.textContent = data.hint;
-            btn.style.display = 'none';
+        if (data.text) {
+            location.reload();
         } else if (data.error) {
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'alert alert-danger';
-            resultDiv.textContent = data.error;
-            btn.disabled = false;
-            btn.textContent = 'Reveal Hint';
+            alert(data.error);
         }
     })
-    .catch(function(err) {
-        resultDiv.style.display = 'block';
-        resultDiv.className = 'alert alert-danger';
-        resultDiv.textContent = 'An error occurred. Please try again.';
-        btn.disabled = false;
-        btn.textContent = 'Reveal Hint';
+    .catch(function() {
+        alert('An error occurred. Please try again.');
     });
 }
 

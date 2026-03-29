@@ -374,6 +374,17 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
             next_hint = h
             break
 
+    # Compute hint purchase cost info (CTF-304)
+    next_hint_cost = 0
+    points_after_next_hint = challenge.points
+    penalty_warning = False
+    if next_hint and next_hint.penalty > 0:
+        current_value = challenge.calculate_points_with_penalty(total_hint_penalty)
+        projected_penalty = total_hint_penalty + next_hint.penalty
+        points_after_next_hint = challenge.calculate_points_with_penalty(projected_penalty)
+        next_hint_cost = current_value - points_after_next_hint
+        penalty_warning = projected_penalty >= 100
+
     # Get challenge files
     from ctf.services.attachment import get_challenge_files
 
@@ -413,6 +424,9 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "hints": all_hints,
         "unlocked_hint_ids": unlocked_hint_ids,
         "next_hint": next_hint,
+        "next_hint_cost": next_hint_cost,
+        "points_after_next_hint": points_after_next_hint,
+        "penalty_warning": penalty_warning,
         "total_hint_penalty": total_hint_penalty,
         "max_attempts": challenge.max_attempts,
         "attempts_remaining": attempts_remaining,

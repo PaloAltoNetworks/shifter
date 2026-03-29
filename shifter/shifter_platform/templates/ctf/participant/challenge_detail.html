@@ -248,8 +248,35 @@
                     <div>
                         <strong>Your attempts:</strong> {{ attempt_count }}
                     </div>
+                    {% if show_ratings and rating %}
+                    <div class="mt-2">
+                        <strong>Rating:</strong>
+                        {% if rating.average %}{{ rating.average }}/5 ({{ rating.count }} rating{{ rating.count|pluralize }}){% else %}No ratings yet{% endif %}
+                    </div>
+                    {% endif %}
                 </div>
             </div>
+
+            <!-- Rate Challenge (after solving, if ratings enabled) -->
+            {% if is_solved and event.rating_visibility != "disabled" %}
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Rate This Challenge</h5>
+                </div>
+                <div class="card-body">
+                    <div id="rating-result" style="display: none;"></div>
+                    <div class="btn-group" role="group">
+                        {% for btn in rating_buttons %}
+                        <button type="button" class="btn {% if btn.active %}btn-warning{% else %}btn-outline-warning{% endif %} btn-sm"
+                                onclick="rateChallenge({{ btn.value }})">{{ btn.value }}</button>
+                        {% endfor %}
+                    </div>
+                    <small class="text-muted d-block mt-1">
+                        {% if own_rating %}Your rating: {{ own_rating }}/5{% else %}Rate from 1 (poor) to 5 (excellent){% endif %}
+                    </small>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -370,6 +397,41 @@ function downloadFile(apiUrl) {
             else if (data.error) { alert(data.error); }
         })
         .catch(function() { alert('Download failed.'); });
+}
+
+function rateChallenge(value) {
+    var resultDiv = document.getElementById('rating-result');
+
+    fetch("{% url 'ctf:api_rate_challenge' challenge_id=challenge.pk %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: JSON.stringify({value: value}),
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.error) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'alert alert-danger mb-3';
+            resultDiv.textContent = data.error;
+        } else {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'alert alert-success mb-3';
+            resultDiv.textContent = 'Rated ' + value + '/5. Thanks!';
+            // Update button styles
+            var buttons = document.querySelectorAll('.btn-group .btn');
+            buttons.forEach(function(btn, i) {
+                btn.className = (i + 1 === value) ? 'btn btn-warning btn-sm' : 'btn btn-outline-warning btn-sm';
+            });
+        }
+    })
+    .catch(function() {
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'alert alert-danger mb-3';
+        resultDiv.textContent = 'Rating failed. Please try again.';
+    });
 }
 </script>
 {% endblock %}

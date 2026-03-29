@@ -406,6 +406,24 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "timeout_retry_after": timeout_retry_after,
         "show_solution": bool(challenge.solution and participant.event.status in ("ended", "archived")),
     }
+
+    # Add rating context
+    rating_visibility = participant.event.rating_visibility
+    if rating_visibility != "disabled":
+        from ctf.services.submission import get_challenge_rating
+
+        rating_data = get_challenge_rating(challenge_id)
+        context["rating"] = rating_data
+        context["show_ratings"] = rating_visibility == "public"
+        # Get participant's own rating if they have one
+        from ctf.models import CTFChallengeRating
+
+        own_rating_obj = CTFChallengeRating.objects.filter(participant=participant, challenge=challenge).first()
+        own_rating_value = own_rating_obj.value if own_rating_obj else None
+        context["own_rating"] = own_rating_value
+        # Pre-compute button states for template (avoids broken template filter math)
+        context["rating_buttons"] = [{"value": i, "active": own_rating_value == i} for i in range(1, 6)]
+
     return render(request, "ctf/participant/challenge_detail.html", context)
 
 
@@ -940,6 +958,11 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
         .order_by("category", "name")
     )
 
+    # Rating stats
+    from ctf.services.submission import get_challenge_rating
+
+    rating_data = get_challenge_rating(challenge_id)
+
     context = {
         "challenge": challenge,
         "event": challenge.event,
@@ -951,6 +974,7 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
         "challenge_files": challenge_files,
         "prerequisites": prerequisites,
         "other_challenges": other_challenges,
+        "rating": rating_data,
     }
 
     return render(request, "ctf/admin/challenge_detail.html", context)
@@ -1635,6 +1659,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "submission_cooldown_seconds": event.submission_cooldown_seconds,
                 "attempt_limit_mode": event.attempt_limit_mode,
                 "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
+                "rating_visibility": event.rating_visibility,
             }
         )
 
@@ -1892,6 +1917,43 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
                 "penalty": challenge.hint_penalty,
             }
         )
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@ctf_participant_required
+@require_POST
+def api_rate_challenge(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
+    """API: Rate a challenge (1-5). Participant must have solved it.
+
+    Args:
+        challenge_id: UUID of the challenge.
+    """
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.services.participant import get_participant_by_user
+    from ctf.services.submission import rate_challenge
+
+    participant = get_participant_by_user(_get_user(request))
+    if not participant:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    value = body.get("value")
+    if not isinstance(value, int):
+        return JsonResponse({"error": "value must be an integer (1-5)"}, status=400)
+
+    try:
+        rating = rate_challenge(participant.id, challenge_id, value)
+        return JsonResponse({"value": rating.value, "challenge_id": str(challenge_id)})
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
     except CTFValidationError as e:

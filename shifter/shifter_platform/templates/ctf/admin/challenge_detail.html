@@ -513,6 +513,12 @@
                 </span>
             </div>
             <div class="detail-row">
+                <span class="detail-label">Rating</span>
+                <span class="detail-value">
+                    {% if rating.average %}{{ rating.average }}/5 ({{ rating.count }} rating{{ rating.count|pluralize }}){% else %}No ratings yet{% endif %}
+                </span>
+            </div>
+            <div class="detail-row">
                 <span class="detail-label">Display Order</span>
                 <span class="detail-value">{{ challenge.order }}</span>
             </div>

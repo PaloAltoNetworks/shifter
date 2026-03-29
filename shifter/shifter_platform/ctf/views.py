@@ -418,8 +418,11 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         # Get participant's own rating if they have one
         from ctf.models import CTFChallengeRating
 
-        own_rating = CTFChallengeRating.objects.filter(participant=participant, challenge=challenge).first()
-        context["own_rating"] = own_rating.value if own_rating else None
+        own_rating_obj = CTFChallengeRating.objects.filter(participant=participant, challenge=challenge).first()
+        own_rating_value = own_rating_obj.value if own_rating_obj else None
+        context["own_rating"] = own_rating_value
+        # Pre-compute button states for template (avoids broken template filter math)
+        context["rating_buttons"] = [{"value": i, "active": own_rating_value == i} for i in range(1, 6)]
 
     return render(request, "ctf/participant/challenge_detail.html", context)
 

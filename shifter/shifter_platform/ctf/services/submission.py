@@ -452,6 +452,16 @@ def rate_challenge(
             details={"challenge_id": str(challenge_id)},
         ) from None
 
+    # Validate participant and challenge belong to the same event
+    if challenge.event_id != participant.event_id:
+        raise CTFValidationError(
+            "Challenge does not belong to participant's event",
+            details={
+                "participant_event": str(participant.event_id),
+                "challenge_event": str(challenge.event_id),
+            },
+        )
+
     # Check event has ratings enabled
     if challenge.event.rating_visibility == "disabled":
         raise CTFValidationError(
@@ -498,11 +508,13 @@ def get_challenge_rating(challenge_id: UUID) -> dict[str, float | int | None]:
     Returns:
         Dict with 'average' (float or None) and 'count' (int).
     """
-    from django.db.models import Avg
+    from django.db.models import Avg, Count
 
-    ratings = CTFChallengeRating.objects.filter(challenge_id=challenge_id)
-    result = ratings.aggregate(average=Avg("value"))
+    result = CTFChallengeRating.objects.filter(challenge_id=challenge_id).aggregate(
+        average=Avg("value"),
+        count=Count("id"),
+    )
     return {
         "average": round(result["average"], 1) if result["average"] is not None else None,
-        "count": ratings.count(),
+        "count": result["count"],
     }

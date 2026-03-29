@@ -243,3 +243,19 @@ class TestHintPurchaseContext:
         response = participant_client.get(url)
         assert response.context["next_hint_cost"] == 0
         assert response.context["points_after_next_hint"] == active_challenge.points
+
+    def test_marginal_cost_with_prior_hints(self, participant_client, active_challenge, participant):
+        """next_hint_cost reflects marginal loss, not raw single-hint deduction.
+
+        200pt challenge. Hint 1 = 60%, hint 2 = 60%.
+        After hint 1: penalty 60%, value = 200 - 120 = 80.
+        After hint 2: penalty 120% capped to 100%, value = 1.
+        Marginal cost of hint 2 = 80 - 1 = 79 (not 120).
+        """
+        h1 = CTFHint.objects.create(challenge=active_challenge, text="H1", penalty=60, order=0)
+        CTFHint.objects.create(challenge=active_challenge, text="H2", penalty=60, order=1)
+        use_hint(participant.id, h1.id)
+        url = reverse("ctf:challenge_detail", kwargs={"challenge_id": active_challenge.pk})
+        response = participant_client.get(url)
+        assert response.context["next_hint_cost"] == 79
+        assert response.context["points_after_next_hint"] == 1

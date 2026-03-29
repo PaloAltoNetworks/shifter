@@ -379,9 +379,10 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     points_after_next_hint = challenge.points
     penalty_warning = False
     if next_hint and next_hint.penalty > 0:
-        next_hint_cost = (challenge.points * next_hint.penalty) // 100
+        current_value = challenge.calculate_points_with_penalty(total_hint_penalty)
         projected_penalty = total_hint_penalty + next_hint.penalty
         points_after_next_hint = challenge.calculate_points_with_penalty(projected_penalty)
+        next_hint_cost = current_value - points_after_next_hint
         penalty_warning = projected_penalty >= 100
 
     # Get challenge files

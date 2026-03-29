@@ -361,10 +361,11 @@ function submitFlag(e) {
 function useHint(hintId, hintPenalty) {
     var challengePoints = {{ challenge.points }};
     var currentPenalty = {{ total_hint_penalty }};
+    var currentPenaltyCapped = Math.min(currentPenalty, 100);
+    var currentValue = Math.max(1, challengePoints - Math.floor(challengePoints * currentPenaltyCapped / 100));
     var projectedPenalty = Math.min(currentPenalty + (hintPenalty || 0), 100);
-    var reduction = Math.floor(challengePoints * projectedPenalty / 100);
-    var pointsAfter = Math.max(1, challengePoints - reduction);
-    var cost = Math.floor(challengePoints * (hintPenalty || 0) / 100);
+    var pointsAfter = Math.max(1, challengePoints - Math.floor(challengePoints * projectedPenalty / 100));
+    var cost = currentValue - pointsAfter;
 
     var msg = 'Reveal this hint?\n\n';
     if (hintPenalty > 0) {

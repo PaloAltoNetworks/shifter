@@ -495,7 +495,7 @@ def complete_upload(request: HttpRequest) -> JsonResponse:
     )
 
 
-@csrf_exempt  # Allow sendBeacon on page unload (no custom headers)
+@csrf_exempt  # navigator.sendBeacon() cannot send custom headers; see docstring.
 @login_required
 @require_POST
 def cancel_upload(request: HttpRequest) -> JsonResponse:
@@ -503,30 +503,42 @@ def cancel_upload(request: HttpRequest) -> JsonResponse:
     Cancel an in-progress upload.
 
     Request body (JSON):
-        - upload_token: Token from initiate response (optional)
+        - upload_token: HMAC-signed token from initiate_upload (required)
 
-    Cleans up S3 object if it exists and clears upload lock.
+    Verifies the upload token, cleans up the S3 object, then clears the
+    session upload lock.  Returns 400 when the token is absent or invalid so
+    that unauthenticated or cross-site requests cannot mutate session state.
 
-    Note: CSRF exempt to support navigator.sendBeacon() on page unload.
-    Security maintained via @login_required and HMAC-signed upload_token.
+    CSRF strategy:
+        The endpoint is @csrf_exempt to support navigator.sendBeacon() on page
+        unload, which cannot attach custom request headers (including
+        X-CSRFToken).  Instead, the HMAC-signed upload_token provides
+        equivalent protection:
+
+        * It is only obtainable by completing initiate_upload, which IS
+          CSRF-protected.
+        * It is cryptographically bound to the authenticated user (user_id in
+          the signed payload).
+        * Without a valid token no state mutation occurs.
     """
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         data = {}
 
-    upload_token = data.get("upload_token", "")
+    upload_token = data.get("upload_token", "").strip()
+    if not upload_token:
+        return JsonResponse({"error": "upload_token is required"}, status=400)
+
     user = _get_user(request)
 
-    # Try to clean up S3 object if token provided
-    if upload_token:
-        try:
-            cms_cancel_upload(user, upload_token)
-            logger.info("Cancelled upload cleaned up: user=%s", user.email)
-        except CMSError:
-            pass  # Invalid token or S3 error, ignore
+    try:
+        cms_cancel_upload(user, upload_token)
+        logger.info("Cancelled upload cleaned up: user=%s", user.email)
+    except CMSError:
+        return JsonResponse({"error": "Invalid or expired upload token"}, status=400)
 
-    # Clear upload in progress
+    # Clear upload in progress only after the token has been validated
     set_upload_in_progress(request.session, False)
 
     return JsonResponse({"success": True})

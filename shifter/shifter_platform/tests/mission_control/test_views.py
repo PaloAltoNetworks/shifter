@@ -3,6 +3,7 @@
 All ORM access is mocked — no @pytest.mark.django_db markers.
 """
 
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -220,3 +221,116 @@ class TestUploadLock:
 
 # Note: TestRangeToJson was removed as engine.serialization.range_to_dict no longer exists.
 # Ranges are now serialized via RangeContext.model_dump() directly in views.
+
+
+# ---------------------------------------------------------------------------
+# CancelUpload View Tests
+# ---------------------------------------------------------------------------
+
+
+def _post_json_request(rf, path="/", user=None, body=None):
+    """Build a POST request with JSON body, session and user attached."""
+    content = json.dumps(body or {}).encode()
+    request = rf.post(path, data=content, content_type="application/json")
+    request.user = user or AnonymousUser()
+    request.session = {}
+    return request
+
+
+class TestCancelUploadView:
+    """Tests for cancel_upload view — CSRF strategy and bounded state mutation."""
+
+    def test_requires_login(self, rf):
+        from mission_control.views import cancel_upload
+
+        request = _post_json_request(rf, body={"upload_token": "tok"})
+        response = cancel_upload(request)
+        assert response.status_code == 302
+
+    def test_requires_post(self, rf, mock_user):
+        from mission_control.views import cancel_upload
+
+        request = _get_request(rf, user=mock_user)
+        response = cancel_upload(request)
+        assert response.status_code == 405
+
+    def test_missing_token_returns_400_and_does_not_mutate_session(self, rf, mock_user):
+        """No upload_token → 400 and session upload lock untouched."""
+        from mission_control.upload_session import set_upload_in_progress
+        from mission_control.views import cancel_upload
+
+        request = _post_json_request(rf, body={}, user=mock_user)
+        set_upload_in_progress(request.session, True)
+
+        response = cancel_upload(request)
+
+        assert response.status_code == 400
+        data = json.loads(response.content)
+        assert "error" in data
+        # Session lock must NOT have been cleared
+        assert request.session.get("upload_lock") is not None
+
+    def test_empty_token_returns_400_and_does_not_mutate_session(self, rf, mock_user):
+        """Whitespace-only token is treated as absent — 400, session unchanged."""
+        from mission_control.upload_session import set_upload_in_progress
+        from mission_control.views import cancel_upload
+
+        request = _post_json_request(rf, body={"upload_token": "   "}, user=mock_user)
+        set_upload_in_progress(request.session, True)
+
+        response = cancel_upload(request)
+
+        assert response.status_code == 400
+        assert request.session.get("upload_lock") is not None
+
+    def test_invalid_token_returns_400_and_does_not_mutate_session(self, rf, mock_user):
+        """Invalid token → 400 and session upload lock untouched."""
+        from cms.exceptions import CMSError
+        from mission_control.upload_session import set_upload_in_progress
+        from mission_control.views import cancel_upload
+
+        request = _post_json_request(rf, body={"upload_token": "bad.token"}, user=mock_user)
+        set_upload_in_progress(request.session, True)
+
+        with patch("mission_control.views.cms_cancel_upload", side_effect=CMSError("Invalid upload token")):
+            response = cancel_upload(request)
+
+        assert response.status_code == 400
+        data = json.loads(response.content)
+        assert "error" in data
+        # Session lock must NOT have been cleared
+        assert request.session.get("upload_lock") is not None
+
+    def test_valid_token_clears_session_and_returns_200(self, rf, mock_user):
+        """Valid token → S3 cleanup called, session cleared, 200 returned."""
+        from mission_control.upload_session import set_upload_in_progress
+        from mission_control.views import cancel_upload
+
+        request = _post_json_request(rf, body={"upload_token": "valid.token"}, user=mock_user)
+        set_upload_in_progress(request.session, True)
+
+        with patch("mission_control.views.cms_cancel_upload") as mock_cancel:
+            response = cancel_upload(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data == {"success": True}
+        mock_cancel.assert_called_once()
+        # Session lock must have been cleared
+        assert request.session.get("upload_lock") is None
+
+    def test_invalid_json_body_returns_400(self, rf, mock_user):
+        """Malformed JSON body treated as missing token — returns 400."""
+        from mission_control.views import cancel_upload
+
+        request = rf.post(
+            "/",
+            data=b"not-json",
+            content_type="application/json",
+        )
+        request.user = mock_user
+        request.session = {}
+
+        response = cancel_upload(request)
+
+        assert response.status_code == 400

@@ -83,8 +83,6 @@ def make_challenge(event=None, **overrides) -> CTFChallenge:
         "difficulty": ChallengeDifficulty.EASY.value,
         "flag_hash": "$2b$12$test_hash_placeholder",
         "flag_format": "FLAG{...}",
-        "hint": "",
-        "hint_penalty": 0,
         "release_time": None,
         "order": 0,
     }

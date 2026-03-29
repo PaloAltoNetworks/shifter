@@ -358,7 +358,21 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     submissions = get_participant_submissions(participant.id, challenge_id=challenge_id)
     is_solved = submissions.filter(is_correct=True).exists()
     attempt_count = submissions.count()
-    hint_used = submissions.filter(hint_used=True).exists()
+
+    # Get progressive hints and unlock status
+    from ctf.services.hint import get_hints, get_total_hint_penalty, get_unlocked_hints
+
+    all_hints = list(get_hints(challenge_id))
+    unlocked_hints = get_unlocked_hints(participant.id, challenge_id)
+    unlocked_hint_ids = {h.id for h in unlocked_hints}
+    total_hint_penalty = get_total_hint_penalty(participant.id, challenge_id)
+
+    # Determine the next available hint (first one not yet unlocked)
+    next_hint = None
+    for h in all_hints:
+        if h.id not in unlocked_hint_ids:
+            next_hint = h
+            break
 
     # Get challenge files
     from ctf.services.attachment import get_challenge_files
@@ -396,7 +410,10 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "submissions": submissions,
         "is_solved": is_solved,
         "attempt_count": attempt_count,
-        "hint_used": hint_used,
+        "hints": all_hints,
+        "unlocked_hint_ids": unlocked_hint_ids,
+        "next_hint": next_hint,
+        "total_hint_penalty": total_hint_penalty,
         "max_attempts": challenge.max_attempts,
         "attempts_remaining": attempts_remaining,
         "challenge_files": challenge_files,
@@ -1793,8 +1810,10 @@ def api_challenge_detail(request: HttpRequest, challenge_id: UUID) -> JsonRespon
                 "points": challenge.points,
                 "difficulty": challenge.difficulty,
                 "flag_format": challenge.flag_format,
-                "hint": challenge.hint,
-                "hint_penalty": challenge.hint_penalty,
+                "hints": [
+                    {"id": str(h.id), "text": h.text, "penalty": h.penalty, "order": h.order}
+                    for h in challenge.hints.all()
+                ],
                 "max_attempts": challenge.max_attempts,
                 "order": challenge.order,
                 "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
@@ -1894,32 +1913,58 @@ def api_submit_flag(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
 @ctf_participant_required
 @require_POST
 def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
-    """API: Use hint for a challenge.
+    """API: Unlock the next hint for a challenge (or a specific hint by ID).
+
+    POST body (optional): {"hint_id": "<uuid>"}
+    If no hint_id provided, unlocks the next hint in order.
 
     Args:
         challenge_id: UUID of the challenge.
     """
-    from ctf.exceptions import CTFNotFoundError, CTFValidationError
-    from ctf.services.challenge import get_challenge
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+    from ctf.services.hint import get_hints, get_unlocked_hints, use_hint
     from ctf.services.participant import get_participant_by_user
-    from ctf.services.submission import use_hint
 
     participant = get_participant_by_user(_get_user(request))
     if not participant:
         return JsonResponse({"error": "Participant not found"}, status=404)
 
+    # Parse optional hint_id from body
+    hint_id = None
+    if request.body:
+        try:
+            body = json.loads(request.body)
+            hint_id = body.get("hint_id")
+        except json.JSONDecodeError:
+            pass
+
     try:
-        hint_text = use_hint(participant.id, challenge_id)
-        challenge = get_challenge(challenge_id)
-        return JsonResponse(
-            {
-                "hint": hint_text,
-                "penalty": challenge.hint_penalty,
-            }
-        )
+        if hint_id:
+            # Unlock specific hint
+            result = use_hint(participant.id, UUID(hint_id))
+        else:
+            # Unlock next hint in order
+            all_hints = list(get_hints(challenge_id))
+            unlocked = get_unlocked_hints(participant.id, challenge_id)
+            unlocked_ids = {h.id for h in unlocked}
+
+            next_hint = None
+            for h in all_hints:
+                if h.id not in unlocked_ids:
+                    next_hint = h
+                    break
+
+            if not next_hint:
+                return JsonResponse({"error": "No more hints available"}, status=400)
+
+            result = use_hint(participant.id, next_hint.id)
+
+        return JsonResponse(result)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
-    except CTFValidationError as e:
+    except (CTFValidationError, CTFStateError) as e:
         return JsonResponse({"error": str(e)}, status=400)
 
 
@@ -1980,7 +2025,6 @@ def api_submissions(request: HttpRequest) -> JsonResponse:
             "challenge_name": s.challenge.name,
             "is_correct": s.is_correct,
             "points_awarded": s.points_awarded,
-            "hint_used": s.hint_used,
             "attempt_number": s.attempt_number,
             "submitted_at": s.submitted_at.isoformat() if s.submitted_at else None,
         }
@@ -2690,6 +2734,81 @@ def api_remove_flag(request: HttpRequest, flag_id: UUID) -> JsonResponse:
     try:
         remove_flag(flag_id)
         return JsonResponse({"success": True})
+    except CTFNotFoundError as e:
+        return JsonResponse({"error": str(e)}, status=404)
+    except CTFStateError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# -----------------------------------------------------------------------------
+# Hint Management API Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def api_challenge_hints(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
+    """API: List or add hints for a challenge.
+
+    GET: List all hints for a challenge.
+    POST: Add a new hint. Body: {"text": "...", "penalty": 0-100, "order": int}
+    """
+    import json
+
+    from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+    from ctf.services import get_challenge
+    from ctf.services.hint import add_hint, get_hints
+
+    try:
+        challenge = get_challenge(challenge_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Challenge not found"}, status=404)
+
+    forbidden = _check_event_ownership(challenge.event, _get_user(request))
+    if forbidden:
+        return forbidden
+
+    if request.method == "GET":
+        hints = get_hints(challenge_id)
+        data = [
+            {
+                "id": str(h.id),
+                "text": h.text,
+                "penalty": h.penalty,
+                "order": h.order,
+            }
+            for h in hints
+        ]
+        return JsonResponse({"hints": data})
+
+    # POST
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    try:
+        hint = add_hint(challenge_id, body)
+        return JsonResponse(
+            {"id": str(hint.id), "text": hint.text, "penalty": hint.penalty, "order": hint.order},
+            status=201,
+        )
+    except (CTFNotFoundError, CTFStateError, CTFValidationError) as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@ctf_organizer_required
+@require_POST
+def api_hint_delete(request: HttpRequest, hint_id: UUID) -> JsonResponse:
+    """API: Delete a hint."""
+    from ctf.exceptions import CTFNotFoundError, CTFStateError
+    from ctf.services.hint import remove_hint
+
+    try:
+        remove_hint(hint_id)
+        return JsonResponse({}, status=204)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)
     except CTFStateError as e:

@@ -266,9 +266,9 @@
                 <div class="card-body">
                     <div id="rating-result" style="display: none;"></div>
                     <div class="btn-group" role="group">
-                        {% for i in "12345" %}
-                        <button type="button" class="btn {% if own_rating == i|add:"0" %}btn-warning{% else %}btn-outline-warning{% endif %} btn-sm"
-                                onclick="rateChallenge({{ i }})">{{ i }}</button>
+                        {% for btn in rating_buttons %}
+                        <button type="button" class="btn {% if btn.active %}btn-warning{% else %}btn-outline-warning{% endif %} btn-sm"
+                                onclick="rateChallenge({{ btn.value }})">{{ btn.value }}</button>
                         {% endfor %}
                     </div>
                     <small class="text-muted d-block mt-1">

@@ -38,6 +38,23 @@
     </div>
     {% endif %}
 
+    <!-- Topic Filter -->
+    {% if event_topics %}
+    <div class="mb-4">
+        <small class="text-muted me-2">Topics:</small>
+        <a href="{% url 'ctf:challenges' %}{% if category_filter %}?category={{ category_filter }}{% endif %}{% if tag_filter %}{% if category_filter %}&{% else %}?{% endif %}tag={{ tag_filter|urlencode }}{% endif %}"
+           class="btn btn-sm {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %} me-1 mb-1">
+            All
+        </a>
+        {% for topic in event_topics %}
+        <a href="{% url 'ctf:challenges' %}?topic={{ topic.name|urlencode }}{% if category_filter %}&category={{ category_filter }}{% endif %}{% if tag_filter %}&tag={{ tag_filter|urlencode }}{% endif %}"
+           class="btn btn-sm {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %} me-1 mb-1">
+            {{ topic.name }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <!-- Challenges by Category -->
     {% for category, challenges in challenges_by_category.items %}
     <div class="mb-4">
@@ -70,6 +87,9 @@
                             </div>
                             {% for tag in challenge.tags.all %}
                             <span class="badge bg-secondary">{{ tag.name }}</span>
+                            {% endfor %}
+                            {% for topic in challenge.topics.all %}
+                            <span class="badge bg-info">{{ topic.name }}</span>
                             {% endfor %}
                             <small class="text-muted d-block mt-1">{{ challenge.solve_count }} solve{{ challenge.solve_count|pluralize }}</small>
                             {% if challenge.is_locked %}

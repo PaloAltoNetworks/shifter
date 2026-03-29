@@ -217,6 +217,13 @@ class CTFChallengeForm(forms.ModelForm):
         help_text="Comma-separated tags (e.g. XDR, Linux, Windows)",
     )
 
+    # Comma-separated topic names (M2M handled in save)
+    topic_list = forms.CharField(
+        max_length=500,
+        required=False,
+        help_text="Comma-separated topics (e.g. SQL Injection, Privilege Escalation)",
+    )
+
     class Meta:
         model = CTFChallenge
         fields = [
@@ -261,9 +268,10 @@ class CTFChallengeForm(forms.ModelForm):
                 "%Y-%m-%d %H:%M",
             ]
 
-        # Populate tag_list from existing M2M on edit
+        # Populate tag_list and topic_list from existing M2M on edit
         if self.instance.pk and not self.instance._state.adding:
             self.fields["tag_list"].initial = ", ".join(self.instance.tags.values_list("name", flat=True))
+            self.fields["topic_list"].initial = ", ".join(self.instance.topics.values_list("name", flat=True))
 
         # Flag is required for new challenges
         if self.instance._state.adding:
@@ -360,6 +368,15 @@ class CTFChallengeForm(forms.ModelForm):
                 event = self.event or challenge.event
                 tag_objects = _resolve_tags(event, tag_names)
                 challenge.tags.set(tag_objects)
+
+            # Handle topics (M2M)
+            topic_list_str = self.cleaned_data.get("topic_list", "")
+            if topic_list_str is not None:
+                from ctf.services.challenge import _resolve_topics
+
+                topic_names = [t.strip() for t in topic_list_str.split(",") if t.strip()]
+                topic_objects = _resolve_topics(topic_names)
+                challenge.topics.set(topic_objects)
 
         return challenge
 

@@ -154,6 +154,11 @@ api_patterns = [
         views.api_use_hint,
         name="api_use_hint",
     ),
+    path(
+        "api/challenges/<uuid:challenge_id>/rate/",
+        views.api_rate_challenge,
+        name="api_rate_challenge",
+    ),
     path("api/submissions/", views.api_submissions, name="api_submissions"),
     # Participant APIs
     path(

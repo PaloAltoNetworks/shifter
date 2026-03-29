@@ -209,9 +209,13 @@
                         <div id="hint-result-{{ hint.id }}" style="display: none;"></div>
                         <p class="text-muted mb-1">Hint {{ forloop.counter }} available</p>
                         {% if hint.penalty > 0 %}
-                        <small class="text-warning d-block mb-1">Penalty: {{ hint.penalty }}% of points</small>
+                        <small class="text-warning d-block mb-1">Penalty: {{ hint.penalty }}% of points (-{{ next_hint_cost }} pts)</small>
+                        <small class="text-muted d-block mb-1">Challenge value after: {{ points_after_next_hint }} / {{ challenge.points }} pts</small>
                         {% endif %}
-                        <button type="button" class="btn btn-outline-warning btn-sm" onclick="useHint('{{ hint.id }}')">
+                        {% if penalty_warning %}
+                        <small class="text-danger d-block mb-1">Warning: This hint will reduce the challenge to its minimum value!</small>
+                        {% endif %}
+                        <button type="button" class="btn btn-outline-warning btn-sm" onclick="useHint('{{ hint.id }}', {{ hint.penalty }})">
                             Reveal Hint {{ forloop.counter }}
                         </button>
                         {% else %}
@@ -354,8 +358,26 @@ function submitFlag(e) {
     return false;
 }
 
-function useHint(hintId) {
-    if (!confirm('Are you sure you want to reveal this hint? A penalty may apply.')) {
+function useHint(hintId, hintPenalty) {
+    var challengePoints = {{ challenge.points }};
+    var currentPenalty = {{ total_hint_penalty }};
+    var currentPenaltyCapped = Math.min(currentPenalty, 100);
+    var currentValue = Math.max(1, challengePoints - Math.floor(challengePoints * currentPenaltyCapped / 100));
+    var projectedPenalty = Math.min(currentPenalty + (hintPenalty || 0), 100);
+    var pointsAfter = Math.max(1, challengePoints - Math.floor(challengePoints * projectedPenalty / 100));
+    var cost = currentValue - pointsAfter;
+
+    var msg = 'Reveal this hint?\n\n';
+    if (hintPenalty > 0) {
+        msg += 'Cost: ' + hintPenalty + '% penalty (-' + cost + ' pts)\n';
+        msg += 'Challenge value after: ' + pointsAfter + ' / ' + challengePoints + ' pts\n';
+    }
+    if (projectedPenalty >= 100) {
+        msg += '\n⚠ WARNING: This will reduce the challenge to its minimum value (1 pt)!';
+    }
+    msg += '\nThis action cannot be undone.';
+
+    if (!confirm(msg)) {
         return;
     }
 

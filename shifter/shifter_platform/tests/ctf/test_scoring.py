@@ -728,45 +728,35 @@ class TestGetEventStatistics:
 class TestCalculatePointsWithPenalty:
     """Tests for CTFChallenge.calculate_points_with_penalty().
 
-    This is a pure model method that only reads self attributes —
+    This is a pure model method that only reads self.points —
     no DB calls needed, just mock instances.
     """
 
-    def _make_challenge(self, points, hint="", hint_penalty=0):
+    def _make_challenge(self, points):
         """Create a mock challenge with the fields needed by calculate_points_with_penalty."""
         from ctf.models import CTFChallenge
 
         challenge = MagicMock(spec=CTFChallenge)
         challenge.points = points
-        challenge.hint = hint
-        challenge.hint_penalty = hint_penalty
-        # Bind the real method to our mock
         challenge.calculate_points_with_penalty = CTFChallenge.calculate_points_with_penalty.__get__(challenge)
         return challenge
 
-    def test_no_hint_used_returns_full_points(self):
-        """Not using hint gives full points regardless of penalty setting."""
-        challenge = self._make_challenge(points=100, hint="A hint", hint_penalty=50)
-        assert challenge.calculate_points_with_penalty(hint_used=False) == 100
-
     def test_zero_penalty_returns_full_points(self):
-        """0% penalty gives full points even when hint used."""
-        challenge = self._make_challenge(points=100, hint="A hint", hint_penalty=0)
-        assert challenge.calculate_points_with_penalty(hint_used=True) == 100
+        """0% cumulative penalty gives full points."""
+        challenge = self._make_challenge(points=100)
+        assert challenge.calculate_points_with_penalty(0) == 100
 
     def test_100_percent_penalty_guarantees_minimum_1_point(self):
         """100% penalty still awards at least 1 point."""
-        challenge = self._make_challenge(points=100, hint="A hint", hint_penalty=100)
-        result = challenge.calculate_points_with_penalty(hint_used=True)
-        assert result == 1
+        challenge = self._make_challenge(points=100)
+        assert challenge.calculate_points_with_penalty(100) == 1
 
     def test_partial_penalty_reduces_correctly(self):
         """25% penalty on 200 points = 150 points."""
-        challenge = self._make_challenge(points=200, hint="A hint", hint_penalty=25)
-        assert challenge.calculate_points_with_penalty(hint_used=True) == 150
+        challenge = self._make_challenge(points=200)
+        assert challenge.calculate_points_with_penalty(25) == 150
 
-    def test_no_hint_text_no_penalty(self):
-        """Challenge with no hint text returns full points regardless."""
-        challenge = self._make_challenge(points=100, hint="", hint_penalty=0)
-        assert challenge.calculate_points_with_penalty(hint_used=False) == 100
-        assert challenge.calculate_points_with_penalty(hint_used=True) == 100
+    def test_over_100_capped(self):
+        """Penalties over 100% are capped — still awards 1 point."""
+        challenge = self._make_challenge(points=100)
+        assert challenge.calculate_points_with_penalty(150) == 1

@@ -84,7 +84,6 @@ class TestCTFChallengeForm:
                 "points": ctf_challenge.points,
                 "difficulty": ctf_challenge.difficulty,
                 "flag": "",  # Empty flag on edit
-                "hint_penalty": 0,
                 "max_attempts": 0,
                 "order": 0,
             },
@@ -92,24 +91,6 @@ class TestCTFChallengeForm:
             event=ctf_challenge.event,
         )
         assert form.is_valid(), form.errors
-
-    def test_form_validates_hint_penalty_requires_hint(self, ctf_event_draft):
-        """Form rejects hint_penalty without hint text."""
-        form = CTFChallengeForm(
-            data={
-                "name": "Test Challenge",
-                "description": "Find the flag",
-                "category": ChallengeCategory.WEB.value,
-                "points": 100,
-                "difficulty": ChallengeDifficulty.EASY.value,
-                "flag": "FLAG{test}",
-                "hint": "",  # No hint
-                "hint_penalty": 25,  # But penalty set
-            },
-            event=ctf_event_draft,
-        )
-        assert not form.is_valid()
-        assert "hint_penalty" in form.errors
 
     def test_form_validates_release_time_within_event(self, ctf_event_draft):
         """Form rejects release_time outside event bounds."""

@@ -503,6 +503,16 @@
                 </span>
             </div>
             <div class="detail-row">
+                <span class="detail-label">Topics</span>
+                <span class="detail-value">
+                    {% for topic in challenge.topics.all %}
+                    <span class="badge bg-info">{{ topic.name }}</span>
+                    {% empty %}
+                    <span class="text-muted">None</span>
+                    {% endfor %}
+                </span>
+            </div>
+            <div class="detail-row">
                 <span class="detail-label">Display Order</span>
                 <span class="detail-value">{{ challenge.order }}</span>
             </div>

@@ -18,7 +18,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFChallengePrerequisite, CTFChallengeTag, CTFEvent, CTFFlag
+from ctf.models import CTFChallenge, CTFChallengePrerequisite, CTFChallengeTag, CTFEvent, CTFFlag, CTFTopic
 
 if TYPE_CHECKING:
     pass
@@ -44,6 +44,23 @@ def _resolve_tags(event: CTFEvent, tag_names: list[str]) -> list[CTFChallengeTag
         )
         tags.append(tag)
     return tags
+
+
+def _resolve_topics(topic_names: list[str]) -> list[CTFTopic]:
+    """Get-or-create CTFTopic objects for the given names.
+
+    Topic names are normalized to lowercase. Topics are global (not event-scoped).
+    """
+    topics = []
+    seen: set[str] = set()
+    for name in topic_names:
+        name = name.strip().lower()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        topic, _ = CTFTopic.objects.get_or_create(name=name)
+        topics.append(topic)
+    return topics
 
 
 # Fields that organizers may set when creating or updating challenges.
@@ -444,6 +461,7 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any]) -> CTFChall
     data = challenge_data.copy()
     flags_list = data.pop("flags", None)
     tag_names = data.pop("tags", None)
+    topic_names = data.pop("topics", None)
 
     # Validate: need either 'flag' or 'flags'
     if "flag" not in data and not flags_list:
@@ -489,6 +507,11 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any]) -> CTFChall
         if tag_names is not None:
             tag_objects = _resolve_tags(event, tag_names)
             challenge.tags.set(tag_objects)
+
+        # Set topics if provided
+        if topic_names is not None:
+            topic_objects = _resolve_topics(topic_names)
+            challenge.topics.set(topic_objects)
 
         logger.info(
             "Created challenge %s for event %s: %s",
@@ -540,6 +563,7 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any]) -> CTFC
     data = challenge_data.copy()
     flags_list = data.pop("flags", None)
     tag_names = data.pop("tags", None)
+    topic_names = data.pop("topics", None)
 
     # Hash new flag if provided
     if "flag" in data:
@@ -567,6 +591,11 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any]) -> CTFC
         if tag_names is not None:
             tag_objects = _resolve_tags(challenge.event, tag_names)
             challenge.tags.set(tag_objects)
+
+        # Update topics if provided
+        if topic_names is not None:
+            topic_objects = _resolve_topics(topic_names)
+            challenge.topics.set(topic_objects)
 
         logger.info("Updated challenge %s", challenge_id)
 

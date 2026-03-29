@@ -1403,3 +1403,197 @@ class TestChallengeTopics:
         assert challenge.topics.count() == 2
         updated = update_challenge(challenge.id, {"topics": []})
         assert updated.topics.count() == 0
+
+
+# =============================================================================
+# Challenge Rating Tests (CTF-120)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestChallengeRatings:
+    """Tests for challenge ratings (CTF-120)."""
+
+    @pytest.fixture
+    def active_event(self, db, organizer_user):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ctf.models import CTFEvent
+
+        return CTFEvent.objects.create(
+            name="Rating Event",
+            created_by=organizer_user,
+            status=EventStatus.ACTIVE.value,
+            event_start=timezone.now() - timedelta(hours=1),
+            event_end=timezone.now() + timedelta(hours=7),
+            scenario_id="basic",
+            submission_cooldown_seconds=0,
+            rating_visibility="public",
+        )
+
+    @pytest.fixture
+    def participant(self, active_event, participant_user):
+        from django.utils import timezone
+
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        return CTFParticipant.objects.create(
+            event=active_event,
+            user=participant_user,
+            email=participant_user.email,
+            name="Rater",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+
+    @pytest.fixture
+    def solved_challenge(self, active_event, participant):
+        from ctf.models import CTFChallenge, CTFSubmission
+
+        challenge = CTFChallenge.objects.create(
+            event=active_event,
+            name="Rated Challenge",
+            description="Test",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_rate",
+        )
+        # Create a correct submission
+        CTFSubmission.objects.create(
+            participant=participant,
+            challenge=challenge,
+            submitted_flag="FLAG{correct}",
+            is_correct=True,
+            points_awarded=100,
+            attempt_number=1,
+        )
+        return challenge
+
+    def test_rate_challenge_after_solving(self, participant, solved_challenge):
+        from ctf.services.submission import rate_challenge
+
+        rating = rate_challenge(participant.id, solved_challenge.id, 4)
+        assert rating.value == 4
+
+    def test_rate_challenge_before_solving_fails(self, active_event, participant):
+        from ctf.exceptions import CTFValidationError
+        from ctf.models import CTFChallenge
+        from ctf.services.submission import rate_challenge
+
+        unsolved = CTFChallenge.objects.create(
+            event=active_event,
+            name="Unsolved",
+            description="Test",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_unsolved",
+        )
+        with pytest.raises(CTFValidationError, match="must solve"):
+            rate_challenge(participant.id, unsolved.id, 3)
+
+    def test_update_existing_rating(self, participant, solved_challenge):
+        from ctf.services.submission import rate_challenge
+
+        rate_challenge(participant.id, solved_challenge.id, 3)
+        rating = rate_challenge(participant.id, solved_challenge.id, 5)
+        assert rating.value == 5
+        # Should still be only one rating
+        from ctf.models import CTFChallengeRating
+
+        assert CTFChallengeRating.objects.filter(participant=participant, challenge=solved_challenge).count() == 1
+
+    def test_rating_value_validation(self, participant, solved_challenge):
+        from ctf.exceptions import CTFValidationError
+        from ctf.services.submission import rate_challenge
+
+        with pytest.raises(CTFValidationError, match="between 1 and 5"):
+            rate_challenge(participant.id, solved_challenge.id, 0)
+
+        with pytest.raises(CTFValidationError, match="between 1 and 5"):
+            rate_challenge(participant.id, solved_challenge.id, 6)
+
+    def test_get_challenge_rating_average(self, active_event, solved_challenge, participant, organizer_user):
+        from django.contrib.auth.models import User
+        from django.utils import timezone
+
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant, CTFSubmission
+        from ctf.services.submission import get_challenge_rating, rate_challenge
+
+        # First participant rates 4
+        rate_challenge(participant.id, solved_challenge.id, 4)
+
+        # Create second participant who also solved it
+        user2 = User.objects.create_user("rater2", "rater2@test.com", "pass")
+        p2 = CTFParticipant.objects.create(
+            event=active_event,
+            user=user2,
+            email=user2.email,
+            name="Rater 2",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+        CTFSubmission.objects.create(
+            participant=p2,
+            challenge=solved_challenge,
+            submitted_flag="FLAG{correct}",
+            is_correct=True,
+            points_awarded=100,
+            attempt_number=1,
+        )
+        rate_challenge(p2.id, solved_challenge.id, 2)
+
+        result = get_challenge_rating(solved_challenge.id)
+        assert result["average"] == 3.0
+        assert result["count"] == 2
+
+    def test_rating_disabled_event(self, organizer_user, participant_user):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ctf.enums import ParticipantStatus
+        from ctf.exceptions import CTFValidationError
+        from ctf.models import CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission
+        from ctf.services.submission import rate_challenge
+
+        event = CTFEvent.objects.create(
+            name="No Ratings Event",
+            created_by=organizer_user,
+            status=EventStatus.ACTIVE.value,
+            event_start=timezone.now() - timedelta(hours=1),
+            event_end=timezone.now() + timedelta(hours=7),
+            scenario_id="basic",
+            rating_visibility="disabled",
+        )
+        challenge = CTFChallenge.objects.create(
+            event=event,
+            name="No Rate",
+            description="Test",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            flag_hash="$2b$12$x",
+        )
+        p = CTFParticipant.objects.create(
+            event=event,
+            user=participant_user,
+            email=participant_user.email,
+            name="No Rater",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+        CTFSubmission.objects.create(
+            participant=p,
+            challenge=challenge,
+            submitted_flag="FLAG{x}",
+            is_correct=True,
+            points_awarded=100,
+            attempt_number=1,
+        )
+        with pytest.raises(CTFValidationError, match="disabled"):
+            rate_challenge(p.id, challenge.id, 4)

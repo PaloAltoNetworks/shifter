@@ -1270,3 +1270,136 @@ class TestChallengeSolutions:
         )
         ctf_event_draft.status = "ended"
         assert not bool(challenge.solution and ctf_event_draft.status in ("ended", "archived"))
+
+
+# =============================================================================
+# Challenge Topic Tests (CTF-119)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestChallengeTopics:
+    """Tests for challenge topic taxonomy (CTF-119)."""
+
+    def test_create_challenge_with_topics(self, ctf_event_draft):
+        """Creating a challenge with topics attaches them."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Topic Challenge",
+                "description": "Has topics",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "difficulty": ChallengeDifficulty.EASY.value,
+                "flag": "FLAG{topic}",
+                "topics": ["SQL Injection", "XSS"],
+            },
+        )
+        topic_names = sorted(challenge.topics.values_list("name", flat=True))
+        assert topic_names == ["sql injection", "xss"]
+
+    def test_update_challenge_topics(self, ctf_event_draft):
+        """Updating topics replaces the existing set."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Topic Update",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{topicupd}",
+                "topics": ["SQL Injection"],
+            },
+        )
+        updated = update_challenge(challenge.id, {"topics": ["Privilege Escalation"]})
+        assert list(updated.topics.values_list("name", flat=True)) == ["privilege escalation"]
+
+    def test_topics_reusable_across_events(self, ctf_event_draft, organizer_user):
+        """Same topic can be used by challenges in different events."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ctf.models import CTFEvent, CTFTopic
+
+        event2 = CTFEvent.objects.create(
+            name="Second Event",
+            created_by=organizer_user,
+            status="draft",
+            event_start=timezone.now() + timedelta(days=10),
+            event_end=timezone.now() + timedelta(days=10, hours=8),
+            scenario_id="basic",
+        )
+        c1 = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "E1 Challenge",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{e1}",
+                "topics": ["SQL Injection"],
+            },
+        )
+        c2 = create_challenge(
+            event2.id,
+            {
+                "name": "E2 Challenge",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{e2}",
+                "topics": ["SQL Injection"],
+            },
+        )
+        # Both share the same global topic object
+        assert c1.topics.first().pk == c2.topics.first().pk
+        assert CTFTopic.objects.filter(name="sql injection").count() == 1
+
+    def test_topic_global_uniqueness(self, ctf_event_draft):
+        """Topics are globally unique by name."""
+        from ctf.models import CTFTopic
+
+        create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Unique Topic",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{uniq}",
+                "topics": ["Network Analysis", "Network Analysis"],
+            },
+        )
+        assert CTFTopic.objects.filter(name="network analysis").count() == 1
+
+    def test_create_challenge_without_topics(self, ctf_event_draft):
+        """Challenges without topics have empty set."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "No Topics",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{notopic}",
+            },
+        )
+        assert challenge.topics.count() == 0
+
+    def test_clear_topics(self, ctf_event_draft):
+        """Passing empty topics list clears all topics."""
+        challenge = create_challenge(
+            ctf_event_draft.id,
+            {
+                "name": "Clear Topics",
+                "description": "d",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "flag": "FLAG{cleartopic}",
+                "topics": ["SQL Injection", "XSS"],
+            },
+        )
+        assert challenge.topics.count() == 2
+        updated = update_challenge(challenge.id, {"topics": []})
+        assert updated.topics.count() == 0

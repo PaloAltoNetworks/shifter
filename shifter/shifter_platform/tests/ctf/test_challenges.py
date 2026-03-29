@@ -16,7 +16,7 @@ from django.urls import reverse
 
 from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus
 from ctf.forms import CTFChallengeForm
-from ctf.models import CTFChallenge, CTFFlag
+from ctf.models import CTFChallenge, CTFFlag, CTFSubmission
 from ctf.services import (
     add_flag,
     create_challenge,
@@ -1578,3 +1578,171 @@ class TestChallengeRatings:
         )
         with pytest.raises(CTFValidationError, match="disabled"):
             rate_challenge(p.id, challenge.id, 4)
+
+
+# =============================================================================
+# Next Challenge Navigation Tests (CTF-121)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestNextChallengeNavigation:
+    """Tests for next challenge navigation (CTF-121)."""
+
+    def test_form_queryset_excludes_self(self, ctf_event_draft):
+        """Form next_challenge queryset excludes the challenge being edited."""
+        c1 = CTFChallenge.objects.create(
+            event=ctf_event_draft,
+            name="C1",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h1",
+        )
+        CTFChallenge.objects.create(
+            event=ctf_event_draft,
+            name="C2",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h2",
+        )
+        form = CTFChallengeForm(instance=c1, event=ctf_event_draft)
+        qs = form.fields["next_challenge"].queryset
+        assert c1 not in qs
+        assert qs.count() == 1
+
+    def test_form_queryset_filters_by_event(self, ctf_event_draft, organizer_user):
+        """Form next_challenge queryset only includes same-event challenges."""
+        from ctf.models import CTFEvent
+
+        other_event = CTFEvent.objects.create(
+            name="Other Event",
+            created_by=organizer_user,
+            status=EventStatus.DRAFT.value,
+            event_start=ctf_event_draft.event_start,
+            event_end=ctf_event_draft.event_end,
+            scenario_id="basic",
+        )
+        CTFChallenge.objects.create(
+            event=ctf_event_draft,
+            name="Same Event",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h1",
+        )
+        CTFChallenge.objects.create(
+            event=other_event,
+            name="Other Event Challenge",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h2",
+        )
+        form = CTFChallengeForm(event=ctf_event_draft)
+        qs = form.fields["next_challenge"].queryset
+        assert qs.count() == 1
+        assert qs.first().name == "Same Event"
+
+    def test_next_challenge_link_shown_when_solved(
+        self,
+        client,
+        ctf_event_active,
+        participant_user,
+    ):
+        """Solved challenge with next_challenge shows navigation link."""
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        c1 = CTFChallenge.objects.create(
+            event=ctf_event_active,
+            name="Challenge 1",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h1",
+        )
+        c2 = CTFChallenge.objects.create(
+            event=ctf_event_active,
+            name="Challenge 2",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h2",
+        )
+        c1.next_challenge = c2
+        c1.save()
+
+        p = CTFParticipant.objects.create(
+            event=ctf_event_active,
+            user=participant_user,
+            email=participant_user.email,
+            name="Player",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=ctf_event_active.event_start,
+        )
+        CTFSubmission.objects.create(
+            participant=p,
+            challenge=c1,
+            submitted_flag="FLAG{x}",
+            is_correct=True,
+            points_awarded=100,
+            attempt_number=1,
+        )
+
+        client.force_login(participant_user)
+        url = reverse("ctf:challenge_detail", kwargs={"challenge_id": c1.pk})
+        response = client.get(url)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Challenge 2" in content
+        assert str(c2.pk) in content
+
+    def test_next_challenge_link_hidden_when_not_configured(
+        self,
+        client,
+        ctf_event_active,
+        participant_user,
+    ):
+        """Solved challenge without next_challenge does not show link."""
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        c1 = CTFChallenge.objects.create(
+            event=ctf_event_active,
+            name="Solo Challenge",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h1",
+        )
+        p = CTFParticipant.objects.create(
+            event=ctf_event_active,
+            user=participant_user,
+            email=participant_user.email,
+            name="Player",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=ctf_event_active.event_start,
+        )
+        CTFSubmission.objects.create(
+            participant=p,
+            challenge=c1,
+            submitted_flag="FLAG{x}",
+            is_correct=True,
+            points_awarded=100,
+            attempt_number=1,
+        )
+
+        client.force_login(participant_user)
+        url = reverse("ctf:challenge_detail", kwargs={"challenge_id": c1.pk})
+        response = client.get(url)
+        assert response.status_code == 200
+        assert "Next:" not in response.content.decode()

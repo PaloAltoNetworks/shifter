@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.47.0] - 2026-03-29
+
+### Changed
+- Progressive ordered hints system replacing single hint per challenge (CTF-003)
+- `CTFHint` model with per-hint text, penalty, and order for sequential unlock
+- `CTFHintUsage` model tracks which hints each participant has unlocked
+- Cumulative penalty calculation (sum of unlocked hint penalties, capped at 100%)
+- Organizer hint management via API (add/remove hints on challenge detail page)
+- Participant progressive hint UI with sequential unlock and penalty display
+- Data migration converts existing single-hint challenges to CTFHint records
+
+### Removed
+- Legacy `hint` and `hint_penalty` fields from CTFChallenge
+- Legacy `hint_used` field from CTFSubmission
+
 ## [3.46.0] - 2026-03-28
 
 ### Added

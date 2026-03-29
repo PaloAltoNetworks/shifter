@@ -251,29 +251,18 @@ class TestCTFChallengeModel:
         mock_submissions.filter.assert_called_once_with(is_correct=True)
 
     @pytest.mark.parametrize(
-        "points,hint_penalty,hint_used,expected",
+        "points,total_penalty,expected",
         [
-            pytest.param(100, 0, False, 100, id="no-penalty"),
-            pytest.param(200, 25, True, 150, id="with-penalty"),
-            pytest.param(200, 25, False, 200, id="penalty-not-used"),
+            pytest.param(100, 0, 100, id="no-penalty"),
+            pytest.param(200, 25, 150, id="25pct-penalty"),
+            pytest.param(100, 100, 1, id="100pct-minimum-1"),
+            pytest.param(200, 150, 1, id="over-100pct-capped"),
         ],
     )
-    def test_challenge_calculate_points(self, points, hint_penalty, hint_used, expected):
-        """Test points calculation with various penalty configurations."""
-        challenge = make_challenge(
-            points=points,
-            hint="Look at the cipher mode" if hint_penalty else "",
-            hint_penalty=hint_penalty,
-        )
-        assert challenge.calculate_points_with_penalty(hint_used=hint_used) == expected
-
-    def test_challenge_validation_hint_penalty_without_hint(self):
-        """Test validation rejects hint_penalty without hint."""
-        challenge = make_challenge(hint="", hint_penalty=25)
-        with pytest.raises(ValidationError) as exc_info:
-            challenge.clean()
-
-        assert "hint_penalty" in exc_info.value.message_dict
+    def test_challenge_calculate_points(self, points, total_penalty, expected):
+        """Test points calculation with cumulative hint penalty."""
+        challenge = make_challenge(points=points)
+        assert challenge.calculate_points_with_penalty(total_penalty) == expected
 
 
 # -----------------------------------------------------------------------------

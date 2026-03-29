@@ -34,6 +34,7 @@ from ctf.enums import (
     NotificationStatus,
     NotificationType,
     ParticipantStatus,
+    RatingVisibility,
     ScheduledTaskStatus,
     ScheduledTaskType,
 )
@@ -313,6 +314,12 @@ class CTFEvent(CTFBaseModel):
         default=300,
         validators=[MaxValueValidator(3600)],
         help_text="Seconds before attempts reset when using timeout mode (0-3600)",
+    )
+    rating_visibility = models.CharField(
+        max_length=20,
+        choices=RatingVisibility.choices(),
+        default=RatingVisibility.PUBLIC.value,
+        help_text="Challenge rating visibility: public, organizer-only, or disabled",
     )
 
     class Meta:
@@ -1319,6 +1326,56 @@ class CTFAward(CTFBaseModel):
 
         if errors:
             raise ValidationError(errors)
+
+
+class CTFChallengeRating(CTFBaseModel):
+    """Participant rating of a challenge.
+
+    Participants who have solved a challenge can rate it on a 1-5 scale.
+    One rating per participant per challenge (upsert on re-rate).
+
+    Attributes:
+        participant: The participant who rated.
+        challenge: The challenge being rated.
+        value: Rating value (1-5).
+    """
+
+    participant = models.ForeignKey(
+        CTFParticipant,
+        on_delete=models.CASCADE,
+        related_name="ratings",
+        help_text="Participant who rated",
+    )
+    challenge = models.ForeignKey(
+        CTFChallenge,
+        on_delete=models.CASCADE,
+        related_name="ratings",
+        help_text="Challenge being rated",
+    )
+    value = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        help_text="Rating value (1-5)",
+    )
+
+    class Meta:
+        db_table = "ctf_challenge_rating"
+        ordering = ["-created_at"]
+        verbose_name = "CTF Challenge Rating"
+        verbose_name_plural = "CTF Challenge Ratings"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["participant", "challenge"],
+                condition=Q(deleted_at__isnull=True),
+                name="unique_active_rating_per_participant_challenge",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["challenge"]),
+        ]
+
+    def __str__(self) -> str:
+        """Return rating description."""
+        return f"{self.participant.name} rated {self.challenge.name}: {self.value}/5"
 
 
 class CTFNotification(CTFBaseModel):

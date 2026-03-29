@@ -238,6 +238,26 @@ class AttemptLimitMode(str, Enum):
         return [(m.value, m.name.title()) for m in cls]
 
 
+class RatingVisibility(str, Enum):
+    """Controls whether challenge ratings are visible to participants.
+
+    PUBLIC: All participants can see average ratings.
+    ORGANIZER: Only organizers can see ratings.
+    DISABLED: Ratings are disabled for this event.
+    """
+
+    PUBLIC = "public"
+    ORGANIZER = "organizer"
+    DISABLED = "disabled"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        return [(v.value, v.name.title()) for v in cls]
+
+
 class UserType(str, Enum):
     """User types for the platform."""
 

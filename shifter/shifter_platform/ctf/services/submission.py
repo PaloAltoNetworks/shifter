@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from ctf.enums import EventStatus
 from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFParticipant, CTFSubmission
+from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
 from ctf.services.challenge import verify_flag
 
 if TYPE_CHECKING:
@@ -407,3 +407,114 @@ def get_correct_submissions(challenge_id: UUID) -> QuerySet[CTFSubmission]:
         .select_related("participant")
         .order_by("submitted_at")
     )
+
+
+def rate_challenge(
+    participant_id: UUID,
+    challenge_id: UUID,
+    value: int,
+) -> CTFChallengeRating:
+    """Rate a challenge (1-5). Participant must have solved the challenge.
+
+    Creates a new rating or updates existing one (upsert).
+
+    Args:
+        participant_id: UUID of the participant.
+        challenge_id: UUID of the challenge.
+        value: Rating value (1-5).
+
+    Returns:
+        The CTFChallengeRating instance.
+
+    Raises:
+        CTFNotFoundError: If participant or challenge doesn't exist.
+        CTFValidationError: If participant hasn't solved the challenge or value is invalid.
+    """
+    if not (1 <= value <= 5):
+        raise CTFValidationError(
+            "Rating must be between 1 and 5",
+            details={"value": value},
+        )
+
+    try:
+        participant = CTFParticipant.objects.get(pk=participant_id)
+    except CTFParticipant.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Participant {participant_id} not found",
+            details={"participant_id": str(participant_id)},
+        ) from None
+
+    try:
+        challenge = CTFChallenge.objects.get(pk=challenge_id)
+    except CTFChallenge.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Challenge {challenge_id} not found",
+            details={"challenge_id": str(challenge_id)},
+        ) from None
+
+    # Validate participant and challenge belong to the same event
+    if challenge.event_id != participant.event_id:
+        raise CTFValidationError(
+            "Challenge does not belong to participant's event",
+            details={
+                "participant_event": str(participant.event_id),
+                "challenge_event": str(challenge.event_id),
+            },
+        )
+
+    # Check event has ratings enabled
+    if challenge.event.rating_visibility == "disabled":
+        raise CTFValidationError(
+            "Ratings are disabled for this event",
+            details={"challenge_id": str(challenge_id)},
+        )
+
+    # Check participant solved the challenge
+    solved = CTFSubmission.objects.filter(
+        participant=participant,
+        challenge=challenge,
+        is_correct=True,
+    ).exists()
+
+    if not solved:
+        raise CTFValidationError(
+            "You must solve a challenge before rating it",
+            details={"challenge_id": str(challenge_id)},
+        )
+
+    # Upsert rating
+    rating, _ = CTFChallengeRating.objects.update_or_create(
+        participant=participant,
+        challenge=challenge,
+        defaults={"value": value},
+    )
+
+    logger.info(
+        "Challenge rated: participant=%s, challenge=%s, value=%d",
+        participant_id,
+        challenge_id,
+        value,
+    )
+
+    return rating
+
+
+def get_challenge_rating(challenge_id: UUID) -> dict[str, float | int | None]:
+    """Get average rating and count for a challenge.
+
+    Args:
+        challenge_id: UUID of the challenge.
+
+    Returns:
+        Dict with 'average' (float or None) and 'count' (int).
+    """
+    from django.db.models import Avg, Count
+
+    result = CTFChallengeRating.objects.filter(challenge_id=challenge_id).aggregate(
+        average=Avg("value"),
+        count=Count("id"),
+    )
+    return {
+        "average": round(result["average"], 1) if result["average"] is not None else None,
+        "count": result["count"],
+    }

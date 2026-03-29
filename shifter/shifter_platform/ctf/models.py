@@ -515,6 +515,12 @@ class CTFChallenge(CTFBaseModel):
         related_name="challenges",
         help_text="Freeform metadata tags (e.g. XDR, Linux, Windows)",
     )
+    topics: models.ManyToManyField[CTFTopic, CTFTopic] = models.ManyToManyField(
+        "CTFTopic",
+        blank=True,
+        related_name="challenges",
+        help_text="Knowledge areas or attack techniques (controlled vocabulary)",
+    )
 
     class Meta:
         db_table = "ctf_challenge"
@@ -596,6 +602,40 @@ class CTFChallenge(CTFBaseModel):
             reduction = (self.points * self.hint_penalty) // 100
             return max(1, self.points - reduction)
         return self.points
+
+
+class CTFTopic(CTFBaseModel):
+    """Controlled vocabulary topic for challenges.
+
+    Topics represent knowledge areas or attack techniques (e.g. SQL Injection,
+    Privilege Escalation, Network Analysis). Unlike tags, topics are global
+    (not event-scoped) and form a managed taxonomy reusable across events.
+
+    Attributes:
+        name: Topic name (e.g. "SQL Injection", "Privilege Escalation").
+        description: Optional description of the topic.
+    """
+
+    name = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Topic name (e.g. SQL Injection, Privilege Escalation)",
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional description of the topic",
+    )
+
+    class Meta:
+        db_table = "ctf_topic"
+        ordering = ["name"]
+        verbose_name = "CTF Topic"
+        verbose_name_plural = "CTF Topics"
+
+    def __str__(self) -> str:
+        """Return topic name."""
+        return self.name
 
 
 class CTFChallengeTag(CTFBaseModel):

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.45.0] - 2026-03-28
+
+### Added
+- Controlled vocabulary topic taxonomy for CTF challenges (CTF-119)
+- `CTFTopic` model for global knowledge areas and attack techniques (e.g. SQL Injection, Privilege Escalation)
+- Topics distinct from categories (event-scoped enum) and tags (freeform, event-scoped)
+- Topic filtering on participant challenge listing via `?topic=` query parameter
+- Topics displayed as badges on challenge cards and admin detail pages
+- Topics included in challenge API responses (list and detail)
+
 ## [3.44.0] - 2026-03-28
 
 ### Added

@@ -182,14 +182,63 @@
             <div class="challenge-description">{{ challenge.description|linebreaks }}</div>
         </div>
 
-        <!-- Hint -->
-        {% if challenge.hint %}
+        <!-- Hints -->
         <div class="card">
-            <div class="card-title">Hint</div>
-            <p style="margin: 0 0 4px; font-size: 14px;">{{ challenge.hint }}</p>
-            <span class="text-muted text-small">Penalty: {{ challenge.hint_penalty }}% of points</span>
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                Hints ({{ challenge.hints.count }})
+                {% if event.is_content_modifiable %}
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="document.getElementById('add-hint-form').style.display='block'">Add Hint</button>
+                {% endif %}
+            </div>
+            {% if challenge.hints.count > 0 %}
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--xdr-border);">
+                        <th style="padding: 6px; text-align: left;">#</th>
+                        <th style="padding: 6px; text-align: left;">Text</th>
+                        <th style="padding: 6px; text-align: left;">Penalty</th>
+                        {% if event.is_content_modifiable %}<th style="padding: 6px;"></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for hint in challenge.hints.all %}
+                    <tr style="border-bottom: 1px solid var(--xdr-border);">
+                        <td style="padding: 6px;">{{ hint.order }}</td>
+                        <td style="padding: 6px;">{{ hint.text|truncatechars:80 }}</td>
+                        <td style="padding: 6px;">{{ hint.penalty }}%</td>
+                        {% if event.is_content_modifiable %}
+                        <td style="padding: 6px; text-align: right;">
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeHint('{{ hint.id }}')">Remove</button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted" style="font-size: 13px; margin: 0;">No hints added yet.</p>
+            {% endif %}
+            {% if event.is_content_modifiable %}
+            <div id="add-hint-form" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--xdr-border);">
+                <div style="margin-bottom: 8px;">
+                    <label style="font-size: 12px; font-weight: 600;">Hint Text</label>
+                    <textarea id="new-hint-text" class="form-input" rows="2" style="width: 100%;"></textarea>
+                </div>
+                <div style="display: flex; gap: 12px; margin-bottom: 8px;">
+                    <div>
+                        <label style="font-size: 12px; font-weight: 600;">Penalty (%)</label>
+                        <input type="number" id="new-hint-penalty" class="form-input" min="0" max="100" value="0" style="width: 100px;">
+                    </div>
+                    <div>
+                        <label style="font-size: 12px; font-weight: 600;">Order</label>
+                        <input type="number" id="new-hint-order" class="form-input" min="0" value="{{ challenge.hints.count }}" style="width: 100px;">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" onclick="addHint()">Add</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('add-hint-form').style.display='none'">Cancel</button>
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
 
         <!-- Solution -->
         {% if challenge.solution %}
@@ -597,6 +646,33 @@ function removePrerequisite(prereqId) {
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
     }).then(r => r.json()).then(data => {
         if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+
+function addHint() {
+    const text = document.getElementById('new-hint-text').value.trim();
+    const penalty = parseInt(document.getElementById('new-hint-penalty').value) || 0;
+    const order = parseInt(document.getElementById('new-hint-order').value) || 0;
+    if (!text) { alert('Hint text is required.'); return; }
+
+    fetch("{% url 'ctf:api_challenge_hints' challenge_id=challenge.pk %}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({text: text, penalty: penalty, order: order}),
+    }).then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); } else { location.reload(); }
+    });
+}
+
+const REMOVE_HINT_URL = "{% url 'ctf:api_hint_delete' hint_id='00000000-0000-0000-0000-000000000000' %}";
+function removeHint(hintId) {
+    if (!confirm('Remove this hint?')) return;
+    const url = REMOVE_HINT_URL.replace('00000000-0000-0000-0000-000000000000', hintId);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    }).then(r => {
+        if (r.ok) { location.reload(); } else { r.json().then(d => alert(d.error)); }
     });
 }
 </script>

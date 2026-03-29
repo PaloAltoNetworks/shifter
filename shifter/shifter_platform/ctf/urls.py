@@ -154,6 +154,17 @@ api_patterns = [
         views.api_use_hint,
         name="api_use_hint",
     ),
+    # Hint management (organizer)
+    path(
+        "api/challenges/<uuid:challenge_id>/hints/",
+        views.api_challenge_hints,
+        name="api_challenge_hints",
+    ),
+    path(
+        "api/hints/<uuid:hint_id>/delete/",
+        views.api_hint_delete,
+        name="api_hint_delete",
+    ),
     path(
         "api/challenges/<uuid:challenge_id>/rate/",
         views.api_rate_challenge,

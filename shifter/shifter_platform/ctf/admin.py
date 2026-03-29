@@ -277,12 +277,6 @@ class CTFChallengeAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             },
         ),
         (
-            "Hints",
-            {
-                "fields": ["hint", "hint_penalty"],
-            },
-        ),
-        (
             "Limits",
             {
                 "fields": ["max_attempts", "release_time"],
@@ -508,11 +502,10 @@ class CTFSubmissionAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "is_correct_display",
         "points_awarded",
         "attempt_number",
-        "hint_used",
         "submitted_at",
         "ip_address",
     ]
-    list_filter = ["is_correct", "hint_used", "challenge__event", "submitted_at"]
+    list_filter = ["is_correct", "challenge__event", "submitted_at"]
     search_fields = [
         "participant__name",
         "participant__email",
@@ -544,7 +537,7 @@ class CTFSubmissionAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         (
             "Details",
             {
-                "fields": ["hint_used", "ip_address", "submitted_at"],
+                "fields": ["ip_address", "submitted_at"],
             },
         ),
         (

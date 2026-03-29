@@ -61,6 +61,15 @@ from ctf.services.event import (
     start_event,
     update_event,
 )
+from ctf.services.hint import (
+    add_hint,
+    get_hints,
+    get_total_hint_penalty,
+    get_unlocked_hints,
+    remove_hint,
+    update_hint,
+    use_hint,
+)
 from ctf.services.participant import (
     bulk_import_participants,
     delete_participant,
@@ -92,13 +101,13 @@ from ctf.services.submission import (
     get_correct_submissions,
     get_participant_submissions,
     submit_flag,
-    use_hint,
 )
 
 __all__ = [
     "activate_event",
     "add_challenge_file",
     "add_flag",
+    "add_hint",
     "add_prerequisite",
     "archive_event",
     "bulk_import_participants",
@@ -127,6 +136,7 @@ __all__ = [
     "get_event_awards",
     "get_event_statistics",
     "get_event_stats",
+    "get_hints",
     "get_organizer_events",
     "get_participant",
     "get_participant_awards",
@@ -137,6 +147,8 @@ __all__ = [
     "get_range_status",
     "get_scoreboard",
     "get_team_scoreboard",
+    "get_total_hint_penalty",
+    "get_unlocked_hints",
     "grant_award",
     "hash_flag",
     "invite_participant",
@@ -149,6 +161,7 @@ __all__ = [
     "provision_participant_range",
     "remove_challenge_file",
     "remove_flag",
+    "remove_hint",
     "remove_prerequisite",
     "resend_invite",
     "resume_event",
@@ -158,6 +171,7 @@ __all__ = [
     "submit_flag",
     "update_challenge",
     "update_event",
+    "update_hint",
     "update_participant_range_status",
     "use_hint",
     "verify_flag",

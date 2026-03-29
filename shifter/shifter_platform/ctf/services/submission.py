@@ -1,6 +1,6 @@
 """CTF Submission service.
 
-Provides business logic for flag submission and hint usage.
+Provides business logic for flag submission and scoring.
 """
 
 from __future__ import annotations
@@ -238,8 +238,10 @@ def submit_flag(
                     },
                 )
 
-    # Check if hint was used
-    hint_used = _check_hint_used(participant, challenge)
+    # Calculate hint penalty
+    from ctf.services.hint import get_total_hint_penalty
+
+    total_hint_penalty = get_total_hint_penalty(participant.id, challenge.id)
 
     # Verify flag
     is_correct = verify_flag(challenge, submitted_flag.strip())
@@ -247,7 +249,7 @@ def submit_flag(
     # Calculate points
     points = 0
     if is_correct:
-        points = challenge.calculate_points_with_penalty(hint_used)
+        points = challenge.calculate_points_with_penalty(total_hint_penalty)
         logger.info(
             "Correct flag submitted: participant=%s, challenge=%s, points=%d",
             participant_id,
@@ -269,7 +271,6 @@ def submit_flag(
             submitted_flag=submitted_flag,
             is_correct=is_correct,
             points_awarded=points,
-            hint_used=hint_used,
             attempt_number=attempt_count + 1,
             ip_address=ip_address,
         )
@@ -299,81 +300,6 @@ def get_participant_submissions(
         qs = qs.filter(challenge_id=challenge_id)
 
     return qs.select_related("challenge").order_by("-submitted_at")
-
-
-def use_hint(participant_id: UUID, challenge_id: UUID) -> str:
-    """Mark hint as used and return hint text.
-
-    Args:
-        participant_id: UUID of the participant.
-        challenge_id: UUID of the challenge.
-
-    Returns:
-        The hint text.
-
-    Raises:
-        CTFNotFoundError: If participant or challenge doesn't exist.
-        CTFValidationError: If challenge has no hint.
-    """
-    logger.info(
-        "Hint requested: participant=%s, challenge=%s",
-        participant_id,
-        challenge_id,
-    )
-
-    try:
-        CTFParticipant.objects.get(pk=participant_id)
-    except CTFParticipant.DoesNotExist:
-        raise CTFNotFoundError(
-            f"Participant {participant_id} not found",
-            details={"participant_id": str(participant_id)},
-        ) from None
-
-    try:
-        challenge = CTFChallenge.objects.get(pk=challenge_id)
-    except CTFChallenge.DoesNotExist:
-        raise CTFNotFoundError(
-            f"Challenge {challenge_id} not found",
-            details={"challenge_id": str(challenge_id)},
-        ) from None
-
-    if not challenge.hint:
-        raise CTFValidationError(
-            "Challenge has no hint available",
-            details={"challenge_id": str(challenge_id)},
-        )
-
-    # Track hint usage (we'll check this during submission)
-    # For now, we just log it - could add a HintUsage model later
-    logger.info(
-        "Hint used: participant=%s, challenge=%s, penalty=%d%%",
-        participant_id,
-        challenge_id,
-        challenge.hint_penalty,
-    )
-
-    return challenge.hint
-
-
-def _check_hint_used(participant: CTFParticipant, challenge: CTFChallenge) -> bool:
-    """Check if participant has used hint for a challenge.
-
-    Currently checks if there's any submission with hint_used=True.
-    Could be enhanced with a dedicated HintUsage model.
-
-    Args:
-        participant: The participant.
-        challenge: The challenge.
-
-    Returns:
-        True if hint was used, False otherwise.
-    """
-    # Check if any previous submission had hint_used=True
-    return CTFSubmission.objects.filter(
-        participant=participant,
-        challenge=challenge,
-        hint_used=True,
-    ).exists()
 
 
 def get_challenge_submissions(challenge_id: UUID) -> QuerySet[CTFSubmission]:

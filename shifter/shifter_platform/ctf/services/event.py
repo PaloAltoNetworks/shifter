@@ -42,6 +42,7 @@ _EVENT_MUTABLE_FIELDS = frozenset(
         "submission_cooldown_seconds",
         "attempt_limit_mode",
         "attempt_limit_cooldown_seconds",
+        "rating_visibility",
     }
 )
 

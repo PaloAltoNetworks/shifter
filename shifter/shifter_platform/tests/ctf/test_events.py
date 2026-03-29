@@ -236,6 +236,7 @@ class TestCTFEventForm:
             "submission_cooldown_seconds": 0,
             "attempt_limit_mode": "lockout",
             "attempt_limit_cooldown_seconds": 300,
+            "rating_visibility": "public",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -258,6 +259,7 @@ class TestCTFEventForm:
             "submission_cooldown_seconds": 0,
             "attempt_limit_mode": "lockout",
             "attempt_limit_cooldown_seconds": 300,
+            "rating_visibility": "public",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors
@@ -345,6 +347,7 @@ class TestCTFEventForm:
             "submission_cooldown_seconds": 10,
             "attempt_limit_mode": "timeout",
             "attempt_limit_cooldown_seconds": 600,
+            "rating_visibility": "organizer",
         }
         form = CTFEventForm(data=data)
         assert form.is_valid(), form.errors

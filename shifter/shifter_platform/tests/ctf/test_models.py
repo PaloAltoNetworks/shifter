@@ -264,6 +264,41 @@ class TestCTFChallengeModel:
         challenge = make_challenge(points=points)
         assert challenge.calculate_points_with_penalty(total_penalty) == expected
 
+    def test_next_challenge_self_reference_rejected(self):
+        """Cannot set next_challenge to self."""
+        challenge = make_challenge()
+        challenge.next_challenge = challenge
+        challenge.next_challenge_id = challenge.pk
+        with pytest.raises(ValidationError, match="own next challenge"):
+            challenge.clean()
+
+    def test_next_challenge_cross_event_rejected(self):
+        """Cannot set next_challenge to a challenge in a different event."""
+        event_a = make_ctf_event(name="Event A")
+        event_b = make_ctf_event(name="Event B")
+        challenge_a = make_challenge(event=event_a)
+        challenge_b = make_challenge(event=event_b)
+        challenge_a.next_challenge = challenge_b
+        challenge_a.next_challenge_id = challenge_b.pk
+        with pytest.raises(ValidationError, match="same event"):
+            challenge_a.clean()
+
+    def test_next_challenge_same_event_accepted(self):
+        """next_challenge in same event passes validation."""
+        event = make_ctf_event()
+        challenge_a = make_challenge(event=event)
+        challenge_b = make_challenge(event=event, name="Challenge B")
+        challenge_a.next_challenge = challenge_b
+        challenge_a.next_challenge_id = challenge_b.pk
+        challenge_a.clean()  # Should not raise
+
+    def test_next_challenge_null_accepted(self):
+        """Null next_challenge passes validation."""
+        challenge = make_challenge()
+        challenge.next_challenge = None
+        challenge.next_challenge_id = None
+        challenge.clean()  # Should not raise
+
 
 # -----------------------------------------------------------------------------
 # CTFTeam Model Tests

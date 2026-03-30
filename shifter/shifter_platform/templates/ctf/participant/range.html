@@ -25,6 +25,7 @@
                             <th>Name</th>
                             <th>IP Address</th>
                             <th>OS</th>
+                            <th>Access</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -33,6 +34,15 @@
                             <td><code>{{ inst.name }}</code></td>
                             <td><code>{{ inst.private_ip }}</code></td>
                             <td>{{ inst.os_type }}</td>
+                            <td>
+                                {% if inst.os_type == 'kali' or inst.os_type == 'ubuntu' or inst.os_type == 'windows' %}
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="openRdpSession(this, '{{ inst.uuid }}')">
+                                    Open
+                                </button>
+                                {% else %}
+                                <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -65,4 +75,61 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCookie(name) {
+    let value = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                value = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return value;
+}
+
+function openRdpSession(button, instanceUuid) {
+    if (!instanceUuid) {
+        alert('Instance not available');
+        return;
+    }
+
+    button.disabled = true;
+    var originalText = button.textContent;
+    button.textContent = 'Opening...';
+
+    fetch('{% url "mission_control:guacamole_rdp_url" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: JSON.stringify({ instance_uuid: instanceUuid }),
+    })
+    .then(function(response) {
+        if (!response.ok) {
+            return response.json().then(function(data) {
+                throw new Error(data.error || 'Failed to generate access URL');
+            });
+        }
+        return response.json();
+    })
+    .then(function(data) {
+        window.open(data.url, '_blank');
+    })
+    .catch(function(error) {
+        alert('Failed to open session: ' + error.message);
+    })
+    .finally(function() {
+        button.disabled = false;
+        button.textContent = originalText;
+    });
+}
+</script>
 {% endblock %}

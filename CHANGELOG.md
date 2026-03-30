@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.49.0] - 2026-03-29
+
+### Added
+- Next challenge navigation: optional per-challenge FK to suggest follow-up after solving (CTF-121)
+- Organizer dropdown on challenge form to configure next challenge
+- Participant "Next:" link in solved alert with non-blocking navigation
+
 ## [3.48.0] - 2026-03-29
 
 ### Added

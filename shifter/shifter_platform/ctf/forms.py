@@ -238,6 +238,7 @@ class CTFChallengeForm(forms.ModelForm):
             "max_attempts",
             "release_time",
             "order",
+            "next_challenge",
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
@@ -270,6 +271,14 @@ class CTFChallengeForm(forms.ModelForm):
         if self.instance.pk and not self.instance._state.adding:
             self.fields["tag_list"].initial = ", ".join(self.instance.tags.values_list("name", flat=True))
             self.fields["topic_list"].initial = ", ".join(self.instance.topics.values_list("name", flat=True))
+
+        # Filter next_challenge to same-event challenges, excluding self
+        if event:
+            qs = CTFChallenge.objects.filter(event=event, deleted_at__isnull=True)
+            if self.instance.pk:
+                qs = qs.exclude(pk=self.instance.pk)
+            self.fields["next_challenge"].queryset = qs
+        self.fields["next_challenge"].required = False
 
         # Flag is required for new challenges
         if self.instance._state.adding:

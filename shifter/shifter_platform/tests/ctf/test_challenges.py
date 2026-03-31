@@ -1746,3 +1746,97 @@ class TestNextChallengeNavigation:
         response = client.get(url)
         assert response.status_code == 200
         assert "Next:" not in response.content.decode()
+
+
+# =============================================================================
+# Organizer Dashboard Tests (CTF-1301)
+# =============================================================================
+
+
+@pytest.mark.django_db
+class TestOrganizerDashboard:
+    """Tests for the enhanced organizer dashboard (CTF-1301)."""
+
+    def test_dashboard_context_with_active_event(
+        self,
+        authenticated_organizer_client,
+        ctf_event_active,
+    ):
+        """Dashboard includes active_events_data when active events exist."""
+        url = reverse("ctf:admin_dashboard")
+        response = authenticated_organizer_client.get(url)
+        assert response.status_code == 200
+        assert "active_events_data" in response.context
+        assert len(response.context["active_events_data"]) == 1
+        item = response.context["active_events_data"][0]
+        assert item["event"].pk == ctf_event_active.pk
+        assert "stats" in item
+        assert "status_form" in item
+        assert "range_ready" in item
+
+    def test_dashboard_range_overview(
+        self,
+        authenticated_organizer_client,
+        ctf_event_active,
+    ):
+        """Dashboard context includes range provisioning counts."""
+        url = reverse("ctf:admin_dashboard")
+        response = authenticated_organizer_client.get(url)
+        assert response.status_code == 200
+        assert "range_ready" in response.context
+        assert "range_provisioning" in response.context
+        assert "range_error" in response.context
+
+    def test_dashboard_activity_feed_with_submissions(
+        self,
+        authenticated_organizer_client,
+        ctf_event_active,
+        participant_user,
+    ):
+        """Dashboard shows recent submissions in activity feed."""
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        challenge = CTFChallenge.objects.create(
+            event=ctf_event_active,
+            name="Dashboard Test",
+            description="d",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$h1",
+        )
+        p = CTFParticipant.objects.create(
+            event=ctf_event_active,
+            user=participant_user,
+            email=participant_user.email,
+            name="Player",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=ctf_event_active.event_start,
+        )
+        CTFSubmission.objects.create(
+            participant=p,
+            challenge=challenge,
+            submitted_flag="FLAG{x}",
+            is_correct=True,
+            points_awarded=100,
+            attempt_number=1,
+        )
+
+        url = reverse("ctf:admin_dashboard")
+        response = authenticated_organizer_client.get(url)
+        assert response.status_code == 200
+        assert len(response.context["recent_activity"]) == 1
+        assert response.context["recent_activity"][0].is_correct is True
+
+    def test_dashboard_no_active_events(
+        self,
+        authenticated_organizer_client,
+        ctf_event_draft,
+    ):
+        """Dashboard works with no active events (empty sections)."""
+        url = reverse("ctf:admin_dashboard")
+        response = authenticated_organizer_client.get(url)
+        assert response.status_code == 200
+        assert response.context["active_events_data"] == []
+        assert response.context["recent_activity"] == []

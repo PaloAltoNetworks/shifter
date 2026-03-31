@@ -616,15 +616,17 @@ def ctf_help(request: HttpRequest) -> HttpResponse:
 def admin_dashboard(request: HttpRequest) -> HttpResponse:
     """Organizer main dashboard.
 
-    Shows overview of all events and quick actions.
+    Shows overview of all events, quick actions, range status, and activity feed.
     """
-    from ctf.services import get_organizer_events
+    from django.db.models import Count
+
+    from ctf.enums import EventStatus
+    from ctf.forms import EventStatusForm
+    from ctf.models import CTFParticipant, CTFSubmission
+    from ctf.services import get_event_stats, get_organizer_events
 
     # Get all events first for counting
     all_events = get_organizer_events(_get_user(request))
-
-    # Get stats for active/upcoming/draft events
-    from ctf.enums import EventStatus
 
     active_count = all_events.filter(status=EventStatus.ACTIVE.value).count()
     upcoming_count = all_events.filter(status=EventStatus.REGISTRATION.value).count()
@@ -633,12 +635,64 @@ def admin_dashboard(request: HttpRequest) -> HttpResponse:
     # Get recent 5 events for display
     recent_events = list(all_events[:5])
 
+    # Active events with stats, range summary, and status controls
+    active_events_data = []
+    active_event_ids = []
+    range_ready = 0
+    range_provisioning = 0
+    range_error = 0
+
+    for evt in all_events.filter(status=EventStatus.ACTIVE.value)[:5]:
+        active_event_ids.append(evt.id)
+        stats = get_event_stats(evt)
+        status_form = EventStatusForm(event=evt)
+
+        # Range status breakdown for this event
+        range_counts = dict(
+            CTFParticipant.objects.filter(event=evt)
+            .exclude(range_status="")
+            .values_list("range_status")
+            .annotate(c=Count("id"))
+            .values_list("range_status", "c")
+        )
+        evt_ready = range_counts.get("ready", 0)
+        evt_provisioning = range_counts.get("provisioning", 0)
+        evt_error = range_counts.get("error", 0)
+        range_ready += evt_ready
+        range_provisioning += evt_provisioning
+        range_error += evt_error
+
+        active_events_data.append(
+            {
+                "event": evt,
+                "stats": stats,
+                "status_form": status_form,
+                "range_ready": evt_ready,
+                "range_provisioning": evt_provisioning,
+                "range_error": evt_error,
+            }
+        )
+
+    # Recent activity feed — last 15 submissions across active events
+    recent_activity = []
+    if active_event_ids:
+        recent_activity = list(
+            CTFSubmission.objects.filter(participant__event_id__in=active_event_ids)
+            .select_related("participant", "challenge")
+            .order_by("-submitted_at")[:15]
+        )
+
     context = {
         "recent_events": recent_events,
         "active_count": active_count,
         "upcoming_count": upcoming_count,
         "draft_count": draft_count,
         "total_events": all_events.count(),
+        "active_events_data": active_events_data,
+        "recent_activity": recent_activity,
+        "range_ready": range_ready,
+        "range_provisioning": range_provisioning,
+        "range_error": range_error,
     }
 
     return render(request, "ctf/admin/dashboard.html", context)

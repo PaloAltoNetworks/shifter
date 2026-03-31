@@ -636,40 +636,47 @@ def admin_dashboard(request: HttpRequest) -> HttpResponse:
     recent_events = list(all_events[:5])
 
     # Active events with stats, range summary, and status controls
-    active_events_data = []
-    active_event_ids = []
+    active_events = list(all_events.filter(status=EventStatus.ACTIVE.value)[:5])
+    active_event_ids = [evt.id for evt in active_events]
+
+    # Batch range status aggregation across all active events (single query)
+    range_by_event: dict[str, dict[str, int]] = {}
     range_ready = 0
     range_provisioning = 0
     range_error = 0
+    if active_event_ids:
+        range_rows = (
+            CTFParticipant.objects.filter(event_id__in=active_event_ids)
+            .exclude(range_status="")
+            .values("event_id", "range_status")
+            .annotate(c=Count("id"))
+        )
+        for row in range_rows:
+            eid = str(row["event_id"])
+            status = row["range_status"]
+            count = row["c"]
+            range_by_event.setdefault(eid, {})[status] = count
+            if status == "ready":
+                range_ready += count
+            elif status == "provisioning":
+                range_provisioning += count
+            elif status == "error":
+                range_error += count
 
-    for evt in all_events.filter(status=EventStatus.ACTIVE.value)[:5]:
-        active_event_ids.append(evt.id)
+    active_events_data = []
+    for evt in active_events:
         stats = get_event_stats(evt)
         status_form = EventStatusForm(event=evt)
-
-        # Range status breakdown for this event
-        range_counts = dict(
-            CTFParticipant.objects.filter(event=evt)
-            .exclude(range_status="")
-            .values_list("range_status")
-            .annotate(c=Count("id"))
-            .values_list("range_status", "c")
-        )
-        evt_ready = range_counts.get("ready", 0)
-        evt_provisioning = range_counts.get("provisioning", 0)
-        evt_error = range_counts.get("error", 0)
-        range_ready += evt_ready
-        range_provisioning += evt_provisioning
-        range_error += evt_error
+        evt_ranges = range_by_event.get(str(evt.id), {})
 
         active_events_data.append(
             {
                 "event": evt,
                 "stats": stats,
                 "status_form": status_form,
-                "range_ready": evt_ready,
-                "range_provisioning": evt_provisioning,
-                "range_error": evt_error,
+                "range_ready": evt_ranges.get("ready", 0),
+                "range_provisioning": evt_ranges.get("provisioning", 0),
+                "range_error": evt_ranges.get("error", 0),
             }
         )
 

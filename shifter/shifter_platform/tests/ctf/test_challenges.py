@@ -1840,3 +1840,15 @@ class TestOrganizerDashboard:
         assert response.status_code == 200
         assert response.context["active_events_data"] == []
         assert response.context["recent_activity"] == []
+
+    def test_dashboard_quick_controls_post_pauses_event(
+        self,
+        authenticated_organizer_client,
+        ctf_event_active,
+    ):
+        """Quick controls form POST to event detail pauses the active event."""
+        url = reverse("ctf:admin_event_detail", kwargs={"event_id": ctf_event_active.pk})
+        response = authenticated_organizer_client.post(url, {"action": "pause"})
+        assert response.status_code == 302
+        ctf_event_active.refresh_from_db()
+        assert ctf_event_active.status == "paused"

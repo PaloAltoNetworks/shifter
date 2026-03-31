@@ -33,16 +33,16 @@
     margin-bottom: 12px;
 }
 
-.range-badge {
+.status-badge {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
 }
-.range-badge.ready { background: #d1fae5; color: #065f46; }
-.range-badge.provisioning { background: #dbeafe; color: #1e40af; }
-.range-badge.error { background: #fee2e2; color: #991b1b; }
+.status-badge.ready { background: #d1fae5; color: #065f46; }
+.status-badge.provisioning { background: #dbeafe; color: #1e40af; }
+.status-badge.error { background: #fee2e2; color: #991b1b; }
 
 .quick-controls-row {
     display: flex;
@@ -132,9 +132,9 @@
                 {% if item.range_ready or item.range_provisioning or item.range_error %}
                 &middot;
                 Ranges:
-                {% if item.range_ready %}<span class="range-badge ready">{{ item.range_ready }} ready</span>{% endif %}
-                {% if item.range_provisioning %}<span class="range-badge provisioning">{{ item.range_provisioning }} provisioning</span>{% endif %}
-                {% if item.range_error %}<span class="range-badge error">{{ item.range_error }} error</span>{% endif %}
+                {% if item.range_ready %}<span class="status-badge ready">{{ item.range_ready }} ready</span>{% endif %}
+                {% if item.range_provisioning %}<span class="status-badge provisioning">{{ item.range_provisioning }} provisioning</span>{% endif %}
+                {% if item.range_error %}<span class="status-badge error">{{ item.range_error }} error</span>{% endif %}
                 {% endif %}
             </div>
         </div>
@@ -195,9 +195,9 @@
                 <td>{{ sub.challenge.name }}</td>
                 <td>
                     {% if sub.is_correct %}
-                    <span class="range-badge ready">Correct (+{{ sub.points_awarded }})</span>
+                    <span class="status-badge ready">Correct (+{{ sub.points_awarded }})</span>
                     {% else %}
-                    <span class="range-badge error">Incorrect</span>
+                    <span class="status-badge error">Incorrect</span>
                     {% endif %}
                 </td>
             </tr>

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# ~/.claude/hooks/git_add_commit_guard.py
 """
-Git Add and Commit Guard Hook
+Git Add/Commit Guard Hook (PreToolUse)
 
-Blocks git add and commit operations by Claude.
+Blocks git add and git commit unless the user has explicitly directed it.
+Claude should never stage or commit on its own — the user signs commits.
 
 Exit codes:
   0 = allow command
@@ -15,11 +15,18 @@ import sys
 data = json.load(sys.stdin)
 command = data.get("tool_input", {}).get("command", "")
 
-# Check if running Python/pytest without venv activation
-python_commands = [" git add ", " git commit "]
-if any(cmd in command for cmd in python_commands):
-    error_msg = """ERROR: Claude may not add or commit files in git. Please ask the user to do it.
-"""
-    print(error_msg, file=sys.stderr)
-    sys.exit(2)
+blocked = [
+    "git add ",
+    "git add.",
+    "git commit",
+]
+
+for cmd in blocked:
+    if cmd in command:
+        print(
+            f"BLOCKED: Claude may not run '{cmd}'. The user handles all git add/commit operations.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
 sys.exit(0)

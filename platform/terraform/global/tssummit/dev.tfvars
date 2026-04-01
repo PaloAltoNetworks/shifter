@@ -18,3 +18,7 @@ ngfw_scm_pin_value    = "387db972a60d4f89a4251db70bf06c58"
 
 # Workstation
 workstation_ami_id = "ami-058f0cf1cc0bc26b3"
+
+# Windows Instances
+windows_server_ami_id  = "ami-058f0cf1cc0bc26b3"
+windows_desktop_ami_id = "ami-0607d4beefbf087ae"

@@ -72,6 +72,13 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
   cidr_ipv4         = each.value
 }
 
+resource "aws_vpc_security_group_ingress_rule" "webserver_from_endpoint" {
+  security_group_id = aws_security_group.webserver.id
+  description       = "All from endpoint subnet"
+  ip_protocol       = "-1"
+  cidr_ipv4         = aws_subnet.endpoint.cidr_block
+}
+
 # ------------------------------------------------------------------------------
 # EC2 Instance
 # ------------------------------------------------------------------------------
@@ -83,7 +90,7 @@ resource "aws_instance" "webserver1" {
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.webserver.id]
 
-  associate_public_ip_address = false
+  associate_public_ip_address = true
 
   tags = {
     Name = "WebServer1"

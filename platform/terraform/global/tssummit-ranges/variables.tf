@@ -4,16 +4,38 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
-variable "ami_id" {
-  description = "AMI ID for WebServer1 (migrated from original instance)"
+variable "team_name" {
+  description = "Team identifier (e.g. Team2, Team3)"
   type        = string
 }
 
-variable "instance_type" {
-  description = "EC2 instance type"
+# ------------------------------------------------------------------------------
+# Subnet CIDRs (must be unique per team, within 172.31.0.0/16)
+# ------------------------------------------------------------------------------
+
+variable "server_subnet_cidr" {
+  description = "CIDR block for the server subnet"
   type        = string
-  default     = "t2.micro"
 }
+
+variable "untrust_subnet_cidr" {
+  description = "CIDR block for the untrust subnet"
+  type        = string
+}
+
+variable "management_subnet_cidr" {
+  description = "CIDR block for the management subnet"
+  type        = string
+}
+
+variable "endpoint_subnet_cidr" {
+  description = "CIDR block for the endpoint subnet"
+  type        = string
+}
+
+# ------------------------------------------------------------------------------
+# SSH / Access
+# ------------------------------------------------------------------------------
 
 variable "key_name" {
   description = "SSH key pair name"
@@ -21,19 +43,9 @@ variable "key_name" {
   default     = "tssummitwebserver"
 }
 
-variable "subnet_id" {
-  description = "Subnet ID in the default VPC"
-  type        = string
-}
-
 variable "ssh_allowed_cidrs" {
   description = "Map of description to CIDR for SSH ingress rules"
   type        = map(string)
-}
-
-variable "ctfd_ami_id" {
-  description = "AMI ID for the CTFd instance"
-  type        = string
 }
 
 # ------------------------------------------------------------------------------
@@ -62,11 +74,6 @@ variable "ngfw_bootstrap_bucket" {
   type        = string
 }
 
-variable "ngfw_server_subnet_id" {
-  description = "Existing dev-server subnet ID for NGFW server interface"
-  type        = string
-}
-
 variable "ngfw_scm_pin_id" {
   description = "SCM auto-registration PIN ID (certid)"
   type        = string
@@ -85,8 +92,19 @@ variable "ngfw_authcode" {
 }
 
 # ------------------------------------------------------------------------------
-# Workstation Variables
+# Instance AMIs
 # ------------------------------------------------------------------------------
+
+variable "webserver_ami_id" {
+  description = "AMI ID for the webserver instance"
+  type        = string
+}
+
+variable "webserver_instance_type" {
+  description = "Webserver EC2 instance type"
+  type        = string
+  default     = "t2.micro"
+}
 
 variable "workstation_ami_id" {
   description = "AMI ID for the workstation (Windows Server 2025 Desktop Experience)"
@@ -98,10 +116,6 @@ variable "workstation_instance_type" {
   type        = string
   default     = "t3.medium"
 }
-
-# ------------------------------------------------------------------------------
-# Windows Instance Variables
-# ------------------------------------------------------------------------------
 
 variable "windows_server_ami_id" {
   description = "AMI ID for the Windows Server instance"
@@ -123,4 +137,30 @@ variable "windows_desktop_instance_type" {
   description = "Windows Desktop EC2 instance type"
   type        = string
   default     = "t3.large"
+}
+
+# ------------------------------------------------------------------------------
+# AI App Variables
+# ------------------------------------------------------------------------------
+
+variable "ai_app_subnet_cidr" {
+  description = "CIDR block for the AI app subnet"
+  type        = string
+}
+
+variable "ai_app_ami_id" {
+  description = "AMI ID for the AI app instance"
+  type        = string
+}
+
+variable "ai_app_instance_type" {
+  description = "AI App EC2 instance type"
+  type        = string
+  default     = "g4dn.xlarge"
+}
+
+variable "ai_app_allowed_cidrs" {
+  description = "Map of description to CIDR for AI app ingress (SSH + port 8000). Updated day-of with student IPs."
+  type        = map(string)
+  default     = {}
 }

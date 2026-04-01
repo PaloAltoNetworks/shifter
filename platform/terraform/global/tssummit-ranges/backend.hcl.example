@@ -1,0 +1,6 @@
+# Usage: terraform init -backend-config=backend-teamN.hcl
+# Create one per team: backend-team2.hcl, backend-team3.hcl, etc.
+bucket         = "shifter-dev-infra-b7113d6f-5aec-4531-ad09-2e62b51c2a86"
+key            = "global/tssummit-ranges/team2/terraform.tfstate"
+region         = "us-east-2"
+dynamodb_table = "shifter-dev-terraform-b7113d6f-5aec-4531-ad09-2e62b51c2a86"

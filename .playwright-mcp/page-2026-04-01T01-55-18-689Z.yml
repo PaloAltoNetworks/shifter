@@ -1,0 +1,629 @@
+- generic [ref=e1]:
+  - generic [ref=e5]:
+    - complementary [ref=e2108]:
+      - generic [ref=e8]:
+        - generic [ref=e9]:
+          - link [ref=e2109] [cursor=pointer]:
+            - /url: /
+            - img [ref=e13]
+            - img [ref=e19]
+          - generic [ref=e24]:
+            - button [ref=e25] [cursor=pointer]:
+              - img [ref=e27]
+            - button [ref=e2110] [cursor=pointer]:
+              - img [ref=e32]
+              - generic [ref=e36]: Dashboards & Reports
+            - button [ref=e2111] [cursor=pointer]:
+              - img [ref=e40]
+              - generic [ref=e42]: Cases & Issues
+            - button [ref=e2112] [cursor=pointer]:
+              - img [ref=e46]
+              - generic [ref=e48]: Investigation & Response
+            - button [ref=e2113] [cursor=pointer]:
+              - img [ref=e52]
+              - generic [ref=e56]: Threat Management
+            - button [ref=e2114] [cursor=pointer]:
+              - img [ref=e60]
+              - generic [ref=e63]: Posture Management
+            - button [ref=e2115] [cursor=pointer]:
+              - img [ref=e67]
+              - generic [ref=e72]: Inventory
+            - button [ref=e2116] [cursor=pointer]:
+              - img [ref=e76]
+              - generic [ref=e84]: Modules
+          - generic [ref=e85]:
+            - button [ref=e2117] [cursor=pointer]:
+              - generic [ref=e94]: Settings
+            - button [ref=e2118] [cursor=pointer]
+            - button [ref=e2119] [cursor=pointer]:
+              - generic: Notifications (5)
+            - button [ref=e2120] [cursor=pointer]:
+              - generic [ref=e116]:
+                - img [ref=e118]
+                - generic [ref=e120]: Help
+            - generic [ref=e121]:
+              - button [ref=e2121] [cursor=pointer]:
+                - generic [ref=e127]: BE
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - button:
+                        - generic:
+                          - generic:
+                            - img
+                      - button:
+                        - generic:
+                          - generic:
+                            - img
+        - generic [ref=e128]:
+          - generic [ref=e129]:
+            - button [ref=e2122] [cursor=pointer]:
+              - img [ref=e133]
+              - text: Back to main
+            - generic [ref=e135]: Dashboards & Reports
+          - list [ref=e138]:
+            - listitem [ref=e139]:
+              - button [ref=e2123] [cursor=pointer]
+              - link [ref=e2124] [cursor=pointer]:
+                - /url: /dashboard
+                - text: Dashboard
+            - listitem [ref=e144]:
+              - button [ref=e2125] [cursor=pointer]
+              - link [ref=e2126] [cursor=pointer]:
+                - /url: /reports
+                - text: Reports
+            - listitem [ref=e149]:
+              - button [ref=e2127] [cursor=pointer]
+              - link [ref=e2128] [cursor=pointer]:
+                - /url: /dashboards
+                - text: Dashboard Manager
+            - listitem [ref=e154]:
+              - button [ref=e2129] [cursor=pointer]
+              - link [ref=e2130] [cursor=pointer]:
+                - /url: /reports/templates
+                - text: Report Templates
+            - listitem [ref=e159]:
+              - button [ref=e2131] [cursor=pointer]
+              - link [ref=e2132] [cursor=pointer]:
+                - /url: /widget-library
+                - text: Widget Library
+        - generic [ref=e164]:
+          - generic [ref=e165]:
+            - button [ref=e2133] [cursor=pointer]:
+              - img [ref=e169]
+              - text: Back to main
+            - generic [ref=e171]: Cases & Issues
+          - list [ref=e174]:
+            - listitem [ref=e175]:
+              - button [ref=e2134] [cursor=pointer]
+              - link [ref=e2135] [cursor=pointer]:
+                - /url: /cases
+                - text: Cases
+            - listitem [ref=e180]:
+              - button [ref=e2136] [cursor=pointer]
+              - link [ref=e2137] [cursor=pointer]:
+                - /url: /issues
+                - text: Issues
+            - listitem [ref=e185]:
+              - button [ref=e2138] [cursor=pointer]
+              - link [ref=e2139] [cursor=pointer]:
+                - /url: /incident-management/scoring
+                - text: Case Configuration
+        - generic [ref=e190]:
+          - generic [ref=e191]:
+            - button [ref=e2140] [cursor=pointer]:
+              - img [ref=e195]
+              - text: Back to main
+            - generic [ref=e197]: Investigation & Response
+          - list [ref=e200]:
+            - listitem [ref=e201]:
+              - generic [ref=e202]: Search
+              - list [ref=e207]:
+                - listitem [ref=e208]:
+                  - button [ref=e2141] [cursor=pointer]
+                  - link [ref=e2142] [cursor=pointer]:
+                    - /url: /investigation/query-builder
+                    - text: Query Builder
+                - listitem [ref=e213]:
+                  - button [ref=e2143] [cursor=pointer]
+                  - link [ref=e2144] [cursor=pointer]:
+                    - /url: /investigation/query-center
+                    - text: Query Center
+                - listitem [ref=e218]:
+                  - button [ref=e2145] [cursor=pointer]
+                  - link [ref=e2146] [cursor=pointer]:
+                    - /url: /investigation/query-schedule
+                    - text: Scheduled Queries
+            - listitem [ref=e223]:
+              - generic [ref=e224]: Automation
+              - list [ref=e229]:
+                - listitem [ref=e230]:
+                  - button [ref=e2147] [cursor=pointer]
+                  - link [ref=e2148] [cursor=pointer]:
+                    - /url: /playbooks
+                    - text: Playbooks
+                - listitem [ref=e235]:
+                  - button [ref=e2149] [cursor=pointer]
+                  - link [ref=e2150] [cursor=pointer]:
+                    - /url: /scripts
+                    - text: Scripts
+                - listitem [ref=e240]:
+                  - button [ref=e2151] [cursor=pointer]
+                  - link [ref=e2152] [cursor=pointer]:
+                    - /url: /prompts
+                    - text: AI Prompts
+                - listitem [ref=e245]:
+                  - button [ref=e2153] [cursor=pointer]
+                  - link [ref=e2154] [cursor=pointer]:
+                    - /url: /playground
+                    - text: Playground
+                - listitem [ref=e250]:
+                  - button [ref=e2155] [cursor=pointer]
+                  - link [ref=e2156] [cursor=pointer]:
+                    - /url: /triggers
+                    - text: Automation Rules
+            - listitem [ref=e255]:
+              - generic [ref=e256]: Response
+              - list [ref=e261]:
+                - listitem [ref=e262]:
+                  - button [ref=e2157] [cursor=pointer]
+                  - link [ref=e2158] [cursor=pointer]:
+                    - /url: /action-center
+                    - text: Action Center
+                - listitem [ref=e267]:
+                  - button [ref=e2159] [cursor=pointer]
+                  - button [ref=e2160] [cursor=pointer]: Live Terminal
+            - listitem [ref=e272]:
+              - button [ref=e2161] [cursor=pointer]
+              - link [ref=e2162] [cursor=pointer]:
+                - /url: /forensics-investigations
+                - text: Forensics
+        - generic [ref=e277]:
+          - generic [ref=e278]:
+            - button [ref=e2163] [cursor=pointer]:
+              - img [ref=e282]
+              - text: Back to main
+            - generic [ref=e284]: Threat Management
+          - list [ref=e287]:
+            - listitem [ref=e288]:
+              - generic [ref=e289]: Detection Rules
+              - list [ref=e294]:
+                - listitem [ref=e295]:
+                  - button [ref=e2164] [cursor=pointer]
+                  - link [ref=e2165] [cursor=pointer]:
+                    - /url: /rules/ioc
+                    - text: IOC
+                - listitem [ref=e300]:
+                  - button [ref=e2166] [cursor=pointer]
+                  - link [ref=e2167] [cursor=pointer]:
+                    - /url: /rules/bioc
+                    - text: BIOC
+                - listitem [ref=e305]:
+                  - button [ref=e2168] [cursor=pointer]
+                  - link [ref=e2169] [cursor=pointer]:
+                    - /url: /rules/analytics-rules
+                    - text: Analytics Rules
+                - listitem [ref=e310]:
+                  - button [ref=e2170] [cursor=pointer]
+                  - link [ref=e2171] [cursor=pointer]:
+                    - /url: /rules/correlations
+                    - text: Correlations
+        - generic [ref=e315]:
+          - generic [ref=e316]:
+            - button [ref=e2172] [cursor=pointer]:
+              - img [ref=e320]
+              - text: Back to main
+            - generic [ref=e322]: Posture Management
+          - list [ref=e325]:
+            - listitem [ref=e326]:
+              - button [ref=e2173] [cursor=pointer]
+              - link [ref=e2174] [cursor=pointer]:
+                - /url: /exposure-management/vulnerability-issues
+                - text: Vulnerability Management
+            - listitem [ref=e331]:
+              - button [ref=e2175] [cursor=pointer]
+              - link [ref=e2176] [cursor=pointer]:
+                - /url: /compliance
+                - text: Compliance
+            - listitem [ref=e336]:
+              - button [ref=e2177] [cursor=pointer]
+              - link [ref=e2178] [cursor=pointer]:
+                - /url: /posture
+                - text: Rules & Policies
+        - generic [ref=e341]:
+          - generic [ref=e342]:
+            - button [ref=e2179] [cursor=pointer]:
+              - img [ref=e346]
+              - text: Back to main
+            - generic [ref=e348]: Inventory
+          - list [ref=e351]:
+            - listitem [ref=e352]:
+              - generic [ref=e353]: Assets
+              - list [ref=e358]:
+                - listitem [ref=e359]:
+                  - button [ref=e2180] [cursor=pointer]
+                  - link [ref=e2181] [cursor=pointer]:
+                    - /url: /assets/inventory
+                    - text: All Assets
+                - listitem [ref=e364]:
+                  - button [ref=e2182] [cursor=pointer]
+                  - link [ref=e2183] [cursor=pointer]:
+                    - /url: /assets/groups
+                    - text: Groups
+                - listitem [ref=e369]:
+                  - button [ref=e2184] [cursor=pointer]
+                  - link [ref=e2185] [cursor=pointer]:
+                    - /url: /assets/network-configuration
+                    - text: Network Configuration
+                - listitem [ref=e374]:
+                  - button [ref=e2186] [cursor=pointer]
+                  - link [ref=e2187] [cursor=pointer]:
+                    - /url: /assets-view
+                    - text: Asset Scores
+            - listitem [ref=e379]:
+              - generic [ref=e380]: Endpoints
+              - list [ref=e385]:
+                - listitem [ref=e386]:
+                  - button [ref=e2188] [cursor=pointer]
+                  - link [ref=e2189] [cursor=pointer]:
+                    - /url: /endpoints/agents
+                    - text: All Endpoints
+                - listitem [ref=e391]:
+                  - button [ref=e2190] [cursor=pointer]
+                  - link [ref=e2191] [cursor=pointer]:
+                    - /url: /endpoints/groups
+                    - text: Groups
+                - listitem [ref=e396]:
+                  - button [ref=e2192] [cursor=pointer]
+                  - link [ref=e2193] [cursor=pointer]:
+                    - /url: /endpoints/distributions
+                    - text: Installations
+                - listitem [ref=e401]:
+                  - button [ref=e2194] [cursor=pointer]
+                  - link [ref=e2195] [cursor=pointer]:
+                    - /url: /host-insights/accessibility
+                    - text: Host Insights
+                - listitem [ref=e406]:
+                  - button [ref=e2196] [cursor=pointer]
+                  - link [ref=e2197] [cursor=pointer]:
+                    - /url: /endpoints/policies
+                    - text: Policy Management
+                - listitem [ref=e411]:
+                  - button [ref=e2198] [cursor=pointer]
+                  - link [ref=e2199] [cursor=pointer]:
+                    - /url: /endpoints/host-firewall
+                    - text: Host Firewall
+                - listitem [ref=e416]:
+                  - button [ref=e2200] [cursor=pointer]
+                  - link [ref=e2201] [cursor=pointer]:
+                    - /url: /device-control/violations
+                    - text: Device Control Violations
+                - listitem [ref=e421]:
+                  - button [ref=e2202] [cursor=pointer]
+                  - link [ref=e2203] [cursor=pointer]:
+                    - /url: /device-control/disk-encryption
+                    - text: Disk Encryption Visibility
+                - listitem [ref=e426]:
+                  - button [ref=e2204] [cursor=pointer]
+                  - link [ref=e2205] [cursor=pointer]:
+                    - /url: /endpoints/file-integrity-monitoring
+                    - text: File Integrity Monitoring
+                - listitem [ref=e431]:
+                  - button [ref=e2206] [cursor=pointer]
+                  - link [ref=e2207] [cursor=pointer]:
+                    - /url: /compliance/cloud-compliance
+                    - text: Cloud Compliance (Legacy)
+        - generic [ref=e436]:
+          - generic [ref=e437]:
+            - button [ref=e2208] [cursor=pointer]:
+              - img [ref=e441]
+              - text: Back to main
+            - generic [ref=e443]: Modules
+          - list [ref=e446]:
+            - listitem [ref=e447]:
+              - button [ref=e2209] [cursor=pointer]
+              - link [ref=e2210] [cursor=pointer]:
+                - /url: /modules/ai-security
+                - text: AI Security
+            - listitem [ref=e452]:
+              - button [ref=e2211] [cursor=pointer]
+              - link [ref=e2212] [cursor=pointer]:
+                - /url: /modules/appsec
+                - text: Application Security
+            - listitem [ref=e457]:
+              - button [ref=e2213] [cursor=pointer]
+              - link [ref=e2214] [cursor=pointer]:
+                - /url: /attack-surface
+                - text: Attack Surface
+            - listitem [ref=e462]:
+              - button [ref=e2215] [cursor=pointer]
+              - link [ref=e2216] [cursor=pointer]:
+                - /url: /modules/data-security
+                - text: Data Security
+            - listitem [ref=e467]:
+              - button [ref=e2217] [cursor=pointer]
+              - link [ref=e2218] [cursor=pointer]:
+                - /url: /modules/identity
+                - text: Identity Security
+            - listitem [ref=e472]:
+              - button [ref=e2219] [cursor=pointer]
+              - link [ref=e2220] [cursor=pointer]:
+                - /url: /modules/kubernetes-security
+                - text: Kubernetes Security
+    - main [ref=e477]:
+      - img [ref=e479] [cursor=pointer]
+      - generic [ref=e480]:
+        - generic [ref=e809]:
+          - generic [ref=e810]:
+            - img [ref=e2221]:
+              - img [ref=e812]
+            - generic [ref=e814]: warning bold red
+          - generic [ref=e816]:
+            - text: Attention! Some of your endpoints might be exposed to risk due to report-only policies.
+            - button [ref=e2222] [cursor=pointer]:
+              - generic [ref=e821]: Review policies here.
+          - button [ref=e2223] [cursor=pointer]:
+            - img [ref=e2224]:
+              - img [ref=e824]
+            - generic [ref=e827]: close error
+        - generic [ref=e484]:
+          - generic [ref=e485]:
+            - generic [ref=e486]:
+              - generic [ref=e488]:
+                - generic [ref=e489]:
+                  - navigation [ref=e2225]:
+                    - list [ref=e492]:
+                      - listitem [ref=e493]:
+                        - link [disabled] [ref=e2226]:
+                          - /url: /case
+                          - text: Cases & Issues
+                        - img [ref=e496]:
+                          - img [ref=e497]
+                      - listitem [ref=e499]:
+                        - link [ref=e2227] [cursor=pointer]:
+                          - /url: /cases
+                          - text: Cases
+                        - img [ref=e502]:
+                          - img [ref=e503]
+                      - listitem [ref=e505]:
+                        - link [disabled] [ref=e2228]: "Case #528"
+                  - generic [ref=e508]:
+                    - generic [ref=e512]:
+                      - combobox [ref=e513] [cursor=pointer]:
+                        - generic [ref=e514]:
+                          - img [ref=e828]:
+                            - img [ref=e829]
+                          - generic [ref=e515]: Critical
+                      - generic:
+                        - img:
+                          - img
+                    - generic [ref=e519]:
+                      - combobox [ref=e2229] [cursor=pointer]:
+                        - generic [ref=e521]:
+                          - img [ref=e522]:
+                            - img [ref=e2230]
+                          - generic [ref=e523]: Resolved
+                      - generic:
+                        - img:
+                          - img
+                    - generic [ref=e527]:
+                      - combobox [ref=e528] [cursor=pointer]:
+                        - generic [ref=e529]:
+                          - img [ref=e1175]:
+                            - img [ref=e1176]
+                          - generic [ref=e531]: Brad Edwards
+                      - generic:
+                        - button [ref=e2232] [cursor=pointer]:
+                          - img [ref=e1180]:
+                            - img
+                        - img:
+                          - img
+                    - button [ref=e533] [cursor=pointer]:
+                      - img [ref=e534]:
+                        - img
+                - generic [ref=e537]:
+                  - generic [ref=e842] [cursor=pointer]: "0"
+                  - heading [level=1] [ref=e2233]: CVE-2026-23112 vulnerability in linux on inst-2b301793 and inst-25f6ba3a
+              - generic [ref=e844]:
+                - generic [ref=e845]:
+                  - img [ref=e846]:
+                    - img [ref=e847]
+                  - generic [ref=e853]: Summarized by AI
+                - list [ref=e855]:
+                  - listitem [ref=e856]: • Vulnerability CVE-2026-23112 detected in linux package versions 5.15.0-168.178 and 5.15.0-164.174
+                  - listitem [ref=e857]: • This vulnerability affects servers inst-2b301793 and inst-25f6ba3a, both running ubuntu jammy
+                  - listitem [ref=e858]: • The issues were grouped in this case due to a common CVE ID
+            - generic [ref=e554]:
+              - generic [ref=e555]:
+                - generic [ref=e1926]:
+                  - button [ref=e1927] [cursor=pointer]:
+                    - img [ref=e1928]:
+                      - img
+                  - tablist [ref=e1930]:
+                    - generic [ref=e1931]:
+                      - tab [ref=e2234] [cursor=pointer]: Key Assets & Artifacts
+                      - tab [ref=e2235] [cursor=pointer]: Actions
+                      - tab [ref=e2236] [cursor=pointer]: Issues & Insights
+                      - tab [ref=e2237] [cursor=pointer]: Timeline
+                      - tab [selected] [ref=e2238] [cursor=pointer]: Case War Room
+                  - button [ref=e1937] [cursor=pointer]:
+                    - img [ref=e1938]:
+                      - img
+                - generic [ref=e559]:
+                  - combobox [ref=e560] [cursor=pointer]:
+                    - generic [ref=e562]: Detailed View
+                  - generic:
+                    - img:
+                      - img
+              - generic [ref=e2017]:
+                - button [ref=e2239] [cursor=pointer]:
+                  - generic [ref=e2021]: 
+                - generic [ref=e2023]:
+                  - generic [ref=e2025]:
+                    - generic [ref=e2027]:
+                      - checkbox [ref=e2240] [cursor=pointer]
+                      - generic [ref=e2029]: Chats
+                    - generic [ref=e2031]:
+                      - checkbox [ref=e2241] [cursor=pointer]
+                      - generic [ref=e2033]: Notes
+                    - generic [ref=e2035]:
+                      - checkbox [ref=e2242] [cursor=pointer]
+                      - generic [ref=e2037]: Files
+                    - generic [ref=e2039]:
+                      - checkbox [ref=e2243] [cursor=pointer]
+                      - generic [ref=e2041]: Case History
+                    - generic [ref=e2043]:
+                      - checkbox [ref=e2244] [cursor=pointer]
+                      - generic [ref=e2045]: Commands and Task results
+                    - generic [ref=e2047]:
+                      - checkbox [ref=e2245] [cursor=pointer]
+                      - generic [ref=e2049]: Tags
+                  - generic [ref=e2051]:
+                    - generic [ref=e2052]:
+                      - img [ref=e2246]:
+                        - img [ref=e2054]
+                      - generic [ref=e2060]: empty
+                    - generic [ref=e2061]: No entries to show. Try changing the filters.
+                  - generic [ref=e2063]:
+                    - button [ref=e2247] [cursor=pointer]:
+                      - img [ref=e2066]:
+                        - img
+                    - generic [ref=e2067]:
+                      - button [ref=e2248] [cursor=pointer]:
+                        - generic [ref=e2249]:
+                          - img [ref=e2250]:
+                            - img [ref=e2072]
+                          - generic [ref=e2074]: cli markdown
+                      - textbox [disabled] [ref=e2251]:
+                        - /placeholder: "Navigate quickly with `cmd+k (default)`"
+                    - button [ref=e2252] [cursor=pointer]:
+                      - img [ref=e2079]:
+                        - img
+          - generic [ref=e723]:
+            - generic [ref=e724]:
+              - button [ref=e2253] [cursor=pointer]:
+                - img [ref=e726]:
+                  - img
+              - generic [ref=e727]: Resolution Center
+              - radiogroup [ref=e729]:
+                - generic [ref=e731]:
+                  - radio [checked] [ref=e732]
+                  - img [ref=e734] [cursor=pointer]:
+                    - img [ref=e735]
+                - generic [ref=e743]:
+                  - radio [ref=e744]
+                  - img [ref=e746] [cursor=pointer]:
+                    - img [ref=e747]
+                - generic [ref=e750]:
+                  - radio [ref=e751]
+                  - img [ref=e753] [cursor=pointer]:
+                    - img [ref=e754]
+            - generic [ref=e758]:
+              - tablist [ref=e759]:
+                - tab [selected] [ref=e2254] [cursor=pointer]:
+                  - generic [ref=e761]:
+                    - generic [ref=e762]: "0"
+                    - generic [ref=e763]: Pending
+                - tab [ref=e2255] [cursor=pointer]:
+                  - generic [ref=e765]:
+                    - generic [ref=e766]: "0"
+                    - generic [ref=e767]: Recommended
+                - tab [ref=e2256] [cursor=pointer]:
+                  - generic [ref=e769]:
+                    - generic [ref=e770]: "0"
+                    - generic [ref=e771]: In Progress
+                - tab [ref=e2257] [cursor=pointer]:
+                  - generic [ref=e773]:
+                    - generic [ref=e774]: "0"
+                    - generic [ref=e775]: Done
+              - tabpanel [ref=e2258]:
+                - generic [ref=e1130]:
+                  - img [ref=e1132]:
+                    - img [ref=e1133]
+                  - generic [ref=e1135]: No action required
+                  - generic [ref=e1136]: You're all caught up! Check the Recommended tab to continue.
+      - generic [ref=e798]:
+        - button [ref=e799] [cursor=pointer]:
+          - img [ref=e800]
+        - generic:
+          - img
+  - dialog "Resolve case" [ref=e2262]:
+    - generic [ref=e2263]:
+      - generic [ref=e2264]:
+        - heading "Resolve case" [level=3] [ref=e2266]
+        - generic [ref=e2269]:
+          - generic [ref=e2270]:
+            - generic [ref=e2273]:
+              - generic [ref=e2274]: Mark case as
+              - generic [ref=e2275]: "*"
+            - generic [ref=e2279]:
+              - combobox "Mark case as" [expanded] [active] [ref=e2280] [cursor=pointer]:
+                - generic [ref=e2282]: Select resolution reason
+              - generic:
+                - img:
+                  - img
+          - generic [ref=e2284]:
+            - generic [ref=e2288]: Comment
+            - textbox "Comment" [ref=e2290]:
+              - /placeholder: Enter comment
+          - group [ref=e2294]:
+            - generic [ref=e2295]:
+              - checkbox "Resolve all issues in case" [checked] [ref=e2297] [cursor=pointer]:
+                - img [ref=e2298]:
+                  - img [ref=e2299]
+              - generic [ref=e2302]: Resolve all issues in case
+            - generic [ref=e2303]:
+              - checkbox "Create Exclusion" [ref=e2305] [cursor=pointer]
+              - generic [ref=e2307]: Create Exclusion
+          - generic [ref=e2310]:
+            - heading "Send SmartScore feedback" [level=3] [ref=e2311]:
+              - button "Send SmartScore feedback" [ref=e2312] [cursor=pointer]:
+                - img [ref=e2313]:
+                  - img [ref=e2314]
+                - generic [ref=e2316]: Send SmartScore feedback
+            - region "Send SmartScore feedback":
+              - generic [ref=e2317]:
+                - generic [ref=e2318]:
+                  - generic [ref=e2322]: Is this score correct for this case?
+                  - radiogroup "Is this score correct for this case?" [ref=e2324]:
+                    - generic [ref=e2325]:
+                      - radio "Correct" [ref=e2329]
+                      - generic [ref=e2331]: Correct
+                    - generic [ref=e2332]:
+                      - radio "Too high" [ref=e2336]
+                      - generic [ref=e2338]: Too high
+                    - generic [ref=e2339]:
+                      - radio "Too low" [ref=e2343]
+                      - generic [ref=e2345]: Too low
+                - generic [ref=e2347]:
+                  - generic [ref=e2351]: Anything to add?
+                  - textbox "Anything to add?" [ref=e2353]:
+                    - /placeholder: Your feedback will help us improve our summarization capabilities. Please do not include any personally identifiable or confidential information in your response
+        - generic [ref=e2356]:
+          - button "Cancel" [ref=e2357] [cursor=pointer]:
+            - generic [ref=e2358]: Cancel
+          - button "Resolve" [disabled] [ref=e2359]:
+            - generic [ref=e2360]: Resolve
+      - button "Close" [ref=e2362] [cursor=pointer]:
+        - img [ref=e2363]:
+          - img
+    - listbox "Mark case as" [ref=e2368]:
+      - option "Resolved - Known Issue" [ref=e2369] [cursor=pointer]:
+        - generic [ref=e2371]: Resolved - Known Issue
+      - option "Resolved - Duplicate Case" [ref=e2372] [cursor=pointer]:
+        - generic [ref=e2374]: Resolved - Duplicate Case
+      - option "Resolved - False Positive" [ref=e2375] [cursor=pointer]:
+        - generic [ref=e2377]: Resolved - False Positive
+      - option "Resolved - Other" [ref=e2378] [cursor=pointer]:
+        - generic [ref=e2380]: Resolved - Other
+      - option "Resolved - True Positive" [ref=e2381] [cursor=pointer]:
+        - generic [ref=e2383]: Resolved - True Positive
+      - option "Resolved - Security Testing" [ref=e2384] [cursor=pointer]:
+        - generic [ref=e2386]: Resolved - Security Testing
+      - option "Resolved - Dismissed" [ref=e2387] [cursor=pointer]:
+        - generic [ref=e2389]: Resolved - Dismissed
+      - option "Resolved - Fixed" [ref=e2390] [cursor=pointer]:
+        - generic [ref=e2392]: Resolved - Fixed
+      - option "Resolved - Risk Accepted" [ref=e2393] [cursor=pointer]:
+        - generic [ref=e2395]: Resolved - Risk Accepted

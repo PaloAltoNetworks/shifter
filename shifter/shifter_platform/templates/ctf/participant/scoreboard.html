@@ -130,6 +130,15 @@ function fetchScoreboard() {
             rebuildScoreboardTable(data.rankings, data.team_mode);
         }
         var banner = document.getElementById('freeze-banner');
+        if (data.frozen && !banner) {
+            banner = document.createElement('div');
+            banner.id = 'freeze-banner';
+            banner.className = 'alert alert-info mb-4';
+            banner.textContent = 'Scoreboard is now frozen. Your own score continues to update.';
+            var container = document.querySelector('.container-fluid');
+            var card = container.querySelector('.card');
+            container.insertBefore(banner, card);
+        }
         if (banner) {
             banner.style.display = data.frozen ? '' : 'none';
         }

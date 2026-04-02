@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.53.0] - 2026-04-02
+
+### Added
+- Per-participant score timeline API and charts showing cumulative score progression over event duration (CTF-408)
+- Score timeline chart on participant scoreboard page (own timeline) and admin participant detail page (any participant)
+- `get_score_timeline()` service function in CTF scoring module
+
 ## [3.52.0] - 2026-04-01
 
 ### Added

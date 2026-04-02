@@ -760,3 +760,193 @@ class TestCalculatePointsWithPenalty:
         """Penalties over 100% are capped — still awards 1 point."""
         challenge = self._make_challenge(points=100)
         assert challenge.calculate_points_with_penalty(150) == 1
+
+
+# -----------------------------------------------------------------------------
+# get_score_timeline
+# -----------------------------------------------------------------------------
+
+
+class TestGetScoreTimeline:
+    """Tests for get_score_timeline().
+
+    Verifies the chronological score progression (submissions + awards)
+    with cumulative totals for a single participant.
+    """
+
+    @pytest.fixture
+    def mock_models(self):
+        """Patch all ORM objects used by get_score_timeline."""
+        with (
+            patch("ctf.services.scoring.CTFParticipant.objects") as mock_part,
+            patch("ctf.services.scoring.CTFSubmission.objects") as mock_sub,
+            patch("ctf.services.scoring.CTFAward.objects") as mock_award,
+        ):
+            yield mock_part, mock_sub, mock_award
+
+    def _setup(self, mock_models, submissions=None, awards=None):
+        """Configure mocks for a standard timeline query.
+
+        Args:
+            mock_models: Tuple of (participant, submission, award) mocks.
+            submissions: List of (submitted_at, points_awarded, challenge_name) tuples.
+            awards: List of (created_at, points, reason) tuples.
+
+        Returns:
+            UUID used as participant_id.
+        """
+        mock_part, mock_sub, mock_award = mock_models
+        pid = uuid4()
+
+        # Mock participant lookup
+        participant = MagicMock()
+        participant.event.event_start = _NOW - timedelta(hours=8)
+        mock_part.select_related.return_value.get.return_value = participant
+
+        # Mock submissions query chain
+        sub_data = [
+            {"submitted_at": s[0], "points_awarded": s[1], "challenge__name": s[2]} for s in (submissions or [])
+        ]
+        mock_sub.filter.return_value.values.return_value.order_by.return_value = sub_data
+
+        # Mock awards query chain
+        award_data = [{"created_at": a[0], "points": a[1], "reason": a[2]} for a in (awards or [])]
+        mock_award.filter.return_value.values.return_value.order_by.return_value = award_data
+
+        return pid
+
+    def test_timeline_correct_submissions_ordered(self, mock_models):
+        """Two solves produce correct cumulative sequence."""
+        from ctf.services.scoring import get_score_timeline
+
+        t1 = _NOW - timedelta(hours=6)
+        t2 = _NOW - timedelta(hours=4)
+        pid = self._setup(
+            mock_models,
+            submissions=[
+                (t1, 100, "Web 101"),
+                (t2, 200, "Crypto 201"),
+            ],
+        )
+
+        timeline = get_score_timeline(pid)
+
+        assert len(timeline) == 3  # origin + 2 solves
+        assert timeline[0]["cumulative"] == 0
+        assert timeline[0]["type"] == "start"
+        assert timeline[1]["cumulative"] == 100
+        assert timeline[1]["type"] == "solve"
+        assert timeline[2]["cumulative"] == 300
+        assert timeline[2]["type"] == "solve"
+
+    def test_timeline_includes_awards(self, mock_models):
+        """Solve + award are merged and sorted by timestamp."""
+        from ctf.services.scoring import get_score_timeline
+
+        t1 = _NOW - timedelta(hours=6)
+        t2 = _NOW - timedelta(hours=5)
+        pid = self._setup(
+            mock_models,
+            submissions=[(t1, 100, "Web 101")],
+            awards=[(t2, 50, "Bonus for style")],
+        )
+
+        timeline = get_score_timeline(pid)
+
+        assert len(timeline) == 3
+        assert timeline[1]["type"] == "solve"
+        assert timeline[1]["cumulative"] == 100
+        assert timeline[2]["type"] == "award"
+        assert timeline[2]["cumulative"] == 150
+
+    def test_timeline_negative_award(self, mock_models):
+        """Penalty (negative award) reduces cumulative score."""
+        from ctf.services.scoring import get_score_timeline
+
+        t1 = _NOW - timedelta(hours=6)
+        t2 = _NOW - timedelta(hours=5)
+        pid = self._setup(
+            mock_models,
+            submissions=[(t1, 200, "Pwn 301")],
+            awards=[(t2, -50, "Penalty")],
+        )
+
+        timeline = get_score_timeline(pid)
+
+        assert timeline[2]["cumulative"] == 150
+        assert timeline[2]["points"] == -50
+
+    def test_timeline_empty_activity(self, mock_models):
+        """No submissions or awards returns only the origin point."""
+        from ctf.services.scoring import get_score_timeline
+
+        pid = self._setup(mock_models)
+
+        timeline = get_score_timeline(pid)
+
+        assert len(timeline) == 1
+        assert timeline[0]["cumulative"] == 0
+        assert timeline[0]["type"] == "start"
+
+    def test_timeline_origin_at_event_start(self, mock_models):
+        """First entry timestamp matches event_start."""
+        from ctf.services.scoring import get_score_timeline
+
+        pid = self._setup(mock_models)
+        expected_start = (_NOW - timedelta(hours=8)).isoformat()
+
+        timeline = get_score_timeline(pid)
+
+        assert timeline[0]["timestamp"] == expected_start
+
+    def test_timeline_excludes_incorrect_submissions(self, mock_models):
+        """Only correct submissions appear — filter is in the query."""
+        from ctf.services.scoring import get_score_timeline
+
+        _mock_part, mock_sub, _mock_award = mock_models
+
+        pid = self._setup(
+            mock_models,
+            submissions=[
+                (_NOW - timedelta(hours=6), 100, "Web 101"),
+            ],
+        )
+
+        get_score_timeline(pid)
+
+        # Verify the filter was called with is_correct=True
+        call_kwargs = mock_sub.filter.call_args[1]
+        assert call_kwargs["is_correct"] is True
+
+    def test_timeline_labels_truncated(self, mock_models):
+        """Labels exceeding 50 characters are truncated."""
+        from ctf.services.scoring import get_score_timeline
+
+        long_name = "A" * 60
+        pid = self._setup(
+            mock_models,
+            submissions=[
+                (_NOW - timedelta(hours=6), 100, long_name),
+            ],
+        )
+
+        timeline = get_score_timeline(pid)
+
+        assert len(timeline[1]["label"]) == 50
+
+    def test_timeline_type_field(self, mock_models):
+        """Solve entries have type 'solve', award entries have type 'award'."""
+        from ctf.services.scoring import get_score_timeline
+
+        t1 = _NOW - timedelta(hours=6)
+        t2 = _NOW - timedelta(hours=5)
+        pid = self._setup(
+            mock_models,
+            submissions=[(t1, 100, "Web")],
+            awards=[(t2, 25, "Bonus")],
+        )
+
+        timeline = get_score_timeline(pid)
+
+        types = [e["type"] for e in timeline]
+        assert types == ["start", "solve", "award"]

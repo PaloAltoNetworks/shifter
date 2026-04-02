@@ -274,8 +274,16 @@
         </div>
     </div>
 
-    <!-- Right Column: Submission History -->
+    <!-- Right Column: Timeline & Submission History -->
     <div>
+        <!-- Score Timeline Chart -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Score Timeline</div>
+            <div style="position: relative; height: 250px; padding: 0 16px 16px;">
+                <canvas id="score-timeline-chart"></canvas>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-title">Submission History</div>
             {% if submissions %}
@@ -332,6 +340,89 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<script>
+// Score Timeline Chart
+(function() {
+    var canvas = document.getElementById('score-timeline-chart');
+    if (!canvas) return;
+
+    fetch('/ctf/api/participants/{{ participant.pk }}/score-timeline/', {
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (!data.timeline || data.timeline.length === 0) {
+            canvas.parentElement.textContent = 'No score data yet.';
+            return;
+        }
+
+        var labels = [];
+        var scores = [];
+        var tooltipLabels = [];
+
+        for (var i = 0; i < data.timeline.length; i++) {
+            var entry = data.timeline[i];
+            var d = new Date(entry.timestamp);
+            labels.push(d);
+            scores.push(entry.cumulative);
+            tooltipLabels.push(entry.label + (entry.points ? ' (+' + entry.points + ')' : ''));
+        }
+
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Score',
+                    data: scores,
+                    borderColor: '#128df3',
+                    backgroundColor: 'rgba(18, 141, 243, 0.1)',
+                    fill: true,
+                    stepped: 'before',
+                    pointRadius: 3,
+                    pointBackgroundColor: '#128df3',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            tooltipFormat: 'MMM d, HH:mm',
+                            displayFormats: { hour: 'HH:mm', day: 'MMM d' }
+                        },
+                        ticks: { color: '#b8b8b8' },
+                        grid: { color: 'rgba(255,255,255,0.1)' }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: '#b8b8b8', precision: 0 },
+                        grid: { color: 'rgba(255,255,255,0.1)' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: function(context) {
+                                return tooltipLabels[context.dataIndex];
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    })
+    .catch(function(err) {
+        console.error('Failed to load score timeline:', err);
+    });
+})();
+</script>
 <script>
 function resendInvite(participantId) {
     if (!confirm('Resend invitation email to this participant?')) return;

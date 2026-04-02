@@ -237,6 +237,11 @@ api_patterns = [
         views.api_scoreboard,
         name="api_scoreboard",
     ),
+    path(
+        "api/participants/<uuid:participant_id>/score-timeline/",
+        views.api_score_timeline,
+        name="api_score_timeline",
+    ),
     # Notification APIs
     path(
         "api/events/<uuid:event_id>/notifications/",

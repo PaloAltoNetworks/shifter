@@ -136,37 +136,14 @@
             <tr>
                 <th>Rank</th>
                 <th>Name</th>
-                {% if team_mode %}
-                <th>Members</th>
-                {% else %}
-                <th>Team</th>
-                {% endif %}
+                {% if team_mode %}<th>Members</th>{% else %}<th>Team</th>{% endif %}
                 <th>Score</th>
                 <th>Solves</th>
                 <th>Last Solve</th>
             </tr>
         </thead>
         <tbody>
-            {% for entry in bracket_rankings %}
-            <tr>
-                <td>
-                    {% if entry.rank <= 3 %}
-                    <span class="rank-top">{{ entry.rank }}</span>
-                    {% else %}
-                    {{ entry.rank }}
-                    {% endif %}
-                </td>
-                <td><strong>{{ entry.name }}</strong></td>
-                {% if team_mode %}
-                <td>{{ entry.member_count }}</td>
-                {% else %}
-                <td>{{ entry.team_name|default:"-" }}</td>
-                {% endif %}
-                <td><strong>{{ entry.score }}</strong></td>
-                <td>{{ entry.solve_count }}</td>
-                <td>{{ entry.last_solve|default:"-" }}</td>
-            </tr>
-            {% endfor %}
+            {% include "ctf/includes/admin_scoreboard_rows.html" with entries=bracket_rankings %}
         </tbody>
     </table>
     {% else %}
@@ -196,37 +173,14 @@
             <tr>
                 <th>Rank</th>
                 <th>Name</th>
-                {% if team_mode %}
-                <th>Members</th>
-                {% else %}
-                <th>Team</th>
-                {% endif %}
+                {% if team_mode %}<th>Members</th>{% else %}<th>Team</th>{% endif %}
                 <th>Score</th>
                 <th>Solves</th>
                 <th>Last Solve</th>
             </tr>
         </thead>
         <tbody>
-            {% for entry in rankings %}
-            <tr>
-                <td>
-                    {% if entry.rank <= 3 %}
-                    <span class="rank-top">{{ entry.rank }}</span>
-                    {% else %}
-                    {{ entry.rank }}
-                    {% endif %}
-                </td>
-                <td><strong>{{ entry.name }}</strong></td>
-                {% if team_mode %}
-                <td>{{ entry.member_count }}</td>
-                {% else %}
-                <td>{{ entry.team_name|default:"-" }}</td>
-                {% endif %}
-                <td><strong>{{ entry.score }}</strong></td>
-                <td>{{ entry.solve_count }}</td>
-                <td>{{ entry.last_solve|default:"-" }}</td>
-            </tr>
-            {% endfor %}
+            {% include "ctf/includes/admin_scoreboard_rows.html" with entries=rankings %}
         </tbody>
     </table>
     {% else %}

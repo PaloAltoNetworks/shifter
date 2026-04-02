@@ -136,6 +136,30 @@ def _check_event_ownership(event, user) -> JsonResponse | None:
     return None
 
 
+def _resolve_bracket_filter(event_id: UUID, bracket_param: str | None) -> tuple[list, object | None, UUID | None]:
+    """Resolve bracket filter from query parameter.
+
+    Args:
+        event_id: UUID of the event.
+        bracket_param: Raw bracket ID string from request.GET.get("bracket").
+
+    Returns:
+        Tuple of (brackets list, selected_bracket object or None, bracket_id UUID or None).
+    """
+    from ctf.services.bracket import list_brackets
+
+    brackets = list(list_brackets(event_id))
+    selected_bracket = None
+    bracket_id = None
+    if bracket_param:
+        for b in brackets:
+            if str(b.id) == bracket_param:
+                selected_bracket = b
+                bracket_id = b.id
+                break
+    return brackets, selected_bracket, bracket_id
+
+
 # -----------------------------------------------------------------------------
 # Participant Views (CTF Competitors)
 # -----------------------------------------------------------------------------
@@ -496,7 +520,6 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
     Shows rankings for current event. Supports bracket filtering
     via ?bracket=<uuid> query parameter.
     """
-    from ctf.services.bracket import list_brackets
     from ctf.services.participant import get_participant_by_user
     from ctf.services.scoring import get_scoreboard, get_team_scoreboard
 
@@ -506,27 +529,14 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
 
     event = participant.event
     freeze_at = event.scoreboard_freeze_at if event.is_scoreboard_frozen else None
+    brackets, selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
 
-    # Bracket support
-    brackets = list(list_brackets(event.id))
-    selected_bracket_id = request.GET.get("bracket")
-    selected_bracket = None
-    bracket_id = None
-    if selected_bracket_id:
-        for b in brackets:
-            if str(b.id) == selected_bracket_id:
-                selected_bracket = b
-                bracket_id = b.id
-                break
-
-    # Overall scoreboard (always shown)
     rankings = (
         get_team_scoreboard(event.id, freeze_at=freeze_at)
         if event.team_mode
         else get_scoreboard(event.id, freeze_at=freeze_at)
     )
 
-    # Bracket-filtered scoreboard (when a bracket is selected)
     bracket_rankings = None
     if bracket_id:
         bracket_rankings = (
@@ -1459,26 +1469,12 @@ def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
         return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
     from ctf.services import get_event_stats, get_scoreboard, get_team_scoreboard
-    from ctf.services.bracket import list_brackets
 
     stats = get_event_stats(event)
+    brackets, selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
 
-    # Bracket support
-    brackets = list(list_brackets(event.id))
-    selected_bracket_id = request.GET.get("bracket")
-    selected_bracket = None
-    bracket_id = None
-    if selected_bracket_id:
-        for b in brackets:
-            if str(b.id) == selected_bracket_id:
-                selected_bracket = b
-                bracket_id = b.id
-                break
-
-    # Overall scoreboard (admin always sees real-time, no freeze)
     rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
 
-    # Bracket-filtered scoreboard
     bracket_rankings = None
     if bracket_id:
         bracket_rankings = (
@@ -1690,14 +1686,17 @@ def api_assign_bracket(request: HttpRequest, participant_id: UUID) -> JsonRespon
 
         from django.core.exceptions import ValidationError
 
+        from ctf.models import CTFBracket
         from ctf.services.bracket import assign_participant_bracket
 
         try:
             bracket_uuid = _UUID(str(bracket_id))
             participant = assign_participant_bracket(participant_id, bracket_uuid)
-        except (ValueError, ValidationError) as e:
-            return JsonResponse({"error": str(e)}, status=400)
-        except Exception:
+        except ValueError:
+            return JsonResponse({"error": "Invalid bracket ID format"}, status=400)
+        except ValidationError:
+            return JsonResponse({"error": "Bracket and participant must belong to the same event"}, status=400)
+        except CTFBracket.DoesNotExist:
             return JsonResponse({"error": "Bracket not found"}, status=404)
 
         bracket = participant.bracket
@@ -2676,7 +2675,6 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """
     from ctf.exceptions import CTFNotFoundError
     from ctf.services import get_event
-    from ctf.services.bracket import list_brackets
     from ctf.services.scoring import get_scoreboard, get_team_scoreboard
 
     try:
@@ -2690,25 +2688,14 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     if not is_organizer and event.is_scoreboard_frozen:
         freeze_at = event.scoreboard_freeze_at
 
-    # Bracket filter
-    bracket_id = None
-    bracket_id_str = request.GET.get("bracket")
-    if bracket_id_str:
-        from uuid import UUID as _UUID
+    brackets, _selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
 
-        try:
-            bracket_id = _UUID(bracket_id_str)
-        except ValueError:
-            return JsonResponse({"error": "Invalid bracket ID"}, status=400)
-
-    # Overall rankings
     rankings = (
         get_team_scoreboard(event.id, freeze_at=freeze_at)
         if event.team_mode
         else get_scoreboard(event.id, freeze_at=freeze_at)
     )
 
-    # Bracket-specific rankings
     bracket_rankings = None
     if bracket_id:
         bracket_rankings = (
@@ -2717,8 +2704,7 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
             else get_scoreboard(event.id, freeze_at=freeze_at, bracket_id=bracket_id)
         )
 
-    # Available brackets
-    brackets_data = [{"id": str(b.id), "name": b.name} for b in list_brackets(event.id)]
+    brackets_data = [{"id": str(b.id), "name": b.name} for b in brackets]
 
     return JsonResponse(
         {

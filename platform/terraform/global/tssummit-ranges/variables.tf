@@ -162,5 +162,16 @@ variable "ai_app_instance_type" {
 variable "ai_app_allowed_cidrs" {
   description = "Map of description to CIDR for AI app ingress (SSH + port 8000). Updated day-of with student IPs."
   type        = map(string)
-  default     = {}
+  default = {
+    "Clement" = "174.112.186.64/32"
+  }
+}
+
+variable "admin_allowed_cidrs" {
+  description = "Map of description to CIDR for full admin access to all range instances."
+  type        = map(string)
+  default = {
+    "Clement"  = "24.48.68.139/32"
+    "Clement2" = "76.64.77.53/32"
+  }
 }

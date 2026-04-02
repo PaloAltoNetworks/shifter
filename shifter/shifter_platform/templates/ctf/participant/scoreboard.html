@@ -11,8 +11,8 @@
         </button>
     </div>
 
-    {% if participant %}
-    <!-- Score Timeline Chart -->
+    {% if participant and not team_mode %}
+    <!-- Score Timeline Chart (individual mode only) -->
     <div class="card mb-4">
         <div class="card-body">
             <h5 class="card-title mb-3">Your Score Timeline</h5>
@@ -185,7 +185,7 @@ function rebuildScoreboardTable(scoreboard) {
     }
 }
 </script>
-{% if participant %}
+{% if participant and not team_mode %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
 <script src="{% static 'js/score-timeline.js' %}"></script>

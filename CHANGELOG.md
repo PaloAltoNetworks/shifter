@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.55.0] - 2026-04-02
+
+### Added
+- Bracket support: group participants into named brackets (e.g. beginner, intermediate, advanced) with separate scoreboards per bracket (CTF-405)
+- `CTFBracket` model with event-scoped name uniqueness and soft delete
+- `bracket` foreign key on `CTFParticipant` for bracket assignment
+- Bracket CRUD service (`ctf/services/bracket.py`) with assignment validation
+- `bracket_id` filter parameter on `get_scoreboard()` and `get_team_scoreboard()`
+- `bracket_name` field in scoreboard response entries
+- Bracket tabs on participant and admin scoreboard views
+- Admin bracket management views (list, create, edit, delete)
+- API endpoint for assigning/removing participant brackets
+- Bracket column in admin participant list
+- `CTFBracketAdmin` in Django admin with participant count
+- `CTFBracketForm` for bracket creation/editing
+
 ## [3.54.0] - 2026-04-02
 
 ### Added

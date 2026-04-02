@@ -921,6 +921,63 @@ class CTFFlag(CTFBaseModel):
         return f"Flag #{self.order} ({self.flag_type}) for {self.challenge.name}"
 
 
+class CTFBracket(CTFBaseModel):
+    """Named bracket for grouping participants by skill level.
+
+    Brackets enable fair competition in mixed-experience events by
+    providing separate scoreboards per bracket (e.g. beginner,
+    intermediate, advanced).
+
+    Attributes:
+        event: The event this bracket belongs to.
+        name: Bracket display name.
+        description: Optional description of this bracket.
+        display_order: Sort order for bracket tabs.
+    """
+
+    event = models.ForeignKey(
+        CTFEvent,
+        on_delete=models.CASCADE,
+        related_name="brackets",
+        help_text="Event this bracket belongs to",
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Bracket display name (e.g. Beginner, Intermediate, Advanced)",
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional bracket description",
+    )
+    display_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Sort order for bracket display (lower = first)",
+    )
+
+    class Meta:
+        db_table = "ctf_bracket"
+        ordering = ["display_order", "name"]
+        verbose_name = "CTF Bracket"
+        verbose_name_plural = "CTF Brackets"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "name"],
+                condition=Q(deleted_at__isnull=True),
+                name="unique_active_bracket_name_per_event",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        """Return bracket name."""
+        return self.name
+
+    @property
+    def participant_count(self) -> int:
+        """Return count of participants in this bracket."""
+        return self.participants.count()
+
+
 class CTFTeam(CTFBaseModel):
     """Team for team-based CTF competitions.
 
@@ -1056,6 +1113,14 @@ class CTFParticipant(CTFBaseModel):
         blank=True,
         related_name="members",
         help_text="Team membership (for team-based events)",
+    )
+    bracket = models.ForeignKey(
+        CTFBracket,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="participants",
+        help_text="Bracket assignment (for bracket-based events)",
     )
     cognito_sub = models.CharField(  # noqa: DJ001
         max_length=36,

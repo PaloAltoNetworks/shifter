@@ -43,7 +43,12 @@ def calculate_score(participant_id: UUID) -> int:
     return submission_total + award_total
 
 
-def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime | None = None) -> list[dict[str, Any]]:
+def get_scoreboard(
+    event_id: UUID,
+    limit: int | None = None,
+    freeze_at: datetime | None = None,
+    bracket_id: UUID | None = None,
+) -> list[dict[str, Any]]:
     """Get scoreboard for an event.
 
     Returns ranked list of participants with scores.
@@ -54,6 +59,8 @@ def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime
         limit: Optional limit on number of results.
         freeze_at: Optional freeze cutoff. When set, only submissions/awards
             before this time are counted.
+        bracket_id: Optional bracket filter. When set, only participants in
+            this bracket are included.
 
     Returns:
         List of dicts with rank, participant info, score, and solve count.
@@ -66,15 +73,19 @@ def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime
         submission_filter &= Q(submissions__submitted_at__lt=freeze_at)
         award_filter &= Q(awards__created_at__lt=freeze_at)
 
+    base_filter: dict[str, Any] = {
+        "event_id": event_id,
+        "status__in": [
+            ParticipantStatus.ACTIVE.value,
+            ParticipantStatus.REGISTERED.value,
+            ParticipantStatus.COMPLETED.value,
+        ],
+    }
+    if bracket_id is not None:
+        base_filter["bracket_id"] = bracket_id
+
     participants = (
-        CTFParticipant.objects.filter(
-            event_id=event_id,
-            status__in=[
-                ParticipantStatus.ACTIVE.value,
-                ParticipantStatus.REGISTERED.value,
-                ParticipantStatus.COMPLETED.value,
-            ],
-        )
+        CTFParticipant.objects.filter(**base_filter)
         .annotate(
             submission_score=Coalesce(
                 Sum(
@@ -95,7 +106,7 @@ def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime
             ),
         )
         .order_by("-computed_score", "last_solve_time")
-        .select_related("team")
+        .select_related("team", "bracket")
     )
 
     if limit:
@@ -117,6 +128,7 @@ def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime
                 "participant_id": str(p.id),
                 "name": p.name,
                 "team_name": p.team.name if p.team else None,
+                "bracket_name": p.bracket.name if p.bracket else None,
                 "score": p.computed_score,
                 "solve_count": p.solve_count,
                 "last_solve": p.last_solve_time.isoformat() if p.last_solve_time else None,
@@ -130,7 +142,10 @@ def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime
 
 
 def get_team_scoreboard(
-    event_id: UUID, limit: int | None = None, freeze_at: datetime | None = None
+    event_id: UUID,
+    limit: int | None = None,
+    freeze_at: datetime | None = None,
+    bracket_id: UUID | None = None,
 ) -> list[dict[str, Any]]:
     """Get team scoreboard for an event.
 
@@ -142,6 +157,8 @@ def get_team_scoreboard(
         limit: Optional limit on number of results.
         freeze_at: Optional freeze cutoff. When set, only submissions/awards
             before this time are counted.
+        bracket_id: Optional bracket filter. When set, only scores from
+            team members in this bracket are counted.
 
     Returns:
         List of dicts with rank, team info, score, and member count.
@@ -150,9 +167,14 @@ def get_team_scoreboard(
 
     submission_filter = Q(members__submissions__is_correct=True)
     award_filter = Q()
+    member_filter = Q()
     if freeze_at:
         submission_filter &= Q(members__submissions__submitted_at__lt=freeze_at)
         award_filter &= Q(members__awards__created_at__lt=freeze_at)
+    if bracket_id is not None:
+        submission_filter &= Q(members__bracket_id=bracket_id)
+        award_filter &= Q(members__bracket_id=bracket_id)
+        member_filter = Q(members__bracket_id=bracket_id)
 
     teams = (
         CTFTeam.objects.filter(event_id=event_id)
@@ -171,7 +193,7 @@ def get_team_scoreboard(
                 filter=submission_filter,
                 distinct=True,
             ),
-            computed_member_count=Count("members", distinct=True),
+            computed_member_count=Count("members", filter=member_filter if bracket_id else None, distinct=True),
             last_solve_time=Max(
                 "members__submissions__submitted_at",
                 filter=submission_filter,

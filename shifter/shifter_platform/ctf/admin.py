@@ -15,6 +15,7 @@ from django.utils.html import format_html
 
 from ctf.models import (
     CTFAward,
+    CTFBracket,
     CTFChallenge,
     CTFChallengeFile,
     CTFChallengePrerequisite,
@@ -309,6 +310,54 @@ class CTFChallengeAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         return obj.is_deleted
 
 
+@admin.register(CTFBracket)
+class CTFBracketAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    """Admin for CTF brackets."""
+
+    list_display = [
+        "name",
+        "event",
+        "display_order",
+        "participant_count_display",
+        "is_deleted_display",
+    ]
+    list_filter = ["event", "deleted_at"]
+    search_fields = ["name", "event__name"]
+    ordering = ["event", "display_order", "name"]
+    readonly_fields = ["id", "created_at", "updated_at", "deleted_at"]
+
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": ["event", "name", "description", "display_order"],
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["id", "created_at", "updated_at", "deleted_at"],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet:
+        """Annotate queryset with participant count."""
+        qs = super().get_queryset(request)
+        return qs.annotate(_participant_count=Count("participants", distinct=True))
+
+    @admin.display(description="Participants", ordering="_participant_count")
+    def participant_count_display(self, obj: CTFBracket) -> int:
+        """Display participant count."""
+        return getattr(obj, "_participant_count", obj.participant_count)
+
+    @admin.display(description="Deleted", boolean=True)
+    def is_deleted_display(self, obj: CTFBracket) -> bool:
+        """Display soft delete status."""
+        return obj.is_deleted
+
+
 @admin.register(CTFTeam)
 class CTFTeamAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     """Admin for CTF teams."""
@@ -391,13 +440,14 @@ class CTFParticipantAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "event",
         "status",
         "team",
+        "bracket",
         "total_score_display",
         "solved_count_display",
         "is_registered",
         "range_status",
         "is_deleted_display",
     ]
-    list_filter = ["status", "event", "team", "deleted_at"]
+    list_filter = ["status", "event", "team", "bracket", "deleted_at"]
     search_fields = ["name", "email", "event__name", "user__email"]
     ordering = ["event", "name"]
     readonly_fields = [
@@ -422,9 +472,9 @@ class CTFParticipantAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             },
         ),
         (
-            "Team",
+            "Team & Bracket",
             {
-                "fields": ["team"],
+                "fields": ["team", "bracket"],
             },
         ),
         (

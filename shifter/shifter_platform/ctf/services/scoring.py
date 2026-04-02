@@ -17,7 +17,7 @@ from ctf.enums import ParticipantStatus
 from ctf.models import CTFAward, CTFParticipant, CTFSubmission, CTFTeam
 
 if TYPE_CHECKING:
-    pass
+    from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +253,88 @@ def get_challenge_statistics(challenge_id: UUID) -> dict[str, Any]:
             else 0
         ),
     }
+
+
+def get_score_timeline(participant_id: UUID) -> list[dict[str, Any]]:
+    """Get cumulative score timeline for a participant.
+
+    Returns a chronologically-ordered list of score events (solves and awards)
+    with running cumulative totals, suitable for rendering a step chart.
+
+    Args:
+        participant_id: UUID of the participant.
+
+    Returns:
+        List of dicts with timestamp, points, cumulative score, label, and type.
+        The first entry is always the event start with cumulative 0.
+    """
+    logger.debug("Getting score timeline for participant %s", participant_id)
+
+    participant = CTFParticipant.objects.select_related("event").get(pk=participant_id)
+    event_start = participant.event.event_start
+
+    # Correct submissions ordered by time
+    submissions = list(
+        CTFSubmission.objects.filter(
+            participant_id=participant_id,
+            is_correct=True,
+        )
+        .values("submitted_at", "points_awarded", "challenge__name")
+        .order_by("submitted_at")
+    )
+
+    # Awards ordered by time
+    awards = list(
+        CTFAward.objects.filter(
+            participant_id=participant_id,
+        )
+        .values("created_at", "points", "reason")
+        .order_by("created_at")
+    )
+
+    # Merge into unified event list
+    events: list[tuple[datetime, int, str, str]] = []
+    for s in submissions:
+        events.append((s["submitted_at"], s["points_awarded"], s["challenge__name"] or "", "solve"))
+    for a in awards:
+        events.append((a["created_at"], a["points"], a["reason"] or "", "award"))
+
+    events.sort(key=lambda e: e[0])
+
+    # Fold pre-start events into the origin point's cumulative value
+    pre_start_cumulative = 0
+    post_start_events: list[tuple[datetime, int, str, str]] = []
+    for ev in events:
+        if ev[0] < event_start:
+            pre_start_cumulative += ev[1]
+        else:
+            post_start_events.append(ev)
+
+    # Build timeline with cumulative totals
+    timeline: list[dict[str, Any]] = [
+        {
+            "timestamp": event_start.isoformat(),
+            "points": pre_start_cumulative,
+            "cumulative": pre_start_cumulative,
+            "label": "Event start",
+            "type": "start",
+        }
+    ]
+
+    cumulative = pre_start_cumulative
+    for ts, points, label, event_type in post_start_events:
+        cumulative += points
+        timeline.append(
+            {
+                "timestamp": ts.isoformat(),
+                "points": points,
+                "cumulative": cumulative,
+                "label": label[:50] if len(label) > 50 else label,
+                "type": event_type,
+            }
+        )
+
+    return timeline
 
 
 def get_event_statistics(event_id: UUID) -> dict[str, Any]:

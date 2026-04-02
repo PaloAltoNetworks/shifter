@@ -1,4 +1,5 @@
 {% extends "ctf/base.html" %}
+{% load static %}
 {% block ctf_title %}Scoreboard{% endblock %}
 
 {% block ctf_content %}
@@ -9,6 +10,18 @@
             Auto-Refresh: Off
         </button>
     </div>
+
+    {% if participant and not team_mode %}
+    <!-- Score Timeline Chart (individual mode only) -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">Your Score Timeline</h5>
+            <div style="position: relative; height: 250px;">
+                <canvas id="score-timeline-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <div class="card">
         <div class="card-body p-0">
@@ -100,7 +113,7 @@ function fetchScoreboard() {
     .then(function(response) { return response.json(); })
     .then(function(data) {
         if (data.scoreboard) {
-            updateScoreboardTable(data.scoreboard);
+            rebuildScoreboardTable(data.scoreboard);
         }
     })
     .catch(function(err) {
@@ -108,48 +121,76 @@ function fetchScoreboard() {
     });
 }
 
-function updateScoreboardTable(scoreboard) {
+function rebuildScoreboardTable(scoreboard) {
     var tbody = document.getElementById('scoreboard-body');
     if (!tbody) return;
 
     var participantId = "{{ participant_id }}";
     var teamMode = {{ event.team_mode|yesno:"true,false" }};
-    var html = '';
+
+    while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+    }
 
     for (var i = 0; i < scoreboard.length; i++) {
         var entry = scoreboard[i];
         var isCurrentUser = (String(entry.participant_id) === String(participantId));
-        var rowClass = isCurrentUser ? ' class="table-active"' : '';
 
-        html += '<tr' + rowClass + '>';
-        html += '<td>';
+        var tr = document.createElement('tr');
+        if (isCurrentUser) tr.className = 'table-active';
+
+        var tdRank = document.createElement('td');
         if (entry.rank <= 3) {
-            html += '<strong>' + entry.rank + '</strong>';
+            var strong = document.createElement('strong');
+            strong.textContent = entry.rank;
+            tdRank.appendChild(strong);
         } else {
-            html += entry.rank;
+            tdRank.textContent = entry.rank;
         }
-        html += '</td>';
-        html += '<td><strong>' + escapeHtml(entry.name) + '</strong>';
+        tr.appendChild(tdRank);
+
+        var tdName = document.createElement('td');
+        var nameStrong = document.createElement('strong');
+        nameStrong.textContent = entry.name;
+        tdName.appendChild(nameStrong);
         if (isCurrentUser) {
-            html += ' <span class="badge bg-primary ms-1">You</span>';
+            var badge = document.createElement('span');
+            badge.className = 'badge bg-primary ms-1';
+            badge.textContent = 'You';
+            tdName.appendChild(badge);
         }
-        html += '</td>';
+        tr.appendChild(tdName);
+
         if (teamMode) {
-            html += '<td>' + escapeHtml(entry.team_name || '-') + '</td>';
+            var tdTeam = document.createElement('td');
+            tdTeam.textContent = entry.team_name || '-';
+            tr.appendChild(tdTeam);
         }
-        html += '<td><strong>' + entry.score + '</strong></td>';
-        html += '<td>' + entry.solves + '</td>';
-        html += '<td>' + (entry.last_solve || '-') + '</td>';
-        html += '</tr>';
+
+        var tdScore = document.createElement('td');
+        var scoreStrong = document.createElement('strong');
+        scoreStrong.textContent = entry.score;
+        tdScore.appendChild(scoreStrong);
+        tr.appendChild(tdScore);
+
+        var tdSolves = document.createElement('td');
+        tdSolves.textContent = entry.solves;
+        tr.appendChild(tdSolves);
+
+        var tdLastSolve = document.createElement('td');
+        tdLastSolve.textContent = entry.last_solve || '-';
+        tr.appendChild(tdLastSolve);
+
+        tbody.appendChild(tr);
     }
-
-    tbody.innerHTML = html;
-}
-
-function escapeHtml(text) {
-    var div = document.createElement('div');
-    div.appendChild(document.createTextNode(text));
-    return div.innerHTML;
 }
 </script>
+{% if participant and not team_mode %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+<script src="{% static 'js/score-timeline.js' %}"></script>
+<script>
+initScoreTimeline('score-timeline-chart', "{% url 'ctf:api_score_timeline' participant_id=participant.pk %}");
+</script>
+{% endif %}
 {% endblock %}

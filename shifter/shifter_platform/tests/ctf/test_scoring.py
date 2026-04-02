@@ -950,3 +950,27 @@ class TestGetScoreTimeline:
 
         types = [e["type"] for e in timeline]
         assert types == ["start", "solve", "award"]
+
+    def test_timeline_pre_start_awards_folded_into_origin(self, mock_models):
+        """Awards granted before event_start are folded into the origin point."""
+        from ctf.services.scoring import get_score_timeline
+
+        # event_start is _NOW - 8h; award at _NOW - 10h is before start
+        pre_start = _NOW - timedelta(hours=10)
+        post_start = _NOW - timedelta(hours=6)
+        pid = self._setup(
+            mock_models,
+            submissions=[(post_start, 100, "Web 101")],
+            awards=[(pre_start, 50, "Early bonus")],
+        )
+
+        timeline = get_score_timeline(pid)
+
+        # Origin includes the pre-start award
+        assert timeline[0]["type"] == "start"
+        assert timeline[0]["cumulative"] == 50
+        assert timeline[0]["points"] == 50
+        # Post-start solve adds on top
+        assert timeline[1]["cumulative"] == 150
+        # No entry for the pre-start award itself
+        assert len(timeline) == 2

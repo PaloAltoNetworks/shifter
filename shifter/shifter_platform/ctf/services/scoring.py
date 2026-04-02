@@ -301,19 +301,28 @@ def get_score_timeline(participant_id: UUID) -> list[dict[str, Any]]:
 
     events.sort(key=lambda e: e[0])
 
+    # Fold pre-start events into the origin point's cumulative value
+    pre_start_cumulative = 0
+    post_start_events: list[tuple[datetime, int, str, str]] = []
+    for ev in events:
+        if ev[0] < event_start:
+            pre_start_cumulative += ev[1]
+        else:
+            post_start_events.append(ev)
+
     # Build timeline with cumulative totals
     timeline: list[dict[str, Any]] = [
         {
             "timestamp": event_start.isoformat(),
-            "points": 0,
-            "cumulative": 0,
+            "points": pre_start_cumulative,
+            "cumulative": pre_start_cumulative,
             "label": "Event start",
             "type": "start",
         }
     ]
 
-    cumulative = 0
-    for ts, points, label, event_type in events:
+    cumulative = pre_start_cumulative
+    for ts, points, label, event_type in post_start_events:
         cumulative += points
         timeline.append(
             {

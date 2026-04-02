@@ -11,6 +11,12 @@
         </button>
     </div>
 
+    {% if frozen %}
+    <div class="alert alert-info mb-4" id="freeze-banner">
+        Scoreboard frozen since {{ event.scoreboard_freeze_at|date:"N j, Y g:i A" }}. Your own score continues to update.
+    </div>
+    {% endif %}
+
     {% if participant and not team_mode %}
     <!-- Score Timeline Chart (individual mode only) -->
     <div class="card mb-4">
@@ -122,6 +128,19 @@ function fetchScoreboard() {
     .then(function(data) {
         if (data.rankings) {
             rebuildScoreboardTable(data.rankings, data.team_mode);
+        }
+        var banner = document.getElementById('freeze-banner');
+        if (data.frozen && !banner) {
+            banner = document.createElement('div');
+            banner.id = 'freeze-banner';
+            banner.className = 'alert alert-info mb-4';
+            banner.textContent = 'Scoreboard is now frozen. Your own score continues to update.';
+            var container = document.querySelector('.container-fluid');
+            var card = container.querySelector('.card');
+            container.insertBefore(banner, card);
+        }
+        if (banner) {
+            banner.style.display = data.frozen ? '' : 'none';
         }
     })
     .catch(function(err) {

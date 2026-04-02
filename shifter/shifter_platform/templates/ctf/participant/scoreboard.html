@@ -1,4 +1,5 @@
 {% extends "ctf/base.html" %}
+{% load static %}
 {% block ctf_title %}Scoreboard{% endblock %}
 
 {% block ctf_content %}
@@ -81,8 +82,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 <script>
 var autoRefreshInterval = null;
 
@@ -129,7 +128,6 @@ function rebuildScoreboardTable(scoreboard) {
     var participantId = "{{ participant_id }}";
     var teamMode = {{ event.team_mode|yesno:"true,false" }};
 
-    // Clear existing rows safely
     while (tbody.firstChild) {
         tbody.removeChild(tbody.firstChild);
     }
@@ -141,7 +139,6 @@ function rebuildScoreboardTable(scoreboard) {
         var tr = document.createElement('tr');
         if (isCurrentUser) tr.className = 'table-active';
 
-        // Rank cell
         var tdRank = document.createElement('td');
         if (entry.rank <= 3) {
             var strong = document.createElement('strong');
@@ -152,7 +149,6 @@ function rebuildScoreboardTable(scoreboard) {
         }
         tr.appendChild(tdRank);
 
-        // Name cell
         var tdName = document.createElement('td');
         var nameStrong = document.createElement('strong');
         nameStrong.textContent = entry.name;
@@ -165,26 +161,22 @@ function rebuildScoreboardTable(scoreboard) {
         }
         tr.appendChild(tdName);
 
-        // Team cell (if team mode)
         if (teamMode) {
             var tdTeam = document.createElement('td');
             tdTeam.textContent = entry.team_name || '-';
             tr.appendChild(tdTeam);
         }
 
-        // Score cell
         var tdScore = document.createElement('td');
         var scoreStrong = document.createElement('strong');
         scoreStrong.textContent = entry.score;
         tdScore.appendChild(scoreStrong);
         tr.appendChild(tdScore);
 
-        // Solves cell
         var tdSolves = document.createElement('td');
         tdSolves.textContent = entry.solves;
         tr.appendChild(tdSolves);
 
-        // Last solve cell
         var tdLastSolve = document.createElement('td');
         tdLastSolve.textContent = entry.last_solve || '-';
         tr.appendChild(tdLastSolve);
@@ -192,82 +184,13 @@ function rebuildScoreboardTable(scoreboard) {
         tbody.appendChild(tr);
     }
 }
-
-{% if participant %}
-// Score Timeline Chart
-(function() {
-    var canvas = document.getElementById('score-timeline-chart');
-    if (!canvas) return;
-
-    fetch("{% url 'ctf:api_score_timeline' participant_id=participant.pk %}")
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-        if (!data.timeline || data.timeline.length === 0) return;
-
-        var labels = [];
-        var scores = [];
-        var tooltipLabels = [];
-
-        for (var i = 0; i < data.timeline.length; i++) {
-            var entry = data.timeline[i];
-            var d = new Date(entry.timestamp);
-            labels.push(d);
-            scores.push(entry.cumulative);
-            tooltipLabels.push(entry.label + (entry.points ? ' (+' + entry.points + ')' : ''));
-        }
-
-        new Chart(canvas, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Score',
-                    data: scores,
-                    borderColor: '#128df3',
-                    backgroundColor: 'rgba(18, 141, 243, 0.1)',
-                    fill: true,
-                    stepped: 'before',
-                    pointRadius: 3,
-                    pointBackgroundColor: '#128df3',
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            tooltipFormat: 'MMM d, HH:mm',
-                            displayFormats: { hour: 'HH:mm', day: 'MMM d' }
-                        },
-                        ticks: { color: '#b8b8b8' },
-                        grid: { color: 'rgba(255,255,255,0.1)' }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        ticks: { color: '#b8b8b8', precision: 0 },
-                        grid: { color: 'rgba(255,255,255,0.1)' }
-                    }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            afterLabel: function(context) {
-                                return tooltipLabels[context.dataIndex];
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    })
-    .catch(function(err) {
-        console.error('Failed to load score timeline:', err);
-    });
-})();
-{% endif %}
 </script>
+{% if participant %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+<script src="{% static 'js/score-timeline.js' %}"></script>
+<script>
+initScoreTimeline('score-timeline-chart', "{% url 'ctf:api_score_timeline' participant_id=participant.pk %}");
+</script>
+{% endif %}
 {% endblock %}

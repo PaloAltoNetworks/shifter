@@ -1,0 +1,96 @@
+{% extends "mission_control/base.html" %}
+{% block title %}{% if editing %}Edit Bracket{% else %}Create Bracket{% endif %}{% endblock %}
+
+{% block extra_css %}
+<style>
+.bracket-form {
+    max-width: 560px;
+}
+
+.form-help {
+    font-size: 12px;
+    color: var(--xdr-text-secondary);
+    margin-top: 4px;
+}
+
+.field-error {
+    font-size: 12px;
+    color: #ff4d4f;
+    margin-top: 4px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 16px;
+    border-top: 1px solid var(--xdr-border);
+    margin-top: 8px;
+}
+
+.btn-cancel {
+    background: transparent;
+    color: var(--xdr-text-secondary);
+    border: 1px solid var(--xdr-border);
+}
+
+.breadcrumb {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--xdr-text-secondary);
+}
+
+textarea.form-input {
+    resize: vertical;
+    min-height: 60px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
+        <span class="separator">/</span>
+        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+        <span class="separator">/</span>
+        <a href="{% url 'ctf:admin_bracket_list' event_id=event.pk %}">Brackets</a>
+        <span class="separator">/</span>
+        <span>{% if editing %}Edit{% else %}Create{% endif %}</span>
+    </div>
+    <h1 class="page-title">{% if editing %}Edit Bracket{% else %}Create Bracket{% endif %}</h1>
+</div>
+
+<div class="card bracket-form">
+    <form method="post">
+        {% csrf_token %}
+
+        {% for field in form %}
+        <div class="form-group" style="margin-bottom: 16px;">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}
+            <div class="form-help">{{ field.help_text }}</div>
+            {% endif %}
+            {% for error in field.errors %}
+            <div class="field-error">{{ error }}</div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <div class="form-actions">
+            <a href="{% url 'ctf:admin_bracket_list' event_id=event.pk %}" class="btn btn-cancel">Cancel</a>
+            <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Bracket{% endif %}</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

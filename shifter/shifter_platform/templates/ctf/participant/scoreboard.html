@@ -17,8 +17,55 @@
     </div>
     {% endif %}
 
-    {% if participant and not team_mode %}
-    <!-- Score Timeline Chart (individual mode only) -->
+    {% if brackets %}
+    <ul class="nav nav-tabs mb-4" id="bracket-tabs">
+        <li class="nav-item">
+            <a class="nav-link {% if not selected_bracket %}active{% endif %}" href="?">Overall</a>
+        </li>
+        {% for bracket in brackets %}
+        <li class="nav-item">
+            <a class="nav-link {% if selected_bracket and selected_bracket.id == bracket.id %}active{% endif %}"
+               href="?bracket={{ bracket.id }}">{{ bracket.name }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if selected_bracket and bracket_rankings is not None %}
+    <h5 class="mb-3">{{ selected_bracket.name }} Bracket</h5>
+    <div class="card mb-4">
+        <div class="card-body p-0">
+            {% if bracket_rankings %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Name</th>
+                            {% if team_mode %}<th>Members</th>{% elif event.team_mode %}<th>Team</th>{% endif %}
+                            <th>Score</th>
+                            <th>Solves</th>
+                            <th>Last Solve</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% include "ctf/includes/scoreboard_table.html" with entries=bracket_rankings %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <p class="mb-0">No scores yet in this bracket.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <h5 class="mb-3">Overall Scoreboard</h5>
+    {% endif %}
+
+    {% if participant and not team_mode and not selected_bracket %}
+    <!-- Score Timeline Chart (individual mode only, overall view) -->
     <div class="card mb-4">
         <div class="card-body">
             <h5 class="card-title mb-3">Your Score Timeline</h5>
@@ -38,50 +85,14 @@
                         <tr>
                             <th>Rank</th>
                             <th>Name</th>
-                            {% if team_mode %}
-                            <th>Members</th>
-                            {% else %}
-                            {% if event.team_mode %}
-                            <th>Team</th>
-                            {% endif %}
-                            {% endif %}
+                            {% if team_mode %}<th>Members</th>{% elif event.team_mode %}<th>Team</th>{% endif %}
                             <th>Score</th>
                             <th>Solves</th>
                             <th>Last Solve</th>
                         </tr>
                     </thead>
                     <tbody id="scoreboard-body">
-                        {% for entry in rankings %}
-                        <tr {% if not team_mode and entry.participant_id == participant_id %}class="table-active"{% endif %}>
-                            <td>
-                                {% if entry.rank == 1 %}
-                                <strong>1</strong>
-                                {% elif entry.rank == 2 %}
-                                <strong>2</strong>
-                                {% elif entry.rank == 3 %}
-                                <strong>3</strong>
-                                {% else %}
-                                {{ entry.rank }}
-                                {% endif %}
-                            </td>
-                            <td>
-                                <strong>{{ entry.name }}</strong>
-                                {% if not team_mode and entry.participant_id == participant_id %}
-                                <span class="badge bg-primary ms-1">You</span>
-                                {% endif %}
-                            </td>
-                            {% if team_mode %}
-                            <td>{{ entry.member_count }}</td>
-                            {% else %}
-                            {% if event.team_mode %}
-                            <td>{{ entry.team_name|default:"-" }}</td>
-                            {% endif %}
-                            {% endif %}
-                            <td><strong>{{ entry.score }}</strong></td>
-                            <td>{{ entry.solve_count }}</td>
-                            <td>{{ entry.last_solve|default:"-" }}</td>
-                        </tr>
-                        {% endfor %}
+                        {% include "ctf/includes/scoreboard_table.html" with entries=rankings %}
                     </tbody>
                 </table>
             </div>
@@ -123,7 +134,11 @@ function refreshScoreboard() {
 }
 
 function fetchScoreboard() {
-    fetch("{% url 'ctf:api_scoreboard' event_id=event.pk %}")
+    var url = "{% url 'ctf:api_scoreboard' event_id=event.pk %}";
+    {% if selected_bracket %}
+    url += "?bracket={{ selected_bracket.id }}";
+    {% endif %}
+    fetch(url)
     .then(function(response) { return response.json(); })
     .then(function(data) {
         if (data.rankings) {
@@ -211,7 +226,7 @@ function rebuildScoreboardTable(rankings, teamMode) {
     }
 }
 </script>
-{% if participant and not team_mode %}
+{% if participant and not team_mode and not selected_bracket %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
 <script src="{% static 'js/score-timeline.js' %}"></script>

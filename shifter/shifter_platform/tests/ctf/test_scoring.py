@@ -318,6 +318,22 @@ class TestGetTeamScoreboard:
         for entry in board:
             assert entry["score"] == 0
 
+    def test_team_solve_count_is_unique_challenges(self, mock_team_objects, mock_queryset):
+        """solve_count should reflect unique challenges solved, not total submissions."""
+        # Mock team where 3 members solved 2 unique challenges (some overlap)
+        t_alpha = _make_team(
+            "Alpha",
+            computed_score=300,
+            solve_count=2,  # 2 unique challenges
+            computed_member_count=3,
+            last_solve_time=_NOW,
+        )
+
+        self._wire_qs(mock_team_objects, mock_queryset, [t_alpha])
+
+        board = get_team_scoreboard(uuid4())
+        assert board[0]["solve_count"] == 2
+
 
 # -----------------------------------------------------------------------------
 # get_participant_rank tests

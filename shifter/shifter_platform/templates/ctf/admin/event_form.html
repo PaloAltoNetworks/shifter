@@ -120,6 +120,13 @@ input[type="datetime-local"] {
             <div class="form-help">Optional. Must be before event start.</div>
             <div class="field-error" id="error-registration_deadline"></div>
         </div>
+
+        <div class="form-group">
+            <label class="form-label" for="field-scoreboard_freeze_at">Scoreboard Freeze Time</label>
+            <input type="datetime-local" id="field-scoreboard_freeze_at" class="form-input">
+            <div class="form-help">Optional. Scoreboard freezes at this time. Participants see frozen standings; organizers see real-time.</div>
+            <div class="field-error" id="error-scoreboard_freeze_at"></div>
+        </div>
     </div>
 
     <!-- Range Settings -->
@@ -285,11 +292,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var FIELDS = [
         'name', 'description', 'event_start', 'event_end',
-        'registration_deadline', 'scenario_id', 'range_spinup_minutes',
-        'auto_cleanup', 'ngfw_enabled', 'cleanup_delay_hours',
-        'max_participants', 'team_mode', 'team_size_limit',
-        'submission_cooldown_seconds', 'attempt_limit_mode',
-        'attempt_limit_cooldown_seconds', 'rating_visibility'
+        'registration_deadline', 'scoreboard_freeze_at', 'scenario_id',
+        'range_spinup_minutes', 'auto_cleanup', 'ngfw_enabled',
+        'cleanup_delay_hours', 'max_participants', 'team_mode',
+        'team_size_limit', 'submission_cooldown_seconds',
+        'attempt_limit_mode', 'attempt_limit_cooldown_seconds',
+        'rating_visibility'
     ];
 
     // --- Helpers ---
@@ -361,6 +369,9 @@ document.addEventListener('DOMContentLoaded', function() {
         var regDeadline = getField('registration_deadline').value;
         data.registration_deadline = regDeadline ? toISODatetime(regDeadline) : null;
 
+        var freezeAt = getField('scoreboard_freeze_at').value;
+        data.scoreboard_freeze_at = freezeAt ? toISODatetime(freezeAt) : null;
+
         var scenarioId = getField('scenario_id').value;
         data.scenario_id = scenarioId || null;
 
@@ -422,6 +433,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (data.team_mode && (!data.team_size_limit || data.team_size_limit < 2 || data.team_size_limit > 10)) {
             showFieldError('team_size_limit', 'Team size must be between 2 and 10 when team mode is enabled.');
             valid = false;
+        }
+        if (data.scoreboard_freeze_at) {
+            if (data.event_start && data.scoreboard_freeze_at <= data.event_start) {
+                showFieldError('scoreboard_freeze_at', 'Scoreboard freeze time must be after event start.');
+                valid = false;
+            }
+            if (data.event_end && data.scoreboard_freeze_at >= data.event_end) {
+                showFieldError('scoreboard_freeze_at', 'Scoreboard freeze time must be before event end.');
+                valid = false;
+            }
         }
 
         if (!valid) {
@@ -528,6 +549,7 @@ document.addEventListener('DOMContentLoaded', function() {
             getField('event_start').value = toDatetimeLocal(event.event_start);
             getField('event_end').value = toDatetimeLocal(event.event_end);
             getField('registration_deadline').value = toDatetimeLocal(event.registration_deadline);
+            getField('scoreboard_freeze_at').value = toDatetimeLocal(event.scoreboard_freeze_at);
             getField('range_spinup_minutes').value = event.range_spinup_minutes || 30;
             getField('auto_cleanup').checked = !!event.auto_cleanup;
             getField('cleanup_delay_hours').value = event.cleanup_delay_hours || 0;

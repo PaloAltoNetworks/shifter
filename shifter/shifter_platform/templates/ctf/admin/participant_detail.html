@@ -1,4 +1,5 @@
 {% extends "mission_control/base.html" %}
+{% load static %}
 {% block title %}{{ participant.name }} - {{ event.name }}{% endblock %}
 
 {% block extra_css %}
@@ -274,8 +275,16 @@
         </div>
     </div>
 
-    <!-- Right Column: Submission History -->
+    <!-- Right Column: Timeline & Submission History -->
     <div>
+        <!-- Score Timeline Chart -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Score Timeline</div>
+            <div style="position: relative; height: 250px; padding: 0 16px 16px;">
+                <canvas id="score-timeline-chart"></canvas>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-title">Submission History</div>
             {% if submissions %}
@@ -332,6 +341,12 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+<script src="{% static 'js/score-timeline.js' %}"></script>
+<script>
+initScoreTimeline('score-timeline-chart', '/ctf/api/participants/{{ participant.pk }}/score-timeline/');
+</script>
 <script>
 function resendInvite(participantId) {
     if (!confirm('Resend invitation email to this participant?')) return;

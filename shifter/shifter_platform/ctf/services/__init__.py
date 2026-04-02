@@ -93,6 +93,7 @@ from ctf.services.scoring import (
     get_challenge_statistics,
     get_event_statistics,
     get_participant_rank,
+    get_score_timeline,
     get_scoreboard,
     get_team_scoreboard,
 )
@@ -145,6 +146,7 @@ __all__ = [
     "get_participant_submissions",
     "get_prerequisites",
     "get_range_status",
+    "get_score_timeline",
     "get_scoreboard",
     "get_team_scoreboard",
     "get_total_hint_penalty",

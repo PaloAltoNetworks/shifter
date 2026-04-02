@@ -84,6 +84,13 @@ resource "aws_vpc_security_group_ingress_rule" "webserver_from_endpoint" {
   cidr_ipv4         = aws_subnet.endpoint.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "webserver_from_server" {
+  security_group_id = aws_security_group.webserver.id
+  description       = "All from server subnet"
+  ip_protocol       = "-1"
+  cidr_ipv4         = aws_subnet.server.cidr_block
+}
+
 resource "aws_vpc_security_group_egress_rule" "webserver_all" {
   security_group_id = aws_security_group.webserver.id
   ip_protocol       = "-1"
@@ -100,4 +107,17 @@ resource "aws_instance" "webserver" {
   tags = {
     Name = "${local.prefix}-WebServer"
   }
+}
+
+resource "aws_eip" "webserver" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.prefix}-webserver"
+  }
+}
+
+resource "aws_eip_association" "webserver" {
+  instance_id   = aws_instance.webserver.id
+  allocation_id = aws_eip.webserver.id
 }

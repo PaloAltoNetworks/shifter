@@ -240,6 +240,15 @@ def provision_event_ranges_throttled(
                 e,
             )
 
+        logger.info(
+            "Throttled provisioning progress for event %s: %d/%d (%d ready, %d failed)",
+            event_id,
+            i + 1,
+            count,
+            successful,
+            failed,
+        )
+
         # Sleep between provisions (skip after the last one)
         if i < count - 1 and not (shutdown_check and shutdown_check()):
             time.sleep(delay)

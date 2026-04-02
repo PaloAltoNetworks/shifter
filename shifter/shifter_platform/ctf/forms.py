@@ -65,6 +65,7 @@ class CTFEventForm(forms.ModelForm):
             "attempt_limit_mode",
             "attempt_limit_cooldown_seconds",
             "rating_visibility",
+            "scoreboard_freeze_at",
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
@@ -77,6 +78,10 @@ class CTFEventForm(forms.ModelForm):
                 format="%Y-%m-%dT%H:%M",
             ),
             "registration_deadline": forms.DateTimeInput(
+                attrs={"type": "datetime-local"},
+                format="%Y-%m-%dT%H:%M",
+            ),
+            "scoreboard_freeze_at": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
                 format="%Y-%m-%dT%H:%M",
             ),
@@ -103,7 +108,7 @@ class CTFEventForm(forms.ModelForm):
             self.fields["scenario_id"] = forms.CharField(max_length=50)
 
         # Set input formats for datetime fields
-        datetime_fields = ["event_start", "event_end", "registration_deadline"]
+        datetime_fields = ["event_start", "event_end", "registration_deadline", "scoreboard_freeze_at"]
         for field_name in datetime_fields:
             if field_name in self.fields:
                 self.fields[field_name].input_formats = [

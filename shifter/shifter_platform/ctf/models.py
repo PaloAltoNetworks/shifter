@@ -321,6 +321,11 @@ class CTFEvent(CTFBaseModel):
         default=RatingVisibility.PUBLIC.value,
         help_text="Challenge rating visibility: public, organizer-only, or disabled",
     )
+    scoreboard_freeze_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Freeze scoreboard at this time. Solves after this time are hidden from participants.",
+    )
 
     class Meta:
         db_table = "ctf_event"
@@ -356,6 +361,15 @@ class CTFEvent(CTFBaseModel):
                 "Team size limit should only be set when team mode is enabled."
             )
 
+        # Validate scoreboard freeze time
+        if self.scoreboard_freeze_at:
+            if self.event_start and self.scoreboard_freeze_at <= self.event_start:
+                errors.setdefault("scoreboard_freeze_at", []).append(
+                    "Scoreboard freeze time must be after event start."
+                )
+            if self.event_end and self.scoreboard_freeze_at >= self.event_end:
+                errors.setdefault("scoreboard_freeze_at", []).append("Scoreboard freeze time must be before event end.")
+
         if errors:
             raise ValidationError(errors)
 
@@ -373,6 +387,13 @@ class CTFEvent(CTFBaseModel):
     def is_paused(self) -> bool:
         """Return True if event is currently paused."""
         return self.status == EventStatus.PAUSED.value
+
+    @property
+    def is_scoreboard_frozen(self) -> bool:
+        """Return True if scoreboard is currently frozen for participants."""
+        if not self.scoreboard_freeze_at:
+            return False
+        return timezone.now() >= self.scoreboard_freeze_at and self.status == EventStatus.ACTIVE.value
 
     @property
     def is_modifiable(self) -> bool:

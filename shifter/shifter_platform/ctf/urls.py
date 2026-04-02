@@ -97,6 +97,27 @@ admin_patterns = [
         views.admin_scoreboard,
         name="admin_scoreboard",
     ),
+    # Brackets
+    path(
+        "admin/events/<uuid:event_id>/brackets/",
+        views.admin_bracket_list,
+        name="admin_bracket_list",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/brackets/create/",
+        views.admin_bracket_create,
+        name="admin_bracket_create",
+    ),
+    path(
+        "admin/brackets/<uuid:bracket_id>/edit/",
+        views.admin_bracket_edit,
+        name="admin_bracket_edit",
+    ),
+    path(
+        "admin/brackets/<uuid:bracket_id>/delete/",
+        views.admin_bracket_delete,
+        name="admin_bracket_delete",
+    ),
     # Ranges
     path("admin/events/<uuid:event_id>/ranges/", views.admin_range_list, name="admin_range_list"),
     # Notifications
@@ -230,6 +251,12 @@ api_patterns = [
         "api/participants/<uuid:participant_id>/range/restart/",
         views.api_restart_participant_range,
         name="api_restart_participant_range",
+    ),
+    # Bracket APIs
+    path(
+        "api/participants/<uuid:participant_id>/bracket/",
+        views.api_assign_bracket,
+        name="api_assign_bracket",
     ),
     # Scoreboard APIs
     path(

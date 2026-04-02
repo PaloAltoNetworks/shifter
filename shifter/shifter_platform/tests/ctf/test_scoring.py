@@ -990,3 +990,101 @@ class TestGetScoreTimeline:
         assert timeline[1]["cumulative"] == 150
         # No entry for the pre-start award itself
         assert len(timeline) == 2
+
+
+# -----------------------------------------------------------------------------
+# Scoreboard freeze tests
+# -----------------------------------------------------------------------------
+
+
+class TestScoreboardFreeze:
+    """Tests for the freeze_at parameter on get_scoreboard / get_team_scoreboard."""
+
+    def test_get_scoreboard_accepts_freeze_at(self, mock_participant_objects, mock_queryset):
+        """get_scoreboard with freeze_at runs without error and returns results."""
+        freeze_time = _NOW - timedelta(hours=1)
+        p_alice = _make_participant("Alice", computed_score=100, solve_count=1, last_solve_time=_NOW)
+        mock_participant_objects.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = MagicMock(return_value=iter([p_alice]))
+
+        result = get_scoreboard(uuid4(), freeze_at=freeze_time)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "Alice"
+
+    def test_get_scoreboard_without_freeze_at(self, mock_participant_objects, mock_queryset):
+        """get_scoreboard with freeze_at=None still works (default behaviour)."""
+        p_alice = _make_participant("Alice", computed_score=100, solve_count=1)
+        mock_participant_objects.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = MagicMock(return_value=iter([p_alice]))
+
+        result = get_scoreboard(uuid4(), freeze_at=None)
+
+        assert len(result) == 1
+
+    def test_get_team_scoreboard_accepts_freeze_at(self, mock_team_objects, mock_queryset):
+        """get_team_scoreboard with freeze_at runs without error and returns results."""
+        freeze_time = _NOW - timedelta(hours=1)
+        t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=3)
+        mock_team_objects.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = MagicMock(return_value=iter([t_alpha]))
+
+        result = get_team_scoreboard(uuid4(), freeze_at=freeze_time)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "Alpha"
+
+    def test_get_team_scoreboard_without_freeze_at(self, mock_team_objects, mock_queryset):
+        """get_team_scoreboard with freeze_at=None still works (default behaviour)."""
+        t_alpha = _make_team("Alpha", computed_score=200, solve_count=2, computed_member_count=3)
+        mock_team_objects.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = MagicMock(return_value=iter([t_alpha]))
+
+        result = get_team_scoreboard(uuid4(), freeze_at=None)
+
+        assert len(result) == 1
+
+
+class TestIsScoreboardFrozen:
+    """Tests for CTFEvent.is_scoreboard_frozen property."""
+
+    def _make_event(self, freeze_at=None, status="active"):
+        """Create a mock event with freeze configuration."""
+        from ctf.models import CTFEvent
+
+        event = MagicMock(spec=CTFEvent)
+        event.scoreboard_freeze_at = freeze_at
+        event.status = status
+        event.is_scoreboard_frozen = CTFEvent.is_scoreboard_frozen.fget(event)
+        return event
+
+    def test_frozen_when_past_freeze_time_and_active(self):
+        """Event is frozen when now >= freeze_at and status is active."""
+        event = self._make_event(
+            freeze_at=_NOW - timedelta(hours=1),
+            status="active",
+        )
+        assert event.is_scoreboard_frozen is True
+
+    def test_not_frozen_when_no_freeze_time(self):
+        """Event is not frozen when scoreboard_freeze_at is None."""
+        event = self._make_event(freeze_at=None, status="active")
+        assert event.is_scoreboard_frozen is False
+
+    def test_not_frozen_when_event_ended(self):
+        """Event is not frozen when status is ended (freeze lifts on end)."""
+        event = self._make_event(
+            freeze_at=_NOW - timedelta(hours=1),
+            status="ended",
+        )
+        assert event.is_scoreboard_frozen is False
+
+    @patch("ctf.models.timezone")
+    def test_not_frozen_before_freeze_time(self, mock_tz):
+        """Event is not frozen when freeze_at is in the future."""
+        mock_tz.now.return_value = _NOW
+        event = self._make_event(
+            freeze_at=_NOW + timedelta(hours=24),
+            status="active",
+        )
+        assert event.is_scoreboard_frozen is False

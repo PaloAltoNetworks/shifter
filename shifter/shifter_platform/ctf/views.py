@@ -503,14 +503,20 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
         return render(request, "ctf/participant/scoreboard.html", {})
 
     event = participant.event
+    freeze_at = event.scoreboard_freeze_at if event.is_scoreboard_frozen else None
 
-    rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
+    rankings = (
+        get_team_scoreboard(event.id, freeze_at=freeze_at)
+        if event.team_mode
+        else get_scoreboard(event.id, freeze_at=freeze_at)
+    )
 
     context = {
         "participant": participant,
         "event": event,
         "rankings": rankings,
         "team_mode": event.team_mode,
+        "frozen": event.is_scoreboard_frozen,
     }
     return render(request, "ctf/participant/scoreboard.html", context)
 
@@ -1437,6 +1443,7 @@ def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
             "rankings": rankings,
             "team_mode": event.team_mode,
             "stats": stats,
+            "frozen": event.is_scoreboard_frozen,
         },
     )
 
@@ -2412,12 +2419,23 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     except CTFNotFoundError:
         return JsonResponse({"error": "Event not found"}, status=404)
 
-    rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
+    # Organizers see real-time scores; participants see frozen scores
+    is_organizer = event.created_by_id == request.user.pk
+    freeze_at = None
+    if not is_organizer and event.is_scoreboard_frozen:
+        freeze_at = event.scoreboard_freeze_at
+
+    rankings = (
+        get_team_scoreboard(event.id, freeze_at=freeze_at)
+        if event.team_mode
+        else get_scoreboard(event.id, freeze_at=freeze_at)
+    )
 
     return JsonResponse(
         {
             "event_id": str(event.id),
             "team_mode": event.team_mode,
+            "frozen": event.is_scoreboard_frozen and not is_organizer,
             "rankings": rankings,
         }
     )

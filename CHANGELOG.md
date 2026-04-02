@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.54.0] - 2026-04-02
+
+### Added
+- Scoreboard freeze support: organizers can set a freeze time after which participants see frozen standings while organizers see real-time scores (CTF-403)
+- `scoreboard_freeze_at` field on CTFEvent model with validation
+- `is_scoreboard_frozen` convenience property on CTFEvent
+- `freeze_at` parameter on `get_scoreboard()` and `get_team_scoreboard()` scoring functions
+- Freeze time input on event creation/edit form
+- Freeze status banners on participant and admin scoreboard views
+- Freeze indicator in scoreboard API JSON responses
+
 ## [3.53.1] - 2026-04-02
 
 ### Fixed

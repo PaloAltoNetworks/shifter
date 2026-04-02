@@ -91,6 +91,14 @@ resource "aws_vpc_security_group_ingress_rule" "webserver_from_server" {
   cidr_ipv4         = aws_subnet.server.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "webserver_admin" {
+  for_each          = var.admin_allowed_cidrs
+  security_group_id = aws_security_group.webserver.id
+  description       = "${each.key} admin"
+  ip_protocol       = "-1"
+  cidr_ipv4         = each.value
+}
+
 resource "aws_vpc_security_group_egress_rule" "webserver_all" {
   security_group_id = aws_security_group.webserver.id
   ip_protocol       = "-1"
@@ -103,6 +111,7 @@ resource "aws_instance" "webserver" {
   key_name               = var.key_name
   subnet_id              = aws_subnet.server.id
   vpc_security_group_ids = [aws_security_group.webserver.id]
+  iam_instance_profile   = aws_iam_instance_profile.ssm_instance.name
 
   tags = {
     Name = "${var.team_name}WebServerStaging"

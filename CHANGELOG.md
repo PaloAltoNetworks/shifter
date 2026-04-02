@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.53.1] - 2026-04-02
+
+### Fixed
+- Team scoreboard solve count now counts unique challenges solved instead of total submissions (CTF-402)
+- Participant scoreboard template context variable mismatch preventing scoreboard from rendering (CTF-402)
+- Participant scoreboard auto-refresh reading wrong JSON key from API response (CTF-402)
+- Participant scoreboard now displays team-specific columns (Members) when team mode is active (CTF-402)
+
 ## [3.53.0] - 2026-04-02
 
 ### Added

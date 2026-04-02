@@ -43,7 +43,7 @@ def calculate_score(participant_id: UUID) -> int:
     return submission_total + award_total
 
 
-def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, Any]]:
+def get_scoreboard(event_id: UUID, limit: int | None = None, freeze_at: datetime | None = None) -> list[dict[str, Any]]:
     """Get scoreboard for an event.
 
     Returns ranked list of participants with scores.
@@ -52,11 +52,19 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
     Args:
         event_id: UUID of the event.
         limit: Optional limit on number of results.
+        freeze_at: Optional freeze cutoff. When set, only submissions/awards
+            before this time are counted.
 
     Returns:
         List of dicts with rank, participant info, score, and solve count.
     """
     logger.debug("Getting scoreboard for event %s", event_id)
+
+    submission_filter = Q(submissions__is_correct=True)
+    award_filter = Q()
+    if freeze_at:
+        submission_filter &= Q(submissions__submitted_at__lt=freeze_at)
+        award_filter &= Q(awards__created_at__lt=freeze_at)
 
     participants = (
         CTFParticipant.objects.filter(
@@ -71,19 +79,19 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
             submission_score=Coalesce(
                 Sum(
                     "submissions__points_awarded",
-                    filter=Q(submissions__is_correct=True),
+                    filter=submission_filter,
                 ),
                 0,
             ),
-            award_points=Coalesce(Sum("awards__points"), 0),
+            award_points=Coalesce(Sum("awards__points", filter=award_filter if freeze_at else None), 0),
             computed_score=F("submission_score") + F("award_points"),
             solve_count=Count(
                 "submissions",
-                filter=Q(submissions__is_correct=True),
+                filter=submission_filter,
             ),
             last_solve_time=Max(
                 "submissions__submitted_at",
-                filter=Q(submissions__is_correct=True),
+                filter=submission_filter,
             ),
         )
         .order_by("-computed_score", "last_solve_time")
@@ -121,7 +129,9 @@ def get_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, A
     return scoreboard
 
 
-def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[str, Any]]:
+def get_team_scoreboard(
+    event_id: UUID, limit: int | None = None, freeze_at: datetime | None = None
+) -> list[dict[str, Any]]:
     """Get team scoreboard for an event.
 
     Aggregates scores across team members.
@@ -130,11 +140,19 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
     Args:
         event_id: UUID of the event.
         limit: Optional limit on number of results.
+        freeze_at: Optional freeze cutoff. When set, only submissions/awards
+            before this time are counted.
 
     Returns:
         List of dicts with rank, team info, score, and member count.
     """
     logger.debug("Getting team scoreboard for event %s", event_id)
+
+    submission_filter = Q(members__submissions__is_correct=True)
+    award_filter = Q()
+    if freeze_at:
+        submission_filter &= Q(members__submissions__submitted_at__lt=freeze_at)
+        award_filter &= Q(members__awards__created_at__lt=freeze_at)
 
     teams = (
         CTFTeam.objects.filter(event_id=event_id)
@@ -142,21 +160,21 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
             submission_score=Coalesce(
                 Sum(
                     "members__submissions__points_awarded",
-                    filter=Q(members__submissions__is_correct=True),
+                    filter=submission_filter,
                 ),
                 0,
             ),
-            award_points=Coalesce(Sum("members__awards__points"), 0),
+            award_points=Coalesce(Sum("members__awards__points", filter=award_filter if freeze_at else None), 0),
             computed_score=F("submission_score") + F("award_points"),
             solve_count=Count(
                 "members__submissions__challenge",
-                filter=Q(members__submissions__is_correct=True),
+                filter=submission_filter,
                 distinct=True,
             ),
             computed_member_count=Count("members", distinct=True),
             last_solve_time=Max(
                 "members__submissions__submitted_at",
-                filter=Q(members__submissions__is_correct=True),
+                filter=submission_filter,
             ),
         )
         .order_by("-computed_score", "last_solve_time")

@@ -299,7 +299,7 @@ def list_participants_for_event(event_id: UUID) -> QuerySet[CTFParticipant]:
     Returns:
         QuerySet of CTFParticipant instances.
     """
-    return CTFParticipant.objects.filter(event_id=event_id).select_related("team", "user").order_by("name")
+    return CTFParticipant.objects.filter(event_id=event_id).select_related("team", "user", "bracket").order_by("name")
 
 
 def get_participant(participant_id: UUID) -> CTFParticipant:

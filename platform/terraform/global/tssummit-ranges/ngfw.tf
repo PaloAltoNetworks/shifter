@@ -434,6 +434,14 @@ resource "aws_vpc_security_group_ingress_rule" "workstation_from_endpoint" {
   cidr_ipv4         = aws_subnet.endpoint.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "workstation_admin" {
+  for_each          = var.admin_allowed_cidrs
+  security_group_id = aws_security_group.workstation.id
+  description       = "${each.key} admin"
+  ip_protocol       = "-1"
+  cidr_ipv4         = each.value
+}
+
 resource "aws_vpc_security_group_egress_rule" "workstation_all" {
   security_group_id = aws_security_group.workstation.id
   ip_protocol       = "-1"
@@ -445,6 +453,7 @@ resource "aws_instance" "workstation" {
   instance_type          = var.workstation_instance_type
   subnet_id              = aws_subnet.endpoint.id
   vpc_security_group_ids = [aws_security_group.workstation.id]
+  iam_instance_profile   = aws_iam_instance_profile.ssm_instance.name
   key_name               = var.key_name
 
   tags = {
@@ -522,6 +531,14 @@ resource "aws_vpc_security_group_ingress_rule" "windows_desktop_from_endpoint" {
   cidr_ipv4         = aws_subnet.endpoint.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "windows_desktop_admin" {
+  for_each          = var.admin_allowed_cidrs
+  security_group_id = aws_security_group.windows_desktop.id
+  description       = "${each.key} admin"
+  ip_protocol       = "-1"
+  cidr_ipv4         = each.value
+}
+
 resource "aws_vpc_security_group_egress_rule" "windows_desktop_all" {
   security_group_id = aws_security_group.windows_desktop.id
   ip_protocol       = "-1"
@@ -533,6 +550,7 @@ resource "aws_instance" "windows_desktop" {
   instance_type          = var.windows_desktop_instance_type
   subnet_id              = aws_subnet.endpoint.id
   vpc_security_group_ids = [aws_security_group.windows_desktop.id]
+  iam_instance_profile   = aws_iam_instance_profile.ssm_instance.name
   key_name               = "windowsDesktop"
 
   user_data = <<-EOF
@@ -625,6 +643,14 @@ resource "aws_vpc_security_group_ingress_rule" "windows_server_from_server" {
   cidr_ipv4         = aws_subnet.server.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "windows_server_admin" {
+  for_each          = var.admin_allowed_cidrs
+  security_group_id = aws_security_group.windows_server.id
+  description       = "${each.key} admin"
+  ip_protocol       = "-1"
+  cidr_ipv4         = each.value
+}
+
 resource "aws_vpc_security_group_egress_rule" "windows_server_all" {
   security_group_id = aws_security_group.windows_server.id
   ip_protocol       = "-1"
@@ -636,6 +662,7 @@ resource "aws_instance" "windows_server" {
   instance_type          = var.windows_server_instance_type
   subnet_id              = aws_subnet.server.id
   vpc_security_group_ids = [aws_security_group.windows_server.id]
+  iam_instance_profile   = aws_iam_instance_profile.ssm_instance.name
   key_name               = "windowsServer"
 
   user_data = <<-EOF
@@ -698,6 +725,14 @@ resource "aws_vpc_security_group_ingress_rule" "ztna_from_server" {
   description       = "All from server subnet"
   ip_protocol       = "-1"
   cidr_ipv4         = aws_subnet.server.cidr_block
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ztna_admin" {
+  for_each          = var.admin_allowed_cidrs
+  security_group_id = aws_security_group.ztna_connector.id
+  description       = "${each.key} admin"
+  ip_protocol       = "-1"
+  cidr_ipv4         = each.value
 }
 
 resource "aws_vpc_security_group_egress_rule" "ztna_all" {

@@ -19,7 +19,7 @@ ngfw_scm_pin_id       = "cb5d90f7-5c19-41e2-a92a-a13b4e8dc60c"
 ngfw_scm_pin_value    = "387db972a60d4f89a4251db70bf06c58"
 
 # Instances
-webserver_ami_id       = "ami-07062e2a343acc423"
+webserver_ami_id       = "ami-0a7c3c31d7446e13d"
 workstation_ami_id     = "ami-058f0cf1cc0bc26b3"
 windows_server_ami_id  = "ami-058f0cf1cc0bc26b3"
 windows_desktop_ami_id = "ami-0607d4beefbf087ae"

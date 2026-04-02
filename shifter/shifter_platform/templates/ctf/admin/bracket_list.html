@@ -81,7 +81,7 @@
                     <a href="{% url 'ctf:admin_bracket_edit' bracket_id=bracket.pk %}" class="action-btn">Edit</a>
                     <form method="post" action="{% url 'ctf:admin_bracket_delete' bracket_id=bracket.pk %}" style="display: inline;">
                         {% csrf_token %}
-                        <button type="submit" class="action-btn danger" onclick="return confirm('Delete bracket {{ bracket.name }}? Participants will be unassigned.')">Delete</button>
+                        <button type="submit" class="action-btn danger" onclick="return confirm('Delete bracket {{ bracket.name|escapejs }}? Participants will be unassigned.')">Delete</button>
                     </form>
                 </td>
             </tr>

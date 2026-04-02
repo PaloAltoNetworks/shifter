@@ -24,6 +24,7 @@ from ctf.enums import (
     ScheduledTaskStatus,
 )
 from ctf.models import (
+    CTFBracket,
     CTFChallenge,
     CTFEvent,
     CTFParticipant,
@@ -88,6 +89,21 @@ def make_challenge(event=None, **overrides) -> CTFChallenge:
     }
     defaults.update(overrides)
     return CTFChallenge(**defaults)
+
+
+def make_bracket(event=None, **overrides) -> CTFBracket:
+    """Build an in-memory CTFBracket without saving."""
+    if event is None:
+        event = make_ctf_event()
+    defaults = {
+        "id": uuid4(),
+        "event": event,
+        "name": "Test Bracket",
+        "description": "",
+        "display_order": 0,
+    }
+    defaults.update(overrides)
+    return CTFBracket(**defaults)
 
 
 def make_team(event=None, **overrides) -> CTFTeam:

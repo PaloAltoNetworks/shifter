@@ -136,6 +136,30 @@ def _check_event_ownership(event, user) -> JsonResponse | None:
     return None
 
 
+def _resolve_bracket_filter(event_id: UUID, bracket_param: str | None) -> tuple[list, object | None, UUID | None]:
+    """Resolve bracket filter from query parameter.
+
+    Args:
+        event_id: UUID of the event.
+        bracket_param: Raw bracket ID string from request.GET.get("bracket").
+
+    Returns:
+        Tuple of (brackets list, selected_bracket object or None, bracket_id UUID or None).
+    """
+    from ctf.services.bracket import list_brackets
+
+    brackets = list(list_brackets(event_id))
+    selected_bracket = None
+    bracket_id = None
+    if bracket_param:
+        for b in brackets:
+            if str(b.id) == bracket_param:
+                selected_bracket = b
+                bracket_id = b.id
+                break
+    return brackets, selected_bracket, bracket_id
+
+
 # -----------------------------------------------------------------------------
 # Participant Views (CTF Competitors)
 # -----------------------------------------------------------------------------
@@ -493,7 +517,8 @@ def participant_range(request: HttpRequest) -> HttpResponse:
 def scoreboard(request: HttpRequest) -> HttpResponse:
     """Public scoreboard view.
 
-    Shows rankings for current event.
+    Shows rankings for current event. Supports bracket filtering
+    via ?bracket=<uuid> query parameter.
     """
     from ctf.services.participant import get_participant_by_user
     from ctf.services.scoring import get_scoreboard, get_team_scoreboard
@@ -504,6 +529,7 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
 
     event = participant.event
     freeze_at = event.scoreboard_freeze_at if event.is_scoreboard_frozen else None
+    brackets, selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
 
     rankings = (
         get_team_scoreboard(event.id, freeze_at=freeze_at)
@@ -511,10 +537,21 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
         else get_scoreboard(event.id, freeze_at=freeze_at)
     )
 
+    bracket_rankings = None
+    if bracket_id:
+        bracket_rankings = (
+            get_team_scoreboard(event.id, freeze_at=freeze_at, bracket_id=bracket_id)
+            if event.team_mode
+            else get_scoreboard(event.id, freeze_at=freeze_at, bracket_id=bracket_id)
+        )
+
     context = {
         "participant": participant,
         "event": event,
         "rankings": rankings,
+        "bracket_rankings": bracket_rankings,
+        "brackets": brackets,
+        "selected_bracket": selected_bracket,
         "team_mode": event.team_mode,
         "frozen": event.is_scoreboard_frozen,
     }
@@ -1413,6 +1450,8 @@ def admin_team_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
 def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Admin scoreboard view with extra details.
 
+    Supports bracket filtering via ?bracket=<uuid> query parameter.
+
     Args:
         event_id: UUID of the event.
     """
@@ -1432,8 +1471,17 @@ def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
     from ctf.services import get_event_stats, get_scoreboard, get_team_scoreboard
 
     stats = get_event_stats(event)
+    brackets, selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
 
     rankings = get_team_scoreboard(event.id) if event.team_mode else get_scoreboard(event.id)
+
+    bracket_rankings = None
+    if bracket_id:
+        bracket_rankings = (
+            get_team_scoreboard(event.id, bracket_id=bracket_id)
+            if event.team_mode
+            else get_scoreboard(event.id, bracket_id=bracket_id)
+        )
 
     return render(
         request,
@@ -1441,11 +1489,223 @@ def admin_scoreboard(request: HttpRequest, event_id: UUID) -> HttpResponse:
         {
             "event": event,
             "rankings": rankings,
+            "bracket_rankings": bracket_rankings,
+            "brackets": brackets,
+            "selected_bracket": selected_bracket,
             "team_mode": event.team_mode,
             "stats": stats,
             "frozen": event.is_scoreboard_frozen,
         },
     )
+
+
+# -----------------------------------------------------------------------------
+# Bracket Management Views
+# -----------------------------------------------------------------------------
+
+
+@login_required
+@ctf_organizer_required
+def admin_bracket_list(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """List brackets for an event.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_event
+    from ctf.services.bracket import list_brackets
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    brackets = list_brackets(event.id)
+
+    return render(
+        request,
+        "ctf/admin/bracket_list.html",
+        {"event": event, "brackets": brackets},
+    )
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def admin_bracket_create(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """Create a bracket for an event.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from django.contrib import messages
+    from django.http import Http404
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.forms import CTFBracketForm
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    if request.method == "POST":
+        form = CTFBracketForm(request.POST, event=event)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"Bracket '{form.cleaned_data['name']}' created.")
+            return redirect("ctf:admin_bracket_list", event_id=event_id)
+    else:
+        form = CTFBracketForm(event=event)
+
+    return render(
+        request,
+        "ctf/admin/bracket_form.html",
+        {"event": event, "form": form, "editing": False},
+    )
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def admin_bracket_edit(request: HttpRequest, bracket_id: UUID) -> HttpResponse:
+    """Edit a bracket.
+
+    Args:
+        bracket_id: UUID of the bracket.
+    """
+    from django.contrib import messages
+    from django.http import Http404
+
+    from ctf.forms import CTFBracketForm
+    from ctf.models import CTFBracket
+
+    try:
+        bracket = CTFBracket.objects.select_related("event").get(pk=bracket_id)
+    except CTFBracket.DoesNotExist:
+        raise Http404("Bracket not found") from None
+
+    event = bracket.event
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    if request.method == "POST":
+        form = CTFBracketForm(request.POST, instance=bracket, event=event)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"Bracket '{bracket.name}' updated.")
+            return redirect("ctf:admin_bracket_list", event_id=event.id)
+    else:
+        form = CTFBracketForm(instance=bracket, event=event)
+
+    return render(
+        request,
+        "ctf/admin/bracket_form.html",
+        {"event": event, "form": form, "bracket": bracket, "editing": True},
+    )
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["POST"])
+def admin_bracket_delete(request: HttpRequest, bracket_id: UUID) -> HttpResponse:
+    """Delete a bracket.
+
+    Args:
+        bracket_id: UUID of the bracket.
+    """
+    from django.contrib import messages
+    from django.http import Http404
+
+    from ctf.models import CTFBracket
+    from ctf.services.bracket import delete_bracket, get_bracket
+
+    try:
+        bracket = get_bracket(bracket_id)
+    except CTFBracket.DoesNotExist:
+        raise Http404("Bracket not found") from None
+
+    event = bracket.event
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    name = bracket.name
+    delete_bracket(bracket_id)
+    messages.success(request, f"Bracket '{name}' deleted.")
+    return redirect("ctf:admin_bracket_list", event_id=event.id)
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["POST"])
+def api_assign_bracket(request: HttpRequest, participant_id: UUID) -> JsonResponse:
+    """API: Assign or remove a participant's bracket.
+
+    POST body: {"bracket_id": "<uuid>" | null}
+
+    Args:
+        participant_id: UUID of the participant.
+    """
+    import json
+
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_participant
+
+    try:
+        participant = get_participant(participant_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    if participant.event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    bracket_id = body.get("bracket_id")
+
+    if bracket_id is None:
+        from ctf.services.bracket import remove_participant_bracket
+
+        remove_participant_bracket(participant_id)
+        return JsonResponse({"status": "ok", "bracket": None})
+    else:
+        from uuid import UUID as _UUID
+
+        from django.core.exceptions import ValidationError
+
+        from ctf.models import CTFBracket
+        from ctf.services.bracket import assign_participant_bracket
+
+        try:
+            bracket_uuid = _UUID(str(bracket_id))
+            participant = assign_participant_bracket(participant_id, bracket_uuid)
+        except ValueError:
+            return JsonResponse({"error": "Invalid bracket ID format"}, status=400)
+        except ValidationError:
+            return JsonResponse({"error": "Bracket and participant must belong to the same event"}, status=400)
+        except CTFBracket.DoesNotExist:
+            return JsonResponse({"error": "Bracket not found"}, status=404)
+
+        bracket = participant.bracket
+        return JsonResponse(
+            {
+                "status": "ok",
+                "bracket": {"id": str(bracket.id), "name": bracket.name} if bracket else None,
+            }
+        )
 
 
 @login_required
@@ -2408,6 +2668,8 @@ def api_range_access(request: HttpRequest) -> JsonResponse:
 def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """API: Get scoreboard data.
 
+    Supports bracket filtering via ?bracket=<uuid> query parameter.
+
     Args:
         event_id: UUID of the event.
     """
@@ -2426,11 +2688,23 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
     if not is_organizer and event.is_scoreboard_frozen:
         freeze_at = event.scoreboard_freeze_at
 
+    brackets, _selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
+
     rankings = (
         get_team_scoreboard(event.id, freeze_at=freeze_at)
         if event.team_mode
         else get_scoreboard(event.id, freeze_at=freeze_at)
     )
+
+    bracket_rankings = None
+    if bracket_id:
+        bracket_rankings = (
+            get_team_scoreboard(event.id, freeze_at=freeze_at, bracket_id=bracket_id)
+            if event.team_mode
+            else get_scoreboard(event.id, freeze_at=freeze_at, bracket_id=bracket_id)
+        )
+
+    brackets_data = [{"id": str(b.id), "name": b.name} for b in brackets]
 
     return JsonResponse(
         {
@@ -2438,6 +2712,8 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
             "team_mode": event.team_mode,
             "frozen": event.is_scoreboard_frozen and not is_organizer,
             "rankings": rankings,
+            "bracket_rankings": bracket_rankings,
+            "brackets": brackets_data,
         }
     )
 

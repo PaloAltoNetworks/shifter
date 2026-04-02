@@ -46,10 +46,9 @@ Explore the codebase to determine whether the requirement described in the issue
 - You must add or update ADRs as appropriate.
 - Plans must include updating the changelog, readme, and docs as appropriate.
 - If designing code, remember to build off existing cross-cutting concerns, code, and patterns
-- Good code is readable, maintainable, and follows the coding standards
-- Address the concerns a FAANG L6+ engineer would have around security, performance, reliability, and scalability
+- Security, reliability, maintability, and scalability are priorities
 - Avoid reinventing the wheel - use existing libraries and frameworks where appropriate
-- Code should be easy to understand, test, and maintain. Simple is better than complex.
+- Quality is a priority - do not sacrifice quality for speed
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
 ### Step 4.5: Clause-by-Clause Verification

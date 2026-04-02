@@ -20,8 +20,8 @@ ngfw_scm_pin_value    = "387db972a60d4f89a4251db70bf06c58"
 
 # Instances
 webserver_ami_id       = "ami-0a7c3c31d7446e13d"
-workstation_ami_id     = "ami-058f0cf1cc0bc26b3"
-windows_server_ami_id  = "ami-058f0cf1cc0bc26b3"
+workstation_ami_id     = "ami-0687d1d5a48fca4df"
+windows_server_ami_id  = "ami-0687d1d5a48fca4df"
 windows_desktop_ami_id = "ami-0607d4beefbf087ae"
 
 # AI App

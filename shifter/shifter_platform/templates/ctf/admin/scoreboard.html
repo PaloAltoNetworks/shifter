@@ -47,6 +47,29 @@
     color: #faad14;
     font-weight: 700;
 }
+
+.bracket-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+
+.bracket-tabs a {
+    padding: 6px 14px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--xdr-text-secondary);
+    background: var(--xdr-surface);
+    border: 1px solid var(--xdr-border);
+}
+
+.bracket-tabs a.active {
+    color: #128df3;
+    background: rgba(18, 141, 243, 0.1);
+    border-color: #128df3;
+}
 </style>
 {% endblock %}
 
@@ -89,13 +112,84 @@
     </div>
 </div>
 
-<!-- Rankings Table -->
+{% if brackets %}
+<div class="bracket-tabs">
+    <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}" {% if not selected_bracket %}class="active"{% endif %}>Overall</a>
+    {% for bracket in brackets %}
+    <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}?bracket={{ bracket.id }}"
+       {% if selected_bracket and selected_bracket.id == bracket.id %}class="active"{% endif %}>{{ bracket.name }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if selected_bracket and bracket_rankings is not None %}
+<!-- Bracket Rankings Table -->
+<div class="card" style="padding: 0; margin-bottom: 16px;">
+    <div style="padding: 16px;">
+        <div class="card-title" style="margin-bottom: 0;">
+            {{ selected_bracket.name }} Bracket
+        </div>
+    </div>
+    {% if bracket_rankings %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Name</th>
+                {% if team_mode %}
+                <th>Members</th>
+                {% else %}
+                <th>Team</th>
+                {% endif %}
+                <th>Score</th>
+                <th>Solves</th>
+                <th>Last Solve</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in bracket_rankings %}
+            <tr>
+                <td>
+                    {% if entry.rank <= 3 %}
+                    <span class="rank-top">{{ entry.rank }}</span>
+                    {% else %}
+                    {{ entry.rank }}
+                    {% endif %}
+                </td>
+                <td><strong>{{ entry.name }}</strong></td>
+                {% if team_mode %}
+                <td>{{ entry.member_count }}</td>
+                {% else %}
+                <td>{{ entry.team_name|default:"-" }}</td>
+                {% endif %}
+                <td><strong>{{ entry.score }}</strong></td>
+                <td>{{ entry.solve_count }}</td>
+                <td>{{ entry.last_solve|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No scores yet in this bracket.</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card" style="padding: 16px 16px 4px; margin-bottom: 8px;">
+    <div class="card-title" style="margin-bottom: 0;">Overall Rankings</div>
+</div>
+{% endif %}
+
+<!-- Overall Rankings Table -->
 <div class="card" style="padding: 0;">
+    {% if not selected_bracket %}
     <div style="padding: 16px;">
         <div class="card-title" style="margin-bottom: 0;">
             {% if team_mode %}Team Rankings{% else %}Individual Rankings{% endif %}
         </div>
     </div>
+    {% endif %}
     {% if rankings %}
     <table class="table">
         <thead>

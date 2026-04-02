@@ -1,0 +1,97 @@
+{% extends "mission_control/base.html" %}
+{% block title %}Brackets - {{ event.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.breadcrumb {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--xdr-text-secondary);
+}
+
+.action-btn {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 3px;
+    text-decoration: none;
+    border: 1px solid var(--xdr-border);
+    color: var(--xdr-text-secondary);
+    background: transparent;
+    cursor: pointer;
+}
+
+.action-btn:hover {
+    color: var(--xdr-text);
+    border-color: var(--xdr-text-secondary);
+}
+
+.action-btn.danger:hover {
+    color: #ff4d4f;
+    border-color: #ff4d4f;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
+        <span class="separator">/</span>
+        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+        <span class="separator">/</span>
+        <span>Brackets</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1 class="page-title">Brackets</h1>
+        <a href="{% url 'ctf:admin_bracket_create' event_id=event.pk %}" class="btn btn-sm btn-primary">Create Bracket</a>
+    </div>
+</div>
+
+<!-- Brackets Table -->
+<div class="card" style="padding: 0;">
+    {% if brackets %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Order</th>
+                <th>Participants</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bracket in brackets %}
+            <tr>
+                <td><strong>{{ bracket.name }}</strong></td>
+                <td>{{ bracket.description|default:"-"|truncatewords:15 }}</td>
+                <td>{{ bracket.display_order }}</td>
+                <td>{{ bracket.participant_count }}</td>
+                <td>
+                    <a href="{% url 'ctf:admin_bracket_edit' bracket_id=bracket.pk %}" class="action-btn">Edit</a>
+                    <form method="post" action="{% url 'ctf:admin_bracket_delete' bracket_id=bracket.pk %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="action-btn danger" onclick="return confirm('Delete bracket {{ bracket.name }}? Participants will be unassigned.')">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No brackets configured. Create brackets to group participants by skill level.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

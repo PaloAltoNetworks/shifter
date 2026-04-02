@@ -129,6 +129,7 @@
                 {% if event.team_mode %}
                 <th>Team</th>
                 {% endif %}
+                <th>Bracket</th>
                 <th>Registered</th>
                 <th>Score</th>
                 <th>Actions</th>
@@ -165,6 +166,13 @@
                     {% endif %}
                 </td>
                 {% endif %}
+                <td>
+                    {% if participant.bracket %}
+                    {{ participant.bracket.name }}
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if participant.registered_at %}
                     {{ participant.registered_at|date:"M d, Y H:i" }}

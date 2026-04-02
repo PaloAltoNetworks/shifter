@@ -1759,6 +1759,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "attempt_limit_mode": event.attempt_limit_mode,
                 "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
                 "rating_visibility": event.rating_visibility,
+                "scoreboard_freeze_at": event.scoreboard_freeze_at.isoformat() if event.scoreboard_freeze_at else None,
             }
         )
 
@@ -1775,7 +1776,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
     # Parse datetime strings to datetime objects for the service layer
     from django.utils.dateparse import parse_datetime
 
-    for field in ("event_start", "event_end", "registration_deadline"):
+    for field in ("event_start", "event_end", "registration_deadline", "scoreboard_freeze_at"):
         if field in body and isinstance(body[field], str):
             parsed = parse_datetime(body[field])
             if parsed:

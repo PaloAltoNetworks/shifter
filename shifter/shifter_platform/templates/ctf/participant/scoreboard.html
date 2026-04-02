@@ -10,6 +10,18 @@
         </button>
     </div>
 
+    {% if participant %}
+    <!-- Score Timeline Chart -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">Your Score Timeline</h5>
+            <div style="position: relative; height: 250px;">
+                <canvas id="score-timeline-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card">
         <div class="card-body p-0">
             {% if scoreboard %}
@@ -69,6 +81,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 <script>
 var autoRefreshInterval = null;
 
@@ -100,7 +114,7 @@ function fetchScoreboard() {
     .then(function(response) { return response.json(); })
     .then(function(data) {
         if (data.scoreboard) {
-            updateScoreboardTable(data.scoreboard);
+            rebuildScoreboardTable(data.scoreboard);
         }
     })
     .catch(function(err) {
@@ -108,48 +122,152 @@ function fetchScoreboard() {
     });
 }
 
-function updateScoreboardTable(scoreboard) {
+function rebuildScoreboardTable(scoreboard) {
     var tbody = document.getElementById('scoreboard-body');
     if (!tbody) return;
 
     var participantId = "{{ participant_id }}";
     var teamMode = {{ event.team_mode|yesno:"true,false" }};
-    var html = '';
+
+    // Clear existing rows safely
+    while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+    }
 
     for (var i = 0; i < scoreboard.length; i++) {
         var entry = scoreboard[i];
         var isCurrentUser = (String(entry.participant_id) === String(participantId));
-        var rowClass = isCurrentUser ? ' class="table-active"' : '';
 
-        html += '<tr' + rowClass + '>';
-        html += '<td>';
+        var tr = document.createElement('tr');
+        if (isCurrentUser) tr.className = 'table-active';
+
+        // Rank cell
+        var tdRank = document.createElement('td');
         if (entry.rank <= 3) {
-            html += '<strong>' + entry.rank + '</strong>';
+            var strong = document.createElement('strong');
+            strong.textContent = entry.rank;
+            tdRank.appendChild(strong);
         } else {
-            html += entry.rank;
+            tdRank.textContent = entry.rank;
         }
-        html += '</td>';
-        html += '<td><strong>' + escapeHtml(entry.name) + '</strong>';
+        tr.appendChild(tdRank);
+
+        // Name cell
+        var tdName = document.createElement('td');
+        var nameStrong = document.createElement('strong');
+        nameStrong.textContent = entry.name;
+        tdName.appendChild(nameStrong);
         if (isCurrentUser) {
-            html += ' <span class="badge bg-primary ms-1">You</span>';
+            var badge = document.createElement('span');
+            badge.className = 'badge bg-primary ms-1';
+            badge.textContent = 'You';
+            tdName.appendChild(badge);
         }
-        html += '</td>';
+        tr.appendChild(tdName);
+
+        // Team cell (if team mode)
         if (teamMode) {
-            html += '<td>' + escapeHtml(entry.team_name || '-') + '</td>';
+            var tdTeam = document.createElement('td');
+            tdTeam.textContent = entry.team_name || '-';
+            tr.appendChild(tdTeam);
         }
-        html += '<td><strong>' + entry.score + '</strong></td>';
-        html += '<td>' + entry.solves + '</td>';
-        html += '<td>' + (entry.last_solve || '-') + '</td>';
-        html += '</tr>';
+
+        // Score cell
+        var tdScore = document.createElement('td');
+        var scoreStrong = document.createElement('strong');
+        scoreStrong.textContent = entry.score;
+        tdScore.appendChild(scoreStrong);
+        tr.appendChild(tdScore);
+
+        // Solves cell
+        var tdSolves = document.createElement('td');
+        tdSolves.textContent = entry.solves;
+        tr.appendChild(tdSolves);
+
+        // Last solve cell
+        var tdLastSolve = document.createElement('td');
+        tdLastSolve.textContent = entry.last_solve || '-';
+        tr.appendChild(tdLastSolve);
+
+        tbody.appendChild(tr);
     }
-
-    tbody.innerHTML = html;
 }
 
-function escapeHtml(text) {
-    var div = document.createElement('div');
-    div.appendChild(document.createTextNode(text));
-    return div.innerHTML;
-}
+{% if participant %}
+// Score Timeline Chart
+(function() {
+    var canvas = document.getElementById('score-timeline-chart');
+    if (!canvas) return;
+
+    fetch("{% url 'ctf:api_score_timeline' participant_id=participant.pk %}")
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (!data.timeline || data.timeline.length === 0) return;
+
+        var labels = [];
+        var scores = [];
+        var tooltipLabels = [];
+
+        for (var i = 0; i < data.timeline.length; i++) {
+            var entry = data.timeline[i];
+            var d = new Date(entry.timestamp);
+            labels.push(d);
+            scores.push(entry.cumulative);
+            tooltipLabels.push(entry.label + (entry.points ? ' (+' + entry.points + ')' : ''));
+        }
+
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Score',
+                    data: scores,
+                    borderColor: '#128df3',
+                    backgroundColor: 'rgba(18, 141, 243, 0.1)',
+                    fill: true,
+                    stepped: 'before',
+                    pointRadius: 3,
+                    pointBackgroundColor: '#128df3',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            tooltipFormat: 'MMM d, HH:mm',
+                            displayFormats: { hour: 'HH:mm', day: 'MMM d' }
+                        },
+                        ticks: { color: '#b8b8b8' },
+                        grid: { color: 'rgba(255,255,255,0.1)' }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: '#b8b8b8', precision: 0 },
+                        grid: { color: 'rgba(255,255,255,0.1)' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: function(context) {
+                                return tooltipLabels[context.dataIndex];
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    })
+    .catch(function(err) {
+        console.error('Failed to load score timeline:', err);
+    });
+})();
+{% endif %}
 </script>
 {% endblock %}

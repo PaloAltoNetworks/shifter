@@ -2424,6 +2424,51 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
 
 
 @login_required
+@ctf_role_required
+@require_GET
+def api_score_timeline(request: HttpRequest, participant_id: UUID) -> JsonResponse:
+    """API: Get per-participant score timeline.
+
+    Returns chronological score progression data for rendering a step chart.
+    Participants can view their own timeline; organizers can view any
+    participant's timeline for events they own.
+
+    Args:
+        participant_id: UUID of the participant.
+    """
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.services import get_participant
+    from ctf.services.scoring import get_score_timeline
+
+    try:
+        participant = get_participant(participant_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Participant not found"}, status=404)
+
+    # Authorization: organizers can view their events' participants,
+    # participants can only view their own timeline
+    user = _get_user(request)
+    role = get_user_role(user)
+
+    if role.is_ctf_organizer:
+        ownership_error = _check_event_ownership(participant.event, user)
+        if ownership_error:
+            return ownership_error
+    elif participant.user_id != user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    timeline = get_score_timeline(participant_id)
+
+    return JsonResponse(
+        {
+            "participant_id": str(participant.id),
+            "participant_name": participant.name,
+            "timeline": timeline,
+        }
+    )
+
+
+@login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "POST"])
 def api_notification_list(request: HttpRequest, event_id: UUID) -> JsonResponse:

@@ -1631,11 +1631,12 @@ def admin_bracket_delete(request: HttpRequest, bracket_id: UUID) -> HttpResponse
     from django.contrib import messages
     from django.http import Http404
 
+    from ctf.models import CTFBracket
     from ctf.services.bracket import delete_bracket, get_bracket
 
     try:
         bracket = get_bracket(bracket_id)
-    except Exception:
+    except CTFBracket.DoesNotExist:
         raise Http404("Bracket not found") from None
 
     event = bracket.event

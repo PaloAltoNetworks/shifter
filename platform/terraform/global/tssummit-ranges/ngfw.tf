@@ -427,6 +427,13 @@ resource "aws_vpc_security_group_ingress_rule" "workstation_from_server" {
   cidr_ipv4         = aws_subnet.server.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "workstation_from_endpoint" {
+  security_group_id = aws_security_group.workstation.id
+  description       = "All from endpoint subnet"
+  ip_protocol       = "-1"
+  cidr_ipv4         = aws_subnet.endpoint.cidr_block
+}
+
 resource "aws_vpc_security_group_egress_rule" "workstation_all" {
   security_group_id = aws_security_group.workstation.id
   ip_protocol       = "-1"
@@ -443,6 +450,19 @@ resource "aws_instance" "workstation" {
   tags = {
     Name = "${local.prefix}-workstation"
   }
+}
+
+resource "aws_eip" "workstation" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.prefix}-workstation"
+  }
+}
+
+resource "aws_eip_association" "workstation" {
+  instance_id   = aws_instance.workstation.id
+  allocation_id = aws_eip.workstation.id
 }
 
 # ------------------------------------------------------------------------------
@@ -495,6 +515,13 @@ resource "aws_vpc_security_group_ingress_rule" "windows_desktop_from_server" {
   cidr_ipv4         = aws_subnet.server.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "windows_desktop_from_endpoint" {
+  security_group_id = aws_security_group.windows_desktop.id
+  description       = "All from endpoint subnet"
+  ip_protocol       = "-1"
+  cidr_ipv4         = aws_subnet.endpoint.cidr_block
+}
+
 resource "aws_vpc_security_group_egress_rule" "windows_desktop_all" {
   security_group_id = aws_security_group.windows_desktop.id
   ip_protocol       = "-1"
@@ -526,6 +553,19 @@ resource "aws_instance" "windows_desktop" {
   lifecycle {
     ignore_changes = [user_data]
   }
+}
+
+resource "aws_eip" "windows_desktop" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.prefix}-windows-desktop"
+  }
+}
+
+resource "aws_eip_association" "windows_desktop" {
+  instance_id   = aws_instance.windows_desktop.id
+  allocation_id = aws_eip.windows_desktop.id
 }
 
 # ------------------------------------------------------------------------------
@@ -578,6 +618,13 @@ resource "aws_vpc_security_group_ingress_rule" "windows_server_from_endpoint" {
   cidr_ipv4         = aws_subnet.endpoint.cidr_block
 }
 
+resource "aws_vpc_security_group_ingress_rule" "windows_server_from_server" {
+  security_group_id = aws_security_group.windows_server.id
+  description       = "All from server subnet"
+  ip_protocol       = "-1"
+  cidr_ipv4         = aws_subnet.server.cidr_block
+}
+
 resource "aws_vpc_security_group_egress_rule" "windows_server_all" {
   security_group_id = aws_security_group.windows_server.id
   ip_protocol       = "-1"
@@ -612,6 +659,19 @@ resource "aws_instance" "windows_server" {
   }
 }
 
+resource "aws_eip" "windows_server" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.prefix}-windows-server"
+  }
+}
+
+resource "aws_eip_association" "windows_server" {
+  instance_id   = aws_instance.windows_server.id
+  allocation_id = aws_eip.windows_server.id
+}
+
 # ------------------------------------------------------------------------------
 # ZTNA Connector (server subnet)
 # ------------------------------------------------------------------------------
@@ -631,6 +691,13 @@ resource "aws_vpc_security_group_ingress_rule" "ztna_from_endpoint" {
   description       = "All from endpoint subnet"
   ip_protocol       = "-1"
   cidr_ipv4         = aws_subnet.endpoint.cidr_block
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ztna_from_server" {
+  security_group_id = aws_security_group.ztna_connector.id
+  description       = "All from server subnet"
+  ip_protocol       = "-1"
+  cidr_ipv4         = aws_subnet.server.cidr_block
 }
 
 resource "aws_vpc_security_group_egress_rule" "ztna_all" {
@@ -714,4 +781,3 @@ resource "aws_eip_association" "ai_app" {
   instance_id   = aws_instance.ai_app.id
   allocation_id = aws_eip.ai_app.id
 }
-

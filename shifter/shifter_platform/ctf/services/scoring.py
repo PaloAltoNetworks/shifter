@@ -149,8 +149,9 @@ def get_team_scoreboard(event_id: UUID, limit: int | None = None) -> list[dict[s
             award_points=Coalesce(Sum("members__awards__points"), 0),
             computed_score=F("submission_score") + F("award_points"),
             solve_count=Count(
-                "members__submissions",
+                "members__submissions__challenge",
                 filter=Q(members__submissions__is_correct=True),
+                distinct=True,
             ),
             computed_member_count=Count("members", distinct=True),
             last_solve_time=Max(

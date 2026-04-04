@@ -394,3 +394,106 @@ class TestInvitedAtNotSetAtCreation:
         assert len(created) == 2
         for p in created:
             assert p.invited_at is None
+
+
+# ---------------------------------------------------------------------------
+# Organizer event start/end notifications (CTF-1004)
+# ---------------------------------------------------------------------------
+
+
+class TestNotifyOrganizerEventStart:
+    """Tests for notify_organizer_event_start."""
+
+    @patch("ctf.services.notification.CTFNotification")
+    @patch("ctf.services.notification.CTFEvent")
+    def test_sends_email_and_records_notification(self, mock_event_cls, mock_notif_cls, ctf_event):
+        """Sends email to organizer and creates notification record."""
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+
+        with (
+            patch.object(notification, "_send_email", return_value=True) as mock_send,
+            patch.object(notification, "_render_email", return_value=("<html>", "text")) as mock_render,
+        ):
+            notification.notify_organizer_event_start(ctf_event.pk)
+
+        mock_render.assert_called_once_with("event_start", {"event": ctf_event})
+        mock_send.assert_called_once_with(
+            recipient=ctf_event.created_by.email,
+            subject=f"Event started: {ctf_event.name}",
+            html_content="<html>",
+            text_content="text",
+        )
+        mock_notif_cls.objects.create.assert_called_once()
+        call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
+        assert call_kwargs["notification_type"] == NotificationType.EVENT_START.value
+        assert call_kwargs["recipient_filter"] == "organizer"
+
+    @patch("ctf.services.notification.CTFEvent")
+    def test_event_not_found(self, mock_event_cls):
+        """Returns gracefully if event does not exist."""
+        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
+        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
+
+        notification.notify_organizer_event_start(uuid4())
+
+    @patch("ctf.services.notification.CTFEvent")
+    def test_no_organizer_email(self, mock_event_cls, ctf_event):
+        """Returns gracefully if organizer has no email."""
+        ctf_event.created_by.email = None
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+
+        with patch.object(notification, "_send_email") as mock_send:
+            notification.notify_organizer_event_start(ctf_event.pk)
+
+        mock_send.assert_not_called()
+
+
+class TestNotifyOrganizerEventEnd:
+    """Tests for notify_organizer_event_end."""
+
+    @patch("ctf.services.notification.CTFNotification")
+    @patch("ctf.services.notification.CTFEvent")
+    def test_sends_email_and_records_notification(self, mock_event_cls, mock_notif_cls, ctf_event):
+        """Sends email to organizer and creates notification record."""
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+
+        with (
+            patch.object(notification, "_send_email", return_value=True) as mock_send,
+            patch.object(notification, "_render_email", return_value=("<html>", "text")) as mock_render,
+        ):
+            notification.notify_organizer_event_end(ctf_event.pk)
+
+        mock_render.assert_called_once_with("event_end", {"event": ctf_event})
+        mock_send.assert_called_once_with(
+            recipient=ctf_event.created_by.email,
+            subject=f"Event ended: {ctf_event.name}",
+            html_content="<html>",
+            text_content="text",
+        )
+        mock_notif_cls.objects.create.assert_called_once()
+        call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
+        assert call_kwargs["notification_type"] == NotificationType.EVENT_END.value
+        assert call_kwargs["recipient_filter"] == "organizer"
+
+    @patch("ctf.services.notification.CTFEvent")
+    def test_event_not_found(self, mock_event_cls):
+        """Returns gracefully if event does not exist."""
+        mock_event_cls.DoesNotExist = type("DoesNotExist", (Exception,), {})
+        mock_event_cls.objects.get.side_effect = mock_event_cls.DoesNotExist
+
+        notification.notify_organizer_event_end(uuid4())
+
+    @patch("ctf.services.notification.CTFEvent")
+    def test_no_organizer_email(self, mock_event_cls, ctf_event):
+        """Returns gracefully if organizer has no email."""
+        ctf_event.created_by.email = None
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+
+        with patch.object(notification, "_send_email") as mock_send:
+            notification.notify_organizer_event_end(ctf_event.pk)
+
+        mock_send.assert_not_called()

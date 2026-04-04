@@ -1,0 +1,8 @@
+Event Started
+
+Your event {{ event.name }} has automatically transitioned to active.
+
+Flag submissions are now enabled for participants.
+
+Start Time: {{ event.event_start|date:"F j, Y g:i A" }}
+End Time: {{ event.event_end|date:"F j, Y g:i A" }}

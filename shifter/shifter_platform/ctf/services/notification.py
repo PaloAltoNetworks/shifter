@@ -423,7 +423,7 @@ def notify_organizer_provision_failure(
             subject=f"Provisioning failures for {event.name}",
             body=f"{len(failures)} participant(s) failed provisioning",
             status=NotificationStatus.SENT.value,
-            recipient_filter="organizer",
+            recipient_filter="organizers",
             sent_count=1,
             created_by=organizer,
         )
@@ -467,7 +467,7 @@ def notify_organizer_event_start(event_id: UUID) -> None:
             subject=f"Event started: {event.name}",
             body=f"Event {event.name} has automatically started",
             status=NotificationStatus.SENT.value,
-            recipient_filter="organizer",
+            recipient_filter="organizers",
             sent_count=1,
             created_by=organizer,
         )
@@ -511,7 +511,7 @@ def notify_organizer_event_end(event_id: UUID) -> None:
             subject=f"Event ended: {event.name}",
             body=f"Event {event.name} has automatically ended",
             status=NotificationStatus.SENT.value,
-            recipient_filter="organizer",
+            recipient_filter="organizers",
             sent_count=1,
             created_by=organizer,
         )

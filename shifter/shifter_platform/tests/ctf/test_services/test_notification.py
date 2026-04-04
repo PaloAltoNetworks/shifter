@@ -427,7 +427,7 @@ class TestNotifyOrganizerEventStart:
         mock_notif_cls.objects.create.assert_called_once()
         call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
         assert call_kwargs["notification_type"] == NotificationType.EVENT_START.value
-        assert call_kwargs["recipient_filter"] == "organizer"
+        assert call_kwargs["recipient_filter"] == "organizers"
 
     @patch("ctf.services.notification.CTFEvent")
     def test_event_not_found(self, mock_event_cls):
@@ -476,7 +476,7 @@ class TestNotifyOrganizerEventEnd:
         mock_notif_cls.objects.create.assert_called_once()
         call_kwargs = mock_notif_cls.objects.create.call_args.kwargs
         assert call_kwargs["notification_type"] == NotificationType.EVENT_END.value
-        assert call_kwargs["recipient_filter"] == "organizer"
+        assert call_kwargs["recipient_filter"] == "organizers"
 
     @patch("ctf.services.notification.CTFEvent")
     def test_event_not_found(self, mock_event_cls):

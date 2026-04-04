@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.56.0] - 2026-04-04
+
+### Added
+- Scoreboard visibility toggle: organizers can hide the scoreboard from participants until ready (CTF-004)
+- `scoreboard_visible` boolean field on CTFEvent model (default True)
+- Participant scoreboard view and API return hidden state when scoreboard is not visible
+- Admin scoreboard shows banner when scoreboard is hidden from participants
+- Scoreboard visibility checkbox in event create/edit form
+
 ## [3.55.0] - 2026-04-02
 
 ### Added

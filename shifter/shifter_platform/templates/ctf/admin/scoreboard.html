@@ -86,6 +86,12 @@
     <h1 class="page-title">Scoreboard</h1>
 </div>
 
+{% if not event.scoreboard_visible %}
+<div class="card" style="padding: 12px 16px; margin-bottom: 16px; border-left: 3px solid #ff4d4f;">
+    Scoreboard is hidden from participants. They cannot see rankings until you enable visibility in event settings.
+</div>
+{% endif %}
+
 {% if frozen %}
 <div class="card" style="padding: 12px 16px; margin-bottom: 16px; border-left: 3px solid #faad14;">
     Scoreboard is frozen for participants. You are viewing real-time standings.

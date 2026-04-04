@@ -321,6 +321,10 @@ class CTFEvent(CTFBaseModel):
         default=RatingVisibility.PUBLIC.value,
         help_text="Challenge rating visibility: public, organizer-only, or disabled",
     )
+    scoreboard_visible = models.BooleanField(
+        default=True,
+        help_text="Whether the scoreboard is visible to participants. When False, participants see a hidden message.",
+    )
     scoreboard_freeze_at = models.DateTimeField(
         null=True,
         blank=True,

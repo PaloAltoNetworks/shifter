@@ -6,10 +6,21 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h3 mb-0">Scoreboard</h1>
+        {% if not scoreboard_hidden %}
         <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-btn" onclick="refreshScoreboard()">
             Auto-Refresh: Off
         </button>
+        {% endif %}
     </div>
+
+    {% if scoreboard_hidden %}
+    <div class="card">
+        <div class="card-body text-center py-5">
+            <h5 class="text-muted mb-2">Scoreboard Hidden</h5>
+            <p class="text-muted mb-0">The scoreboard is not yet available. The organizer will make it visible when ready.</p>
+        </div>
+    </div>
+    {% else %}
 
     {% if frozen %}
     <div class="alert alert-info mb-4" id="freeze-banner">
@@ -103,6 +114,8 @@
             {% endif %}
         </div>
     </div>
+
+    {% endif %}{# end scoreboard_hidden #}
 </div>
 {% endblock %}
 
@@ -141,6 +154,35 @@ function fetchScoreboard() {
     fetch(url)
     .then(function(response) { return response.json(); })
     .then(function(data) {
+        if (data.scoreboard_hidden) {
+            // Organizer hid the scoreboard mid-event — stop polling and show message
+            if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+            var tbody = document.getElementById('scoreboard-body');
+            if (tbody) { while (tbody.firstChild) { tbody.removeChild(tbody.firstChild); } }
+            var table = document.getElementById('scoreboard-table');
+            if (table) { table.style.display = 'none'; }
+            var container = document.querySelector('.container-fluid');
+            if (!document.getElementById('hidden-banner')) {
+                var hiddenDiv = document.createElement('div');
+                hiddenDiv.id = 'hidden-banner';
+                hiddenDiv.className = 'card';
+                var body = document.createElement('div');
+                body.className = 'card-body text-center py-5';
+                var h5 = document.createElement('h5');
+                h5.className = 'text-muted mb-2';
+                h5.textContent = 'Scoreboard Hidden';
+                var p = document.createElement('p');
+                p.className = 'text-muted mb-0';
+                p.textContent = 'The scoreboard is not yet available. The organizer will make it visible when ready.';
+                body.appendChild(h5);
+                body.appendChild(p);
+                hiddenDiv.appendChild(body);
+                container.appendChild(hiddenDiv);
+            }
+            var btn = document.getElementById('refresh-btn');
+            if (btn) btn.style.display = 'none';
+            return;
+        }
         if (data.rankings) {
             rebuildScoreboardTable(data.rankings, data.team_mode);
         }

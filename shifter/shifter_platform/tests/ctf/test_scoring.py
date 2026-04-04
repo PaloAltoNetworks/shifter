@@ -1088,3 +1088,38 @@ class TestIsScoreboardFrozen:
             status="active",
         )
         assert event.is_scoreboard_frozen is False
+
+
+class TestScoreboardVisibility:
+    """Tests for CTFEvent.scoreboard_visible field behaviour."""
+
+    def _make_event(self, scoreboard_visible=True):
+        """Create a mock event with visibility configuration."""
+        from ctf.models import CTFEvent
+
+        event = MagicMock(spec=CTFEvent)
+        event.scoreboard_visible = scoreboard_visible
+        return event
+
+    def test_scoreboard_visible_by_default(self):
+        """scoreboard_visible defaults to True."""
+        from ctf.models import CTFEvent
+
+        field = CTFEvent._meta.get_field("scoreboard_visible")
+        assert field.default is True
+
+    def test_scoreboard_hidden_when_not_visible(self):
+        """Event with scoreboard_visible=False reports hidden."""
+        event = self._make_event(scoreboard_visible=False)
+        assert event.scoreboard_visible is False
+
+    def test_scoreboard_shown_when_visible(self):
+        """Event with scoreboard_visible=True reports visible."""
+        event = self._make_event(scoreboard_visible=True)
+        assert event.scoreboard_visible is True
+
+    def test_scoreboard_visible_in_mutable_fields(self):
+        """scoreboard_visible is in the event mutable fields whitelist."""
+        from ctf.services.event import _EVENT_MUTABLE_FIELDS
+
+        assert "scoreboard_visible" in _EVENT_MUTABLE_FIELDS

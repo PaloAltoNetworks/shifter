@@ -121,11 +121,23 @@ input[type="datetime-local"] {
             <div class="field-error" id="error-registration_deadline"></div>
         </div>
 
-        <div class="form-group">
-            <label class="form-label" for="field-scoreboard_freeze_at">Scoreboard Freeze Time</label>
-            <input type="datetime-local" id="field-scoreboard_freeze_at" class="form-input">
-            <div class="form-help">Optional. Scoreboard freezes at this time. Participants see frozen standings; organizers see real-time.</div>
-            <div class="field-error" id="error-scoreboard_freeze_at"></div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-checkbox">
+                    <input type="checkbox" id="field-scoreboard_visible" checked>
+                    <div>
+                        <span class="form-checkbox-label">Scoreboard Visible</span>
+                        <div class="form-checkbox-help">When unchecked, participants cannot see the scoreboard</div>
+                    </div>
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="field-scoreboard_freeze_at">Scoreboard Freeze Time</label>
+                <input type="datetime-local" id="field-scoreboard_freeze_at" class="form-input">
+                <div class="form-help">Optional. Scoreboard freezes at this time. Participants see frozen standings; organizers see real-time.</div>
+                <div class="field-error" id="error-scoreboard_freeze_at"></div>
+            </div>
         </div>
     </div>
 
@@ -292,7 +304,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var FIELDS = [
         'name', 'description', 'event_start', 'event_end',
-        'registration_deadline', 'scoreboard_freeze_at', 'scenario_id',
+        'registration_deadline', 'scoreboard_visible', 'scoreboard_freeze_at', 'scenario_id',
         'range_spinup_minutes', 'auto_cleanup', 'ngfw_enabled',
         'cleanup_delay_hours', 'max_participants', 'team_mode',
         'team_size_limit', 'submission_cooldown_seconds',
@@ -363,6 +375,7 @@ document.addEventListener('DOMContentLoaded', function() {
             event_start: toISODatetime(getField('event_start').value),
             event_end: toISODatetime(getField('event_end').value),
             auto_cleanup: getField('auto_cleanup').checked,
+            scoreboard_visible: getField('scoreboard_visible').checked,
             team_mode: getField('team_mode').checked,
         };
 
@@ -549,6 +562,7 @@ document.addEventListener('DOMContentLoaded', function() {
             getField('event_start').value = toDatetimeLocal(event.event_start);
             getField('event_end').value = toDatetimeLocal(event.event_end);
             getField('registration_deadline').value = toDatetimeLocal(event.registration_deadline);
+            getField('scoreboard_visible').checked = event.scoreboard_visible !== false;
             getField('scoreboard_freeze_at').value = toDatetimeLocal(event.scoreboard_freeze_at);
             getField('range_spinup_minutes').value = event.range_spinup_minutes || 30;
             getField('auto_cleanup').checked = !!event.auto_cleanup;

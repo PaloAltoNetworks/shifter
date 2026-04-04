@@ -528,6 +528,15 @@ def scoreboard(request: HttpRequest) -> HttpResponse:
         return render(request, "ctf/participant/scoreboard.html", {})
 
     event = participant.event
+
+    # If organizer has hidden the scoreboard, show a hidden message
+    if not event.scoreboard_visible:
+        return render(
+            request,
+            "ctf/participant/scoreboard.html",
+            {"participant": participant, "event": event, "scoreboard_hidden": True},
+        )
+
     freeze_at = event.scoreboard_freeze_at if event.is_scoreboard_frozen else None
     brackets, selected_bracket, bracket_id = _resolve_bracket_filter(event.id, request.GET.get("bracket"))
 
@@ -2019,6 +2028,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
                 "attempt_limit_mode": event.attempt_limit_mode,
                 "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
                 "rating_visibility": event.rating_visibility,
+                "scoreboard_visible": event.scoreboard_visible,
                 "scoreboard_freeze_at": event.scoreboard_freeze_at.isoformat() if event.scoreboard_freeze_at else None,
             }
         )
@@ -2684,6 +2694,11 @@ def api_scoreboard(request: HttpRequest, event_id: UUID) -> JsonResponse:
 
     # Organizers see real-time scores; participants see frozen scores
     is_organizer = event.created_by_id == request.user.pk
+
+    # If scoreboard is hidden from participants, return early
+    if not is_organizer and not event.scoreboard_visible:
+        return JsonResponse({"scoreboard_hidden": True})
+
     freeze_at = None
     if not is_organizer and event.is_scoreboard_frozen:
         freeze_at = event.scoreboard_freeze_at

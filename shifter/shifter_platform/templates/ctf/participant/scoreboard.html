@@ -6,10 +6,21 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h3 mb-0">Scoreboard</h1>
+        {% if not scoreboard_hidden %}
         <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-btn" onclick="refreshScoreboard()">
             Auto-Refresh: Off
         </button>
+        {% endif %}
     </div>
+
+    {% if scoreboard_hidden %}
+    <div class="card">
+        <div class="card-body text-center py-5">
+            <h5 class="text-muted mb-2">Scoreboard Hidden</h5>
+            <p class="text-muted mb-0">The scoreboard is not yet available. The organizer will make it visible when ready.</p>
+        </div>
+    </div>
+    {% else %}
 
     {% if frozen %}
     <div class="alert alert-info mb-4" id="freeze-banner">
@@ -103,6 +114,8 @@
             {% endif %}
         </div>
     </div>
+
+    {% endif %}{# end scoreboard_hidden #}
 </div>
 {% endblock %}
 

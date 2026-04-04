@@ -429,6 +429,94 @@ def notify_organizer_provision_failure(
         )
 
 
+def notify_organizer_event_start(event_id: UUID) -> None:
+    """Notify the event organizer that the event has automatically started.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    logger.info("Notifying organizer of event start for event %s", event_id)
+
+    try:
+        event = CTFEvent.objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        logger.error("Cannot notify: event %s not found", event_id)
+        return
+
+    organizer = event.created_by
+    if not organizer or not organizer.email:
+        logger.warning("Cannot notify: event %s has no organizer email", event_id)
+        return
+
+    html_content, text_content = _render_email(
+        "event_start",
+        {"event": event},
+    )
+
+    success = _send_email(
+        recipient=organizer.email,
+        subject=f"Event started: {event.name}",
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+    if success:
+        CTFNotification.objects.create(
+            event=event,
+            notification_type=NotificationType.EVENT_START.value,
+            subject=f"Event started: {event.name}",
+            body=f"Event {event.name} has automatically started",
+            status=NotificationStatus.SENT.value,
+            recipient_filter="organizer",
+            sent_count=1,
+            created_by=organizer,
+        )
+
+
+def notify_organizer_event_end(event_id: UUID) -> None:
+    """Notify the event organizer that the event has automatically ended.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    logger.info("Notifying organizer of event end for event %s", event_id)
+
+    try:
+        event = CTFEvent.objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        logger.error("Cannot notify: event %s not found", event_id)
+        return
+
+    organizer = event.created_by
+    if not organizer or not organizer.email:
+        logger.warning("Cannot notify: event %s has no organizer email", event_id)
+        return
+
+    html_content, text_content = _render_email(
+        "event_end",
+        {"event": event},
+    )
+
+    success = _send_email(
+        recipient=organizer.email,
+        subject=f"Event ended: {event.name}",
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+    if success:
+        CTFNotification.objects.create(
+            event=event,
+            notification_type=NotificationType.EVENT_END.value,
+            subject=f"Event ended: {event.name}",
+            body=f"Event {event.name} has automatically ended",
+            status=NotificationStatus.SENT.value,
+            recipient_filter="organizer",
+            sent_count=1,
+            created_by=organizer,
+        )
+
+
 # -----------------------------------------------------------------------------
 # Private helpers
 # -----------------------------------------------------------------------------

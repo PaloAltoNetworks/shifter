@@ -1,0 +1,8 @@
+Event Ended
+
+Your event {{ event.name }} has automatically transitioned to ended.
+
+Flag submissions have been disabled.
+
+Start Time: {{ event.event_start|date:"F j, Y g:i A" }}
+End Time: {{ event.event_end|date:"F j, Y g:i A" }}

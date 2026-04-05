@@ -741,7 +741,7 @@ def _schedule_event_tasks(event: CTFEvent) -> None:
         )
 
     # Schedule reminders at configurable intervals before event start
-    reminder_intervals = event.reminder_hours if event.reminder_hours else [24, 1]
+    reminder_intervals = [h for h in (event.reminder_hours or [24, 1]) if isinstance(h, int) and h > 0]
     for hours in reminder_intervals:
         reminder_time = event.event_start - timedelta(hours=hours)
         if reminder_time > now:

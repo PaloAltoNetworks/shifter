@@ -416,7 +416,7 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
     from ctf.services.notification import _build_registration_url, _render_email, _send_email
 
     registration_url = _build_registration_url(participant.invite_token)
-    html_content, text_content = _render_email(
+    html_content, text_content, custom_subject = _render_email(
         "invitation",
         {
             "event": participant.event,
@@ -424,10 +424,11 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
             "invite_token": participant.invite_token,
             "registration_url": registration_url,
         },
+        event=participant.event,
     )
     sent = _send_email(
         recipient=participant.email,
-        subject=f"You're invited to {participant.event.name}",
+        subject=custom_subject or f"You're invited to {participant.event.name}",
         html_content=html_content,
         text_content=text_content,
     )

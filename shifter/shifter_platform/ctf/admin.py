@@ -19,6 +19,7 @@ from ctf.models import (
     CTFChallenge,
     CTFChallengeFile,
     CTFChallengePrerequisite,
+    CTFEmailTemplate,
     CTFEvent,
     CTFNotification,
     CTFParticipant,
@@ -854,5 +855,48 @@ class CTFChallengePrerequisiteAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
 
     @admin.display(description="Deleted", boolean=True)
     def is_deleted_display(self, obj: CTFChallengePrerequisite) -> bool:
+        """Display soft delete status."""
+        return obj.is_deleted
+
+
+@admin.register(CTFEmailTemplate)
+class CTFEmailTemplateAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    """Admin for per-event email template overrides."""
+
+    list_display = [
+        "event",
+        "notification_type",
+        "subject",
+        "is_deleted_display",
+    ]
+    list_filter = ["notification_type", "event", "deleted_at"]
+    search_fields = ["event__name", "subject"]
+    ordering = ["event", "notification_type"]
+    readonly_fields = ["id", "created_at", "updated_at", "deleted_at"]
+
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": ["event", "notification_type", "subject"],
+            },
+        ),
+        (
+            "Template Content",
+            {
+                "fields": ["html_body", "text_body"],
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["id", "created_at", "updated_at", "deleted_at"],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    @admin.display(description="Deleted", boolean=True)
+    def is_deleted_display(self, obj: CTFEmailTemplate) -> bool:
         """Display soft delete status."""
         return obj.is_deleted

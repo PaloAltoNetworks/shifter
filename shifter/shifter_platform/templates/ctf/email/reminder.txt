@@ -4,6 +4,8 @@ Hi {{ participant.name }},
 
 {{ event.name }} starts in {{ hours_before }} hours!
 
-Start Time: {{ event.event_start|date:"F j, Y g:i A" }}
+Start Time: {{ event_start_local|date:"F j, Y g:i A" }} ({{ event_timezone }})
+
+Access Event: {{ access_url }}
 
 Make sure you're ready. Good luck!

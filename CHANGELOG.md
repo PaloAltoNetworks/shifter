@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.57.0] - 2026-04-04
+
+### Added
+- Event force delete: permanently delete an event and all associated resources regardless of state (CTF-704)
+- Force delete cascades to range instances, participants, challenges, submissions, scores, and scheduled tasks
+- Confirmation page requiring organizer to type event name before force deleting
+- API endpoint for programmatic force delete with confirmation_name validation
+- Danger zone section on event detail page linking to force delete
+
 ## [3.56.2] - 2026-04-04
 
 ### Fixed

@@ -192,6 +192,85 @@ def delete_event(event_id: UUID) -> None:
         logger.info("Deleted CTF event %s", event_id)
 
 
+def force_delete_event(
+    event_id: UUID,
+    actor: User,
+    confirmation_name: str,
+) -> dict[str, Any]:
+    """Force-delete a CTF event and all associated resources.
+
+    Permanently removes the event regardless of its current state. All child
+    records (challenges, participants, submissions, scores, scheduled tasks,
+    etc.) are cascade-deleted. Range instances are destroyed first via the CMS
+    bridge.
+
+    Args:
+        event_id: UUID of the event to force-delete.
+        actor: The user performing the deletion.
+        confirmation_name: Must match the event name exactly (case-sensitive).
+
+    Returns:
+        Summary dict with event_id, event_name, ranges_destroyed, ranges_failed.
+
+    Raises:
+        CTFNotFoundError: If event doesn't exist.
+        CTFValidationError: If confirmation_name doesn't match.
+    """
+    from ctf.services.range import cleanup_event_ranges
+
+    # Use all_objects so force delete works on soft-deleted events too
+    try:
+        event = CTFEvent.all_objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Event {event_id} not found",
+            details={"event_id": str(event_id)},
+        ) from None
+
+    if confirmation_name != event.name:
+        raise CTFValidationError(
+            "Confirmation name does not match event name",
+            details={
+                "expected": event.name,
+                "provided": confirmation_name,
+            },
+        )
+
+    event_name = event.name
+
+    # Destroy range instances OUTSIDE the atomic block (external HTTP calls)
+    ranges_destroyed = 0
+    ranges_failed = 0
+    try:
+        result = cleanup_event_ranges(event_id)
+        ranges_destroyed = result.get("destroyed", 0)
+        ranges_failed = result.get("failed", 0)
+    except Exception:
+        logger.exception("Range cleanup failed for event %s during force delete", event_id)
+
+    # Hard delete inside atomic block — Django CASCADE handles children
+    with transaction.atomic():
+        _cancel_event_tasks(event)
+        event.delete(soft=False)
+
+    logger.warning(
+        "FORCE DELETE: Event %s (%s) permanently deleted by %s (pk=%s). Ranges destroyed: %d, ranges failed: %d.",
+        event_id,
+        event_name,
+        actor.email,
+        actor.pk,
+        ranges_destroyed,
+        ranges_failed,
+    )
+
+    return {
+        "event_id": str(event_id),
+        "event_name": event_name,
+        "ranges_destroyed": ranges_destroyed,
+        "ranges_failed": ranges_failed,
+    }
+
+
 def get_event(event_id: UUID) -> CTFEvent:
     """Get a CTF event by ID.
 

@@ -1,0 +1,186 @@
+{% extends "mission_control/base.html" %}
+{% block title %}Force Delete - {{ event.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.breadcrumb {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--xdr-text-secondary);
+}
+
+.warning-banner {
+    background: rgba(220, 53, 69, 0.1);
+    border: 1px solid #dc3545;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+    color: #dc3545;
+    font-weight: 600;
+}
+
+.impact-list {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0 0 0;
+}
+
+.impact-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--xdr-border);
+    display: flex;
+    justify-content: space-between;
+}
+
+.impact-list li:last-child {
+    border-bottom: none;
+}
+
+.confirm-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--xdr-border);
+    border-radius: 4px;
+    background: var(--xdr-bg-secondary);
+    color: var(--xdr-text-primary);
+    font-size: 14px;
+    margin-top: 8px;
+}
+
+.confirm-input:focus {
+    outline: none;
+    border-color: #dc3545;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: #fff;
+    width: 100%;
+    margin-top: 12px;
+    cursor: pointer;
+}
+
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.error-msg {
+    color: #dc3545;
+    font-size: 13px;
+    margin-top: 8px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="mb-lg">
+    <div class="breadcrumb">
+        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
+        <span class="separator">/</span>
+        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+        <span class="separator">/</span>
+        <span>Force Delete</span>
+    </div>
+    <h1 class="page-title" style="color: #dc3545;">Force Delete Event</h1>
+</div>
+
+<!-- Warning -->
+<div class="warning-banner">
+    This action will permanently delete the event and ALL associated data.
+    This cannot be undone. All range instances will be destroyed immediately.
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <!-- Impact Summary -->
+    <div class="card">
+        <div class="card-title">Data To Be Deleted</div>
+        <ul class="impact-list">
+            <li>
+                <span>Event</span>
+                <strong>{{ event.name }}</strong>
+            </li>
+            <li>
+                <span>Status</span>
+                <strong>{{ event.get_status_display }}</strong>
+            </li>
+            <li>
+                <span>Participants</span>
+                <strong>{{ stats.participant_count }}</strong>
+            </li>
+            <li>
+                <span>Challenges</span>
+                <strong>{{ stats.challenge_count }}</strong>
+            </li>
+            <li>
+                <span>Total Submissions</span>
+                <strong>{{ stats.total_submissions }}</strong>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Confirmation Form -->
+    <div class="card">
+        <div class="card-title">Confirm Deletion</div>
+        <p style="font-size: 13px; color: var(--xdr-text-secondary);">
+            To confirm, type the event name exactly as shown:
+        </p>
+        <p style="font-weight: 600; margin: 8px 0; font-size: 15px;">{{ event.name }}</p>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" id="force-delete-form">
+            {% csrf_token %}
+            <input type="text"
+                   name="confirmation_name"
+                   class="confirm-input"
+                   id="confirmation-name"
+                   placeholder="Type the event name here"
+                   autocomplete="off"
+                   required>
+            <button type="submit" class="btn btn-danger" id="delete-btn" disabled>
+                Permanently Delete Event
+            </button>
+        </form>
+
+        <div style="margin-top: 12px;">
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary" style="width: 100%;">
+                Cancel
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var expectedName = "{{ event.name|escapejs }}";
+    var input = document.getElementById('confirmation-name');
+    var btn = document.getElementById('delete-btn');
+
+    input.addEventListener('input', function() {
+        btn.disabled = (input.value !== expectedName);
+    });
+})();
+</script>
+{% endblock %}

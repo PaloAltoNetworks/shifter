@@ -3099,9 +3099,10 @@ def api_event_email_template(request: HttpRequest, event_id: UUID, notification_
         )
 
     if request.method == "DELETE":
-        deleted_count, _ = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).delete()
-        if deleted_count == 0:
+        template = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).first()
+        if template is None:
             return JsonResponse({"error": "No custom template to delete"}, status=404)
+        template.delete(soft=True)
         return JsonResponse({"status": "reverted_to_default"})
 
     # PUT — create or update
@@ -3114,6 +3115,15 @@ def api_event_email_template(request: HttpRequest, event_id: UUID, notification_
     text_body = body.get("text_body", "").strip()
     if not html_body or not text_body:
         return JsonResponse({"error": "html_body and text_body are required"}, status=400)
+
+    # Validate Django template syntax before saving
+    from django.template import Template, TemplateSyntaxError
+
+    for label, source in [("html_body", html_body), ("text_body", text_body)]:
+        try:
+            Template(source)
+        except TemplateSyntaxError as exc:
+            return JsonResponse({"error": f"Invalid template syntax in {label}: {exc}"}, status=400)
 
     template, _created = CTFEmailTemplate.objects.update_or_create(
         event=event,

@@ -1,4 +1,4 @@
-"""Tests for CTF scheduler event start/end handlers (CTF-1004)."""
+"""Tests for CTF scheduler handlers (CTF-1004, CTF-1005)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ def scheduled_task():
     task.event_id = uuid4()
     task.event = MagicMock()
     task.event.auto_cleanup = False
+    task.metadata = {}
     return task
 
 
@@ -83,3 +84,40 @@ class TestHandleEventEnd:
         mock_complete.assert_called_once_with(scheduled_task.event)
         mock_notify.assert_called_once_with(scheduled_task.event_id)
         mock_cleanup.assert_called_once_with(scheduled_task.event_id)
+
+
+class TestHandleSendReminder:
+    """Tests for _handle_send_reminder scheduler handler (CTF-1005)."""
+
+    @patch("ctf.services.notification.send_reminder", return_value={"sent": 3, "failed": 0})
+    def test_calls_send_reminder_with_metadata_hours(self, mock_send, scheduled_task):
+        """Uses hours_before from task metadata."""
+        scheduled_task.metadata = {"hours_before": 1}
+
+        from ctf.management.commands.run_ctf_scheduler import _handle_send_reminder
+
+        _handle_send_reminder(scheduled_task)
+
+        mock_send.assert_called_once_with(scheduled_task.event_id, hours_before=1)
+
+    @patch("ctf.services.notification.send_reminder", return_value={"sent": 5, "failed": 0})
+    def test_defaults_to_24_when_no_metadata(self, mock_send, scheduled_task):
+        """Defaults to 24 hours when metadata is empty."""
+        scheduled_task.metadata = {}
+
+        from ctf.management.commands.run_ctf_scheduler import _handle_send_reminder
+
+        _handle_send_reminder(scheduled_task)
+
+        mock_send.assert_called_once_with(scheduled_task.event_id, hours_before=24)
+
+    @patch("ctf.services.notification.send_reminder", return_value={"sent": 5, "failed": 0})
+    def test_defaults_to_24_when_metadata_is_none(self, mock_send, scheduled_task):
+        """Defaults to 24 hours when metadata is None."""
+        scheduled_task.metadata = None
+
+        from ctf.management.commands.run_ctf_scheduler import _handle_send_reminder
+
+        _handle_send_reminder(scheduled_task)
+
+        mock_send.assert_called_once_with(scheduled_task.event_id, hours_before=24)

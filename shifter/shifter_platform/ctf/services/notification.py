@@ -215,6 +215,24 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
     sent = 0
     failed = 0
 
+    # Build access URL and timezone-aware start time for template context
+    from zoneinfo import ZoneInfo
+
+    from django.conf import settings
+    from django.urls import reverse
+
+    event_page_url = reverse("ctf:participant_event")
+    base = (getattr(settings, "SITE_URL", "") or "").rstrip("/")
+    access_url = f"{base}{event_page_url}"
+
+    tz_name = getattr(event, "event_timezone", "UTC") or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except (KeyError, ValueError):
+        tz = ZoneInfo("UTC")
+        tz_name = "UTC"
+    event_start_local = event.event_start.astimezone(tz)
+
     for participant in participants:
         try:
             html_content, text_content, custom_subject = _render_email(
@@ -223,6 +241,9 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
                     "event": event,
                     "participant": participant,
                     "hours_before": hours_before,
+                    "access_url": access_url,
+                    "event_start_local": event_start_local,
+                    "event_timezone": tz_name,
                 },
                 event=event,
             )

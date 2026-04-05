@@ -82,4 +82,4 @@ class TestSendEmailAsync:
         # Re-create executor for other tests
         email._executor = None
 
-        mock_send.assert_called_once_with("a@b.com", "Sub", "<h>", "t")
+        mock_send.assert_called_once_with("a@b.com", "Sub", "<h>", "t", from_email=None)

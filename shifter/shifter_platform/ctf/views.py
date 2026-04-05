@@ -1929,6 +1929,52 @@ def admin_notification_create(request: HttpRequest, event_id: UUID) -> HttpRespo
 
 @login_required
 @ctf_organizer_required
+@require_http_methods(["GET"])
+def admin_event_email_templates(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """List email template overrides for an event.
+
+    Shows all notification types with their current template status
+    (default or custom).
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from django.http import Http404
+
+    from ctf.enums import NotificationType
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.models import CTFEmailTemplate
+    from ctf.services import get_event
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    custom_templates = {t.notification_type: t for t in CTFEmailTemplate.objects.filter(event=event)}
+
+    template_list = []
+    for nt in NotificationType:
+        template_list.append(
+            {
+                "type": nt.value,
+                "label": nt.value.replace("_", " ").title(),
+                "custom": custom_templates.get(nt.value),
+            }
+        )
+
+    return render(
+        request,
+        "ctf/admin/email_templates.html",
+        {"event": event, "template_list": template_list},
+    )
+
+
+@login_required
+@ctf_organizer_required
 def admin_analytics(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Analytics view for an event.
 
@@ -3000,6 +3046,91 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
         {
             "notification_id": str(notification_id),
             "status": "sent",
+        }
+    )
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["GET", "PUT", "DELETE"])
+def api_event_email_template(request: HttpRequest, event_id: UUID, notification_type: str) -> JsonResponse:
+    """API: Get, update, or delete a per-event email template override.
+
+    GET returns the custom template (or 404 if using default).
+    PUT creates or updates the custom template.
+    DELETE removes the custom template (reverts to default).
+
+    Args:
+        event_id: UUID of the event.
+        notification_type: Notification type string (e.g. "invitation").
+    """
+    import json
+
+    from ctf.enums import NotificationType
+    from ctf.exceptions import CTFNotFoundError
+    from ctf.models import CTFEmailTemplate
+    from ctf.services import get_event
+
+    # Validate notification_type
+    valid_types = {nt.value for nt in NotificationType}
+    if notification_type not in valid_types:
+        return JsonResponse({"error": f"Invalid notification type: {notification_type}"}, status=400)
+
+    try:
+        event = get_event(event_id)
+    except CTFNotFoundError:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    if request.method == "GET":
+        template = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).first()
+        if template is None:
+            return JsonResponse({"error": "No custom template"}, status=404)
+        return JsonResponse(
+            {
+                "id": str(template.id),
+                "notification_type": template.notification_type,
+                "subject": template.subject,
+                "html_body": template.html_body,
+                "text_body": template.text_body,
+            }
+        )
+
+    if request.method == "DELETE":
+        deleted_count, _ = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).delete()
+        if deleted_count == 0:
+            return JsonResponse({"error": "No custom template to delete"}, status=404)
+        return JsonResponse({"status": "reverted_to_default"})
+
+    # PUT — create or update
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    html_body = body.get("html_body", "").strip()
+    text_body = body.get("text_body", "").strip()
+    if not html_body or not text_body:
+        return JsonResponse({"error": "html_body and text_body are required"}, status=400)
+
+    template, _created = CTFEmailTemplate.objects.update_or_create(
+        event=event,
+        notification_type=notification_type,
+        defaults={
+            "subject": body.get("subject", "").strip(),
+            "html_body": html_body,
+            "text_body": text_body,
+        },
+    )
+    return JsonResponse(
+        {
+            "id": str(template.id),
+            "notification_type": template.notification_type,
+            "subject": template.subject,
+            "html_body": template.html_body,
+            "text_body": template.text_body,
         }
     )
 

@@ -59,6 +59,7 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
                     "invite_token": participant.invite_token,
                     "registration_url": registration_url,
                 },
+                event=event,
             )
             success = _send_email(
                 recipient=participant.email,
@@ -147,6 +148,7 @@ def send_credentials(event_id: UUID) -> dict[str, Any]:
                     "participant": participant,
                     "access_url": access_url,
                 },
+                event=event,
             )
             success = _send_email(
                 recipient=participant.email,
@@ -222,6 +224,7 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
                     "participant": participant,
                     "hours_before": hours_before,
                 },
+                event=event,
             )
             success = _send_email(
                 recipient=participant.email,
@@ -311,6 +314,7 @@ def send_announcement(
                     "subject": subject,
                     "body": body,
                 },
+                event=event,
             )
             success = _send_email(
                 recipient=participant.email,
@@ -407,6 +411,7 @@ def notify_organizer_provision_failure(
             "failures": failures,
             "failure_count": len(failures),
         },
+        event=event,
     )
 
     success = _send_email(
@@ -451,6 +456,7 @@ def notify_organizer_event_start(event_id: UUID) -> None:
     html_content, text_content = _render_email(
         "event_start",
         {"event": event},
+        event=event,
     )
 
     success = _send_email(
@@ -495,6 +501,7 @@ def notify_organizer_event_end(event_id: UUID) -> None:
     html_content, text_content = _render_email(
         "event_end",
         {"event": event},
+        event=event,
     )
 
     success = _send_email(
@@ -571,16 +578,39 @@ def _send_email(
         return False
 
 
-def _render_email(template_name: str, context: dict) -> tuple[str, str]:
+def _render_email(
+    template_name: str,
+    context: dict,
+    event: CTFEvent | None = None,
+) -> tuple[str, str]:
     """Render email templates.
 
+    If *event* is provided and has a custom template for the given
+    notification type, the custom template is rendered from the database.
+    Otherwise the default filesystem template is used.
+
     Args:
-        template_name: Base name (e.g., "invitation").
+        template_name: Base name / notification type (e.g., "invitation").
         context: Template context.
+        event: Optional event for custom template lookup.
 
     Returns:
         Tuple of (html_content, text_content).
     """
+    if event is not None:
+        from ctf.models import CTFEmailTemplate
+
+        custom = CTFEmailTemplate.objects.filter(
+            event=event,
+            notification_type=template_name,
+        ).first()
+        if custom is not None:
+            from django.template import Context, Template
+
+            html_content = Template(custom.html_body).render(Context(context))
+            text_content = Template(custom.text_body).render(Context(context))
+            return html_content, text_content
+
     from django.template.loader import render_to_string
 
     html_content = render_to_string(f"ctf/email/{template_name}.html", context)

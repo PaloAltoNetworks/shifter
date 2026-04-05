@@ -66,6 +66,8 @@ def send_email(
     subject: str,
     html_content: str,
     text_content: str,
+    *,
+    from_email: str | None = None,
 ) -> bool:
     """Send a multipart email synchronously.
 
@@ -77,6 +79,7 @@ def send_email(
         subject: Email subject line.
         html_content: HTML body.
         text_content: Plain-text body.
+        from_email: Sender address.  Falls back to ``DEFAULT_FROM_EMAIL``.
 
     Returns:
         ``True`` if the message was accepted for delivery, ``False`` otherwise.
@@ -84,11 +87,13 @@ def send_email(
     from django.conf import settings
     from django.core.mail import EmailMultiAlternatives
 
+    sender = from_email or getattr(settings, "DEFAULT_FROM_EMAIL", None)
+
     try:
         msg = EmailMultiAlternatives(
             subject=subject,
             body=text_content,
-            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            from_email=sender,
             to=[recipient],
         )
         msg.attach_alternative(html_content, "text/html")
@@ -104,6 +109,8 @@ def send_email_async(
     subject: str,
     html_content: str,
     text_content: str,
+    *,
+    from_email: str | None = None,
 ) -> None:
     """Dispatch email delivery to a background thread.
 
@@ -115,5 +122,6 @@ def send_email_async(
         subject: Email subject line.
         html_content: HTML body.
         text_content: Plain-text body.
+        from_email: Sender address.  Falls back to ``DEFAULT_FROM_EMAIL``.
     """
-    _get_executor().submit(send_email, recipient, subject, html_content, text_content)
+    _get_executor().submit(send_email, recipient, subject, html_content, text_content, from_email=from_email)

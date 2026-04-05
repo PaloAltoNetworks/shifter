@@ -542,6 +542,14 @@
                 <span class="detail-value">{% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}{% else %}Immediate{% endif %}</span>
             </div>
             <div class="detail-row">
+                <span class="detail-label">Target Instance</span>
+                <span class="detail-value">{% if challenge.target_instance_name %}{{ challenge.target_instance_name }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Target Port</span>
+                <span class="detail-value">{% if challenge.target_port %}{{ challenge.target_port }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
+            </div>
+            <div class="detail-row">
                 <span class="detail-label">Tags</span>
                 <span class="detail-value">
                     {% for tag in challenge.tags.all %}

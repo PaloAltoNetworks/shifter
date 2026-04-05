@@ -72,6 +72,14 @@
                         {{ challenge.description|linebreaksbr }}
                     </div>
 
+                    {% if connection_info %}
+                    <div class="alert alert-info mb-3">
+                        <strong>Target:</strong>
+                        <code>{{ connection_info.host }}{% if connection_info.port %}:{{ connection_info.port }}{% endif %}</code>
+                        <small class="text-muted ms-2">({{ connection_info.instance_name }})</small>
+                    </div>
+                    {% endif %}
+
                     {% if challenge.flag_format %}
                     <div class="mb-3">
                         <strong>Flag format:</strong> <code>{{ challenge.flag_format }}</code>

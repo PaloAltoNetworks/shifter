@@ -549,7 +549,10 @@ def _send_email(
     html_content: str,
     text_content: str,
 ) -> bool:
-    """Send an email using Django's email backend.
+    """Send an email using the shared platform email service.
+
+    Delegates to ``shared.email.send_email`` which handles error logging
+    and never raises.  Uses ``CTF_FROM_EMAIL`` as the sender address.
 
     Args:
         recipient: Email address.
@@ -561,21 +564,10 @@ def _send_email(
         True if sent successfully.
     """
     from django.conf import settings
-    from django.core.mail import EmailMultiAlternatives
 
-    try:
-        msg = EmailMultiAlternatives(
-            subject=subject,
-            body=text_content,
-            from_email=settings.CTF_FROM_EMAIL,
-            to=[recipient],
-        )
-        msg.attach_alternative(html_content, "text/html")
-        msg.send()
-        return True
-    except Exception:
-        logger.exception("Failed to send email to %s", recipient)
-        return False
+    from shared.email import send_email
+
+    return send_email(recipient, subject, html_content, text_content, from_email=settings.CTF_FROM_EMAIL)
 
 
 def _render_email(
@@ -621,8 +613,7 @@ def _render_email(
             text_content = Template(custom.text_body).render(Context(context))
             return html_content, text_content, custom.subject or ""
 
-    from django.template.loader import render_to_string
+    from shared.email import render_template
 
-    html_content = render_to_string(f"ctf/email/{template_name}.html", context)
-    text_content = render_to_string(f"ctf/email/{template_name}.txt", context)
-    return html_content, text_content, ""
+    html, text = render_template(f"ctf/email/{template_name}", context)
+    return html, text, ""

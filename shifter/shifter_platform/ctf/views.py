@@ -419,6 +419,25 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
 
     prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant.id)
 
+    connection_info = None
+    participant_user = participant.user
+    if challenge.target_instance_name and participant.range_status == "ready" and participant_user is not None:
+        import cms.services as cms_services
+
+        for inst in cms_services.get_range_target_instances(participant_user.pk):
+            if inst.get("name") != challenge.target_instance_name:
+                continue
+            host = inst.get("private_ip")
+            if not host:
+                break
+            connection_info = {
+                "host": host,
+                "port": challenge.target_port,
+                "instance_name": inst["name"],
+                "os_type": inst.get("os_type", ""),
+            }
+            break
+
     # Calculate timeout state for attempt limits
     attempt_limit_mode = participant.event.attempt_limit_mode
     timeout_retry_after = None
@@ -457,6 +476,7 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
         "challenge_files": challenge_files,
         "prereqs_met": prereqs_met,
         "unmet_challenges": unmet_challenges,
+        "connection_info": connection_info,
         "attempt_limit_mode": attempt_limit_mode,
         "timeout_retry_after": timeout_retry_after,
         "show_solution": bool(challenge.solution and participant.event.status in ("ended", "archived")),

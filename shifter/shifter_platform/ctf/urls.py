@@ -47,6 +47,11 @@ admin_patterns = [
     path("admin/events/create/", views.admin_event_create, name="admin_event_create"),
     path("admin/events/<uuid:event_id>/", views.admin_event_detail, name="admin_event_detail"),
     path("admin/events/<uuid:event_id>/edit/", views.admin_event_edit, name="admin_event_edit"),
+    path(
+        "admin/events/<uuid:event_id>/force-delete/",
+        views.admin_event_force_delete,
+        name="admin_event_force_delete",
+    ),
     # Challenges
     path(
         "admin/events/<uuid:event_id>/challenges/",
@@ -152,6 +157,11 @@ api_patterns = [
     # Event APIs
     path("api/events/", views.api_event_list, name="api_event_list"),
     path("api/events/<uuid:event_id>/", views.api_event_detail, name="api_event_detail"),
+    path(
+        "api/events/<uuid:event_id>/force-delete/",
+        views.api_force_delete_event,
+        name="api_force_delete_event",
+    ),
     path("api/scenarios/", views.api_scenarios, name="api_scenarios"),
     # Challenge APIs
     path(

@@ -82,7 +82,12 @@
 
         var startISO = card.getAttribute('data-event-start');
         var endISO = card.getAttribute('data-event-end');
+        var eventStatus = card.getAttribute('data-event-status') || '';
         if (!startISO || !endISO) return;
+
+        // Don't show countdown for cancelled or terminal states
+        var TERMINAL_STATES = ['cancelled', 'archived'];
+        if (TERMINAL_STATES.indexOf(eventStatus) !== -1) return;
 
         var eventStart = new Date(startISO);
         var eventEnd = new Date(endISO);
@@ -92,6 +97,15 @@
         function update() {
             var now = new Date();
             var diff;
+
+            // If event is completed/ended by status, show ended regardless of timestamps
+            if (eventStatus === 'completed' || eventStatus === 'ended') {
+                labelEl.textContent = '';
+                timerEl.textContent = 'Event has ended';
+                card.style.display = '';
+                clearInterval(intervalId);
+                return;
+            }
 
             if (now < eventStart) {
                 labelEl.textContent = 'Event starts in';

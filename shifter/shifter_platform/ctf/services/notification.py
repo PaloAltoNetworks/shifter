@@ -607,6 +607,8 @@ def _render_email(
         if custom is not None:
             from django.template import Context, Template
 
+            # Safe: Django's template engine does not allow arbitrary code
+            # execution.  Only authenticated event organizers can write templates.
             html_content = Template(custom.html_body).render(Context(context))
             text_content = Template(custom.text_body).render(Context(context))
             return html_content, text_content

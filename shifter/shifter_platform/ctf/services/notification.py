@@ -225,7 +225,7 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
     base = (getattr(settings, "SITE_URL", "") or "").rstrip("/")
     access_url = f"{base}{event_page_url}"
 
-    tz_name = getattr(event, "event_timezone", "UTC") or "UTC"
+    tz_name = event.event_timezone or "UTC"
     try:
         tz = ZoneInfo(tz_name)
     except (KeyError, ValueError):

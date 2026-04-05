@@ -207,6 +207,30 @@ input[type="datetime-local"] {
             </div>
         </div>
 
+        <!-- Connection Info -->
+        <div class="card">
+            <div class="card-title">Connection Info</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.target_instance_name.id_for_label }}">Target Instance Name</label>
+                    <input type="text" id="{{ form.target_instance_name.id_for_label }}" name="{{ form.target_instance_name.html_name }}" class="form-input" maxlength="100" value="{{ form.target_instance_name.value|default_if_none:'' }}">
+                    <div class="form-help">Match a provisioned victim instance name so participants see the resolved host IP.</div>
+                    {% if form.target_instance_name.errors %}
+                    <div class="field-error">{{ form.target_instance_name.errors.0 }}</div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.target_port.id_for_label }}">Target Port</label>
+                    <input type="number" id="{{ form.target_port.id_for_label }}" name="{{ form.target_port.html_name }}" class="form-input" min="1" max="65535" value="{{ form.target_port.value|default_if_none:'' }}">
+                    <div class="form-help">Optional service port to display with the resolved host.</div>
+                    {% if form.target_port.errors %}
+                    <div class="field-error">{{ form.target_port.errors.0 }}</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
         <!-- Solution Writeup -->
         <div class="card">
             <div class="card-title">Solution Writeup</div>

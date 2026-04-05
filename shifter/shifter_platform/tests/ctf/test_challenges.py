@@ -10,6 +10,7 @@ Tests for:
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.urls import reverse
@@ -53,6 +54,8 @@ class TestCTFChallengeForm:
                 "max_attempts": 0,
                 "release_time": "",
                 "order": 0,
+                "target_instance_name": "windows-target",
+                "target_port": 3389,
             },
             event=ctf_event_draft,
         )
@@ -211,6 +214,8 @@ class TestChallengeCreateView:
         response = authenticated_organizer_client.get(url)
         assert response.status_code == 200
         assert "form" in response.context
+        assert 'name="target_instance_name"' in response.content.decode()
+        assert 'name="target_port"' in response.content.decode()
 
     def test_challenge_create_post_creates_challenge(self, authenticated_organizer_client, ctf_event_draft):
         """Challenge create POST creates new challenge."""
@@ -227,6 +232,8 @@ class TestChallengeCreateView:
             "hint_penalty": 0,
             "max_attempts": 0,
             "order": 0,
+            "target_instance_name": "windows-target",
+            "target_port": 3389,
         }
         response = authenticated_organizer_client.post(url, data)
         assert response.status_code == 302  # Redirect on success
@@ -234,6 +241,8 @@ class TestChallengeCreateView:
         challenge = CTFChallenge.objects.get(name="New Challenge")
         assert challenge.event == ctf_event_draft
         assert challenge.points == 100
+        assert challenge.target_instance_name == "windows-target"
+        assert challenge.target_port == 3389
 
     def test_challenge_create_rejects_active_event(self, authenticated_organizer_client, ctf_event_active):
         """Challenge create rejects adding to active event."""
@@ -298,6 +307,8 @@ class TestChallengeEditView:
         assert response.status_code == 200
         assert "form" in response.context
         assert response.context["form"].instance == ctf_challenge
+        assert 'name="target_instance_name"' in response.content.decode()
+        assert 'name="target_port"' in response.content.decode()
 
     def test_challenge_edit_post_updates_challenge(self, authenticated_organizer_client, ctf_challenge):
         """Challenge edit POST updates challenge."""
@@ -314,6 +325,8 @@ class TestChallengeEditView:
             "hint_penalty": 0,
             "max_attempts": 0,
             "order": 0,
+            "target_instance_name": "linux-web",
+            "target_port": 8080,
         }
         response = authenticated_organizer_client.post(url, data)
         assert response.status_code == 302
@@ -321,6 +334,8 @@ class TestChallengeEditView:
         ctf_challenge.refresh_from_db()
         assert ctf_challenge.name == "Updated Challenge Name"
         assert ctf_challenge.points == 150
+        assert ctf_challenge.target_instance_name == "linux-web"
+        assert ctf_challenge.target_port == 8080
 
     def test_challenge_edit_rejects_non_modifiable_event(
         self, authenticated_organizer_client, ctf_event_active, organizer_user
@@ -416,9 +431,15 @@ class TestChallengeServices:
 
         updated = update_challenge(
             challenge_id=ctf_challenge.pk,
-            challenge_data={"points": 250},
+            challenge_data={
+                "points": 250,
+                "target_instance_name": "windows-target",
+                "target_port": 3389,
+            },
         )
         assert updated.points == 250
+        assert updated.target_instance_name == "windows-target"
+        assert updated.target_port == 3389
 
     def test_update_challenge_rehashes_flag(self, ctf_challenge):
         """update_challenge rehashes flag when provided."""
@@ -1746,6 +1767,93 @@ class TestNextChallengeNavigation:
         response = client.get(url)
         assert response.status_code == 200
         assert "Next:" not in response.content.decode()
+
+    def test_challenge_detail_shows_connection_info_for_matching_target(
+        self,
+        client,
+        ctf_event_active,
+        participant_user,
+    ):
+        """Participant challenge detail shows resolved host and port for configured targets."""
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        challenge = CTFChallenge.objects.create(
+            event=ctf_event_active,
+            name="RDP Challenge",
+            description="Find the target",
+            category=ChallengeCategory.NETWORK.value,
+            points=200,
+            difficulty=ChallengeDifficulty.MEDIUM.value,
+            flag_hash="$2b$12$h3",
+            target_instance_name="windows-target",
+            target_port=3389,
+        )
+        CTFParticipant.objects.create(
+            event=ctf_event_active,
+            user=participant_user,
+            email=participant_user.email,
+            name="Player",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=ctf_event_active.event_start,
+            range_instance_id=42,
+            range_status="ready",
+        )
+
+        client.force_login(participant_user)
+        url = reverse("ctf:challenge_detail", kwargs={"challenge_id": challenge.pk})
+        with patch(
+            "cms.services.get_range_target_instances",
+            return_value=[
+                {"name": "windows-target", "private_ip": "10.0.1.10", "os_type": "windows"},
+            ],
+        ):
+            response = client.get(url)
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "10.0.1.10:3389" in content
+        assert "(windows-target)" in content
+
+    def test_challenge_detail_hides_connection_info_when_target_missing(
+        self,
+        client,
+        ctf_event_active,
+        participant_user,
+    ):
+        """Participant challenge detail omits connection info when no target instance matches."""
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        challenge = CTFChallenge.objects.create(
+            event=ctf_event_active,
+            name="Missing Target",
+            description="Find the target",
+            category=ChallengeCategory.NETWORK.value,
+            points=200,
+            difficulty=ChallengeDifficulty.MEDIUM.value,
+            flag_hash="$2b$12$h4",
+            target_instance_name="windows-target",
+            target_port=3389,
+        )
+        CTFParticipant.objects.create(
+            event=ctf_event_active,
+            user=participant_user,
+            email=participant_user.email,
+            name="Player",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=ctf_event_active.event_start,
+            range_instance_id=42,
+            range_status="ready",
+        )
+
+        client.force_login(participant_user)
+        url = reverse("ctf:challenge_detail", kwargs={"challenge_id": challenge.pk})
+        with patch("cms.services.get_range_target_instances", return_value=[]):
+            response = client.get(url)
+
+        assert response.status_code == 200
+        assert "10.0.1.10" not in response.content.decode()
 
 
 # =============================================================================

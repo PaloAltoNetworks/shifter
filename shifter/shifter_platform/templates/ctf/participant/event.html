@@ -39,19 +39,36 @@
 
         <!-- Sidebar Info -->
         <div class="col-md-4 mb-4">
+            <!-- Countdown Timer -->
+            {% if event.event_start and event.event_end %}
+            <div class="card mb-3" id="ctf-countdown-card"
+                 data-event-start="{{ event.event_start|date:'c' }}"
+                 data-event-end="{{ event.event_end|date:'c' }}"
+                 data-event-status="{{ event.status }}"
+                 style="display:none;">
+                <div class="card-body text-center">
+                    <div id="ctf-countdown-label" class="text-muted small mb-1"></div>
+                    <div id="ctf-countdown-timer" class="h4 mb-0 font-monospace"></div>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Schedule -->
             <div class="card mb-3">
                 <div class="card-header">
                     <h5 class="mb-0">Schedule</h5>
                 </div>
-                <div class="card-body">
+                <div class="card-body"
+                     {% if event.event_start %}data-event-start="{{ event.event_start|date:'c' }}"{% endif %}
+                     {% if event.event_end %}data-event-end="{{ event.event_end|date:'c' }}"{% endif %}
+                     id="ctf-schedule">
                     <div class="mb-3">
                         <strong>Start</strong><br>
-                        {{ event.event_start|date:"M d, Y H:i" }}
+                        <span id="ctf-start-time">{{ event.event_start|date:"M d, Y H:i" }} UTC</span>
                     </div>
                     <div>
                         <strong>End</strong><br>
-                        {{ event.event_end|date:"M d, Y H:i" }}
+                        <span id="ctf-end-time">{{ event.event_end|date:"M d, Y H:i" }} UTC</span>
                     </div>
                 </div>
             </div>
@@ -80,4 +97,9 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'js/ctf-event-timing.js' %}"></script>
 {% endblock %}

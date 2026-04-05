@@ -392,3 +392,11 @@ coverage/
 
 # Serena Claude Code code understanding plugin
 .serena/
+
+# Claude Code — commit shared config, ignore local/personal files
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/plans/
+
+# OpenAI Codex CLI
+.codex

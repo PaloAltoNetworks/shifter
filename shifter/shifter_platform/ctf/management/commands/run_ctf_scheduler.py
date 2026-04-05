@@ -190,13 +190,19 @@ def _handle_cleanup_ranges(task: CTFScheduledTask, shutdown_check=None) -> None:
 def _handle_event_start(task: CTFScheduledTask, shutdown_check=None) -> None:
     from ctf.services.event import activate_event
 
-    activate_event(task.event)
+    if activate_event(task.event):
+        from ctf.services.notification import notify_organizer_event_start
+
+        notify_organizer_event_start(task.event_id)
 
 
 def _handle_event_end(task: CTFScheduledTask, shutdown_check=None) -> None:
     from ctf.services.event import complete_event
 
-    complete_event(task.event)
+    if complete_event(task.event):
+        from ctf.services.notification import notify_organizer_event_end
+
+        notify_organizer_event_end(task.event_id)
 
     # Also trigger cleanup if auto_cleanup is enabled
     if task.event.auto_cleanup:

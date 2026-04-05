@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.60.0] - 2026-04-05
+
+### Added
+- Scheduled reminder notifications at configurable intervals before event start (CTF-1005)
+- `reminder_hours` field on CTFEvent for organizer-configurable reminder intervals (default: 24h, 1h)
+- `event_timezone` field on CTFEvent for timezone-aware start times in reminder emails
+- Access URL included in reminder emails linking to participant event page
+- Timezone-aware event start time display in reminder email templates
+
+### Changed
+- Scheduler `_handle_send_reminder` handler now calls `send_reminder()` (was a stub)
+- `_schedule_event_tasks` creates one SEND_REMINDER task per configured interval with `hours_before` metadata
+
 ## [3.59.0] - 2026-04-05
 
 ### Added

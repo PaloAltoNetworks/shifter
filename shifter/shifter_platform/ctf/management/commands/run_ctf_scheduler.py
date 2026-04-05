@@ -213,9 +213,16 @@ def _handle_event_end(task: CTFScheduledTask, shutdown_check=None) -> None:
 
 
 def _handle_send_reminder(task: CTFScheduledTask, shutdown_check=None) -> None:
-    logger.warning(
-        "SEND_REMINDER not yet implemented for event %s",
+    from ctf.services.notification import send_reminder
+
+    hours_before = task.metadata.get("hours_before", 24) if task.metadata else 24
+    result = send_reminder(task.event_id, hours_before=hours_before)
+    logger.info(
+        "SEND_REMINDER for event %s (%dh): sent=%d failed=%d",
         task.event_id,
+        hours_before,
+        result["sent"],
+        result["failed"],
     )
 
 

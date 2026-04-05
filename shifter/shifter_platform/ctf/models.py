@@ -331,6 +331,16 @@ class CTFEvent(CTFBaseModel):
         blank=True,
         help_text="Freeze scoreboard at this time. Solves after this time are hidden from participants.",
     )
+    reminder_hours = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Hours before event start to send reminders (e.g. [24, 1]). Empty list disables reminders.",
+    )
+    event_timezone = models.CharField(
+        max_length=50,
+        default="UTC",
+        help_text="IANA timezone for displaying event times in emails (e.g. 'America/New_York')",
+    )
 
     class Meta:
         db_table = "ctf_event"

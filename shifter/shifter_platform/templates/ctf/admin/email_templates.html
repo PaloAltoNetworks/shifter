@@ -1,0 +1,102 @@
+{% extends "mission_control/base.html" %}
+{% block title %}Email Templates - {{ event.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.breadcrumb {
+    font-size: 13px;
+    color: var(--xdr-text-secondary);
+    margin-bottom: 8px;
+}
+
+.breadcrumb a {
+    color: #128df3;
+}
+
+.breadcrumb .separator {
+    margin: 0 6px;
+    color: var(--xdr-text-secondary);
+}
+
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+.template-card {
+    border: 1px solid var(--xdr-border);
+    border-radius: 6px;
+    padding: 16px;
+    background: var(--xdr-bg-secondary);
+}
+
+.template-card .type-label {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+
+.template-card .status {
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.badge-default {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--xdr-bg-tertiary);
+    color: var(--xdr-text-secondary);
+    font-size: 12px;
+}
+
+.badge-custom {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+    font-size: 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="flex-between mb-lg">
+    <div>
+        <div class="breadcrumb">
+            <a href="{% url 'ctf:admin_event_list' %}">Events</a>
+            <span class="separator">/</span>
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+            <span class="separator">/</span>
+            <span>Email Templates</span>
+        </div>
+        <h1 class="page-title">Email Templates</h1>
+        <p style="color: var(--xdr-text-secondary); font-size: 13px; margin-top: 4px;">
+            Customise email templates for this event. Types using the default template can be overridden via the API.
+        </p>
+    </div>
+</div>
+
+<div class="template-grid">
+    {% for item in template_list %}
+    <div class="template-card">
+        <div class="type-label">{{ item.label }}</div>
+        <div class="status">
+            {% if item.custom %}
+            <span class="badge-custom">Custom</span>
+            {% if item.custom.subject %}
+            <div style="margin-top: 6px; font-size: 13px; color: var(--xdr-text-secondary);">
+                Subject: {{ item.custom.subject }}
+            </div>
+            {% endif %}
+            {% else %}
+            <span class="badge-default">Default</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

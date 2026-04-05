@@ -136,6 +136,12 @@ admin_patterns = [
         views.admin_notification_create,
         name="admin_notification_create",
     ),
+    # Email Templates
+    path(
+        "admin/events/<uuid:event_id>/email-templates/",
+        views.admin_event_email_templates,
+        name="admin_event_email_templates",
+    ),
     # Analytics
     path(
         "admin/events/<uuid:event_id>/analytics/",
@@ -289,6 +295,12 @@ api_patterns = [
         "api/notifications/<uuid:notification_id>/send/",
         views.api_notification_send,
         name="api_notification_send",
+    ),
+    # Email Template APIs
+    path(
+        "api/events/<uuid:event_id>/email-templates/<str:notification_type>/",
+        views.api_event_email_template,
+        name="api_event_email_template",
     ),
     # Invitation APIs
     path(

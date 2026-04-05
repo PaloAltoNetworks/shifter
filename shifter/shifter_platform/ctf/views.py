@@ -890,6 +890,66 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
 
 @login_required
 @ctf_organizer_required
+@require_http_methods(["GET", "POST"])
+def admin_event_force_delete(request: HttpRequest, event_id: UUID) -> HttpResponse:
+    """Force-delete confirmation page and handler.
+
+    GET renders a confirmation page where the organizer must type the event
+    name to confirm. POST performs the force delete and redirects to the
+    event list.
+
+    Args:
+        event_id: UUID of the event.
+    """
+    from django.contrib import messages
+    from django.http import Http404
+    from django.shortcuts import redirect
+
+    from ctf.exceptions import CTFValidationError
+    from ctf.models import CTFEvent
+    from ctf.services import force_delete_event, get_event_stats
+
+    try:
+        event = CTFEvent.all_objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        raise Http404("Event not found") from None
+
+    if event.created_by_id != request.user.pk:
+        return HttpResponse("Forbidden: You do not have access to this event", status=403)
+
+    if request.method == "GET":
+        stats = get_event_stats(event)
+        return render(
+            request,
+            "ctf/admin/event_force_delete.html",
+            {"event": event, "stats": stats},
+        )
+
+    # POST — perform force delete
+    confirmation_name = request.POST.get("confirmation_name", "")
+    try:
+        result = force_delete_event(event_id, request.user, confirmation_name)
+    except CTFValidationError:
+        stats = get_event_stats(event)
+        return render(
+            request,
+            "ctf/admin/event_force_delete.html",
+            {
+                "event": event,
+                "stats": stats,
+                "error": "The name you typed does not match. Please try again.",
+            },
+        )
+
+    messages.success(
+        request,
+        f"Event '{result['event_name']}' has been permanently deleted. Ranges destroyed: {result['ranges_destroyed']}.",
+    )
+    return redirect("ctf:admin_event_list")
+
+
+@login_required
+@ctf_organizer_required
 @require_GET
 def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
     """Show CTF event edit form.
@@ -2065,6 +2125,48 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
         return JsonResponse({"error": str(e)}, status=400)
     except ValidationError as e:
         return JsonResponse({"error": "; ".join(e.messages)}, status=400)
+
+
+@login_required
+@ctf_organizer_required
+@require_http_methods(["POST"])
+def api_force_delete_event(request: HttpRequest, event_id: UUID) -> JsonResponse:
+    """API: Force-delete an event and all associated resources.
+
+    POST body: {"confirmation_name": "<exact event name>"}
+
+    Args:
+        event_id: UUID of the event.
+    """
+    import json
+
+    from ctf.exceptions import CTFValidationError
+    from ctf.models import CTFEvent
+    from ctf.services import force_delete_event
+
+    try:
+        event = CTFEvent.all_objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        return JsonResponse({"error": "Event not found"}, status=404)
+
+    if event.created_by_id != request.user.pk:
+        return JsonResponse({"error": "Forbidden"}, status=403)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    confirmation_name = body.get("confirmation_name")
+    if not confirmation_name:
+        return JsonResponse({"error": "confirmation_name is required"}, status=400)
+
+    try:
+        result = force_delete_event(event_id, request.user, confirmation_name)
+    except CTFValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse(result)
 
 
 @login_required

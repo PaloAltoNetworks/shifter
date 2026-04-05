@@ -216,7 +216,9 @@ def force_delete_event(
         CTFNotFoundError: If event doesn't exist.
         CTFValidationError: If confirmation_name doesn't match.
     """
-    from ctf.services.range import cleanup_event_ranges
+    from ctf.models import CTFChallengeFile, CTFParticipant
+    from ctf.s3 import delete_challenge_file
+    from ctf.services.range import _destroy_single_range
 
     # Use all_objects so force delete works on soft-deleted events too
     try:
@@ -238,15 +240,37 @@ def force_delete_event(
 
     event_name = event.name
 
-    # Destroy range instances OUTSIDE the atomic block (external HTTP calls)
+    # Destroy range instances OUTSIDE the atomic block (external HTTP calls).
+    # Query participants directly via all_objects to handle soft-deleted events
+    # (cleanup_event_ranges uses CTFEvent.objects which skips soft-deleted).
     ranges_destroyed = 0
     ranges_failed = 0
-    try:
-        result = cleanup_event_ranges(event_id)
-        ranges_destroyed = result.get("destroyed", 0)
-        ranges_failed = result.get("failed", 0)
-    except Exception:
-        logger.exception("Range cleanup failed for event %s during force delete", event_id)
+    participants_with_ranges = CTFParticipant.all_objects.filter(
+        event=event,
+        range_instance_id__isnull=False,
+    ).select_related("user")
+    for participant in participants_with_ranges:
+        try:
+            _destroy_single_range(participant, participant.user)
+            ranges_destroyed += 1
+        except Exception:
+            ranges_failed += 1
+            logger.exception(
+                "Failed to destroy range for participant %s during force delete",
+                participant.pk,
+            )
+
+    # Delete S3 challenge file blobs before cascade removes the DB rows
+    s3_keys = list(
+        CTFChallengeFile.all_objects.filter(
+            challenge__event=event,
+        ).values_list("s3_key", flat=True)
+    )
+    for s3_key in s3_keys:
+        try:
+            delete_challenge_file(s3_key)
+        except Exception:
+            logger.exception("Failed to delete S3 object %s during force delete", s3_key)
 
     # Hard delete inside atomic block — Django CASCADE handles children
     with transaction.atomic():

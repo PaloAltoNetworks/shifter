@@ -116,6 +116,19 @@ def submit_flag(
             details={"event_id": str(event.id), "status": event.status},
         )
 
+    # Enforce time boundaries regardless of state (CTF-702)
+    now = timezone.now()
+    if now < event.event_start or now > event.event_end:
+        raise CTFStateError(
+            "Event is not within its competition window",
+            details={
+                "event_id": str(event.id),
+                "event_start": event.event_start.isoformat(),
+                "event_end": event.event_end.isoformat(),
+                "server_time": now.isoformat(),
+            },
+        )
+
     # Check visibility state
     if challenge.visibility == "hidden":
         raise CTFStateError(

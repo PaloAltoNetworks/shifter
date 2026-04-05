@@ -915,31 +915,51 @@ class TestEventServices:
 class TestForceDeleteEvent:
     """Tests for force_delete_event service function."""
 
+    @staticmethod
+    def _mock_empty_querysets():
+        """Return patch contexts for empty participant and file querysets."""
+        mock_part_qs = MagicMock()
+        mock_part_qs.select_related.return_value = []
+        mock_file_qs = MagicMock()
+        mock_file_qs.values_list.return_value = []
+        return mock_part_qs, mock_file_qs
+
     def test_force_delete_success(self, mock_user):
         """force_delete_event should hard-delete the event and clean up ranges."""
         event = _make_mock_event(name="My CTF")
         event.delete = MagicMock(return_value=(1, {"CTFEvent": 1}))
 
+        mock_participant = MagicMock()
+        mock_participant.pk = 42
+        mock_participant.user = mock_user
+        mock_part_qs = MagicMock()
+        mock_part_qs.select_related.return_value = [mock_participant]
+        mock_file_qs = MagicMock()
+        mock_file_qs.values_list.return_value = ["ctf-files/key1.txt"]
+
         with (
             patch("ctf.services.event.CTFEvent.all_objects") as mock_all,
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks") as mock_cancel,
-            patch(
-                "ctf.services.range.cleanup_event_ranges",
-                return_value={"destroyed": 3, "failed": 0},
-            ) as mock_cleanup,
+            patch("ctf.models.CTFParticipant.all_objects") as mock_part_all,
+            patch("ctf.models.CTFChallengeFile.all_objects") as mock_file_all,
+            patch("ctf.services.range._destroy_single_range") as mock_destroy,
+            patch("ctf.s3.delete_challenge_file") as mock_s3_delete,
         ):
             mock_all.get.return_value = event
+            mock_part_all.filter.return_value = mock_part_qs
+            mock_file_all.filter.return_value = mock_file_qs
             from ctf.services.event import force_delete_event
 
             result = force_delete_event(event.pk, mock_user, "My CTF")
 
         assert result["event_name"] == "My CTF"
-        assert result["ranges_destroyed"] == 3
+        assert result["ranges_destroyed"] == 1
         assert result["ranges_failed"] == 0
         event.delete.assert_called_once_with(soft=False)
         mock_cancel.assert_called_once_with(event)
-        mock_cleanup.assert_called_once_with(event.pk)
+        mock_destroy.assert_called_once_with(mock_participant, mock_user)
+        mock_s3_delete.assert_called_once_with("ctf-files/key1.txt")
 
     def test_force_delete_wrong_confirmation_name(self, mock_user):
         """force_delete_event should raise CTFValidationError on name mismatch."""
@@ -971,39 +991,51 @@ class TestForceDeleteEvent:
         event = _make_mock_event(name="Partial Fail")
         event.delete = MagicMock(return_value=(1, {"CTFEvent": 1}))
 
+        mock_ok = MagicMock(pk=1, user=mock_user)
+        mock_fail = MagicMock(pk=2, user=mock_user)
+        mock_part_qs = MagicMock()
+        mock_part_qs.select_related.return_value = [mock_ok, mock_fail]
+        _, mock_file_qs = self._mock_empty_querysets()
+
         with (
             patch("ctf.services.event.CTFEvent.all_objects") as mock_all,
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks"),
+            patch("ctf.models.CTFParticipant.all_objects") as mock_part_all,
+            patch("ctf.models.CTFChallengeFile.all_objects") as mock_file_all,
             patch(
-                "ctf.services.range.cleanup_event_ranges",
-                return_value={"destroyed": 2, "failed": 1},
+                "ctf.services.range._destroy_single_range",
+                side_effect=[None, RuntimeError("CMS error")],
             ),
         ):
             mock_all.get.return_value = event
+            mock_part_all.filter.return_value = mock_part_qs
+            mock_file_all.filter.return_value = mock_file_qs
             from ctf.services.event import force_delete_event
 
             result = force_delete_event(event.pk, mock_user, "Partial Fail")
 
-        assert result["ranges_destroyed"] == 2
+        assert result["ranges_destroyed"] == 1
         assert result["ranges_failed"] == 1
         event.delete.assert_called_once_with(soft=False)
 
     def test_force_delete_range_cleanup_total_failure(self, mock_user):
-        """force_delete_event should proceed even if range cleanup raises."""
+        """force_delete_event should proceed even if all range destroys fail."""
         event = _make_mock_event(name="Total Fail")
         event.delete = MagicMock(return_value=(1, {"CTFEvent": 1}))
+
+        mock_part_qs, mock_file_qs = self._mock_empty_querysets()
 
         with (
             patch("ctf.services.event.CTFEvent.all_objects") as mock_all,
             patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
             patch("ctf.services.event._cancel_event_tasks"),
-            patch(
-                "ctf.services.range.cleanup_event_ranges",
-                side_effect=RuntimeError("CMS bridge down"),
-            ),
+            patch("ctf.models.CTFParticipant.all_objects") as mock_part_all,
+            patch("ctf.models.CTFChallengeFile.all_objects") as mock_file_all,
         ):
             mock_all.get.return_value = event
+            mock_part_all.filter.return_value = mock_part_qs
+            mock_file_all.filter.return_value = mock_file_qs
             from ctf.services.event import force_delete_event
 
             result = force_delete_event(event.pk, mock_user, "Total Fail")

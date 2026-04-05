@@ -905,3 +905,302 @@ class TestEventServices:
 
             with pytest.raises(CTFStateError):
                 update_event(completed_event.pk, {"name": "New Name"})
+
+
+# ---------------------------------------------------------------------------
+# Force Delete Service Tests
+# ---------------------------------------------------------------------------
+
+
+class TestForceDeleteEvent:
+    """Tests for force_delete_event service function."""
+
+    def test_force_delete_success(self, mock_user):
+        """force_delete_event should hard-delete the event and clean up ranges."""
+        event = _make_mock_event(name="My CTF")
+        event.delete = MagicMock(return_value=(1, {"CTFEvent": 1}))
+
+        with (
+            patch("ctf.services.event.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks") as mock_cancel,
+            patch(
+                "ctf.services.range.cleanup_event_ranges",
+                return_value={"destroyed": 3, "failed": 0},
+            ) as mock_cleanup,
+        ):
+            mock_all.get.return_value = event
+            from ctf.services.event import force_delete_event
+
+            result = force_delete_event(event.pk, mock_user, "My CTF")
+
+        assert result["event_name"] == "My CTF"
+        assert result["ranges_destroyed"] == 3
+        assert result["ranges_failed"] == 0
+        event.delete.assert_called_once_with(soft=False)
+        mock_cancel.assert_called_once_with(event)
+        mock_cleanup.assert_called_once_with(event.pk)
+
+    def test_force_delete_wrong_confirmation_name(self, mock_user):
+        """force_delete_event should raise CTFValidationError on name mismatch."""
+        from ctf.exceptions import CTFValidationError
+
+        event = _make_mock_event(name="Real Name")
+
+        with patch("ctf.services.event.CTFEvent.all_objects") as mock_all:
+            mock_all.get.return_value = event
+            from ctf.services.event import force_delete_event
+
+            with pytest.raises(CTFValidationError, match="does not match"):
+                force_delete_event(event.pk, mock_user, "Wrong Name")
+
+    def test_force_delete_event_not_found(self, mock_user):
+        """force_delete_event should raise CTFNotFoundError for missing events."""
+        from ctf.exceptions import CTFNotFoundError
+        from ctf.models import CTFEvent
+
+        with patch("ctf.services.event.CTFEvent.all_objects") as mock_all:
+            mock_all.get.side_effect = CTFEvent.DoesNotExist
+            from ctf.services.event import force_delete_event
+
+            with pytest.raises(CTFNotFoundError):
+                force_delete_event(uuid4(), mock_user, "Whatever")
+
+    def test_force_delete_range_cleanup_partial_failure(self, mock_user):
+        """force_delete_event should proceed even if some ranges fail to destroy."""
+        event = _make_mock_event(name="Partial Fail")
+        event.delete = MagicMock(return_value=(1, {"CTFEvent": 1}))
+
+        with (
+            patch("ctf.services.event.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+            patch(
+                "ctf.services.range.cleanup_event_ranges",
+                return_value={"destroyed": 2, "failed": 1},
+            ),
+        ):
+            mock_all.get.return_value = event
+            from ctf.services.event import force_delete_event
+
+            result = force_delete_event(event.pk, mock_user, "Partial Fail")
+
+        assert result["ranges_destroyed"] == 2
+        assert result["ranges_failed"] == 1
+        event.delete.assert_called_once_with(soft=False)
+
+    def test_force_delete_range_cleanup_total_failure(self, mock_user):
+        """force_delete_event should proceed even if range cleanup raises."""
+        event = _make_mock_event(name="Total Fail")
+        event.delete = MagicMock(return_value=(1, {"CTFEvent": 1}))
+
+        with (
+            patch("ctf.services.event.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.event.transaction.atomic", side_effect=_noop_atomic),
+            patch("ctf.services.event._cancel_event_tasks"),
+            patch(
+                "ctf.services.range.cleanup_event_ranges",
+                side_effect=RuntimeError("CMS bridge down"),
+            ),
+        ):
+            mock_all.get.return_value = event
+            from ctf.services.event import force_delete_event
+
+            result = force_delete_event(event.pk, mock_user, "Total Fail")
+
+        assert result["ranges_destroyed"] == 0
+        assert result["ranges_failed"] == 0
+        event.delete.assert_called_once_with(soft=False)
+
+
+# ---------------------------------------------------------------------------
+# Force Delete API Tests
+# ---------------------------------------------------------------------------
+
+
+class TestApiForceDeleteEvent:
+    """Tests for api_force_delete_event endpoint."""
+
+    def test_api_force_delete_success(self, organizer_client, mock_event):
+        """POST with valid confirmation should return 200 and summary."""
+        url = reverse("ctf:api_force_delete_event", kwargs={"event_id": mock_event.pk})
+
+        with (
+            patch("ctf.models.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.force_delete_event") as mock_svc,
+        ):
+            mock_all.get.return_value = mock_event
+            mock_svc.return_value = {
+                "event_id": str(mock_event.pk),
+                "event_name": mock_event.name,
+                "ranges_destroyed": 0,
+                "ranges_failed": 0,
+            }
+
+            resp = organizer_client.post(
+                url,
+                data='{"confirmation_name": "Test CTF Event"}',
+                content_type="application/json",
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["event_name"] == "Test CTF Event"
+
+    def test_api_force_delete_wrong_name(self, organizer_client, mock_event):
+        """POST with wrong confirmation name should return 400."""
+        from ctf.exceptions import CTFValidationError
+
+        url = reverse("ctf:api_force_delete_event", kwargs={"event_id": mock_event.pk})
+
+        with (
+            patch("ctf.models.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.force_delete_event") as mock_svc,
+        ):
+            mock_all.get.return_value = mock_event
+            mock_svc.side_effect = CTFValidationError("does not match")
+
+            resp = organizer_client.post(
+                url,
+                data='{"confirmation_name": "Wrong Name"}',
+                content_type="application/json",
+            )
+
+        assert resp.status_code == 400
+
+    def test_api_force_delete_missing_confirmation(self, organizer_client, mock_event):
+        """POST without confirmation_name should return 400."""
+        url = reverse("ctf:api_force_delete_event", kwargs={"event_id": mock_event.pk})
+
+        with patch("ctf.models.CTFEvent.all_objects") as mock_all:
+            mock_all.get.return_value = mock_event
+
+            resp = organizer_client.post(
+                url,
+                data="{}",
+                content_type="application/json",
+            )
+
+        assert resp.status_code == 400
+        assert "confirmation_name" in resp.json()["error"]
+
+    def test_api_force_delete_non_owner(self, organizer_client, mock_event):
+        """Non-owner should get 403."""
+        mock_event.created_by_id = 999  # Not the authenticated user (pk=1)
+        url = reverse("ctf:api_force_delete_event", kwargs={"event_id": mock_event.pk})
+
+        with patch("ctf.models.CTFEvent.all_objects") as mock_all:
+            mock_all.get.return_value = mock_event
+
+            resp = organizer_client.post(
+                url,
+                data='{"confirmation_name": "Test CTF Event"}',
+                content_type="application/json",
+            )
+
+        assert resp.status_code == 403
+
+    def test_api_force_delete_not_found(self, organizer_client):
+        """Force-deleting a non-existent event should return 404."""
+        from ctf.models import CTFEvent
+
+        url = reverse("ctf:api_force_delete_event", kwargs={"event_id": uuid4()})
+
+        with patch("ctf.models.CTFEvent.all_objects") as mock_all:
+            mock_all.get.side_effect = CTFEvent.DoesNotExist
+
+            resp = organizer_client.post(
+                url,
+                data='{"confirmation_name": "Whatever"}',
+                content_type="application/json",
+            )
+
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Force Delete Admin View Tests
+# ---------------------------------------------------------------------------
+
+
+class TestAdminEventForceDelete:
+    """Tests for admin_event_force_delete view."""
+
+    def test_get_renders_confirmation_page(self, organizer_client, mock_event):
+        """GET should render the force delete confirmation template."""
+        url = reverse("ctf:admin_event_force_delete", kwargs={"event_id": mock_event.pk})
+
+        with (
+            patch("ctf.models.CTFEvent.all_objects") as mock_all,
+            patch(
+                "ctf.services.get_event_stats",
+                return_value={
+                    "participant_count": 5,
+                    "registered_count": 3,
+                    "invited_count": 2,
+                    "challenge_count": 10,
+                    "total_points": 500,
+                    "total_submissions": 20,
+                    "correct_submissions": 8,
+                    "team_count": 0,
+                },
+            ),
+        ):
+            mock_all.get.return_value = mock_event
+
+            resp = organizer_client.get(url)
+
+        assert resp.status_code == 200
+        assert b"Force Delete" in resp.content
+
+    def test_post_valid_redirects(self, organizer_client, mock_event):
+        """POST with valid confirmation should redirect to event list."""
+        url = reverse("ctf:admin_event_force_delete", kwargs={"event_id": mock_event.pk})
+
+        with (
+            patch("ctf.models.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.force_delete_event") as mock_svc,
+        ):
+            mock_all.get.return_value = mock_event
+            mock_svc.return_value = {
+                "event_id": str(mock_event.pk),
+                "event_name": mock_event.name,
+                "ranges_destroyed": 0,
+                "ranges_failed": 0,
+            }
+
+            resp = organizer_client.post(url, data={"confirmation_name": mock_event.name})
+
+        assert resp.status_code == 302
+        assert "admin_event_list" in resp.url or "/events/" in resp.url
+
+    def test_post_wrong_name_rerenders(self, organizer_client, mock_event):
+        """POST with wrong name should re-render with error message."""
+        from ctf.exceptions import CTFValidationError
+
+        url = reverse("ctf:admin_event_force_delete", kwargs={"event_id": mock_event.pk})
+
+        with (
+            patch("ctf.models.CTFEvent.all_objects") as mock_all,
+            patch("ctf.services.force_delete_event") as mock_svc,
+            patch(
+                "ctf.services.get_event_stats",
+                return_value={
+                    "participant_count": 0,
+                    "registered_count": 0,
+                    "invited_count": 0,
+                    "challenge_count": 0,
+                    "total_points": 0,
+                    "total_submissions": 0,
+                    "correct_submissions": 0,
+                    "team_count": 0,
+                },
+            ),
+        ):
+            mock_all.get.return_value = mock_event
+            mock_svc.side_effect = CTFValidationError("does not match")
+
+            resp = organizer_client.post(url, data={"confirmation_name": "Wrong Name"})
+
+        assert resp.status_code == 200
+        assert b"does not match" in resp.content

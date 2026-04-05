@@ -51,7 +51,7 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
     for participant in participants:
         try:
             registration_url = _build_registration_url(participant.invite_token)
-            html_content, text_content = _render_email(
+            html_content, text_content, custom_subject = _render_email(
                 "invitation",
                 {
                     "event": event,
@@ -63,7 +63,7 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
             )
             success = _send_email(
                 recipient=participant.email,
-                subject=f"You're invited to {event.name}",
+                subject=custom_subject or f"You're invited to {event.name}",
                 html_content=html_content,
                 text_content=text_content,
             )
@@ -141,7 +141,7 @@ def send_credentials(event_id: UUID) -> dict[str, Any]:
             base = (getattr(settings, "SITE_URL", "") or "").rstrip("/")
             access_url = f"{base}{range_page_url}"
 
-            html_content, text_content = _render_email(
+            html_content, text_content, custom_subject = _render_email(
                 "credentials",
                 {
                     "event": event,
@@ -152,7 +152,7 @@ def send_credentials(event_id: UUID) -> dict[str, Any]:
             )
             success = _send_email(
                 recipient=participant.email,
-                subject=f"Your credentials for {event.name}",
+                subject=custom_subject or f"Your credentials for {event.name}",
                 html_content=html_content,
                 text_content=text_content,
             )
@@ -217,7 +217,7 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
 
     for participant in participants:
         try:
-            html_content, text_content = _render_email(
+            html_content, text_content, custom_subject = _render_email(
                 "reminder",
                 {
                     "event": event,
@@ -228,7 +228,7 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
             )
             success = _send_email(
                 recipient=participant.email,
-                subject=f"Reminder: {event.name} starts soon",
+                subject=custom_subject or f"Reminder: {event.name} starts soon",
                 html_content=html_content,
                 text_content=text_content,
             )
@@ -306,7 +306,7 @@ def send_announcement(
 
     for participant in participants:
         try:
-            html_content, text_content = _render_email(
+            html_content, text_content, custom_subject = _render_email(
                 "announcement",
                 {
                     "event": event,
@@ -318,7 +318,7 @@ def send_announcement(
             )
             success = _send_email(
                 recipient=participant.email,
-                subject=subject,
+                subject=custom_subject or subject,
                 html_content=html_content,
                 text_content=text_content,
             )
@@ -404,7 +404,7 @@ def notify_organizer_provision_failure(
         logger.warning("Cannot notify: event %s has no organizer email", event_id)
         return
 
-    html_content, text_content = _render_email(
+    html_content, text_content, custom_subject = _render_email(
         "provision_failure",
         {
             "event": event,
@@ -416,7 +416,7 @@ def notify_organizer_provision_failure(
 
     success = _send_email(
         recipient=organizer.email,
-        subject=f"Range provisioning failures: {event.name}",
+        subject=custom_subject or f"Range provisioning failures: {event.name}",
         html_content=html_content,
         text_content=text_content,
     )
@@ -453,7 +453,7 @@ def notify_organizer_event_start(event_id: UUID) -> None:
         logger.warning("Cannot notify: event %s has no organizer email", event_id)
         return
 
-    html_content, text_content = _render_email(
+    html_content, text_content, custom_subject = _render_email(
         "event_start",
         {"event": event},
         event=event,
@@ -461,7 +461,7 @@ def notify_organizer_event_start(event_id: UUID) -> None:
 
     success = _send_email(
         recipient=organizer.email,
-        subject=f"Event started: {event.name}",
+        subject=custom_subject or f"Event started: {event.name}",
         html_content=html_content,
         text_content=text_content,
     )
@@ -498,7 +498,7 @@ def notify_organizer_event_end(event_id: UUID) -> None:
         logger.warning("Cannot notify: event %s has no organizer email", event_id)
         return
 
-    html_content, text_content = _render_email(
+    html_content, text_content, custom_subject = _render_email(
         "event_end",
         {"event": event},
         event=event,
@@ -506,7 +506,7 @@ def notify_organizer_event_end(event_id: UUID) -> None:
 
     success = _send_email(
         recipient=organizer.email,
-        subject=f"Event ended: {event.name}",
+        subject=custom_subject or f"Event ended: {event.name}",
         html_content=html_content,
         text_content=text_content,
     )
@@ -582,7 +582,7 @@ def _render_email(
     template_name: str,
     context: dict,
     event: CTFEvent | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """Render email templates.
 
     If *event* is provided and has a custom template for the given
@@ -595,14 +595,22 @@ def _render_email(
         event: Optional event for custom template lookup.
 
     Returns:
-        Tuple of (html_content, text_content).
+        Tuple of (html_content, text_content, custom_subject).
+        custom_subject is non-empty only when a custom template with a
+        subject override is used; callers should prefer it over their
+        default subject when non-empty.
     """
+    # Map filesystem template names to NotificationType enum values where
+    # they differ (the "invitation" template corresponds to the "invite" type).
+    _TEMPLATE_TO_TYPE = {"invitation": "invite"}
+
     if event is not None:
         from ctf.models import CTFEmailTemplate
 
+        lookup_type = _TEMPLATE_TO_TYPE.get(template_name, template_name)
         custom = CTFEmailTemplate.objects.filter(
             event=event,
-            notification_type=template_name,
+            notification_type=lookup_type,
         ).first()
         if custom is not None:
             from django.template import Context, Template
@@ -611,10 +619,10 @@ def _render_email(
             # execution.  Only authenticated event organizers can write templates.
             html_content = Template(custom.html_body).render(Context(context))
             text_content = Template(custom.text_body).render(Context(context))
-            return html_content, text_content
+            return html_content, text_content, custom.subject or ""
 
     from django.template.loader import render_to_string
 
     html_content = render_to_string(f"ctf/email/{template_name}.html", context)
     text_content = render_to_string(f"ctf/email/{template_name}.txt", context)
-    return html_content, text_content
+    return html_content, text_content, ""

@@ -740,14 +740,17 @@ def _schedule_event_tasks(event: CTFEvent) -> None:
             scheduled_for=event.get_cleanup_time(),
         )
 
-    # Send reminder 24h before start (if that's still in the future)
-    reminder_time = event.event_start - timedelta(hours=24)
-    if reminder_time > now:
-        CTFScheduledTask.objects.create(
-            event=event,
-            task_type=ScheduledTaskType.SEND_REMINDER.value,
-            scheduled_for=reminder_time,
-        )
+    # Schedule reminders at configurable intervals before event start
+    reminder_intervals = [h for h in (event.reminder_hours or [24, 1]) if isinstance(h, int) and h > 0]
+    for hours in reminder_intervals:
+        reminder_time = event.event_start - timedelta(hours=hours)
+        if reminder_time > now:
+            CTFScheduledTask.objects.create(
+                event=event,
+                task_type=ScheduledTaskType.SEND_REMINDER.value,
+                scheduled_for=reminder_time,
+                metadata={"hours_before": hours},
+            )
 
     logger.info("Scheduled tasks for event %s", event.id)
 

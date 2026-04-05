@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.58.0] - 2026-04-05
+
+### Added
+- Per-event email template customization: organizers can override default email templates for any notification type (CTF-805)
+- `CTFEmailTemplate` model with unique constraint per event and notification type
+- Admin page listing template override status per notification type
+- API endpoint for CRUD operations on custom email templates
+
 ## [3.57.0] - 2026-04-04
 
 ### Added

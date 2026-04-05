@@ -86,7 +86,7 @@ class TestSendInvitations:
         with (
             patch.object(notification, "_send_email", return_value=True),
             patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
         ):
             result = notification.send_invitations(ctf_event.pk)
 
@@ -107,7 +107,7 @@ class TestSendInvitations:
         with (
             patch.object(notification, "_send_email", return_value=True),
             patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
         ):
             result = notification.send_invitations(ctf_event.pk)
 
@@ -126,7 +126,7 @@ class TestSendInvitations:
         with (
             patch.object(notification, "_send_email", return_value=False),
             patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
         ):
             result = notification.send_invitations(ctf_event.pk)
 
@@ -148,7 +148,7 @@ class TestSendInvitations:
         with (
             patch.object(notification, "_send_email", return_value=True),
             patch.object(notification, "_build_registration_url", return_value="https://example.com/register"),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
         ):
             notification.send_invitations(ctf_event.pk)
 
@@ -183,7 +183,7 @@ class TestSendCredentials:
 
         with (
             patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
             patch("django.urls.reverse", return_value="/ctf/range/"),
         ):
             result = notification.send_credentials(ctf_event.pk)
@@ -226,7 +226,7 @@ class TestSendReminder:
 
         with (
             patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
         ):
             result = notification.send_reminder(ctf_event.pk)
 
@@ -273,7 +273,7 @@ class TestSendAnnouncement:
 
         with (
             patch.object(notification, "_send_email", return_value=True),
-            patch.object(notification, "_render_email", return_value=("<html>", "text")),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
         ):
             result = notification.send_announcement(
                 ctf_event.pk,
@@ -342,7 +342,7 @@ class TestRenderEmail:
             f"{ctf_event.name} {registration_url}",
         ]
 
-        html, text = notification._render_email(
+        html, text, custom_subject = notification._render_email(
             "invitation",
             {
                 "event": ctf_event,
@@ -356,6 +356,7 @@ class TestRenderEmail:
         assert ctf_event.name in text
         assert registration_url in html
         assert registration_url in text
+        assert custom_subject == ""
         assert mock_render.call_count == 2
 
 
@@ -413,11 +414,11 @@ class TestNotifyOrganizerEventStart:
 
         with (
             patch.object(notification, "_send_email", return_value=True) as mock_send,
-            patch.object(notification, "_render_email", return_value=("<html>", "text")) as mock_render,
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")) as mock_render,
         ):
             notification.notify_organizer_event_start(ctf_event.pk)
 
-        mock_render.assert_called_once_with("event_start", {"event": ctf_event})
+        mock_render.assert_called_once_with("event_start", {"event": ctf_event}, event=ctf_event)
         mock_send.assert_called_once_with(
             recipient=ctf_event.created_by.email,
             subject=f"Event started: {ctf_event.name}",
@@ -462,11 +463,11 @@ class TestNotifyOrganizerEventEnd:
 
         with (
             patch.object(notification, "_send_email", return_value=True) as mock_send,
-            patch.object(notification, "_render_email", return_value=("<html>", "text")) as mock_render,
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")) as mock_render,
         ):
             notification.notify_organizer_event_end(ctf_event.pk)
 
-        mock_render.assert_called_once_with("event_end", {"event": ctf_event})
+        mock_render.assert_called_once_with("event_end", {"event": ctf_event}, event=ctf_event)
         mock_send.assert_called_once_with(
             recipient=ctf_event.created_by.email,
             subject=f"Event ended: {ctf_event.name}",
@@ -497,3 +498,72 @@ class TestNotifyOrganizerEventEnd:
             notification.notify_organizer_event_end(ctf_event.pk)
 
         mock_send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Custom Email Template Tests
+# ---------------------------------------------------------------------------
+
+
+class TestRenderEmailWithCustomTemplate:
+    """Tests for _render_email with per-event custom template overrides."""
+
+    @patch("django.template.loader.render_to_string")
+    def test_falls_back_to_default_when_no_custom(self, mock_render, ctf_event):
+        """Uses filesystem template when no custom template exists."""
+        mock_render.side_effect = ["<html>default</html>", "default"]
+
+        with patch("ctf.models.CTFEmailTemplate.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = None
+
+            html, text, custom_subject = notification._render_email(
+                "invitation",
+                {"event": ctf_event},
+                event=ctf_event,
+            )
+
+        assert html == "<html>default</html>"
+        assert text == "default"
+        assert custom_subject == ""
+        assert mock_render.call_count == 2
+
+    def test_uses_custom_template_when_present(self):
+        """Renders from DB template instead of filesystem when custom exists."""
+
+        class _SimpleEvent:
+            name = "My Custom Event"
+
+        event = _SimpleEvent()
+
+        mock_template = MagicMock()
+        mock_template.html_body = "<html>Hello {{ event.name }}</html>"
+        mock_template.text_body = "Hello {{ event.name }}"
+        mock_template.subject = "Custom Subject"
+
+        with patch("ctf.models.CTFEmailTemplate.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = mock_template
+
+            html, text, custom_subject = notification._render_email(
+                "invitation",
+                {"event": event},
+                event=event,
+            )
+
+        assert "My Custom Event" in html
+        assert "My Custom Event" in text
+        assert "<html>" in html
+        assert custom_subject == "Custom Subject"
+
+    @patch("django.template.loader.render_to_string")
+    def test_no_db_lookup_when_event_is_none(self, mock_render):
+        """Skips DB lookup when event is not provided (backward compat)."""
+        mock_render.side_effect = ["<html>ok</html>", "ok"]
+
+        html, _text, custom_subject = notification._render_email(
+            "invitation",
+            {"key": "value"},
+        )
+
+        assert html == "<html>ok</html>"
+        assert custom_subject == ""
+        assert mock_render.call_count == 2

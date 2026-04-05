@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from unittest.mock import MagicMock, Mock, patch
 from uuid import uuid4
 
@@ -231,6 +232,90 @@ class TestSendReminder:
             result = notification.send_reminder(ctf_event.pk)
 
         assert result["sent"] == 1
+
+    @patch("ctf.services.notification.CTFNotification")
+    @patch("ctf.services.notification.CTFParticipant")
+    @patch("ctf.services.notification.CTFEvent")
+    def test_passes_access_url_and_timezone_to_template(
+        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant
+    ):
+        """Template context includes access_url, event_start_local, and event_timezone."""
+        from datetime import datetime
+
+        ctf_event.event_start = datetime(2026, 6, 15, 14, 0, tzinfo=UTC)
+        ctf_event.event_timezone = "America/New_York"
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+        mock_part_cls.objects.filter.return_value = [ctf_participant]
+
+        render_calls = []
+
+        def capture_render(template_name, context, event=None):
+            render_calls.append(context)
+            return "<html>", "text", ""
+
+        with (
+            patch.object(notification, "_send_email", return_value=True),
+            patch.object(notification, "_render_email", side_effect=capture_render),
+            patch("django.urls.reverse", return_value="/ctf/event/"),
+        ):
+            notification.send_reminder(ctf_event.pk)
+
+        assert len(render_calls) == 1
+        ctx = render_calls[0]
+        assert "access_url" in ctx
+        assert "/ctf/event/" in ctx["access_url"]
+        assert "event_start_local" in ctx
+        assert ctx["event_timezone"] == "America/New_York"
+
+    @patch("ctf.services.notification.CTFNotification")
+    @patch("ctf.services.notification.CTFParticipant")
+    @patch("ctf.services.notification.CTFEvent")
+    def test_custom_hours_before(self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant):
+        """Accepts custom hours_before parameter."""
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+        mock_part_cls.objects.filter.return_value = [ctf_participant]
+
+        with (
+            patch.object(notification, "_send_email", return_value=True),
+            patch.object(notification, "_render_email", return_value=("<html>", "text", "")),
+        ):
+            result = notification.send_reminder(ctf_event.pk, hours_before=1)
+
+        assert result["hours_before"] == 1
+        assert result["sent"] == 1
+
+    @patch("ctf.services.notification.CTFNotification")
+    @patch("ctf.services.notification.CTFParticipant")
+    @patch("ctf.services.notification.CTFEvent")
+    def test_fallback_timezone_on_invalid(
+        self, mock_event_cls, mock_part_cls, mock_notif_cls, ctf_event, ctf_participant
+    ):
+        """Falls back to UTC on invalid event_timezone."""
+        from datetime import datetime
+
+        ctf_event.event_start = datetime(2026, 6, 15, 14, 0, tzinfo=UTC)
+        ctf_event.event_timezone = "Invalid/Timezone"
+        mock_event_cls.objects.get.return_value = ctf_event
+        mock_event_cls.DoesNotExist = Exception
+        mock_part_cls.objects.filter.return_value = [ctf_participant]
+
+        render_calls = []
+
+        def capture_render(template_name, context, event=None):
+            render_calls.append(context)
+            return "<html>", "text", ""
+
+        with (
+            patch.object(notification, "_send_email", return_value=True),
+            patch.object(notification, "_render_email", side_effect=capture_render),
+            patch("django.urls.reverse", return_value="/ctf/event/"),
+        ):
+            result = notification.send_reminder(ctf_event.pk)
+
+        assert result["sent"] == 1
+        assert render_calls[0]["event_timezone"] == "UTC"
 
 
 class TestSendAnnouncement:

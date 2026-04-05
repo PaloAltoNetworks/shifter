@@ -18,7 +18,7 @@ from ctf.enums import (
     EventStatus,
     ParticipantStatus,
 )
-from ctf.exceptions import CTFRateLimitError
+from ctf.exceptions import CTFRateLimitError, CTFStateError
 from ctf.models import CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission
 from ctf.services.submission import submit_flag
 
@@ -403,3 +403,97 @@ class TestAttemptLimits:
             scenario_id="basic",
         )
         assert event.attempt_limit_mode == "lockout"
+
+
+# ── Fixtures for time-boundary tests ─────────────────────────────────────
+
+
+@pytest.fixture
+def future_start_event(db, organizer_user):
+    """Active event whose start time is in the future."""
+    return CTFEvent.objects.create(
+        name="Future Start Event",
+        created_by=organizer_user,
+        status=EventStatus.ACTIVE.value,
+        event_start=timezone.now() + timedelta(hours=1),
+        event_end=timezone.now() + timedelta(hours=8),
+        scenario_id="basic",
+        submission_cooldown_seconds=0,
+    )
+
+
+@pytest.fixture
+def past_end_event(db, organizer_user):
+    """Active event whose end time is in the past."""
+    return CTFEvent.objects.create(
+        name="Past End Event",
+        created_by=organizer_user,
+        status=EventStatus.ACTIVE.value,
+        event_start=timezone.now() - timedelta(hours=8),
+        event_end=timezone.now() - timedelta(hours=1),
+        scenario_id="basic",
+        submission_cooldown_seconds=0,
+    )
+
+
+@pytest.mark.django_db
+class TestTimeBoundaryEnforcement:
+    """Tests for event time-boundary enforcement (CTF-702).
+
+    Submissions must be rejected when outside the event_start/event_end
+    window, even if the event status is ACTIVE.
+    """
+
+    @patch("ctf.services.submission.verify_flag", return_value=False)
+    def test_rejects_before_event_start(self, mock_verify, future_start_event, participant_user, db):
+        """Flag submission is rejected when now < event_start, even if ACTIVE."""
+        challenge = CTFChallenge.objects.create(
+            event=future_start_event,
+            name="Early Challenge",
+            description="Test",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_early",
+        )
+        participant = CTFParticipant.objects.create(
+            event=future_start_event,
+            user=participant_user,
+            email=participant_user.email,
+            name="Early Participant",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+
+        with pytest.raises(CTFStateError, match="not within its competition window"):
+            submit_flag(participant.id, challenge.id, "FLAG{too_early}")
+
+    @patch("ctf.services.submission.verify_flag", return_value=False)
+    def test_rejects_after_event_end(self, mock_verify, past_end_event, participant_user, db):
+        """Flag submission is rejected when now > event_end, even if ACTIVE."""
+        challenge = CTFChallenge.objects.create(
+            event=past_end_event,
+            name="Late Challenge",
+            description="Test",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_late",
+        )
+        participant = CTFParticipant.objects.create(
+            event=past_end_event,
+            user=participant_user,
+            email=participant_user.email,
+            name="Late Participant",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+
+        with pytest.raises(CTFStateError, match="not within its competition window"):
+            submit_flag(participant.id, challenge.id, "FLAG{too_late}")
+
+    @patch("ctf.services.submission.verify_flag", return_value=False)
+    def test_allows_within_window(self, mock_verify, participant, challenge):
+        """Flag submission succeeds when within the event time window."""
+        submission = submit_flag(participant.id, challenge.id, "FLAG{on_time}")
+        assert submission is not None

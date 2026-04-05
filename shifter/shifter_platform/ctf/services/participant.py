@@ -56,6 +56,17 @@ def invite_participant(
             details={"event_id": str(event_id)},
         ) from None
 
+    # Check registration deadline
+    if event.registration_deadline and timezone.now() > event.registration_deadline:
+        raise CTFValidationError(
+            "Registration deadline has passed",
+            code="CTF_REGISTRATION_DEADLINE_PASSED",
+            details={
+                "event_id": str(event_id),
+                "deadline": event.registration_deadline.isoformat(),
+            },
+        )
+
     # Check max participants
     if event.max_participants:
         current_count = event.participants.count()
@@ -134,6 +145,17 @@ def bulk_import_participants(
             f"Event {event_id} not found",
             details={"event_id": str(event_id)},
         ) from None
+
+    # Check registration deadline
+    if event.registration_deadline and timezone.now() > event.registration_deadline:
+        raise CTFValidationError(
+            "Registration deadline has passed",
+            code="CTF_REGISTRATION_DEADLINE_PASSED",
+            details={
+                "event_id": str(event_id),
+                "deadline": event.registration_deadline.isoformat(),
+            },
+        )
 
     # Parse CSV
     reader = csv.reader(io.StringIO(csv_content))

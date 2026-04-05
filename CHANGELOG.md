@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `event_timezone` field on CTFEvent for timezone-aware start times in reminder emails
 - Access URL included in reminder emails linking to participant event page
 - Timezone-aware event start time display in reminder email templates
+- Per-challenge connection info for range-integrated challenges (CTF-115)
+- `target_instance_name` and `target_port` fields on CTFChallenge to map a challenge to a specific range service
+- Participant challenge detail view now resolves the configured target against the participant's ready range and displays the host:port inline
 
 ### Changed
 - Scheduler `_handle_send_reminder` handler now calls `send_reminder()` (was a stub)

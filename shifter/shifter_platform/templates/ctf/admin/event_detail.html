@@ -258,6 +258,19 @@
                 <strong>{{ event.range_spinup_minutes }} min</strong>
             </div>
         </div>
+
+        <!-- Danger Zone -->
+        <div class="card" style="border: 1px solid #dc3545;">
+            <div class="card-title" style="color: #dc3545;">Danger Zone</div>
+            <p style="font-size: 13px; color: var(--xdr-text-secondary); margin-bottom: 12px;">
+                Permanently delete this event and all associated data.
+                This action cannot be undone.
+            </p>
+            <a href="{% url 'ctf:admin_event_force_delete' event_id=event.pk %}"
+               class="btn" style="background: #dc3545; color: #fff; width: 100%;">
+                Force Delete Event
+            </a>
+        </div>
     </div>
 </div>
 {% endblock %}

@@ -192,6 +192,109 @@ def delete_event(event_id: UUID) -> None:
         logger.info("Deleted CTF event %s", event_id)
 
 
+def force_delete_event(
+    event_id: UUID,
+    actor: User,
+    confirmation_name: str,
+) -> dict[str, Any]:
+    """Force-delete a CTF event and all associated resources.
+
+    Permanently removes the event regardless of its current state. All child
+    records (challenges, participants, submissions, scores, scheduled tasks,
+    etc.) are cascade-deleted. Range instances are destroyed first via the CMS
+    bridge.
+
+    Args:
+        event_id: UUID of the event to force-delete.
+        actor: The user performing the deletion.
+        confirmation_name: Must match the event name exactly (case-sensitive).
+
+    Returns:
+        Summary dict with event_id, event_name, ranges_destroyed, ranges_failed.
+
+    Raises:
+        CTFNotFoundError: If event doesn't exist.
+        CTFValidationError: If confirmation_name doesn't match.
+    """
+    from ctf.models import CTFChallengeFile, CTFParticipant
+    from ctf.s3 import delete_challenge_file
+    from ctf.services.range import _destroy_single_range
+
+    # Use all_objects so force delete works on soft-deleted events too
+    try:
+        event = CTFEvent.all_objects.get(pk=event_id)
+    except CTFEvent.DoesNotExist:
+        raise CTFNotFoundError(
+            f"Event {event_id} not found",
+            details={"event_id": str(event_id)},
+        ) from None
+
+    if confirmation_name != event.name:
+        raise CTFValidationError(
+            "Confirmation name does not match event name",
+            details={
+                "expected": event.name,
+                "provided": confirmation_name,
+            },
+        )
+
+    event_name = event.name
+
+    # Destroy range instances OUTSIDE the atomic block (external HTTP calls).
+    # Query participants directly via all_objects to handle soft-deleted events
+    # (cleanup_event_ranges uses CTFEvent.objects which skips soft-deleted).
+    ranges_destroyed = 0
+    ranges_failed = 0
+    participants_with_ranges = CTFParticipant.all_objects.filter(
+        event=event,
+        range_instance_id__isnull=False,
+    ).select_related("user")
+    for participant in participants_with_ranges:
+        try:
+            _destroy_single_range(participant, participant.user)
+            ranges_destroyed += 1
+        except Exception:
+            ranges_failed += 1
+            logger.exception(
+                "Failed to destroy range for participant %s during force delete",
+                participant.pk,
+            )
+
+    # Delete S3 challenge file blobs before cascade removes the DB rows
+    s3_keys = list(
+        CTFChallengeFile.all_objects.filter(
+            challenge__event=event,
+        ).values_list("s3_key", flat=True)
+    )
+    for s3_key in s3_keys:
+        try:
+            delete_challenge_file(s3_key)
+        except Exception:
+            logger.exception("Failed to delete S3 object %s during force delete", s3_key)
+
+    # Hard delete inside atomic block — Django CASCADE handles children
+    with transaction.atomic():
+        _cancel_event_tasks(event)
+        event.delete(soft=False)
+
+    logger.warning(
+        "FORCE DELETE: Event %s (%s) permanently deleted by %s (pk=%s). Ranges destroyed: %d, ranges failed: %d.",
+        event_id,
+        event_name,
+        actor.email,
+        actor.pk,
+        ranges_destroyed,
+        ranges_failed,
+    )
+
+    return {
+        "event_id": str(event_id),
+        "event_name": event_name,
+        "ranges_destroyed": ranges_destroyed,
+        "ranges_failed": ranges_failed,
+    }
+
+
 def get_event(event_id: UUID) -> CTFEvent:
     """Get a CTF event by ID.
 

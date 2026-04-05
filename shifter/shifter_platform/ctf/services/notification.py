@@ -552,7 +552,7 @@ def _send_email(
     """Send an email using the shared platform email service.
 
     Delegates to ``shared.email.send_email`` which handles error logging
-    and never raises.
+    and never raises.  Uses ``CTF_FROM_EMAIL`` as the sender address.
 
     Args:
         recipient: Email address.
@@ -563,9 +563,11 @@ def _send_email(
     Returns:
         True if sent successfully.
     """
+    from django.conf import settings
+
     from shared.email import send_email
 
-    return send_email(recipient, subject, html_content, text_content)
+    return send_email(recipient, subject, html_content, text_content, from_email=settings.CTF_FROM_EMAIL)
 
 
 def _render_email(

@@ -451,8 +451,9 @@ CHECK_LEVELS = {
 
 
 def _parse_args() -> argparse.Namespace:
+    valid_checks = sorted(CHECKS)
     parser = argparse.ArgumentParser(description="Run ADR conformance checks")
-    parser.add_argument("checks", nargs="*", choices=sorted(CHECKS), help="Explicit checks to run")
+    parser.add_argument("checks", nargs="*", default=[], help=f"Explicit checks to run ({', '.join(valid_checks)})")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--all", action="store_true", help="Check the full repo")
     scope.add_argument("--changed", action="store_true", help="Check staged or modified files")
@@ -464,7 +465,12 @@ def _parse_args() -> argparse.Namespace:
         help="Named check profile",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable output")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.checks:
+        invalid = set(args.checks) - set(valid_checks)
+        if invalid:
+            parser.error(f"invalid check(s): {', '.join(sorted(invalid))} (choose from {', '.join(valid_checks)})")
+    return args
 
 
 def _selected_files(args: argparse.Namespace, repo_root: Path) -> list[str] | None:

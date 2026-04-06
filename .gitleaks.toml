@@ -1,0 +1,16 @@
+title = "Shifter Gitleaks Configuration"
+
+[allowlist]
+description = "Repo-approved false positives and fixture secrets"
+paths = [
+  '''README\.md''',
+  '''shifter/engine/provisioner/tests/.*''',
+  '''shifter/shifter_platform/tests/engine/ssh/conftest\.py''',
+  '''shifter/packer/tests/.*''',
+  '''scripts/bootstrap/tests/.*''',
+]
+
+regexes = [
+  '''token=[0-9a-f]{40}''',
+  '''MOCK_KEY''',
+]

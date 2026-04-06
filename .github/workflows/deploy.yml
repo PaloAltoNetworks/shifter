@@ -73,8 +73,8 @@ jobs:
           else
             ENV="prod"
           fi
-          echo "environment=$ENV" >> $GITHUB_OUTPUT
-          echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+          echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> "$GITHUB_OUTPUT"
 
       - name: Check for skip flags
         id: skip
@@ -83,8 +83,8 @@ jobs:
           SKIP_TESTS="false"
 
           # Only allow skip on dev (PRs to dev or pushes to dev)
-          if ([ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]) || \
-             ([ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]); then
+          if { [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; } || \
+             { [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]; }; then
 
             # Get commit message
             if [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -104,7 +104,7 @@ jobs:
             fi
           fi
 
-          echo "skip_tests=$SKIP_TESTS" >> $GITHUB_OUTPUT
+          echo "skip_tests=$SKIP_TESTS" >> "$GITHUB_OUTPUT"
 
   # ============================================================================
   # DEPENDENCY CHAIN: Core -> Range -> Platform

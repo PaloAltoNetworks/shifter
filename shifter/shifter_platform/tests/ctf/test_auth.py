@@ -892,16 +892,15 @@ class TestInviteRateLimit:
         from ctf.views import _check_invite_rate_limit
 
         with patch("django.core.cache.cache") as mock_cache:
-            mock_cache.get.return_value = 0
+            mock_cache.incr.return_value = 1
             assert _check_invite_rate_limit(user_id=1, limit=50) is True
-            mock_cache.set.assert_called_once()
 
     def test_rate_limit_blocks_over_limit(self):
         """Requests over limit should be blocked."""
         from ctf.views import _check_invite_rate_limit
 
         with patch("django.core.cache.cache") as mock_cache:
-            mock_cache.get.return_value = 50
+            mock_cache.incr.return_value = 51
             assert _check_invite_rate_limit(user_id=1, limit=50) is False
 
 

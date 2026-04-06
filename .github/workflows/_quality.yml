@@ -17,6 +17,38 @@ jobs:
   # Linting
   # ===========================================================================
 
+  adr-conformance:
+    name: Architecture (adr conformance)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ADR guard
+        run: python3 scripts/adr_guard/adr_guard.py --all --level ci
+
+  workflow-lint:
+    name: Lint (GitHub Actions)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: devops-actions/actionlint@v0.1.10
+
+  terraform-lint:
+    name: Lint (terraform)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Init TFLint
+        run: tflint --init --config "${GITHUB_WORKSPACE}/.tflint.hcl"
+
+      - name: Run TFLint
+        working-directory: platform/terraform
+        run: tflint --recursive --config "${GITHUB_WORKSPACE}/.tflint.hcl"
+
   shifter-platform-lint:
     name: Lint (shifter_platform)
     runs-on: self-hosted
@@ -177,7 +209,6 @@ jobs:
 
   check-layer-imports-arch:
     name: Architecture (layer imports)
-    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -192,6 +223,23 @@ jobs:
       - name: Check layer imports
         working-directory: scripts/check_layer_imports
         run: uv run python check_layer_imports.py
+
+  import-linter-arch:
+    name: Architecture (import linter)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Check import contracts
+        working-directory: shifter/shifter_platform
+        run: uv run lint-imports --config ../../.importlinter
 
   # ===========================================================================
   # SAST
@@ -399,6 +447,17 @@ jobs:
         working-directory: scripts/check_layer_imports
         run: uv run pytest tests/
 
+  adr-guard-tests:
+    name: Tests (adr_guard)
+    if: ${{ !inputs.skip_tests }}
+    needs: [adr-conformance]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: python3 -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
+
   # ===========================================================================
   # JavaScript Tests
   # ===========================================================================
@@ -454,9 +513,36 @@ jobs:
           compact: true
           soft_fail: true
 
+  secrets-gitleaks:
+    name: Security (gitleaks)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine scan range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${{ github.event.before }}..${{ github.sha }}"
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+          echo "log_opts=$RANGE" >> "$GITHUB_OUTPUT"
+
+      - name: Run gitleaks on new commits
+        uses: DariuszPorowski/github-action-gitleaks@v2.1.0
+        with:
+          config: .gitleaks.toml
+          fail: true
+          report_format: json
+          log_opts: ${{ steps.range.outputs.log_opts }}
+
   model-fks-arch:
     name: Architecture (model FKs)
-    if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
     services:
       postgres:

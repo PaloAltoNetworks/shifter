@@ -11,6 +11,6 @@ paths = [
 ]
 
 regexes = [
-  '''token=5fd0e92594a03e3defe1c85a402c9258dbfe4681''',
+  '''token=[0-9a-f]{40}''',
   '''MOCK_KEY''',
 ]

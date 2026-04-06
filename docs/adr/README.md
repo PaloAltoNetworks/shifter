@@ -17,6 +17,12 @@ The enforcement entrypoint is:
 python3 scripts/adr_guard/adr_guard.py --all --level ci
 ```
 
+Optionally pass explicit check names as positional arguments:
+
+```bash
+python3 scripts/adr_guard/adr_guard.py layer-imports guardrail-docs --all
+```
+
 Current mechanisms:
 
 - `scripts/adr_guard/adr_guard.py`: repo-native policy runner

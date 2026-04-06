@@ -766,6 +766,7 @@ class TestCTFRegisterView:
         mock_user = _make_mock_user(email="part@test.com")
         mock_participant = MagicMock()
         mock_participant.user = mock_user
+        mock_participant.is_invite_valid = True
         mock_objects.filter.return_value.select_related.return_value.first.return_value = mock_participant
 
         request = request_factory.get("/ctf/register/?token=valid-token")
@@ -778,12 +779,13 @@ class TestCTFRegisterView:
     @patch("django.contrib.auth.login")
     @patch("ctf.models.CTFParticipant.objects")
     def test_repeated_token_use_works(self, mock_objects, mock_login, request_factory):
-        """Using the same token again should log in the same user."""
+        """Using the same token again should log in the same user (multi-use default)."""
         from ctf.views import ctf_register
 
         mock_user = _make_mock_user(email="part@test.com")
         mock_participant = MagicMock()
         mock_participant.user = mock_user
+        mock_participant.is_invite_valid = True
         mock_objects.filter.return_value.select_related.return_value.first.return_value = mock_participant
 
         # First use
@@ -829,6 +831,78 @@ class TestCTFRegisterView:
         request = request_factory.get("/ctf/register/?token=invited-token")
         response = ctf_register(request)
         assert response.status_code == 400
+
+    @patch("django.contrib.auth.login")
+    @patch("ctf.models.CTFParticipant.objects")
+    def test_expired_token_rejected(self, mock_objects, mock_login, request_factory):
+        """Expired invite token should return 400."""
+        from ctf.views import ctf_register
+
+        mock_participant = MagicMock()
+        mock_participant.user = _make_mock_user(email="expired@test.com")
+        mock_participant.is_invite_valid = False
+        mock_objects.filter.return_value.select_related.return_value.first.return_value = mock_participant
+
+        request = request_factory.get("/ctf/register/?token=expired-token")
+        response = ctf_register(request)
+        assert response.status_code == 400
+        assert b"expired" in response.content.lower()
+        mock_login.assert_not_called()
+
+    @patch("django.contrib.auth.login")
+    @patch("ctf.models.CTFParticipant.objects")
+    def test_valid_token_checks_expiration(self, mock_objects, mock_login, request_factory):
+        """Valid token should pass the is_invite_valid check and log in."""
+        from ctf.views import ctf_register
+
+        mock_participant = MagicMock()
+        mock_participant.user = _make_mock_user(email="valid@test.com")
+        mock_participant.is_invite_valid = True
+        mock_objects.filter.return_value.select_related.return_value.first.return_value = mock_participant
+
+        request = request_factory.get("/ctf/register/?token=valid-token")
+        response = ctf_register(request)
+        assert response.status_code == 302
+        mock_login.assert_called_once()
+
+    @override_settings(MAGIC_LINK_SINGLE_USE=True)
+    @patch("django.contrib.auth.login")
+    @patch("ctf.models.CTFParticipant.objects")
+    def test_single_use_clears_token(self, mock_objects, mock_login, request_factory):
+        """When MAGIC_LINK_SINGLE_USE is True, token is cleared after login."""
+        from ctf.views import ctf_register
+
+        mock_participant = MagicMock()
+        mock_participant.user = _make_mock_user(email="single@test.com")
+        mock_participant.is_invite_valid = True
+        mock_objects.filter.return_value.select_related.return_value.first.return_value = mock_participant
+
+        request = request_factory.get("/ctf/register/?token=single-use-token")
+        response = ctf_register(request)
+        assert response.status_code == 302
+        mock_participant.save.assert_called_once()
+        assert mock_participant.invite_token == ""
+
+
+class TestInviteRateLimit:
+    """Test rate limiting on magic link generation endpoints (PLAT-101)."""
+
+    def test_rate_limit_allows_within_limit(self):
+        """Requests within limit should succeed."""
+        from ctf.views import _check_invite_rate_limit
+
+        with patch("django.core.cache.cache") as mock_cache:
+            mock_cache.get.return_value = 0
+            assert _check_invite_rate_limit(user_id=1, limit=50) is True
+            mock_cache.set.assert_called_once()
+
+    def test_rate_limit_blocks_over_limit(self):
+        """Requests over limit should be blocked."""
+        from ctf.views import _check_invite_rate_limit
+
+        with patch("django.core.cache.cache") as mock_cache:
+            mock_cache.get.return_value = 50
+            assert _check_invite_rate_limit(user_id=1, limit=50) is False
 
 
 # ---------------------------------------------------------------------------

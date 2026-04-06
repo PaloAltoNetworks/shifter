@@ -50,6 +50,15 @@ Changes to these files are architecture work and must stay documented:
 - `scripts/adr_guard/**`
 - `docs/adr/**`
 
+## Ground Control
+
+All requirements management uses the Ground Control MCP server against the `aphelion` project.
+
+- **Requirement UIDs** use the `GC-` prefix (e.g., `GC-42`).
+- **Traceability link types**: `IMPLEMENTS` (requirement → code), `TESTS` (requirement → test), `GITHUB_ISSUE` (requirement → issue).
+- **Requirement statuses**: `DRAFT` → `ACTIVE`. Transition to `ACTIVE` once implemented.
+- **MCP tools**: `gc_get_requirement`, `gc_get_traceability`, `gc_create_github_issue`, `gc_create_traceability_link`, `gc_transition_status`.
+
 ## Architectural Defaults
 
 - Cross-layer access goes through service boundaries.

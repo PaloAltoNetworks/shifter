@@ -32,7 +32,7 @@ There is also agent-specific wiring:
 - `.claude/hooks/adr_guard_hook.py` runs the ADR guard after Claude edits files.
 - `.claude/skills/adr-check/SKILL.md` provides a default workflow for ADR conformance work.
 - `.claude/skills/architecture-review/SKILL.md` provides a repo-specific architecture review checklist.
-- `AGENTS.md` gives Codex a repo-local policy file.
+- `AGENTS.md` gives Codex a repo-local policy file, including Ground Control project context for the `/implement` workflow.
 
 Review controls:
 
@@ -52,6 +52,8 @@ The first slice intentionally stays small:
 
 - `guardrail-docs`
   Requires guardrail changes to update ADR or developer docs in the same change.
+  This is a changeset-level check (needs to see multiple files) so it runs in
+  pre-commit and `--level fast`, but NOT in the per-edit Claude hook.
 
 - `cross-layer-model-imports`
   Fails on direct cross-layer model imports inside service layers. The current tree already satisfies this rule, so it is part of the default guard.

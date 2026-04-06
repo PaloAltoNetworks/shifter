@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.62.1] - 2026-04-06
+
+### Fixed
+- ADR guard argparse ambiguity: positional `checks` arg replaced with `--checks` named option to prevent `--files nargs="+"` from swallowing check names
+- Claude post-edit hook no longer runs `guardrail-docs` check, which is a changeset-level check incompatible with per-file hook context
+
+### Added
+- Ground Control project context in AGENTS.md for the `/implement` workflow
+
 ## [3.62.0] - 2026-04-05
 
 ### Added

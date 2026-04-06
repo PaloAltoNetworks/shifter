@@ -33,6 +33,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _check_invite_rate_limit(user_id: int, limit: int = 50, window: int = 3600) -> bool:
+    """Return True if within rate limit for magic link generation.
+
+    Uses Django's cache with a fixed-window counter. Default: 50 per hour.
+    Note: with the default LocMemCache, limits are per-process. For cross-worker
+    enforcement, configure a shared CACHES backend (e.g. Redis, Memcached).
+    """
+    from django.core.cache import cache
+
+    key = f"invite_ratelimit:{user_id}"
+    # add() only sets if key doesn't exist — preserves the original TTL
+    cache.add(key, 0, timeout=window)
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        # Key expired between add and incr — retry
+        cache.set(key, 1, timeout=window)
+        count = 1
+    return count <= limit
+
+
 def _get_user(request: HttpRequest) -> User:
     """Get authenticated user from request. Use only in @login_required views."""
     assert request.user.is_authenticated, "View must use @login_required"
@@ -171,7 +192,11 @@ def ctf_register(request: HttpRequest) -> HttpResponse:
     No login required. The invite token IS the authentication.
     Participants are auto-registered at add-time via _auto_register_participant(),
     so every valid token maps to a participant with a linked Django user.
+
+    Token expiration is enforced via is_invite_valid. When MAGIC_LINK_SINGLE_USE
+    is True, the token is cleared after the first successful login.
     """
+    from django.conf import settings
     from django.contrib.auth import login
 
     from ctf.models import CTFParticipant
@@ -184,7 +209,15 @@ def ctf_register(request: HttpRequest) -> HttpResponse:
     if not participant or not participant.user:
         return HttpResponse("Invalid invite token.", status=400)
 
+    if not participant.is_invite_valid:
+        return HttpResponse("Invite token has expired.", status=400)
+
     login(request, participant.user, backend="django.contrib.auth.backends.ModelBackend")
+
+    if getattr(settings, "MAGIC_LINK_SINGLE_USE", False):
+        participant.invite_token = ""  # nosec B105 — clearing token, not a password
+        participant.save(update_fields=["invite_token", "updated_at"])
+
     return redirect("mission_control:dashboard")
 
 
@@ -2769,6 +2802,9 @@ def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) ->
     from ctf.exceptions import CTFNotFoundError, CTFStateError
     from ctf.services import get_participant, resend_invite
 
+    if not _check_invite_rate_limit(_get_user(request).pk):
+        return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
+
     try:
         participant = get_participant(participant_id)
     except CTFNotFoundError:
@@ -3309,6 +3345,9 @@ def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
     from ctf.exceptions import CTFNotFoundError
     from ctf.services import get_event
     from ctf.services.notification import send_invitations
+
+    if not _check_invite_rate_limit(_get_user(request).pk):
+        return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
 
     try:
         event = get_event(event_id)

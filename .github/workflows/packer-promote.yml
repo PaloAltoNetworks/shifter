@@ -43,9 +43,11 @@ jobs:
       - name: Update prod SSM from config
         run: |
           AMI_ID=$(jq -r '.prod' shifter/packer/dc-amis.json)
-          echo "## DC AMI Update (Prod)" >> $GITHUB_STEP_SUMMARY
-          echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Source:** dc-amis.json (prebaked AMI)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## DC AMI Update (Prod)"
+            echo "- **AMI ID:** \`$AMI_ID\`"
+            echo "- **Source:** dc-amis.json (prebaked AMI)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           aws ssm put-parameter \
             --name "/shifter/ami/dc" \
@@ -54,9 +56,11 @@ jobs:
             --overwrite \
             --description "Prebaked DC AMI from dc-amis.json, run ${{ github.run_id }}"
 
-          echo "- **SSM Parameter:** \`/shifter/ami/dc\` updated" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Done!** Prod DC AMI updated." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "- **SSM Parameter:** \`/shifter/ami/dc\` updated"
+            echo ""
+            echo "**Done!** Prod DC AMI updated."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Other AMIs are copied from dev to prod
   promote:
@@ -74,14 +78,16 @@ jobs:
       - name: Get dev AMI ID from SSM
         run: |
           DEV_AMI_ID=$(aws ssm get-parameter --name "/shifter/ami/${{ inputs.ami_type }}" --query Parameter.Value --output text)
-          echo "DEV_AMI_ID=$DEV_AMI_ID" >> $GITHUB_ENV
-          echo "## Promoting ${{ inputs.ami_type }} AMI to prod" >> $GITHUB_STEP_SUMMARY
-          echo "- **Dev AMI ID:** \`$DEV_AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "DEV_AMI_ID=$DEV_AMI_ID" >> "$GITHUB_ENV"
+          {
+            echo "## Promoting ${{ inputs.ami_type }} AMI to prod"
+            echo "- **Dev AMI ID:** \`$DEV_AMI_ID\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Get dev account ID
         run: |
           DEV_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "DEV_ACCOUNT_ID=$DEV_ACCOUNT_ID" >> $GITHUB_ENV
+          echo "DEV_ACCOUNT_ID=$DEV_ACCOUNT_ID" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials (prod)
         uses: aws-actions/configure-aws-credentials@v4
@@ -92,7 +98,7 @@ jobs:
       - name: Get prod account ID
         run: |
           PROD_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "PROD_ACCOUNT_ID=$PROD_ACCOUNT_ID" >> $GITHUB_ENV
+          echo "PROD_ACCOUNT_ID=$PROD_ACCOUNT_ID" >> "$GITHUB_ENV"
 
       - name: Switch back to dev to share AMI
         uses: aws-actions/configure-aws-credentials@v4
@@ -110,6 +116,7 @@ jobs:
           # Get and share all snapshots associated with the AMI
           SNAPSHOT_IDS=$(aws ec2 describe-images --image-ids "$DEV_AMI_ID" \
             --query 'Images[0].BlockDeviceMappings[*].Ebs.SnapshotId' --output text)
+          # shellcheck disable=SC2086
           for SNAPSHOT_ID in $SNAPSHOT_IDS; do
             if [ "$SNAPSHOT_ID" != "None" ] && [ -n "$SNAPSHOT_ID" ]; then
               aws ec2 modify-snapshot-attribute \
@@ -117,10 +124,10 @@ jobs:
                 --attribute createVolumePermission \
                 --operation-type add \
                 --user-ids "$PROD_ACCOUNT_ID"
-              echo "- **Shared snapshot:** $SNAPSHOT_ID" >> $GITHUB_STEP_SUMMARY
+              echo "- **Shared snapshot:** $SNAPSHOT_ID" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
-          echo "- **Shared AMI with prod account:** $PROD_ACCOUNT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Shared AMI with prod account:** $PROD_ACCOUNT_ID" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure AWS credentials (prod) for copy
         uses: aws-actions/configure-aws-credentials@v4
@@ -136,14 +143,14 @@ jobs:
             --name "shifter-${{ inputs.ami_type }}-${{ github.run_id }}" \
             --description "Promoted from dev by GitHub Actions run ${{ github.run_id }}" \
             --query ImageId --output text)
-          echo "PROD_AMI_ID=$PROD_AMI_ID" >> $GITHUB_ENV
-          echo "- **Prod AMI ID:** \`$PROD_AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "PROD_AMI_ID=$PROD_AMI_ID" >> "$GITHUB_ENV"
+          echo "- **Prod AMI ID:** \`$PROD_AMI_ID\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Wait for prod AMI to be available
         run: |
           echo "Waiting for AMI $PROD_AMI_ID to become available..."
           aws ec2 wait image-available --image-ids "$PROD_AMI_ID"
-          echo "- **Prod AMI Status:** available" >> $GITHUB_STEP_SUMMARY
+          echo "- **Prod AMI Status:** available" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update prod SSM Parameter
         run: |
@@ -153,6 +160,8 @@ jobs:
             --value "$PROD_AMI_ID" \
             --overwrite \
             --description "Promoted from dev by GitHub Actions run ${{ github.run_id }}"
-          echo "- **Prod SSM:** \`/shifter/ami/${{ inputs.ami_type }}\` updated" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Done!** Prod now uses the same AMI as dev." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "- **Prod SSM:** \`/shifter/ami/${{ inputs.ami_type }}\` updated"
+            echo ""
+            echo "**Done!** Prod now uses the same AMI as dev."
+          } >> "$GITHUB_STEP_SUMMARY"

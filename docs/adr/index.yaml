@@ -1,0 +1,105 @@
+[
+  {
+    "id": "ADR-001",
+    "title": "Cross-layer access goes through service boundaries",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Cross-layer imports may target shared contracts and explicitly allowed service seams only.",
+    "rules": [
+      {
+        "id": "ADR-001-R1",
+        "description": "Cross-layer imports must conform to scripts/check_layer_imports/layer_imports.yaml.",
+        "checks": ["layer-imports"]
+      },
+      {
+        "id": "ADR-001-R2",
+        "description": "Direct cross-layer model imports are disallowed by default and must be introduced intentionally.",
+        "checks": ["cross-layer-model-imports"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "claude-hook", "agent-policy"],
+    "evidence": [
+      "scripts/check_layer_imports/layer_imports.yaml",
+      "scripts/adr_guard/adr_guard.py"
+    ]
+  },
+  {
+    "id": "ADR-002",
+    "title": "Guardrail changes must remain documented",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Changes to enforcement and workflow files must include matching ADR or developer documentation updates.",
+    "rules": [
+      {
+        "id": "ADR-002-R1",
+        "description": "Guardrail file changes must update docs/adr or the developer ADR enforcement docs in the same change.",
+        "checks": ["guardrail-docs"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "agent-policy"],
+    "evidence": [
+      "docs/adr/README.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md"
+    ]
+  },
+  {
+    "id": "ADR-003",
+    "title": "ADR enforcement is a required architecture gate",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Architecture policy checks run independently of optional test skips.",
+    "rules": [
+      {
+        "id": "ADR-003-R1",
+        "description": "ADR conformance must run in CI even when tests are skipped.",
+        "checks": ["adr-registry", "layer-imports", "cross-layer-model-imports"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["ci"],
+    "evidence": [
+      ".github/workflows/_quality.yml",
+      ".github/workflows/deploy.yml"
+    ]
+  },
+  {
+    "id": "ADR-004",
+    "title": "Use stack-appropriate off-the-shelf policy tooling where it fits",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Prefer mature ecosystem-native enforcement tools for workflows, Terraform, Python import contracts, and secret scanning, while keeping repo-specific rules in adr_guard.",
+    "rules": [
+      {
+        "id": "ADR-004-R1",
+        "description": "GitHub Actions workflows are linted with actionlint.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R2",
+        "description": "Terraform code is linted with TFLint in addition to fmt and validate.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R3",
+        "description": "Python package import contracts are enforced with import-linter in addition to repo-specific checks.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R4",
+        "description": "New commits are scanned for secrets with gitleaks.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      ".importlinter",
+      ".tflint.hcl",
+      ".gitleaks.toml",
+      ".pre-commit-config.yaml",
+      ".github/workflows/_quality.yml"
+    ]
+  }
+]

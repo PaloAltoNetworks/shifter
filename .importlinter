@@ -1,0 +1,60 @@
+[importlinter]
+root_packages =
+    cms
+    engine
+    management
+    mission_control
+    shared
+    ctf
+
+[importlinter:contract:engine-forbidden]
+name = Engine may not depend on CMS, Mission Control, or CTF
+type = forbidden
+source_modules =
+    engine
+forbidden_modules =
+    cms
+    mission_control
+    ctf
+allow_indirect_imports = True
+
+[importlinter:contract:cms-forbidden]
+name = CMS may not depend on Mission Control or CTF
+type = forbidden
+source_modules =
+    cms
+forbidden_modules =
+    mission_control
+    ctf
+allow_indirect_imports = True
+
+[importlinter:contract:management-forbidden]
+name = Management stays isolated from other app layers
+type = forbidden
+source_modules =
+    management
+forbidden_modules =
+    engine
+    cms
+    mission_control
+    ctf
+allow_indirect_imports = True
+
+[importlinter:contract:mission-control-forbidden]
+name = Mission Control may not depend on CTF directly
+type = forbidden
+source_modules =
+    mission_control
+forbidden_modules =
+    ctf
+allow_indirect_imports = True
+
+[importlinter:contract:ctf-forbidden]
+name = CTF may not depend on Engine or Mission Control directly
+type = forbidden
+source_modules =
+    ctf
+forbidden_modules =
+    engine
+    mission_control
+allow_indirect_imports = True

@@ -453,7 +453,7 @@ CHECK_LEVELS = {
 def _parse_args() -> argparse.Namespace:
     valid_checks = sorted(CHECKS)
     parser = argparse.ArgumentParser(description="Run ADR conformance checks")
-    parser.add_argument("checks", nargs="*", default=[], help=f"Explicit checks to run ({', '.join(valid_checks)})")
+    parser.add_argument("--checks", nargs="*", default=[], help=f"Explicit checks to run ({', '.join(valid_checks)})")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--all", action="store_true", help="Check the full repo")
     scope.add_argument("--changed", action="store_true", help="Check staged or modified files")

@@ -1224,13 +1224,17 @@ class CTFParticipant(CTFBaseModel):
         if not self.invite_token:
             self.invite_token = secrets.token_urlsafe(32)
         if not self.invite_token_expires:
-            # Token valid through event end
-            if hasattr(self, "event") and self.event_id and self.event.event_end:
-                self.invite_token_expires = self.event.event_end
-            else:
-                from datetime import timedelta
+            from datetime import timedelta
 
-                self.invite_token_expires = timezone.now() + timedelta(days=7)
+            from django.conf import settings
+
+            hours = getattr(settings, "MAGIC_LINK_EXPIRY_HOURS", 24)
+            config_expiry = timezone.now() + timedelta(hours=hours)
+            if hasattr(self, "event") and self.event_id and self.event.event_end:
+                # Use the earlier of event end or configured expiry
+                self.invite_token_expires = min(self.event.event_end, config_expiry)
+            else:
+                self.invite_token_expires = config_expiry
         super().save(*args, **kwargs)
 
     def clean(self) -> None:

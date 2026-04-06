@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.61.0] - 2026-04-05
+
+### Added
+- Time-boundary enforcement on flag submissions rejects attempts before event start or after event end, regardless of event state (CTF-702)
+- Countdown timer on participant event page showing time until event start or end
+- Client-side local timezone display for event start and end times on participant event page
+
 ## [3.60.0] - 2026-04-05
 
 ### Added

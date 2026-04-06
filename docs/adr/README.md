@@ -20,7 +20,7 @@ python3 scripts/adr_guard/adr_guard.py --all --level ci
 Optionally pass explicit check names as positional arguments:
 
 ```bash
-python3 scripts/adr_guard/adr_guard.py layer-imports guardrail-docs --all
+python3 scripts/adr_guard/adr_guard.py --checks layer-imports guardrail-docs --all
 ```
 
 Current mechanisms:

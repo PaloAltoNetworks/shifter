@@ -75,12 +75,14 @@ jobs:
           packer build -color=false -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
 
           # Extract AMI ID from manifest
-          AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' ${{ inputs.ami_type }}-manifest.json)
-          echo "AMI_ID=$AMI_ID" >> $GITHUB_ENV
-          echo "## Dev AMI Build Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- **Type:** ${{ inputs.ami_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Region:** us-east-2" >> $GITHUB_STEP_SUMMARY
+          AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' "${{ inputs.ami_type }}-manifest.json")
+          echo "AMI_ID=$AMI_ID" >> "$GITHUB_ENV"
+          {
+            echo "## Dev AMI Build Complete"
+            echo "- **Type:** ${{ inputs.ami_type }}"
+            echo "- **AMI ID:** \`$AMI_ID\`"
+            echo "- **Region:** us-east-2"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update dev SSM Parameter
         run: |
@@ -114,7 +116,7 @@ jobs:
 
           if [ -n "$INSTANCE_IDS" ]; then
             echo "Terminating: $INSTANCE_IDS"
-            # shellcheck disable=SC2086 -- word splitting intended for multiple IDs
+            # shellcheck disable=SC2086
             aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
             echo "- **Cleanup:** Terminated builder instance(s)" >> "$GITHUB_STEP_SUMMARY"
           else

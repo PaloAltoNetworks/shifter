@@ -31,7 +31,7 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - uses: devops-actions/actionlint@v0.1.10
+      - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
 
   terraform-lint:
     name: Lint (terraform)
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v4
+        uses: terraform-linters/setup-tflint@6e87008f9dd1fe3e34e66aca6c97b4a69f72a7f4 # v4
 
       - name: Init TFLint
         run: tflint --init --config "${GITHUB_WORKSPACE}/.tflint.hcl"
@@ -534,7 +534,7 @@ jobs:
           echo "log_opts=$RANGE" >> "$GITHUB_OUTPUT"
 
       - name: Run gitleaks on new commits
-        uses: DariuszPorowski/github-action-gitleaks@v2.1.0
+        uses: DariuszPorowski/github-action-gitleaks@a027585cb1f2780aa441f20f4d0aabf8b1a0d90e # v2.1.0
         with:
           config: .gitleaks.toml
           fail: true

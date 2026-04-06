@@ -25,7 +25,6 @@ jobs:
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       environment: ${{ steps.env.outputs.environment }}
       is_dev: ${{ steps.env.outputs.is_dev }}
-      skip_quality: ${{ steps.skip.outputs.skip_quality }}
       skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
       - uses: actions/checkout@v4
@@ -74,19 +73,18 @@ jobs:
           else
             ENV="prod"
           fi
-          echo "environment=$ENV" >> $GITHUB_OUTPUT
-          echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+          echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> "$GITHUB_OUTPUT"
 
       - name: Check for skip flags
         id: skip
         run: |
-          # Check for [skip quality] or [skip tests] in commit message
-          SKIP_QUALITY="false"
+          # Check for [skip tests] in commit message
           SKIP_TESTS="false"
 
           # Only allow skip on dev (PRs to dev or pushes to dev)
-          if ([ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]) || \
-             ([ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]); then
+          if { [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ github.base_ref }}" == "dev" ]; } || \
+             { [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/dev" ]; }; then
 
             # Get commit message
             if [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -99,12 +97,6 @@ jobs:
 
             echo "Commit message: $COMMIT_MSG"
 
-            # Check commit message for [skip quality]
-            if echo "$COMMIT_MSG" | grep -qi "\[skip quality\]"; then
-              SKIP_QUALITY="true"
-              echo "::warning::Skipping quality checks (commit message contains [skip quality])"
-            fi
-
             # Check commit message for [skip tests]
             if echo "$COMMIT_MSG" | grep -qi "\[skip tests\]"; then
               SKIP_TESTS="true"
@@ -112,8 +104,7 @@ jobs:
             fi
           fi
 
-          echo "skip_quality=$SKIP_QUALITY" >> $GITHUB_OUTPUT
-          echo "skip_tests=$SKIP_TESTS" >> $GITHUB_OUTPUT
+          echo "skip_tests=$SKIP_TESTS" >> "$GITHUB_OUTPUT"
 
   # ============================================================================
   # DEPENDENCY CHAIN: Core -> Range -> Platform
@@ -124,7 +115,6 @@ jobs:
     name: Quality
     needs: changes
     if: |
-      needs.changes.outputs.skip_quality != 'true' &&
       (needs.changes.outputs.core == 'true' ||
        needs.changes.outputs.range == 'true' ||
        needs.changes.outputs.shifter_engine == 'true' ||

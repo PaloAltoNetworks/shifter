@@ -10,6 +10,7 @@ Getting started as a Shifter developer.
 4. [Secrets](secrets) - What secrets exist, where they live
 5. [Terraform](terraform) - Infrastructure patterns
 6. [Principles](principles) - Engineering philosophy
+7. [ADR Enforcement](adr-enforcement) - Architecture guardrails and policy checks
 
 ## Prerequisites
 

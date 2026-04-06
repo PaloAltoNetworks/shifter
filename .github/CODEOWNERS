@@ -1,0 +1,18 @@
+# Guardrails and architecture
+/docs/adr/** @Brad-Edwards
+/scripts/adr_guard/** @Brad-Edwards
+/.github/workflows/** @Brad-Edwards
+/.github/CODEOWNERS @Brad-Edwards
+/.github/pull_request_template.md @Brad-Edwards
+/.github/copilot-instructions.md @Brad-Edwards
+/.pre-commit-config.yaml @Brad-Edwards
+/.importlinter @Brad-Edwards
+/.tflint.hcl @Brad-Edwards
+/.gitleaks.toml @Brad-Edwards
+/.claude/settings.json @Brad-Edwards
+/.claude/hooks/** @Brad-Edwards
+/AGENTS.md @Brad-Edwards
+
+# Shared contracts and public service seams
+/shifter/shifter_platform/shared/** @Brad-Edwards
+/shifter/shifter_platform/*/services.py @Brad-Edwards

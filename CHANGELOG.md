@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.62.0] - 2026-04-05
+
+### Added
+- Enforce magic link token expiration at login — expired tokens are now rejected (PLAT-101)
+- Configurable magic link expiration via `MAGIC_LINK_EXPIRY_HOURS` setting (default 24 hours)
+- Configurable single-use tokens via `MAGIC_LINK_SINGLE_USE` setting (default multi-use)
+- Rate limiting on invitation generation endpoints (50 per hour per organizer)
+
 ## [3.61.0] - 2026-04-05
 
 ### Added

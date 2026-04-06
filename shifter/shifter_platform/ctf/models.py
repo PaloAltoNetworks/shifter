@@ -1230,7 +1230,10 @@ class CTFParticipant(CTFBaseModel):
             else:
                 from datetime import timedelta
 
-                self.invite_token_expires = timezone.now() + timedelta(days=7)
+                from django.conf import settings
+
+                hours = getattr(settings, "MAGIC_LINK_EXPIRY_HOURS", 24)
+                self.invite_token_expires = timezone.now() + timedelta(hours=hours)
         super().save(*args, **kwargs)
 
     def clean(self) -> None:

@@ -59,6 +59,7 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_ENDPOINT_URL: http://localstack:4566
+      WEB_WORKERS: 2
     depends_on:
       db:
         condition: service_healthy

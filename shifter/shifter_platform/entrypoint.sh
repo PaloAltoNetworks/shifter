@@ -126,15 +126,11 @@ fi
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Run command passed as arguments, or default to daphne
+# Run command passed as arguments, or default to gunicorn
 if [[ $# -gt 0 ]]; then
     echo "Running: $@"
     exec "$@"
 else
-    echo "Starting daphne..."
-    exec daphne config.asgi:application \
-        --bind 0.0.0.0 \
-        --port 8000 \
-        --access-log - \
-        --verbosity 1
+    echo "Starting gunicorn (workers: ${WEB_WORKERS:-auto})..."
+    exec gunicorn --config gunicorn.conf.py
 fi

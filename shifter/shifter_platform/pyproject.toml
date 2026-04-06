@@ -16,6 +16,7 @@ dependencies = [
     "django-ses",
     "djangorestframework",
     "gunicorn",
+    "uvicorn[standard]",
     "markdown",
     "mozilla-django-oidc",
     "paramiko",

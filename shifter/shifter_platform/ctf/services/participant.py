@@ -403,9 +403,15 @@ def resend_invite(participant_id: UUID) -> CTFParticipant:
             details={"participant_id": str(participant_id)},
         ) from None
 
-    # Generate new token — valid through event end
+    # Generate new token — valid through min(event end, configured expiry)
+    from datetime import timedelta
+
+    from django.conf import settings
+
     now = timezone.now()
-    token_expires = participant.event.event_end
+    hours = getattr(settings, "MAGIC_LINK_EXPIRY_HOURS", 24)
+    config_expiry = now + timedelta(hours=hours)
+    token_expires = min(participant.event.event_end, config_expiry)
 
     participant.invite_token = secrets.token_urlsafe(32)
     participant.invite_token_expires = token_expires

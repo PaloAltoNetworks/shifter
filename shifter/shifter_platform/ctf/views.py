@@ -36,16 +36,22 @@ logger = logging.getLogger(__name__)
 def _check_invite_rate_limit(user_id: int, limit: int = 50, window: int = 3600) -> bool:
     """Return True if within rate limit for magic link generation.
 
-    Uses Django's cache to track invitations per user. Default: 50 per hour.
+    Uses Django's cache with a fixed-window counter. Default: 50 per hour.
+    Note: with the default LocMemCache, limits are per-process. For cross-worker
+    enforcement, configure a shared CACHES backend (e.g. Redis, Memcached).
     """
     from django.core.cache import cache
 
     key = f"invite_ratelimit:{user_id}"
-    count = cache.get(key, 0)
-    if count >= limit:
-        return False
-    cache.set(key, count + 1, timeout=window)
-    return True
+    # add() only sets if key doesn't exist — preserves the original TTL
+    cache.add(key, 0, timeout=window)
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        # Key expired between add and incr — retry
+        cache.set(key, 1, timeout=window)
+        count = 1
+    return count <= limit
 
 
 def _get_user(request: HttpRequest) -> User:

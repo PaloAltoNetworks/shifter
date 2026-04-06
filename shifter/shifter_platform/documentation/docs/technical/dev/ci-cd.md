@@ -68,10 +68,19 @@ The orchestrator uses path filters to run only relevant jobs:
 
 Runs on every PR and push:
 
+- **ADR conformance**: `python3 scripts/adr_guard/adr_guard.py --all --level ci`
+- **Workflow linting**: `actionlint`
+- **Terraform linting**: `tflint`
+  The repo currently runs a narrow TFLint profile that excludes existing
+  version/provider and unused-declaration debt until that backlog is burned down.
+- **Python import contracts**: `lint-imports --config ../../.importlinter`
 - **Python linting**: `ruff check`, `ruff format --check`
 - **Tests**: `pytest` with PostgreSQL service container
 - **IaC scanning**: Checkov (soft fail - warnings only)
+- **Secret scanning**: gitleaks on newly introduced commits
 - **Coverage**: Shifter Engine requires 80% minimum
+
+Architecture checks are not skipped by the normal test-skip path. `[skip tests]` may skip slow test jobs on `dev`, but it does not bypass ADR or architecture enforcement.
 
 ## Terraform Flow
 

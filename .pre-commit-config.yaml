@@ -22,6 +22,18 @@ repos:
         # Exclude: tests (check key format strings) + crypto.py (key generation module, not leaked secrets)
         exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py)
 
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.11
+    hooks:
+      - id: actionlint
+        files: ^\.github/workflows/.*\.yml$
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks
+        args: [--config, .gitleaks.toml]
+
   # Python - Ruff (linting + formatting)
   # Note: Ruff handles import sorting via "I" rules - no separate isort needed
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -114,6 +126,10 @@ repos:
     hooks:
       - id: terraform_fmt
         files: ^platform/terraform/
+      - id: terraform_tflint
+        files: ^platform/terraform/
+        args:
+          [--args=--config=__GIT_WORKING_DIR__/.tflint.hcl]
       - id: terraform_validate
         files: ^platform/terraform/
 
@@ -192,6 +208,22 @@ repos:
 
   - repo: local
     hooks:
+      - id: adr-guard-fast
+        name: architecture (adr guard fast)
+        entry: python3 scripts/adr_guard/adr_guard.py --changed --level fast
+        language: system
+        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$)
+        pass_filenames: false
+        verbose: true
+
+      - id: import-linter-shifter-platform
+        name: architecture (import linter)
+        entry: bash -c 'cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter'
+        language: system
+        files: ^(shifter/shifter_platform/(cms|engine|management|mission_control|shared|ctf)/.*\.py$|\.importlinter$)
+        pass_filenames: false
+        verbose: true
+
       - id: check-layer-imports
         name: architecture (layer imports)
         entry: bash -c 'cd scripts/check_layer_imports && uv run python check_layer_imports.py -q'

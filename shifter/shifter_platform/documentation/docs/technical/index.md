@@ -31,6 +31,7 @@ Platform architecture, infrastructure, and development documentation.
 - [CI/CD](dev/ci-cd) - Pipeline configuration
 - [Secrets](dev/secrets) - Secrets management
 - [Principles](dev/principles) - Engineering philosophy
+- [ADR Enforcement](dev/adr-enforcement) - Architecture guardrails and policy checks
 
 ## Planning & Notes
 

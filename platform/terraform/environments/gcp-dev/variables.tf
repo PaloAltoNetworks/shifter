@@ -101,6 +101,12 @@ variable "db_availability_type" {
   default     = "ZONAL"
 }
 
+variable "require_mfa" {
+  description = "Require MFA for all portal users"
+  type        = bool
+  default     = false
+}
+
 variable "portal_domain_names" {
   description = "Domain names for the portal SSL certificate"
   type        = list(string)

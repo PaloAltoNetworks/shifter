@@ -195,6 +195,22 @@ module "redis" {
 # Load Balancer + Cloud Armor WAF (portal HTTPS ingress)
 # ------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------
+# Firebase Auth (Identity Platform)
+# ------------------------------------------------------------------------------
+
+module "auth" {
+  source = "../../modules/gcp-auth"
+
+  project_id         = var.project_id
+  require_mfa        = var.require_mfa
+  authorized_domains = var.portal_domain_names
+}
+
+# ------------------------------------------------------------------------------
+# Load Balancer + Cloud Armor WAF (portal HTTPS ingress)
+# ------------------------------------------------------------------------------
+
 module "loadbalancer" {
   source = "../../modules/gcp-loadbalancer"
 

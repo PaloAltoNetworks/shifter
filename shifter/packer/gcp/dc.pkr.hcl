@@ -1,13 +1,39 @@
 // Windows Server 2022 Domain Controller image for KubeVirt
 //
-// Same base as the Windows victim image but with:
-// - AD DS feature pre-installed (NOT promoted — promotion happens at runtime)
-// - DNS feature pre-installed
-// - No XAMPP/IIS/FTP victim services
-// - DC-specific firewall rules
+// Pre-promoted DC image — AD forest is fully installed during the Packer build,
+// NOT at runtime. This saves 5-10 minutes per range deployment.
 //
-// At runtime, cloudbase-init userdata promotes the DC:
-//   Install-ADDSForest -DomainName "yourrange.local" ...
+// CANNOT be sysprepped. Microsoft does not support sysprep on a promoted DC
+// (breaks NTDS.dit, replication metadata, SYSVOL). This is the same constraint
+// as the AWS DC AMI (prebaked in dc-amis.json with hardcoded AMI IDs).
+//
+// Implications:
+// - Every VM booted from this image has the same SID and computer name
+// - This is fine because each range's DC is on an isolated network
+// - Must use KubeVirt DataVolume (persistent clone), NOT containerDisk,
+//   because AD state needs to persist and the image can't be ephemeral
+// - CDI clones the golden DataVolume per range (fast block-level copy)
+//
+// The domain name and other per-range config are set by the existing
+// DC setup plan scripts at range provisioning time (same as AWS flow).
+
+variable "dc_domain_name" {
+  type        = string
+  description = "AD forest domain name to promote during build"
+  default     = "internal.shifter"
+}
+
+variable "dc_netbios_name" {
+  type        = string
+  description = "AD NetBIOS domain name"
+  default     = "INTSHIFTER"
+}
+
+variable "dc_safe_mode_password" {
+  type        = string
+  description = "AD DS Safe Mode Administrator password (DSRM)"
+  sensitive   = true
+}
 
 source "qemu" "dc" {
   iso_url      = var.windows_iso_url
@@ -54,7 +80,7 @@ build {
     ]
   }
 
-  // Install cloudbase-init
+  // Install cloudbase-init (for boot-time hostname/network config — NOT sysprep)
   provisioner "powershell" {
     inline = [
       "$url = 'https://cloudbase.it/downloads/CloudbaseInitSetup_Stable_x64.msi'",
@@ -63,8 +89,10 @@ build {
       "Remove-Item 'C:\\cloudbase-init.msi'",
       "",
       "$configFile = 'C:\\Program Files\\Cloudbase Solutions\\Cloudbase-Init\\conf\\cloudbase-init.conf'",
-      "(Get-Content $configFile) -replace 'plugins=.*', 'plugins=cloudbaseinit.plugins.common.mtu.MTUPlugin,cloudbaseinit.plugins.common.sethostname.SetHostNamePlugin,cloudbaseinit.plugins.common.localscripts.LocalScriptsPlugin,cloudbaseinit.plugins.common.userdata.UserDataPlugin' | Set-Content $configFile",
+      "(Get-Content $configFile) -replace 'plugins=.*', 'plugins=cloudbaseinit.plugins.common.mtu.MTUPlugin,cloudbaseinit.plugins.common.localscripts.LocalScriptsPlugin,cloudbaseinit.plugins.common.userdata.UserDataPlugin' | Set-Content $configFile",
       "(Get-Content $configFile) -replace 'metadata_services=.*', 'metadata_services=cloudbaseinit.metadata.services.nocloudservice.NoCloudConfigDriveService' | Set-Content $configFile",
+      "",
+      "# Remove SetHostNamePlugin — hostname changes break AD on a promoted DC",
     ]
   }
 
@@ -79,7 +107,7 @@ build {
     ]
   }
 
-  // Pre-install AD DS + DNS features (promotion happens at runtime via userdata)
+  // Install AD DS + DNS features
   provisioner "powershell" {
     inline = [
       "Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools",
@@ -88,11 +116,42 @@ build {
     ]
   }
 
-  // Sysprep
+  // Promote to Domain Controller (full forest install)
+  // This is what makes the image pre-promoted — saves 5-10 min per range.
   provisioner "powershell" {
     inline = [
-      "& 'C:\\Program Files\\Cloudbase Solutions\\Cloudbase-Init\\conf\\Unattend.xml'",
-      "C:\\Windows\\System32\\Sysprep\\sysprep.exe /generalize /oobe /shutdown /unattend:'C:\\Program Files\\Cloudbase Solutions\\Cloudbase-Init\\conf\\Unattend.xml'",
+      "Import-Module ADDSDeployment",
+      "$safePwd = ConvertTo-SecureString '${var.dc_safe_mode_password}' -AsPlainText -Force",
+      "Install-ADDSForest `",
+      "  -DomainName '${var.dc_domain_name}' `",
+      "  -DomainNetbiosName '${var.dc_netbios_name}' `",
+      "  -SafeModeAdministratorPassword $safePwd `",
+      "  -InstallDns:$true `",
+      "  -NoRebootOnCompletion:$true `",
+      "  -Force:$true",
+    ]
+  }
+
+  // Reboot after promotion (AD DS requires it)
+  provisioner "windows-restart" {
+    restart_timeout = "15m"
+  }
+
+  // Verify AD is running
+  provisioner "powershell" {
+    inline = [
+      "Get-ADDomain | Select-Object -Property DNSRoot, NetBIOSName, DomainMode",
+      "Get-Service NTDS, DNS | Format-Table Name, Status",
+    ]
+  }
+
+  // NO SYSPREP — cannot sysprep a promoted DC.
+  // Image is used as-is. Each range gets a CDI DataVolume clone.
+  // Clean up temp files only.
+  provisioner "powershell" {
+    inline = [
+      "Remove-Item -Path $env:TEMP\\* -Recurse -Force -ErrorAction SilentlyContinue",
+      "Clear-EventLog -LogName Application, System -ErrorAction SilentlyContinue",
     ]
   }
 

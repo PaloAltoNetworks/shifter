@@ -32,3 +32,15 @@ output "artifact_registry_repository" {
   description = "Artifact Registry path for VM disk images (use in containerDisk image refs)"
   value       = module.kubevirt.artifact_registry_repository
 }
+
+# Storage
+output "storage_bucket_name" {
+  description = "GCS bucket for agent files and artifacts"
+  value       = module.storage.bucket_name
+}
+
+# Pub/Sub
+output "range_events_topic" {
+  description = "Pub/Sub topic for range status events"
+  value       = module.pubsub.range_events_topic_id
+}

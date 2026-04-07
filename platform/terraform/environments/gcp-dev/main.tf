@@ -103,3 +103,46 @@ module "kubevirt" {
 
   labels = var.labels
 }
+
+# ------------------------------------------------------------------------------
+# Object Storage (GCS — agent files, artifacts)
+# ------------------------------------------------------------------------------
+
+module "storage" {
+  source = "../../modules/gcp-storage"
+
+  project_id  = var.project_id
+  region      = var.region
+  name_prefix = local.name_prefix
+
+  gke_node_service_account_email = module.gke.node_service_account_email
+  cicd_service_account_email     = var.cicd_service_account_email
+
+  labels = var.labels
+}
+
+# ------------------------------------------------------------------------------
+# Pub/Sub (range status events)
+# ------------------------------------------------------------------------------
+
+module "pubsub" {
+  source = "../../modules/gcp-pubsub"
+
+  project_id  = var.project_id
+  name_prefix = local.name_prefix
+
+  labels = var.labels
+}
+
+# ------------------------------------------------------------------------------
+# Secret Manager (platform secrets — containers only, values set manually)
+# ------------------------------------------------------------------------------
+
+module "secrets" {
+  source = "../../modules/gcp-secrets"
+
+  project_id  = var.project_id
+  name_prefix = local.name_prefix
+
+  labels = var.labels
+}

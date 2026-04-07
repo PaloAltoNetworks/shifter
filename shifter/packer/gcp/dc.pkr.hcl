@@ -35,7 +35,7 @@ source "qemu" "dc" {
 
   communicator   = "winrm"
   winrm_username = "Administrator"
-  winrm_password = "Packer@Build2024!"
+  winrm_password = var.winrm_password
   winrm_timeout  = "30m"
 
   shutdown_command = "shutdown /s /t 10 /f /d p:4:1"

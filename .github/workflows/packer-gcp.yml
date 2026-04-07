@@ -73,12 +73,29 @@ jobs:
         run: packer init .
         working-directory: ${{ env.PACKER_DIR }}
 
+      - name: Prepare Windows answer file
+        if: inputs.image_type == 'windows' || inputs.image_type == 'dc'
+        run: |
+          sed -i "s/WINRM_PASSWORD_PLACEHOLDER/${{ secrets.PACKER_WINRM_PASSWORD }}/g" \
+            answer_files/windows/Autounattend.xml
+        working-directory: ${{ env.PACKER_DIR }}
+
       - name: Packer validate
-        run: packer validate -only="qemu.${{ inputs.image_type }}" .
+        run: |
+          VARS=""
+          if [[ "${{ inputs.image_type }}" == "windows" || "${{ inputs.image_type }}" == "dc" ]]; then
+            VARS="-var winrm_password=${{ secrets.PACKER_WINRM_PASSWORD }}"
+          fi
+          packer validate -only="qemu.${{ inputs.image_type }}" $VARS .
         working-directory: ${{ env.PACKER_DIR }}
 
       - name: Packer build
-        run: packer build -only="qemu.${{ inputs.image_type }}" .
+        run: |
+          VARS=""
+          if [[ "${{ inputs.image_type }}" == "windows" || "${{ inputs.image_type }}" == "dc" ]]; then
+            VARS="-var winrm_password=${{ secrets.PACKER_WINRM_PASSWORD }}"
+          fi
+          packer build -only="qemu.${{ inputs.image_type }}" $VARS .
         working-directory: ${{ env.PACKER_DIR }}
 
       - name: Wrap in containerDisk and push

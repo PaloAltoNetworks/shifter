@@ -19,9 +19,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$SCRIPT_DIR"
 
+# For Windows builds, substitute password placeholder in Autounattend.xml
+if [[ "${IMAGE_TYPE}" == "windows" || "${IMAGE_TYPE}" == "dc" ]]; then
+    if [ -z "${WINRM_PASSWORD:-}" ]; then
+        echo "ERROR: WINRM_PASSWORD env var required for Windows builds"
+        exit 1
+    fi
+    # Create a temp copy with the password substituted
+    ANSWER_FILE="answer_files/windows/Autounattend.xml"
+    sed "s/WINRM_PASSWORD_PLACEHOLDER/${WINRM_PASSWORD}/g" "${ANSWER_FILE}" > "${ANSWER_FILE}.tmp"
+    mv "${ANSWER_FILE}.tmp" "${ANSWER_FILE}"
+    trap "git checkout -- ${ANSWER_FILE} 2>/dev/null" EXIT
+fi
+
 echo "=== Building ${IMAGE_TYPE} with Packer (QEMU) ==="
+PACKER_VARS=""
+if [[ "${IMAGE_TYPE}" == "windows" || "${IMAGE_TYPE}" == "dc" ]]; then
+    PACKER_VARS="-var winrm_password=${WINRM_PASSWORD}"
+fi
 packer init .
-packer build -only="qemu.${IMAGE_TYPE}" .
+packer build -only="qemu.${IMAGE_TYPE}" ${PACKER_VARS} .
 
 # Find the output qcow2
 DISK_IMAGE="output/${IMAGE_TYPE}/"*.qcow2

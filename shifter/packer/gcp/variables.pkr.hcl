@@ -46,3 +46,10 @@ variable "artifact_registry" {
   description = "Artifact Registry path (e.g., 'us-central1-docker.pkg.dev/my-project/dev-range-vm-images')"
   default     = ""
 }
+
+// Windows build password (used only during Packer build, wiped by sysprep)
+variable "winrm_password" {
+  type        = string
+  description = "Temporary Administrator password for WinRM during Packer build (wiped by sysprep)"
+  sensitive   = true
+}

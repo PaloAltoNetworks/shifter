@@ -1,0 +1,15 @@
+# containerDisk wrapper for KubeVirt VM images.
+#
+# Wraps a qcow2 disk image into an OCI container for use as a
+# KubeVirt containerDisk volume. UID 107 is the qemu user.
+#
+# Usage:
+#   docker build --build-arg DISK_IMAGE=output/ubuntu/shifter-ubuntu.qcow2 \
+#                -f Dockerfile.containerDisk -t us-central1-docker.pkg.dev/PROJECT/REPO/ubuntu:latest .
+#   docker push us-central1-docker.pkg.dev/PROJECT/REPO/ubuntu:latest
+
+ARG DISK_IMAGE
+
+FROM scratch
+ARG DISK_IMAGE
+ADD --chown=107:107 ${DISK_IMAGE} /disk/image.qcow2

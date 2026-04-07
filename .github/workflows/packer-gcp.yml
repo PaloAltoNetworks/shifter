@@ -1,0 +1,118 @@
+# Build KubeVirt VM images (qcow2 via Packer QEMU) and push to Artifact Registry.
+#
+# GCP equivalent of packer.yml (AWS AMI builds).
+# Requires a self-hosted runner with KVM access (/dev/kvm) for acceptable build times.
+# GCP Compute Engine VMs with nested virtualization enabled work as runners.
+
+name: "Build VM Image (GCP/KubeVirt)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_type:
+        description: "Image to build"
+        required: true
+        type: choice
+        options:
+          - ubuntu
+          - kali
+          - windows
+          - dc
+      ref:
+        description: "Branch to build from (default: dev)"
+        required: false
+        type: string
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PACKER_DIR: shifter/packer/gcp
+
+jobs:
+  build:
+    name: "Build ${{ inputs.image_type }}"
+    runs-on: self-hosted
+    environment: gcp-dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Verify KVM access
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "ERROR: /dev/kvm not available. This runner needs nested virtualization enabled."
+            echo "Use a GCP VM with --enable-nested-virtualization or a bare metal runner."
+            exit 1
+          fi
+          echo "KVM available: $(ls -la /dev/kvm)"
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Packer init
+        run: packer init .
+        working-directory: ${{ env.PACKER_DIR }}
+
+      - name: Packer validate
+        run: packer validate -only="qemu.${{ inputs.image_type }}" .
+        working-directory: ${{ env.PACKER_DIR }}
+
+      - name: Packer build
+        run: packer build -only="qemu.${{ inputs.image_type }}" .
+        working-directory: ${{ env.PACKER_DIR }}
+
+      - name: Wrap in containerDisk and push
+        run: |
+          DISK_IMAGE="output/${{ inputs.image_type }}/"*.qcow2
+          if [ ! -f $DISK_IMAGE ]; then
+            echo "ERROR: No qcow2 found in output/${{ inputs.image_type }}/"
+            exit 1
+          fi
+
+          REGISTRY="${{ secrets.GCP_ARTIFACT_REGISTRY }}"
+          TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+          TAG="${REGISTRY}/${{ inputs.image_type }}:${TIMESTAMP}"
+          TAG_LATEST="${REGISTRY}/${{ inputs.image_type }}:latest"
+
+          docker build \
+            --build-arg "DISK_IMAGE=${DISK_IMAGE}" \
+            -f Dockerfile.containerDisk \
+            -t "${TAG}" \
+            -t "${TAG_LATEST}" \
+            .
+
+          docker push "${TAG}"
+          docker push "${TAG_LATEST}"
+
+          echo "Pushed: ${TAG}"
+          echo "Latest: ${TAG_LATEST}"
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ env.PACKER_DIR }}
+        id: push
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ inputs.image_type }}-qemu-manifest"
+          path: "${{ env.PACKER_DIR }}/${{ inputs.image_type }}-qemu-manifest.json"
+          retention-days: 30

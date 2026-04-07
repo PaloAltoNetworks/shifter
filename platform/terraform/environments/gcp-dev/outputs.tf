@@ -44,3 +44,14 @@ output "range_events_topic" {
   description = "Pub/Sub topic for range status events"
   value       = module.pubsub.range_events_topic_id
 }
+
+# Database
+output "db_private_ip" {
+  description = "Cloud SQL private IP"
+  value       = module.database.private_ip
+}
+
+output "db_connection_name" {
+  description = "Cloud SQL connection name (for Cloud SQL Proxy)"
+  value       = module.database.connection_name
+}

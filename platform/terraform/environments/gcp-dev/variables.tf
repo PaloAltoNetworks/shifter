@@ -86,6 +86,22 @@ variable "kubevirt_node_count" {
 }
 
 # ------------------------------------------------------------------------------
+# Cloud SQL
+# ------------------------------------------------------------------------------
+
+variable "db_tier" {
+  description = "Cloud SQL machine tier"
+  type        = string
+  default     = "db-custom-2-7680"
+}
+
+variable "db_availability_type" {
+  description = "ZONAL (dev) or REGIONAL (prod HA)"
+  type        = string
+  default     = "ZONAL"
+}
+
+# ------------------------------------------------------------------------------
 # KubeVirt + CDI
 # ------------------------------------------------------------------------------
 

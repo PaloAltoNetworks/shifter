@@ -146,3 +146,22 @@ module "secrets" {
 
   labels = var.labels
 }
+
+# ------------------------------------------------------------------------------
+# Cloud SQL PostgreSQL (private IP via Private Services Access)
+# ------------------------------------------------------------------------------
+
+module "database" {
+  source = "../../modules/gcp-database"
+
+  project_id  = var.project_id
+  region      = var.region
+  name_prefix = local.name_prefix
+  network_id  = module.network.network_id
+
+  tier                = var.db_tier
+  availability_type   = var.db_availability_type
+  deletion_protection = var.deletion_protection
+
+  labels = var.labels
+}

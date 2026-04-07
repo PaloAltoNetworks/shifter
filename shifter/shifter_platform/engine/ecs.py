@@ -59,6 +59,7 @@ def _run_local_provisioner(command: list[str]) -> str | None:
     # Ensure required env vars are set (from Django settings or environment)
     env.setdefault("ENVIRONMENT", getattr(settings, "ENVIRONMENT", "dev"))
     env.setdefault("AWS_REGION", getattr(settings, "AWS_REGION", "us-east-2"))
+    env.setdefault("CLOUD_PROVIDER", getattr(settings, "CLOUD_PROVIDER", "aws"))
 
     # For local dev, use standard DB connection (not IAM auth)
     # The provisioner will need DB_HOST, DB_USER, DB_PASSWORD, DB_NAME

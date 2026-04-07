@@ -9,11 +9,20 @@ class CloudError(Exception):
 
 
 class CloudProviderNotImplementedError(CloudError):
-    """Raised when a requested cloud provider has no adapter."""
+    """Raised when a requested cloud provider has no adapter or adapter is a stub."""
 
-    def __init__(self, provider: str) -> None:
-        super().__init__(f"Cloud provider '{provider}' is not implemented. Supported providers: aws")
+    def __init__(self, provider: str, service: str = "") -> None:
+        if service:
+            msg = (
+                f"GCP {service} adapter is not yet implemented. "
+                f"This is a stub for the AWS→GCP migration. "
+                f"Implement cloud/gcp/{service.lower().replace(' ', '_')}.py to enable."
+            )
+        else:
+            msg = f"Cloud provider '{provider}' is not implemented. Supported: aws. Planned: gcp"
+        super().__init__(msg)
         self.provider = provider
+        self.service = service
 
 
 class CloudEventBusError(CloudError):

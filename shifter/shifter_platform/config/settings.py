@@ -32,6 +32,9 @@ FIELD_ENCRYPTION_KEY = os.environ.get(
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
 
+# Cloud provider for range provisioning (aws or gcp)
+CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
+
 # Site URL for internal callbacks (e.g., provisioner callback)
 # Required in all environments - no default fallback
 SITE_URL = os.environ.get("SITE_URL")

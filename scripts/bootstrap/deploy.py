@@ -1259,21 +1259,32 @@ Examples:
     bootstrap_parser = subparsers.add_parser("bootstrap", help="Bootstrap AWS account (S3, DynamoDB, IAM)")
     bootstrap_parser.add_argument("--env", required=True, choices=["dev", "prod"], help="Environment")
     bootstrap_parser.add_argument("--profile", required=True, help="AWS CLI profile name")
+    bootstrap_parser.add_argument("--provider", choices=["aws", "gcp"], default="aws", help="Cloud provider (default: aws)")
     bootstrap_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
 
     # Terraform command
     tf_parser = subparsers.add_parser("terraform", help="Deploy Terraform infrastructure")
     tf_parser.add_argument("--env", required=True, choices=["dev", "prod"], help="Environment")
     tf_parser.add_argument("--profile", required=True, help="AWS CLI profile name")
+    tf_parser.add_argument("--provider", choices=["aws", "gcp"], default="aws", help="Cloud provider (default: aws)")
     tf_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
 
     # Full command
     full_parser = subparsers.add_parser("full", help="Full interactive deployment (bootstrap + config + terraform)")
     full_parser.add_argument("--env", required=True, choices=["dev", "prod"], help="Environment")
     full_parser.add_argument("--profile", required=True, help="AWS CLI profile name")
+    full_parser.add_argument("--provider", choices=["aws", "gcp"], default="aws", help="Cloud provider (default: aws)")
     full_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
 
     args = parser.parse_args()
+
+    # GCP provider gate — fail early with clear message
+    provider = getattr(args, "provider", "aws")
+    if provider == "gcp":
+        error("GCP deployment is not yet implemented.")
+        info("This flag exists to establish the CLI contract for the AWS→GCP migration.")
+        info("GCP support will be added incrementally. See platform/terraform/environments/gcp-dev/")
+        sys.exit(1)
 
     if args.command == "bootstrap":
         config = BootstrapConfig(env=args.env)

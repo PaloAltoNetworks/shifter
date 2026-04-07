@@ -881,6 +881,190 @@ def _update_remote_state_references(env: str, bucket: str, region: str, dry_run:
             warn("Skipping remote_state updates - you'll need to update them manually")
 
 
+def gcp_bootstrap(env: str, profile: str, dry_run: bool = False) -> None:
+    """Bootstrap GCP project for Shifter.
+
+    GCP equivalent of bootstrap_account(). Creates:
+    1. GCS bucket for Terraform state
+    2. Enables required GCP APIs
+    3. Runs Terraform to create WIF, service account, state bucket
+
+    Args:
+        env: Environment name (dev, prod).
+        profile: gcloud configuration name (used with --configuration flag).
+        dry_run: If True, show what would be done without making changes.
+    """
+    header(f"Bootstrapping GCP Project for {env.upper()}")
+
+    # Step 1: Verify gcloud is authenticated
+    subheader("Verifying GCP authentication")
+    result = run_cmd(
+        ["gcloud", "config", "get-value", "project", f"--configuration={profile}"],
+        dry_run=dry_run,
+        capture=True,
+    )
+    if dry_run:
+        project_id = "my-project-id"
+    else:
+        if not result or result.returncode != 0:
+            error("gcloud is not configured. Run: gcloud auth login && gcloud config set project <PROJECT_ID>")
+            sys.exit(1)
+        project_id = result.stdout.strip()
+        if not project_id:
+            error("No GCP project set. Run: gcloud config set project <PROJECT_ID>")
+            sys.exit(1)
+        success(f"GCP project: {project_id}")
+
+    # Step 2: Enable required APIs
+    subheader("Enabling required GCP APIs")
+    apis = [
+        "iam.googleapis.com",
+        "iamcredentials.googleapis.com",
+        "cloudresourcemanager.googleapis.com",
+        "sts.googleapis.com",
+        "container.googleapis.com",
+        "compute.googleapis.com",
+        "sqladmin.googleapis.com",
+        "secretmanager.googleapis.com",
+        "pubsub.googleapis.com",
+        "artifactregistry.googleapis.com",
+        "storage.googleapis.com",
+    ]
+    for api in apis:
+        info(f"Enabling {api}...")
+        run_cmd(
+            ["gcloud", "services", "enable", api, f"--project={project_id}", f"--configuration={profile}"],
+            dry_run=dry_run,
+        )
+    if not dry_run:
+        success("All required APIs enabled")
+
+    # Step 3: Create GCS bucket for Terraform state (before Terraform runs)
+    bucket_name = f"shifter-{env}-terraform-state"
+    region = "us-central1"
+
+    subheader(f"Creating Terraform state bucket: gs://{bucket_name}")
+    run_cmd(
+        [
+            "gcloud", "storage", "buckets", "create", f"gs://{bucket_name}",
+            f"--project={project_id}",
+            f"--location={region}",
+            "--uniform-bucket-level-access",
+            f"--configuration={profile}",
+        ],
+        dry_run=dry_run,
+        check=False,  # Bucket may already exist
+    )
+
+    # Enable versioning on state bucket
+    run_cmd(
+        [
+            "gcloud", "storage", "buckets", "update", f"gs://{bucket_name}",
+            "--versioning",
+            f"--configuration={profile}",
+        ],
+        dry_run=dry_run,
+        check=False,
+    )
+    if not dry_run:
+        success(f"State bucket ready: gs://{bucket_name}")
+
+    # Step 4: Run Terraform (creates WIF + service account)
+    subheader("Running Terraform for GCP IAM")
+
+    iam_tf_dir = get_repo_root() / "platform" / "terraform" / "global" / "gcp-iam"
+    if not iam_tf_dir.exists():
+        error(f"GCP IAM Terraform directory not found: {iam_tf_dir}")
+        sys.exit(1)
+
+    # Update tfvars with actual project ID
+    tfvars_file = iam_tf_dir / f"{env}.tfvars"
+    if tfvars_file.exists() and not dry_run:
+        content = tfvars_file.read_text()
+        if 'project_id  = ""' in content or "project_id  = ''" in content:
+            info(f"Setting project_id in {tfvars_file.name}")
+            content = content.replace('project_id  = ""', f'project_id  = "{project_id}"')
+            tfvars_file.write_text(content)
+            success(f"Updated {tfvars_file.name} with project_id={project_id}")
+
+    original_dir = os.getcwd()
+    os.chdir(iam_tf_dir)
+
+    try:
+        # Init with GCS backend
+        backend_config = f"bucket={bucket_name},prefix=global/gcp-iam/{env}"
+        info(f"Running terraform init with backend: {backend_config}")
+        run_cmd(
+            ["terraform", "init", "-reconfigure", f"-backend-config=bucket={bucket_name}",
+             f"-backend-config=prefix=global/gcp-iam/{env}"],
+            dry_run=dry_run,
+        )
+
+        # Plan and apply
+        info("Running terraform plan...")
+        run_cmd(
+            ["terraform", "plan", f"-var-file={env}.tfvars", "-out=tfplan"],
+            dry_run=dry_run,
+        )
+
+        if not dry_run:
+            if not confirm("Apply this plan?"):
+                error("GCP bootstrap requires applying Terraform")
+                sys.exit(1)
+
+            info("Running terraform apply...")
+            apply_result = run_cmd(["terraform", "apply", "tfplan"])
+            if apply_result and apply_result.returncode != 0:
+                error("Terraform apply failed")
+                sys.exit(1)
+
+            success("GCP IAM infrastructure created")
+
+            # Capture outputs for GitHub secrets
+            output_result = subprocess.run(  # nosec B603 B607
+                ["terraform", "output", "-json"], capture_output=True, text=True, check=False
+            )
+            if output_result.returncode == 0:
+                outputs = json.loads(output_result.stdout)
+                _walkthrough_gcp_github_secrets(outputs)
+    finally:
+        os.chdir(original_dir)
+
+    success("GCP bootstrap complete!")
+
+
+def _walkthrough_gcp_github_secrets(outputs: dict) -> None:
+    """Walk user through adding GCP secrets to GitHub."""
+    header("Configure GitHub Secrets for GCP")
+
+    wif_provider = outputs.get("workload_identity_provider", {}).get("value", "")
+    sa_email = outputs.get("service_account_email", {}).get("value", "")
+    project_id = outputs.get("project_id", {}).get("value", "")
+
+    print("Add these secrets to your GitHub repository:\n")
+    print(f"  {Colors.BOLD}GCP_WORKLOAD_IDENTITY_PROVIDER{Colors.END} = {wif_provider}")
+    print(f"  {Colors.BOLD}GCP_SERVICE_ACCOUNT{Colors.END}            = {sa_email}")
+    print(f"  {Colors.BOLD}GCP_PROJECT_ID{Colors.END}                 = {project_id}")
+
+    print(f"\n{Colors.DIM}These are used by google-github-actions/auth in GitHub Actions workflows.{Colors.END}")
+
+    # Try automated setup via gh CLI
+    if shutil.which("gh"):
+        print()
+        if confirm("Set these automatically via GitHub CLI?"):
+            for name, value in [
+                ("GCP_WORKLOAD_IDENTITY_PROVIDER", wif_provider),
+                ("GCP_SERVICE_ACCOUNT", sa_email),
+                ("GCP_PROJECT_ID", project_id),
+            ]:
+                run_cmd(["gh", "secret", "set", name, "--body", value], check=False)
+            success("GitHub secrets configured")
+        else:
+            wait_for_user("Add the secrets manually via GitHub Settings → Secrets and variables → Actions")
+    else:
+        wait_for_user("Add the secrets manually via GitHub Settings → Secrets and variables → Actions")
+
+
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
@@ -1196,13 +1380,24 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     walkthrough_final_steps(env)
 
 
-def check_dependencies():
-    """Check all required dependencies before starting."""
-    required = {
-        "aws": "AWS CLI - https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
-        "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
-        "git": "Git - https://git-scm.com/downloads",
-    }
+def check_dependencies(provider: str = "aws"):
+    """Check all required dependencies before starting.
+
+    Args:
+        provider: Cloud provider (aws or gcp). Determines which CLI tools are required.
+    """
+    if provider == "gcp":
+        required = {
+            "gcloud": "Google Cloud SDK - https://cloud.google.com/sdk/docs/install",
+            "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
+            "git": "Git - https://git-scm.com/downloads",
+        }
+    else:
+        required = {
+            "aws": "AWS CLI - https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+            "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
+            "git": "Git - https://git-scm.com/downloads",
+        }
 
     optional = {"gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"}
 
@@ -1250,9 +1445,6 @@ Examples:
         """,
     )
 
-    # Check dependencies first
-    check_dependencies()
-
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Bootstrap command
@@ -1278,15 +1470,21 @@ Examples:
 
     args = parser.parse_args()
 
-    # GCP provider gate — fail early with clear message
     provider = getattr(args, "provider", "aws")
-    if provider == "gcp":
-        error("GCP deployment is not yet implemented.")
-        info("This flag exists to establish the CLI contract for the AWS→GCP migration.")
-        info("GCP support will be added incrementally. See platform/terraform/environments/gcp-dev/")
+
+    # Check dependencies (provider-aware)
+    check_dependencies(provider)
+
+    # GCP terraform/full not yet implemented (bootstrap is)
+    if provider == "gcp" and args.command in ("terraform", "full"):
+        error(f"GCP '{args.command}' is not yet implemented.")
+        info("GCP bootstrap is available: ./deploy.py bootstrap --env dev --profile default --provider gcp")
+        info("GCP terraform deploy will be added when GKE modules are built.")
         sys.exit(1)
 
-    if args.command == "bootstrap":
+    if provider == "gcp" and args.command == "bootstrap":
+        gcp_bootstrap(args.env, args.profile, dry_run=args.dry_run)
+    elif args.command == "bootstrap":
         config = BootstrapConfig(env=args.env)
         result = bootstrap_account(config, args.profile, dry_run=args.dry_run)
         if not args.dry_run:

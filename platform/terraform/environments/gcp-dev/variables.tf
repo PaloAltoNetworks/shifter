@@ -49,6 +49,46 @@ variable "enable_flow_logs" {
   default     = false
 }
 
+# ------------------------------------------------------------------------------
+# GKE Cluster
+# ------------------------------------------------------------------------------
+
+variable "master_authorized_cidrs" {
+  description = "CIDRs allowed to access the GKE API server"
+  type = list(object({
+    cidr = string
+    name = string
+  }))
+  default = [
+    {
+      cidr = "0.0.0.0/0"
+      name = "all"
+    }
+  ]
+}
+
+variable "deletion_protection" {
+  description = "Prevent accidental cluster deletion"
+  type        = bool
+  default     = false
+}
+
+variable "kubevirt_machine_type" {
+  description = "Machine type for KubeVirt nodes (must support nested virt — n2-standard-*)"
+  type        = string
+  default     = "n2-standard-16"
+}
+
+variable "kubevirt_node_count" {
+  description = "Number of KubeVirt nodes (scale for events: ~7 VMs per n2-standard-16)"
+  type        = number
+  default     = 3
+}
+
+# ------------------------------------------------------------------------------
+# Labels
+# ------------------------------------------------------------------------------
+
 variable "labels" {
   description = "Labels to apply to all resources"
   type        = map(string)

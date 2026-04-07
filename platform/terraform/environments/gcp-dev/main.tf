@@ -41,3 +41,31 @@ module "network" {
 
   labels = var.labels
 }
+
+# ------------------------------------------------------------------------------
+# GKE Cluster (KubeVirt-ready, with system + KubeVirt node pools)
+# ------------------------------------------------------------------------------
+
+module "gke" {
+  source = "../../modules/gcp-gke"
+
+  project_id = var.project_id
+  region     = var.region
+  name_prefix = local.name_prefix
+
+  # Network inputs from network module
+  network_id              = module.network.network_id
+  gke_subnet_id           = module.network.gke_subnet_id
+  gke_pods_range_name     = module.network.gke_pods_range_name
+  gke_services_range_name = module.network.gke_services_range_name
+
+  # Cluster settings
+  master_authorized_cidrs = var.master_authorized_cidrs
+  deletion_protection     = var.deletion_protection
+
+  # KubeVirt node pool
+  kubevirt_machine_type = var.kubevirt_machine_type
+  kubevirt_node_count   = var.kubevirt_node_count
+
+  labels = var.labels
+}

@@ -26,3 +26,9 @@ output "kubevirt_node_pool_name" {
   description = "KubeVirt node pool name"
   value       = module.gke.kubevirt_node_pool_name
 }
+
+# KubeVirt + Artifact Registry
+output "artifact_registry_repository" {
+  description = "Artifact Registry path for VM disk images (use in containerDisk image refs)"
+  value       = module.kubevirt.artifact_registry_repository
+}

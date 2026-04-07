@@ -86,6 +86,28 @@ variable "kubevirt_node_count" {
 }
 
 # ------------------------------------------------------------------------------
+# KubeVirt + CDI
+# ------------------------------------------------------------------------------
+
+variable "kubevirt_version" {
+  description = "KubeVirt release version"
+  type        = string
+  default     = "v1.4.0"
+}
+
+variable "cdi_version" {
+  description = "CDI release version"
+  type        = string
+  default     = "v1.60.3"
+}
+
+variable "cicd_service_account_email" {
+  description = "CI/CD service account email for Artifact Registry push access (from gcp-iam bootstrap)"
+  type        = string
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
 # Labels
 # ------------------------------------------------------------------------------
 

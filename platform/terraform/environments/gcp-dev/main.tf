@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = ">= 1.14.0"
+    }
   }
   backend "gcs" {}
 }
@@ -19,6 +23,16 @@ provider "google" {
     environment = var.environment
   }
 }
+
+# kubectl provider — authenticates to GKE cluster for KubeVirt operator install
+provider "kubectl" {
+  host                   = "https://${module.gke.cluster_endpoint}"
+  cluster_ca_certificate = base64decode(module.gke.cluster_ca_certificate)
+  token                  = data.google_client_config.default.access_token
+  load_config_file       = false
+}
+
+data "google_client_config" "default" {}
 
 locals {
   name_prefix = "${var.environment}-range"
@@ -66,6 +80,26 @@ module "gke" {
   # KubeVirt node pool
   kubevirt_machine_type = var.kubevirt_machine_type
   kubevirt_node_count   = var.kubevirt_node_count
+
+  labels = var.labels
+}
+
+# ------------------------------------------------------------------------------
+# KubeVirt + CDI Operators + Artifact Registry
+# ------------------------------------------------------------------------------
+
+module "kubevirt" {
+  source = "../../modules/gcp-kubevirt"
+
+  project_id  = var.project_id
+  region      = var.region
+  name_prefix = local.name_prefix
+
+  kubevirt_version = var.kubevirt_version
+  cdi_version      = var.cdi_version
+
+  gke_node_service_account_email = module.gke.node_service_account_email
+  cicd_service_account_email     = var.cicd_service_account_email
 
   labels = var.labels
 }

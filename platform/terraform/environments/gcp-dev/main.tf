@@ -185,3 +185,36 @@ module "redis" {
 
   depends_on = [module.database]
 }
+
+# ------------------------------------------------------------------------------
+# Artifact Registry for App Container Images (portal, guacamole, provisioner)
+# Separate from the VM disk images repo in the kubevirt module.
+# ------------------------------------------------------------------------------
+
+resource "google_artifact_registry_repository" "app_images" {
+  location      = var.region
+  repository_id = "${local.name_prefix}-app-images"
+  description   = "Container images for Shifter platform services (portal, guacamole, provisioner)"
+  format        = "DOCKER"
+  project       = var.project_id
+
+  labels = var.labels
+}
+
+resource "google_artifact_registry_repository_iam_member" "app_images_gke_reader" {
+  location   = google_artifact_registry_repository.app_images.location
+  repository = google_artifact_registry_repository.app_images.repository_id
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${module.gke.node_service_account_email}"
+  project    = var.project_id
+}
+
+resource "google_artifact_registry_repository_iam_member" "app_images_cicd_writer" {
+  count = var.cicd_service_account_email != "" ? 1 : 0
+
+  location   = google_artifact_registry_repository.app_images.location
+  repository = google_artifact_registry_repository.app_images.repository_id
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${var.cicd_service_account_email}"
+  project    = var.project_id
+}

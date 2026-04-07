@@ -61,3 +61,9 @@ output "redis_host" {
   description = "Memorystore Redis host (private IP)"
   value       = module.redis.host
 }
+
+# Artifact Registry
+output "app_images_registry" {
+  description = "Artifact Registry path for app container images"
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.app_images.repository_id}"
+}

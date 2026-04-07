@@ -101,6 +101,18 @@ variable "db_availability_type" {
   default     = "ZONAL"
 }
 
+variable "redis_tier" {
+  description = "BASIC (dev) or STANDARD_HA (prod)"
+  type        = string
+  default     = "BASIC"
+}
+
+variable "redis_memory_size_gb" {
+  description = "Redis memory in GB"
+  type        = number
+  default     = 1
+}
+
 # ------------------------------------------------------------------------------
 # KubeVirt + CDI
 # ------------------------------------------------------------------------------

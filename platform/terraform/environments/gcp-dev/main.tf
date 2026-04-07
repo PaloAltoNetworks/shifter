@@ -165,3 +165,23 @@ module "database" {
 
   labels = var.labels
 }
+
+# ------------------------------------------------------------------------------
+# Memorystore Redis (sessions, Django Channels)
+# Uses the Private Services Access peering created by the database module.
+# ------------------------------------------------------------------------------
+
+module "redis" {
+  source = "../../modules/gcp-redis"
+
+  project_id     = var.project_id
+  region         = var.region
+  name_prefix    = local.name_prefix
+  network_id     = module.network.network_id
+  tier           = var.redis_tier
+  memory_size_gb = var.redis_memory_size_gb
+
+  labels = var.labels
+
+  depends_on = [module.database]
+}

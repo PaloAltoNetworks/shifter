@@ -55,3 +55,9 @@ output "db_connection_name" {
   description = "Cloud SQL connection name (for Cloud SQL Proxy)"
   value       = module.database.connection_name
 }
+
+# Redis
+output "redis_host" {
+  description = "Memorystore Redis host (private IP)"
+  value       = module.redis.host
+}

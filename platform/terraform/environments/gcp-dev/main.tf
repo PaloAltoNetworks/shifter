@@ -191,6 +191,23 @@ module "redis" {
 # Separate from the VM disk images repo in the kubevirt module.
 # ------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------
+# Load Balancer + Cloud Armor WAF (portal HTTPS ingress)
+# ------------------------------------------------------------------------------
+
+module "loadbalancer" {
+  source = "../../modules/gcp-loadbalancer"
+
+  project_id   = var.project_id
+  name_prefix  = local.name_prefix
+  domain_names = var.portal_domain_names
+}
+
+# ------------------------------------------------------------------------------
+# Artifact Registry for App Container Images (portal, guacamole, provisioner)
+# Separate from the VM disk images repo in the kubevirt module.
+# ------------------------------------------------------------------------------
+
 resource "google_artifact_registry_repository" "app_images" {
   location      = var.region
   repository_id = "${local.name_prefix}-app-images"

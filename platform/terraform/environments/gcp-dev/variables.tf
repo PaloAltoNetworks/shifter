@@ -101,6 +101,12 @@ variable "db_availability_type" {
   default     = "ZONAL"
 }
 
+variable "portal_domain_names" {
+  description = "Domain names for the portal SSL certificate"
+  type        = list(string)
+  default     = []
+}
+
 variable "redis_tier" {
   description = "BASIC (dev) or STANDARD_HA (prod)"
   type        = string

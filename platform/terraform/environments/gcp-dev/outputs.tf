@@ -57,6 +57,18 @@ output "db_connection_name" {
 }
 
 # Redis
+# Load Balancer
+output "portal_ip_address" {
+  description = "Static IP for portal (point DNS here)"
+  value       = module.loadbalancer.static_ip_address
+}
+
+output "cloud_armor_policy_name" {
+  description = "Cloud Armor WAF policy name (for GKE BackendConfig)"
+  value       = module.loadbalancer.security_policy_name
+}
+
+# Redis
 output "redis_host" {
   description = "Memorystore Redis host (private IP)"
   value       = module.redis.host

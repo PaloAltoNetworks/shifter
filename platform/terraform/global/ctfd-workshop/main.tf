@@ -106,6 +106,7 @@ resource "aws_instance" "ctfd" {
   user_data = templatefile("${path.module}/ctfd-userdata.sh.tftpl", {
     ctfd_git_ref           = var.ctfd_git_ref
     ctfd_repo_url          = var.ctfd_repo_url
+    docker_buildx_version  = var.docker_buildx_version
     docker_compose_version = var.docker_compose_version
     domain                 = var.domain
   })

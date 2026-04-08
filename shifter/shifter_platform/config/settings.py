@@ -347,7 +347,21 @@ ENGINE_PRIVATE_SUBNET_IDS = os.environ.get("ENGINE_PRIVATE_SUBNET_IDS") or os.en
     "PULUMI_PRIVATE_SUBNET_IDS", ""
 )
 
-# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
+# ------------------------------------------------------------------------------
+# GCP Configuration
+# ------------------------------------------------------------------------------
+
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
+
+# GKE provisioner settings (used when CLOUD_PROVIDER=gcp)
+GKE_PROVISIONER_IMAGE = os.environ.get("GKE_PROVISIONER_IMAGE", "")
+GKE_PROVISIONER_NAMESPACE = os.environ.get("GKE_PROVISIONER_NAMESPACE", "shifter-engine")
+GKE_PROVISIONER_SERVICE_ACCOUNT = os.environ.get("GKE_PROVISIONER_SERVICE_ACCOUNT", "")
+
+# Pub/Sub topic for range events (GCP equivalent of SNS_RANGE_EVENTS_ARN)
+PUBSUB_RANGE_EVENTS_TOPIC = os.environ.get("PUBSUB_RANGE_EVENTS_TOPIC", "")
+
+# Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS/GKE Job)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
 PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")
 

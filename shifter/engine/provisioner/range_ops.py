@@ -1,11 +1,13 @@
 """Range pause/resume operations.
 
-Handles pausing and resuming all EC2 instances in a range.
+Handles pausing and resuming all instances in a range.
+Supports both AWS EC2 (AWSExecutor) and GCP KubeVirt (KubeVirtExecutor).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -24,22 +26,74 @@ NGFW_START_MAX_RETRIES = 3
 NGFW_START_RETRY_DELAYS = (10, 30, 60)
 
 
+def _get_cloud_provider() -> str:
+    """Get the active cloud provider from environment."""
+    return os.environ.get("CLOUD_PROVIDER", "aws")
+
+
+def _get_executor():
+    """Create the appropriate executor for the active cloud provider.
+
+    Returns:
+        AWSExecutor or KubeVirtExecutor.
+    """
+    provider = _get_cloud_provider()
+    if provider == "gcp":
+        from executors.kubevirt_executor import KubeVirtExecutor
+
+        return KubeVirtExecutor()
+    return AWSExecutor()
+
+
+def _extract_instance_id(state: dict, provider: str) -> str | None:
+    """Extract the provider-specific instance identifier from state JSON.
+
+    Args:
+        state: Instance state dict from DB.
+        provider: Cloud provider ("aws" or "gcp").
+
+    Returns:
+        Instance ID string, or None if not found.
+    """
+    if provider == "gcp":
+        return state.get("vm_name")
+    return state.get("aws_instance_id")
+
+
+def _extract_instance_namespace(state: dict) -> str:
+    """Extract the Kubernetes namespace from GCP instance state.
+
+    Args:
+        state: Instance state dict from DB.
+
+    Returns:
+        Namespace string (defaults to empty string if not set).
+    """
+    return state.get("namespace", "")
+
+
 def get_range_instance_ids(request_id: str) -> list[dict]:
-    """Get all EC2 instance IDs for a range.
+    """Get all instance identifiers for a range.
 
     Queries engine_instance records for the given request and extracts
-    AWS instance IDs from the state JSON field.
+    provider-specific instance IDs from the state JSON field.
 
     Args:
         request_id: UUID string of the Request.
 
     Returns:
-        List of dicts with 'uuid' (our instance UUID) and 'aws_instance_id'.
+        List of dicts with:
+        - uuid: Our instance UUID
+        - instance_id: Provider-specific ID (EC2 instance ID or KubeVirt VM name)
+        - role: Instance role
+        - namespace: Kubernetes namespace (GCP only, empty for AWS)
+        - aws_instance_id: EC2 instance ID (backward compat, same as instance_id on AWS)
 
     Raises:
-        ValueError: If no instances found or missing AWS instance IDs.
+        ValueError: If no instances found or missing instance IDs.
     """
     logger.info("get_range_instance_ids: request_id=%s", request_id)
+    provider = _get_cloud_provider()
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -60,26 +114,27 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
     instances = []
     for uuid, state, role in rows:
         state_dict = state if isinstance(state, dict) else {}
-        aws_instance_id = state_dict.get("aws_instance_id")
+        instance_id = _extract_instance_id(state_dict, provider)
 
-        if not aws_instance_id:
+        if not instance_id:
             logger.warning(
-                "Instance %s (role=%s) missing aws_instance_id in state, skipping",
+                "Instance %s (role=%s) missing instance_id in state, skipping",
                 uuid,
                 role,
             )
             continue
 
-        instances.append(
-            {
-                "uuid": str(uuid),
-                "aws_instance_id": aws_instance_id,
-                "role": role,
-            }
-        )
+        entry = {
+            "uuid": str(uuid),
+            "instance_id": instance_id,
+            "aws_instance_id": instance_id,  # backward compat
+            "role": role,
+            "namespace": _extract_instance_namespace(state_dict) if provider == "gcp" else "",
+        }
+        instances.append(entry)
 
     if not instances:
-        raise ValueError(f"No instances with AWS instance IDs found for request: {request_id}")
+        raise ValueError(f"No instances with instance IDs found for request: {request_id}")
 
     logger.info(
         "get_range_instance_ids: found %d instances for request_id=%s",
@@ -471,25 +526,28 @@ def _execute_instance_operation(
     """Execute pause/resume operation on a single instance.
 
     Args:
-        executor: AWSExecutor instance.
+        executor: AWSExecutor or KubeVirtExecutor instance.
         orchestrator: OpsOrchestrator instance.
         plan: Plan to execute (RangePausePlan or RangeResumePlan).
-        instance: Dict with uuid, aws_instance_id, role.
+        instance: Dict with uuid, instance_id, role, and optionally namespace.
 
     Returns:
         Tuple of (uuid, success, error_message).
     """
-    aws_instance_id = instance["aws_instance_id"]
+    instance_id = instance["instance_id"]
     uuid = instance["uuid"]
 
     try:
-        context = plan.get_context(aws_instance_id)
-        result = orchestrator.orchestrate(aws_instance_id, plan, context)
+        context = plan.get_context(instance_id)
+        # For GCP, add namespace to context so KubeVirtExecutor can use it
+        if instance.get("namespace"):
+            context["namespace"] = instance["namespace"]
+        result = orchestrator.orchestrate(instance_id, plan, context)
 
         if result.success:
             logger.info(
                 "Operation succeeded for instance %s (uuid=%s)",
-                aws_instance_id,
+                instance_id,
                 uuid,
             )
             return (uuid, True, None)
@@ -497,7 +555,7 @@ def _execute_instance_operation(
             error_msg = f"Operation failed: {result.error}"
             logger.error(
                 "Operation failed for instance %s (uuid=%s): %s",
-                aws_instance_id,
+                instance_id,
                 uuid,
                 result.error,
             )
@@ -507,7 +565,7 @@ def _execute_instance_operation(
         error_msg = str(e)
         logger.exception(
             "Exception during operation for instance %s (uuid=%s)",
-            aws_instance_id,
+            instance_id,
             uuid,
         )
         return (uuid, False, error_msg)
@@ -542,8 +600,8 @@ def run_range_pause(request_id: str) -> None:
     # Get all instances to pause
     instances = get_range_instance_ids(request_id)
 
-    # Create executor and orchestrator
-    executor = AWSExecutor()
+    # Create executor and orchestrator (provider-aware)
+    executor = _get_executor()
     orchestrator = OpsOrchestrator(executor)
     plan = RangePausePlan()
 
@@ -569,7 +627,7 @@ def run_range_pause(request_id: str) -> None:
             except Exception as e:
                 logger.exception(
                     "Unexpected error pausing instance %s",
-                    instance["aws_instance_id"],
+                    instance["instance_id"],
                 )
                 results.append((instance["uuid"], False, str(e)))
 
@@ -667,8 +725,8 @@ def run_range_resume(request_id: str) -> None:
     # Get all instances to resume
     instances = get_range_instance_ids(request_id)
 
-    # Create executor and orchestrator
-    executor = AWSExecutor()
+    # Create executor and orchestrator (provider-aware)
+    executor = _get_executor()
     orchestrator = OpsOrchestrator(executor)
     plan = RangeResumePlan()
 
@@ -694,7 +752,7 @@ def run_range_resume(request_id: str) -> None:
             except Exception as e:
                 logger.exception(
                     "Unexpected error resuming instance %s",
-                    instance["aws_instance_id"],
+                    instance["instance_id"],
                 )
                 results.append((instance["uuid"], False, str(e)))
 

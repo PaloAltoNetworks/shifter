@@ -135,8 +135,52 @@ def _get_engine_ecs_config() -> tuple[str, str, str, list[str]] | None:
     return cluster_arn, task_definition_arn, security_group_id, subnet_ids
 
 
+def _get_provisioner_config() -> tuple[str, str, dict] | None:
+    """Get provisioner task configuration for the active cloud provider.
+
+    Returns provider-agnostic tuple of (task_definition, cluster, network_config)
+    that can be passed directly to TaskRunner.run_task().
+
+    Returns:
+        Tuple of (task_definition, cluster, network_config) or None if not configured.
+    """
+    provider = getattr(settings, "CLOUD_PROVIDER", "aws")
+
+    if provider == "gcp":
+        image: str = getattr(settings, "GKE_PROVISIONER_IMAGE", "") or ""
+        if not image:
+            logger.warning(
+                "GKE provisioner configuration incomplete. "
+                "Set GKE_PROVISIONER_IMAGE in settings."
+            )
+            return None
+        namespace = getattr(settings, "GKE_PROVISIONER_NAMESPACE", "shifter-engine")
+        service_account = getattr(settings, "GKE_PROVISIONER_SERVICE_ACCOUNT", None)
+        network_config: dict = {
+            "namespace": namespace,
+        }
+        if service_account:
+            network_config["service_account"] = service_account
+        # cluster is not used by GCPTaskRunner (determined by kubeconfig)
+        return image, "", network_config
+
+    # Default: AWS ECS
+    ecs_config = _get_engine_ecs_config()
+    if ecs_config is None:
+        return None
+    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
+    return task_definition_arn, cluster_arn, network_config
+
+
 def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
-    """Start an ECS Fargate task for provisioning operations.
+    """Start a provisioner task for provisioning operations (legacy range_id pattern).
 
     Args:
         range_id: Database ID of the Range
@@ -144,12 +188,12 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
         command: Command to run ("provision" or "destroy")
 
     Returns:
-        ECS task ARN if successful, None if ECS is not configured
+        Task identifier if successful, None if not configured
 
     Raises:
         TypeError: If range_id is not an integer or user_id is not an integer or command is not a string
         ValueError: If range_id is negative or user_id is negative or command is empty
-        CloudTaskError: If ECS task fails to start
+        CloudTaskError: If task fails to start
     """
     if range_id is None or not isinstance(range_id, int):
         raise TypeError("range_id must be an integer")
@@ -164,13 +208,13 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     if not command.strip():
         raise ValueError("command must be a non-empty string")
 
-    ecs_config = _get_engine_ecs_config()
-    if ecs_config is None:
+    config = _get_provisioner_config()
+    if config is None:
         return None
 
-    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    task_definition, cluster, network_config = config
 
-    logger.info(f"Starting ECS task for range_id={range_id} command={command}")
+    logger.info(f"Starting provisioner task for range_id={range_id} command={command}")
 
     command_list = [
         ResourceType.RANGE.value,
@@ -181,27 +225,19 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
         str(user_id),
     ]
 
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
-
     try:
         runner = get_task_runner()
-        task_arn = runner.run_task(
-            task_definition=task_definition_arn,
-            cluster=cluster_arn,
+        task_id = runner.run_task(
+            task_definition=task_definition,
+            cluster=cluster,
             command=command_list,
             container_name="pulumi-provisioner",
             network_config=network_config,
         )
-        logger.info(f"Started ECS task: range_id={range_id} command={command} task_arn={task_arn}")
-        return task_arn
+        logger.info(f"Started provisioner task: range_id={range_id} command={command} task_id={task_id}")
+        return task_id
     except CloudTaskError as e:
-        logger.error(f"Failed to start ECS task for range_id={range_id}: {e}")
+        logger.error(f"Failed to start provisioner task for range_id={range_id}: {e}")
         raise
 
 
@@ -247,8 +283,9 @@ def start_teardown(range_id: int, user_id: int) -> str | None:
 
 
 def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
-    """Start an ECS Fargate task for Range operations using request_id.
+    """Start a provisioner task for Range operations using request_id.
 
+    Uses the configured cloud provider (AWS ECS Fargate or GCP GKE Job).
     Matches NGFW pattern - provisioner fetches all data from DB using request_id.
 
     Args:
@@ -256,12 +293,12 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command: Command to run ("provision" or "destroy")
 
     Returns:
-        ECS task ARN if successful, None if ECS is not configured
+        Task identifier if successful, None if not configured
 
     Raises:
         TypeError: If request_id is None or not a UUID
         ValueError: If command is invalid
-        CloudTaskError: If ECS task fails to start
+        CloudTaskError: If task fails to start
     """
     from uuid import UUID as UUIDType
 
@@ -279,36 +316,28 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
-    ecs_config = _get_engine_ecs_config()
-    if ecs_config is None:
+    config = _get_provisioner_config()
+    if config is None:
         return None
 
-    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    task_definition, cluster, network_config = config
 
     command_list = ["range", command, "--request-id", str(request_id)]
-    logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
-
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
+    logger.info(f"Starting provisioner task for Range request_id={request_id} command={command}")
 
     try:
         runner = get_task_runner()
-        task_arn = runner.run_task(
-            task_definition=task_definition_arn,
-            cluster=cluster_arn,
+        task_id = runner.run_task(
+            task_definition=task_definition,
+            cluster=cluster,
             command=command_list,
             container_name="pulumi-provisioner",
             network_config=network_config,
         )
-        logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
-        return task_arn
+        logger.info(f"Started provisioner task: request_id={request_id} task_id={task_id}")
+        return task_id
     except CloudTaskError as e:
-        logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
+        logger.error(f"Failed to start provisioner task for request_id={request_id}: {e}")
         raise
 
 
@@ -372,19 +401,21 @@ def start_range_operation(request_id: UUID, operation: str) -> str | None:
 
 
 def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
-    """Start an ECS Fargate task for NGFW operations.
+    """Start a provisioner task for NGFW operations.
+
+    Uses the configured cloud provider (AWS ECS Fargate or GCP GKE Job).
 
     Args:
         request_id: UUID of the Request to operate on
         command: Command list to run (e.g., ["ngfw", "provision", "--request-id", "..."])
 
     Returns:
-        ECS task ARN if successful, None if ECS is not configured
+        Task identifier if successful, None if not configured
 
     Raises:
         TypeError: If request_id is None or command is not a list
         ValueError: If command is empty
-        CloudTaskError: If ECS task fails to start
+        CloudTaskError: If task fails to start
     """
     from uuid import UUID
 
@@ -402,35 +433,27 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
         return _run_local_provisioner(command)
 
-    ecs_config = _get_engine_ecs_config()
-    if ecs_config is None:
+    config = _get_provisioner_config()
+    if config is None:
         return None
 
-    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    task_definition, cluster, network_config = config
 
-    logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
-
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
+    logger.info(f"Starting NGFW provisioner task for request_id={request_id} command={command}")
 
     try:
         runner = get_task_runner()
-        task_arn = runner.run_task(
-            task_definition=task_definition_arn,
-            cluster=cluster_arn,
+        task_id = runner.run_task(
+            task_definition=task_definition,
+            cluster=cluster,
             command=command,
             container_name="pulumi-provisioner",
             network_config=network_config,
         )
-        logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
-        return task_arn
+        logger.info(f"Started NGFW provisioner task: request_id={request_id} task_id={task_id}")
+        return task_id
     except CloudTaskError as e:
-        logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
+        logger.error(f"Failed to start NGFW provisioner task for request_id={request_id}: {e}")
         raise
 
 
@@ -498,25 +521,30 @@ def start_ngfw_operation(request_id: UUID, operation: str) -> str | None:
     return _start_ngfw_ecs_task(request_id, command)
 
 
-def get_task_status(task_arn: str) -> dict | None:
-    """Get the status of an ECS task.
+def get_task_status(task_id: str) -> dict | None:
+    """Get the status of a provisioner task.
 
     Args:
-        task_arn: ARN of the ECS task to check
+        task_id: Task identifier (ECS task ARN or GKE Job name)
 
     Returns:
         Dict with status info, or None if not configured
     """
-    if not task_arn:
+    if not task_id:
         return None
 
-    cluster_arn = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None)
-    if not cluster_arn:
-        return None
+    # For AWS, we need the cluster ARN. For GCP, cluster is ignored by the runner.
+    provider = getattr(settings, "CLOUD_PROVIDER", "aws")
+    if provider == "gcp":
+        cluster = ""
+    else:
+        cluster = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+        if not cluster:
+            return None
 
     try:
         runner = get_task_runner()
-        result = runner.get_task_status(cluster=cluster_arn, task_id=task_arn)
+        result = runner.get_task_status(cluster=cluster, task_id=task_id)
 
         if result is None:
             return {"status": "UNKNOWN", "reason": "Task not found"}

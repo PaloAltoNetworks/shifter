@@ -79,7 +79,8 @@ class InstanceConfig:
         name: Display name for UI (e.g., "target-ubuntu", "attacker-kali").
         role: Instance role ("attacker", "victim", or "dc").
         os_type: Operating system type ("kali", "ubuntu", "windows").
-        instance_type: AWS instance type (e.g., "t3.medium").
+        instance_type: AWS instance type (e.g., "t3.medium") or GCP machine type.
+        image: Container disk image URI (GCP) or empty for AWS (AMI resolved separately).
         agent_s3_key: S3 key for agent installer (optional).
         agent_presigned_url: Presigned URL for agent download (optional).
         dc_config: Domain controller configuration (optional).
@@ -92,6 +93,7 @@ class InstanceConfig:
     role: str  # "attacker", "victim", or "dc"
     os_type: str  # "kali", "ubuntu", "windows"
     instance_type: str
+    image: str = ""  # GCP containerDisk image URI (Artifact Registry)
     agent_s3_key: str | None = None  # S3 key for agent installer
     agent_presigned_url: str | None = None  # Presigned URL for agent download
     dc_config: dict[str, str] | None = None  # {"domain_name": "...", "netbios_name": "..."}
@@ -123,16 +125,16 @@ class SubnetConfig:
 class RangeConfig:
     """Configuration for a complete range.
 
+    Supports both AWS (EC2/VPC) and GCP (KubeVirt/GKE) provisioning.
+    AWS-specific fields default to empty strings so GCP configs can omit them.
+
     Attributes:
         range_id: Database ID for the range.
         user_id: Owner's user ID.
         request_uuid: Correlation key for the provisioning request.
         environment: Deployment environment (dev, staging, prod).
+        cloud_provider: Cloud provider ("aws" or "gcp").
         subnets: List of logical subnets with their instances.
-        vpc_id: AWS VPC ID for range deployment.
-        vpc_cidr: VPC CIDR block (e.g., '10.1.0.0/16').
-        ngfw_data_eni_id: NGFW data ENI ID for inter-subnet routing.
-            Empty string if no NGFW attached to this range.
     """
 
     range_id: int
@@ -140,15 +142,18 @@ class RangeConfig:
     request_uuid: str
     environment: str
     subnets: list[SubnetConfig]
-    vpc_id: str
-    vpc_cidr: str
-    route_table_id: str
-    instance_profile_name: str
-    kali_ami_id: str
-    victim_ami_id: str
-    windows_ami_id: str
-    agent_s3_bucket: str
-    availability_zone: str
+    cloud_provider: str = "aws"  # "aws" or "gcp"
+
+    # --- AWS-specific fields (defaults allow GCP configs to omit them) ---
+    vpc_id: str = ""
+    vpc_cidr: str = ""
+    route_table_id: str = ""
+    instance_profile_name: str = ""
+    kali_ami_id: str = ""
+    victim_ami_id: str = ""
+    windows_ami_id: str = ""
+    agent_s3_bucket: str = ""
+    availability_zone: str = ""
     ngfw_data_eni_id: str = ""  # NGFW data ENI ID for inter-subnet routing
     dc_ami_id: str = ""  # AMI ID for DC instances (prebaked with AD DS)
     portal_vpc_cidr: str = ""
@@ -167,6 +172,10 @@ class RangeConfig:
     firewall_endpoint_id: str = ""
     # SSM/Bedrock endpoints subnet CIDR for NGFW routing
     ssm_endpoints_subnet_cidr: str = ""
+
+    # --- GCP-specific fields ---
+    gke_namespace: str = ""  # Kubernetes namespace for range isolation
+    gcp_project_id: str = ""  # GCP project ID
 
 
 def get_range_from_db(range_id: int) -> dict[str, Any]:

@@ -67,3 +67,9 @@ variable "docker_compose_version" {
   type        = string
   default     = "v5.1.0"
 }
+
+variable "docker_buildx_version" {
+  description = "Pinned Docker Buildx release tag"
+  type        = string
+  default     = "v0.21.2"
+}

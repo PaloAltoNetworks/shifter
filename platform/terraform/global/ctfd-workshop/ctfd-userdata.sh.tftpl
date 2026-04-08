@@ -9,6 +9,12 @@ curl -fsSL \
   -o /usr/local/bin/docker-compose
 chmod 0755 /usr/local/bin/docker-compose
 
+install -d -m 0755 /usr/local/lib/docker/cli-plugins
+curl -fsSL \
+  "https://github.com/docker/buildx/releases/download/${docker_buildx_version}/buildx-${docker_buildx_version}.linux-amd64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod 0755 /usr/local/lib/docker/cli-plugins/docker-buildx
+
 install -d -m 0755 /opt/ctfd
 git clone "${ctfd_repo_url}" /opt/ctfd
 cd /opt/ctfd
@@ -28,6 +34,11 @@ services:
     restart: always
   cache:
     restart: always
+  nginx:
+    # Keep upstream's nginx service available for debugging, but disable it by
+    # default so the host nginx/certbot flow can own ports 80/443.
+    profiles:
+      - container-nginx
 YAML
 
 /usr/local/bin/docker-compose up -d

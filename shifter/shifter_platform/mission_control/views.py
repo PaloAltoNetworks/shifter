@@ -336,39 +336,15 @@ def help_page(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_GET
 def walkthrough(request: HttpRequest) -> HttpResponse:
-    """Box 0 walkthrough with copy-pasteable prompts for CTF participants."""
-    from engine.services import get_user_ready_range_instances
-
-    box_info = {
-        "webdev01": "WebShell",
-        "mx-internal": "MailRoom",
-        "support-win": "HelpDesk",
-        "ci-runner": "DevBox",
-        "backup-dc": "Vault",
-    }
-
-    target_instances = []
-    webshell_ip = ""
-
-    # Find the user's active ready range and extract target IPs
-    for inst in get_user_ready_range_instances(cast(int, request.user.pk)):
-        if inst.get("role") != "attacker":
-            hostname = inst.get("name", "")
-            target_instances.append(
-                {
-                    "name": box_info.get(hostname, hostname),
-                    "private_ip": inst.get("private_ip", ""),
-                    "os_type": inst.get("os_type", ""),
-                }
-            )
-            if hostname == "webdev01":
-                webshell_ip = inst.get("private_ip", "")
-
+    """Participant launch page for the standalone CTFd platform."""
     context = {
-        "page_title": "Walkthrough",
+        "page_title": "CTFd",
         "active_nav": "walkthrough",
-        "target_instances": target_instances,
-        "webshell_ip": webshell_ip,
+        "ctfd_url": getattr(
+            django_settings,
+            "CTFD_PLATFORM_URL",
+            "https://ctf.shifter.keplerops.com/login",
+        ),
     }
     return render(request, "mission_control/walkthrough.html", context)
 

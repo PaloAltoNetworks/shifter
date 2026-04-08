@@ -21,6 +21,17 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+# Resolve current image digests so task definitions update when images change
+data "aws_ecr_image" "guacd" {
+  repository_name = element(split("/", var.guacd_ecr_repository_url), 1)
+  image_tag       = var.guacd_image_tag
+}
+
+data "aws_ecr_image" "guacamole_client" {
+  repository_name = element(split("/", var.guacamole_client_ecr_repository_url), 1)
+  image_tag       = var.guacamole_client_image_tag
+}
+
 # ------------------------------------------------------------------------------
 # Local Variables
 # ------------------------------------------------------------------------------

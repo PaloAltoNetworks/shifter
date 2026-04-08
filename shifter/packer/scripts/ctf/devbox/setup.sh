@@ -281,11 +281,11 @@ echo "devops ALL=(root) NOPASSWD: /usr/bin/node" > /etc/sudoers.d/devops
 chmod 440 /etc/sudoers.d/devops
 
 echo "=== Planting flags ==="
-echo "FLAG{d3vb0x_us3r_0wn3d}" > /home/devops/user.txt
+echo "FLAG{devbox_user_cc939bfa201647fe5992}" > /home/devops/user.txt
 chown devops:devops /home/devops/user.txt
 chmod 400 /home/devops/user.txt
 
-echo "FLAG{d3vb0x_r00t_pwn3d}" > /root/root.txt
+echo "FLAG{devbox_root_952fb99dc35b0eef6b78}" > /root/root.txt
 chmod 400 /root/root.txt
 
 echo "=== Enforcing SSH password authentication ==="

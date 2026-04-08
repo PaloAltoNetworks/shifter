@@ -125,11 +125,11 @@ SUDOEOF
 chmod 440 /etc/sudoers.d/svc-mail
 
 echo "=== Planting flags ==="
-echo "FLAG{m41lr00m_us3r_0wn3d}" > /home/svc-mail/user.txt
+echo "FLAG{mailroom_user_bd84ca4b49d77ca2436a}" > /home/svc-mail/user.txt
 chown svc-mail:svc-mail /home/svc-mail/user.txt
 chmod 400 /home/svc-mail/user.txt
 
-echo "FLAG{m41lr00m_r00t_pwn3d}" > /root/root.txt
+echo "FLAG{mailroom_root_cd3b0319366eadb8fbd9}" > /root/root.txt
 chmod 400 /root/root.txt
 
 echo "=== Enforcing SSH password authentication ==="

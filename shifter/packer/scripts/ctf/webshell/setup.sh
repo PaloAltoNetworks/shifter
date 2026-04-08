@@ -5,9 +5,40 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+wait_for_apt() {
+    local waited=0
+    local timeout=600
+
+    echo "=== Waiting for background apt/dpkg work to finish ==="
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+        || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+        || pgrep -x unattended-upgr >/dev/null 2>&1 \
+        || pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1; do
+        if [ "$waited" -ge "$timeout" ]; then
+            echo "Timed out waiting for apt/dpkg lock holders to exit"
+            ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
+            return 1
+        fi
+        echo "apt/dpkg still busy; retrying in 5s..."
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+apt_update() {
+    wait_for_apt
+    apt-get update
+}
+
+apt_install() {
+    wait_for_apt
+    apt-get install -y "$@"
+}
+
 echo "=== Installing Apache + PHP ==="
-apt-get update
-apt-get install -y apache2 libapache2-mod-php php
+apt_update
+apt_install apache2 libapache2-mod-php php
 
 echo "=== Creating webshell (cmd.php) ==="
 cat > /var/www/html/cmd.php << 'PHPEOF'
@@ -79,7 +110,7 @@ int main(int argc, char *argv[]) {
     return system(cmd);
 }
 CEOF
-apt-get install -y gcc
+apt_install gcc
 gcc -o /usr/local/bin/backup /tmp/backup.c
 chmod u+s /usr/local/bin/backup
 rm /tmp/backup.c

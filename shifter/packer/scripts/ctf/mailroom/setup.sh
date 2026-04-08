@@ -101,7 +101,12 @@ chmod 400 /home/svc-mail/user.txt
 echo "FLAG{m41lr00m_r00t_pwn3d}" > /root/root.txt
 chmod 400 /root/root.txt
 
-# SSH already installed and configured in base AMI (services.sh)
+echo "=== Enforcing SSH password authentication ==="
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-shifter-password-auth.conf << 'SSHEOF'
+PasswordAuthentication yes
+SSHEOF
+systemctl restart ssh
 
 echo "=== Fixing vsftpd PAM for anonymous login ==="
 # Default PAM config blocks anonymous FTP - replace with permissive auth
@@ -114,7 +119,6 @@ PAMEOF
 
 echo "=== Enabling services ==="
 systemctl enable vsftpd
-# ssh already enabled in base AMI (services.sh)
 systemctl enable postfix
 
 echo "=== MailRoom box setup complete ==="

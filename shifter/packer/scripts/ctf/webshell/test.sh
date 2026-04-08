@@ -49,7 +49,7 @@ check "www-data sudo rule exists" test -f /etc/sudoers.d/www-data
 check "Sudo rule allows www-data -> john" grep -q "www-data.*john" /etc/sudoers.d/www-data
 
 # SSH config
-check "Password auth enabled" grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config
+check "Effective SSH password auth enabled" sh -c 'sshd -T 2>/dev/null | grep -q "^passwordauthentication yes$"'
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

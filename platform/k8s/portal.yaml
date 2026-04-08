@@ -1,0 +1,168 @@
+# Mission Control Portal — GKE in-cluster deployment
+#
+# Deploys the Django/Daphne portal inside the GKE cluster so it can
+# reach KubeVirt VM pod IPs directly for terminal and RDP connections.
+#
+# On AWS, the portal runs on EC2 and reaches range VMs via VPC routing.
+# On GCP, the portal runs as a pod and reaches VMs via pod networking.
+#
+# Exposed via a LoadBalancer Service (backed by GCP External Application LB).
+# TLS termination happens at the LB (configured separately in gcp-loadbalancer).
+#
+# Requirements:
+# - Workload Identity SA bound to the portal KSA for GCP API access
+# - Secret "portal-env" containing Django settings as env vars
+# - Redis (from gcp-redis module) for Django Channels
+# - Cloud SQL (from gcp-database module) for PostgreSQL
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shifter-portal
+  labels:
+    app: shifter
+    component: portal
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portal
+  namespace: shifter-portal
+  annotations:
+    # Workload Identity — maps this KSA to a GCP SA for Secret Manager, Pub/Sub, etc.
+    # Replace with actual GCP SA email from Terraform output.
+    iam.gke.io/gcp-service-account: "portal@PROJECT_ID.iam.gserviceaccount.com"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal
+  namespace: shifter-portal
+  labels:
+    app: shifter
+    component: portal
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: shifter
+      component: portal
+  template:
+    metadata:
+      labels:
+        app: shifter
+        component: portal
+    spec:
+      serviceAccountName: portal
+      containers:
+        - name: portal
+          image: PORTAL_IMAGE  # Replace with Artifact Registry image
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: portal-env
+          env:
+            - name: CLOUD_PROVIDER
+              value: "gcp"
+            - name: DJANGO_SETTINGS_MODULE
+              value: "config.settings"
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal
+  namespace: shifter-portal
+  labels:
+    app: shifter
+    component: portal
+  annotations:
+    # NEG for GCP External Application LB integration
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  selector:
+    app: shifter
+    component: portal
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+# Guacamole proxy for RDP access to Windows VMs
+# Runs in the same namespace so it can reach VM pod IPs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guacamole
+  namespace: shifter-portal
+  labels:
+    app: shifter
+    component: guacamole
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shifter
+      component: guacamole
+  template:
+    metadata:
+      labels:
+        app: shifter
+        component: guacamole
+    spec:
+      containers:
+        - name: guacd
+          image: guacamole/guacd:1.5.5
+          ports:
+            - name: guacd
+              containerPort: 4822
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: guacd
+  namespace: shifter-portal
+  labels:
+    app: shifter
+    component: guacamole
+spec:
+  type: ClusterIP
+  selector:
+    app: shifter
+    component: guacamole
+  ports:
+    - name: guacd
+      port: 4822
+      targetPort: 4822
+      protocol: TCP

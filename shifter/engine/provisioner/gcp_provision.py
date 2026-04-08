@@ -369,6 +369,63 @@ def provision_range_gcp(
         # Step 5: Create NetworkPolicy for subnet isolation
         _create_network_policies(executor, namespace, subnets)
 
+        # Step 5b: Wire range to NGFW if enabled
+        ngfw_enabled = range_spec.get("ngfw", False)
+        if ngfw_enabled:
+            from gcp_ngfw import configure_range_ngfw_routing
+            from main import get_db_connection
+
+            # Look up user's NGFW management IP and SSH key
+            with get_db_connection() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT ei.state->>'management_ip',
+                           ei.state->>'ssh_key_secret_ref',
+                           ei.state->>'service_ip',
+                           ei.state->>'namespace'
+                    FROM engine_instance ei
+                    JOIN engine_request er ON ei.request_id = er.id
+                    WHERE er.user_id = %s AND ei.role = 'ngfw'
+                      AND ei.status IN ('ready', 'paused', 'resuming')
+                    ORDER BY ei.created_at DESC LIMIT 1
+                    """,
+                    (user_id,),
+                )
+                ngfw_row = cur.fetchone()
+
+            if ngfw_row and ngfw_row[0]:
+                ngfw_mgmt_ip = ngfw_row[0]
+                ngfw_key_ref = ngfw_row[1] or ""
+                ngfw_svc_ip = ngfw_row[2] or ""
+                ngfw_ns = ngfw_row[3] or ""
+
+                # Get NGFW SSH key from Secret Manager
+                from cloud import get_secrets_store
+
+                ngfw_ssh_key = get_secrets_store().get_secret(ngfw_key_ref) if ngfw_key_ref else ""
+
+                if ngfw_ssh_key:
+                    # Build subnet CIDRs for NGFW configuration
+                    # On GCP/K8s, subnets don't have CIDRs — use pod network ranges
+                    ngfw_subnets = [
+                        {"name": s.get("name", ""), "cidr": "", "connected_to": s.get("connected_to", [])}
+                        for s in subnets
+                    ]
+                    configure_range_ngfw_routing(
+                        range_namespace=namespace,
+                        ngfw_namespace=ngfw_ns,
+                        ngfw_service_ip=ngfw_svc_ip,
+                        subnets=ngfw_subnets,
+                        range_id=range_id,
+                        ssh_private_key=ngfw_ssh_key,
+                        ngfw_management_ip=ngfw_mgmt_ip,
+                    )
+                    logger.info("provision_range_gcp: NGFW routing configured for range_id=%d", range_id)
+                else:
+                    logger.warning("provision_range_gcp: NGFW SSH key not available, skipping NGFW config")
+            else:
+                logger.warning("provision_range_gcp: ngfw=true but no active NGFW found for user %d", user_id)
+
         # Step 6: Run instance setup plans via SSH
         logger.info(
             "provision_range_gcp: running setup plans for %d instances",

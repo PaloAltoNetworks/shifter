@@ -23,12 +23,36 @@ def test_linux_boxes_enforce_effective_ssh_password_auth() -> None:
         assert "systemctl restart ssh" in content
 
 
+def test_linux_boxes_wait_for_background_apt_work() -> None:
+    """Workshop Ubuntu boxes must tolerate unattended-upgrades on first boot."""
+    for box in ("webshell", "mailroom", "devbox"):
+        content = _read(box, "setup.sh")
+        assert "wait_for_apt()" in content
+        assert "apt_update()" in content
+        assert "apt_install()" in content
+        assert "/var/lib/dpkg/lock-frontend" in content
+        assert "pgrep -x unattended-upgr" in content
+        assert "wait_for_apt" in content
+
+
 def test_linux_box_validation_checks_effective_sshd_config() -> None:
     """Validation scripts should test the rendered sshd config, not one file."""
     for box in ("webshell", "mailroom", "devbox"):
         content = _read(box, "test.sh")
         assert "sshd -T" in content
         assert "passwordauthentication yes" in content
+
+
+def test_webshell_template_has_extended_ssh_timeout() -> None:
+    """WebShell should tolerate slow SSH readiness before provisioning starts."""
+    content = (PACKER_DIR / "ctf-webshell.pkr.hcl").read_text()
+    assert 'ssh_timeout  = "10m"' in content
+
+
+def test_devbox_template_has_extended_ssh_timeout() -> None:
+    """DevBox should tolerate slow SSH readiness before provisioning starts."""
+    content = (PACKER_DIR / "ctf-devbox.pkr.hcl").read_text()
+    assert 'ssh_timeout  = "10m"' in content
 
 
 def test_helpdesk_user_is_not_local_admin() -> None:

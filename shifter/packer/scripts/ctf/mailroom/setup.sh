@@ -5,14 +5,45 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+wait_for_apt() {
+    local waited=0
+    local timeout=600
+
+    echo "=== Waiting for background apt/dpkg work to finish ==="
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+        || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+        || pgrep -x unattended-upgr >/dev/null 2>&1 \
+        || pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1; do
+        if [ "$waited" -ge "$timeout" ]; then
+            echo "Timed out waiting for apt/dpkg lock holders to exit"
+            ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
+            return 1
+        fi
+        echo "apt/dpkg still busy; retrying in 5s..."
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+apt_update() {
+    wait_for_apt
+    apt-get update
+}
+
+apt_install() {
+    wait_for_apt
+    apt-get install -y "$@"
+}
+
 echo "=== Installing services ==="
-apt-get update
+apt_update
 
 # Pre-seed postfix to avoid interactive prompts
 echo "postfix postfix/mailname string mailroom.local" | debconf-set-selections
 echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
 
-apt-get install -y vsftpd postfix
+apt_install vsftpd postfix
 
 echo "=== Configuring vsftpd for anonymous access ==="
 cat > /etc/vsftpd.conf << 'FTPEOF'

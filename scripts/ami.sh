@@ -3,6 +3,8 @@
 # Usage:
 #   ./scripts/ami.sh -b kali    # Build AMI in dev
 #   ./scripts/ami.sh -p kali    # Promote AMI to prod
+#   ./scripts/ami.sh -b ctf-webshell  # Build workshop AMI in dev
+#   ./scripts/ami.sh -p ctf-webshell  # Promote workshop AMI to prod
 
 set -e
 
@@ -16,7 +18,9 @@ usage() {
     echo "  -b <type>   Build AMI in dev (runs packer.yml)"
     echo "  -p <type>   Promote AMI to prod (runs packer-promote.yml)"
     echo ""
-    echo "AMI types: kali, ubuntu, windows, dc, brokenbk"
+    echo "AMI types:"
+    echo "  Base: kali, ubuntu, windows, dc, brokenbk"
+    echo "  CTF: ctf-webshell, ctf-mailroom, ctf-helpdesk, ctf-devbox, ctf-vault"
     echo ""
     echo "Current branch: $BRANCH"
     exit 1

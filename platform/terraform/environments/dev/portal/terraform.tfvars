@@ -81,7 +81,7 @@ kali_instance_type   = "t3.large"
 # Autoscaling
 # ------------------------------------------------------------------------------
 
-enable_autoscaling   = false
+enable_autoscaling   = true
 asg_min_size         = 2
 asg_max_size         = 5
 asg_desired_capacity = 2

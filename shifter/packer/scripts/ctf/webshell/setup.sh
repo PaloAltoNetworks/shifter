@@ -84,11 +84,11 @@ id john &>/dev/null || useradd -m -s /bin/bash john
 echo "john:SuperSecret123!" | chpasswd
 
 echo "=== Planting flags ==="
-echo "FLAG{w3bsh3ll_us3r_0wn3d}" > /home/john/local.txt
+echo "FLAG{webshell_user_2930c972ff14ce1bc149}" > /home/john/local.txt
 chown john:john /home/john/local.txt
 chmod 400 /home/john/local.txt
 
-echo "FLAG{w3bsh3ll_r00t_pwn3d}" > /root/root.txt
+echo "FLAG{webshell_root_cf87de2595c81e674e0a}" > /root/root.txt
 chmod 400 /root/root.txt
 
 echo "=== Creating SUID backup binary ==="

@@ -29,7 +29,7 @@ Run after all ranges reach `ready`, before the workshop starts.
 1. Get all range IDs for the event
 2. For each range, get the provisioned instance IDs by name
 3. SSM into each victim instance and overwrite the flag files
-4. Verify the hardcoded flags in `mission_control/views.py` `walkthrough()` match the values above
+4. Verify the post-provision overwrite used the intended values above
 
 ### Linux boxes (webdev01, mx-internal, ci-runner)
 
@@ -41,11 +41,11 @@ SSM `AWS-RunPowerShellScript` per instance, overwriting via `Set-Content`.
 
 ## Where Flags Are Displayed
 
-- **Walkthrough page** (`/mission-control/walkthrough/`): Target Boxes table shows user and root flags per box. Hardcoded in `mission_control/views.py` in the `box_flags` dict.
+- **Walkthrough page** (`/mission-control/walkthrough/`): Flags are not shown.
 - **Organizer guide** (`documentation/docs/features/ctf-organizer-guide.md`): Not shown (organizer uses the walkthrough page or this doc).
 
 ## If Flags Need to Change
 
-1. Update `box_flags` dict in `mission_control/views.py` `walkthrough()`
-2. Deploy the code change
-3. Re-run the SSM overwrite on all victim instances
+1. Update the flag source for the event
+2. Rebuild the affected AMIs or re-run the SSM overwrite on all victim instances
+3. Re-seed CTFd with the same values

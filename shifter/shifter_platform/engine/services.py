@@ -644,10 +644,10 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     ssh_key = None
     if os_type == "windows":
-        ssh_key_arn = instance.get("ssh_key_secret_arn")
-        if ssh_key_arn:
+        ssh_key_ref = instance.get("ssh_key_secret_ref") or instance.get("ssh_key_secret_arn")
+        if ssh_key_ref:
             try:
-                ssh_key = get_ssh_key(ssh_key_arn)
+                ssh_key = get_ssh_key(ssh_key_ref)
             except Exception as e:
                 logger.warning("Failed to get SSH key for SFTP: %s", e)
 
@@ -728,12 +728,12 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     # Get SSH key from secrets
-    ssh_key_arn = instance.get("ssh_key_secret_arn")
-    if not ssh_key_arn:
-        logger.error("No SSH key ARN for instance: %s", instance_uuid)
+    ssh_key_ref = instance.get("ssh_key_secret_ref") or instance.get("ssh_key_secret_arn")
+    if not ssh_key_ref:
+        logger.error("No SSH key ref for instance: %s", instance_uuid)
         raise ValueError(f"Instance {instance_uuid} has no SSH key configured")
 
-    ssh_key = get_ssh_key(ssh_key_arn)
+    ssh_key = get_ssh_key(ssh_key_ref)
 
     # Create SSH connection
     host = instance.get("private_ip")
@@ -847,13 +847,13 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
         logger.error("No management IP in NGFW state: ngfw_uuid=%s", ngfw_uuid)
         raise ValueError(f"NGFW {ngfw_uuid} has no management IP configured")
 
-    ssh_key_arn = ngfw_instance.state.get("ssh_key_secret_arn")
-    if not ssh_key_arn:
-        logger.error("No SSH key ARN in NGFW state: ngfw_uuid=%s", ngfw_uuid)
+    ssh_key_ref = ngfw_instance.state.get("ssh_key_secret_ref") or ngfw_instance.state.get("ssh_key_secret_arn")
+    if not ssh_key_ref:
+        logger.error("No SSH key ref in NGFW state: ngfw_uuid=%s", ngfw_uuid)
         raise ValueError(f"NGFW {ngfw_uuid} has no SSH key configured")
 
     # Get SSH key from secrets
-    ssh_key = get_ssh_key(ssh_key_arn)
+    ssh_key = get_ssh_key(ssh_key_ref)
 
     # Create SSH connection for PAN-OS CLI
     # - Username: admin (PAN-OS default admin)

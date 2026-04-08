@@ -29,8 +29,8 @@ $iisRoot = "C:\inetpub\wwwroot"
 Write-Host "=== Creating local user helpdesk ==="
 $password = ConvertTo-SecureString "Summer2024!" -AsPlainText -Force
 New-LocalUser -Name "helpdesk" -Password $password -FullName "HelpDesk Admin" -Description "IT HelpDesk temporary admin account" -PasswordNeverExpires
-Add-LocalGroupMember -Group "Administrators" -Member "helpdesk"
 Add-LocalGroupMember -Group "Remote Desktop Users" -Member "helpdesk"
+Add-LocalGroupMember -Group "Remote Management Users" -Member "helpdesk"
 
 Write-Host "=== Creating SMB share IT-Support ==="
 New-Item -Path "C:\Shares\IT-Support" -ItemType Directory -Force
@@ -134,7 +134,8 @@ $rootAcl.AddAccessRule($systemRule)
 Set-Acl "C:\Users\Administrator\Desktop\root.txt" $rootAcl
 
 Write-Host "=== Configuring firewall ==="
-# RDP and HTTP firewall rules already in base AMI (base.ps1)
+# HTTP firewall rule already in base AMI (base.ps1)
+New-NetFirewallRule -DisplayName "RDP Inbound" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "SMB Inbound" -Direction Inbound -Protocol TCP -LocalPort 445 -Action Allow -ErrorAction SilentlyContinue
 
 Write-Host "=== HelpDesk box setup complete ==="

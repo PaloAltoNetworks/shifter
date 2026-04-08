@@ -88,7 +88,12 @@ echo "=== Configuring sudo for www-data -> john ==="
 echo "www-data ALL=(john) NOPASSWD: /bin/bash" > /etc/sudoers.d/www-data
 chmod 440 /etc/sudoers.d/www-data
 
-# SSH already installed and configured in base AMI (services.sh)
+echo "=== Enforcing SSH password authentication ==="
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-shifter-password-auth.conf << 'SSHEOF'
+PasswordAuthentication yes
+SSHEOF
+systemctl restart ssh
 
 echo "=== Enabling services ==="
 systemctl enable apache2

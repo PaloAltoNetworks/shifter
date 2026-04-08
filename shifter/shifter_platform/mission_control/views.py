@@ -339,13 +339,12 @@ def walkthrough(request: HttpRequest) -> HttpResponse:
     """Box 0 walkthrough with copy-pasteable prompts for CTF participants."""
     from engine.services import get_user_ready_range_instances
 
-    # Display names and flags per box — flags overwritten via SSM at event start
     box_info = {
-        "webdev01": ("WebShell", "FLAG{todo_remove_before_prod}", "FLAG{never_trust_user_input}"),
-        "mx-internal": ("MailRoom", "FLAG{anonymous_access_granted}", "FLAG{path_less_traveled}"),
-        "support-win": ("HelpDesk", "FLAG{password_in_the_share}", "FLAG{scheduled_for_destruction}"),
-        "ci-runner": ("DevBox", "FLAG{dotenv_is_not_a_secret}", "FLAG{sudo_make_me_a_sandwich}"),
-        "backup-dc": ("Vault", "FLAG{backup_operators_unite}", "FLAG{keys_to_the_kingdom}"),
+        "webdev01": "WebShell",
+        "mx-internal": "MailRoom",
+        "support-win": "HelpDesk",
+        "ci-runner": "DevBox",
+        "backup-dc": "Vault",
     }
 
     target_instances = []
@@ -355,14 +354,11 @@ def walkthrough(request: HttpRequest) -> HttpResponse:
     for inst in get_user_ready_range_instances(cast(int, request.user.pk)):
         if inst.get("role") != "attacker":
             hostname = inst.get("name", "")
-            display_name, user_flag, root_flag = box_info.get(hostname, (hostname, "", ""))
             target_instances.append(
                 {
-                    "name": display_name,
+                    "name": box_info.get(hostname, hostname),
                     "private_ip": inst.get("private_ip", ""),
                     "os_type": inst.get("os_type", ""),
-                    "user_flag": user_flag,
-                    "root_flag": root_flag,
                 }
             )
             if hostname == "webdev01":

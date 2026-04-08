@@ -114,10 +114,10 @@ for disaster recovery purposes. Use this responsibly.
 
 Write-Host "=== Planting flags ==="
 # User flag
-"FLAG{v4ult_us3r_0wn3d}" | Out-File -FilePath "C:\Users\vaultadmin\Desktop\user.txt" -Encoding UTF8 -NoNewline
+"FLAG{vault_user_d1aadc0c3b961f4736d2}" | Out-File -FilePath "C:\Users\vaultadmin\Desktop\user.txt" -Encoding UTF8 -NoNewline
 
 # Root flag
-"FLAG{v4ult_r00t_pwn3d}" | Out-File -FilePath "C:\Users\Administrator\Desktop\root.txt" -Encoding UTF8 -NoNewline
+"FLAG{vault_root_c70f5667d45cabac71d4}" | Out-File -FilePath "C:\Users\Administrator\Desktop\root.txt" -Encoding UTF8 -NoNewline
 
 # Restrict root flag
 $rootAcl = New-Object System.Security.AccessControl.FileSecurity

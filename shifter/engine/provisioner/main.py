@@ -1902,12 +1902,24 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                     run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
 
     try:
-        if operation == "up":
-            _run_terraform_provision(request_id, range_id, user_id, range_spec)
-        elif operation == "destroy":
-            _run_terraform_destroy(request_id, range_id, user_id, range_spec)
+        cloud_provider = os.environ.get("CLOUD_PROVIDER", "aws")
+
+        if cloud_provider == "gcp":
+            from gcp_provision import destroy_range_gcp, provision_range_gcp
+
+            if operation == "up":
+                provision_range_gcp(request_id, range_id, user_id, range_spec)
+            elif operation == "destroy":
+                destroy_range_gcp(request_id, range_id, user_id, range_spec)
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
         else:
-            raise ValueError(f"Unknown operation: {operation}")
+            if operation == "up":
+                _run_terraform_provision(request_id, range_id, user_id, range_spec)
+            elif operation == "destroy":
+                _run_terraform_destroy(request_id, range_id, user_id, range_spec)
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
 
     except Exception as e:
         error_msg = str(e)[:1000]

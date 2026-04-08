@@ -29,8 +29,9 @@ Check "IIS page contains HelpDesk" { (Get-Content "C:\inetpub\wwwroot\index.html
 
 # User
 Check "helpdesk user exists" { Get-LocalUser -Name "helpdesk" -ErrorAction Stop; $true }
-Check "helpdesk is in Administrators" { (Get-LocalGroupMember -Group "Administrators").Name -match "helpdesk" }
+Check "helpdesk is not in Administrators" { -not ((Get-LocalGroupMember -Group "Administrators").Name -match "helpdesk") }
 Check "helpdesk is in Remote Desktop Users" { (Get-LocalGroupMember -Group "Remote Desktop Users").Name -match "helpdesk" }
+Check "helpdesk is in Remote Management Users" { (Get-LocalGroupMember -Group "Remote Management Users").Name -match "helpdesk" }
 
 # SMB Share
 Check "IT-Support share exists" { Get-SmbShare -Name "IT-Support" -ErrorAction Stop; $true }

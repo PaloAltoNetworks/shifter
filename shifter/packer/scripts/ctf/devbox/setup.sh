@@ -2,7 +2,8 @@
 # CTF Box 3 - "DevBox" - Ubuntu
 # Chain: Command injection in DevNotes search -> reverse shell as node ->
 #        SSH key in /opt/backups -> SSH as devops -> sudo node -> GTFOBins -> root
-# Dual-homed: second NIC on 10.0.2.0/24 with .env containing vault creds
+# Vault credentials are staged in .env; the Vault host is another target in the
+# same workshop subnet and does not use a fixed per-scenario IP.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -46,7 +47,7 @@ const notes = [
   { id: 1, title: "Sprint Planning", content: "Review backlog items for Q1 sprint", author: "devops", date: "2024-01-10" },
   { id: 2, title: "API Redesign", content: "Migrate REST endpoints to GraphQL", author: "mgarcia", date: "2024-01-12" },
   { id: 3, title: "Deploy Checklist", content: "Run tests, build docker image, push to registry", author: "devops", date: "2024-01-15" },
-  { id: 4, title: "Vault Setup", content: "Configure vault server on internal network for secrets management", author: "devops", date: "2024-01-20" },
+  { id: 4, title: "Vault Setup", content: "Configure vault server for secrets management", author: "devops", date: "2024-01-20" },
   { id: 5, title: "Backup Script", content: "Backup script moved to /opt/backups, runs nightly via cron", author: "node", date: "2024-02-01" }
 ];
 
@@ -150,10 +151,9 @@ EOF
 
 cat > /opt/devnotes/notes/vault.txt << 'EOF'
 Vault Setup
-- Configure vault server on internal network
-- Vault is on the internal subnet (10.0.2.0/24)
-- Access via SSH from this box only
-- Credentials in /opt/devnotes/.env
+- Configure vault server on the workshop range
+- Vault is another host in the same target subnet
+- Use the credentials in /opt/devnotes/.env with the Vault target IP
 EOF
 
 cat > /opt/devnotes/notes/backup.txt << 'EOF'
@@ -176,8 +176,7 @@ cat > /opt/devnotes/.env << 'ENVEOF'
 NODE_ENV=production
 PORT=3000
 
-# Vault server credentials (internal network)
-VAULT_HOST=10.0.2.10
+# Vault server credentials
 VAULT_ADMIN=vaultadmin
 VAULT_PASS=DevOps2024!
 ENVEOF
@@ -257,6 +256,11 @@ chmod 400 /home/devops/user.txt
 echo "FLAG{d3vb0x_r00t_pwn3d}" > /root/root.txt
 chmod 400 /root/root.txt
 
-# SSH already installed and configured in base AMI (services.sh)
+echo "=== Enforcing SSH password authentication ==="
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-shifter-password-auth.conf << 'SSHEOF'
+PasswordAuthentication yes
+SSHEOF
+systemctl restart ssh
 
 echo "=== DevBox setup complete ==="

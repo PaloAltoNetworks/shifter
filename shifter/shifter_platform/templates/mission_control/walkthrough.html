@@ -154,7 +154,7 @@
         <h6 class="mb-2">Your Target Boxes</h6>
         <table>
             <thead>
-                <tr><th>Name</th><th>IP Address</th><th>OS</th><th>User Flag</th><th>Root Flag</th></tr>
+                <tr><th>Name</th><th>IP Address</th><th>OS</th></tr>
             </thead>
             <tbody>
                 {% for inst in target_instances %}
@@ -162,8 +162,6 @@
                     <td><code>{{ inst.name }}</code></td>
                     <td><code>{{ inst.private_ip }}</code></td>
                     <td>{{ inst.os_type }}</td>
-                    <td><code>{{ inst.user_flag }}</code></td>
-                    <td><code>{{ inst.root_flag }}</code></td>
                 </tr>
                 {% endfor %}
             </tbody>

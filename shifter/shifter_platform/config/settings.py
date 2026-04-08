@@ -361,6 +361,12 @@ GKE_PROVISIONER_SERVICE_ACCOUNT = os.environ.get("GKE_PROVISIONER_SERVICE_ACCOUN
 # Pub/Sub topic for range events (GCP equivalent of SNS_RANGE_EVENTS_ARN)
 PUBSUB_RANGE_EVENTS_TOPIC = os.environ.get("PUBSUB_RANGE_EVENTS_TOPIC", "")
 
+# CTF batch provisioning settings (GCP only — K8s-aware pacing)
+CTF_GCP_BATCH_SIZE = int(os.environ.get("CTF_GCP_BATCH_SIZE", "5"))
+CTF_GCP_MAX_BATCH_SIZE = int(os.environ.get("CTF_GCP_MAX_BATCH_SIZE", "20"))
+CTF_GCP_MIN_BATCH_DELAY = int(os.environ.get("CTF_GCP_MIN_BATCH_DELAY", "10"))
+CTF_GCP_MAX_BATCH_DELAY = int(os.environ.get("CTF_GCP_MAX_BATCH_DELAY", "60"))
+
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS/GKE Job)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
 PROVISIONER_PATH = os.environ.get("PROVISIONER_PATH", "")

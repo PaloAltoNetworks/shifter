@@ -35,3 +35,13 @@ output "kubevirt_node_pool_name" {
   description = "Name of the KubeVirt node pool"
   value       = google_container_node_pool.kubevirt.name
 }
+
+output "kubevirt_autoscaling_enabled" {
+  description = "Whether cluster autoscaler is enabled for KubeVirt nodes"
+  value       = var.kubevirt_enable_autoscaling
+}
+
+output "kubevirt_max_node_count" {
+  description = "Maximum KubeVirt node count (when autoscaling is enabled)"
+  value       = var.kubevirt_enable_autoscaling ? var.kubevirt_max_node_count : var.kubevirt_node_count
+}

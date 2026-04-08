@@ -161,8 +161,12 @@ def provision_event_ranges_throttled(
 ) -> dict[str, Any]:
     """Provision ranges for all participants with throttled pacing.
 
-    Spreads provisioning requests across ``spinup_window_seconds`` to avoid
-    overwhelming AWS with simultaneous ECS tasks.
+    Pacing strategy adapts to the cloud provider:
+    - **AWS (default)**: Sequential provisioning with even delays across the
+      spinup window (clamped to [5, 120]s). Avoids overwhelming ECS/Terraform.
+    - **GCP (K8s)**: Batch provisioning with smaller inter-batch delays. K8s
+      scheduler handles VM placement concurrently and the cluster autoscaler
+      adds nodes as needed, so we can submit more aggressively.
 
     Args:
         event_id: UUID of the event.
@@ -176,6 +180,8 @@ def provision_event_ranges_throttled(
     Raises:
         CTFNotFoundError: If event doesn't exist.
     """
+    from django.conf import settings
+
     logger.info(
         "Throttled provisioning for event %s (window=%ds)",
         event_id,
@@ -208,7 +214,34 @@ def provision_event_ranges_throttled(
             "interrupted": False,
         }
 
-    # Delay between provisions, clamped to [5, 120] seconds
+    cloud_provider = getattr(settings, "CLOUD_PROVIDER", "aws")
+
+    if cloud_provider == "gcp":
+        return _provision_throttled_gcp(
+            event_id,
+            participants,
+            count,
+            spinup_window_seconds,
+            shutdown_check,
+        )
+
+    return _provision_throttled_sequential(
+        event_id,
+        participants,
+        count,
+        spinup_window_seconds,
+        shutdown_check,
+    )
+
+
+def _provision_throttled_sequential(
+    event_id: UUID,
+    participants: list,
+    count: int,
+    spinup_window_seconds: int,
+    shutdown_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Sequential provisioning for AWS — one at a time with even delays."""
     raw_delay = spinup_window_seconds / max(count, 1)
     delay = max(5.0, min(120.0, raw_delay))
 
@@ -249,11 +282,9 @@ def provision_event_ranges_throttled(
             failed,
         )
 
-        # Sleep between provisions (skip after the last one)
         if i < count - 1 and not (shutdown_check and shutdown_check()):
             time.sleep(delay)
 
-    # Notify organizer of failures
     if errors:
         from ctf.services.notification import notify_organizer_provision_failure
 
@@ -267,6 +298,123 @@ def provision_event_ranges_throttled(
         "errors": errors,
         "interrupted": interrupted,
     }
+
+
+def _provision_throttled_gcp(
+    event_id: UUID,
+    participants: list,
+    count: int,
+    spinup_window_seconds: int,
+    shutdown_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Batch provisioning for GCP — submit in batches with shorter delays.
+
+    K8s handles scheduling concurrency, so we submit ranges in batches rather
+    than one-by-one. The cluster autoscaler reacts to pending pods within
+    ~30-60 seconds, so we pace batches to give it time to scale.
+
+    Batch sizing:
+    - batch_size = max(5, count // 10), capped at 20
+    - inter-batch delay = max(10, spinup_window / number_of_batches), capped at 60s
+
+    This means a 50-participant event with a 30-minute window processes in
+    ~10 batches of 5, with ~3-minute gaps — but the K8s scheduler works on
+    all 5 per batch concurrently.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from django.conf import settings as django_settings
+
+    min_batch = getattr(django_settings, "CTF_GCP_BATCH_SIZE", 5)
+    max_batch = getattr(django_settings, "CTF_GCP_MAX_BATCH_SIZE", 20)
+    min_delay = getattr(django_settings, "CTF_GCP_MIN_BATCH_DELAY", 10)
+    max_delay = getattr(django_settings, "CTF_GCP_MAX_BATCH_DELAY", 60)
+
+    batch_size = max(min_batch, min(max_batch, count // 10 or min_batch))
+    num_batches = (count + batch_size - 1) // batch_size
+    raw_delay = spinup_window_seconds / max(num_batches, 1)
+    batch_delay = max(float(min_delay), min(float(max_delay), raw_delay))
+
+    logger.info(
+        "GCP batch provisioning: event=%s count=%d batch_size=%d batches=%d delay=%.1fs",
+        event_id,
+        count,
+        batch_size,
+        num_batches,
+        batch_delay,
+    )
+
+    successful = 0
+    failed = 0
+    errors: list[dict[str, str]] = []
+    interrupted = False
+
+    for batch_idx in range(num_batches):
+        if shutdown_check and shutdown_check():
+            logger.info(
+                "GCP batch provisioning interrupted at batch %d/%d for event %s",
+                batch_idx,
+                num_batches,
+                event_id,
+            )
+            interrupted = True
+            break
+
+        batch_start = batch_idx * batch_size
+        batch_end = min(batch_start + batch_size, count)
+        batch = participants[batch_start:batch_end]
+
+        # Submit batch concurrently
+        batch_results: list[tuple[str, bool, str]] = []
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = {pool.submit(_provision_single, p.pk): p for p in batch}
+            for future in as_completed(futures):
+                participant = futures[future]
+                try:
+                    future.result()
+                    batch_results.append((str(participant.pk), True, ""))
+                except Exception as e:
+                    batch_results.append((str(participant.pk), False, str(e)))
+
+        for pid, ok, err in batch_results:
+            if ok:
+                successful += 1
+            else:
+                failed += 1
+                errors.append({"participant_id": pid, "error": err})
+
+        logger.info(
+            "GCP batch provisioning progress for event %s: batch %d/%d complete, %d/%d ready, %d failed",
+            event_id,
+            batch_idx + 1,
+            num_batches,
+            successful,
+            count,
+            failed,
+        )
+
+        # Sleep between batches (skip after the last one)
+        if batch_idx < num_batches - 1 and not (shutdown_check and shutdown_check()):
+            time.sleep(batch_delay)
+
+    if errors:
+        from ctf.services.notification import notify_organizer_provision_failure
+
+        notify_organizer_provision_failure(event_id, errors)
+
+    return {
+        "event_id": str(event_id),
+        "total": successful + failed,
+        "successful": successful,
+        "failed": failed,
+        "errors": errors,
+        "interrupted": interrupted,
+    }
+
+
+def _provision_single(participant_id: UUID) -> dict[str, Any]:
+    """Provision a single participant range (for use in thread pool)."""
+    return provision_participant_range_with_retry(participant_id)
 
 
 def get_range_status(participant_id: UUID) -> dict[str, Any]:

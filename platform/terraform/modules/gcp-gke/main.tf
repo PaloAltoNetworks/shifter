@@ -190,7 +190,17 @@ resource "google_container_node_pool" "kubevirt" {
   location = var.region
   project  = var.project_id
 
-  node_count = var.kubevirt_node_count
+  # When autoscaling is enabled, node_count is the initial count and the
+  # cluster autoscaler manages scaling between min and max.
+  node_count = var.kubevirt_enable_autoscaling ? null : var.kubevirt_node_count
+
+  dynamic "autoscaling" {
+    for_each = var.kubevirt_enable_autoscaling ? [1] : []
+    content {
+      min_node_count = var.kubevirt_node_count
+      max_node_count = var.kubevirt_max_node_count
+    }
+  }
 
   node_config {
     machine_type = var.kubevirt_machine_type

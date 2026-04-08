@@ -97,9 +97,21 @@ variable "kubevirt_machine_type" {
 }
 
 variable "kubevirt_node_count" {
-  description = "Number of KubeVirt nodes (scale based on VM count: ~7 VMs per n2-standard-16)"
+  description = "Initial/minimum number of KubeVirt nodes (scale based on VM count: ~7 VMs per n2-standard-16)"
   type        = number
   default     = 3
+}
+
+variable "kubevirt_enable_autoscaling" {
+  description = "Enable cluster autoscaler for the KubeVirt node pool (recommended for CTF events)"
+  type        = bool
+  default     = false
+}
+
+variable "kubevirt_max_node_count" {
+  description = "Maximum KubeVirt nodes when autoscaling is enabled (e.g., 50-participant CTF = ~8 nodes)"
+  type        = number
+  default     = 10
 }
 
 variable "kubevirt_disk_size_gb" {

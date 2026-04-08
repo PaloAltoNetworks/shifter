@@ -10,10 +10,10 @@ class CloudError(Exception):
 
 
 class CloudProviderNotImplementedError(CloudError):
-    """Raised when a requested cloud provider has no adapter."""
+    """Raised when a requested cloud provider has no adapter or adapter is a stub."""
 
     def __init__(self, provider: str) -> None:
-        super().__init__(f"Cloud provider '{provider}' is not implemented. Supported providers: aws")
+        super().__init__(f"Cloud provider '{provider}' is not yet implemented. Supported: aws. Planned: gcp")
         self.provider = provider
 
 

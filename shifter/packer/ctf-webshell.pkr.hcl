@@ -17,6 +17,8 @@ source "amazon-ebs" "ctf-webshell" {
   }
 
   ssh_username = "ubuntu"
+  # WebShell has seen intermittent slow SSH readiness before provisioning starts.
+  ssh_timeout  = "10m"
 
   vpc_id    = var.vpc_id != "" ? var.vpc_id : null
   subnet_id = var.subnet_id != "" ? var.subnet_id : null

@@ -8,13 +8,45 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+wait_for_apt() {
+    local waited=0
+    local timeout=600
+
+    echo "=== Waiting for background apt/dpkg work to finish ==="
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+        || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+        || pgrep -x unattended-upgr >/dev/null 2>&1 \
+        || pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1; do
+        if [ "$waited" -ge "$timeout" ]; then
+            echo "Timed out waiting for apt/dpkg lock holders to exit"
+            ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
+            return 1
+        fi
+        echo "apt/dpkg still busy; retrying in 5s..."
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+apt_update() {
+    wait_for_apt
+    apt-get update
+}
+
+apt_install() {
+    wait_for_apt
+    apt-get install -y "$@"
+}
+
 echo "=== Installing packages ==="
-apt-get update
-apt-get install -y nginx curl
+apt_update
+apt_install nginx curl
 
 # Install Node.js 18.x from NodeSource (apt nodejs is too old for Express 4.18)
+wait_for_apt
 curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-apt-get install -y nodejs
+apt_install nodejs
 
 echo "=== Creating users ==="
 id devops &>/dev/null || useradd -m -s /bin/bash devops

@@ -3,6 +3,8 @@
 Replaces the Terraform-based AWS provisioner flow:
 - Creates a K8s namespace per range (isolation)
 - Creates KubeVirt VirtualMachine CRDs from containerDisk images
+- Generates SSH keypair, injects public key via cloud-init
+- Runs setup plans (bootstrap, XDR agent, domain join) via SSH
 - Configures NetworkPolicy for subnet isolation
 - Writes provisioned state to the same DB schema as AWS
 
@@ -35,6 +37,114 @@ INSTANCE_SIZING = {
     "victim": {"cpu": 2, "memory": "4Gi"},
     "dc": {"cpu": 4, "memory": "8Gi"},
 }
+
+
+def _generate_ssh_keypair() -> tuple[str, str]:
+    """Generate an Ed25519 SSH keypair for range VM access.
+
+    Returns:
+        Tuple of (private_key_pem, public_key_openssh).
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private_key = Ed25519PrivateKey.generate()
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    public_key = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.OpenSSH,
+            format=serialization.PublicFormat.OpenSSH,
+        )
+        .decode("utf-8")
+    )
+    return private_pem, public_key
+
+
+def _store_ssh_key_in_secret_manager(
+    request_id: str,
+    private_key: str,
+) -> str:
+    """Store the range SSH private key in GCP Secret Manager.
+
+    Args:
+        request_id: Request UUID (used in secret name).
+        private_key: PEM-encoded private key.
+
+    Returns:
+        Secret resource name (projects/PROJECT/secrets/NAME).
+    """
+    # Use the google-cloud-secret-manager SDK directly for creation
+    # (the SecretsStore protocol only defines get_secret, not create).
+    from google.cloud import secretmanager  # type: ignore[attr-defined]
+
+    project = os.environ.get("GCP_PROJECT_ID", "")
+    client = secretmanager.SecretManagerServiceClient()
+    secret_id = f"range-ssh-{request_id[:12]}"
+    parent = f"projects/{project}"
+
+    try:
+        secret = client.create_secret(
+            request={
+                "parent": parent,
+                "secret_id": secret_id,
+                "secret": {"replication": {"automatic": {}}},
+            }
+        )
+    except Exception as e:
+        if "ALREADY_EXISTS" in str(e):
+            secret_name = f"{parent}/secrets/{secret_id}"
+        else:
+            raise
+    else:
+        secret_name = secret.name
+
+    client.add_secret_version(
+        request={
+            "parent": secret_name,
+            "payload": {"data": private_key.encode("utf-8")},
+        }
+    )
+    logger.info("Stored SSH key in Secret Manager: %s", secret_name)
+    return secret_name
+
+
+def _build_cloud_init_userdata(
+    public_key: str,
+    hostname: str,
+    ssh_user: str = "ubuntu",
+) -> str:
+    """Build minimal cloud-init userdata for SSH key injection.
+
+    Only handles SSH key setup so the provisioner can connect.
+    All other configuration (XDR agent, domain join, etc.) runs via SSH
+    after boot to support CyberScript-driven dynamic composition.
+
+    Args:
+        public_key: SSH public key (OpenSSH format).
+        hostname: VM hostname.
+        ssh_user: SSH user to configure (ubuntu, kali, etc.).
+
+    Returns:
+        cloud-init userdata string.
+    """
+    return f"""#cloud-config
+hostname: {hostname}
+manage_etc_hosts: true
+ssh_authorized_keys:
+  - {public_key}
+users:
+  - default
+  - name: {ssh_user}
+    ssh_authorized_keys:
+      - {public_key}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+"""
 
 
 def _get_image_for_os(os_type: str) -> str:
@@ -118,6 +228,13 @@ def provision_range_gcp(
     namespace = _build_namespace_name(request_id)
 
     try:
+        # Step 0: Generate SSH keypair for this range
+        logger.info("provision_range_gcp: generating SSH keypair")
+        ssh_private_key, ssh_public_key = _generate_ssh_keypair()
+
+        # Store private key in Secret Manager
+        ssh_key_secret_ref = _store_ssh_key_in_secret_manager(request_id, ssh_private_key)
+
         # Step 1: Create namespace
         logger.info("provision_range_gcp: creating namespace=%s", namespace)
         ns_result = executor.create_namespace(
@@ -160,6 +277,14 @@ def provision_range_gcp(
                 # Sanitize VM name for K8s (must be DNS-compatible)
                 vm_name = inst_name.lower().replace("_", "-").replace(" ", "-")[:63]
 
+                # Determine SSH user for this OS
+                ssh_user = "kali" if os_type == "kali" else "ubuntu"
+                cloud_init = _build_cloud_init_userdata(
+                    public_key=ssh_public_key,
+                    hostname=vm_name,
+                    ssh_user=ssh_user,
+                )
+
                 vm_futures.append(
                     {
                         "uuid": inst_uuid,
@@ -171,6 +296,8 @@ def provision_range_gcp(
                         "subnet_name": subnet_name,
                         "cpu": sizing["cpu"],
                         "memory": sizing["memory"],
+                        "cloud_init": cloud_init,
+                        "ssh_user": ssh_user,
                     }
                 )
 
@@ -194,6 +321,7 @@ def provision_range_gcp(
                     "shifter-instance-uuid": vm_spec["uuid"],
                     "shifter-subnet": vm_spec["subnet_name"],
                 },
+                cloud_init=vm_spec.get("cloud_init"),
             )
             if not result.success:
                 raise RuntimeError(f"Failed to create VM {vm_spec['vm_name']}: {result.stderr}")
@@ -218,10 +346,6 @@ def provision_range_gcp(
                 raise RuntimeError(f"Failed to describe VM {vm_spec['vm_name']}: {describe_result.stderr}")
             vm_info = json.loads(describe_result.stdout)
 
-            # Build the SSH key secret reference.
-            # On GCP, SSH keys are stored in Secret Manager.
-            ssh_key_secret_ref = os.environ.get("RANGE_SSH_KEY_SECRET", "")
-
             instances_output.append(
                 {
                     "uuid": vm_spec["uuid"],
@@ -230,8 +354,11 @@ def provision_range_gcp(
                     "os": vm_spec["os_type"],
                     "instance_id": vm_spec["vm_name"],
                     "private_ip": vm_info.get("ip_address", ""),
+                    "public_key": ssh_public_key,
+                    "hostname": vm_spec["vm_name"],
                     "subnet_name": vm_spec["subnet_name"],
                     "ssh_key_secret_arn": ssh_key_secret_ref,
+                    "ssh_user": vm_spec.get("ssh_user", "ubuntu"),
                     # GCP-specific state fields
                     "vm_name": vm_spec["vm_name"],
                     "namespace": namespace,
@@ -242,7 +369,19 @@ def provision_range_gcp(
         # Step 5: Create NetworkPolicy for subnet isolation
         _create_network_policies(executor, namespace, subnets)
 
-        # Step 6: Write state to DB
+        # Step 6: Run instance setup plans via SSH
+        logger.info(
+            "provision_range_gcp: running setup plans for %d instances",
+            len(instances_output),
+        )
+        _run_gcp_instance_setup(
+            instances_output=instances_output,
+            range_spec=range_spec,
+            ssh_private_key=ssh_private_key,
+            range_id=range_id,
+        )
+
+        # Step 8: Write state to DB
         logger.info(
             "provision_range_gcp: writing state to DB range_id=%d instances=%d",
             range_id,
@@ -250,7 +389,7 @@ def provision_range_gcp(
         )
         _write_gcp_provisioned_state(range_id, namespace, subnets_output, instances_output)
 
-        # Step 7: Update range status and publish ready event
+        # Step 9: Update range status and publish ready event
         update_range_status(range_id, "ready", ready_at="NOW()")
         publish_ready(
             request_id=request_id,
@@ -284,6 +423,184 @@ def provision_range_gcp(
             error_message=error_msg,
         )
         raise
+
+
+def _run_gcp_instance_setup(
+    instances_output: list[dict],
+    range_spec: dict[str, Any],
+    ssh_private_key: str,
+    range_id: int = 0,
+) -> None:
+    """Run setup plans on provisioned VMs via SSH.
+
+    Same logic as run_instance_setup() in main.py but uses GenericSSHExecutor
+    instead of SSMExecutor. DC setup runs first (blocking), then other
+    instances in parallel.
+
+    Args:
+        instances_output: List of instance dicts with private_ip, role, os, etc.
+        range_spec: Range spec with subnet/instance configs.
+        ssh_private_key: PEM private key for SSH access.
+        range_id: Range ID for hostname generation.
+    """
+    from executors.generic_ssh_executor import GenericSSHExecutor
+    from main import SetupError, get_agent_presigned_url
+    from orchestrators.setup_orchestrator import SetupOrchestrator
+    from plans.bootstrap import BootstrapPlan
+    from plans.domain_join import DomainJoinPlan
+    from plans.linux_bootstrap import LinuxBootstrapPlan
+    from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
+    from plans.xdr_agent_install import XDRAgentInstallPlan
+
+    # Build UUID -> config lookup from spec
+    uuid_to_config: dict[str, dict] = {}
+    for subnet in range_spec.get("subnets", []):
+        for inst in subnet.get("instances", []):
+            uuid_to_config[inst.get("uuid", "")] = inst
+
+    # Separate DCs from other instances
+    dc_instances = [i for i in instances_output if i.get("role") == "dc"]
+    other_instances = [i for i in instances_output if i.get("role") != "dc"]
+
+    def _setup_single(inst: dict, dc_ip: str | None = None, domain_name: str | None = None) -> None:
+        """Run setup plans for a single instance via SSH."""
+        ip = inst["private_ip"]
+        role = inst.get("role", "victim")
+        os_type = inst.get("os", "ubuntu")
+        ssh_user = inst.get("ssh_user", "kali" if os_type == "kali" else "ubuntu")
+        inst_uuid = inst.get("uuid", "")
+        inst_config = uuid_to_config.get(inst_uuid, {})
+        hostname = inst.get("hostname", inst.get("vm_name", ""))
+        public_key = inst.get("public_key", "")
+        agent_url = get_agent_presigned_url(inst_config) or ""
+        xdr_required = bool(inst_config.get("agent"))
+
+        ssh_exec = GenericSSHExecutor(
+            private_key=ssh_private_key,
+            username=ssh_user,
+        )
+
+        # Wait for SSH to become available
+        logger.info("Waiting for SSH on %s (%s)...", inst.get("vm_name"), ip)
+        ssh_exec.wait_for_ready(ip, timeout_seconds=300)
+
+        orchestrator = SetupOrchestrator(executor=ssh_exec)
+
+        # Context object for plan.get_context()
+        class InstanceCtx:
+            pass
+
+        ctx = InstanceCtx()
+        ctx.hostname = hostname  # type: ignore[attr-defined]
+        ctx.public_key = public_key  # type: ignore[attr-defined]
+        ctx.ssh_user = ssh_user  # type: ignore[attr-defined]
+        ctx.agent_presigned_url = agent_url  # type: ignore[attr-defined]
+
+        if role == "attacker":
+            plan = LinuxBootstrapPlan()
+            context = plan.get_context(ctx)
+            result = orchestrator.orchestrate(ip, plan, context)
+            if not result.success:
+                raise SetupError(f"Attacker setup failed on {ip}: {result.error}")
+
+        elif role == "victim":
+            if os_type in ("kali", "ubuntu"):
+                # Linux bootstrap
+                plan = LinuxBootstrapPlan()
+                context = plan.get_context(ctx)
+                result = orchestrator.orchestrate(ip, plan, context)
+                if not result.success:
+                    raise SetupError(f"Linux bootstrap failed on {ip}: {result.error}")
+
+                # XDR agent install
+                if agent_url:
+                    xdr_plan = LinuxXDRAgentInstallPlan()
+                    xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_url})
+                    result = orchestrator.orchestrate(ip, xdr_plan, xdr_ctx)
+                    if not result.success:
+                        raise SetupError(f"XDR install failed on {ip}: {result.error}")
+                elif xdr_required:
+                    raise SetupError(f"XDR required but no URL for {ip}")
+
+            else:
+                # Windows bootstrap (connect as Administrator)
+                win_exec = GenericSSHExecutor(
+                    private_key=ssh_private_key,
+                    username="Administrator",
+                )
+                win_orchestrator = SetupOrchestrator(executor=win_exec)
+
+                win_plan = BootstrapPlan()
+                win_ctx = win_plan.get_context(ctx)
+                result = win_orchestrator.orchestrate(ip, win_plan, win_ctx)
+                if not result.success:
+                    raise SetupError(f"Windows bootstrap failed on {ip}: {result.error}")
+
+                # XDR agent
+                if agent_url:
+                    xdr_plan = XDRAgentInstallPlan()
+                    xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_url})
+                    result = win_orchestrator.orchestrate(ip, xdr_plan, xdr_ctx)
+                    if not result.success:
+                        raise SetupError(f"Windows XDR install failed on {ip}: {result.error}")
+                elif xdr_required:
+                    raise SetupError(f"XDR required but no URL for {ip}")
+
+                # Domain join
+                if inst_config.get("join_domain") and dc_ip and domain_name:
+                    join_plan = DomainJoinPlan()
+                    join_ctx = join_plan.get_context({"dc_ip": dc_ip, "domain_name": domain_name})
+                    result = win_orchestrator.orchestrate(ip, join_plan, join_ctx)
+                    if not result.success:
+                        raise SetupError(f"Domain join failed on {ip}: {result.error}")
+
+        elif role == "dc":
+            # DC verification only — AD is pre-promoted in the image
+            from plans.dc_setup import DCSetupPlan
+
+            win_exec = GenericSSHExecutor(
+                private_key=ssh_private_key,
+                username="Administrator",
+            )
+            win_orchestrator = SetupOrchestrator(executor=win_exec)
+            dc_plan = DCSetupPlan()
+            dc_config = inst_config.get("dc_config", {})
+            dc_ctx = dc_plan.get_context(dc_config)
+            result = win_orchestrator.orchestrate(ip, dc_plan, dc_ctx)
+            if not result.success:
+                raise SetupError(f"DC setup failed on {ip}: {result.error}")
+
+        logger.info("Setup complete for %s (%s, role=%s)", inst.get("vm_name"), ip, role)
+
+    # Run DC setup first (blocking) — must complete before domain joins
+    actual_dc_ip = None
+    actual_domain = None
+    for dc_inst in dc_instances:
+        _setup_single(dc_inst)
+        actual_dc_ip = dc_inst.get("private_ip")
+        dc_uuid = dc_inst.get("uuid", "")
+        dc_config = uuid_to_config.get(dc_uuid, {}).get("dc_config", {})
+        actual_domain = dc_config.get("domain_name")
+
+    # Run other instances in parallel
+    if other_instances:
+        logger.info("Running setup for %d non-DC instances in parallel", len(other_instances))
+
+        def _setup_worker(inst: dict) -> tuple[str, bool, str]:
+            try:
+                _setup_single(inst, dc_ip=actual_dc_ip, domain_name=actual_domain)
+                return (inst.get("vm_name", ""), True, "")
+            except Exception as e:
+                return (inst.get("vm_name", ""), False, str(e))
+
+        with ThreadPoolExecutor(max_workers=min(len(other_instances), 10)) as pool:
+            futures = {pool.submit(_setup_worker, inst): inst for inst in other_instances}
+            for future in as_completed(futures):
+                vm_name, success, error = future.result()
+                if not success:
+                    raise SetupError(f"Instance {vm_name} setup failed: {error}")
+
+    logger.info("All GCP instance setup complete")
 
 
 def destroy_range_gcp(

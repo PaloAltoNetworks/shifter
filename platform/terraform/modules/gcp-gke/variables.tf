@@ -109,9 +109,9 @@ variable "kubevirt_enable_autoscaling" {
 }
 
 variable "kubevirt_max_node_count" {
-  description = "Maximum KubeVirt nodes when autoscaling is enabled (e.g., 50-participant CTF = ~8 nodes)"
+  description = "Maximum KubeVirt nodes when autoscaling is enabled (~4-5 VMs per n2-standard-16 node)"
   type        = number
-  default     = 10
+  default     = 200
 }
 
 variable "kubevirt_disk_size_gb" {

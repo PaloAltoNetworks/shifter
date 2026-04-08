@@ -67,7 +67,7 @@ resource "aws_ecs_task_definition" "guacd" {
 
   container_definitions = jsonencode([{
     name      = "guacd"
-    image     = "${var.guacd_ecr_repository_url}:${var.guacd_image_tag}"
+    image     = "${var.guacd_ecr_repository_url}:${var.guacd_image_tag}@${data.aws_ecr_image.guacd.image_digest}"
     essential = true
 
     portMappings = [{
@@ -144,7 +144,7 @@ resource "aws_ecs_task_definition" "guacamole_client" {
 
   container_definitions = jsonencode([{
     name      = "guacamole-client"
-    image     = "${var.guacamole_client_ecr_repository_url}:${var.guacamole_client_image_tag}"
+    image     = "${var.guacamole_client_ecr_repository_url}:${var.guacamole_client_image_tag}@${data.aws_ecr_image.guacamole_client.image_digest}"
     essential = true
 
     portMappings = [{

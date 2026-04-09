@@ -8,16 +8,28 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+stop_background_apt() {
+    systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+}
+
 wait_for_apt() {
     local waited=0
     local timeout=600
 
     echo "=== Waiting for background apt/dpkg work to finish ==="
+    stop_background_apt
     while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
         || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
         || pgrep -x unattended-upgr >/dev/null 2>&1 \
         || pgrep -x apt >/dev/null 2>&1 \
         || pgrep -x apt-get >/dev/null 2>&1; do
+        if pgrep -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1; then
+            echo "Stopping unattended-upgrade-shutdown helper..."
+            pkill -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1 || true
+            sleep 2
+            continue
+        fi
         if [ "$waited" -ge "$timeout" ]; then
             echo "Timed out waiting for apt/dpkg lock holders to exit"
             ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true

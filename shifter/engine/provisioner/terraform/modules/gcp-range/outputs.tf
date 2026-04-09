@@ -27,6 +27,7 @@ output "instances" {
       instance_id            = inst.name
       private_ip             = inst.network_interface[0].network_ip
       ssh_key_secret_arn     = google_secret_manager_secret.ssh_key[key].id
+      ssh_username           = local.instance_map[key].is_windows ? "Administrator" : local.instance_map[key].ssh_user
       hostname               = local.instance_map[key].hostname
       public_key             = tls_private_key.instance[key].public_key_openssh
       xdr_agent_url          = local.instance_map[key].agent_url
@@ -34,6 +35,9 @@ output "instances" {
       gcp_instance_name      = inst.name
       gcp_instance_id        = inst.id
       gcp_instance_self_link = inst.self_link
+      gcp_private_ip         = inst.network_interface[0].network_ip
+      gcp_ssh_key_secret_id  = google_secret_manager_secret.ssh_key[key].id
+      gcp_ssh_username       = local.instance_map[key].is_windows ? "Administrator" : local.instance_map[key].ssh_user
       gcp_zone               = inst.zone
       gcp_subnetwork         = google_compute_subnetwork.range[local.instance_map[key].subnet_name].self_link
     }

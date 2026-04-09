@@ -179,10 +179,14 @@ class TestRangeStatePayloads:
                 "instance_id": "shifter-range-vm-1",
                 "private_ip": "10.50.1.10",
                 "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "ssh_username": "ubuntu",
                 "subnet_name": "attack",
                 "gcp_instance_name": "shifter-range-vm-1",
                 "gcp_instance_id": "9988776655",
                 "gcp_instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
+                "gcp_private_ip": "10.50.1.10",
+                "gcp_ssh_key_secret_id": "projects/test/secrets/range-ssh-key",
+                "gcp_ssh_username": "ubuntu",
                 "gcp_zone": "us-central1-b",
                 "gcp_subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
             },
@@ -191,11 +195,15 @@ class TestRangeStatePayloads:
 
         assert instance_state["cloud_provider"] == "gcp"
         assert instance_state["aws_instance_id"] is None
+        assert instance_state["ssh_username"] == "ubuntu"
         assert instance_state["provider_metadata"] == {
             "gcp": {
                 "instance_name": "shifter-range-vm-1",
                 "instance_id": "9988776655",
                 "instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
+                "private_ip": "10.50.1.10",
+                "ssh_key_secret_id": "projects/test/secrets/range-ssh-key",
+                "ssh_username": "ubuntu",
                 "zone": "us-central1-b",
                 "subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
             }
@@ -214,6 +222,7 @@ class TestRangeStatePayloads:
                 "instance_id": "shifter-range-vm-1",
                 "private_ip": "10.50.1.10",
                 "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "ssh_username": "Administrator",
                 "gcp_instance_id": "9988776655",
             },
             provider="gcp",
@@ -223,6 +232,7 @@ class TestRangeStatePayloads:
         assert payload["os_type"] == "windows"
         assert payload["instance_id"] == "shifter-range-vm-1"
         assert payload["ssh_key_secret_arn"] == "projects/test/secrets/range-ssh-key"
+        assert payload["ssh_username"] == "Administrator"
         assert payload["cloud_provider"] == "gcp"
         assert payload["provider_metadata"] == {"gcp": {"instance_id": "9988776655"}}
 

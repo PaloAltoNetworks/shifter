@@ -22,6 +22,7 @@ def _outputs(
 ) -> dict[str, object]:
     return {
         "assets_bucket_name": {"value": "shifter-gcp-dev-gcp-dev-assets"},
+        "terraform_state_bucket_name": {"value": "shifter-gcp-dev-terraform-state"},
         "platform_events_topic_id": {"value": "projects/shifter-gcp-dev/topics/shifter-gcp-dev-events"},
         "platform_event_subscriptions": {
             "value": {
@@ -82,6 +83,7 @@ def test_render_env_uses_ip_fallback_in_debug_mode():
     rendered = module.render_env(_outputs())
 
     assert "DJANGO_DEBUG=true\n" in rendered
+    assert "TF_STATE_BUCKET=shifter-gcp-dev-terraform-state\n" in rendered
     assert "SESSION_COOKIE_SECURE=false\n" in rendered
     assert "CSRF_COOKIE_SECURE=false\n" in rendered
     assert "SITE_URL=http://10.0.0.30\n" in rendered

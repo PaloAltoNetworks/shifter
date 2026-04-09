@@ -27,6 +27,7 @@ def _unique(values: list[str]) -> list[str]:
 
 def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) -> str:
     assets_bucket = _value(outputs, "assets_bucket_name")
+    terraform_state_bucket = _value(outputs, "terraform_state_bucket_name")
     topic_id = _value(outputs, "platform_events_topic_id")
     subscriptions = _value(outputs, "platform_event_subscriptions")
     secret_ids = _value(outputs, "runtime_secret_ids")
@@ -54,6 +55,7 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     values = {
         "STORAGE_BUCKET_NAME": assets_bucket,
         "AGENT_STORAGE_BUCKET": assets_bucket,
+        "TF_STATE_BUCKET": terraform_state_bucket,
         "RANGE_EVENTS_TOPIC_ID": topic_id,
         "QUEUE_CMS_CONSUMER_ID": subscriptions["cms"],
         "QUEUE_CMS_PUBLISHER_ID": topic_id,

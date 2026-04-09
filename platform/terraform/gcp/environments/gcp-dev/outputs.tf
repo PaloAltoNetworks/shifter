@@ -53,6 +53,11 @@ output "assets_bucket_name" {
   value       = module.platform_core.assets_bucket_name
 }
 
+output "terraform_state_bucket_name" {
+  description = "GCS bucket name for provisioner Terraform state."
+  value       = module.platform_core.terraform_state_bucket_name
+}
+
 output "public_ingress_ip_name" {
   description = "Reserved global static IP name for the GKE ingress."
   value       = module.platform_core.public_ingress_ip_name

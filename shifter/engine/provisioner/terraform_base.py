@@ -1,10 +1,14 @@
 """Shared Terraform runner helpers.
 
 Provides common functions used by both terraform_runner.py (NGFW) and
-range_terraform_runner.py (Range). Each caller passes a state_key_prefix
+range_terraform_runner.py (Range). Each caller passes a state key prefix
 and label to distinguish its state path and log messages.
 
-State path pattern: s3://{bucket}/{state_key_prefix}/{request_uuid}/terraform.tfstate
+Backends:
+- AWS uses the S3 backend with object keys like
+  ``{prefix}/{request_uuid}/terraform.tfstate`` and DynamoDB locking.
+- GCP uses the GCS backend with object keys like
+  ``{prefix}/{request_uuid}/default.tfstate`` and no external lock table.
 """
 
 import contextlib
@@ -12,6 +16,7 @@ import json
 import logging
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,64 +24,134 @@ from cloud import get_object_storage
 
 logger = logging.getLogger(__name__)
 
+_AWS_BACKEND = "s3"
+_GCP_BACKEND = "gcs"
+_AWS_STATE_FILENAME = "terraform.tfstate"
+_GCP_STATE_FILENAME = "default.tfstate"
+_SUPPORTED_BACKEND_URL_SCHEMES = {
+    "s3://": _AWS_BACKEND,
+    "gs://": _GCP_BACKEND,
+}
+
+
+@dataclass(frozen=True)
+class TerraformBackendConfig:
+    """Resolved backend configuration for the active cloud provider."""
+
+    backend_type: str
+    bucket: str
+    backend_path: str
+    state_object_key: str
+
+
+def _get_provider() -> str:
+    return os.environ.get("CLOUD_PROVIDER", "aws")
+
+
+def _parse_backend_url(bucket_url: str) -> tuple[str, str]:
+    """Parse a Terraform backend URL into backend type and bucket name."""
+    normalized_url = bucket_url.strip()
+    for prefix, backend_type in _SUPPORTED_BACKEND_URL_SCHEMES.items():
+        if normalized_url.startswith(prefix):
+            bucket = normalized_url[len(prefix) :].strip("/")
+            if not bucket:
+                raise ValueError(f"Invalid Terraform backend URL: {bucket_url}")
+            return backend_type, bucket
+    raise ValueError(f"Unsupported Terraform backend URL: {bucket_url}")
+
+
+def get_backend_type() -> str:
+    """Resolve the Terraform backend type for the active provider."""
+    bucket_url = os.environ.get("STATE_BUCKET_URL") or os.environ.get("PULUMI_BACKEND_URL", "")
+    if bucket_url:
+        backend_type, _ = _parse_backend_url(bucket_url)
+        return backend_type
+
+    return _GCP_BACKEND if _get_provider() == "gcp" else _AWS_BACKEND
+
 
 def get_state_bucket() -> str:
-    """Get the S3 bucket name for Terraform state.
+    """Get the Terraform state bucket name.
 
     Uses TF_STATE_BUCKET environment variable. Falls back to STATE_BUCKET_URL
-    or legacy PULUMI_BACKEND_URL (s3://bucket-name format) for backward
+    or legacy PULUMI_BACKEND_URL (s3://bucket-name or gs://bucket-name format) for backward
     compatibility during rollout.
 
     Returns:
-        S3 bucket name
+        Backend bucket name
 
     Raises:
         ValueError: If no state bucket env var is set
     """
-    # Check for explicit TF_STATE_BUCKET first
     if bucket := os.environ.get("TF_STATE_BUCKET"):
         return bucket
 
-    # Extract from STATE_BUCKET_URL or legacy PULUMI_BACKEND_URL (format: s3://bucket-name)
     bucket_url = os.environ.get("STATE_BUCKET_URL") or os.environ.get("PULUMI_BACKEND_URL", "")
-    if bucket_url.startswith("s3://"):
-        return bucket_url[5:]  # Strip "s3://"
+    if bucket_url:
+        _, bucket = _parse_backend_url(bucket_url)
+        return bucket
 
     raise ValueError("TF_STATE_BUCKET, STATE_BUCKET_URL, or PULUMI_BACKEND_URL environment variable is required")
 
 
-def get_locks_table() -> str:
-    """Get the DynamoDB table name for state locking.
+def get_locks_table() -> str | None:
+    """Get the DynamoDB table name for S3 backend locking.
 
-    Uses TF_LOCKS_TABLE if set, otherwise derives from state bucket name.
+    Uses TF_LOCKS_TABLE if set, otherwise derives from the state bucket name.
     Convention: {name_prefix}-pulumi-state -> {name_prefix}-pulumi-locks
 
     Returns:
-        DynamoDB table name
+        DynamoDB table name for AWS backends, otherwise None
     """
+    if get_backend_type() != _AWS_BACKEND:
+        return None
+
     if table := os.environ.get("TF_LOCKS_TABLE"):
         return table
 
-    # Derive from bucket name: replace -pulumi-state with -pulumi-locks
     bucket = get_state_bucket()
     if bucket.endswith("-pulumi-state"):
         return bucket.replace("-pulumi-state", "-pulumi-locks")
 
-    # Fallback: append -locks
     return f"{bucket}-locks"
 
 
-def get_state_key(state_key_prefix: str, request_uuid: str) -> str:
-    """Get the S3 key for Terraform state file.
+def get_state_key(
+    state_key_prefix: str,
+    request_uuid: str,
+    *,
+    backend_type: str | None = None,
+) -> str:
+    """Get the object key for the Terraform state file.
 
     Args:
         state_key_prefix: Prefix for the state key (e.g. "user_ngfw", "ranges")
         request_uuid: UUID of the provisioning request
+        backend_type: Optional explicit backend type override
 
     Returns:
-        S3 key path
+        Backend object key path
     """
-    return f"{state_key_prefix}/{request_uuid}/terraform.tfstate"
+    resolved_backend_type = backend_type or get_backend_type()
+    state_filename = _GCP_STATE_FILENAME if resolved_backend_type == _GCP_BACKEND else _AWS_STATE_FILENAME
+    return f"{state_key_prefix}/{request_uuid}/{state_filename}"
+
+
+def get_backend_config(state_key_prefix: str, request_uuid: str) -> TerraformBackendConfig:
+    """Resolve backend config for a Terraform operation."""
+    backend_type = get_backend_type()
+    bucket = get_state_bucket()
+    backend_path = f"{state_key_prefix}/{request_uuid}"
+    return TerraformBackendConfig(
+        backend_type=backend_type,
+        bucket=bucket,
+        backend_path=backend_path,
+        state_object_key=get_state_key(
+            state_key_prefix,
+            request_uuid,
+            backend_type=backend_type,
+        ),
+    )
 
 
 def has_terraform_state(state_key_prefix: str, request_uuid: str) -> bool:
@@ -87,17 +162,15 @@ def has_terraform_state(state_key_prefix: str, request_uuid: str) -> bool:
         request_uuid: UUID of the provisioning request
 
     Returns:
-        True if Terraform state file exists in S3, False otherwise
+        True if Terraform state file exists, False otherwise
     """
     try:
-        bucket = get_state_bucket()
+        backend = get_backend_config(state_key_prefix, request_uuid)
     except ValueError:
-        # No state bucket configured
         return False
 
-    state_key = get_state_key(state_key_prefix, request_uuid)
     storage = get_object_storage()
-    result = storage.object_exists(bucket=bucket, key=state_key)
+    result = storage.object_exists(bucket=backend.bucket, key=backend.state_object_key)
     logger.debug("Terraform state %s for request %s", "exists" if result else "not found", request_uuid)
     return result
 
@@ -159,31 +232,38 @@ def init_workspace(
     Raises:
         RuntimeError: If init fails
     """
-    bucket = get_state_bucket()
-    locks_table = get_locks_table()
-    state_key = get_state_key(state_key_prefix, request_uuid)
+    backend = get_backend_config(state_key_prefix, request_uuid)
 
     logger.info(
-        "Initializing %s Terraform workspace: bucket=%s key=%s",
+        "Initializing %s Terraform workspace: backend=%s bucket=%s path=%s",
         label,
-        bucket,
-        state_key,
+        backend.backend_type,
+        backend.bucket,
+        backend.backend_path,
     )
 
-    run_terraform(
-        [
-            "init",
-            "-backend=true",
-            f"-backend-config=bucket={bucket}",
-            f"-backend-config=key={state_key}",
-            "-backend-config=region=us-east-2",
-            f"-backend-config=dynamodb_table={locks_table}",
-            "-backend-config=encrypt=true",
-            "-input=false",
-            "-no-color",
-        ],
-        working_dir,
-    )
+    init_args = [
+        "init",
+        "-backend=true",
+        f"-backend-config=bucket={backend.bucket}",
+        "-input=false",
+        "-no-color",
+    ]
+
+    if backend.backend_type == _AWS_BACKEND:
+        locks_table = get_locks_table()
+        init_args.extend(
+            [
+                f"-backend-config=key={backend.state_object_key}",
+                "-backend-config=region=us-east-2",
+                f"-backend-config=dynamodb_table={locks_table}",
+                "-backend-config=encrypt=true",
+            ]
+        )
+    else:
+        init_args.append(f"-backend-config=prefix={backend.backend_path}")
+
+    run_terraform(init_args, working_dir)
 
     logger.info("%s Terraform workspace initialized successfully", label)
 
@@ -313,7 +393,7 @@ def destroy(
 
 
 def cleanup_state(state_key_prefix: str, request_uuid: str, label: str) -> None:
-    """Delete Terraform state file from S3 after destroy.
+    """Delete the backend state file after destroy.
 
     This removes the state file after resources are destroyed,
     similar to `pulumi stack rm`.
@@ -323,22 +403,26 @@ def cleanup_state(state_key_prefix: str, request_uuid: str, label: str) -> None:
         request_uuid: UUID of the provisioning request
         label: Label for log messages
     """
-    bucket = get_state_bucket()
-    state_key = get_state_key(state_key_prefix, request_uuid)
+    backend = get_backend_config(state_key_prefix, request_uuid)
 
-    logger.info("Deleting %s Terraform state: s3://%s/%s", label, bucket, state_key)
+    logger.info(
+        "Deleting %s Terraform state: %s://%s/%s",
+        label,
+        backend.backend_type,
+        backend.bucket,
+        backend.state_object_key,
+    )
 
     storage = get_object_storage()
 
-    # Delete state file
     try:
-        storage.delete_object(bucket=bucket, key=state_key)
+        storage.delete_object(bucket=backend.bucket, key=backend.state_object_key)
     except Exception as e:
         logger.warning("Failed to delete state file: %s", e)
 
-    # Delete lock file if exists
-    lock_key = f"{state_key}.tflock"
-    with contextlib.suppress(Exception):
-        storage.delete_object(bucket=bucket, key=lock_key)
+    if backend.backend_type == _AWS_BACKEND:
+        lock_key = f"{backend.state_object_key}.tflock"
+        with contextlib.suppress(Exception):
+            storage.delete_object(bucket=backend.bucket, key=lock_key)
 
     logger.info("%s Terraform state cleanup completed", label)

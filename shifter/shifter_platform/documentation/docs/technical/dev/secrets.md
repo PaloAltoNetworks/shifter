@@ -6,7 +6,7 @@ Where secrets live and how to manage them.
 
 1. **Never in code** - No secrets in source files or environment configs
 2. **GitHub Secrets for CI/CD** - OIDC role ARNs only
-3. **AWS Secrets Manager for runtime** - Application secrets at runtime
+3. **Cloud secret manager for runtime** - AWS Secrets Manager today, GCP Secret Manager for `gcp-dev`
 4. **Explicit, not default** - No silent fallbacks; fail if secret missing
 5. **tfvars are config, not secrets** - Committed to repo, no sensitive values
 
@@ -18,8 +18,11 @@ These must be configured in repository Settings > Secrets and variables > Action
 |--------|---------|
 | `AWS_ROLE_ARN` | GitHub Actions IAM role for **prod** (OIDC) |
 | `AWS_ROLE_ARN_DEV` | GitHub Actions IAM role for **dev** (OIDC) |
+| `GCP_SERVICE_ACCOUNT` | GitHub Actions service account email for `gcp-dev` deploys |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | GitHub Actions workload identity provider resource for `gcp-dev` deploys |
 
-These are IAM role ARNs for OIDC federation. No static access keys.
+AWS uses IAM role ARNs for OIDC federation. `gcp-dev` uses Google workload
+identity federation. No static access keys are required.
 
 **Note**: Terraform variables (tfvars) are committed to the repository. CI/CD reads them directly from the checked-out code. No `TF_VARS_*` secrets needed.
 
@@ -40,6 +43,27 @@ Runtime secrets accessed by the portal at startup.
 | Secret Name | Contains |
 |-------------|----------|
 | `shifter-dev-box-admin-password` | Windows Administrator password (auto-generated) |
+
+## GCP Secret Manager
+
+`gcp-dev` stages parallel runtime secret bundles with the same shapes the portal
+already expects at startup:
+
+| Secret Name | Contains |
+|-------------|----------|
+| `shifter-gcp-dev-app` | Django `SECRET_KEY`, field encryption key |
+| `shifter-gcp-dev-db` | Database connection JSON bundle |
+| `shifter-gcp-dev-guacamole-db` | Guacamole PostgreSQL connection JSON bundle |
+| `shifter-gcp-dev-oidc` | OIDC client ID, client secret, issuer URL, auth domain |
+| `shifter-gcp-dev-guacamole-json-auth` | Guacamole JSON auth signing key |
+
+Current rollout behavior:
+
+- `shifter-gcp-dev-app` and `shifter-gcp-dev-db` are seeded by Terraform for the first deployable control-plane slice
+- `shifter-gcp-dev-guacamole-db` and `shifter-gcp-dev-guacamole-json-auth` are now seeded by Terraform and synced into the `guacamole-runtime` Kubernetes Secret during deploy
+- `shifter-gcp-dev-oidc` still needs to be populated before the non-debug portal auth path is enabled
+- The `gcp-dev` deploy workflow only exports `OIDC_SECRET_ID` into the portal runtime when all of these conditions hold: `public_hostname` is set, managed TLS is enabled, the OIDC secret has a readable latest version, and the GKE managed certificate reaches `Active`
+- If any of those checks fail, the workflow intentionally keeps `DJANGO_DEBUG=true` and insecure cookies disabled so `gcp-dev` remains reachable through the debug-auth path instead of failing hard during startup
 
 ## What's NOT a Secret
 
@@ -101,6 +125,11 @@ aws secretsmanager create-secret \
 
 ### GitHub OIDC Role
 Role ARN doesn't change. Trust policy updates are in `platform/terraform/global/iam/`.
+
+### GCP Workload Identity Federation
+The provider resource and target service account stay stable. Rotate or tighten
+permissions in GCP IAM without changing the GitHub workflow contract unless the
+provider or service account identity itself changes.
 
 ## Accessing Secrets Locally
 

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shifter-platform
+  labels:
+    app.kubernetes.io/part-of: shifter
+    shifter.dev/plane: control
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shifter-jobs
+  labels:
+    app.kubernetes.io/part-of: shifter
+    shifter.dev/plane: jobs

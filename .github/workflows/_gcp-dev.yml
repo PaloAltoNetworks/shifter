@@ -1,0 +1,320 @@
+name: GCP Dev
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+    secrets:
+      GCP_SERVICE_ACCOUNT:
+        required: false
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (${{ inputs.environment }})
+    runs-on: self-hosted
+    env:
+      KUBECONFORM_VERSION: v0.7.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.1"
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.1
+      - name: Install kubeconform
+        run: |
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+      - run: terraform fmt -check -recursive
+        working-directory: platform/terraform/gcp
+      - run: terraform init -backend=false
+        working-directory: platform/terraform/gcp/environments/${{ inputs.environment }}
+      - run: terraform validate
+        working-directory: platform/terraform/gcp/environments/${{ inputs.environment }}
+      - run: |
+          (
+            kubectl kustomize platform/k8s/gcp/overlays/${{ inputs.environment }}
+            printf '\n---\n'
+            cat platform/k8s/gcp/overlays/${{ inputs.environment }}/platform-edge.generated.yaml
+          ) > /tmp/gcp-platform.yaml
+      - run: /tmp/kubeconform -strict -summary /tmp/gcp-platform.yaml
+
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    runs-on: self-hosted
+    needs: validate
+    if: github.event_name != 'pull_request'
+    env:
+      TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
+      K8S_OVERLAY_DIR: platform/k8s/gcp/overlays/${{ inputs.environment }}
+      TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core
+      EDGE_CERT_NAME: platform-managed-cert
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure GCP deploy auth is configured
+        run: |
+          if [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ] || [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]; then
+            echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
+            exit 1
+          fi
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          version: ">= 416.0.0"
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.1"
+      - name: Bootstrap Terraform backend metadata
+        run: |
+          TFVARS_FILE="${TF_DIR}/terraform.tfvars"
+          PROJECT_ID=$(awk -F'"' '/^project_id/ {print $2}' "$TFVARS_FILE")
+          REGION=$(awk -F'"' '/^region/ {print $2}' "$TFVARS_FILE")
+          TF_STATE_BUCKET="${PROJECT_ID}-terraform-state"
+          echo "PROJECT_ID=${PROJECT_ID}" >> "$GITHUB_ENV"
+          echo "REGION=${REGION}" >> "$GITHUB_ENV"
+          echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}" >> "$GITHUB_ENV"
+      - name: Bootstrap Terraform state bucket
+        run: |
+          if ! gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+            gcloud storage buckets create "gs://${TF_STATE_BUCKET}" \
+              --project="${PROJECT_ID}" \
+              --location="${REGION}" \
+              --uniform-bucket-level-access
+          fi
+          gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -reconfigure \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${TF_BACKEND_PREFIX}"
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve
+      - name: Capture Terraform outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform output -json > /tmp/gcp-terraform-outputs.json
+      - name: Export deploy metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          outputs = json.loads(Path("/tmp/gcp-terraform-outputs.json").read_text())
+
+          def value(key):
+              return outputs[key]["value"]
+
+          image_roots = value("artifact_registry_image_roots")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env_file:
+              env_file.write(f"GKE_CLUSTER_NAME={value('gke_cluster_name')}\n")
+              env_file.write(f"GKE_CLUSTER_LOCATION={value('gke_cluster_location')}\n")
+              env_file.write(f"PORTAL_IMAGE_ROOT={image_roots['portal']}\n")
+              env_file.write(f"GUACD_IMAGE_ROOT={image_roots['guacd']}\n")
+              env_file.write(f"GUACAMOLE_CLIENT_IMAGE_ROOT={image_roots['guacamole-client']}\n")
+              env_file.write(f"PROVISIONER_IMAGE_ROOT={image_roots['pulumi-provisioner']}\n")
+              env_file.write(f"ARTIFACT_REGISTRY_HOST={image_roots['portal'].split('/')[0]}\n")
+              env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
+              env_file.write(f"MANAGED_TLS_ENABLED={'true' if value('managed_tls_enabled') else 'false'}\n")
+              env_file.write(f"OIDC_SECRET_RESOURCE={value('runtime_secret_ids')['oidc']}\n")
+          PY
+      - name: Resolve requested portal auth mode
+        run: |
+          SECURE_PORTAL_MODE_REQUESTED=false
+          if [ -n "${PUBLIC_HOSTNAME}" ] && [ "${MANAGED_TLS_ENABLED}" = "true" ]; then
+            OIDC_SECRET_NAME="${OIDC_SECRET_RESOURCE##*/}"
+            if gcloud secrets versions access latest --secret "${OIDC_SECRET_NAME}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+              SECURE_PORTAL_MODE_REQUESTED=true
+            else
+              echo "::warning::Managed TLS is configured for ${PUBLIC_HOSTNAME}, but the OIDC secret has no readable version. The portal will stay in DEBUG mode."
+            fi
+          fi
+          echo "SECURE_PORTAL_MODE_REQUESTED=${SECURE_PORTAL_MODE_REQUESTED}" >> "$GITHUB_ENV"
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ARTIFACT_REGISTRY_HOST }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push portal image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter
+          file: ./shifter/shifter_platform/Dockerfile
+          push: true
+          tags: |
+            ${{ env.PORTAL_IMAGE_ROOT }}:latest
+            ${{ env.PORTAL_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
+          no-cache: true
+      - name: Build and push provisioner image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter/engine/provisioner
+          push: true
+          tags: |
+            ${{ env.PROVISIONER_IMAGE_ROOT }}:latest
+            ${{ env.PROVISIONER_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
+          no-cache: true
+      - name: Build and push guacd image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter/engine/guacd
+          push: true
+          tags: |
+            ${{ env.GUACD_IMAGE_ROOT }}:latest
+            ${{ env.GUACD_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
+          no-cache: true
+      - name: Build and push guacamole-client image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./shifter/engine/guacamole
+          push: true
+          tags: |
+            ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:latest
+            ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
+          no-cache: true
+      - uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ env.GKE_CLUSTER_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
+      - name: Resolve active secure portal state
+        run: |
+          SECURE_PORTAL_MODE=false
+          if [ "${SECURE_PORTAL_MODE_REQUESTED}" = "true" ]; then
+            CERT_STATUS=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
+            if [ "${CERT_STATUS}" = "Active" ]; then
+              SECURE_PORTAL_MODE=true
+            fi
+          fi
+          echo "SECURE_PORTAL_MODE=${SECURE_PORTAL_MODE}" >> "$GITHUB_ENV"
+      - name: Render generated runtime env
+        run: |
+          RENDER_ARGS=(
+            --terraform-output-json /tmp/gcp-terraform-outputs.json
+            --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env"
+          )
+          if [ "${SECURE_PORTAL_MODE}" = "true" ]; then
+            RENDER_ARGS+=(--secure-portal-mode)
+          fi
+          python3 scripts/gcp/render_runtime_env.py "${RENDER_ARGS[@]}"
+      - name: Render generated edge manifest
+        run: |
+          python3 scripts/gcp/render_edge_manifest.py \
+            --terraform-output-json /tmp/gcp-terraform-outputs.json \
+            --output "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
+      - name: Apply GKE manifests
+        run: kubectl apply -k "${K8S_OVERLAY_DIR}"
+      - name: Sync Guacamole runtime secret
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          outputs = json.loads(Path("/tmp/gcp-terraform-outputs.json").read_text())
+          runtime_secret_ids = outputs["runtime_secret_ids"]["value"]
+
+          def secret_name(resource_name: str) -> str:
+              return resource_name.rstrip("/").split("/")[-1]
+
+          guacamole_db_secret = secret_name(runtime_secret_ids["guacamole-db"])
+          guacamole_json_secret = secret_name(runtime_secret_ids["guacamole-json-auth"])
+
+          db_secret = subprocess.check_output(
+              ["gcloud", "secrets", "versions", "access", "latest", "--secret", guacamole_db_secret, "--project", os.environ["PROJECT_ID"]],
+              text=True,
+          )
+          json_auth_secret = subprocess.check_output(
+              ["gcloud", "secrets", "versions", "access", "latest", "--secret", guacamole_json_secret, "--project", os.environ["PROJECT_ID"]],
+              text=True,
+          ).strip()
+
+          db_payload = json.loads(db_secret)
+          kubectl_args = [
+              "kubectl",
+              "create",
+              "secret",
+              "generic",
+              "guacamole-runtime",
+              "--namespace",
+              "shifter-platform",
+              f"--from-literal=POSTGRESQL_USER={db_payload['username']}",
+              f"--from-literal=POSTGRESQL_PASSWORD={db_payload['password']}",
+              f"--from-literal=JSON_SECRET_KEY={json_auth_secret}",
+              "--dry-run=client",
+              "-o",
+              "yaml",
+          ]
+          secret_manifest = subprocess.check_output(kubectl_args, text=True)
+          subprocess.run(["kubectl", "apply", "-f", "-"], input=secret_manifest, text=True, check=True)
+          PY
+      - name: Restart control-plane deployments
+        run: |
+          for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
+            kubectl rollout restart "deployment/${deployment}" -n shifter-platform
+          done
+      - name: Wait for rollouts
+        run: |
+          for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
+            kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
+          done
+      - name: Apply platform edge manifest
+        run: kubectl apply -f "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
+      - name: Wait for ingress IP
+        run: |
+          for _ in $(seq 1 60); do
+            INGRESS_IP=$(kubectl get ingress platform-external -n shifter-platform -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [ -n "${INGRESS_IP}" ]; then
+              echo "Ingress IP: ${INGRESS_IP}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::Ingress IP was not assigned within 10 minutes"
+      - name: Promote portal to secure mode
+        run: |
+          if [ "${SECURE_PORTAL_MODE_REQUESTED}" != "true" ] || [ "${SECURE_PORTAL_MODE}" = "true" ]; then
+            exit 0
+          fi
+          for _ in $(seq 1 120); do
+            CERT_STATUS=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
+            if [ "${CERT_STATUS}" = "Active" ]; then
+              python3 scripts/gcp/render_runtime_env.py \
+                --terraform-output-json /tmp/gcp-terraform-outputs.json \
+                --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env" \
+                --secure-portal-mode
+              kubectl apply -k "${K8S_OVERLAY_DIR}"
+              for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
+                kubectl rollout restart "deployment/${deployment}" -n shifter-platform
+              done
+              for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
+                kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
+              done
+              exit 0
+            fi
+            echo "Waiting for ManagedCertificate ${EDGE_CERT_NAME}: status='${CERT_STATUS:-pending}'"
+            sleep 30
+          done
+          echo "::warning::ManagedCertificate ${EDGE_CERT_NAME} did not become Active within 60 minutes. The portal remains in the debug-auth fallback until a later deploy promotes it."

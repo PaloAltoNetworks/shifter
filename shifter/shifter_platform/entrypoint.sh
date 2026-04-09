@@ -2,22 +2,53 @@
 set -euo pipefail
 
 # ------------------------------------------------------------------------------
-# Fetch secrets from AWS Secrets Manager (prod only)
+# Fetch secrets from the active cloud secret manager (prod only)
 # ------------------------------------------------------------------------------
 
-if [[ -n "${DB_SECRET_ARN:-}" ]] && [[ -n "${APP_SECRET_ARN:-}" ]]; then
-    echo "Fetching secrets from AWS Secrets Manager..."
+fetch_runtime_secret() {
+    python - "$1" <<'PY'
+import os
+import sys
+
+provider = os.environ.get("CLOUD_PROVIDER", "aws")
+secret_id = sys.argv[1]
+
+if provider == "gcp":
+    from google.cloud import secretmanager
+
+    name = secret_id
+    if "/versions/" not in name:
+        if name.startswith("projects/"):
+            name = f"{name}/versions/latest"
+        else:
+            project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            if not project_id:
+                raise RuntimeError("GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT is required for Secret Manager access")
+            name = f"projects/{project_id}/secrets/{name}/versions/latest"
+
+    client = secretmanager.SecretManagerServiceClient()
+    response = client.access_secret_version(request={"name": name})
+    print(response.payload.data.decode("utf-8"))
+else:
+    import boto3
+
+    region = os.environ.get("AWS_REGION") or os.environ.get("CLOUD_REGION") or "us-east-2"
+    client = boto3.client("secretsmanager", region_name=region)
+    response = client.get_secret_value(SecretId=secret_id)
+    print(response["SecretString"])
+PY
+}
+
+DB_SECRET_ID="${DB_SECRET_ID:-${DB_SECRET_ARN:-}}"
+APP_SECRET_ID="${APP_SECRET_ID:-${APP_SECRET_ARN:-}}"
+OIDC_SECRET_ID="${OIDC_SECRET_ID:-${OIDC_SECRET_ARN:-${COGNITO_SECRET_ARN:-}}}"
+GUACAMOLE_SECRET_ID="${GUACAMOLE_SECRET_ID:-${GUACAMOLE_SECRET_ARN:-}}"
+
+if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
+    echo "Fetching runtime secrets from ${CLOUD_PROVIDER:-aws} secret manager..."
 
     # Fetch DB secret
-    DB_SECRET=$(python -c "
-import boto3
-import json
-import os
-
-client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
-response = client.get_secret_value(SecretId=os.environ['DB_SECRET_ARN'])
-print(response['SecretString'])
-")
+    DB_SECRET=$(fetch_runtime_secret "$DB_SECRET_ID")
 
     # Export DB credentials
     # DB_HOST can be overridden via env var
@@ -28,15 +59,7 @@ print(response['SecretString'])
     export DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
 
     # Fetch App secret
-    APP_SECRET=$(python -c "
-import boto3
-import json
-import os
-
-client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
-response = client.get_secret_value(SecretId=os.environ['APP_SECRET_ARN'])
-print(response['SecretString'])
-")
+    APP_SECRET=$(fetch_runtime_secret "$APP_SECRET_ID")
 
     # Export Django secret key
     export DJANGO_SECRET_KEY=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['django_secret_key'])")
@@ -50,35 +73,20 @@ padding = (4 - len(key) % 4) % 4
 print(key + '=' * padding)
 ")
 
-    # Fetch Cognito secret if ARN provided
-    if [[ -n "${COGNITO_SECRET_ARN:-}" ]]; then
-        COGNITO_SECRET=$(python -c "
-import boto3
-import json
-import os
-
-client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
-response = client.get_secret_value(SecretId=os.environ['COGNITO_SECRET_ARN'])
-print(response['SecretString'])
-")
+    # Fetch OIDC secret if provided
+    if [[ -n "${OIDC_SECRET_ID:-}" ]]; then
+        OIDC_SECRET=$(fetch_runtime_secret "$OIDC_SECRET_ID")
 
         # Export OIDC credentials
-        export OIDC_RP_CLIENT_ID=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_id'])")
-        export OIDC_RP_CLIENT_SECRET=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
-        export OIDC_ISSUER_URL=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
-        export OIDC_AUTH_DOMAIN=$(echo "$COGNITO_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['domain'])")
+        export OIDC_RP_CLIENT_ID=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_id'])")
+        export OIDC_RP_CLIENT_SECRET=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['client_secret'])")
+        export OIDC_ISSUER_URL=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['issuer_url'])")
+        export OIDC_AUTH_DOMAIN=$(echo "$OIDC_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('domain', ''))")
     fi
 
-    # Fetch Guacamole JSON auth secret if ARN provided (for RDP integration)
-    if [[ -n "${GUACAMOLE_SECRET_ARN:-}" ]]; then
-        export GUACAMOLE_JSON_AUTH_SECRET=$(python -c "
-import boto3
-import os
-
-client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
-response = client.get_secret_value(SecretId=os.environ['GUACAMOLE_SECRET_ARN'])
-print(response['SecretString'])
-")
+    # Fetch Guacamole JSON auth secret if provided (for RDP integration)
+    if [[ -n "${GUACAMOLE_SECRET_ID:-}" ]]; then
+        export GUACAMOLE_JSON_AUTH_SECRET=$(fetch_runtime_secret "$GUACAMOLE_SECRET_ID")
     fi
 
     echo "Secrets loaded successfully"

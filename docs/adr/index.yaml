@@ -101,5 +101,38 @@
       ".pre-commit-config.yaml",
       ".github/workflows/_quality.yml"
     ]
+  },
+  {
+    "id": "ADR-005",
+    "title": "Cloud expansion must preserve provider seams and AWS continuity",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths.",
+    "rules": [
+      {
+        "id": "ADR-005-R1",
+        "description": "Shared cloud factories must route supported providers through adapter packages rather than provider-specific call sites in domain code.",
+        "checks": []
+      },
+      {
+        "id": "ADR-005-R2",
+        "description": "Deployment branch routing must keep AWS dev/prod behavior intact while isolating any new provider branch.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "shifter/shifter_platform/shared/cloud/__init__.py",
+      "shifter/engine/provisioner/cloud/__init__.py",
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/entrypoint.sh",
+      ".github/workflows/deploy.yml",
+      ".github/workflows/_gcp-dev.yml",
+      "platform/terraform/gcp/modules/platform-core/main.tf",
+      "platform/terraform/gcp/README.md",
+      "platform/k8s/gcp/README.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
+    ]
   }
 ]

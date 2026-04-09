@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess  # nosec B404 - used for local dev provisioner only
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 
@@ -27,6 +27,36 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+_GCP_PROVISIONER_ENV_KEYS = (
+    "CLOUD_PROVIDER",
+    "ENVIRONMENT",
+    "CLOUD_REGION",
+    "AWS_REGION",
+    "GCP_REGION",
+    "GCP_PROJECT_ID",
+    "GOOGLE_CLOUD_PROJECT",
+    "CLOUD_PROJECT_ID",
+    "DB_HOST",
+    "DB_PORT",
+    "DB_NAME",
+    "DB_USER",
+    "DB_PASSWORD",
+    "FIELD_ENCRYPTION_KEY",
+    "RANGE_EVENTS_TOPIC_ID",
+    "SNS_RANGE_EVENTS_ARN",
+    "STORAGE_BUCKET_NAME",
+    "AGENT_STORAGE_BUCKET",
+    "AGENT_S3_BUCKET",
+    "RANGE_NETWORK_ID",
+    "RANGE_NETWORK_CIDR",
+    "RANGE_NETWORK_REGION",
+    "PORTAL_NETWORK_CIDRS",
+    "RANGE_VPC_ID",
+    "RANGE_VPC_CIDR",
+    "RANGE_AVAILABILITY_ZONE",
+    "AVAILABILITY_ZONE",
+)
 
 
 def _run_local_provisioner(command: list[str]) -> str | None:
@@ -58,7 +88,13 @@ def _run_local_provisioner(command: list[str]) -> str | None:
 
     # Ensure required env vars are set (from Django settings or environment)
     env.setdefault("ENVIRONMENT", getattr(settings, "ENVIRONMENT", "dev"))
+    env.setdefault("CLOUD_PROVIDER", getattr(settings, "CLOUD_PROVIDER", "aws"))
+    env.setdefault("CLOUD_REGION", getattr(settings, "CLOUD_REGION", "us-east-2"))
     env.setdefault("AWS_REGION", getattr(settings, "AWS_REGION", "us-east-2"))
+    gcp_project_id = getattr(settings, "GCP_PROJECT_ID", "")
+    if gcp_project_id:
+        env.setdefault("GCP_PROJECT_ID", gcp_project_id)
+        env.setdefault("GOOGLE_CLOUD_PROJECT", gcp_project_id)
 
     # For local dev, use standard DB connection (not IAM auth)
     # The provisioner will need DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
@@ -71,9 +107,10 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("DB_NAME", str(db_config.get("NAME", "shifter")))
 
     # SNS config (for event publishing - LocalStack support)
-    sns_arn = getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
+    sns_arn = getattr(settings, "RANGE_EVENTS_TOPIC_ID", "") or getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
     aws_endpoint = getattr(settings, "AWS_ENDPOINT_URL", "")
     if sns_arn:
+        env.setdefault("RANGE_EVENTS_TOPIC_ID", sns_arn)
         env.setdefault("SNS_RANGE_EVENTS_ARN", sns_arn)
     if aws_endpoint:
         env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
@@ -105,33 +142,91 @@ def _is_local_provisioner_enabled() -> bool:
     return mode in ("subprocess", "docker")
 
 
-def _get_engine_ecs_config() -> tuple[str, str, str, list[str]] | None:
-    """Read Engine ECS configuration from settings.
+def _get_gcp_provisioner_env_overrides() -> dict[str, str] | None:
+    """Forward the runtime env contract needed by ephemeral GKE provisioner Jobs."""
+    if getattr(settings, "CLOUD_PROVIDER", "aws") != "gcp":
+        return None
+
+    fallback_values = {
+        "CLOUD_PROVIDER": getattr(settings, "CLOUD_PROVIDER", ""),
+        "ENVIRONMENT": getattr(settings, "ENVIRONMENT", ""),
+        "CLOUD_REGION": getattr(settings, "CLOUD_REGION", ""),
+        "AWS_REGION": getattr(settings, "AWS_REGION", ""),
+        "GCP_REGION": os.environ.get("GCP_REGION") or getattr(settings, "CLOUD_REGION", ""),
+        "GCP_PROJECT_ID": getattr(settings, "GCP_PROJECT_ID", ""),
+        "GOOGLE_CLOUD_PROJECT": getattr(settings, "GCP_PROJECT_ID", ""),
+        "CLOUD_PROJECT_ID": getattr(settings, "GCP_PROJECT_ID", ""),
+    }
+
+    env_overrides: dict[str, str] = {}
+    for key in _GCP_PROVISIONER_ENV_KEYS:
+        value = os.environ.get(key)
+        if value is None or value == "":
+            value = fallback_values.get(key, "")
+        if value is None or value == "":
+            continue
+        env_overrides[key] = str(value)
+
+    return env_overrides or None
+
+
+def _get_engine_task_config() -> tuple[str, str, dict[str, Any] | None] | None:
+    """Read Engine task runner configuration from settings.
 
     Returns:
-        Tuple of (cluster_arn, task_def_arn, security_group_id, subnet_ids)
+        Tuple of (cluster_or_location, task_definition_or_job, network_config)
         or None if configuration is incomplete.
     """
-    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
-    task_definition_arn: str = getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
-    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None) or ""
-    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "") or ""
+    provider = getattr(settings, "CLOUD_PROVIDER", "aws")
+    cluster: str = (
+        getattr(settings, "ENGINE_TASK_CLUSTER", None) or getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None) or ""
+    )
+    task_definition: str = (
+        getattr(settings, "ENGINE_TASK_DEFINITION", None) or getattr(settings, "ENGINE_TASK_DEFINITION_ARN", None) or ""
+    )
 
-    if not all([cluster_arn, task_definition_arn, security_group_id, subnet_ids_str]):
+    if provider == "gcp":
+        if not all([cluster, task_definition]):
+            logger.warning(
+                "GCP task configuration incomplete, skipping task run. "
+                "Set ENGINE_TASK_NAMESPACE/ENGINE_TASK_CLUSTER and "
+                "ENGINE_TASK_IMAGE/ENGINE_TASK_DEFINITION in settings."
+            )
+            return None
+        return cluster, task_definition, None
+
+    security_group_id: str = (
+        getattr(settings, "ENGINE_TASK_NETWORK_SECURITY_GROUP_ID", None)
+        or getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", None)
+        or ""
+    )
+    subnet_ids_str: str = (
+        getattr(settings, "ENGINE_TASK_NETWORK_SUBNET_IDS", None)
+        or getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "")
+        or ""
+    )
+
+    if not all([cluster, task_definition, security_group_id, subnet_ids_str]):
         logger.warning(
-            "ECS configuration incomplete, skipping ECS task. "
-            "Set ENGINE_ECS_CLUSTER_ARN, ENGINE_TASK_DEFINITION_ARN, "
-            "ENGINE_ECS_SECURITY_GROUP_ID, and ENGINE_PRIVATE_SUBNET_IDS in settings."
+            "AWS task configuration incomplete, skipping ECS task. "
+            "Set ENGINE_TASK_CLUSTER, ENGINE_TASK_DEFINITION, "
+            "ENGINE_TASK_NETWORK_SECURITY_GROUP_ID, and ENGINE_TASK_NETWORK_SUBNET_IDS in settings."
         )
         return None
 
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
-
     if not subnet_ids:
-        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_TASK_NETWORK_SUBNET_IDS is empty or invalid")
         return None
 
-    return cluster_arn, task_definition_arn, security_group_id, subnet_ids
+    network_config = {
+        "awsvpcConfiguration": {
+            "subnets": subnet_ids,
+            "securityGroups": [security_group_id],
+            "assignPublicIp": "DISABLED",
+        }
+    }
+    return cluster, task_definition, network_config
 
 
 def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
@@ -163,11 +258,11 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
     if not command.strip():
         raise ValueError("command must be a non-empty string")
 
-    ecs_config = _get_engine_ecs_config()
-    if ecs_config is None:
+    task_config = _get_engine_task_config()
+    if task_config is None:
         return None
 
-    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    cluster, task_definition, network_config = task_config
 
     logger.info(f"Starting ECS task for range_id={range_id} command={command}")
 
@@ -180,21 +275,14 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
         str(user_id),
     ]
 
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
-
     try:
         runner = get_task_runner()
         task_arn = runner.run_task(
-            task_definition=task_definition_arn,
-            cluster=cluster_arn,
+            task_definition=task_definition,
+            cluster=cluster,
             command=command_list,
             container_name="pulumi-provisioner",
+            env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
         logger.info(f"Started ECS task: range_id={range_id} command={command} task_arn={task_arn}")
@@ -278,30 +366,23 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
-    ecs_config = _get_engine_ecs_config()
-    if ecs_config is None:
+    task_config = _get_engine_task_config()
+    if task_config is None:
         return None
 
-    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    cluster, task_definition, network_config = task_config
 
     command_list = ["range", command, "--request-id", str(request_id)]
     logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
 
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
-
     try:
         runner = get_task_runner()
         task_arn = runner.run_task(
-            task_definition=task_definition_arn,
-            cluster=cluster_arn,
+            task_definition=task_definition,
+            cluster=cluster,
             command=command_list,
             container_name="pulumi-provisioner",
+            env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
         logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
@@ -401,29 +482,22 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
         logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
         return _run_local_provisioner(command)
 
-    ecs_config = _get_engine_ecs_config()
-    if ecs_config is None:
+    task_config = _get_engine_task_config()
+    if task_config is None:
         return None
 
-    cluster_arn, task_definition_arn, security_group_id, subnet_ids = ecs_config
+    cluster, task_definition, network_config = task_config
 
     logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
-
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
 
     try:
         runner = get_task_runner()
         task_arn = runner.run_task(
-            task_definition=task_definition_arn,
-            cluster=cluster_arn,
+            task_definition=task_definition,
+            cluster=cluster,
             command=command,
             container_name="pulumi-provisioner",
+            env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
         logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
@@ -509,13 +583,13 @@ def get_task_status(task_arn: str) -> dict | None:
     if not task_arn:
         return None
 
-    cluster_arn = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None)
-    if not cluster_arn:
+    cluster = getattr(settings, "ENGINE_TASK_CLUSTER", None) or getattr(settings, "ENGINE_ECS_CLUSTER_ARN", None)
+    if not cluster:
         return None
 
     try:
         runner = get_task_runner()
-        result = runner.get_task_status(cluster=cluster_arn, task_id=task_arn)
+        result = runner.get_task_status(cluster=cluster, task_id=task_arn)
 
         if result is None:
             return {"status": "UNKNOWN", "reason": "Task not found"}

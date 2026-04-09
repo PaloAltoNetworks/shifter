@@ -43,7 +43,7 @@ class TestPublishExperimentEvent:
         """Raises ExperimentEventError when SQS queue is not configured."""
         mock_settings.SQS_QUEUE_CONFIG = {}
 
-        with pytest.raises(ExperimentEventError, match="SQS_CMS_URL not configured"):
+        with pytest.raises(ExperimentEventError, match="publisher not configured"):
             publish_experiment_event(
                 event_type="test.event",
                 payload={"data": "value"},
@@ -54,11 +54,32 @@ class TestPublishExperimentEvent:
         """Raises ExperimentEventError when queue URL is empty string."""
         mock_settings.SQS_QUEUE_CONFIG = {"cms": {"url": ""}}
 
-        with pytest.raises(ExperimentEventError, match="SQS_CMS_URL not configured"):
+        with pytest.raises(ExperimentEventError, match="publisher not configured"):
             publish_experiment_event(
                 event_type="test.event",
                 payload={"data": "value"},
             )
+
+    @patch("cms.experiments.events.settings")
+    @patch("cms.experiments.events.get_queue_publisher")
+    def test_prefers_publisher_id_when_present(self, mock_get_publisher: MagicMock, mock_settings: MagicMock) -> None:
+        """Uses publisher_id so Pub/Sub topics can differ from worker subscriptions."""
+        mock_settings.SQS_QUEUE_CONFIG = {
+            "cms": {
+                "url": "projects/test/subscriptions/shifter-gcp-dev-cms",
+                "publisher_id": "projects/test/topics/shifter-gcp-dev-events",
+            }
+        }
+        mock_publisher = MagicMock()
+        mock_get_publisher.return_value = mock_publisher
+
+        publish_experiment_event(
+            event_type="experiment.run.range_provisioned",
+            payload={"experiment_id": 1, "run_id": 1},
+        )
+
+        call_args = mock_publisher.send_message.call_args
+        assert call_args[0][0] == "projects/test/topics/shifter-gcp-dev-events"
 
     @patch("cms.experiments.events.settings")
     @patch("cms.experiments.events.get_queue_publisher")

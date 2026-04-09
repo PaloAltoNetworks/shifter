@@ -169,6 +169,60 @@ class RangeConfig:
     ssm_endpoints_subnet_cidr: str = ""
 
 
+@dataclass(frozen=True)
+class RangeNetworkConfig:
+    """Provider-neutral network contract for range provisioning.
+
+    This keeps the provisioner's subnet allocation and future Terraform inputs
+    behind generic env names while preserving the legacy AWS VPC env vars as
+    fallbacks.
+    """
+
+    network_id: str
+    network_cidr: str
+    network_region: str
+    portal_network_cidrs: tuple[str, ...] = ()
+
+    @property
+    def primary_portal_cidr(self) -> str:
+        """Return the first portal CIDR for legacy single-CIDR call sites."""
+        return self.portal_network_cidrs[0] if self.portal_network_cidrs else ""
+
+
+def _parse_csv_env(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def load_range_network_config() -> RangeNetworkConfig:
+    """Load the active provider's range-network contract from environment variables."""
+    portal_network_cidrs = _parse_csv_env(os.environ.get("PORTAL_NETWORK_CIDRS", ""))
+    legacy_portal_cidr = os.environ.get("PORTAL_VPC_CIDR", "")
+    if not portal_network_cidrs and legacy_portal_cidr:
+        portal_network_cidrs = (legacy_portal_cidr,)
+
+    return RangeNetworkConfig(
+        network_id=os.environ.get("RANGE_NETWORK_ID") or os.environ.get("RANGE_VPC_ID", ""),
+        network_cidr=os.environ.get("RANGE_NETWORK_CIDR") or os.environ.get("RANGE_VPC_CIDR", ""),
+        network_region=(
+            os.environ.get("RANGE_NETWORK_REGION")
+            or os.environ.get("GCP_REGION")
+            or os.environ.get("CLOUD_REGION")
+            or os.environ.get("AWS_REGION", "")
+        ),
+        portal_network_cidrs=portal_network_cidrs,
+    )
+
+
+def get_range_availability_zone(default: str = "us-east-2b") -> str:
+    """Return the configured range placement zone for AWS-style callers."""
+    return (
+        os.environ.get("RANGE_NETWORK_ZONE")
+        or os.environ.get("RANGE_AVAILABILITY_ZONE")
+        or os.environ.get("AVAILABILITY_ZONE")
+        or default
+    )
+
+
 def get_range_from_db(range_id: int) -> dict[str, Any]:
     """Load range configuration from database.
 

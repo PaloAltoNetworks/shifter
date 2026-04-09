@@ -4,9 +4,16 @@ from unittest.mock import patch
 
 import pytest
 
-from cloud import get_config_store, get_db_auth, get_event_bus, get_object_storage, get_secrets_store
+from cloud import (
+    get_config_store,
+    get_db_auth,
+    get_event_bus,
+    get_network_inventory,
+    get_object_storage,
+    get_secrets_store,
+)
 from cloud.exceptions import CloudProviderNotImplementedError
-from cloud.types import ConfigStore, DBAuth, EventBus, ObjectStorage, SecretsStore
+from cloud.types import ConfigStore, DBAuth, EventBus, NetworkInventory, ObjectStorage, SecretsStore
 
 
 class TestFactoryWithAWS:
@@ -37,34 +44,53 @@ class TestFactoryWithAWS:
         store = get_secrets_store()
         assert isinstance(store, SecretsStore)
 
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"})
+    def test_get_network_inventory_returns_aws(self):
+        inventory = get_network_inventory()
+        assert isinstance(inventory, NetworkInventory)
+
+
+class TestFactoryWithGCP:
+    """Factory returns GCP adapters when CLOUD_PROVIDER=gcp."""
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_event_bus_returns_gcp(self):
+        bus = get_event_bus()
+        assert isinstance(bus, EventBus)
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_config_store_returns_gcp(self):
+        store = get_config_store()
+        assert isinstance(store, ConfigStore)
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_db_auth_returns_gcp(self):
+        auth = get_db_auth()
+        assert isinstance(auth, DBAuth)
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_object_storage_returns_gcp(self):
+        storage = get_object_storage()
+        assert isinstance(storage, ObjectStorage)
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_secrets_store_returns_gcp(self):
+        store = get_secrets_store()
+        assert isinstance(store, SecretsStore)
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
+    def test_get_network_inventory_returns_gcp(self):
+        inventory = get_network_inventory()
+        assert isinstance(inventory, NetworkInventory)
+
 
 class TestFactoryWithUnsupportedProvider:
     """Factory raises clear error for unsupported providers."""
 
-    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
-    def test_get_event_bus_raises_for_gcp(self):
-        with pytest.raises(CloudProviderNotImplementedError, match="gcp"):
-            get_event_bus()
-
-    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
-    def test_get_config_store_raises_for_gcp(self):
-        with pytest.raises(CloudProviderNotImplementedError, match="gcp"):
-            get_config_store()
-
-    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
-    def test_get_db_auth_raises_for_gcp(self):
-        with pytest.raises(CloudProviderNotImplementedError, match="gcp"):
-            get_db_auth()
-
-    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"})
-    def test_get_secrets_store_raises_for_gcp(self):
-        with pytest.raises(CloudProviderNotImplementedError, match="gcp"):
-            get_secrets_store()
-
     @patch.dict("os.environ", {"CLOUD_PROVIDER": "azure"})
     def test_raises_for_unknown_provider(self):
         with pytest.raises(CloudProviderNotImplementedError, match="azure"):
-            get_object_storage()
+            get_network_inventory()
 
 
 class TestFactoryDefaultProvider:

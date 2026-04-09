@@ -378,6 +378,7 @@ Thumbs.db
 
 # Notes, scratchpad, etc
 temp/
+.tmp/
 
 risks/
 

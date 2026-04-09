@@ -258,6 +258,21 @@ class TestCheckDependencies:
             assert "https://developer.hashicorp.com" in captured.out
             assert "https://git-scm.com" in captured.out
 
+    def test_gdc_bootstrap_checks_gcloud_and_ssh_keygen_instead_of_aws(self):
+        """The GDC bootstrap path should require gcloud/ssh-keygen, not AWS/Terraform."""
+        with patch("shutil.which") as mock_which:
+            mock_which.side_effect = lambda cmd: (
+                "/usr/bin/gcloud"
+                if cmd == "gcloud"
+                else "/usr/bin/ssh-keygen"
+                if cmd == "ssh-keygen"
+                else "/usr/bin/git"
+                if cmd == "git"
+                else None
+            )
+
+            deploy.check_dependencies("gdc-bootstrap")
+
 
 # =============================================================================
 # Test: confirm()
@@ -694,6 +709,141 @@ class TestBootstrapConfig:
         """Config accepts custom GitHub repository."""
         config = deploy.BootstrapConfig(env="dev", github_repo="my-repo")
         assert config.github_repo == "my-repo"
+
+
+# =============================================================================
+# Test: GDCBootstrapConfig and helpers
+# =============================================================================
+
+
+class TestGdcProjectResolution:
+    """Tests for repo-root .env and env-var based GDC project discovery."""
+
+    def test_prefers_runtime_environment_over_repo_env(self, tmp_path):
+        """Process env vars should win over the repo-root .env file."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".env").write_text("PANW_GCP_DEV=from-dotenv\n")
+
+        with (
+            patch("deploy.get_repo_root", return_value=repo_root),
+            patch.dict("os.environ", {"PANW_GCP_DEV": "from-env"}, clear=False),
+        ):
+            assert deploy.get_default_gdc_project_id() == "from-env"
+
+    def test_reads_project_id_from_repo_env_when_runtime_env_missing(self, tmp_path):
+        """The repo-root .env should be used when no explicit env var is set."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".env").write_text("PANW_GCP_DEV=prod-rwctxzl6shxk\n")
+
+        with (
+            patch("deploy.get_repo_root", return_value=repo_root),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            assert deploy.get_default_gdc_project_id() == "prod-rwctxzl6shxk"
+
+
+class TestGdcBootstrapConfig:
+    """Tests for deploy.GDCBootstrapConfig."""
+
+    def test_derives_network_and_service_account_names(self):
+        """Config should derive the default network, subnet, and service account names."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        assert config.resolved_network_name == "cluster1-gdc"
+        assert config.resolved_subnetwork_name == "cluster1-gdc-us-central1"
+        assert config.service_account_email == "baremetal-gcr@prod-rwctxzl6shxk.iam.gserviceaccount.com"
+
+    def test_exposes_expected_cluster_hosts(self):
+        """Config should expose the expected workstation, control-plane, and worker hosts."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        assert config.workstation.name == "cluster1-abm-ws0-001"
+        assert [host.vxlan_ip for host in config.control_plane_hosts] == ["10.200.0.3", "10.200.0.4", "10.200.0.5"]
+        assert [host.vxlan_ip for host in config.worker_hosts] == ["10.200.0.6", "10.200.0.7"]
+
+
+class TestGdcRenderers:
+    """Tests for the generated GDC bootstrap assets."""
+
+    def test_cluster_config_includes_multi_network_and_vmruntime_prereqs(self):
+        """The generated cluster config should include the validated networking settings."""
+        config = deploy.GDCBootstrapConfig(
+            project_id="prod-rwctxzl6shxk",
+            cluster_id="cluster1",
+            google_account_email="bedwards@paloaltonetworks.com",
+        )
+
+        rendered = deploy.render_gdc_cluster_config(config)
+
+        assert "multipleNetworkInterfaces: true" in rendered
+        assert "controlPlaneVIP: 10.200.0.49" in rendered
+        assert "ingressVIP: 10.200.0.50" in rendered
+        assert "clusterAdmin:" in rendered
+        assert "bedwards@paloaltonetworks.com" in rendered
+
+    def test_prepare_hosts_script_bakes_in_vxlan_and_inotify_fix(self):
+        """The host prep script should contain both the vxlan setup and the inotify hardening."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        rendered = deploy.render_gdc_prepare_hosts_script(config)
+
+        assert "ip link add vxlan0 type vxlan id 42" in rendered
+        assert "fs.inotify.max_user_instances = 1024" in rendered
+        assert 'configure_remote_host "10.240.0.3" "10.200.0.3"' in rendered
+
+    def test_create_cluster_script_is_safe_to_rerun(self):
+        """The cluster create script should skip cluster creation if the kubeconfig already exists."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        rendered = deploy.render_gdc_create_cluster_script(config)
+
+        assert f"if [ ! -f {config.kubeconfig_path} ]" in rendered
+        assert "bmctl check vmruntimepfc" in rendered
+        assert "patch vmruntime vmruntime" in rendered
+
+
+class TestGdcBootstrapCluster:
+    """Tests for deploy.gdc_bootstrap_cluster."""
+
+    def test_executes_bootstrap_steps_in_order(self, tmp_path):
+        """The GDC bootstrap path should execute the expected sequence of helper steps."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        staged_assets = {
+            "assets_dir": tmp_path / "cluster1",
+            "ssh_metadata": tmp_path / "cluster1" / "ssh-metadata",
+        }
+
+        with (
+            patch("deploy.confirm", return_value=True),
+            patch("deploy.ensure_gdc_apis") as mock_apis,
+            patch("deploy.ensure_gdc_service_account") as mock_sa,
+            patch("deploy.stage_gdc_bootstrap_assets", return_value=staged_assets) as mock_stage,
+            patch("deploy.ensure_gdc_network") as mock_network,
+            patch("deploy.ensure_gdc_instances") as mock_instances,
+            patch("deploy.sync_gdc_instance_ssh_metadata") as mock_sync,
+            patch("deploy.wait_for_gdc_ssh") as mock_wait,
+            patch("deploy.upload_gdc_assets") as mock_upload,
+            patch("deploy.run_gdc_workstation_script") as mock_remote,
+        ):
+            result = deploy.gdc_bootstrap_cluster(config)
+
+            assert result["cluster_id"] == "cluster1"
+            mock_apis.assert_called_once_with(config, dry_run=False)
+            mock_sa.assert_called_once_with(config, dry_run=False)
+            mock_stage.assert_called_once()
+            mock_network.assert_called_once_with(config, dry_run=False)
+            mock_instances.assert_called_once_with(config, staged_assets["ssh_metadata"], dry_run=False)
+            mock_sync.assert_called_once_with(config, staged_assets["ssh_metadata"], dry_run=False)
+            assert mock_wait.call_count == len(config.all_hosts)
+            mock_upload.assert_called_once_with(config, staged_assets["assets_dir"], dry_run=False)
+            assert [call.args[1] for call in mock_remote.call_args_list] == [
+                "prepare-workstation.sh",
+                "prepare-hosts.sh",
+                "create-cluster.sh",
+                "install-helper.sh",
+            ]
 
 
 # =============================================================================
@@ -1717,6 +1867,20 @@ class TestMainCLI:
 
             mock_full.assert_called_once()
 
+    def test_executes_gdc_bootstrap_command(self):
+        """CLI executes gdc_bootstrap_cluster when gdc-bootstrap command given."""
+        with (
+            patch(
+                "sys.argv",
+                ["deploy.py", "gdc-bootstrap", "--project-id", "prod-rwctxzl6shxk", "--cluster-id", "cluster1"],
+            ),
+            patch("deploy.check_dependencies"),
+            patch("deploy.gdc_bootstrap_cluster") as mock_gdc_bootstrap,
+        ):
+            deploy.main()
+
+            mock_gdc_bootstrap.assert_called_once()
+
     # ---------------------------------------------------------------------
     # Dry-run mode
     # ---------------------------------------------------------------------
@@ -1750,3 +1914,25 @@ class TestMainCLI:
             deploy.main()
 
             assert mock_terraform.call_args[1]["dry_run"] is True
+
+    def test_passes_dry_run_flag_to_gdc_bootstrap(self):
+        """CLI passes --dry-run flag to gdc_bootstrap_cluster."""
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "deploy.py",
+                    "gdc-bootstrap",
+                    "--project-id",
+                    "prod-rwctxzl6shxk",
+                    "--cluster-id",
+                    "cluster1",
+                    "--dry-run",
+                ],
+            ),
+            patch("deploy.check_dependencies"),
+            patch("deploy.gdc_bootstrap_cluster") as mock_gdc_bootstrap,
+        ):
+            deploy.main()
+
+            assert mock_gdc_bootstrap.call_args[1]["dry_run"] is True

@@ -130,23 +130,49 @@ def _load_template(name: str):
     return env.get_template(name)
 
 
+def _get_linux_access_password(os_type: str) -> str:
+    if os_type == "kali":
+        return os.environ.get("GDC_KALI_PASSWORD", "kali")
+    return os.environ.get("GDC_UBUNTU_PASSWORD", "ubuntu")
+
+
+def _get_windows_admin_password(role: str) -> str:
+    if role == "dc":
+        return os.environ.get("DC_DOMAIN_PASSWORD") or os.environ.get(
+            "GDC_WINDOWS_ADMIN_PASSWORD",
+            "CortexSavesTheDay!",
+        )
+    return os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!")
+
+
 def _render_user_data(instance: dict[str, Any], hostname: str, public_key: str) -> str:
     role = str(instance.get("role", "victim"))
     os_type = str(instance.get("os_type", "ubuntu"))
 
     if role == "dc":
         template = _load_template("dc_windows.ps1.j2")
-        admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "CortexSavesTheDay!")
+        admin_password = _get_windows_admin_password(role)
         return template.render(public_key=public_key, admin_password=admin_password)
     if os_type == "windows":
         template = _load_template("victim_windows.ps1.j2")
-        return template.render(public_key=public_key)
+        return template.render(
+            public_key=public_key,
+            admin_password=_get_windows_admin_password(role),
+        )
     if role == "attacker" or os_type == "kali":
         template = _load_template("kali.sh.j2")
-        return template.render(hostname=hostname, public_key=public_key)
+        return template.render(
+            hostname=hostname,
+            public_key=public_key,
+            kali_password=_get_linux_access_password("kali"),
+        )
 
     template = _load_template("victim_linux.sh.j2")
-    return template.render(public_key=public_key, ssh_user=get_ssh_username(os_type, role))
+    return template.render(
+        public_key=public_key,
+        ssh_user=get_ssh_username(os_type, role),
+        guest_password=_get_linux_access_password(os_type),
+    )
 
 
 def _resolve_image_source(source_url: str, gcs_secret_name: str | None) -> dict[str, Any]:

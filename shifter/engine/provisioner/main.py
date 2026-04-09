@@ -1928,7 +1928,7 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                 )
                 range_terraform_runner.destroy_range(
                     request_id,
-                    range_terraform_runner.RANGE_MODULE_PATH,
+                    range_terraform_runner.get_range_module_path(),
                     variables=tf_variables,
                 )
                 range_terraform_runner.cleanup_range_state(request_id)
@@ -1936,7 +1936,7 @@ def run_range_terraform(operation: str, request_id: str) -> None:
             except Exception as cleanup_error:
                 logger.error(
                     "Auto-cleanup FAILED for range_id=%s request_id=%s: %s. "
-                    "Orphaned AWS resources may exist and require manual cleanup.",
+                    "Orphaned cloud resources may exist and require manual cleanup.",
                     range_id,
                     request_id,
                     cleanup_error,
@@ -2022,7 +2022,7 @@ def _run_terraform_provision(
     output_data = range_terraform_runner.apply_range(
         request_id,
         tf_variables,
-        range_terraform_runner.RANGE_MODULE_PATH,
+        range_terraform_runner.get_range_module_path(),
     )
     logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
 
@@ -2138,7 +2138,7 @@ def _run_terraform_destroy(
         tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
         range_terraform_runner.destroy_range(
             request_id,
-            range_terraform_runner.RANGE_MODULE_PATH,
+            range_terraform_runner.get_range_module_path(),
             variables=tf_variables,
         )
         terraform_succeeded = True

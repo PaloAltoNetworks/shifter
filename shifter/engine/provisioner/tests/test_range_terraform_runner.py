@@ -3,10 +3,36 @@
 Covers destroy_range variable passing (mirrors test_terraform_runner.py for NGFW).
 """
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+
+
+class TestProviderRouting:
+    """Test provider-routed module and state prefix selection."""
+
+    def test_get_range_module_path_defaults_to_aws(self):
+        from range_terraform_runner import AWS_RANGE_MODULE_PATH, get_range_module_path
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert get_range_module_path() == AWS_RANGE_MODULE_PATH
+
+    def test_get_range_module_path_uses_gcp_module(self):
+        from range_terraform_runner import GCP_RANGE_MODULE_PATH, get_range_module_path
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+            assert get_range_module_path() == GCP_RANGE_MODULE_PATH
+
+    def test_get_range_state_key_prefix_uses_provider_specific_paths(self):
+        from range_terraform_runner import get_range_state_key_prefix
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert get_range_state_key_prefix() == "ranges"
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+            assert get_range_state_key_prefix() == "gcp/ranges"
 
 
 class TestDestroyRange:

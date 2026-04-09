@@ -64,6 +64,11 @@ output "assets_bucket_name" {
   value       = google_storage_bucket.assets.name
 }
 
+output "terraform_state_bucket_name" {
+  description = "Expected GCS bucket name for provisioner Terraform state."
+  value       = "${var.project_id}-terraform-state"
+}
+
 output "public_ingress_ip_name" {
   description = "Reserved global static IP name for the platform ingress."
   value       = google_compute_global_address.platform_ingress.name

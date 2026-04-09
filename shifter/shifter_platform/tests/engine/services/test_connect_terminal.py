@@ -89,14 +89,14 @@ class TestConnectTerminal:
             "uuid": "gcp-instance-uuid-123",
             "role": "victim",
             "os_type": "ubuntu",
-            "private_ip": "10.50.1.10",
-            "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+            "private_ip": "10.200.0.110",
+            "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
             "cloud_provider": "gcp",
             "provider_metadata": {
                 "gcp": {
-                    "instance_id": "9988776655",
-                    "instance_name": "shifter-range-vm-1",
-                    "zone": "us-central1-b",
+                    "vm_name": "vmrt-vm-1",
+                    "namespace": "range-42",
+                    "network_name": "range-42-attack",
                 }
             },
         }
@@ -114,7 +114,7 @@ class TestConnectTerminal:
             result = connect_terminal(mock_user, "gcp-instance-uuid-123")
 
         assert isinstance(result, SSHConnection)
-        assert result.host == "10.50.1.10"
+        assert result.host == "10.200.0.110"
         assert result.username == "ubuntu"
         assert result.private_key == ssh_key
 

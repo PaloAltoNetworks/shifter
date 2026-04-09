@@ -81,13 +81,13 @@ class TestGetResourceStatus:
             {
                 "uuid": "gcp-123",
                 "role": "victim",
-                "private_ip": "10.50.1.10",
-                "instance_id": "shifter-range-vm-1",
+                "private_ip": "10.200.0.110",
+                "instance_id": "vmrt-vm-1",
                 "cloud_provider": "gcp",
                 "provider_metadata": {
                     "gcp": {
-                        "instance_id": "9988776655",
-                        "zone": "us-central1-b",
+                        "vm_name": "vmrt-vm-1",
+                        "namespace": "range-42",
                     }
                 },
             }
@@ -106,7 +106,7 @@ class TestGetResourceStatus:
             result = get_range_status(42)
 
         assert result["instances"] == instances
-        assert result["instances"][0]["provider_metadata"]["gcp"]["zone"] == "us-central1-b"
+        assert result["instances"][0]["provider_metadata"]["gcp"]["namespace"] == "range-42"
 
     def test_returns_none_when_range_not_found(self):
         """Service returns None when range doesn't exist."""

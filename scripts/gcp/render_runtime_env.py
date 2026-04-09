@@ -25,6 +25,13 @@ def _unique(values: list[str]) -> list[str]:
     return ordered
 
 
+def _derive_sibling_secret_id(secret_id: str, current_suffix: str, new_suffix: str) -> str:
+    marker = f"-{current_suffix}"
+    if marker in secret_id:
+        return secret_id.rsplit(marker, 1)[0] + f"-{new_suffix}"
+    return secret_id
+
+
 def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) -> str:
     assets_bucket = _value(outputs, "assets_bucket_name")
     terraform_state_bucket = _value(outputs, "terraform_state_bucket_name")
@@ -68,6 +75,7 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "DB_SECRET_ID": secret_ids["db"],
         "APP_SECRET_ID": secret_ids["app"],
         "GUACAMOLE_SECRET_ID": secret_ids["guacamole-json-auth"],
+        "GDC_ACCESS_SECRET_ID": _derive_sibling_secret_id(secret_ids["app"], "app", "gdc-access"),
         "DJANGO_DEBUG": "false" if secure_portal_mode else "true",
         "SESSION_COOKIE_SECURE": "true" if secure_portal_mode else "false",
         "CSRF_COOKIE_SECURE": "true" if secure_portal_mode else "false",
@@ -88,6 +96,10 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "RANGE_NETWORK_CIDR": range_network_cidr,
         "RANGE_NETWORK_REGION": range_network_region,
         "PORTAL_NETWORK_CIDRS": ",".join(_unique(portal_network_cidrs)),
+        "GDC_RANGE_NAMESPACE_PREFIX": "range",
+        "GDC_NETWORK_INTERFACE": "vxlan0",
+        "GDC_NETWORK_DNS_NAMESERVERS": "8.8.8.8",
+        "GDC_STATIC_IP_RESERVATION_COUNT": "4",
         "RANGE_VPC_ID": range_network_id,
         "RANGE_VPC_CIDR": range_network_cidr,
     }

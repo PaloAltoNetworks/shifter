@@ -31,9 +31,15 @@ promote the runtime from the IP/debug path to the hostname/TLS path once the
 managed certificate becomes active.
 
 The generated runtime env now carries the provider-neutral range-network
-contract for future Compute Engine slices:
+contract and the GDC access settings used by the provisioner for the active
+GDC range plane:
 
 - `RANGE_NETWORK_ID`
 - `RANGE_NETWORK_CIDR`
 - `RANGE_NETWORK_REGION`
 - `PORTAL_NETWORK_CIDRS`
+- `GDC_ACCESS_SECRET_ID`
+- `GDC_RANGE_NAMESPACE_PREFIX`
+- `GDC_NETWORK_INTERFACE`
+- `GDC_NETWORK_DNS_NAMESERVERS`
+- `GDC_STATIC_IP_RESERVATION_COUNT`

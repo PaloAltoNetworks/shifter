@@ -89,10 +89,15 @@ def test_render_env_uses_ip_fallback_in_debug_mode():
     assert "SITE_URL=http://10.0.0.30\n" in rendered
     assert "DJANGO_ALLOWED_HOSTS=10.0.0.30,localhost,127.0.0.1\n" in rendered
     assert "OIDC_SECRET_ID=" not in rendered
+    assert "GDC_ACCESS_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-access\n" in rendered
     assert "RANGE_NETWORK_ID=projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range\n" in rendered
     assert "RANGE_NETWORK_CIDR=10.50.0.0/16\n" in rendered
     assert "RANGE_NETWORK_REGION=us-central1\n" in rendered
     assert "PORTAL_NETWORK_CIDRS=10.40.0.0/20,10.44.0.0/16\n" in rendered
+    assert "GDC_RANGE_NAMESPACE_PREFIX=range\n" in rendered
+    assert "GDC_NETWORK_INTERFACE=vxlan0\n" in rendered
+    assert "GDC_NETWORK_DNS_NAMESERVERS=8.8.8.8\n" in rendered
+    assert "GDC_STATIC_IP_RESERVATION_COUNT=4\n" in rendered
     assert "RANGE_VPC_ID=projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range\n" in rendered
     assert "RANGE_VPC_CIDR=10.50.0.0/16\n" in rendered
 

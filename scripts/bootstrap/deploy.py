@@ -207,6 +207,7 @@ GDC_API_SERVICES = [
     "logging.googleapis.com",
     "monitoring.googleapis.com",
     "opsconfigmonitoring.googleapis.com",
+    "secretmanager.googleapis.com",
     "serviceusage.googleapis.com",
     "stackdriver.googleapis.com",
 ]
@@ -408,6 +409,7 @@ class GDCBootstrapConfig:
     region: str = "us-central1"
     zone: str = "us-central1-a"
     bmctl_version: str = "1.34.200-gke.68"
+    environment: str = "gcp-dev"
     network_name: str | None = None
     subnetwork_name: str | None = None
     subnet_cidr: str = "10.240.0.0/20"
@@ -474,6 +476,10 @@ class GDCBootstrapConfig:
     @property
     def cluster_context(self) -> str:
         return f"{self.cluster_id}-admin@{self.cluster_id}"
+
+    @property
+    def gdc_access_secret_id(self) -> str:
+        return f"shifter-{self.environment}-gdc-access"
 
     @property
     def workstation(self) -> GDCHost:
@@ -806,6 +812,21 @@ def render_gdc_install_helper_script(config: GDCBootstrapConfig) -> str:
     )
 
 
+def build_gdc_access_secret_payload(config: GDCBootstrapConfig, kubeconfig: str) -> str:
+    """Build the provisioner-facing GDC access bundle stored in Secret Manager."""
+    payload = {
+        "cluster_id": config.cluster_id,
+        "region": config.region,
+        "vxlan_cidr": config.vxlan_cidr,
+        "network_interface": "vxlan0",
+        "range_namespace_prefix": "range",
+        "dns_nameservers": ["8.8.8.8"],
+        "static_ip_reservation_count": 4,
+        "kubeconfig": kubeconfig,
+    }
+    return json.dumps(payload, indent=2)
+
+
 def stage_gdc_bootstrap_assets(config: GDCBootstrapConfig, staging_dir: Path, dry_run: bool = False) -> dict[str, Path]:
     """Create the local assets that will be uploaded to the admin workstation."""
     assets_dir = staging_dir / config.cluster_id
@@ -910,6 +931,34 @@ def ensure_gdc_service_account(config: GDCBootstrapConfig, dry_run: bool = False
                 "--no-user-output-enabled",
             ],
             dry_run=dry_run,
+        )
+
+
+def ensure_gdc_access_secret(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
+    """Ensure the provisioner-facing GDC access secret exists."""
+    if dry_run or not gcloud_resource_exists(
+        [
+            "gcloud",
+            "secrets",
+            "describe",
+            config.gdc_access_secret_id,
+            "--project",
+            config.project_id,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "secrets",
+                "create",
+                config.gdc_access_secret_id,
+                "--replication-policy",
+                "automatic",
+                "--project",
+                config.project_id,
+            ],
+            dry_run=dry_run,
+            check=False,
         )
 
 
@@ -1176,6 +1225,64 @@ def run_gdc_workstation_script(
     )
 
 
+def fetch_gdc_kubeconfig(config: GDCBootstrapConfig, dry_run: bool = False) -> str:
+    """Fetch the generated kubeconfig from the admin workstation."""
+    if dry_run:
+        return ""
+
+    result = run_cmd(
+        [
+            "gcloud",
+            "compute",
+            "ssh",
+            f"root@{config.workstation.name}",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            "--command",
+            f"cat {config.kubeconfig_path}",
+        ],
+        capture=True,
+    )
+    if result is None or not result.stdout.strip():
+        error("Failed to read the GDC kubeconfig from the admin workstation")
+        sys.exit(1)
+    return result.stdout
+
+
+def sync_gdc_access_secret(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
+    """Publish the current GDC kubeconfig and range-plane settings to Secret Manager."""
+    ensure_gdc_access_secret(config, dry_run=dry_run)
+    kubeconfig = fetch_gdc_kubeconfig(config, dry_run=dry_run)
+    payload = build_gdc_access_secret_payload(config, kubeconfig)
+
+    if dry_run:
+        info(f"[DRY-RUN] Would add a new version to Secret Manager secret {config.gdc_access_secret_id}")
+        return
+
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as handle:
+        handle.write(payload)
+        payload_path = Path(handle.name)
+
+    try:
+        run_cmd(
+            [
+                "gcloud",
+                "secrets",
+                "versions",
+                "add",
+                config.gdc_access_secret_id,
+                "--data-file",
+                str(payload_path),
+                "--project",
+                config.project_id,
+            ]
+        )
+    finally:
+        payload_path.unlink(missing_ok=True)
+
+
 def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, str]:
     """Bootstrap the repeatable GDC-on-Compute-Engine VM Runtime cluster."""
     if not config.project_id:
@@ -1211,6 +1318,7 @@ def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> 
         run_gdc_workstation_script(config, "prepare-hosts.sh", dry_run=dry_run)
         run_gdc_workstation_script(config, "create-cluster.sh", dry_run=dry_run)
         run_gdc_workstation_script(config, "install-helper.sh", dry_run=dry_run)
+        sync_gdc_access_secret(config, dry_run=dry_run)
 
     success("GDC bootstrap complete")
     print("\nNext commands:")
@@ -1229,6 +1337,7 @@ shifter-gdc-kubeconfig"""
         "subnetwork_name": config.resolved_subnetwork_name,
         "workstation": config.workstation.name,
         "kubeconfig_path": config.kubeconfig_path,
+        "gdc_access_secret_id": config.gdc_access_secret_id,
     }
 
 

@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
+    GDCNetworkAccessConfig,
     InstanceConfig,
     RangeConfig,
     RangeNetworkConfig,
@@ -21,6 +22,7 @@ from config import (
     generate_presigned_url,
     get_range_availability_zone,
     get_range_from_db,
+    load_gdc_network_access_config,
     load_range_network_config,
 )
 
@@ -253,6 +255,74 @@ class TestRangeNetworkEnv:
         )
 
         assert get_range_availability_zone() == "us-central1-b"
+
+    def test_load_gdc_network_access_config_reads_secret_bundle(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_ACCESS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-access",
+            },
+            clear=True,
+        )
+        mock_secrets = mocker.Mock()
+        mock_secrets.get_secret.return_value = """
+        {
+          "cluster_id": "cluster1",
+          "region": "us-central1",
+          "vxlan_cidr": "10.200.0.0/24",
+          "network_interface": "vxlan0",
+          "range_namespace_prefix": "range",
+          "dns_nameservers": ["8.8.8.8", "1.1.1.1"],
+          "static_ip_reservation_count": 6,
+          "kubeconfig": "apiVersion: v1\\nclusters: []\\ncontexts: []\\ncurrent-context: ''\\nusers: []\\n"
+        }
+        """
+        mocker.patch("cloud.get_secrets_store", return_value=mock_secrets)
+
+        config = load_gdc_network_access_config()
+
+        assert config == GDCNetworkAccessConfig(
+            access_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-access",
+            cluster_id="cluster1",
+            region="us-central1",
+            vxlan_cidr="10.200.0.0/24",
+            network_interface="vxlan0",
+            namespace_prefix="range",
+            dns_nameservers=("8.8.8.8", "1.1.1.1"),
+            static_ip_reservation_count=6,
+            kubeconfig="apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nusers: []",
+        )
+
+    def test_load_range_network_config_uses_gdc_access_bundle_when_active(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_ACCESS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-access",
+                "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
+                "RANGE_NETWORK_ID": "projects/test/global/networks/legacy-range",
+                "RANGE_NETWORK_CIDR": "10.50.0.0/16",
+            },
+            clear=True,
+        )
+        mock_secrets = mocker.Mock()
+        mock_secrets.get_secret.return_value = """
+        {
+          "cluster_id": "cluster1",
+          "region": "us-central1",
+          "vxlan_cidr": "10.200.0.0/24",
+          "kubeconfig": "apiVersion: v1\\nclusters: []\\ncontexts: []\\ncurrent-context: ''\\nusers: []\\n"
+        }
+        """
+        mocker.patch("cloud.get_secrets_store", return_value=mock_secrets)
+
+        config = load_range_network_config()
+
+        assert config.network_id == "cluster1"
+        assert config.network_cidr == "10.200.0.0/24"
+        assert config.network_region == "us-central1"
+        assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
 
 
 class TestDecryptField:

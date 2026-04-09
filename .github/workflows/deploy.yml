@@ -4,7 +4,7 @@ name: Deploy
 on:
   pull_request:
   push:
-    branches: [main, dev]
+    branches: [main, dev, gcp-dev]
   workflow_dispatch:
 
 concurrency:
@@ -23,7 +23,9 @@ jobs:
       range: ${{ steps.filter.outputs.range }}
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
+      gcp: ${{ steps.filter.outputs.gcp }}
       environment: ${{ steps.env.outputs.environment }}
+      provider: ${{ steps.env.outputs.provider }}
       is_dev: ${{ steps.env.outputs.is_dev }}
       skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
@@ -58,22 +60,58 @@ jobs:
               - 'platform/terraform/environments/*/portal/**'
               - 'shifter/**'
               - '.github/workflows/_shifter-platform.yml'
+            gcp:
+              - 'platform/terraform/gcp/**'
+              - 'platform/k8s/gcp/**'
+              - 'scripts/gcp/**'
+              - 'shifter/shifter_platform/shared/cloud/gcp/**'
+              - 'shifter/shifter_platform/shared/cloud/types.py'
+              - 'shifter/engine/provisioner/cloud/gcp/**'
+              - 'shifter/shifter_platform/config/settings.py'
+              - 'shifter/shifter_platform/engine/ecs.py'
+              - 'shifter/shifter_platform/cms/experiments/ecs.py'
+              - 'shifter/shifter_platform/entrypoint.sh'
+              - 'shifter/shifter_platform/cms/experiments/events.py'
+              - 'shifter/shifter_platform/shared/management/commands/run_worker.py'
+              - 'shifter/shifter_platform/requirements-gcp.txt'
+              - 'shifter/engine/provisioner/requirements-gcp.txt'
+              - 'shifter/shifter_platform/Dockerfile'
+              - 'shifter/engine/provisioner/Dockerfile'
+              - '.github/workflows/_gcp-dev.yml'
+              - '.github/workflows/deploy.yml'
 
       - name: Set environment
         id: env
         run: |
+          PROVIDER="aws"
+
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            # Only PRs to main use prod; all others (dev, feature branches) use dev
-            ENV="${{ github.base_ref == 'main' && 'prod' || 'dev' }}"
+            if [ "${{ github.base_ref }}" == "main" ]; then
+              ENV="prod"
+            elif [ "${{ github.base_ref }}" == "gcp-dev" ]; then
+              ENV="gcp-dev"
+              PROVIDER="gcp"
+            else
+              ENV="dev"
+            fi
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual runs always target dev for safety
-            ENV="dev"
+            if [ "${{ github.ref }}" == "refs/heads/gcp-dev" ]; then
+              ENV="gcp-dev"
+              PROVIDER="gcp"
+            else
+              # Manual runs default to dev for safety unless explicitly run on gcp-dev
+              ENV="dev"
+            fi
+          elif [ "${{ github.ref }}" == "refs/heads/gcp-dev" ]; then
+            ENV="gcp-dev"
+            PROVIDER="gcp"
           elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
             ENV="dev"
           else
             ENV="prod"
           fi
           echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+          echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
           echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> "$GITHUB_OUTPUT"
 
       - name: Check for skip flags
@@ -119,16 +157,33 @@ jobs:
        needs.changes.outputs.range == 'true' ||
        needs.changes.outputs.shifter_engine == 'true' ||
        needs.changes.outputs.shifter_platform == 'true' ||
+       needs.changes.outputs.gcp == 'true' ||
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
     with:
       skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
+
+  gcp-dev:
+    name: GCP Dev
+    needs: [changes, quality]
+    if: |
+      always() &&
+      needs.changes.outputs.provider == 'gcp' &&
+      (needs.changes.outputs.gcp == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.quality.result == 'success' || needs.quality.result == 'skipped')
+    uses: ./.github/workflows/_gcp-dev.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+    secrets:
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
 
   core:
     name: Core
     needs: [changes, quality]
     if: |
       always() &&
+      needs.changes.outputs.provider == 'aws' &&
       (needs.changes.outputs.core == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')
     uses: ./.github/workflows/_core.yml
@@ -144,6 +199,7 @@ jobs:
     needs: [changes, quality, core]
     if: |
       always() &&
+      needs.changes.outputs.provider == 'aws' &&
       (needs.changes.outputs.range == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')
@@ -160,6 +216,7 @@ jobs:
     needs: [changes, quality, core]
     if: |
       always() &&
+      needs.changes.outputs.provider == 'aws' &&
       (needs.changes.outputs.shifter_engine == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.quality.result == 'success' || needs.quality.result == 'skipped')
@@ -176,6 +233,7 @@ jobs:
     needs: [changes, quality, core, range, shifter-engine]
     if: |
       always() &&
+      needs.changes.outputs.provider == 'aws' &&
       (needs.changes.outputs.shifter_platform == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.core.result == 'success' || needs.core.result == 'skipped') &&
       (needs.range.result == 'success' || needs.range.result == 'skipped') &&

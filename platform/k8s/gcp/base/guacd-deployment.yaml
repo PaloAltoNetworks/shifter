@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guacd
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: guacd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: guacd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: shifter
+        app.kubernetes.io/component: guacd
+    spec:
+      serviceAccountName: workers
+      containers:
+        - name: guacd
+          image: placeholder-guacd:latest
+          imagePullPolicy: Always
+          ports:
+            - name: guacd
+              containerPort: 4822
+          readinessProbe:
+            tcpSocket:
+              port: guacd
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: guacd
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

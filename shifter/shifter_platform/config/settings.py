@@ -11,11 +11,17 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse boolean environment variables using explicit true/false strings."""
+    return os.environ.get(name, str(default)).lower() == "true"
+
+
 # Security
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
-DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
+DEBUG = _env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 
@@ -115,13 +121,14 @@ ASGI_APPLICATION = "config.asgi.application"
 # Redis for channel layer (multi-instance ASG deployment)
 # Falls back to in-memory for local dev when REDIS_HOST not set
 REDIS_HOST = os.environ.get("REDIS_HOST", "")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
 if REDIS_HOST:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [(REDIS_HOST, 6379)],
+                "hosts": [(REDIS_HOST, REDIS_PORT)],
             },
         },
     }
@@ -198,6 +205,8 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", True)
+    CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", True)
 
 # ------------------------------------------------------------------------------
 # OIDC Authentication (Cognito)
@@ -210,7 +219,7 @@ AUTHENTICATION_BACKENDS = [
 
 # Magic link authentication (PLAT-101)
 MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
-MAGIC_LINK_SINGLE_USE = os.environ.get("MAGIC_LINK_SINGLE_USE", "false").lower() == "true"
+MAGIC_LINK_SINGLE_USE = _env_bool("MAGIC_LINK_SINGLE_USE", False)
 
 # Cognito OIDC settings - loaded from environment
 OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "")
@@ -258,7 +267,7 @@ LOGOUT_REDIRECT_URL = "/"
 # Login URL - dev bypass in DEBUG, OIDC in production
 LOGIN_URL = "/dev-login/" if DEBUG else "oidc_authentication_init"
 
-# Cognito logout endpoint - clears Cognito session in addition to Django session
+# OIDC logout endpoint - clears the identity provider session in addition to Django session
 OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"
 
 # Create users on first login
@@ -313,6 +322,9 @@ PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 
 # Which cloud provider to use: "aws" (default) or "gcp" (future)
 CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
+GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or GOOGLE_CLOUD_PROJECT
+GCP_REGION = os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION", "")
 
 # Generic names — adapters use these; AWS-specific names kept as fallbacks
 CLOUD_REGION = (
@@ -329,20 +341,50 @@ AWS_S3_REGION = CLOUD_REGION  # Backward compat alias
 AWS_REGION = CLOUD_REGION  # Backward compat alias
 AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
 
-# SNS Topic for publishing events (provisioner -> workers)
-SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
+# Topic for publishing events (provisioner -> workers)
+RANGE_EVENTS_TOPIC_ID = os.environ.get("RANGE_EVENTS_TOPIC_ID") or os.environ.get("SNS_RANGE_EVENTS_ARN", "")
+SNS_RANGE_EVENTS_ARN = RANGE_EVENTS_TOPIC_ID  # Backward compat alias
 
-# Shifter Engine (ECS Fargate) — PULUMI_ fallbacks removed after infra deploys new names
-ENGINE_ECS_CLUSTER_ARN = os.environ.get("ENGINE_ECS_CLUSTER_ARN") or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-ENGINE_TASK_DEFINITION_ARN = os.environ.get("ENGINE_TASK_DEFINITION_ARN") or os.environ.get(
-    "PULUMI_TASK_DEFINITION_ARN", ""
+# Shifter Engine task runner configuration.
+# AWS uses ECS-compatible values. GCP uses a Kubernetes namespace plus a
+# container image that the GKE-native task runner launches as a Job.
+ENGINE_TASK_CLUSTER = (
+    os.environ.get("ENGINE_TASK_NAMESPACE")
+    or os.environ.get("ENGINE_TASK_CLUSTER")
+    or os.environ.get("ENGINE_JOB_LOCATION")
+    or os.environ.get("ENGINE_ECS_CLUSTER_ARN")
+    or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
 )
-ENGINE_ECS_SECURITY_GROUP_ID = os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID") or os.environ.get(
-    "PULUMI_ECS_SECURITY_GROUP_ID", ""
+ENGINE_TASK_DEFINITION = (
+    os.environ.get("ENGINE_TASK_DEFINITION")
+    or os.environ.get("ENGINE_TASK_IMAGE")
+    or os.environ.get("ENGINE_TASK_DEFINITION_ARN")
+    or os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
 )
-ENGINE_PRIVATE_SUBNET_IDS = os.environ.get("ENGINE_PRIVATE_SUBNET_IDS") or os.environ.get(
-    "PULUMI_PRIVATE_SUBNET_IDS", ""
+ENGINE_TASK_SERVICE_ACCOUNT_NAME = os.environ.get("ENGINE_TASK_SERVICE_ACCOUNT_NAME", "")
+ENGINE_TASK_IMAGE_PULL_POLICY = os.environ.get("ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent")
+ENGINE_TASK_BACKOFF_LIMIT = int(os.environ.get("ENGINE_TASK_BACKOFF_LIMIT", "0"))
+ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED = int(os.environ.get("ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED", "3600"))
+ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = (
+    os.environ.get("ENGINE_TASK_NETWORK_SECURITY_GROUP_ID")
+    or os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID")
+    or os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
 )
+ENGINE_TASK_NETWORK_SUBNET_IDS = (
+    os.environ.get("ENGINE_TASK_NETWORK_SUBNET_IDS")
+    or os.environ.get("ENGINE_PRIVATE_SUBNET_IDS")
+    or os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
+)
+
+# Backward compat aliases for existing AWS call sites and tests
+ENGINE_ECS_CLUSTER_ARN = ENGINE_TASK_CLUSTER
+ENGINE_TASK_DEFINITION_ARN = ENGINE_TASK_DEFINITION
+ENGINE_ECS_SECURITY_GROUP_ID = ENGINE_TASK_NETWORK_SECURITY_GROUP_ID
+ENGINE_PRIVATE_SUBNET_IDS = ENGINE_TASK_NETWORK_SUBNET_IDS
+EXPERIMENT_TASK_DEFINITION = os.environ.get("EXPERIMENT_TASK_DEFINITION") or os.environ.get(
+    "EXPERIMENT_TASK_DEFINITION_ARN", ""
+)
+EXPERIMENT_TASK_DEFINITION_ARN = EXPERIMENT_TASK_DEFINITION
 
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
@@ -375,27 +417,40 @@ GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMO
 # ------------------------------------------------------------------------------
 # SQS Worker Configuration
 # ------------------------------------------------------------------------------
-# Queue URLs are passed via environment variables by the deployment workflow.
-# Each worker polls one queue and dispatches to the corresponding handler.
+# Queue identifiers are passed via environment variables by the deployment workflow.
+# On AWS the consumer and publisher both use the same SQS URL. On GCP workers
+# consume Pub/Sub subscriptions while publishers target topics, so the config
+# allows those identifiers to diverge without changing existing AWS call sites.
 
-SQS_QUEUE_CONFIG = {
-    "cms": {
-        "url": os.environ.get("SQS_CMS_URL", ""),
-        "handler": "cms.handlers.process_event",
-    },
-    "engine": {
-        "url": os.environ.get("SQS_ENGINE_URL", ""),
-        "handler": "engine.handlers.process_event",
-    },
-    "mc": {
-        "url": os.environ.get("SQS_MC_URL", ""),
-        "handler": "mission_control.handlers.process_event",
-    },
-    "experiments": {
-        "url": os.environ.get("SQS_EXPERIMENTS_URL", ""),
-        "handler": "cms.experiments.handlers.process_event",
-    },
+
+def _build_queue_config(name: str, legacy_env: str, handler: str) -> dict[str, str]:
+    consumer_id = (
+        os.environ.get(f"QUEUE_{name}_CONSUMER_ID")
+        or os.environ.get(f"QUEUE_{name}_ID")
+        or os.environ.get(legacy_env, "")
+    )
+    publisher_id = (
+        os.environ.get(f"QUEUE_{name}_PUBLISHER_ID") or os.environ.get(f"QUEUE_{name}_TOPIC_ID") or consumer_id
+    )
+    return {
+        "url": consumer_id,
+        "consumer_id": consumer_id,
+        "publisher_id": publisher_id,
+        "handler": handler,
+    }
+
+
+QUEUE_CONFIG = {
+    "cms": _build_queue_config("CMS", "SQS_CMS_URL", "cms.handlers.process_event"),
+    "engine": _build_queue_config("ENGINE", "SQS_ENGINE_URL", "engine.handlers.process_event"),
+    "mc": _build_queue_config("MC", "SQS_MC_URL", "mission_control.handlers.process_event"),
+    "experiments": _build_queue_config(
+        "EXPERIMENTS",
+        "SQS_EXPERIMENTS_URL",
+        "cms.experiments.handlers.process_event",
+    ),
 }
+SQS_QUEUE_CONFIG = QUEUE_CONFIG  # Backward compat alias
 
 # ------------------------------------------------------------------------------
 # CTF Configuration

@@ -62,3 +62,17 @@ class ObjectStorage(Protocol):
     def object_exists(self, bucket: str, key: str) -> bool: ...
 
     def delete_object(self, bucket: str, key: str) -> None: ...
+
+
+@runtime_checkable
+class NetworkInventory(Protocol):
+    """Protocol for network/subnet inventory and exhaustion alert publication."""
+
+    def list_subnet_cidrs(self, network_id: str) -> list[str]: ...
+
+    def publish_subnet_exhaustion_alarm(
+        self,
+        network_id: str,
+        cidr_prefix: str,
+        subnet_size: int,
+    ) -> None: ...

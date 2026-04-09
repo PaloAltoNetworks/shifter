@@ -15,10 +15,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
     InstanceConfig,
     RangeConfig,
+    RangeNetworkConfig,
     SubnetConfig,
     decrypt_field,
     generate_presigned_url,
+    get_range_availability_zone,
     get_range_from_db,
+    load_range_network_config,
 )
 
 
@@ -182,6 +185,74 @@ class TestDataclassDefaults:
         assert config.dc_ami_id == ""
         assert config.portal_vpc_cidr == "10.0.0.0/16"
         assert config.portal_vpc_peering_id == ""
+
+    def test_range_network_config_primary_portal_cidr(self):
+        """RangeNetworkConfig should expose the first portal CIDR for legacy callers."""
+        config = RangeNetworkConfig(
+            network_id="projects/test/global/networks/range",
+            network_cidr="10.50.0.0/16",
+            network_region="us-central1",
+            portal_network_cidrs=("10.40.0.0/20", "10.44.0.0/16"),
+        )
+
+        assert config.primary_portal_cidr == "10.40.0.0/20"
+
+
+class TestRangeNetworkEnv:
+    """Tests for provider-neutral range network env parsing."""
+
+    def test_load_range_network_config_prefers_generic_env_names(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "RANGE_NETWORK_ID": "projects/test/global/networks/gcp-range",
+                "RANGE_NETWORK_CIDR": "10.50.0.0/16",
+                "RANGE_NETWORK_REGION": "us-central1",
+                "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
+                "RANGE_VPC_ID": "vpc-legacy",
+                "RANGE_VPC_CIDR": "10.1.0.0/16",
+            },
+            clear=True,
+        )
+
+        config = load_range_network_config()
+
+        assert config.network_id == "projects/test/global/networks/gcp-range"
+        assert config.network_cidr == "10.50.0.0/16"
+        assert config.network_region == "us-central1"
+        assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
+
+    def test_load_range_network_config_falls_back_to_legacy_env_names(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "RANGE_VPC_ID": "vpc-legacy",
+                "RANGE_VPC_CIDR": "10.1.0.0/16",
+                "PORTAL_VPC_CIDR": "10.0.0.0/16",
+                "AWS_REGION": "us-east-2",
+            },
+            clear=True,
+        )
+
+        config = load_range_network_config()
+
+        assert config.network_id == "vpc-legacy"
+        assert config.network_cidr == "10.1.0.0/16"
+        assert config.network_region == "us-east-2"
+        assert config.portal_network_cidrs == ("10.0.0.0/16",)
+
+    def test_get_range_availability_zone_supports_legacy_and_generic_env_names(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "RANGE_AVAILABILITY_ZONE": "us-east-2a",
+                "AVAILABILITY_ZONE": "us-east-2b",
+            },
+            clear=True,
+        )
+
+        assert get_range_availability_zone() == "us-central1-b"
 
 
 class TestDecryptField:

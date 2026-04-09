@@ -28,35 +28,63 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _get_ecs_config() -> tuple[str, str, str, list[str]] | None:
-    """Read ECS configuration from settings.
+def _get_task_config() -> tuple[str, str, dict | None] | None:
+    """Read task runner configuration for experiment execution.
 
     Returns:
-        Tuple of (cluster_arn, task_def_arn, security_group_id, subnet_ids)
+        Tuple of (cluster_or_location, task_definition_or_job, network_config)
         or None if configuration is incomplete.
     """
-    cluster_arn: str = getattr(settings, "ENGINE_ECS_CLUSTER_ARN", "")
-    task_def_arn: str = getattr(settings, "EXPERIMENT_TASK_DEFINITION_ARN", "") or getattr(
-        settings, "ENGINE_TASK_DEFINITION_ARN", ""
+    provider = getattr(settings, "CLOUD_PROVIDER", "aws")
+    cluster: str = getattr(settings, "ENGINE_TASK_CLUSTER", "") or getattr(settings, "ENGINE_ECS_CLUSTER_ARN", "")
+    task_definition: str = (
+        getattr(settings, "EXPERIMENT_TASK_DEFINITION", "")
+        or getattr(settings, "EXPERIMENT_TASK_DEFINITION_ARN", "")
+        or getattr(settings, "ENGINE_TASK_DEFINITION", "")
+        or getattr(settings, "ENGINE_TASK_DEFINITION_ARN", "")
     )
-    security_group_id: str = getattr(settings, "ENGINE_ECS_SECURITY_GROUP_ID", "")
-    subnet_ids_str: str = getattr(settings, "ENGINE_PRIVATE_SUBNET_IDS", "")
 
-    if not all([cluster_arn, task_def_arn, security_group_id, subnet_ids_str]):
+    if provider == "gcp":
+        if not all([cluster, task_definition]):
+            logger.warning(
+                "GCP task configuration incomplete for experiment tasks. "
+                "Required: ENGINE_TASK_NAMESPACE/ENGINE_TASK_CLUSTER and "
+                "EXPERIMENT_TASK_DEFINITION or ENGINE_TASK_IMAGE/ENGINE_TASK_DEFINITION."
+            )
+            return None
+        return cluster, task_definition, None
+
+    security_group_id: str = getattr(settings, "ENGINE_TASK_NETWORK_SECURITY_GROUP_ID", "") or getattr(
+        settings, "ENGINE_ECS_SECURITY_GROUP_ID", ""
+    )
+    subnet_ids_str: str = getattr(settings, "ENGINE_TASK_NETWORK_SUBNET_IDS", "") or getattr(
+        settings, "ENGINE_PRIVATE_SUBNET_IDS", ""
+    )
+    if not all([cluster, task_definition, security_group_id, subnet_ids_str]):
         logger.warning(
-            "ECS configuration incomplete for experiment tasks. "
-            "Required: ENGINE_ECS_CLUSTER_ARN, EXPERIMENT_TASK_DEFINITION_ARN "
-            "(or ENGINE_TASK_DEFINITION_ARN), ENGINE_ECS_SECURITY_GROUP_ID, "
-            "ENGINE_PRIVATE_SUBNET_IDS."
+            "AWS task configuration incomplete for experiment tasks. "
+            "Required: ENGINE_TASK_CLUSTER, EXPERIMENT_TASK_DEFINITION "
+            "(or ENGINE_TASK_DEFINITION), ENGINE_TASK_NETWORK_SECURITY_GROUP_ID, "
+            "ENGINE_TASK_NETWORK_SUBNET_IDS."
         )
         return None
 
     subnet_ids = [s.strip() for s in subnet_ids_str.split(",") if s.strip()]
     if not subnet_ids:
-        logger.error("ENGINE_PRIVATE_SUBNET_IDS is empty or invalid")
+        logger.error("ENGINE_TASK_NETWORK_SUBNET_IDS is empty or invalid")
         return None
 
-    return cluster_arn, task_def_arn, security_group_id, subnet_ids
+    return (
+        cluster,
+        task_definition,
+        {
+            "awsvpcConfiguration": {
+                "subnets": subnet_ids,
+                "securityGroups": [security_group_id],
+                "assignPublicIp": "DISABLED",
+            }
+        },
+    )
 
 
 def start_experiment_task(
@@ -97,11 +125,11 @@ def start_experiment_task(
     if command not in ("execute", "collect"):
         raise ValueError(f"Invalid command: {command!r}. Must be 'execute' or 'collect'.")
 
-    ecs_config = _get_ecs_config()
-    if ecs_config is None:
+    task_config = _get_task_config()
+    if task_config is None:
         return None
 
-    cluster_arn, task_def_arn, security_group_id, subnet_ids = ecs_config
+    cluster, task_definition, network_config = task_config
 
     # Build container command
     container_command = [
@@ -128,19 +156,11 @@ def start_experiment_task(
         command,
     )
 
-    network_config = {
-        "awsvpcConfiguration": {
-            "subnets": subnet_ids,
-            "securityGroups": [security_group_id],
-            "assignPublicIp": "DISABLED",
-        }
-    }
-
     try:
         runner = get_task_runner()
         task_arn = runner.run_task(
-            task_definition=task_def_arn,
-            cluster=cluster_arn,
+            task_definition=task_definition,
+            cluster=cluster,
             command=container_command,
             container_name="experiment-executor",
             env_overrides=env_overrides,

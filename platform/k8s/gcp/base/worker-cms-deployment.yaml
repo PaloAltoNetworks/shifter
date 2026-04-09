@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-cms
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: worker-cms
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: worker-cms
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: shifter
+        app.kubernetes.io/component: worker-cms
+    spec:
+      serviceAccountName: workers
+      containers:
+        - name: worker-cms
+          image: placeholder-portal:latest
+          imagePullPolicy: Always
+          args: ["python", "manage.py", "run_worker", "--queue", "cms"]
+          envFrom:
+            - configMapRef:
+                name: platform-runtime
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "find /tmp/worker-cms-heartbeat -mmin -2 | grep -q ."]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

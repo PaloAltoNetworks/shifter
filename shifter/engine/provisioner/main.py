@@ -25,7 +25,7 @@ from catalog.instances import (
     _get_windows_instance_type,
 )
 from components.instance import sanitize_hostname
-from config import generate_presigned_url
+from config import generate_presigned_url, get_range_availability_zone, load_range_network_config
 from events import (
     STATUS_DESTROYED,
     STATUS_FAILED,
@@ -67,9 +67,9 @@ def get_agent_presigned_url(inst_config: dict) -> str | None:
     if not s3_key:
         return None
 
-    bucket = os.environ.get("AGENT_S3_BUCKET", "")
+    bucket = os.environ.get("AGENT_STORAGE_BUCKET") or os.environ.get("AGENT_S3_BUCKET", "")
     if not bucket:
-        logger.warning("AGENT_S3_BUCKET not set, cannot generate presigned URL")
+        logger.warning("AGENT_STORAGE_BUCKET/AGENT_S3_BUCKET not set, cannot generate presigned URL")
         return None
 
     try:
@@ -230,22 +230,22 @@ def get_db_connection() -> psycopg.Connection:
             password=db_password,
         )
 
-    # Production mode: use RDS IAM auth
-    aws_region = os.environ.get("AWS_REGION")
-    if not all([db_host, db_user, db_name, aws_region]):
+    # Production mode: use provider-native IAM auth
+    cloud_region = os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION")
+    if not all([db_host, db_user, db_name, cloud_region]):
         missing = [
             k
             for k, v in [
                 ("DB_HOST", db_host),
                 ("DB_USER", db_user),
                 ("DB_NAME", db_name),
-                ("AWS_REGION", aws_region),
+                ("CLOUD_REGION", cloud_region),
             ]
             if not v
         ]
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
-    logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
+    logger.debug("get_db_connection: cloud IAM auth to %s:%s/%s", db_host, db_port, db_name)
     assert db_host is not None  # validated above
     assert db_user is not None  # validated above
     from cloud import get_db_auth
@@ -1989,8 +1989,9 @@ def _run_terraform_provision(
     if spec_subnets:
         from components.network import allocate_subnets
 
-        vpc_id = os.environ.get("RANGE_VPC_ID", "")
-        vpc_cidr = os.environ.get("RANGE_VPC_CIDR", "10.1.0.0/16")
+        range_network = load_range_network_config()
+        vpc_id = range_network.network_id
+        vpc_cidr = range_network.network_cidr or "10.1.0.0/16"
         # Extract CIDR prefix (e.g., "10.1" from "10.1.0.0/16")
         cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
 
@@ -2228,7 +2229,7 @@ def _build_range_terraform_variables(
             agent_presigned_url = ""
             if agent_s3_key:
                 agent_presigned_url = generate_presigned_url(
-                    bucket=os.environ.get("AGENT_S3_BUCKET", ""),
+                    bucket=os.environ.get("AGENT_STORAGE_BUCKET") or os.environ.get("AGENT_S3_BUCKET", ""),
                     key=agent_s3_key,
                 )
 
@@ -2277,6 +2278,8 @@ def _build_range_terraform_variables(
             )
         logger.info("Using NGFW data_eni_id=%s for range %s inter-subnet routing", ngfw_data_eni_id, range_id)
 
+    range_network = load_range_network_config()
+
     return {
         # Core identifiers
         "range_id": range_id,
@@ -2284,13 +2287,13 @@ def _build_range_terraform_variables(
         "request_uuid": request_id,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         # VPC configuration
-        "vpc_id": os.environ.get("RANGE_VPC_ID", ""),
-        "vpc_cidr": os.environ.get("RANGE_VPC_CIDR", ""),
-        "availability_zone": os.environ.get("AVAILABILITY_ZONE", "us-east-2b"),
+        "vpc_id": range_network.network_id,
+        "vpc_cidr": range_network.network_cidr,
+        "availability_zone": get_range_availability_zone(),
         # Network integration
         "s3_endpoint_id": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
-        "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portal_vpc_cidr": range_network.primary_portal_cidr,
         "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
         "ngfw_data_eni_id": ngfw_data_eni_id,
         # AMI IDs

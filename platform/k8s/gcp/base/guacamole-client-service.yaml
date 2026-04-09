@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: guacamole-client
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: guacamole-client
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: guacamole-client
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

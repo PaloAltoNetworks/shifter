@@ -9,12 +9,13 @@ WORKDIR /app
 COPY cyberscript /cyberscript
 
 # Copy dependency files
-COPY shifter_platform/pyproject.toml shifter_platform/uv.lock ./
+COPY shifter_platform/pyproject.toml shifter_platform/uv.lock shifter_platform/requirements-gcp.txt ./
 
 # Export requirements and install dependencies into system Python
 # Install cyberscript as a local package
 RUN uv export --no-hashes --no-emit-project --frozen > requirements.txt && \
     uv pip install --system --no-cache -r requirements.txt && \
+    uv pip install --system --no-cache -r requirements-gcp.txt && \
     uv pip install --system --no-cache /cyberscript
 
 # Production stage

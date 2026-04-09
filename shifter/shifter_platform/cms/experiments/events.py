@@ -23,18 +23,20 @@ class ExperimentEventError(Exception):
     """Failed to publish an experiment event."""
 
 
-def _get_experiments_queue_url() -> str | None:
-    """Get the experiments SQS queue URL from settings.
+def _get_experiments_publisher_id() -> str | None:
+    """Get the queue publisher identifier from settings.
 
-    Experiments use the cms queue since they're part of the cms module.
+    Experiments publish onto the CMS event stream because experiment lifecycle
+    handlers are dispatched by the CMS worker. On AWS this is the CMS SQS URL.
+    On GCP this is the shared Pub/Sub topic consumed by the CMS subscription.
 
     Returns:
-        Queue URL string, or None if not configured.
+        Publisher identifier string, or None if not configured.
     """
     config: dict[str, Any] = getattr(settings, "SQS_QUEUE_CONFIG", {})
     cms_config: dict[str, str] = config.get("cms", {})
-    url: str = cms_config.get("url", "")
-    return url or None
+    publisher_id = cms_config.get("publisher_id") or cms_config.get("url", "")
+    return publisher_id or None
 
 
 def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
@@ -47,9 +49,9 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
     Raises:
         ExperimentEventError: If queue message publishing fails.
     """
-    queue_url = _get_experiments_queue_url()
-    if queue_url is None:
-        error_msg = f"Cannot publish experiment event {event_type}: SQS_CMS_URL not configured"
+    publisher_id = _get_experiments_publisher_id()
+    if publisher_id is None:
+        error_msg = f"Cannot publish experiment event {event_type}: CMS event publisher not configured"
         logger.error(error_msg)
         raise ExperimentEventError(error_msg)
 
@@ -60,7 +62,7 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
 
     try:
         publisher = get_queue_publisher()
-        publisher.send_message(queue_url, json.dumps(message_body, default=str))
+        publisher.send_message(publisher_id, json.dumps(message_body, default=str))
         logger.info(
             "publish_experiment_event: published event_type=%s to experiments queue",
             event_type,
@@ -70,7 +72,7 @@ def publish_experiment_event(event_type: str, payload: dict[str, Any]) -> None:
             "publish_experiment_event: failed to publish event_type=%s",
             event_type,
         )
-        raise ExperimentEventError(f"Failed to publish event {event_type} to SQS: {exc}") from exc
+        raise ExperimentEventError(f"Failed to publish event {event_type} to queue: {exc}") from exc
 
 
 def publish_range_provisioned_for_experiment(

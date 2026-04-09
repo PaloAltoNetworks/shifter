@@ -45,6 +45,26 @@ platform/terraform/
     └── dev-box/              # Windows dev instance
 ```
 
+GCP work is staged in a parallel tree so it cannot collide with the current
+AWS deploy path:
+
+```
+platform/terraform/gcp/
+├── environments/
+│   └── gcp-dev/             # GCP control-plane foundation for gcp-dev, including optional hostname and DNS settings
+└── modules/
+    └── platform-core/       # VPC, GKE, Cloud SQL, Memorystore, Artifact Registry, Pub/Sub, GCS, ingress IP, optional DNS, secrets
+```
+
+The staged GKE runtime manifests live alongside that Terraform tree:
+
+```
+platform/k8s/gcp/
+├── base/                   # Shared GKE deployments, services, RBAC
+└── overlays/
+    └── gcp-dev/            # gcp-dev-specific config, images, generated runtime/edge artifacts, Workload Identity
+```
+
 ## State Management
 
 Each component has its own state file:
@@ -68,6 +88,36 @@ State is stored in S3 with DynamoDB locking:
 cd platform/terraform/environments/dev/portal
 AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init
 ```
+
+For the staged GCP tree, local validation still runs without a remote backend:
+
+```bash
+cd platform/terraform/gcp/environments/gcp-dev
+terraform init -backend=false
+terraform validate
+```
+
+CI bootstraps a GCS backend bucket named `${project_id}-terraform-state` for
+`gcp-dev` pushes before running `terraform init`.
+
+The `gcp-dev` tfvars file also exposes the first hostname/DNS controls for the
+GKE edge path:
+
+```hcl
+public_hostname         = ""
+enable_managed_tls      = false
+create_dns_managed_zone = false
+dns_managed_zone_name   = ""
+dns_zone_dns_name       = ""
+dns_record_ttl          = 300
+```
+
+With the defaults, `gcp-dev` stays on the reserved ingress IP and the portal
+remains in debug-auth mode. When a hostname is configured and managed TLS is
+enabled, the deploy workflow can switch the portal runtime to the non-debug
+OIDC path once the OIDC secret is populated and the GKE managed certificate is
+active. The generated edge manifest now includes a GKE `FrontendConfig` that
+redirects browser traffic to HTTPS during that secure mode.
 
 ### Plan
 
@@ -98,9 +148,13 @@ enable_autoscaling = false
 
 Terraform variables are committed to the repo. CI/CD reads them directly after checkout.
 
-### In AWS Secrets Manager (Runtime)
+### In Cloud Secret Managers (Runtime)
 
-Database passwords, API keys, etc. are stored in Secrets Manager and accessed at runtime, not during Terraform apply.
+Database passwords, API keys, and runtime signing keys are stored in the cloud
+secret manager and accessed at runtime. For the current `gcp-dev` slice,
+Terraform seeds the app, DB, and Guacamole runtime bundles needed for first
+boot. The OIDC secret remains separately managed so the deploy workflow can
+gate the non-debug portal path on actual identity-provider readiness.
 
 ## Module Patterns
 
@@ -206,6 +260,15 @@ terraform fmt -recursive
 3. Update tfvars with required variables
 4. Test in dev before prod
 
+For GCP work:
+
+1. Add reusable modules under `platform/terraform/gcp/modules/`
+2. Wire them into `platform/terraform/gcp/environments/gcp-dev/`
+3. Provision provider-native shared services there first: Pub/Sub, GCS, Secret Manager, Cloud SQL, Memorystore, ingress IPs
+4. Stage matching runtime manifests under `platform/k8s/gcp/`, including separate edge resources when path routing depends on healthy workloads
+5. Keep the remote backend, deploy credentials, and rendered runtime config aligned with the Terraform outputs
+6. Do not weaken or replace the existing AWS environment trees while expanding GCP
+
 ## Debugging
 
 ### Enable Logging
@@ -238,6 +301,6 @@ terraform init
 
 - Don't use `terraform apply -auto-approve` locally
 - Don't hardcode values that vary by environment
-- Don't store state locally (always use S3 backend)
+- Don't store state locally (use the existing remote backend for the target environment)
 - Don't skip `terraform plan` review
 - Don't apply prod changes without PR review

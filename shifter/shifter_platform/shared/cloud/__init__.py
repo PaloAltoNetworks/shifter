@@ -38,6 +38,10 @@ def get_object_storage() -> ObjectStorage:
         from shared.cloud.aws.storage import AWSObjectStorage
 
         return AWSObjectStorage()
+    if provider == "gcp":
+        from shared.cloud.gcp.storage import GCPObjectStorage
+
+        return GCPObjectStorage()
     raise CloudProviderNotImplementedError(provider)
 
 
@@ -48,6 +52,10 @@ def get_task_runner() -> TaskRunner:
         from shared.cloud.aws.task_runner import AWSTaskRunner
 
         return AWSTaskRunner()
+    if provider == "gcp":
+        from shared.cloud.gcp.task_runner import GCPTaskRunner
+
+        return GCPTaskRunner()
     raise CloudProviderNotImplementedError(provider)
 
 
@@ -58,6 +66,10 @@ def get_queue_consumer() -> QueueConsumer:
         from shared.cloud.aws.queue import AWSQueueConsumer
 
         return AWSQueueConsumer()
+    if provider == "gcp":
+        from shared.cloud.gcp.queue import GCPQueueConsumer
+
+        return GCPQueueConsumer()
     raise CloudProviderNotImplementedError(provider)
 
 
@@ -68,6 +80,10 @@ def get_queue_publisher() -> QueuePublisher:
         from shared.cloud.aws.queue import AWSQueuePublisher
 
         return AWSQueuePublisher()
+    if provider == "gcp":
+        from shared.cloud.gcp.queue import GCPQueuePublisher
+
+        return GCPQueuePublisher()
     raise CloudProviderNotImplementedError(provider)
 
 
@@ -78,4 +94,8 @@ def get_secrets_store() -> SecretsStore:
         from shared.cloud.aws.secrets import AWSSecretsStore
 
         return AWSSecretsStore()
+    if provider == "gcp":
+        from shared.cloud.gcp.secrets import GCPSecretsStore
+
+        return GCPSecretsStore()
     raise CloudProviderNotImplementedError(provider)

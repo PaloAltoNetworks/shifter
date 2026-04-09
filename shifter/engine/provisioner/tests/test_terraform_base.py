@@ -30,7 +30,7 @@ class TestBackendResolution:
     def test_get_state_key_uses_gcs_state_filename(self):
         from terraform_base import get_state_key
 
-        assert get_state_key("gcp/ranges", "req-123") == "gcp/ranges/req-123/default.tfstate"
+        assert get_state_key("gcp/gdc-ranges", "req-123") == "gcp/gdc-ranges/req-123/default.tfstate"
 
 
 class TestWorkspaceInitialization:
@@ -58,11 +58,11 @@ class TestWorkspaceInitialization:
     def test_init_workspace_uses_gcs_backend_config(self, mock_run):
         from terraform_base import init_workspace
 
-        init_workspace("gcp/ranges", "req-123", MagicMock(), "Range")
+        init_workspace("gcp/gdc-ranges", "req-123", MagicMock(), "Range")
 
         init_args = mock_run.call_args.args[0]
         assert "-backend-config=bucket=shifter-gcp-dev-terraform-state" in init_args
-        assert "-backend-config=prefix=gcp/ranges/req-123" in init_args
+        assert "-backend-config=prefix=gcp/gdc-ranges/req-123" in init_args
         assert not any(arg.startswith("-backend-config=key=") for arg in init_args)
         assert not any("dynamodb_table=" in arg for arg in init_args)
 
@@ -82,9 +82,9 @@ class TestStateCleanup:
         storage = MagicMock()
         mock_get_storage.return_value = storage
 
-        cleanup_state("gcp/ranges", "req-123", "Range")
+        cleanup_state("gcp/gdc-ranges", "req-123", "Range")
 
         storage.delete_object.assert_called_once_with(
             bucket="shifter-gcp-dev-terraform-state",
-            key="gcp/ranges/req-123/default.tfstate",
+            key="gcp/gdc-ranges/req-123/default.tfstate",
         )

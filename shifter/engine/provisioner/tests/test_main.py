@@ -209,6 +209,35 @@ class TestRangeStatePayloads:
             }
         }
 
+    def test_build_instance_state_collects_gdc_alias_metadata_under_gcp_provider(self):
+        from main import _build_instance_state
+
+        instance_state = _build_instance_state(
+            {
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "ssh_username": "Administrator",
+                "subnet_name": "scenario-a",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "scenario-a-net",
+                "gdc_ip": "10.200.0.110",
+                "vmruntime_disk_name": "vmrt-vm-1-disk",
+            },
+            provider="gcp",
+        )
+
+        assert instance_state["provider_metadata"] == {
+            "gcp": {
+                "vm_name": "vmrt-vm-1",
+                "namespace": "range-42",
+                "network_name": "scenario-a-net",
+                "ip": "10.200.0.110",
+                "disk_name": "vmrt-vm-1-disk",
+            }
+        }
+
     def test_build_provisioned_instance_payload_keeps_legacy_fields_and_adds_provider_metadata(self):
         from main import _build_provisioned_instance_payload
 

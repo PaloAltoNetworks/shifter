@@ -19,11 +19,24 @@ class TestProviderRouting:
         with patch.dict(os.environ, {}, clear=True):
             assert get_range_module_path() == AWS_RANGE_MODULE_PATH
 
-    def test_get_range_module_path_uses_gcp_module(self):
-        from range_terraform_runner import GCP_RANGE_MODULE_PATH, get_range_module_path
+    def test_get_range_module_path_uses_legacy_gcp_module_only_when_explicitly_requested(self):
+        from range_terraform_runner import LEGACY_GCP_RANGE_MODULE_PATH, get_range_module_path
 
-        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
-            assert get_range_module_path() == GCP_RANGE_MODULE_PATH
+        with patch.dict(
+            os.environ,
+            {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_PLANE": "legacy-compute-engine"},
+            clear=True,
+        ):
+            assert get_range_module_path() == LEGACY_GCP_RANGE_MODULE_PATH
+
+    def test_get_range_module_path_fails_fast_for_default_gdc_range_plane(self):
+        from range_terraform_runner import get_range_module_path
+
+        with (
+            patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True),
+            pytest.raises(RuntimeError, match="GDC VM Runtime"),
+        ):
+            get_range_module_path()
 
     def test_get_range_state_key_prefix_uses_provider_specific_paths(self):
         from range_terraform_runner import get_range_state_key_prefix
@@ -32,7 +45,14 @@ class TestProviderRouting:
             assert get_range_state_key_prefix() == "ranges"
 
         with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
-            assert get_range_state_key_prefix() == "gcp/ranges"
+            assert get_range_state_key_prefix() == "gcp/gdc-ranges"
+
+        with patch.dict(
+            os.environ,
+            {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_PLANE": "legacy-compute-engine"},
+            clear=True,
+        ):
+            assert get_range_state_key_prefix() == "gcp/legacy-ce-ranges"
 
 
 class TestDestroyRange:

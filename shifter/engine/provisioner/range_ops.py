@@ -25,10 +25,10 @@ NGFW_START_RETRY_DELAYS = (10, 30, 60)
 
 
 def get_range_instance_ids(request_id: str) -> list[dict]:
-    """Get all EC2 instance IDs for a range.
+    """Get all instance IDs for a range.
 
     Queries engine_instance records for the given request and extracts
-    AWS instance IDs from the state JSON field.
+    provider-specific instance IDs from the state JSON field.
 
     Args:
         request_id: UUID string of the Request.
@@ -38,6 +38,7 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
 
     Raises:
         ValueError: If no instances found or missing AWS instance IDs.
+        NotImplementedError: If the range uses a non-AWS provider.
     """
     logger.info("get_range_instance_ids: request_id=%s", request_id)
 
@@ -60,6 +61,13 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
     instances = []
     for uuid, state, role in rows:
         state_dict = state if isinstance(state, dict) else {}
+        cloud_provider = state_dict.get("cloud_provider", "aws")
+        if cloud_provider != "aws":
+            raise NotImplementedError(
+                "Range pause/resume is still AWS-only. "
+                f"Found cloud_provider={cloud_provider!r} for request {request_id}. "
+                "The GDC/GCP lifecycle rewrite must land before range pause/resume can support this provider."
+            )
         aws_instance_id = state_dict.get("aws_instance_id")
 
         if not aws_instance_id:

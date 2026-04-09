@@ -11,23 +11,48 @@ from typing import Any
 import terraform_base
 
 AWS_RANGE_MODULE_PATH = Path(__file__).parent / "terraform" / "modules" / "range"
-GCP_RANGE_MODULE_PATH = Path(__file__).parent / "terraform" / "modules" / "gcp-range"
+LEGACY_GCP_RANGE_MODULE_PATH = Path(__file__).parent / "terraform" / "modules" / "gcp-range"
 
 _LABEL = "Range"
+_GCP_RANGE_PLANE_ENV = "GCP_RANGE_PLANE"
+_DEFAULT_GCP_RANGE_PLANE = "gdc-vmruntime"
+_LEGACY_GCP_RANGE_PLANES = {"legacy-compute-engine", "compute-engine", "legacy-ce"}
 
 
 def _get_provider() -> str:
     return os.environ.get("CLOUD_PROVIDER", "aws")
 
 
+def get_gcp_range_plane() -> str:
+    """Return the active GCP range-plane implementation selector."""
+    return os.environ.get(_GCP_RANGE_PLANE_ENV, _DEFAULT_GCP_RANGE_PLANE).strip().lower()
+
+
 def get_range_module_path() -> Path:
     """Return the provider-specific range Terraform module path."""
-    return GCP_RANGE_MODULE_PATH if _get_provider() == "gcp" else AWS_RANGE_MODULE_PATH
+    if _get_provider() != "gcp":
+        return AWS_RANGE_MODULE_PATH
+
+    if get_gcp_range_plane() in _LEGACY_GCP_RANGE_PLANES:
+        return LEGACY_GCP_RANGE_MODULE_PATH
+
+    raise RuntimeError(
+        "Active GCP range provisioning now targets GDC VM Runtime, not the legacy Compute Engine "
+        "terraform/modules/gcp-range module. Slice 10/11 must provide the GDC range-plane "
+        f"implementation before GCP range provisioning can run. Set {_GCP_RANGE_PLANE_ENV}=legacy-compute-engine "
+        "only if you intentionally need the retired path for migration/debug work."
+    )
 
 
 def get_range_state_key_prefix() -> str:
     """Return the provider-specific Terraform state key prefix."""
-    return "gcp/ranges" if _get_provider() == "gcp" else "ranges"
+    if _get_provider() != "gcp":
+        return "ranges"
+
+    if get_gcp_range_plane() in _LEGACY_GCP_RANGE_PLANES:
+        return "gcp/legacy-ce-ranges"
+
+    return "gcp/gdc-ranges"
 
 
 def has_terraform_state(request_uuid: str) -> bool:

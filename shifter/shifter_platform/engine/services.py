@@ -52,7 +52,7 @@ def _get_instance_provider_metadata(instance: dict[str, Any]) -> dict[str, Any]:
         if isinstance(metadata, dict):
             return metadata
 
-    for provider_name in ("gcp", "aws"):
+    for provider_name in ("gcp", "gdc", "aws"):
         metadata = provider_metadata.get(provider_name)
         if isinstance(metadata, dict):
             return metadata
@@ -74,6 +74,9 @@ def _resolve_instance_host(instance: dict[str, Any]) -> str:
         provider_metadata.get("network_ip"),
         provider_metadata.get("internal_ip"),
         provider_metadata.get("internalIp"),
+        provider_metadata.get("guest_ip"),
+        provider_metadata.get("vm_ip"),
+        provider_metadata.get("ip"),
     )
 
 
@@ -85,6 +88,8 @@ def _resolve_instance_ssh_key_secret_ref(instance: dict[str, Any]) -> str:
         instance.get("ssh_key_secret_id"),
         provider_metadata.get("ssh_key_secret_arn"),
         provider_metadata.get("ssh_key_secret_id"),
+        provider_metadata.get("ssh_secret_ref"),
+        provider_metadata.get("ssh_secret_id"),
     )
 
 
@@ -94,6 +99,7 @@ def _resolve_instance_connection_name(instance: dict[str, Any]) -> str:
     resolved_name = _first_connection_value(
         instance.get("name"),
         provider_metadata.get("instance_name"),
+        provider_metadata.get("vm_name"),
         provider_metadata.get("name"),
     )
     if resolved_name:
@@ -113,6 +119,7 @@ def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
         instance.get("ssh_user"),
         provider_metadata.get("ssh_username"),
         provider_metadata.get("ssh_user"),
+        provider_metadata.get("username"),
     )
     if explicit_username:
         return explicit_username
@@ -736,10 +743,10 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     ssh_key = None
     if os_type == "windows":
-        ssh_key_arn = instance.get("ssh_key_secret_arn")
-        if ssh_key_arn:
+        ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
+        if ssh_key_ref:
             try:
-                ssh_key = get_ssh_key(ssh_key_arn)
+                ssh_key = get_ssh_key(ssh_key_ref)
             except Exception as e:
                 logger.warning("Failed to get SSH key for SFTP: %s", e)
 

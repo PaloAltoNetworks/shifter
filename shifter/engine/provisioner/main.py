@@ -394,12 +394,19 @@ def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}
 
 
+def _get_provider_metadata_prefixes(provider: str) -> tuple[str, ...]:
+    """Return the accepted output prefixes for provider metadata extraction."""
+    if provider == "gcp":
+        return ("gcp_", "gdc_", "vmruntime_")
+    return (f"{provider}_",)
+
+
 def _extract_provider_metadata(resource: dict[str, Any], provider: str) -> dict[str, Any]:
     """Collect provider-prefixed keys into a nested metadata block."""
-    provider_prefix = f"{provider}_"
-    return _compact_state_fields(
-        {key.removeprefix(provider_prefix): value for key, value in resource.items() if key.startswith(provider_prefix)}
-    )
+    metadata: dict[str, Any] = {}
+    for prefix in _get_provider_metadata_prefixes(provider):
+        metadata.update({key.removeprefix(prefix): value for key, value in resource.items() if key.startswith(prefix)})
+    return _compact_state_fields(metadata)
 
 
 def _build_subnet_provider_metadata(subnet_data: dict[str, Any], provider: str) -> dict[str, Any]:

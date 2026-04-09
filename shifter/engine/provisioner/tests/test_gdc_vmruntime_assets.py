@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig, GDCVMRuntimeProfile
 from gdc_vmruntime_assets import (
+    _render_user_data,
     _resolve_image_source,
     apply_range_assets,
     destroy_range_assets,
@@ -28,6 +29,31 @@ class TestImageSourceResolution:
                 "url": "docker://registry.example.com/image:latest",
             }
         }
+
+
+class TestRenderUserData:
+    def test_uses_env_driven_linux_passwords(self, monkeypatch):
+        monkeypatch.setenv("GDC_UBUNTU_PASSWORD", "LabUbuntu123!")
+
+        result = _render_user_data(
+            {"role": "victim", "os_type": "ubuntu"},
+            hostname="target-ubuntu-01",
+            public_key="ssh-rsa AAAA",
+        )
+
+        assert "LabUbuntu123!" in result
+        assert "Shifter setup plans" in result
+
+    def test_uses_domain_password_for_dc(self, monkeypatch):
+        monkeypatch.setenv("DC_DOMAIN_PASSWORD", "DomainPass123!")
+
+        result = _render_user_data(
+            {"role": "dc", "os_type": "windows"},
+            hostname="dc-01",
+            public_key="ssh-rsa AAAA",
+        )
+
+        assert "DomainPass123!" in result
 
 
 class TestApplyRangeAssets:

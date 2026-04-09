@@ -5,9 +5,25 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Victim Linux instance booting..."
 
-# SSH access for browser terminal (SSM can be flaky).
+# Configure stable desktop credentials for Guacamole/RDP access
+guest_password="{{ guest_password }}"
+
+# SSH access for browser terminal.
 ssh_user="{{ ssh_user }}"
 public_key="{{ public_key }}"
+
+if [ -n "$guest_password" ] && id "$ssh_user" >/dev/null 2>&1; then
+    echo "Setting local password for $ssh_user..."
+    echo "$ssh_user:$guest_password" | chpasswd
+    echo "Password configured for $ssh_user"
+fi
+
+# Ensure SSH/RDP packages exist on the base image
+if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y openssh-server xrdp xorgxrdp || apt-get install -y openssh-server xrdp
+fi
 
 echo "Configuring SSH access for $ssh_user..."
 user_home=$(eval echo ~$ssh_user)
@@ -23,6 +39,14 @@ else
     echo "No public key provided, skipping key auth setup"
 fi
 
+# Enable password authentication for desktop/file-transfer tooling
+if [ -f /etc/ssh/sshd_config ]; then
+    sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+    if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
+        echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+    fi
+fi
+
 # Ensure SSH service is running (Ubuntu uses ssh, Amazon Linux uses sshd)
 if systemctl list-unit-files | grep -q "^ssh.service"; then
     systemctl enable --now ssh || true
@@ -33,10 +57,10 @@ fi
 # Ensure xrdp is running for RDP access via Guacamole (Ubuntu AMI has xrdp installed)
 if systemctl list-unit-files | grep -q "^xrdp.service"; then
     echo "Starting xrdp service..."
-    systemctl start xrdp
+    systemctl enable --now xrdp || true
     systemctl status xrdp --no-pager || true
     echo "xrdp service started"
 fi
 
-# All other setup (hostname, XDR) stays in SSM plans.
-echo "user_data complete. SSM will handle remaining setup."
+# All other setup (hostname, XDR) stays in Shifter setup plans.
+echo "user_data complete. Shifter setup plans will handle remaining setup."

@@ -1,6 +1,6 @@
 <powershell>
 # Windows victim instance setup script
-# Minimal - all real setup is handled by SSM plans
+# Minimal - all deeper setup is handled by Shifter setup plans
 
 $ErrorActionPreference = "Stop"
 $LogFile = "C:\Windows\Temp\user-data.log"
@@ -16,11 +16,18 @@ Log-Message "Victim Windows instance booting..."
 
 # Set Administrator password for RDP access
 # TODO: Move to CMS-managed instance credentials (#542)
-$AdminPassword = "CortexSavesTheDay!"
+$AdminPassword = "{{ admin_password }}"
 net user Administrator $AdminPassword
 Log-Message "Administrator password configured"
 
-# Configure SSH key for Terminal UI (OpenSSH is baked into AMI)
+# Ensure OpenSSH Server is installed
+$sshCapability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+if ($sshCapability.State -ne 'Installed') {
+    Log-Message "Installing OpenSSH Server..."
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+}
+
+# Configure SSH key for Terminal UI
 $PublicKey = "{{ public_key }}"
 if ($PublicKey) {
     $sshDir = "C:\\ProgramData\\ssh"
@@ -39,21 +46,27 @@ if ($PublicKey) {
     Log-Message "No public key provided, skipping SSH key setup"
 }
 
-# Ensure sshd service is running (installed in AMI)
+# Ensure sshd service is running
 $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
 if ($sshdService) {
     Start-Service sshd -ErrorAction SilentlyContinue
     Set-Service -Name sshd -StartupType Automatic
+    Enable-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue | Out-Null
     Log-Message "sshd service started"
 } else {
     Log-Message "sshd service not found"
 }
 
 # Ensure RDP service is running
+Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server" `
+    -Name "fDenyTSConnections" `
+    -Value 0 `
+    -ErrorAction SilentlyContinue
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue | Out-Null
 Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
 Start-Service -Name TermService -ErrorAction SilentlyContinue
 
-# All other setup (hostname, XDR) is handled by SSM plans.
+# All other setup (hostname, XDR) is handled by Shifter setup plans.
 
-Log-Message "user_data complete. SSM will handle remaining setup."
+Log-Message "user_data complete. Shifter setup plans will handle remaining setup."
 </powershell>

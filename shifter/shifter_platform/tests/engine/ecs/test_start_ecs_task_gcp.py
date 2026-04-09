@@ -46,6 +46,10 @@ class TestStartEcsTaskGCP:
             "GDC_STATIC_IP_RESERVATION_COUNT": "4",
             "GDC_VM_STORAGE_CLASS": "local-shared",
             "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
+            "GDC_WINDOWS_ADMIN_PASSWORD": "CortexSavesTheDay!",
+            "GDC_KALI_PASSWORD": "kali",
+            "GDC_UBUNTU_PASSWORD": "ubuntu",
+            "DC_DOMAIN_PASSWORD": "DomainAdminPass!",
             "GDC_KALI_IMAGE_URL": "gs://images/kali.qcow2",
             "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
             "GDC_WINDOWS_IMAGE_URL": "gs://images/windows.qcow2",
@@ -78,5 +82,12 @@ class TestStartEcsTaskGCP:
                 call_kwargs["env_overrides"]["GDC_VM_IMAGE_GCS_SECRET_ID"]
                 == env_overrides["GDC_VM_IMAGE_GCS_SECRET_ID"]
             )
+            assert (
+                call_kwargs["env_overrides"]["GDC_WINDOWS_ADMIN_PASSWORD"]
+                == env_overrides["GDC_WINDOWS_ADMIN_PASSWORD"]
+            )
+            assert call_kwargs["env_overrides"]["GDC_KALI_PASSWORD"] == env_overrides["GDC_KALI_PASSWORD"]
+            assert call_kwargs["env_overrides"]["GDC_UBUNTU_PASSWORD"] == env_overrides["GDC_UBUNTU_PASSWORD"]
+            assert call_kwargs["env_overrides"]["DC_DOMAIN_PASSWORD"] == env_overrides["DC_DOMAIN_PASSWORD"]
             assert call_kwargs["env_overrides"]["GDC_KALI_IMAGE_URL"] == env_overrides["GDC_KALI_IMAGE_URL"]
             assert call_kwargs["env_overrides"]["DB_HOST"] == env_overrides["DB_HOST"]

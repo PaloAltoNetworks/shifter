@@ -6,6 +6,7 @@ Infrastructure lifecycle for Shifter platform.
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -137,6 +138,42 @@ def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
     if os_type == "windows":
         return "Administrator"
     return "ubuntu"
+
+
+def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Resolve the RDP username/password pair for a provisioned guest."""
+    os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
+    role = _first_connection_value(instance.get("role"), "instance").lower()
+    provider = _first_connection_value(instance.get("cloud_provider")).lower()
+
+    if os_type == "windows":
+        if provider == "gcp":
+            if role == "dc":
+                return (
+                    "Administrator",
+                    os.environ.get("DC_DOMAIN_PASSWORD")
+                    or os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!"),
+                )
+            return (
+                "Administrator",
+                os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!"),
+            )
+        return (
+            "Administrator",
+            "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!",
+        )
+
+    if os_type == "kali":
+        return (
+            "kali",
+            os.environ.get("GDC_KALI_PASSWORD", "kali") if provider == "gcp" else "kali",
+        )
+    if os_type == "ubuntu":
+        return (
+            "ubuntu",
+            os.environ.get("GDC_UBUNTU_PASSWORD", "ubuntu") if provider == "gcp" else "ubuntu",
+        )
+    return None, None
 
 
 def create_range(request_spec: RequestSpec) -> UUID:
@@ -717,7 +754,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         raise ValueError(f"RDP not available for pod-backed asset {instance_uuid}")
 
     # Check if instance has GUI
-    os_type = instance.get("os_type", "")
+    os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
     if os_type not in ("kali", "ubuntu", "windows"):
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
 
@@ -727,22 +764,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
     connection_name = _resolve_instance_connection_name(instance)
-    role = instance.get("role", "instance")
-
-    # Get RDP credentials based on OS type and role
-    # TODO: Move instance default passwords to CMS (#542)
-    rdp_username = None
-    rdp_password = None
-    if os_type == "windows":
-        rdp_username = "Administrator"
-        # DC uses domain admin password (prebaked AMI), others use demo password
-        rdp_password = "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"  # nosec B105
-    elif os_type == "kali":
-        rdp_username = "kali"
-        rdp_password = "kali"  # nosec B105 - Kali OS default
-    elif os_type == "ubuntu":
-        rdp_username = "ubuntu"
-        rdp_password = "ubuntu"  # nosec B105 - demo environment
+    rdp_username, rdp_password = _resolve_rdp_credentials(instance)
 
     # Get SSH key for SFTP file transfers
     # Windows uses key-based auth; Linux uses password auth for simplicity

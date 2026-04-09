@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
     GDCNetworkAccessConfig,
+    GDCVMRuntimeConfig,
+    GDCVMRuntimeProfile,
     InstanceConfig,
     RangeConfig,
     RangeNetworkConfig,
@@ -23,6 +25,7 @@ from config import (
     get_range_availability_zone,
     get_range_from_db,
     load_gdc_network_access_config,
+    load_gdc_vmruntime_config,
     load_range_network_config,
 )
 
@@ -323,6 +326,66 @@ class TestRangeNetworkEnv:
         assert config.network_cidr == "10.200.0.0/24"
         assert config.network_region == "us-central1"
         assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
+
+    def test_load_gdc_vmruntime_config_reads_image_contract(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_VM_STORAGE_CLASS": "local-shared",
+                "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
+                "GDC_KALI_IMAGE_URL": "gs://images/kali.qcow2",
+                "GDC_KALI_VCPUS": "4",
+                "GDC_KALI_MEMORY": "8Gi",
+                "GDC_KALI_DISK_SIZE_GIB": "40",
+                "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
+                "GDC_WINDOWS_IMAGE_URL": "gs://images/windows.qcow2",
+                "GDC_DC_IMAGE_URL": "docker://registry.example.com/dc-image:latest",
+            },
+            clear=True,
+        )
+
+        config = load_gdc_vmruntime_config()
+
+        assert config == GDCVMRuntimeConfig(
+            storage_class_name="local-shared",
+            image_gcs_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
+            kali=GDCVMRuntimeProfile(source_url="gs://images/kali.qcow2", vcpus=4, memory="8Gi", disk_size_gib=40),
+            ubuntu=GDCVMRuntimeProfile(
+                source_url="https://example.com/ubuntu.img",
+                vcpus=1,
+                memory="2Gi",
+                disk_size_gib=20,
+            ),
+            windows=GDCVMRuntimeProfile(
+                source_url="gs://images/windows.qcow2",
+                vcpus=2,
+                memory="8Gi",
+                disk_size_gib=64,
+            ),
+            dc=GDCVMRuntimeProfile(
+                source_url="docker://registry.example.com/dc-image:latest",
+                vcpus=2,
+                memory="8Gi",
+                disk_size_gib=64,
+            ),
+        )
+
+    def test_gdc_vmruntime_config_requires_matching_profile_when_selected(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
+            },
+            clear=True,
+        )
+
+        config = load_gdc_vmruntime_config()
+
+        assert config.get_profile(role="victim", os_type="ubuntu").source_url == "https://example.com/ubuntu.img"
+        with pytest.raises(RuntimeError, match="Missing GDC VM Runtime image URL"):
+            config.get_profile(role="dc", os_type="windows")
 
 
 class TestDecryptField:

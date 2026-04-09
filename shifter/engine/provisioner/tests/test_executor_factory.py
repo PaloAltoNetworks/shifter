@@ -69,6 +69,27 @@ class TestBuildGuestExecutionContext:
         context.close()
         mock_executor.close.assert_called_once_with()
 
+    def test_gcp_prefers_explicit_ssh_username_from_instance_output(self, mocker, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+
+        mock_store = mocker.Mock()
+        mock_store.get_secret.return_value = "PRIVATE KEY"
+        mocker.patch("executors.factory.get_secrets_store", return_value=mock_store)
+        mock_executor_cls = mocker.patch("executors.factory.GuestSSHExecutor")
+
+        build_guest_execution_context(
+            {
+                "instance_id": "range-vm-1",
+                "private_ip": "10.50.1.10",
+                "ssh_key_secret_arn": "projects/test/secrets/range-vm-1-key",
+                "ssh_username": "custom-user",
+                "os": "ubuntu",
+                "role": "victim",
+            }
+        )
+
+        mock_executor_cls.assert_called_once_with(private_key="PRIVATE KEY", username="custom-user")
+
     def test_gcp_requires_private_ip(self, monkeypatch):
         monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
 

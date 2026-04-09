@@ -755,6 +755,7 @@ class TestGdcBootstrapConfig:
         assert config.resolved_subnetwork_name == "cluster1-gdc-us-central1"
         assert config.service_account_email == "baremetal-gcr@prod-rwctxzl6shxk.iam.gserviceaccount.com"
         assert config.gdc_access_secret_id == "shifter-gcp-dev-gdc-access"
+        assert config.gdc_vm_image_gcs_secret_id == "shifter-gcp-dev-gdc-vm-image-gcs"
 
     def test_exposes_expected_cluster_hosts(self):
         """Config should expose the expected workstation, control-plane, and worker hosts."""
@@ -823,6 +824,7 @@ class TestGdcBootstrapCluster:
         staged_assets = {
             "assets_dir": tmp_path / "cluster1",
             "ssh_metadata": tmp_path / "cluster1" / "ssh-metadata",
+            "service_account_key": tmp_path / "cluster1" / "bm-gcr.json",
         }
 
         with (
@@ -837,6 +839,7 @@ class TestGdcBootstrapCluster:
             patch("deploy.upload_gdc_assets") as mock_upload,
             patch("deploy.run_gdc_workstation_script") as mock_remote,
             patch("deploy.sync_gdc_access_secret") as mock_access_secret,
+            patch("deploy.sync_gdc_vm_image_secret") as mock_vm_image_secret,
         ):
             result = deploy.gdc_bootstrap_cluster(config)
 
@@ -856,7 +859,9 @@ class TestGdcBootstrapCluster:
                 "install-helper.sh",
             ]
             mock_access_secret.assert_called_once_with(config, dry_run=False)
+            mock_vm_image_secret.assert_called_once_with(config, staged_assets["service_account_key"], dry_run=False)
             assert result["gdc_access_secret_id"] == "shifter-gcp-dev-gdc-access"
+            assert result["gdc_vm_image_gcs_secret_id"] == "shifter-gcp-dev-gdc-vm-image-gcs"
 
 
 # =============================================================================

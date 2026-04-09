@@ -29,26 +29,64 @@ class TestProviderRouting:
             get_range_module_path()
 
     @patch(
-        "range_terraform_runner.gdc_range_networks.apply_range_networks",
-        return_value={"subnets": {}, "instances": []},
+        "range_terraform_runner.gdc_vmruntime_assets.apply_range_assets",
+        return_value=[{"instance_id": "range-42-attack-attacker-1234"}],
     )
-    def test_apply_range_dispatches_to_gdc_network_runner_by_default(self, mock_apply):
+    @patch(
+        "range_terraform_runner.gdc_scenario_pods.apply_range_assets",
+        return_value=[{"instance_id": "range-42-attack-victim-5678-pod"}],
+    )
+    @patch(
+        "range_terraform_runner.gdc_range_networks.apply_range_networks",
+        return_value={"subnets": {"attack": {"subnet_id": "range-42-attack"}}, "instances": []},
+    )
+    def test_apply_range_dispatches_to_gdc_network_and_asset_runners(
+        self,
+        mock_network_apply,
+        mock_pod_apply,
+        mock_vm_apply,
+    ):
         from range_terraform_runner import apply_range
 
         with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
             result = apply_range("req-123", {"range_id": 42, "subnets": []})
 
-        assert result == {"subnets": {}, "instances": []}
-        mock_apply.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+        assert result == {
+            "subnets": {"attack": {"subnet_id": "range-42-attack"}},
+            "instances": [
+                {"instance_id": "range-42-attack-attacker-1234"},
+                {"instance_id": "range-42-attack-victim-5678-pod"},
+            ],
+        }
+        mock_network_apply.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+        mock_vm_apply.assert_called_once_with(
+            "req-123",
+            {"range_id": 42, "subnets": []},
+            {"attack": {"subnet_id": "range-42-attack"}},
+        )
+        mock_pod_apply.assert_called_once_with(
+            "req-123",
+            {"range_id": 42, "subnets": []},
+            {"attack": {"subnet_id": "range-42-attack"}},
+        )
 
     @patch("range_terraform_runner.gdc_range_networks.destroy_range_networks")
-    def test_destroy_range_dispatches_to_gdc_network_runner_by_default(self, mock_destroy):
+    @patch("range_terraform_runner.gdc_vmruntime_assets.destroy_range_assets")
+    @patch("range_terraform_runner.gdc_scenario_pods.destroy_range_assets")
+    def test_destroy_range_dispatches_to_gdc_asset_then_network_runner(
+        self,
+        mock_pod_destroy,
+        mock_asset_destroy,
+        mock_network_destroy,
+    ):
         from range_terraform_runner import destroy_range
 
         with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
             destroy_range("req-123", variables={"range_id": 42, "subnets": []})
 
-        mock_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+        mock_pod_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+        mock_asset_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+        mock_network_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
 
     def test_get_range_state_key_prefix_uses_provider_specific_paths(self):
         from range_terraform_runner import get_range_state_key_prefix

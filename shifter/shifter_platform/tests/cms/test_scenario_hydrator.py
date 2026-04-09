@@ -42,6 +42,21 @@ BASIC_TEMPLATE = ScenarioTemplate(
     ],
 )
 
+MIXED_ASSET_TEMPLATE = ScenarioTemplate(
+    id="mixed_assets",
+    name="Mixed Assets",
+    description="One VM Runtime asset and one lower-fidelity scenario Pod",
+    instances=[
+        InstanceConfig(name="Attacker", role="attacker", os_type="kali"),
+        InstanceConfig(
+            name="Lower Fidelity Target",
+            asset_type="scenario_pod",
+            role="victim",
+            os_type="ubuntu",
+        ),
+    ],
+)
+
 AD_ATTACK_LAB_TEMPLATE = ScenarioTemplate(
     id="ad_attack_lab",
     name="AD Attack Lab",
@@ -115,6 +130,7 @@ def _load_scenario_side_effect(scenario_id):
     templates = {
         "basic": BASIC_TEMPLATE,
         "ad_attack_lab": AD_ATTACK_LAB_TEMPLATE,
+        "mixed_assets": MIXED_ASSET_TEMPLATE,
     }
     if scenario_id not in templates:
         raise ValueError(f"Scenario '{scenario_id}' not found")
@@ -168,6 +184,17 @@ class TestHydrateScenario:
         roles = [i.role for i in result.all_instances]
         assert "attacker" in roles
         assert "victim" in roles
+
+    @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
+    def test_preserves_asset_type_from_template(self, _mock_load, user, windows_agent):
+        """Hydration keeps pod-backed vs VM-backed asset intent."""
+        from cms.scenarios.hydrator import hydrate_scenario
+
+        result = hydrate_scenario("mixed_assets", user.id, windows_agent)
+        attacker = next(i for i in result.all_instances if i.name == "Attacker")
+        pod_target = next(i for i in result.all_instances if i.name == "Lower Fidelity Target")
+        assert attacker.asset_type == "vm_runtime_vm"
+        assert pod_target.asset_type == "scenario_pod"
 
     @patch("cms.scenarios.hydrator.load_scenario", side_effect=_load_scenario_side_effect)
     def test_each_instance_has_uuid(self, _mock_load, user, windows_agent):

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import gdc_range_networks
+import gdc_scenario_pods
+import gdc_vmruntime_assets
 import terraform_base
 
 AWS_RANGE_MODULE_PATH = Path(__file__).parent / "terraform" / "modules" / "range"
@@ -61,7 +63,21 @@ def apply_range(
 ) -> dict[str, Any]:
     """Run terraform apply for Range and return outputs."""
     if _uses_active_gdc_range_plane():
-        return gdc_range_networks.apply_range_networks(request_uuid, variables)
+        network_output = gdc_range_networks.apply_range_networks(request_uuid, variables)
+        vm_output = gdc_vmruntime_assets.apply_range_assets(
+            request_uuid,
+            variables,
+            network_output.get("subnets", {}),
+        )
+        pod_output = gdc_scenario_pods.apply_range_assets(
+            request_uuid,
+            variables,
+            network_output.get("subnets", {}),
+        )
+        return {
+            "subnets": network_output.get("subnets", {}),
+            "instances": [*vm_output, *pod_output],
+        }
 
     if working_dir is None:
         working_dir = get_range_module_path()
@@ -75,6 +91,8 @@ def destroy_range(
 ) -> None:
     """Run terraform destroy for Range."""
     if _uses_active_gdc_range_plane():
+        gdc_scenario_pods.destroy_range_assets(request_uuid, variables)
+        gdc_vmruntime_assets.destroy_range_assets(request_uuid, variables)
         gdc_range_networks.destroy_range_networks(request_uuid, variables)
         return
 

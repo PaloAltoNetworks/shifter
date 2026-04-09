@@ -94,6 +94,54 @@ def _compute_network_allocation(
     return gateway_ip, static_ips, exclude
 
 
+def _asset_key(instance: dict[str, Any], index: int) -> str:
+    """Build a stable lookup key for per-asset network assignments."""
+    uuid_value = str(instance.get("uuid", "")).strip()
+    if uuid_value:
+        return uuid_value
+    name_value = str(instance.get("name", "")).strip()
+    if name_value:
+        return name_value
+    return f"asset-{index}"
+
+
+def _is_scenario_pod(instance: dict[str, Any]) -> bool:
+    """Return True when the range asset should be provisioned as a Pod."""
+    return str(instance.get("asset_type", "vm_runtime_vm")).strip() == "scenario_pod"
+
+
+def _compute_asset_ip_assignments(
+    cidr: str,
+    *,
+    static_ip_reservation_count: int,
+    instances: list[dict[str, Any]],
+) -> tuple[str, list[str], list[str], dict[str, str]]:
+    """Compute deterministic per-asset IP assignments for a mixed subnet.
+
+    VM-backed assets keep their assigned IPs out of the NAD allocation pool.
+    Pod-backed assets request their assigned IPs explicitly, so those IPs remain
+    allocatable to Whereabouts but still deterministic for the range spec order.
+    """
+    required_static_ips = max(static_ip_reservation_count, len(instances))
+    gateway_ip, reserved_static_ips, _ = _compute_network_allocation(
+        cidr,
+        static_ip_reservation_count=required_static_ips,
+    )
+    assigned_ips = reserved_static_ips[: len(instances)]
+    extra_reserved_ips = reserved_static_ips[len(instances) :]
+
+    assignments: dict[str, str] = {}
+    exclude = [f"{ip}/32" for ip in extra_reserved_ips]
+    for index, instance in enumerate(instances):
+        assigned_ip = assigned_ips[index]
+        assignments[_asset_key(instance, index)] = assigned_ip
+        if not _is_scenario_pod(instance):
+            exclude.append(f"{assigned_ip}/32")
+
+    exclude.append(f"{gateway_ip}/32")
+    return gateway_ip, reserved_static_ips, exclude, assignments
+
+
 def _build_network_manifest(
     *,
     network_name: str,
@@ -189,7 +237,7 @@ def _apply_cluster_custom_object(custom_api, body: dict[str, Any], api_exception
     except api_exception as exc:
         if exc.status != 409:
             raise
-        custom_api.replace_cluster_custom_object(
+        custom_api.patch_cluster_custom_object(
             group=_NETWORK_GROUP,
             version=_NETWORK_VERSION,
             plural=_NETWORK_PLURAL,
@@ -213,7 +261,7 @@ def _apply_namespaced_custom_object(custom_api, body: dict[str, Any], namespace:
     except api_exception as exc:
         if exc.status != 409:
             raise
-        custom_api.replace_namespaced_custom_object(
+        custom_api.patch_namespaced_custom_object(
             group=_NAD_GROUP,
             version=_NAD_VERSION,
             plural=_NAD_PLURAL,
@@ -297,9 +345,11 @@ def apply_range_networks(request_uuid: str, variables: dict[str, Any]) -> dict[s
 
         network_name = _network_name(range_id, subnet_name)
         labels = _network_labels(range_id, request_uuid, subnet_name)
-        gateway_ip, reserved_static_ips, exclude = _compute_network_allocation(
+        instances = list(subnet.get("instances") or [])
+        gateway_ip, reserved_static_ips, exclude, asset_ip_assignments = _compute_asset_ip_assignments(
             subnet_cidr,
             static_ip_reservation_count=access.static_ip_reservation_count,
+            instances=instances,
         )
 
         network_manifest = _build_network_manifest(
@@ -334,6 +384,7 @@ def apply_range_networks(request_uuid: str, variables: dict[str, Any]) -> dict[s
             "gdc_ipam_range": subnet_cidr,
             "gdc_ipam_exclude": exclude,
             "gdc_reserved_static_ips": reserved_static_ips,
+            "gdc_asset_ip_assignments": asset_ip_assignments,
             "gdc_cluster_id": access.cluster_id,
         }
 

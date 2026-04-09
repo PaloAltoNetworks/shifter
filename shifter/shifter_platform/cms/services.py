@@ -1270,6 +1270,7 @@ def get_active_range(user: User) -> RangeContext | None:
                             InstanceContext(
                                 uuid=spec.get("uuid"),
                                 name=spec.get("name", ""),
+                                asset_type=spec.get("asset_type", "vm_runtime_vm"),
                                 role=spec["role"],
                                 os_type=spec["os_type"],
                                 join_domain=spec.get("join_domain", False),
@@ -1282,6 +1283,7 @@ def get_active_range(user: User) -> RangeContext | None:
                         InstanceContext(
                             uuid=spec.get("uuid"),
                             name=spec.get("name", ""),
+                            asset_type=spec.get("asset_type", "vm_runtime_vm"),
                             role=spec["role"],
                             os_type=spec["os_type"],
                             join_domain=spec.get("join_domain", False),
@@ -1390,6 +1392,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
                         InstanceContext(
                             uuid=spec.get("uuid"),
                             name=spec.get("name", ""),
+                            asset_type=spec.get("asset_type", "vm_runtime_vm"),
                             role=spec["role"],
                             os_type=spec["os_type"],
                             join_domain=spec.get("join_domain", False),
@@ -1402,6 +1405,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
                     InstanceContext(
                         uuid=spec.get("uuid"),
                         name=spec.get("name", ""),
+                        asset_type=spec.get("asset_type", "vm_runtime_vm"),
                         role=spec["role"],
                         os_type=spec["os_type"],
                         join_domain=spec.get("join_domain", False),

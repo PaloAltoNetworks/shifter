@@ -137,6 +137,7 @@ class TestInstanceSpec:
 
         spec = InstanceSpec(name="attacker-kali", role="attacker", os_type="kali")
         assert spec.name == "attacker-kali"
+        assert spec.asset_type == "vm_runtime_vm"
         assert spec.role == "attacker"
         assert spec.os_type == "kali"
 
@@ -144,6 +145,7 @@ class TestInstanceSpec:
         "field,default",
         [
             pytest.param("uuid", None, id="uuid"),
+            pytest.param("asset_type", "vm_runtime_vm", id="asset_type"),
             pytest.param("agent", None, id="agent"),
             pytest.param("dc_config", None, id="dc_config"),
             pytest.param("join_domain", False, id="join_domain"),
@@ -235,6 +237,13 @@ class TestInstanceSpec:
         spec = InstanceSpec.model_validate(data)
         assert spec.agent is not None
         assert spec.agent.s3_key == "agents/agent.msi"
+
+    def test_scenario_pod_requires_linux_os_type(self):
+        """Pod-backed assets are limited to lower-fidelity Linux guests."""
+        from shared.schemas.range import InstanceSpec
+
+        with pytest.raises(ValidationError, match="kali or ubuntu"):
+            InstanceSpec(name="bad-pod", asset_type="scenario_pod", role="victim", os_type="windows")
 
 
 class TestRangeSpec:

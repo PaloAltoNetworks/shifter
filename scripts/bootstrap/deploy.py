@@ -482,6 +482,10 @@ class GDCBootstrapConfig:
         return f"shifter-{self.environment}-gdc-access"
 
     @property
+    def gdc_vm_image_gcs_secret_id(self) -> str:
+        return f"shifter-{self.environment}-gdc-vm-image-gcs"
+
+    @property
     def workstation(self) -> GDCHost:
         return GDCHost(
             name=f"{self.cluster_id}-abm-ws0-001",
@@ -962,6 +966,34 @@ def ensure_gdc_access_secret(config: GDCBootstrapConfig, dry_run: bool = False) 
         )
 
 
+def ensure_gdc_vm_image_secret(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
+    """Ensure the VM Runtime image-import Secret Manager secret exists."""
+    if dry_run or not gcloud_resource_exists(
+        [
+            "gcloud",
+            "secrets",
+            "describe",
+            config.gdc_vm_image_gcs_secret_id,
+            "--project",
+            config.project_id,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "secrets",
+                "create",
+                config.gdc_vm_image_gcs_secret_id,
+                "--replication-policy",
+                "automatic",
+                "--project",
+                config.project_id,
+            ],
+            dry_run=dry_run,
+            check=False,
+        )
+
+
 def ensure_gdc_network(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
     """Create the custom VPC, subnet, and firewall rules used by the cluster."""
     if dry_run or not gcloud_resource_exists(
@@ -1283,6 +1315,25 @@ def sync_gdc_access_secret(config: GDCBootstrapConfig, dry_run: bool = False) ->
         payload_path.unlink(missing_ok=True)
 
 
+def sync_gdc_vm_image_secret(config: GDCBootstrapConfig, service_account_key_path: Path, dry_run: bool = False) -> None:
+    """Publish the GCS image-import key to Secret Manager for range provisioning."""
+    ensure_gdc_vm_image_secret(config, dry_run=dry_run)
+    run_cmd(
+        [
+            "gcloud",
+            "secrets",
+            "versions",
+            "add",
+            config.gdc_vm_image_gcs_secret_id,
+            "--data-file",
+            str(service_account_key_path),
+            "--project",
+            config.project_id,
+        ],
+        dry_run=dry_run,
+    )
+
+
 def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, str]:
     """Bootstrap the repeatable GDC-on-Compute-Engine VM Runtime cluster."""
     if not config.project_id:
@@ -1319,6 +1370,7 @@ def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> 
         run_gdc_workstation_script(config, "create-cluster.sh", dry_run=dry_run)
         run_gdc_workstation_script(config, "install-helper.sh", dry_run=dry_run)
         sync_gdc_access_secret(config, dry_run=dry_run)
+        sync_gdc_vm_image_secret(config, staged_assets["service_account_key"], dry_run=dry_run)
 
     success("GDC bootstrap complete")
     print("\nNext commands:")
@@ -1338,6 +1390,7 @@ shifter-gdc-kubeconfig"""
         "workstation": config.workstation.name,
         "kubeconfig_path": config.kubeconfig_path,
         "gdc_access_secret_id": config.gdc_access_secret_id,
+        "gdc_vm_image_gcs_secret_id": config.gdc_vm_image_gcs_secret_id,
     }
 
 

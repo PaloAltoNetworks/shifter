@@ -110,9 +110,11 @@ jobs:
           else
             ENV="prod"
           fi
-          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
-          echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
-          echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )" >> "$GITHUB_OUTPUT"
+          {
+            echo "environment=$ENV"
+            echo "provider=$PROVIDER"
+            echo "is_dev=$( [ \"$ENV\" == \"dev\" ] && echo true || echo false )"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check for skip flags
         id: skip

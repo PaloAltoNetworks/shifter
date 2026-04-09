@@ -191,6 +191,25 @@ class TestInstanceSpecValidation:
             )
             assert spec.os_type == os_type
 
+    def test_defaults_asset_type_to_vm_runtime_vm(self):
+        """InstanceSpec defaults to VM-backed assets."""
+        from cyberscript.schemas import InstanceSpec
+
+        spec = InstanceSpec(name="test-instance", role="victim", os_type="ubuntu")
+        assert spec.asset_type == "vm_runtime_vm"
+
+    def test_rejects_invalid_scenario_pod_configuration(self):
+        """Pod-backed assets are limited to lower-fidelity Linux guests."""
+        from cyberscript.schemas import InstanceSpec
+
+        with pytest.raises(ValueError, match="kali or ubuntu"):
+            InstanceSpec(
+                name="bad-pod",
+                asset_type="scenario_pod",
+                role="victim",
+                os_type="windows",
+            )
+
 
 class TestEventValidation:
     """Tests for event model validation."""

@@ -205,12 +205,116 @@ class GDCNetworkAccessConfig:
     static_ip_reservation_count: int = 4
 
 
+@dataclass(frozen=True)
+class GDCVMRuntimeProfile:
+    """Per-guest VM Runtime image and sizing configuration."""
+
+    source_url: str = ""
+    vcpus: int = 1
+    memory: str = "2Gi"
+    disk_size_gib: int = 20
+
+
+@dataclass(frozen=True)
+class GDCVMRuntimeConfig:
+    """VM Runtime image and sizing contract for the active GCP range plane."""
+
+    storage_class_name: str = "local-shared"
+    image_gcs_secret_id: str = ""
+    kali: GDCVMRuntimeProfile = field(default_factory=GDCVMRuntimeProfile)
+    ubuntu: GDCVMRuntimeProfile = field(default_factory=GDCVMRuntimeProfile)
+    windows: GDCVMRuntimeProfile = field(default_factory=GDCVMRuntimeProfile)
+    dc: GDCVMRuntimeProfile = field(default_factory=GDCVMRuntimeProfile)
+
+    def get_profile(self, *, role: str, os_type: str) -> GDCVMRuntimeProfile:
+        """Return the matching VM Runtime profile for a scenario instance."""
+        if role == "dc":
+            profile = self.dc
+        elif os_type == "kali":
+            profile = self.kali
+        elif os_type == "windows":
+            profile = self.windows
+        else:
+            profile = self.ubuntu
+
+        if not profile.source_url:
+            raise RuntimeError(
+                f"Missing GDC VM Runtime image URL for role={role!r} os_type={os_type!r}. "
+                "Set the corresponding GDC_*_IMAGE_URL environment variable."
+            )
+        return profile
+
+
+@dataclass(frozen=True)
+class GDCScenarioPodProfile:
+    """Per-asset container image configuration for mixed scenario Pods."""
+
+    image: str
+
+
+@dataclass(frozen=True)
+class GDCScenarioPodConfig:
+    """Container image contract for pod-backed scenario assets on GDC."""
+
+    image_pull_policy: str = "IfNotPresent"
+    kali: GDCScenarioPodProfile = field(
+        default_factory=lambda: GDCScenarioPodProfile("docker.io/kalilinux/kali-rolling:latest")
+    )
+    ubuntu: GDCScenarioPodProfile = field(
+        default_factory=lambda: GDCScenarioPodProfile("docker.io/library/ubuntu:24.04")
+    )
+
+    def get_profile(self, *, os_type: str) -> GDCScenarioPodProfile:
+        """Return the matching container image profile for a scenario pod."""
+        if os_type == "kali":
+            profile = self.kali
+        elif os_type == "ubuntu":
+            profile = self.ubuntu
+        else:
+            raise RuntimeError(f"scenario_pod assets only support kali or ubuntu, got {os_type!r}")
+
+        if not profile.image:
+            raise RuntimeError(
+                f"Missing GDC scenario pod image for os_type={os_type!r}. "
+                "Set the corresponding GDC_SCENARIO_POD_*_IMAGE environment variable."
+            )
+        return profile
+
+
 def _parse_csv_env(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def _is_active_gdc_range_plane() -> bool:
     return os.environ.get("CLOUD_PROVIDER", "aws") == "gcp"
+
+
+def _get_int_env(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    return int(value) if value else default
+
+
+def _load_gdc_vm_profile(
+    prefix: str,
+    *,
+    default_vcpus: int,
+    default_memory: str,
+    default_disk_size_gib: int,
+) -> GDCVMRuntimeProfile:
+    """Load a role-specific VM Runtime profile from env vars."""
+    return GDCVMRuntimeProfile(
+        source_url=os.environ.get(f"{prefix}_IMAGE_URL", "").strip(),
+        vcpus=_get_int_env(f"{prefix}_VCPUS", default_vcpus),
+        memory=os.environ.get(f"{prefix}_MEMORY", default_memory).strip(),
+        disk_size_gib=_get_int_env(f"{prefix}_DISK_SIZE_GIB", default_disk_size_gib),
+    )
+
+
+def _load_gdc_scenario_pod_profile(prefix: str, *, default_image: str) -> GDCScenarioPodProfile:
+    """Load a role-specific scenario Pod profile from env vars."""
+    return GDCScenarioPodProfile(
+        image=os.environ.get(f"{prefix}_IMAGE", default_image).strip() or default_image,
+    )
 
 
 def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
@@ -273,6 +377,37 @@ def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
         network_interface=network_interface.strip() or "vxlan0",
         dns_nameservers=tuple(dns_nameservers) or ("8.8.8.8",),
         static_ip_reservation_count=static_ip_reservation_count,
+    )
+
+
+def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
+    """Load VM Runtime image and sizing configuration for GDC guest assets."""
+    if not _is_active_gdc_range_plane():
+        raise RuntimeError("GDC VM Runtime config is only valid when CLOUD_PROVIDER=gcp")
+
+    return GDCVMRuntimeConfig(
+        storage_class_name=os.environ.get("GDC_VM_STORAGE_CLASS", "local-shared").strip() or "local-shared",
+        image_gcs_secret_id=os.environ.get("GDC_VM_IMAGE_GCS_SECRET_ID", "").strip(),
+        kali=_load_gdc_vm_profile("GDC_KALI", default_vcpus=2, default_memory="4Gi", default_disk_size_gib=20),
+        ubuntu=_load_gdc_vm_profile("GDC_UBUNTU", default_vcpus=1, default_memory="2Gi", default_disk_size_gib=20),
+        windows=_load_gdc_vm_profile("GDC_WINDOWS", default_vcpus=2, default_memory="8Gi", default_disk_size_gib=64),
+        dc=_load_gdc_vm_profile("GDC_DC", default_vcpus=2, default_memory="8Gi", default_disk_size_gib=64),
+    )
+
+
+def load_gdc_scenario_pod_config() -> GDCScenarioPodConfig:
+    """Load image configuration for pod-backed scenario assets."""
+    return GDCScenarioPodConfig(
+        image_pull_policy=os.environ.get("GDC_SCENARIO_POD_IMAGE_PULL_POLICY", "IfNotPresent").strip()
+        or "IfNotPresent",
+        kali=_load_gdc_scenario_pod_profile(
+            "GDC_SCENARIO_POD_KALI",
+            default_image="docker.io/kalilinux/kali-rolling:latest",
+        ),
+        ubuntu=_load_gdc_scenario_pod_profile(
+            "GDC_SCENARIO_POD_UBUNTU",
+            default_image="docker.io/library/ubuntu:24.04",
+        ),
     )
 
 

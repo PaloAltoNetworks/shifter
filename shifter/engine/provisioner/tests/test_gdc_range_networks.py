@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from config import GDCNetworkAccessConfig
 from gdc_range_networks import (
+    _compute_asset_ip_assignments,
     _compute_network_allocation,
     apply_range_networks,
     destroy_range_networks,
@@ -27,6 +28,29 @@ class TestAllocationHelpers:
             "10.200.0.107/32",
             "10.200.0.108/32",
             "10.200.0.109/32",
+            "10.200.0.110/32",
+        ]
+
+    def test_compute_asset_ip_assignments_keeps_pod_ips_out_of_exclude_list(self):
+        gateway_ip, reserved_static_ips, exclude, assignments = _compute_asset_ip_assignments(
+            "10.200.0.96/28",
+            static_ip_reservation_count=4,
+            instances=[
+                {"uuid": "vm-1", "asset_type": "vm_runtime_vm"},
+                {"uuid": "pod-1", "asset_type": "scenario_pod"},
+            ],
+        )
+
+        assert gateway_ip == "10.200.0.110"
+        assert reserved_static_ips == ["10.200.0.106", "10.200.0.107", "10.200.0.108", "10.200.0.109"]
+        assert assignments == {
+            "vm-1": "10.200.0.106",
+            "pod-1": "10.200.0.107",
+        }
+        assert exclude == [
+            "10.200.0.108/32",
+            "10.200.0.109/32",
+            "10.200.0.106/32",
             "10.200.0.110/32",
         ]
 
@@ -63,6 +87,7 @@ class TestRangeNetworkProvisioning:
                             "name": "attack",
                             "uuid": "subnet-uuid-1",
                             "cidr": "10.200.0.96/28",
+                            "instances": [{"uuid": f"inst-{i}"} for i in range(6)],
                         }
                     ],
                 },
@@ -75,7 +100,22 @@ class TestRangeNetworkProvisioning:
         assert subnet["subnet_id"] == "range-42-attack"
         assert subnet["gdc_namespace"] == "range-42"
         assert subnet["gdc_gateway_ip"] == "10.200.0.110"
-        assert subnet["gdc_reserved_static_ips"] == ["10.200.0.106", "10.200.0.107", "10.200.0.108", "10.200.0.109"]
+        assert subnet["gdc_reserved_static_ips"] == [
+            "10.200.0.104",
+            "10.200.0.105",
+            "10.200.0.106",
+            "10.200.0.107",
+            "10.200.0.108",
+            "10.200.0.109",
+        ]
+        assert subnet["gdc_asset_ip_assignments"] == {
+            "inst-0": "10.200.0.104",
+            "inst-1": "10.200.0.105",
+            "inst-2": "10.200.0.106",
+            "inst-3": "10.200.0.107",
+            "inst-4": "10.200.0.108",
+            "inst-5": "10.200.0.109",
+        }
         assert result["instances"] == []
 
     @patch("gdc_range_networks._build_kube_api_client", return_value=object())

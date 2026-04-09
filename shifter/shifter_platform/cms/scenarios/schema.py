@@ -37,6 +37,7 @@ class InstanceConfig(BaseModel):
     """
 
     name: str
+    asset_type: Literal["vm_runtime_vm", "scenario_pod"] = "vm_runtime_vm"
     role: Literal["attacker", "victim", "dc"]
     os_type: Literal["kali", "windows", "ubuntu", "from_agent"]
     xdr_agent: bool = False
@@ -50,6 +51,21 @@ class InstanceConfig(BaseModel):
         """Validate dc_config is provided when domain_controller is True."""
         if self.domain_controller and self.dc_config is None:
             raise ValueError("dc_config is required when domain_controller is true")
+        if self.asset_type == "scenario_pod":
+            if self.role not in {"attacker", "victim"}:
+                raise ValueError("scenario_pod assets must use attacker or victim roles")
+            if self.os_type not in {"kali", "ubuntu"}:
+                raise ValueError("scenario_pod assets must use kali or ubuntu os_type")
+            if self.xdr_agent:
+                raise ValueError("scenario_pod assets cannot install XDR agents")
+            if self.domain_controller:
+                raise ValueError("scenario_pod assets cannot be domain controllers")
+            if self.join_domain:
+                raise ValueError("scenario_pod assets cannot join a domain")
+            if self.dc_config is not None:
+                raise ValueError("scenario_pod assets cannot define dc_config")
+            if self.ami_key is not None:
+                raise ValueError("scenario_pod assets cannot define ami_key")
         return self
 
 

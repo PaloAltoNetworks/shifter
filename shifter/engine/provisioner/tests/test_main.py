@@ -178,6 +178,7 @@ class TestRangeStatePayloads:
 
         instance_state = _build_instance_state(
             {
+                "asset_type": "vm_runtime_vm",
                 "instance_id": "vmrt-vm-1",
                 "private_ip": "10.200.0.110",
                 "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
@@ -195,6 +196,7 @@ class TestRangeStatePayloads:
         )
 
         assert instance_state["cloud_provider"] == "gcp"
+        assert instance_state["asset_type"] == "vm_runtime_vm"
         assert instance_state["aws_instance_id"] is None
         assert instance_state["ssh_username"] == "ubuntu"
         assert instance_state["provider_metadata"] == {
@@ -245,6 +247,7 @@ class TestRangeStatePayloads:
             {
                 "uuid": "inst-123",
                 "name": "workstation-1",
+                "asset_type": "vm_runtime_vm",
                 "role": "victim",
                 "os": "windows",
                 "subnet_name": "victims",
@@ -259,6 +262,7 @@ class TestRangeStatePayloads:
         )
 
         assert payload["uuid"] == "inst-123"
+        assert payload["asset_type"] == "vm_runtime_vm"
         assert payload["os_type"] == "windows"
         assert payload["instance_id"] == "vmrt-vm-1"
         assert payload["ssh_key_secret_arn"] == "projects/test/secrets/vmrt-ssh-key"
@@ -308,6 +312,7 @@ class TestRangeStatePayloads:
             {
                 "uuid": "inst-123",
                 "name": "workstation-1",
+                "asset_type": "vm_runtime_vm",
                 "role": "victim",
                 "os": "windows",
                 "subnet_name": "attack",
@@ -339,14 +344,15 @@ class TestRangeStatePayloads:
         assert instance_state["aws_instance_id"] is None
         assert instance_state["provider_metadata"]["gcp"]["namespace"] == "range-42"
         assert provisioned_instances[0]["cloud_provider"] == "gcp"
+        assert provisioned_instances[0]["asset_type"] == "vm_runtime_vm"
         assert provisioned_instances[0]["instance_id"] == "vmrt-vm-1"
         assert provisioned_instances[0]["provider_metadata"]["gcp"]["vm_name"] == "vmrt-vm-1"
 
 
-class TestGdcProvisionGuard:
-    """Tests for the Slice 10 guard that prevents false-ready GCP ranges."""
+class TestGdcProvisioning:
+    """Tests for the active GDC VM Runtime range path."""
 
-    def test_run_terraform_provision_blocks_gdc_ranges_until_vm_lifecycle_lands(self):
+    def test_run_terraform_provision_runs_setup_and_writes_state_for_gdc_ranges(self):
         from config import RangeNetworkConfig
         from main import _run_terraform_provision
 
@@ -359,6 +365,7 @@ class TestGdcProvisionGuard:
                         {
                             "uuid": "inst-123",
                             "name": "attacker",
+                            "asset_type": "vm_runtime_vm",
                             "role": "attacker",
                             "os_type": "kali",
                         }
@@ -388,19 +395,79 @@ class TestGdcProvisionGuard:
                             "uuid": "subnet-123",
                             "subnet_id": "range-42-attack",
                             "subnet_cidr": "10.200.0.96/28",
+                            "gdc_namespace": "range-42",
+                            "gdc_network_name": "range-42-attack",
                         }
                     },
-                    "instances": [],
+                    "instances": [
+                        {
+                            "uuid": "inst-123",
+                            "name": "attacker",
+                            "asset_type": "vm_runtime_vm",
+                            "role": "attacker",
+                            "os": "kali",
+                            "subnet_name": "attack",
+                            "instance_id": "range-42-attack-attacker-1234",
+                            "private_ip": "10.200.0.104",
+                            "public_key": "ssh-rsa AAAA",
+                            "ssh_key_secret_arn": "projects/test/secrets/range-42-attacker-ssh",
+                            "ssh_username": "kali",
+                            "gdc_vm_name": "range-42-attack-attacker-1234",
+                            "gdc_namespace": "range-42",
+                            "gdc_network_name": "range-42-attack",
+                            "gdc_ip": "10.200.0.104",
+                            "vmruntime_disk_name": "range-42-attack-attacker-1234-boot",
+                        }
+                    ],
                 },
             ),
             patch("main.run_instance_setup") as mock_setup,
             patch("main.write_provisioned_state") as mock_write_state,
-            pytest.raises(NotImplementedError, match="VM Runtime asset lifecycle"),
+            patch("main.get_range_data_by_request_id", return_value={"ngfw_instance_id": None}),
+            patch("main.publish_ready"),
         ):
             _run_terraform_provision("req-123", 42, 7, range_spec)
 
-        mock_setup.assert_not_called()
-        mock_write_state.assert_not_called()
+        mock_setup.assert_called_once()
+        mock_write_state.assert_called_once()
+
+    def test_run_instance_setup_skips_pod_backed_assets(self):
+        from main import run_instance_setup
+
+        with (
+            patch("main._run_dc_setup") as mock_dc_setup,
+            patch("main._run_single_instance_setup") as mock_single_setup,
+        ):
+            run_instance_setup(
+                instances_output=[
+                    {
+                        "uuid": "pod-uuid-1",
+                        "asset_type": "scenario_pod",
+                        "role": "victim",
+                        "os": "ubuntu",
+                        "instance_id": "range-42-mixed-victim-pod-uuid-1-pod",
+                        "private_ip": "10.200.0.107",
+                    }
+                ],
+                range_spec={
+                    "subnets": [
+                        {
+                            "instances": [
+                                {
+                                    "uuid": "pod-uuid-1",
+                                    "name": "lower-fidelity-target",
+                                    "asset_type": "scenario_pod",
+                                    "role": "victim",
+                                    "os_type": "ubuntu",
+                                }
+                            ]
+                        }
+                    ]
+                },
+            )
+
+        mock_dc_setup.assert_not_called()
+        mock_single_setup.assert_not_called()
 
 
 class TestPollForSerialAndCert:

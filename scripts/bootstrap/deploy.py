@@ -24,9 +24,12 @@ import re
 import shutil
 import subprocess  # nosec B404
 import sys
+import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import dedent
 
 # Import runner setup module
 try:
@@ -186,6 +189,40 @@ def get_aws_account_id(profile: str = None) -> str:
 def get_repo_root() -> Path:
     """Get the repository root directory."""
     return Path(__file__).parent.parent.parent
+
+
+GDC_API_SERVICES = [
+    "anthos.googleapis.com",
+    "anthosaudit.googleapis.com",
+    "anthosgke.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "connectgateway.googleapis.com",
+    "container.googleapis.com",
+    "gkeconnect.googleapis.com",
+    "gkehub.googleapis.com",
+    "gkeonprem.googleapis.com",
+    "iam.googleapis.com",
+    "kubernetesmetadata.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
+    "opsconfigmonitoring.googleapis.com",
+    "serviceusage.googleapis.com",
+    "stackdriver.googleapis.com",
+]
+
+GDC_SERVICE_ACCOUNT_ROLES = [
+    "roles/gkehub.connect",
+    "roles/gkehub.admin",
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/monitoring.dashboardEditor",
+    "roles/monitoring.viewer",
+    "roles/opsconfigmonitoring.resourceMetadata.writer",
+    "roles/serviceusage.serviceUsageViewer",
+    "roles/stackdriver.resourceMetadata.writer",
+    "roles/kubernetesmetadata.publisher",
+]
 
 
 def s3_bucket_exists(bucket_name: str, profile: str) -> bool:
@@ -350,6 +387,849 @@ class BootstrapConfig:
     @property
     def secret_name(self) -> str:
         return "AWS_ROLE_ARN" if self.env == "prod" else "AWS_ROLE_ARN_DEV"
+
+
+@dataclass(frozen=True)
+class GDCHost:
+    """Single host in the GDC-on-Compute-Engine evaluation topology."""
+
+    name: str
+    role: str
+    primary_ip: str
+    vxlan_ip: str
+
+
+@dataclass
+class GDCBootstrapConfig:
+    """Configuration for a repeatable GDC VM Runtime bootstrap."""
+
+    project_id: str
+    cluster_id: str = "cluster1"
+    region: str = "us-central1"
+    zone: str = "us-central1-a"
+    bmctl_version: str = "1.34.200-gke.68"
+    network_name: str | None = None
+    subnetwork_name: str | None = None
+    subnet_cidr: str = "10.240.0.0/20"
+    vxlan_cidr: str = "10.200.0.0/24"
+    pod_cidr: str = "192.168.0.0/16"
+    service_cidr: str = "172.26.232.0/24"
+    control_plane_vip: str = "10.200.0.49"
+    ingress_vip: str = "10.200.0.50"
+    address_pool: str = "10.200.0.50-10.200.0.70"
+    machine_type: str = "n1-standard-8"
+    boot_disk_size_gb: int = 200
+    boot_disk_type: str = "pd-ssd"
+    service_account_name: str = "baremetal-gcr"
+    google_account_email: str | None = None
+
+    @property
+    def resolved_network_name(self) -> str:
+        return self.network_name or f"{self.cluster_id}-gdc"
+
+    @property
+    def resolved_subnetwork_name(self) -> str:
+        return self.subnetwork_name or f"{self.resolved_network_name}-{self.region}"
+
+    @property
+    def service_account_email(self) -> str:
+        return f"{self.service_account_name}@{self.project_id}.iam.gserviceaccount.com"
+
+    @property
+    def cluster_namespace(self) -> str:
+        return f"{self.cluster_id}-ns"
+
+    @property
+    def cluster_workspace_dir(self) -> str:
+        return f"/root/bmctl-workspace/{self.cluster_id}"
+
+    @property
+    def kubeconfig_path(self) -> str:
+        return f"{self.cluster_workspace_dir}/{self.cluster_id}-kubeconfig"
+
+    @property
+    def staging_dir(self) -> str:
+        return "/root/shifter-gdc-bootstrap"
+
+    @property
+    def staging_bundle_dir(self) -> str:
+        return f"{self.staging_dir}/{self.cluster_id}"
+
+    @property
+    def instance_tag(self) -> str:
+        return f"{self.cluster_id}-gdc"
+
+    @property
+    def ssh_firewall_rule_name(self) -> str:
+        return f"{self.cluster_id}-allow-ssh-rule"
+
+    @property
+    def internal_firewall_rule_name(self) -> str:
+        return f"{self.cluster_id}-allow-internal-rule"
+
+    @property
+    def lb_firewall_rule_name(self) -> str:
+        return f"{self.cluster_id}-allow-lb-traffic-rule"
+
+    @property
+    def cluster_context(self) -> str:
+        return f"{self.cluster_id}-admin@{self.cluster_id}"
+
+    @property
+    def workstation(self) -> GDCHost:
+        return GDCHost(
+            name=f"{self.cluster_id}-abm-ws0-001",
+            role="workstation",
+            primary_ip="10.240.0.2",
+            vxlan_ip="10.200.0.2",
+        )
+
+    @property
+    def control_plane_hosts(self) -> list[GDCHost]:
+        return [
+            GDCHost(f"{self.cluster_id}-abm-cp1-001", "control-plane", "10.240.0.3", "10.200.0.3"),
+            GDCHost(f"{self.cluster_id}-abm-cp2-001", "control-plane", "10.240.0.4", "10.200.0.4"),
+            GDCHost(f"{self.cluster_id}-abm-cp3-001", "control-plane", "10.240.0.5", "10.200.0.5"),
+        ]
+
+    @property
+    def worker_hosts(self) -> list[GDCHost]:
+        return [
+            GDCHost(f"{self.cluster_id}-abm-w1-001", "worker", "10.240.0.6", "10.200.0.6"),
+            GDCHost(f"{self.cluster_id}-abm-w2-001", "worker", "10.240.0.7", "10.200.0.7"),
+        ]
+
+    @property
+    def all_hosts(self) -> list[GDCHost]:
+        return [self.workstation, *self.control_plane_hosts, *self.worker_hosts]
+
+    @property
+    def cluster_node_hosts(self) -> list[GDCHost]:
+        return [*self.control_plane_hosts, *self.worker_hosts]
+
+
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a simple KEY=VALUE env file without extra dependencies."""
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("'").strip('"')
+    return values
+
+
+def get_default_gdc_project_id() -> str:
+    """Resolve the default GDC/GCP project from env vars or the repo-root .env."""
+    for key in ("GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "PANW_GCP_DEV"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+
+    repo_env = parse_env_file(get_repo_root() / ".env")
+    for key in ("GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "PANW_GCP_DEV"):
+        value = repo_env.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def gcloud_resource_exists(cmd: list[str]) -> bool:
+    """Return True when the gcloud describe/list command exits successfully."""
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
+    return result.returncode == 0
+
+
+def render_gdc_cluster_config(config: GDCBootstrapConfig) -> str:
+    """Render the hybrid-cluster config used by bmctl on the workstation."""
+    lines = [
+        "---",
+        "gcrKeyPath: /root/bm-gcr.json",
+        "sshPrivateKeyPath: /root/.ssh/id_rsa",
+        "gkeConnectAgentServiceAccountKeyPath: /root/bm-gcr.json",
+        "gkeConnectRegisterServiceAccountKeyPath: /root/bm-gcr.json",
+        "cloudOperationsServiceAccountKeyPath: /root/bm-gcr.json",
+        "---",
+        "apiVersion: v1",
+        "kind: Namespace",
+        "metadata:",
+        f"  name: {config.cluster_namespace}",
+        "---",
+        "apiVersion: baremetal.cluster.gke.io/v1",
+        "kind: Cluster",
+        "metadata:",
+        f"  name: {config.cluster_id}",
+        f"  namespace: {config.cluster_namespace}",
+        "spec:",
+        "  type: hybrid",
+        f"  anthosBareMetalVersion: {config.bmctl_version}",
+        "  gkeConnect:",
+        f"    projectID: {config.project_id}",
+        "  controlPlane:",
+        "    nodePoolSpec:",
+        f"      clusterName: {config.cluster_id}",
+        "      nodes:",
+    ]
+    lines.extend(f"      - address: {host.vxlan_ip}" for host in config.control_plane_hosts)
+    lines.extend(
+        [
+            "  clusterNetwork:",
+            "    multipleNetworkInterfaces: true",
+            "    pods:",
+            "      cidrBlocks:",
+            f"      - {config.pod_cidr}",
+            "    services:",
+            "      cidrBlocks:",
+            f"      - {config.service_cidr}",
+            "  loadBalancer:",
+            "    mode: bundled",
+            "    ports:",
+            "      controlPlaneLBPort: 443",
+            "    vips:",
+            f"      controlPlaneVIP: {config.control_plane_vip}",
+            f"      ingressVIP: {config.ingress_vip}",
+            "    addressPools:",
+            "    - name: ingress-pool",
+            "      addresses:",
+            f"      - {config.address_pool}",
+            "  clusterOperations:",
+            f"    location: {config.region}",
+            f"    projectID: {config.project_id}",
+        ]
+    )
+    if config.google_account_email:
+        lines.extend(
+            [
+                "  clusterSecurity:",
+                "    authorization:",
+                "      clusterAdmin:",
+                "        gcpAccounts:",
+                f"        - {config.google_account_email}",
+            ]
+        )
+    lines.extend(
+        [
+            "  storage:",
+            "    lvpNodeMounts:",
+            "      path: /mnt/localpv-disk",
+            "      storageClassName: node-disk",
+            "    lvpShare:",
+            "      numPVUnderSharedPath: 5",
+            "      path: /mnt/localpv-share",
+            "      storageClassName: local-shared",
+            "  nodeConfig:",
+            "    podDensity:",
+            "      maxPodsPerNode: 250",
+            "---",
+            "apiVersion: baremetal.cluster.gke.io/v1",
+            "kind: NodePool",
+            "metadata:",
+            "  name: node-pool-1",
+            f"  namespace: {config.cluster_namespace}",
+            "spec:",
+            f"  clusterName: {config.cluster_id}",
+            "  nodes:",
+        ]
+    )
+    lines.extend(f"  - address: {host.vxlan_ip}" for host in config.worker_hosts)
+    return "\n".join(lines) + "\n"
+
+
+def render_gdc_prepare_workstation_script(config: GDCBootstrapConfig) -> str:
+    """Render the workstation prep script."""
+    return dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        export DEBIAN_FRONTEND=noninteractive
+
+        apt-get -qq update
+        apt-get -qq install -y ca-certificates curl jq
+
+        if ! command -v docker >/dev/null 2>&1; then
+          curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+          sh /tmp/get-docker.sh
+        fi
+        systemctl enable --now docker
+
+        if ! command -v kubectl >/dev/null 2>&1; then
+          KUBECTL_VERSION="$(curl -fsSL https://storage.googleapis.com/kubernetes-release/release/stable.txt)"
+          curl -fsSLo /usr/local/sbin/kubectl \
+            "https://storage.googleapis.com/kubernetes-release/release/${{KUBECTL_VERSION}}/bin/linux/amd64/kubectl"
+          chmod +x /usr/local/sbin/kubectl
+        fi
+
+        if ! command -v bmctl >/dev/null 2>&1; then
+          curl -fsSLo /usr/local/sbin/bmctl \
+            "https://storage.googleapis.com/anthos-baremetal-release/bmctl/{config.bmctl_version}/linux-amd64/bmctl"
+          chmod +x /usr/local/sbin/bmctl
+        fi
+
+        install -d -m 700 /root/.ssh {config.staging_dir} {config.cluster_workspace_dir}
+        install -m 600 {config.staging_bundle_dir}/id_rsa /root/.ssh/id_rsa
+        install -m 644 {config.staging_bundle_dir}/id_rsa.pub /root/.ssh/id_rsa.pub
+        install -m 600 {config.staging_bundle_dir}/bm-gcr.json /root/bm-gcr.json
+        printf 'Host *\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n' >/root/.ssh/config
+        chmod 600 /root/.ssh/config
+        """
+    )
+
+
+def render_gdc_prepare_hosts_script(config: GDCBootstrapConfig) -> str:
+    """Render the host prep script that creates vxlan0 and hardening on all nodes."""
+    peer_ips = " ".join(host.primary_ip for host in config.all_hosts)
+    local_vxlan_setup = dedent(
+        f"""\
+        default_iface="$(ip route show default | awk '/default/ {{print $5; exit}}')"
+        if ! ip link show vxlan0 >/dev/null 2>&1; then
+          ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472
+        fi
+        for peer_ip in {peer_ips}; do
+          bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true
+        done
+        ip addr replace {config.workstation.vxlan_ip}/24 dev vxlan0
+        ip link set up dev vxlan0
+        """
+    )
+    remote_hosts = "\n".join(
+        f'configure_remote_host "{host.primary_ip}" "{host.vxlan_ip}"' for host in config.cluster_node_hosts
+    )
+    return dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        configure_node() {{
+          local vxlan_ip="$1"
+          local default_iface
+          default_iface="$(ip route show default | awk '/default/ {{print $5; exit}}')"
+          if ! ip link show vxlan0 >/dev/null 2>&1; then
+            ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472
+          fi
+          for peer_ip in {peer_ips}; do
+            bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true
+          done
+          ip addr replace "${{vxlan_ip}}/24" dev vxlan0
+          ip link set up dev vxlan0
+
+          install -d -m 755 /mnt/localpv-disk /mnt/localpv-share
+          cat >/etc/sysctl.d/99-gdc-vmruntime-inotify.conf <<'EOF'
+        fs.inotify.max_user_instances = 1024
+        fs.inotify.max_user_watches = 1048576
+        EOF
+          sysctl --load /etc/sysctl.d/99-gdc-vmruntime-inotify.conf
+        }}
+
+        configure_remote_host() {{
+          local host_ip="$1"
+          local vxlan_ip="$2"
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "root@${{host_ip}}" "bash -s" -- "${{vxlan_ip}}" <<'EOF'
+        set -euo pipefail
+        vxlan_ip="$1"
+        default_iface="$(ip route show default | awk '/default/ {{print $5; exit}}')"
+        if ! ip link show vxlan0 >/dev/null 2>&1; then
+          ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472
+        fi
+        for peer_ip in {peer_ips}; do
+          bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true
+        done
+        ip addr replace "${{vxlan_ip}}/24" dev vxlan0
+        ip link set up dev vxlan0
+        install -d -m 755 /mnt/localpv-disk /mnt/localpv-share
+        cat >/etc/sysctl.d/99-gdc-vmruntime-inotify.conf <<'EON'
+        fs.inotify.max_user_instances = 1024
+        fs.inotify.max_user_watches = 1048576
+        EON
+        sysctl --load /etc/sysctl.d/99-gdc-vmruntime-inotify.conf
+        EOF
+        }}
+
+        {local_vxlan_setup}
+        {remote_hosts}
+        """
+    )
+
+
+def render_gdc_create_cluster_script(config: GDCBootstrapConfig) -> str:
+    """Render the cluster creation and VM Runtime enablement script."""
+    return dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        export GOOGLE_APPLICATION_CREDENTIALS=/root/bm-gcr.json
+        install -d -m 755 {config.cluster_workspace_dir}
+
+        if [ ! -f {config.kubeconfig_path} ]; then
+          bmctl create config -c {config.cluster_id} --force
+          install -m 600 {config.staging_bundle_dir}/cluster.yaml \
+            {config.cluster_workspace_dir}/{config.cluster_id}.yaml
+          bmctl check preflight -c {config.cluster_id}
+          bmctl create cluster -c {config.cluster_id}
+        fi
+        bmctl check vmruntimepfc --kubeconfig {config.kubeconfig_path}
+        kubectl --kubeconfig {config.kubeconfig_path} patch vmruntime vmruntime --type merge \
+          -p '{{"spec":{{"enabled":true}}}}'
+        kubectl --kubeconfig {config.kubeconfig_path} wait \
+          --for=jsonpath='{{.status.ready}}'=true vmruntime/vmruntime --timeout=10m
+        """
+    )
+
+
+def render_gdc_install_helper_script(config: GDCBootstrapConfig) -> str:
+    """Render helper scripts for repeated admin access on the workstation."""
+    return dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cat >/usr/local/bin/shifter-gdc-kubectl <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        exec env KUBECONFIG="{config.kubeconfig_path}" kubectl "$@"
+        EOF
+        chmod +x /usr/local/bin/shifter-gdc-kubectl
+
+        cat >/usr/local/bin/shifter-gdc-kubeconfig <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        printf '%s\\n' "{config.kubeconfig_path}"
+        EOF
+        chmod +x /usr/local/bin/shifter-gdc-kubeconfig
+        """
+    )
+
+
+def stage_gdc_bootstrap_assets(config: GDCBootstrapConfig, staging_dir: Path, dry_run: bool = False) -> dict[str, Path]:
+    """Create the local assets that will be uploaded to the admin workstation."""
+    assets_dir = staging_dir / config.cluster_id
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    private_key_path = assets_dir / "id_rsa"
+    public_key_path = assets_dir / "id_rsa.pub"
+    service_account_key_path = assets_dir / "bm-gcr.json"
+    ssh_metadata_path = assets_dir / "ssh-metadata"
+    cluster_config_path = assets_dir / "cluster.yaml"
+    workstation_script = assets_dir / "prepare-workstation.sh"
+    hosts_script = assets_dir / "prepare-hosts.sh"
+    cluster_script = assets_dir / "create-cluster.sh"
+    helper_script = assets_dir / "install-helper.sh"
+
+    if dry_run:
+        info(f"[DRY-RUN] Would generate bootstrap assets in {assets_dir}")
+    else:
+        run_cmd(["ssh-keygen", "-t", "rsa", "-N", "", "-f", str(private_key_path)])
+        run_cmd(
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "keys",
+                "create",
+                str(service_account_key_path),
+                "--iam-account",
+                config.service_account_email,
+                "--project",
+                config.project_id,
+            ]
+        )
+        ssh_metadata_path.write_text(f"root:{public_key_path.read_text().strip()}\n")
+        cluster_config_path.write_text(render_gdc_cluster_config(config))
+        workstation_script.write_text(render_gdc_prepare_workstation_script(config))
+        hosts_script.write_text(render_gdc_prepare_hosts_script(config))
+        cluster_script.write_text(render_gdc_create_cluster_script(config))
+        helper_script.write_text(render_gdc_install_helper_script(config))
+        for script_path in (workstation_script, hosts_script, cluster_script, helper_script):
+            script_path.chmod(0o755)
+
+    return {
+        "assets_dir": assets_dir,
+        "private_key": private_key_path,
+        "public_key": public_key_path,
+        "service_account_key": service_account_key_path,
+        "ssh_metadata": ssh_metadata_path,
+        "cluster_config": cluster_config_path,
+        "workstation_script": workstation_script,
+        "hosts_script": hosts_script,
+        "cluster_script": cluster_script,
+        "helper_script": helper_script,
+    }
+
+
+def ensure_gdc_apis(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
+    """Enable the GDC/GKE/GCP APIs required by the evaluation cluster."""
+    run_cmd(["gcloud", "config", "set", "project", config.project_id], dry_run=dry_run)
+    run_cmd(["gcloud", "services", "enable", *GDC_API_SERVICES, "--project", config.project_id], dry_run=dry_run)
+
+
+def ensure_gdc_service_account(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
+    """Create the shared GDC service account and grant the required project roles."""
+    if dry_run or not gcloud_resource_exists(
+        [
+            "gcloud",
+            "iam",
+            "service-accounts",
+            "describe",
+            config.service_account_email,
+            "--project",
+            config.project_id,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "create",
+                config.service_account_name,
+                "--project",
+                config.project_id,
+            ],
+            dry_run=dry_run,
+            check=False,
+        )
+
+    member = f"serviceAccount:{config.service_account_email}"
+    for role in GDC_SERVICE_ACCOUNT_ROLES:
+        run_cmd(
+            [
+                "gcloud",
+                "projects",
+                "add-iam-policy-binding",
+                config.project_id,
+                "--member",
+                member,
+                "--role",
+                role,
+                "--no-user-output-enabled",
+            ],
+            dry_run=dry_run,
+        )
+
+
+def ensure_gdc_network(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
+    """Create the custom VPC, subnet, and firewall rules used by the cluster."""
+    if dry_run or not gcloud_resource_exists(
+        ["gcloud", "compute", "networks", "describe", config.resolved_network_name, "--project", config.project_id]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "compute",
+                "networks",
+                "create",
+                config.resolved_network_name,
+                "--project",
+                config.project_id,
+                "--subnet-mode",
+                "custom",
+            ],
+            dry_run=dry_run,
+        )
+
+    if dry_run or not gcloud_resource_exists(
+        [
+            "gcloud",
+            "compute",
+            "networks",
+            "subnets",
+            "describe",
+            config.resolved_subnetwork_name,
+            "--project",
+            config.project_id,
+            "--region",
+            config.region,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "compute",
+                "networks",
+                "subnets",
+                "create",
+                config.resolved_subnetwork_name,
+                "--project",
+                config.project_id,
+                "--network",
+                config.resolved_network_name,
+                "--region",
+                config.region,
+                "--range",
+                config.subnet_cidr,
+                "--enable-private-ip-google-access",
+            ],
+            dry_run=dry_run,
+        )
+
+    firewall_rules = [
+        (
+            config.ssh_firewall_rule_name,
+            "tcp:22",
+            "0.0.0.0/0",
+        ),
+        (
+            config.internal_firewall_rule_name,
+            "tcp,udp,icmp",
+            config.subnet_cidr,
+        ),
+        (
+            config.lb_firewall_rule_name,
+            "tcp:443,tcp:6444",
+            "0.0.0.0/0",
+        ),
+    ]
+
+    for name, rules, source_ranges in firewall_rules:
+        if dry_run or not gcloud_resource_exists(
+            ["gcloud", "compute", "firewall-rules", "describe", name, "--project", config.project_id]
+        ):
+            run_cmd(
+                [
+                    "gcloud",
+                    "compute",
+                    "firewall-rules",
+                    "create",
+                    name,
+                    "--project",
+                    config.project_id,
+                    "--network",
+                    config.resolved_network_name,
+                    "--direction",
+                    "INGRESS",
+                    "--allow",
+                    rules,
+                    "--source-ranges",
+                    source_ranges,
+                    "--target-tags",
+                    config.instance_tag,
+                ],
+                dry_run=dry_run,
+            )
+
+
+def gdc_instance_create_command(
+    config: GDCBootstrapConfig,
+    host: GDCHost,
+    ssh_metadata_path: Path,
+) -> list[str]:
+    """Build the gcloud command to create a single cluster VM."""
+    return [
+        "gcloud",
+        "compute",
+        "instances",
+        "create",
+        host.name,
+        "--project",
+        config.project_id,
+        "--zone",
+        config.zone,
+        "--machine-type",
+        config.machine_type,
+        "--boot-disk-size",
+        f"{config.boot_disk_size_gb}G",
+        "--boot-disk-type",
+        config.boot_disk_type,
+        "--image-family",
+        "ubuntu-2204-lts",
+        "--image-project",
+        "ubuntu-os-cloud",
+        "--subnet",
+        config.resolved_subnetwork_name,
+        "--private-network-ip",
+        host.primary_ip,
+        "--can-ip-forward",
+        "--min-cpu-platform",
+        "Intel Haswell",
+        "--enable-nested-virtualization",
+        "--service-account",
+        config.service_account_email,
+        "--scopes",
+        "cloud-platform",
+        "--tags",
+        config.instance_tag,
+        "--metadata",
+        f"cluster_id={config.cluster_id},bmctl_version={config.bmctl_version},enable-oslogin=FALSE",
+        "--metadata-from-file",
+        f"ssh-keys={ssh_metadata_path}",
+    ]
+
+
+def ensure_gdc_instances(config: GDCBootstrapConfig, ssh_metadata_path: Path, dry_run: bool = False) -> None:
+    """Create the workstation and cluster nodes if they do not already exist."""
+    for host in config.all_hosts:
+        if dry_run or not gcloud_resource_exists(
+            [
+                "gcloud",
+                "compute",
+                "instances",
+                "describe",
+                host.name,
+                "--project",
+                config.project_id,
+                "--zone",
+                config.zone,
+            ]
+        ):
+            run_cmd(gdc_instance_create_command(config, host, ssh_metadata_path), dry_run=dry_run)
+
+
+def sync_gdc_instance_ssh_metadata(config: GDCBootstrapConfig, ssh_metadata_path: Path, dry_run: bool = False) -> None:
+    """Ensure all instances trust the current bootstrap key pair."""
+    for host in config.all_hosts:
+        run_cmd(
+            [
+                "gcloud",
+                "compute",
+                "instances",
+                "add-metadata",
+                host.name,
+                "--project",
+                config.project_id,
+                "--zone",
+                config.zone,
+                "--metadata-from-file",
+                f"ssh-keys={ssh_metadata_path}",
+            ],
+            dry_run=dry_run,
+        )
+
+
+def wait_for_gdc_ssh(config: GDCBootstrapConfig, host: GDCHost, dry_run: bool = False) -> None:
+    """Wait until gcloud compute ssh succeeds for the given host."""
+    if dry_run:
+        info(f"[DRY-RUN] Would wait for SSH on {host.name}")
+        return
+
+    for attempt in range(1, 31):
+        result = subprocess.run(  # nosec B603 B607
+            [
+                "gcloud",
+                "compute",
+                "ssh",
+                f"root@{host.name}",
+                "--project",
+                config.project_id,
+                "--zone",
+                config.zone,
+                "--command",
+                "printf ready",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+        info(f"Waiting for SSH on {host.name} (attempt {attempt}/30)")
+        time.sleep(10)
+
+    error(f"Timed out waiting for SSH on {host.name}")
+    sys.exit(1)
+
+
+def upload_gdc_assets(config: GDCBootstrapConfig, assets_dir: Path, dry_run: bool = False) -> None:
+    """Upload the rendered bootstrap bundle to the admin workstation."""
+    run_cmd(
+        [
+            "gcloud",
+            "compute",
+            "scp",
+            "--recurse",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            str(assets_dir),
+            f"root@{config.workstation.name}:{config.staging_dir}/",
+        ],
+        dry_run=dry_run,
+    )
+
+
+def run_gdc_workstation_script(
+    config: GDCBootstrapConfig,
+    script_name: str,
+    dry_run: bool = False,
+) -> None:
+    """Execute a staged script on the admin workstation."""
+    run_cmd(
+        [
+            "gcloud",
+            "compute",
+            "ssh",
+            f"root@{config.workstation.name}",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            "--command",
+            f"bash {config.staging_dir}/{config.cluster_id}/{script_name}",
+        ],
+        dry_run=dry_run,
+    )
+
+
+def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, str]:
+    """Bootstrap the repeatable GDC-on-Compute-Engine VM Runtime cluster."""
+    if not config.project_id:
+        error("GDC bootstrap requires a GCP project ID. Set PANW_GCP_DEV or pass --project-id.")
+        sys.exit(1)
+
+    header(f"Bootstrapping {config.cluster_id} GDC Cluster")
+
+    info(f"GCP Project: {config.project_id}")
+    info(f"Region / Zone: {config.region} / {config.zone}")
+    info(f"Network: {config.resolved_network_name} ({config.subnet_cidr})")
+    info(f"Service Account: {config.service_account_email}")
+    info(f"VM Runtime VIPs: control-plane={config.control_plane_vip}, ingress={config.ingress_vip}")
+
+    if not dry_run and not confirm("Create or reconcile these GDC bootstrap resources?"):
+        warn("Aborted by user")
+        sys.exit(0)
+
+    ensure_gdc_apis(config, dry_run=dry_run)
+    ensure_gdc_service_account(config, dry_run=dry_run)
+
+    with tempfile.TemporaryDirectory(prefix="shifter-gdc-bootstrap-") as staging_dir_name:
+        staged_assets = stage_gdc_bootstrap_assets(config, Path(staging_dir_name), dry_run=dry_run)
+        ensure_gdc_network(config, dry_run=dry_run)
+        ensure_gdc_instances(config, staged_assets["ssh_metadata"], dry_run=dry_run)
+        sync_gdc_instance_ssh_metadata(config, staged_assets["ssh_metadata"], dry_run=dry_run)
+
+        for host in config.all_hosts:
+            wait_for_gdc_ssh(config, host, dry_run=dry_run)
+
+        upload_gdc_assets(config, staged_assets["assets_dir"], dry_run=dry_run)
+        run_gdc_workstation_script(config, "prepare-workstation.sh", dry_run=dry_run)
+        run_gdc_workstation_script(config, "prepare-hosts.sh", dry_run=dry_run)
+        run_gdc_workstation_script(config, "create-cluster.sh", dry_run=dry_run)
+        run_gdc_workstation_script(config, "install-helper.sh", dry_run=dry_run)
+
+    success("GDC bootstrap complete")
+    print("\nNext commands:")
+    code_block(
+        f"""gcloud compute ssh root@{config.workstation.name} --project {config.project_id} --zone {config.zone}
+shifter-gdc-kubectl get nodes
+shifter-gdc-kubeconfig"""
+    )
+
+    return {
+        "project_id": config.project_id,
+        "cluster_id": config.cluster_id,
+        "region": config.region,
+        "zone": config.zone,
+        "network_name": config.resolved_network_name,
+        "subnetwork_name": config.resolved_subnetwork_name,
+        "workstation": config.workstation.name,
+        "kubeconfig_path": config.kubeconfig_path,
+    }
 
 
 def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = False) -> dict:
@@ -1196,13 +2076,25 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     walkthrough_final_steps(env)
 
 
-def check_dependencies():
-    """Check all required dependencies before starting."""
-    required = {
-        "aws": "AWS CLI - https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
-        "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
-        "git": "Git - https://git-scm.com/downloads",
-    }
+def check_dependencies(command: str | None = None):
+    """Check command-specific dependencies before starting."""
+    required = {"git": "Git - https://git-scm.com/downloads"}
+
+    if command in {None, "bootstrap", "terraform", "full"}:
+        required.update(
+            {
+                "aws": "AWS CLI - https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+                "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
+            }
+        )
+
+    if command == "gdc-bootstrap":
+        required.update(
+            {
+                "gcloud": "Google Cloud CLI - https://cloud.google.com/sdk/docs/install",
+                "ssh-keygen": "OpenSSH client tools - https://www.openssh.com/",
+            }
+        )
 
     optional = {"gh": "GitHub CLI - https://cli.github.com/ (recommended for automating GitHub secrets)"}
 
@@ -1247,11 +2139,11 @@ Examples:
 
   # Just run terraform (after bootstrap)
   ./scripts/bootstrap/deploy.py terraform --env prod --profile my-prod-profile
+
+  # Bootstrap a repeatable Google Distributed Cloud VM Runtime cluster
+  ./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
         """,
     )
-
-    # Check dependencies first
-    check_dependencies()
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -1273,7 +2165,23 @@ Examples:
     full_parser.add_argument("--profile", required=True, help="AWS CLI profile name")
     full_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
 
+    gdc_parser = subparsers.add_parser(
+        "gdc-bootstrap",
+        help="Bootstrap a repeatable Google Distributed Cloud VM Runtime evaluation cluster",
+    )
+    gdc_parser.add_argument(
+        "--project-id",
+        default=get_default_gdc_project_id(),
+        help="GCP project ID (defaults to PANW_GCP_DEV or repo-root .env)",
+    )
+    gdc_parser.add_argument("--cluster-id", default="cluster1", help="Cluster name / prefix")
+    gdc_parser.add_argument("--region", default="us-central1", help="Cluster region")
+    gdc_parser.add_argument("--zone", default="us-central1-a", help="Compute Engine zone")
+    gdc_parser.add_argument("--google-account-email", help="Optional Google identity to grant cluster-admin")
+    gdc_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
+
     args = parser.parse_args()
+    check_dependencies(args.command)
 
     if args.command == "bootstrap":
         config = BootstrapConfig(env=args.env)
@@ -1292,6 +2200,18 @@ Examples:
 
     elif args.command == "full":
         full_deployment(args.env, args.profile, dry_run=args.dry_run)
+
+    elif args.command == "gdc-bootstrap":
+        gdc_bootstrap_cluster(
+            GDCBootstrapConfig(
+                project_id=args.project_id,
+                cluster_id=args.cluster_id,
+                region=args.region,
+                zone=args.zone,
+                google_account_email=args.google_account_email,
+            ),
+            dry_run=args.dry_run,
+        )
 
 
 if __name__ == "__main__":

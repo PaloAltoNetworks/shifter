@@ -14,6 +14,7 @@ import paramiko
 from executors.base import (
     CommandResult,
     ExecutorCommandError,
+    ExecutorConnectionError,
     ExecutorError,
     ExecutorTimeoutError,
 )
@@ -27,7 +28,7 @@ CommandError = ExecutorCommandError
 TimeoutError = ExecutorTimeoutError
 
 
-class ConnectionError(SSHExecutorError):
+class ConnectionError(ExecutorConnectionError):
     """Raised when SSH connection fails."""
 
 
@@ -300,6 +301,15 @@ class SSHExecutor:
 
             logger.info(f"Waiting for SSH on {host}... ({elapsed:.1f}s / {timeout_seconds}s)")
             time.sleep(self._poll_interval)
+
+    def wait_for_ready(
+        self,
+        instance_id: str,
+        timeout_seconds: int = 1800,
+        document_name: str = "",
+    ) -> bool:
+        """Wait for PAN-OS SSH readiness with the shared executor signature."""
+        return self.wait_for_agent(instance_id, timeout_seconds=timeout_seconds)
 
     def _check_ssh_available(self, host: str) -> bool:
         """Check if SSH is available and PAN-OS CLI is ready.

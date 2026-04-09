@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 
-from executors.base import CommandResult, ExecutorError, ExecutorTimeoutError
+from executors.base import CommandResult, ExecutorConnectionError, ExecutorError, ExecutorTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ NGFWExecutorError = ExecutorError
 NGFWTimeoutError = ExecutorTimeoutError
 
 
-class NGFWConnectionError(NGFWExecutorError):
+class NGFWConnectionError(ExecutorConnectionError):
     """Raised when SSH connection fails."""
 
 
@@ -206,8 +206,14 @@ class NGFWExecutor:
             )
             time.sleep(self._poll_interval)
 
-    # Alias for Executor protocol compatibility
-    wait_for_ready = wait_for_agent
+    def wait_for_ready(
+        self,
+        instance_id: str,
+        timeout_seconds: int = 1800,
+        document_name: str = "",
+    ) -> bool:
+        """Wait for NGFW SSH readiness with the shared executor signature."""
+        return self.wait_for_agent(instance_id, timeout_seconds=timeout_seconds)
 
     def reboot_and_wait(
         self,

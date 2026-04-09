@@ -5,6 +5,7 @@ and utility functions for the provisioner.
 """
 
 import base64
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -189,8 +190,90 @@ class RangeNetworkConfig:
         return self.portal_network_cidrs[0] if self.portal_network_cidrs else ""
 
 
+@dataclass(frozen=True)
+class GDCNetworkAccessConfig:
+    """Access contract for the GDC VM Runtime range plane."""
+
+    access_secret_id: str
+    kubeconfig: str
+    cluster_id: str
+    vxlan_cidr: str
+    region: str
+    namespace_prefix: str = "range"
+    network_interface: str = "vxlan0"
+    dns_nameservers: tuple[str, ...] = ("8.8.8.8",)
+    static_ip_reservation_count: int = 4
+
+
 def _parse_csv_env(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _is_active_gdc_range_plane() -> bool:
+    return os.environ.get("CLOUD_PROVIDER", "aws") == "gcp"
+
+
+def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
+    """Load the GDC access bundle from Secret Manager when configured."""
+    secret_id = os.environ.get("GDC_ACCESS_SECRET_ID", "").strip()
+    if not secret_id:
+        return None
+
+    from cloud import get_secrets_store
+
+    raw_secret = get_secrets_store().get_secret(secret_id)
+    payload: dict[str, Any] = {}
+    kubeconfig = raw_secret
+
+    try:
+        parsed = json.loads(raw_secret)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict):
+        payload = parsed
+        kubeconfig = str(parsed.get("kubeconfig", "")).strip()
+        if not kubeconfig:
+            raise RuntimeError("GDC access secret is missing the kubeconfig field")
+
+    cluster_id = str(payload.get("cluster_id") or os.environ.get("GDC_CLUSTER_ID", "")).strip()
+    vxlan_cidr = str(payload.get("vxlan_cidr") or os.environ.get("GDC_VXLAN_CIDR", "")).strip()
+    region = str(
+        payload.get("region")
+        or os.environ.get("RANGE_NETWORK_REGION")
+        or os.environ.get("GCP_REGION")
+        or os.environ.get("CLOUD_REGION")
+        or os.environ.get("AWS_REGION", "")
+    ).strip()
+    namespace_prefix = str(
+        payload.get("range_namespace_prefix") or os.environ.get("GDC_RANGE_NAMESPACE_PREFIX", "range")
+    )
+    network_interface = str(payload.get("network_interface") or os.environ.get("GDC_NETWORK_INTERFACE", "vxlan0"))
+    dns_nameservers = tuple(
+        payload.get("dns_nameservers") or _parse_csv_env(os.environ.get("GDC_NETWORK_DNS_NAMESERVERS", "8.8.8.8"))
+    )
+    static_ip_reservation_count = int(
+        payload.get("static_ip_reservation_count") or os.environ.get("GDC_STATIC_IP_RESERVATION_COUNT", "4")
+    )
+
+    if not cluster_id:
+        raise RuntimeError("GDC access secret must include cluster_id or GDC_CLUSTER_ID must be set")
+    if not vxlan_cidr:
+        raise RuntimeError("GDC access secret must include vxlan_cidr or GDC_VXLAN_CIDR must be set")
+    if not region:
+        raise RuntimeError("GDC access secret must include region or RANGE_NETWORK_REGION/GCP_REGION must be set")
+
+    return GDCNetworkAccessConfig(
+        access_secret_id=secret_id,
+        kubeconfig=kubeconfig,
+        cluster_id=cluster_id,
+        vxlan_cidr=vxlan_cidr,
+        region=region,
+        namespace_prefix=namespace_prefix.strip() or "range",
+        network_interface=network_interface.strip() or "vxlan0",
+        dns_nameservers=tuple(dns_nameservers) or ("8.8.8.8",),
+        static_ip_reservation_count=static_ip_reservation_count,
+    )
 
 
 def load_range_network_config() -> RangeNetworkConfig:
@@ -199,6 +282,15 @@ def load_range_network_config() -> RangeNetworkConfig:
     legacy_portal_cidr = os.environ.get("PORTAL_VPC_CIDR", "")
     if not portal_network_cidrs and legacy_portal_cidr:
         portal_network_cidrs = (legacy_portal_cidr,)
+
+    gdc_access = load_gdc_network_access_config() if _is_active_gdc_range_plane() else None
+    if gdc_access is not None:
+        return RangeNetworkConfig(
+            network_id=gdc_access.cluster_id,
+            network_cidr=gdc_access.vxlan_cidr,
+            network_region=gdc_access.region,
+            portal_network_cidrs=portal_network_cidrs,
+        )
 
     return RangeNetworkConfig(
         network_id=os.environ.get("RANGE_NETWORK_ID") or os.environ.get("RANGE_VPC_ID", ""),

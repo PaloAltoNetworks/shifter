@@ -39,6 +39,11 @@ class TestStartEcsTaskGCP:
             "RANGE_NETWORK_CIDR": "10.50.0.0/16",
             "RANGE_NETWORK_REGION": "us-central1",
             "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
+            "GDC_ACCESS_SECRET_ID": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-access",
+            "GDC_RANGE_NAMESPACE_PREFIX": "range",
+            "GDC_NETWORK_INTERFACE": "vxlan0",
+            "GDC_NETWORK_DNS_NAMESERVERS": "8.8.8.8",
+            "GDC_STATIC_IP_RESERVATION_COUNT": "4",
         }
 
         with (
@@ -62,4 +67,5 @@ class TestStartEcsTaskGCP:
             assert call_kwargs["env_overrides"]["RANGE_NETWORK_ID"] == env_overrides["RANGE_NETWORK_ID"]
             assert call_kwargs["env_overrides"]["RANGE_NETWORK_CIDR"] == env_overrides["RANGE_NETWORK_CIDR"]
             assert call_kwargs["env_overrides"]["PORTAL_NETWORK_CIDRS"] == env_overrides["PORTAL_NETWORK_CIDRS"]
+            assert call_kwargs["env_overrides"]["GDC_ACCESS_SECRET_ID"] == env_overrides["GDC_ACCESS_SECRET_ID"]
             assert call_kwargs["env_overrides"]["DB_HOST"] == env_overrides["DB_HOST"]

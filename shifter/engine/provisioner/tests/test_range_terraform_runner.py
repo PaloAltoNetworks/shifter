@@ -19,24 +19,36 @@ class TestProviderRouting:
         with patch.dict(os.environ, {}, clear=True):
             assert get_range_module_path() == AWS_RANGE_MODULE_PATH
 
-    def test_get_range_module_path_uses_legacy_gcp_module_only_when_explicitly_requested(self):
-        from range_terraform_runner import LEGACY_GCP_RANGE_MODULE_PATH, get_range_module_path
-
-        with patch.dict(
-            os.environ,
-            {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_PLANE": "legacy-compute-engine"},
-            clear=True,
-        ):
-            assert get_range_module_path() == LEGACY_GCP_RANGE_MODULE_PATH
-
-    def test_get_range_module_path_fails_fast_for_default_gdc_range_plane(self):
+    def test_get_range_module_path_fails_fast_for_gcp(self):
         from range_terraform_runner import get_range_module_path
 
         with (
             patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True),
-            pytest.raises(RuntimeError, match="GDC VM Runtime"),
+            pytest.raises(RuntimeError, match="does not expose a Terraform module path"),
         ):
             get_range_module_path()
+
+    @patch(
+        "range_terraform_runner.gdc_range_networks.apply_range_networks",
+        return_value={"subnets": {}, "instances": []},
+    )
+    def test_apply_range_dispatches_to_gdc_network_runner_by_default(self, mock_apply):
+        from range_terraform_runner import apply_range
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+            result = apply_range("req-123", {"range_id": 42, "subnets": []})
+
+        assert result == {"subnets": {}, "instances": []}
+        mock_apply.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
+
+    @patch("range_terraform_runner.gdc_range_networks.destroy_range_networks")
+    def test_destroy_range_dispatches_to_gdc_network_runner_by_default(self, mock_destroy):
+        from range_terraform_runner import destroy_range
+
+        with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
+            destroy_range("req-123", variables={"range_id": 42, "subnets": []})
+
+        mock_destroy.assert_called_once_with("req-123", {"range_id": 42, "subnets": []})
 
     def test_get_range_state_key_prefix_uses_provider_specific_paths(self):
         from range_terraform_runner import get_range_state_key_prefix
@@ -46,13 +58,6 @@ class TestProviderRouting:
 
         with patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp"}, clear=True):
             assert get_range_state_key_prefix() == "gcp/gdc-ranges"
-
-        with patch.dict(
-            os.environ,
-            {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_PLANE": "legacy-compute-engine"},
-            clear=True,
-        ):
-            assert get_range_state_key_prefix() == "gcp/legacy-ce-ranges"
 
 
 class TestDestroyRange:

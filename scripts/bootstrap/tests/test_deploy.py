@@ -754,6 +754,7 @@ class TestGdcBootstrapConfig:
         assert config.resolved_network_name == "cluster1-gdc"
         assert config.resolved_subnetwork_name == "cluster1-gdc-us-central1"
         assert config.service_account_email == "baremetal-gcr@prod-rwctxzl6shxk.iam.gserviceaccount.com"
+        assert config.gdc_access_secret_id == "shifter-gcp-dev-gdc-access"
 
     def test_exposes_expected_cluster_hosts(self):
         """Config should expose the expected workstation, control-plane, and worker hosts."""
@@ -803,6 +804,15 @@ class TestGdcRenderers:
         assert "bmctl check vmruntimepfc" in rendered
         assert "patch vmruntime vmruntime" in rendered
 
+    def test_build_gdc_access_secret_payload_contains_cluster_and_vxlan_details(self):
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        rendered = deploy.build_gdc_access_secret_payload(config, "apiVersion: v1\nclusters: []\n")
+
+        assert '"cluster_id": "cluster1"' in rendered
+        assert '"vxlan_cidr": "10.200.0.0/24"' in rendered
+        assert '"network_interface": "vxlan0"' in rendered
+
 
 class TestGdcBootstrapCluster:
     """Tests for deploy.gdc_bootstrap_cluster."""
@@ -826,6 +836,7 @@ class TestGdcBootstrapCluster:
             patch("deploy.wait_for_gdc_ssh") as mock_wait,
             patch("deploy.upload_gdc_assets") as mock_upload,
             patch("deploy.run_gdc_workstation_script") as mock_remote,
+            patch("deploy.sync_gdc_access_secret") as mock_access_secret,
         ):
             result = deploy.gdc_bootstrap_cluster(config)
 
@@ -844,6 +855,8 @@ class TestGdcBootstrapCluster:
                 "create-cluster.sh",
                 "install-helper.sh",
             ]
+            mock_access_secret.assert_called_once_with(config, dry_run=False)
+            assert result["gdc_access_secret_id"] == "shifter-gcp-dev-gdc-access"
 
 
 # =============================================================================

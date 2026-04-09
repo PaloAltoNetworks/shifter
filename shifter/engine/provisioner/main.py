@@ -2095,11 +2095,7 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                     user_id,
                     range_spec,
                 )
-                range_terraform_runner.destroy_range(
-                    request_id,
-                    range_terraform_runner.get_range_module_path(),
-                    variables=tf_variables,
-                )
+                range_terraform_runner.destroy_range(request_id, variables=tf_variables)
                 range_terraform_runner.cleanup_range_state(request_id)
                 logger.info("Auto-cleanup succeeded for range_id=%s", range_id)
             except Exception as cleanup_error:
@@ -2188,11 +2184,7 @@ def _run_terraform_provision(
     tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
 
     # Run Terraform apply
-    output_data = range_terraform_runner.apply_range(
-        request_id,
-        tf_variables,
-        range_terraform_runner.get_range_module_path(),
-    )
+    output_data = range_terraform_runner.apply_range(request_id, tf_variables)
     logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
 
     subnets_output = output_data.get("subnets", {})
@@ -2204,6 +2196,16 @@ def _run_terraform_provision(
         instances=instances_output,
         expected_subnet_names=expected_subnet_names,
     )
+
+    if (
+        _get_cloud_provider() == "gcp"
+        and any(subnet.get("instances") for subnet in spec_subnets)
+        and not instances_output
+    ):
+        raise NotImplementedError(
+            "GDC scenario network provisioning is implemented, but VM Runtime asset lifecycle is not wired yet. "
+            "Slice 11 must land before GCP ranges with scenario assets can complete provisioning."
+        )
 
     # Validate NGFW routes were created if range requires NGFW
     if range_spec.get("ngfw", False):
@@ -2305,11 +2307,7 @@ def _run_terraform_destroy(
     terraform_succeeded = False
     try:
         tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
-        range_terraform_runner.destroy_range(
-            request_id,
-            range_terraform_runner.get_range_module_path(),
-            variables=tf_variables,
-        )
+        range_terraform_runner.destroy_range(request_id, variables=tf_variables)
         terraform_succeeded = True
 
         logger.info("Cleaning up Terraform state...")

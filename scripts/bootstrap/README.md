@@ -29,6 +29,7 @@ The `deploy.py` CLI provides an interactive walkthrough for bootstrapping a bare
 - the hybrid GDC cluster plus VM Runtime enablement
 - the inotify hardening needed to keep `macvtap-deviceplugin` stable
 - admin workstation helpers for repeatable kubeconfig access
+- the `shifter-gcp-dev-gdc-access` Secret Manager bundle consumed by the provisioner for GDC range-plane access
 
 ## Interactive Prompts
 

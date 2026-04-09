@@ -124,32 +124,34 @@ class TestRangeStatePayloads:
             }
         }
 
-    def test_build_subnet_state_persists_gcp_metadata_without_aws_aliases(self):
+    def test_build_subnet_state_persists_gdc_metadata_without_aws_aliases(self):
         from main import _build_subnet_state
 
         subnet_state = _build_subnet_state(
             {
-                "subnet_id": "projects/test/regions/us-central1/subnetworks/range-1",
-                "subnet_cidr": "10.50.1.0/28",
-                "security_group_id": "shifter-target-tag",
+                "subnet_id": "range-42-attack",
+                "subnet_cidr": "10.200.0.96/28",
+                "security_group_id": "",
                 "route_table_id": "",
-                "gcp_subnetwork_name": "range-1",
-                "gcp_subnetwork_id": "1234567890",
-                "gcp_subnetwork_self_link": "projects/test/regions/us-central1/subnetworks/range-1",
-                "gcp_target_tag": "shifter-target-tag",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_nad_name": "range-42-attack",
+                "gdc_gateway_ip": "10.200.0.97",
+                "gdc_ipam_range": "10.200.0.96/28",
             },
             provider="gcp",
         )
 
         assert subnet_state["cloud_provider"] == "gcp"
-        assert subnet_state["subnet_id"] == "projects/test/regions/us-central1/subnetworks/range-1"
+        assert subnet_state["subnet_id"] == "range-42-attack"
         assert subnet_state["aws_subnet_id"] is None
         assert subnet_state["provider_metadata"] == {
             "gcp": {
-                "subnetwork_name": "range-1",
-                "subnetwork_id": "1234567890",
-                "subnetwork_self_link": "projects/test/regions/us-central1/subnetworks/range-1",
-                "target_tag": "shifter-target-tag",
+                "namespace": "range-42",
+                "network_name": "range-42-attack",
+                "nad_name": "range-42-attack",
+                "gateway_ip": "10.200.0.97",
+                "ipam_range": "10.200.0.96/28",
             }
         }
 
@@ -171,24 +173,23 @@ class TestRangeStatePayloads:
         assert instance_state["aws_instance_id"] == "i-abc123"
         assert instance_state["provider_metadata"] == {"aws": {"instance_id": "i-abc123"}}
 
-    def test_build_instance_state_collects_gcp_metadata(self):
+    def test_build_instance_state_collects_gdc_metadata(self):
         from main import _build_instance_state
 
         instance_state = _build_instance_state(
             {
-                "instance_id": "shifter-range-vm-1",
-                "private_ip": "10.50.1.10",
-                "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
                 "ssh_username": "ubuntu",
                 "subnet_name": "attack",
-                "gcp_instance_name": "shifter-range-vm-1",
-                "gcp_instance_id": "9988776655",
-                "gcp_instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
-                "gcp_private_ip": "10.50.1.10",
-                "gcp_ssh_key_secret_id": "projects/test/secrets/range-ssh-key",
-                "gcp_ssh_username": "ubuntu",
-                "gcp_zone": "us-central1-b",
-                "gcp_subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_ip": "10.200.0.110",
+                "gdc_ssh_secret_id": "projects/test/secrets/vmrt-ssh-key",
+                "gdc_username": "ubuntu",
+                "vmruntime_disk_name": "vmrt-vm-1-disk",
             },
             provider="gcp",
         )
@@ -198,14 +199,13 @@ class TestRangeStatePayloads:
         assert instance_state["ssh_username"] == "ubuntu"
         assert instance_state["provider_metadata"] == {
             "gcp": {
-                "instance_name": "shifter-range-vm-1",
-                "instance_id": "9988776655",
-                "instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
-                "private_ip": "10.50.1.10",
-                "ssh_key_secret_id": "projects/test/secrets/range-ssh-key",
-                "ssh_username": "ubuntu",
-                "zone": "us-central1-b",
-                "subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
+                "vm_name": "vmrt-vm-1",
+                "namespace": "range-42",
+                "network_name": "range-42-attack",
+                "ip": "10.200.0.110",
+                "ssh_secret_id": "projects/test/secrets/vmrt-ssh-key",
+                "username": "ubuntu",
+                "disk_name": "vmrt-vm-1-disk",
             }
         }
 
@@ -248,22 +248,23 @@ class TestRangeStatePayloads:
                 "role": "victim",
                 "os": "windows",
                 "subnet_name": "victims",
-                "instance_id": "shifter-range-vm-1",
-                "private_ip": "10.50.1.10",
-                "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
                 "ssh_username": "Administrator",
-                "gcp_instance_id": "9988776655",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
             },
             provider="gcp",
         )
 
         assert payload["uuid"] == "inst-123"
         assert payload["os_type"] == "windows"
-        assert payload["instance_id"] == "shifter-range-vm-1"
-        assert payload["ssh_key_secret_arn"] == "projects/test/secrets/range-ssh-key"
+        assert payload["instance_id"] == "vmrt-vm-1"
+        assert payload["ssh_key_secret_arn"] == "projects/test/secrets/vmrt-ssh-key"
         assert payload["ssh_username"] == "Administrator"
         assert payload["cloud_provider"] == "gcp"
-        assert payload["provider_metadata"] == {"gcp": {"instance_id": "9988776655"}}
+        assert payload["provider_metadata"] == {"gcp": {"vm_name": "vmrt-vm-1", "namespace": "range-42"}}
 
     def test_get_cloud_provider_defaults_to_aws(self):
         from main import _get_cloud_provider
@@ -293,14 +294,14 @@ class TestRangeStatePayloads:
         subnets = {
             "attack": {
                 "uuid": "subnet-123",
-                "subnet_id": "projects/test/regions/us-central1/subnetworks/range-1",
-                "subnet_cidr": "10.50.1.0/28",
-                "security_group_id": "shifter-target-tag",
+                "subnet_id": "range-42-attack",
+                "subnet_cidr": "10.200.0.96/28",
+                "security_group_id": "",
                 "route_table_id": "",
-                "gcp_subnetwork_name": "range-1",
-                "gcp_subnetwork_id": "1234567890",
-                "gcp_subnetwork_self_link": "projects/test/regions/us-central1/subnetworks/range-1",
-                "gcp_target_tag": "shifter-target-tag",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_nad_name": "range-42-attack",
+                "gdc_gateway_ip": "10.200.0.97",
             }
         }
         instances = [
@@ -310,14 +311,14 @@ class TestRangeStatePayloads:
                 "role": "victim",
                 "os": "windows",
                 "subnet_name": "attack",
-                "instance_id": "shifter-range-vm-1",
-                "private_ip": "10.50.1.10",
-                "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
-                "gcp_instance_name": "shifter-range-vm-1",
-                "gcp_instance_id": "9988776655",
-                "gcp_instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
-                "gcp_zone": "us-central1-b",
-                "gcp_subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_ip": "10.200.0.110",
+                "vmruntime_disk_name": "vmrt-vm-1-disk",
             }
         ]
 
@@ -333,13 +334,73 @@ class TestRangeStatePayloads:
 
         assert subnet_state["cloud_provider"] == "gcp"
         assert subnet_state["aws_subnet_id"] is None
-        assert subnet_state["provider_metadata"]["gcp"]["subnetwork_id"] == "1234567890"
+        assert subnet_state["provider_metadata"]["gcp"]["network_name"] == "range-42-attack"
         assert instance_state["cloud_provider"] == "gcp"
         assert instance_state["aws_instance_id"] is None
-        assert instance_state["provider_metadata"]["gcp"]["zone"] == "us-central1-b"
+        assert instance_state["provider_metadata"]["gcp"]["namespace"] == "range-42"
         assert provisioned_instances[0]["cloud_provider"] == "gcp"
-        assert provisioned_instances[0]["instance_id"] == "shifter-range-vm-1"
-        assert provisioned_instances[0]["provider_metadata"]["gcp"]["instance_id"] == "9988776655"
+        assert provisioned_instances[0]["instance_id"] == "vmrt-vm-1"
+        assert provisioned_instances[0]["provider_metadata"]["gcp"]["vm_name"] == "vmrt-vm-1"
+
+
+class TestGdcProvisionGuard:
+    """Tests for the Slice 10 guard that prevents false-ready GCP ranges."""
+
+    def test_run_terraform_provision_blocks_gdc_ranges_until_vm_lifecycle_lands(self):
+        from config import RangeNetworkConfig
+        from main import _run_terraform_provision
+
+        range_spec = {
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-123",
+                    "instances": [
+                        {
+                            "uuid": "inst-123",
+                            "name": "attacker",
+                            "role": "attacker",
+                            "os_type": "kali",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        with (
+            patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True),
+            patch("main.publish_status_update"),
+            patch("components.network.allocate_subnets", return_value=["10.200.0.96/28"]),
+            patch(
+                "main.load_range_network_config",
+                return_value=RangeNetworkConfig("cluster1", "10.200.0.0/24", "us-central1"),
+            ),
+            patch("main._update_range_config"),
+            patch(
+                "main._build_range_terraform_variables",
+                return_value={"range_id": 42, "subnets": range_spec["subnets"]},
+            ),
+            patch(
+                "main.range_terraform_runner.apply_range",
+                return_value={
+                    "subnets": {
+                        "attack": {
+                            "uuid": "subnet-123",
+                            "subnet_id": "range-42-attack",
+                            "subnet_cidr": "10.200.0.96/28",
+                        }
+                    },
+                    "instances": [],
+                },
+            ),
+            patch("main.run_instance_setup") as mock_setup,
+            patch("main.write_provisioned_state") as mock_write_state,
+            pytest.raises(NotImplementedError, match="VM Runtime asset lifecycle"),
+        ):
+            _run_terraform_provision("req-123", 42, 7, range_spec)
+
+        mock_setup.assert_not_called()
+        mock_write_state.assert_not_called()
 
 
 class TestPollForSerialAndCert:

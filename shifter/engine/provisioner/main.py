@@ -459,6 +459,7 @@ def _build_instance_state(instance_data: dict[str, Any], provider: str | None = 
     """Build the persisted engine_instance.state payload for range guests."""
     resolved_provider = provider or _get_cloud_provider()
     state = {
+        "asset_type": instance_data.get("asset_type", "vm_runtime_vm"),
         "cloud_provider": resolved_provider,
         "instance_id": instance_data.get("instance_id"),
         "private_ip": instance_data.get("private_ip"),
@@ -478,6 +479,7 @@ def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider:
     return {
         "uuid": instance_data.get("uuid"),
         "name": instance_data.get("name"),
+        "asset_type": instance_data.get("asset_type", "vm_runtime_vm"),
         "role": instance_data.get("role"),
         "os_type": instance_data.get("os"),
         "subnet_name": instance_data.get("subnet_name"),
@@ -1940,10 +1942,23 @@ def run_instance_setup(
         for inst in subnet.get("instances", []):
             uuid_to_config[inst.get("uuid", "")] = inst
 
-    # Separate DCs from other instances
+    # Separate Pod-backed assets from VM-backed assets. Slice 12 only composes
+    # them onto the same subnet; guest bootstrap/tooling for Pods is a later slice.
+    pod_instances = []
+    vm_instances = []
+    for inst in instances_output:
+        if inst.get("asset_type", "vm_runtime_vm") == "scenario_pod":
+            pod_instances.append(inst)
+        else:
+            vm_instances.append(inst)
+
+    if pod_instances:
+        logger.info("Skipping VM setup for %d pod-backed scenario assets", len(pod_instances))
+
+    # Separate DCs from other VM-backed instances
     dc_instances = []
     other_instances = []
-    for inst in instances_output:
+    for inst in vm_instances:
         if inst.get("role") == "dc":
             dc_instances.append(inst)
         else:
@@ -2197,16 +2212,6 @@ def _run_terraform_provision(
         expected_subnet_names=expected_subnet_names,
     )
 
-    if (
-        _get_cloud_provider() == "gcp"
-        and any(subnet.get("instances") for subnet in spec_subnets)
-        and not instances_output
-    ):
-        raise NotImplementedError(
-            "GDC scenario network provisioning is implemented, but VM Runtime asset lifecycle is not wired yet. "
-            "Slice 11 must land before GCP ranges with scenario assets can complete provisioning."
-        )
-
     # Validate NGFW routes were created if range requires NGFW
     if range_spec.get("ngfw", False):
         ngfw_data = get_user_ngfw_data(user_id)
@@ -2408,6 +2413,7 @@ def _build_range_terraform_variables(
                 {
                     "uuid": inst.get("uuid", ""),
                     "name": inst.get("name", ""),
+                    "asset_type": inst.get("asset_type", "vm_runtime_vm"),
                     "role": role,
                     "os_type": tf_os_type,
                     "instance_type": instance_type,
@@ -2447,7 +2453,8 @@ def _build_range_terraform_variables(
 
     range_network = load_range_network_config()
 
-    return {
+    provider = _get_cloud_provider()
+    variables = {
         # Core identifiers
         "range_id": range_id,
         "user_id": user_id,
@@ -2463,16 +2470,25 @@ def _build_range_terraform_variables(
         "portal_vpc_cidr": range_network.primary_portal_cidr,
         "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
         "ngfw_data_eni_id": ngfw_data_eni_id,
-        # AMI IDs
-        "kali_ami_id": get_ami_id("kali"),
-        "victim_ami_id": get_ami_id("victim"),
-        "windows_ami_id": get_ami_id("windows"),
-        "dc_ami_id": get_ami_id("dc"),
-        # IAM
-        "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
         # Subnets specification
         "subnets": tf_subnets,
     }
+
+    if provider == "gcp":
+        return variables
+
+    variables.update(
+        {
+            # AMI IDs
+            "kali_ami_id": get_ami_id("kali"),
+            "victim_ami_id": get_ami_id("victim"),
+            "windows_ami_id": get_ami_id("windows"),
+            "dc_ami_id": get_ami_id("dc"),
+            # IAM
+            "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
+        }
+    )
+    return variables
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:

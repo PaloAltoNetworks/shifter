@@ -83,9 +83,17 @@ def build_guest_execution_context(
             raise ValueError("GCP guest execution requires ssh_key_secret_arn in instance output")
 
         private_key = get_secrets_store().get_secret(secret_id)
+        username = (
+            instance_data.get("ssh_username")
+            or instance_data.get("ssh_user")
+            or get_ssh_username(
+                resolved_os_type,
+                resolved_role,
+            )
+        )
         executor = GuestSSHExecutor(
             private_key=private_key,
-            username=get_ssh_username(resolved_os_type, resolved_role),
+            username=username,
         )
         return GuestExecutionContext(
             executor=executor,

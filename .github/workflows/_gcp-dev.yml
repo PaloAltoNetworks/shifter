@@ -85,9 +85,11 @@ jobs:
           PROJECT_ID=$(awk -F'"' '/^project_id/ {print $2}' "$TFVARS_FILE")
           REGION=$(awk -F'"' '/^region/ {print $2}' "$TFVARS_FILE")
           TF_STATE_BUCKET="${PROJECT_ID}-terraform-state"
-          echo "PROJECT_ID=${PROJECT_ID}" >> "$GITHUB_ENV"
-          echo "REGION=${REGION}" >> "$GITHUB_ENV"
-          echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}" >> "$GITHUB_ENV"
+          {
+            echo "PROJECT_ID=${PROJECT_ID}"
+            echo "REGION=${REGION}"
+            echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}"
+          } >> "$GITHUB_ENV"
       - name: Bootstrap Terraform state bucket
         run: |
           if ! gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then

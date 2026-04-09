@@ -106,3 +106,30 @@ class TestGetSSHConnectionInfo:
         assert result["username"] == "Administrator"
         assert result["connection_name"] == "range-42-win-target"
         assert result["cloud_provider"] == "gcp"
+
+    def test_rejects_pod_backed_assets_for_ssh(self):
+        from engine.models import Range
+        from engine.services import get_ssh_connection_info
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "pod-instance-uuid-123",
+            "asset_type": "scenario_pod",
+            "role": "victim",
+            "os_type": "ubuntu",
+            "private_ip": "10.200.0.107",
+            "cloud_provider": "gcp",
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        with patch.object(Range.objects, "filter", return_value=mock_queryset):
+            try:
+                get_ssh_connection_info(mock_user, "pod-instance-uuid-123")
+            except ValueError as exc:
+                assert "pod-backed asset" in str(exc)
+            else:
+                raise AssertionError("Expected ValueError for pod-backed asset SSH")

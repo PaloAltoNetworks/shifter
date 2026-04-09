@@ -46,6 +46,7 @@ class TestInstanceConfig:
 
         instance = InstanceConfig(name="Attacker", role="attacker", os_type="kali")
         assert instance.name == "Attacker"
+        assert instance.asset_type == "vm_runtime_vm"
         assert instance.role == "attacker"
         assert instance.os_type == "kali"
 
@@ -135,6 +136,38 @@ class TestInstanceConfig:
 
         instance = InstanceConfig(name="Victim", role="victim", os_type="from_agent", xdr_agent=True)
         assert instance.os_type == "from_agent"
+
+    def test_create_scenario_pod_instance(self):
+        """InstanceConfig can declare a pod-backed lower-fidelity asset."""
+        from cms.scenarios.schema import InstanceConfig
+
+        instance = InstanceConfig(
+            name="Lower Fidelity Target",
+            asset_type="scenario_pod",
+            role="victim",
+            os_type="ubuntu",
+        )
+        assert instance.asset_type == "scenario_pod"
+
+    def test_scenario_pod_rejects_windows(self):
+        """Pod-backed assets are limited to Linux guest types in Slice 12."""
+        from cms.scenarios.schema import InstanceConfig
+
+        with pytest.raises(ValidationError, match="kali or ubuntu"):
+            InstanceConfig(name="Bad Pod", asset_type="scenario_pod", role="victim", os_type="windows")
+
+    def test_scenario_pod_rejects_xdr_agent(self):
+        """Pod-backed assets cannot declare XDR installation details."""
+        from cms.scenarios.schema import InstanceConfig
+
+        with pytest.raises(ValidationError, match="cannot install XDR"):
+            InstanceConfig(
+                name="Bad Pod",
+                asset_type="scenario_pod",
+                role="victim",
+                os_type="ubuntu",
+                xdr_agent=True,
+            )
 
 
 class TestSubnetConfig:

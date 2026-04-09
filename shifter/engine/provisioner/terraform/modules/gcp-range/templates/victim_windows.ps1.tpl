@@ -10,7 +10,6 @@ function Log-Message {
 }
 
 Log-Message "Starting Windows victim startup script"
-Rename-Computer -NewName "${hostname}" -Force
 net user Administrator "${admin_password}"
 
 $sshDir = "C:\ProgramData\ssh"
@@ -29,6 +28,11 @@ if ($existing -notcontains $publicKey) {
     Add-Content -Path $authKeys -Value $publicKey
 }
 icacls $authKeys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
+
+if (-not (Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*' | Where-Object State -eq 'Installed')) {
+    Log-Message "Installing OpenSSH Server capability"
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+}
 
 $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
 if ($sshdService) {

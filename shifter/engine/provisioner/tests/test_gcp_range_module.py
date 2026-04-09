@@ -31,10 +31,23 @@ class TestGcpRangeModuleContract:
         victim_template = (MODULE_PATH / "templates" / "victim_windows.ps1.tpl").read_text(encoding="utf-8")
         dc_template = (MODULE_PATH / "templates" / "dc_windows.ps1.tpl").read_text(encoding="utf-8")
 
+        assert "Get-WindowsCapability" in victim_template
         assert "Get-Service -Name sshd" in victim_template
         assert "Start-Service sshd" in victim_template
+        assert "Get-WindowsCapability" in dc_template
         assert "Get-Service -Name sshd" in dc_template
         assert "Start-Service sshd" in dc_template
+
+    def test_gcp_startup_templates_leave_hostname_to_setup_plans(self):
+        kali_template = (MODULE_PATH / "templates" / "kali.sh.tpl").read_text(encoding="utf-8")
+        linux_template = (MODULE_PATH / "templates" / "victim_linux.sh.tpl").read_text(encoding="utf-8")
+        victim_windows = (MODULE_PATH / "templates" / "victim_windows.ps1.tpl").read_text(encoding="utf-8")
+        dc_windows = (MODULE_PATH / "templates" / "dc_windows.ps1.tpl").read_text(encoding="utf-8")
+
+        assert "hostnamectl set-hostname" not in kali_template
+        assert "hostnamectl set-hostname" not in linux_template
+        assert "Rename-Computer" not in victim_windows
+        assert "Rename-Computer" not in dc_windows
 
 
 class TestGcpRangeModuleValidation:

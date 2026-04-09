@@ -4,8 +4,6 @@ set -euo pipefail
 exec > >(tee /var/log/startup-script.log) 2>&1
 
 echo "Starting Linux victim GCE startup script..."
-hostnamectl set-hostname "${hostname}"
-grep -q "${hostname}" /etc/hosts || echo "127.0.1.1 ${hostname}" >> /etc/hosts
 
 mkdir -p /home/${ssh_user}/.ssh
 chmod 700 /home/${ssh_user}/.ssh

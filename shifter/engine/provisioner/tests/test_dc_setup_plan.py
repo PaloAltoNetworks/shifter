@@ -45,6 +45,25 @@ class TestDCSetupPlan:
         assert plan.verify_step.name == "verify_ad_running"
         assert plan.verify_step.is_verification is True
 
+    def test_runtime_promotion_mode_includes_promotion_step_and_reboot(self):
+        """Runtime promotion mode should promote AD before post-setup verification."""
+        plan = DCSetupPlan(runtime_promotion=True)
+
+        assert [step.name for step in plan.steps] == [
+            "promote_domain_controller",
+            "set_admin_password",
+            "enable_ssh_password_auth",
+        ]
+        assert plan.steps[0].requires_reboot is True
+
+    def test_runtime_promotion_script_installs_ad_ds_if_missing(self):
+        """Runtime promotion script should install AD DS on a base Windows image."""
+        plan = DCSetupPlan(runtime_promotion=True)
+        promote_step = plan.steps[0]
+
+        assert "Install-WindowsFeature -Name AD-Domain-Services" in promote_step.script
+        assert "Get-ADDomainController" in promote_step.script
+
 
 class TestDCSetupPlanContext:
     """Tests for get_context method."""

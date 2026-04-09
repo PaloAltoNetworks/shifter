@@ -28,6 +28,105 @@ class EngineError(Exception):
     pass
 
 
+def _first_connection_value(*values: object) -> str:
+    """Return the first non-empty connection value as a normalized string."""
+    for value in values:
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                return normalized
+        elif value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _get_instance_provider_metadata(instance: dict[str, Any]) -> dict[str, Any]:
+    """Return the provider-specific metadata block for an instance payload."""
+    provider_metadata = instance.get("provider_metadata")
+    if not isinstance(provider_metadata, dict):
+        return {}
+
+    provider = _first_connection_value(instance.get("cloud_provider")).lower()
+    if provider:
+        metadata = provider_metadata.get(provider)
+        if isinstance(metadata, dict):
+            return metadata
+
+    for provider_name in ("gcp", "aws"):
+        metadata = provider_metadata.get(provider_name)
+        if isinstance(metadata, dict):
+            return metadata
+
+    return {}
+
+
+def _resolve_instance_host(instance: dict[str, Any]) -> str:
+    """Resolve the best internal host/IP for guest connectivity."""
+    provider_metadata = _get_instance_provider_metadata(instance)
+    return _first_connection_value(
+        instance.get("host"),
+        instance.get("private_ip"),
+        instance.get("privateIp"),
+        instance.get("internal_ip"),
+        instance.get("internalIp"),
+        provider_metadata.get("private_ip"),
+        provider_metadata.get("privateIp"),
+        provider_metadata.get("network_ip"),
+        provider_metadata.get("internal_ip"),
+        provider_metadata.get("internalIp"),
+    )
+
+
+def _resolve_instance_ssh_key_secret_ref(instance: dict[str, Any]) -> str:
+    """Resolve the active secret reference for the instance SSH key."""
+    provider_metadata = _get_instance_provider_metadata(instance)
+    return _first_connection_value(
+        instance.get("ssh_key_secret_arn"),
+        instance.get("ssh_key_secret_id"),
+        provider_metadata.get("ssh_key_secret_arn"),
+        provider_metadata.get("ssh_key_secret_id"),
+    )
+
+
+def _resolve_instance_connection_name(instance: dict[str, Any]) -> str:
+    """Resolve a stable display name for RDP/SSH Guacamole connections."""
+    provider_metadata = _get_instance_provider_metadata(instance)
+    resolved_name = _first_connection_value(
+        instance.get("name"),
+        provider_metadata.get("instance_name"),
+        provider_metadata.get("name"),
+    )
+    if resolved_name:
+        return resolved_name
+
+    os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
+    role = _first_connection_value(instance.get("role"), "instance").lower()
+    display_role = "target" if role == "victim" else role
+    return f"{display_role}-{os_type or 'instance'}"
+
+
+def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
+    """Resolve the guest SSH username for terminal and Guacamole access."""
+    provider_metadata = _get_instance_provider_metadata(instance)
+    explicit_username = _first_connection_value(
+        instance.get("ssh_username"),
+        instance.get("ssh_user"),
+        provider_metadata.get("ssh_username"),
+        provider_metadata.get("ssh_user"),
+    )
+    if explicit_username:
+        return explicit_username
+
+    os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
+    if os_type == "kali":
+        return "kali"
+    if os_type == "amazon-linux":
+        return "ec2-user"
+    if os_type == "windows":
+        return "Administrator"
+    return "ubuntu"
+
+
 def create_range(request_spec: RequestSpec) -> UUID:
     """Provision infrastructure for range.
 
@@ -609,19 +708,12 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
 
     # Get IP
-    private_ip = instance.get("private_ip")
-    if not private_ip:
+    host = _resolve_instance_host(instance)
+    if not host:
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
-    # Build connection name from instance name (falls back to role-based name)
+    connection_name = _resolve_instance_connection_name(instance)
     role = instance.get("role", "instance")
-    instance_name = instance.get("name")
-    if instance_name:
-        connection_name = instance_name
-    else:
-        # Fallback for older ranges without name field
-        display_role = "target" if role == "victim" else role
-        connection_name = f"{display_role}-{os_type}"
 
     # Get RDP credentials based on OS type and role
     # TODO: Move instance default passwords to CMS (#542)
@@ -652,7 +744,8 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
                 logger.warning("Failed to get SSH key for SFTP: %s", e)
 
     return {
-        "private_ip": private_ip,
+        "private_ip": host,
+        "host": host,
         "os_type": os_type,
         "connection_name": connection_name,
         "rdp_username": rdp_username,
@@ -661,8 +754,8 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     }
 
 
-def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
-    """Get SSH connection to instance.
+def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
+    """Get SSH connection details for a range instance.
 
     Looks up the Range containing the instance by searching provisioned_instances
     JSONB for matching UUID. This supports the new request_id-based provisioning
@@ -673,19 +766,16 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
         instance_uuid: UUID of the instance to connect to
 
     Returns:
-        SSHConnection configured for the instance
+        Dictionary with host, username, private_key, connection_name, and os_type.
 
     Raises:
         ValueError: If user is None, instance_uuid invalid,
             range not READY, or instance not found
         PermissionError: If user doesn't own the range
     """
-    # Lazy imports to avoid circular dependencies
     from engine.models import Range
     from engine.secrets import get_ssh_key
-    from engine.ssh import SSHConnection
 
-    # Input validation
     if user is None:
         raise ValueError("user is required")
     if not instance_uuid:
@@ -727,41 +817,67 @@ def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
         )
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
-    # Get SSH key from secrets
-    ssh_key_arn = instance.get("ssh_key_secret_arn")
-    if not ssh_key_arn:
-        logger.error("No SSH key ARN for instance: %s", instance_uuid)
+    ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
+    if not ssh_key_ref:
+        logger.error("No SSH key reference for instance: %s", instance_uuid)
         raise ValueError(f"Instance {instance_uuid} has no SSH key configured")
 
-    ssh_key = get_ssh_key(ssh_key_arn)
+    ssh_key = get_ssh_key(ssh_key_ref)
 
-    # Create SSH connection
-    host = instance.get("private_ip")
+    host = _resolve_instance_host(instance)
     if not host:
         logger.error("No IP address for instance: %s", instance_uuid)
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
-    # Determine SSH username based on OS type
-    os_type = instance.get("os_type", "").lower()
-    if os_type == "kali":
-        username = "kali"
-    elif os_type == "amazon-linux":
-        username = "ec2-user"
-    elif os_type == "windows":
-        username = "Administrator"
-    else:
-        username = "ubuntu"  # Default for ubuntu and other Linux distros
+    os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
+    username = _resolve_instance_ssh_username(instance)
+
+    return {
+        "host": host,
+        "port": 22,
+        "username": username,
+        "private_key": ssh_key,
+        "connection_name": _resolve_instance_connection_name(instance),
+        "os_type": os_type,
+        "private_ip": host,
+        "cloud_provider": _first_connection_value(instance.get("cloud_provider")).lower(),
+    }
+
+
+def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
+    """Get SSH connection to instance.
+
+    Looks up the Range containing the instance by searching provisioned_instances
+    JSONB for matching UUID. This supports the new request_id-based provisioning
+    pattern where range_id may not be populated in CMS.
+
+    Args:
+        user: Authenticated user requesting connection
+        instance_uuid: UUID of the instance to connect to
+
+    Returns:
+        SSHConnection configured for the instance
+
+    Raises:
+        ValueError: If user is None, instance_uuid invalid,
+            range not READY, or instance not found
+        PermissionError: If user doesn't own the range
+    """
+    from engine.ssh import SSHConnection
+
+    ssh_info = get_ssh_connection_info(user, instance_uuid)
 
     # Use tmux for persistent sessions on Linux instances
     # Windows doesn't have tmux, so skip session_id for Windows
     session_id = None
-    if os_type != "windows":
+    if ssh_info["os_type"] != "windows":
         session_id = instance_uuid
 
     return SSHConnection(
-        host=host,
-        username=username,
-        private_key=ssh_key,
+        host=ssh_info["host"],
+        username=ssh_info["username"],
+        private_key=ssh_info["private_key"],
+        port=ssh_info["port"],
         session_id=session_id,
     )
 

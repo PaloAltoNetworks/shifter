@@ -26,6 +26,9 @@ class TestGcpRangeModuleContract:
         assert "instance_id" in outputs_tf
         assert "private_ip" in outputs_tf
         assert "ssh_key_secret_arn" in outputs_tf
+        assert "ssh_username" in outputs_tf
+        assert "gcp_private_ip" in outputs_tf
+        assert "gcp_ssh_key_secret_id" in outputs_tf
 
     def test_windows_startup_templates_enable_sshd(self):
         victim_template = (MODULE_PATH / "templates" / "victim_windows.ps1.tpl").read_text(encoding="utf-8")

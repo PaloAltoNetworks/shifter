@@ -456,6 +456,7 @@ def _build_instance_state(instance_data: dict[str, Any], provider: str | None = 
         "instance_id": instance_data.get("instance_id"),
         "private_ip": instance_data.get("private_ip"),
         "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        "ssh_username": instance_data.get("ssh_username"),
         "subnet_name": instance_data.get("subnet_name"),
         "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
         # Preserve the current AWS field name for existing pause/resume readers.
@@ -476,6 +477,7 @@ def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider:
         "instance_id": instance_data.get("instance_id"),
         "private_ip": instance_data.get("private_ip"),
         "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        "ssh_username": instance_data.get("ssh_username"),
         "cloud_provider": resolved_provider,
         "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
     }

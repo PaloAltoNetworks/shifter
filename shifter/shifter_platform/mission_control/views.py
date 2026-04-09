@@ -322,6 +322,97 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
 
 
 @login_required
+@require_POST
+def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
+    """Generate a signed Guacamole URL for SSH access to a range instance."""
+    from engine.services import get_ssh_connection_info
+    from mission_control.guacamole import create_guacamole_ssh_url
+
+    user = _get_user(request)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    instance_uuid = data.get("instance_uuid", "").strip()
+    if not instance_uuid:
+        return JsonResponse({"error": "instance_uuid is required"}, status=400)
+
+    try:
+        ssh_info = get_ssh_connection_info(user, instance_uuid)
+    except ValueError as e:
+        logger.error(
+            "Range SSH access denied (ValueError): user=%s instance_uuid=%s error=%s",
+            user.email,
+            instance_uuid,
+            e,
+        )
+        return JsonResponse({"error": str(e)}, status=400)
+    except PermissionError as e:
+        logger.error(
+            "Range SSH access denied (PermissionError): user=%s instance_uuid=%s",
+            user.email,
+            instance_uuid,
+        )
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception:
+        logger.exception(
+            "Unexpected error getting range SSH connection: user=%s instance_uuid=%s",
+            user.email,
+            instance_uuid,
+        )
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+    secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
+    if not secret_key:
+        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        return JsonResponse({"error": "SSH service not configured"}, status=503)
+
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
+
+    try:
+        url = create_guacamole_ssh_url(
+            base_url=guacamole_base_url,
+            secret_key=secret_key,
+            username=user.email,
+            connection_name=ssh_info["connection_name"],
+            hostname=ssh_info["host"],
+            port=ssh_info["port"],
+            ssh_username=ssh_info["username"],
+            ssh_private_key=ssh_info["private_key"],
+            expires_minutes=5,
+            api_base_url=guacamole_api_url,
+        )
+    except ValueError as e:
+        logger.error(
+            "Failed to generate range SSH URL: user=%s instance_uuid=%s error=%s",
+            user.email,
+            instance_uuid,
+            e,
+        )
+        return JsonResponse({"error": "Failed to generate SSH URL"}, status=500)
+    except Exception:
+        logger.exception(
+            "Unexpected error generating range SSH URL: user=%s instance_uuid=%s",
+            user.email,
+            instance_uuid,
+        )
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+    logger.info(
+        "Guacamole SSH URL generated for range instance: user=%s instance_uuid=%s host=%s provider=%s",
+        user.email,
+        instance_uuid,
+        ssh_info["host"],
+        ssh_info.get("cloud_provider") or "unknown",
+    )
+
+    return JsonResponse({"url": url})
+
+
+@login_required
 @require_GET
 def help_page(request: HttpRequest) -> HttpResponse:
     """Help and documentation."""

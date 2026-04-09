@@ -27,6 +27,15 @@ class TestGcpRangeModuleContract:
         assert "private_ip" in outputs_tf
         assert "ssh_key_secret_arn" in outputs_tf
 
+    def test_windows_startup_templates_enable_sshd(self):
+        victim_template = (MODULE_PATH / "templates" / "victim_windows.ps1.tpl").read_text(encoding="utf-8")
+        dc_template = (MODULE_PATH / "templates" / "dc_windows.ps1.tpl").read_text(encoding="utf-8")
+
+        assert "Get-Service -Name sshd" in victim_template
+        assert "Start-Service sshd" in victim_template
+        assert "Get-Service -Name sshd" in dc_template
+        assert "Start-Service sshd" in dc_template
+
 
 class TestGcpRangeModuleValidation:
     """Validation tests for the Terraform module itself."""

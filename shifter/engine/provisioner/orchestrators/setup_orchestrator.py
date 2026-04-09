@@ -7,50 +7,17 @@ the plan step by step, handling reboots and verification.
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
-from executors.base import CommandResult
-from executors.ngfw_executor import (
-    NGFWConnectionError,
-    NGFWTimeoutError,
-)
-from executors.ssh_executor import (
-    ConnectionError as SSHConnectionError,
-)
-from executors.ssh_executor import (
-    TimeoutError as SSHTimeoutError,
-)
-from executors.ssm_executor import (
-    CommandError,
-    SSMExecutorError,
-    TimeoutError,
+from executors.base import (
+    CommandResult,
+    Executor,
+    ExecutorCommandError,
+    ExecutorConnectionError,
+    ExecutorError,
+    ExecutorTimeoutError,
 )
 from plans.base import SetupPlan, SetupStep
-
-
-class Executor(Protocol):
-    """Protocol for command executors (SSM or SSH).
-
-    Both SSMExecutor and SSHExecutor implement this protocol with slightly
-    different parameter names (host vs instance_id) but compatible call signatures.
-    """
-
-    def run_command(
-        self,
-        instance_id: str,
-        script: str,
-        timeout_seconds: int = ...,
-        document_name: str = ...,
-        stdin_input: str | None = ...,
-    ) -> CommandResult: ...
-
-    def reboot_and_wait(
-        self,
-        instance_id: str,
-        timeout_seconds: int = ...,
-        document_name: str = ...,
-    ) -> bool: ...
-
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +138,7 @@ class SetupOrchestrator:
                             document_name=document_name,
                         )
                         logger.debug("orchestrate: reboot completed")
-                    except (TimeoutError, SSMExecutorError) as e:
+                    except (ExecutorTimeoutError, ExecutorError) as e:
                         logger.error("orchestrate: reboot failed step=%s", step.name)
                         raise SetupError(
                             f"Reboot failed after step '{step.name}': {e}",
@@ -179,7 +146,7 @@ class SetupOrchestrator:
                             cause=e,
                         ) from e
 
-            except (CommandError, TimeoutError, SSMExecutorError) as e:
+            except (ExecutorCommandError, ExecutorTimeoutError, ExecutorError) as e:
                 logger.error("orchestrate: step failed step=%s error=%s", step.name, e)
                 raise SetupError(
                     f"Step '{step.name}' failed: {e}",
@@ -193,7 +160,7 @@ class SetupOrchestrator:
             logger.debug("orchestrate: running verification step")
             try:
                 verify_result = self._execute_step(instance_id, plan.verify_step, context, document_name)
-            except (CommandError, TimeoutError, SSMExecutorError) as e:
+            except (ExecutorCommandError, ExecutorTimeoutError, ExecutorError) as e:
                 logger.error("orchestrate: verification failed error=%s", e)
                 raise SetupError(
                     f"Verification failed: {e}",
@@ -253,9 +220,9 @@ class SetupOrchestrator:
                     document_name=document_name,
                     stdin_input=rendered_stdin if rendered_stdin else None,
                 )
-            except (SSHConnectionError, SSHTimeoutError) as e:
+            except (ExecutorConnectionError, ExecutorTimeoutError) as e:
                 logger.warning(
-                    "_execute_step: SSH error step=%s attempt=%d: %s",
+                    "_execute_step: transport error step=%s attempt=%d: %s",
                     step.name,
                     attempt + 1,
                     e,
@@ -263,22 +230,7 @@ class SetupOrchestrator:
                 if attempt < max_retries:
                     continue  # Retry
                 raise SetupError(
-                    f"Step '{step.name}' failed: SSH error after {max_retries + 1} attempts: {e}",
-                    step_name=step.name,
-                    cause=e,
-                ) from e
-            except TimeoutError as e:
-                logger.warning(
-                    "_execute_step: timeout step=%s attempt=%d/%d: %s",
-                    step.name,
-                    attempt + 1,
-                    max_retries + 1,
-                    e,
-                )
-                if attempt < max_retries:
-                    continue  # Retry
-                raise SetupError(
-                    f"Step '{step.name}' failed: timeout after {max_retries + 1} attempts: {e}",
+                    f"Step '{step.name}' failed: transport error after {max_retries + 1} attempts: {e}",
                     step_name=step.name,
                     cause=e,
                 ) from e
@@ -531,8 +483,8 @@ class SetupOrchestrator:
                     document_name=document_name,
                     stdin_input=f"show jobs id {job_id}\n",
                 )
-            except (SSHConnectionError, SSHTimeoutError, NGFWConnectionError, NGFWTimeoutError) as e:
-                logger.warning("_poll_panos_job: SSH error, retrying: %s", e)
+            except (ExecutorConnectionError, ExecutorTimeoutError) as e:
+                logger.warning("_poll_panos_job: transport error, retrying: %s", e)
                 time.sleep(poll_interval)
                 continue
             last_output = result.stdout

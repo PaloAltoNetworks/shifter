@@ -72,6 +72,42 @@ class TestGetResourceStatus:
             assert result["instances"] == []  # None becomes empty list
             assert result["ready_at"] is None  # None timestamp stays None
 
+    def test_preserves_provider_metadata_in_instances(self):
+        """Service returns richer provider metadata without stripping legacy fields."""
+        from engine.models import Range
+        from engine.services import get_range_status
+
+        instances = [
+            {
+                "uuid": "gcp-123",
+                "role": "victim",
+                "private_ip": "10.50.1.10",
+                "instance_id": "shifter-range-vm-1",
+                "cloud_provider": "gcp",
+                "provider_metadata": {
+                    "gcp": {
+                        "instance_id": "9988776655",
+                        "zone": "us-central1-b",
+                    }
+                },
+            }
+        ]
+        mock_range = Mock(
+            spec=Range,
+            id=42,
+            status=Range.Status.READY,
+            error_message="",
+            provisioned_instances=instances,
+            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
+            ready_at=None,
+        )
+
+        with patch.object(Range.objects, "get", return_value=mock_range):
+            result = get_range_status(42)
+
+        assert result["instances"] == instances
+        assert result["instances"][0]["provider_metadata"]["gcp"]["zone"] == "us-central1-b"
+
     def test_returns_none_when_range_not_found(self):
         """Service returns None when range doesn't exist."""
         from engine.models import Range

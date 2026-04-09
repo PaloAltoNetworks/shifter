@@ -3,9 +3,10 @@
 Only tests for pure logic - no mock-heavy integration tests.
 """
 
+import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -92,6 +93,214 @@ class TestParseDeviceCertificateStatus:
         from main import parse_device_certificate_status
 
         assert parse_device_certificate_status("") is None
+
+
+class TestRangeStatePayloads:
+    """Tests for provider-aware range state serialization helpers."""
+
+    def test_build_subnet_state_preserves_aws_fields(self):
+        from main import _build_subnet_state
+
+        subnet_state = _build_subnet_state(
+            {
+                "subnet_id": "subnet-123",
+                "subnet_cidr": "10.1.1.0/28",
+                "security_group_id": "sg-123",
+                "route_table_id": "rtb-123",
+            },
+            provider="aws",
+        )
+
+        assert subnet_state["cloud_provider"] == "aws"
+        assert subnet_state["subnet_id"] == "subnet-123"
+        assert subnet_state["aws_subnet_id"] == "subnet-123"
+        assert subnet_state["aws_cidr"] == "10.1.1.0/28"
+        assert subnet_state["provider_metadata"] == {
+            "aws": {
+                "subnet_id": "subnet-123",
+                "cidr": "10.1.1.0/28",
+                "security_group_id": "sg-123",
+                "route_table_id": "rtb-123",
+            }
+        }
+
+    def test_build_subnet_state_persists_gcp_metadata_without_aws_aliases(self):
+        from main import _build_subnet_state
+
+        subnet_state = _build_subnet_state(
+            {
+                "subnet_id": "projects/test/regions/us-central1/subnetworks/range-1",
+                "subnet_cidr": "10.50.1.0/28",
+                "security_group_id": "shifter-target-tag",
+                "route_table_id": "",
+                "gcp_subnetwork_name": "range-1",
+                "gcp_subnetwork_id": "1234567890",
+                "gcp_subnetwork_self_link": "projects/test/regions/us-central1/subnetworks/range-1",
+                "gcp_target_tag": "shifter-target-tag",
+            },
+            provider="gcp",
+        )
+
+        assert subnet_state["cloud_provider"] == "gcp"
+        assert subnet_state["subnet_id"] == "projects/test/regions/us-central1/subnetworks/range-1"
+        assert subnet_state["aws_subnet_id"] is None
+        assert subnet_state["provider_metadata"] == {
+            "gcp": {
+                "subnetwork_name": "range-1",
+                "subnetwork_id": "1234567890",
+                "subnetwork_self_link": "projects/test/regions/us-central1/subnetworks/range-1",
+                "target_tag": "shifter-target-tag",
+            }
+        }
+
+    def test_build_instance_state_preserves_aws_instance_alias(self):
+        from main import _build_instance_state
+
+        instance_state = _build_instance_state(
+            {
+                "instance_id": "i-abc123",
+                "private_ip": "10.1.1.10",
+                "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+                "subnet_name": "attack",
+            },
+            provider="aws",
+        )
+
+        assert instance_state["cloud_provider"] == "aws"
+        assert instance_state["instance_id"] == "i-abc123"
+        assert instance_state["aws_instance_id"] == "i-abc123"
+        assert instance_state["provider_metadata"] == {"aws": {"instance_id": "i-abc123"}}
+
+    def test_build_instance_state_collects_gcp_metadata(self):
+        from main import _build_instance_state
+
+        instance_state = _build_instance_state(
+            {
+                "instance_id": "shifter-range-vm-1",
+                "private_ip": "10.50.1.10",
+                "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "subnet_name": "attack",
+                "gcp_instance_name": "shifter-range-vm-1",
+                "gcp_instance_id": "9988776655",
+                "gcp_instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
+                "gcp_zone": "us-central1-b",
+                "gcp_subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
+            },
+            provider="gcp",
+        )
+
+        assert instance_state["cloud_provider"] == "gcp"
+        assert instance_state["aws_instance_id"] is None
+        assert instance_state["provider_metadata"] == {
+            "gcp": {
+                "instance_name": "shifter-range-vm-1",
+                "instance_id": "9988776655",
+                "instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
+                "zone": "us-central1-b",
+                "subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
+            }
+        }
+
+    def test_build_provisioned_instance_payload_keeps_legacy_fields_and_adds_provider_metadata(self):
+        from main import _build_provisioned_instance_payload
+
+        payload = _build_provisioned_instance_payload(
+            {
+                "uuid": "inst-123",
+                "name": "workstation-1",
+                "role": "victim",
+                "os": "windows",
+                "subnet_name": "victims",
+                "instance_id": "shifter-range-vm-1",
+                "private_ip": "10.50.1.10",
+                "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "gcp_instance_id": "9988776655",
+            },
+            provider="gcp",
+        )
+
+        assert payload["uuid"] == "inst-123"
+        assert payload["os_type"] == "windows"
+        assert payload["instance_id"] == "shifter-range-vm-1"
+        assert payload["ssh_key_secret_arn"] == "projects/test/secrets/range-ssh-key"
+        assert payload["cloud_provider"] == "gcp"
+        assert payload["provider_metadata"] == {"gcp": {"instance_id": "9988776655"}}
+
+    def test_get_cloud_provider_defaults_to_aws(self):
+        from main import _get_cloud_provider
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("CLOUD_PROVIDER", raising=False)
+            assert _get_cloud_provider() == "aws"
+
+    def test_get_cloud_provider_reads_env(self):
+        from main import _get_cloud_provider
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "gcp")
+            assert _get_cloud_provider() == "gcp"
+
+    def test_write_provisioned_state_persists_gcp_metadata_blocks(self):
+        from main import write_provisioned_state
+
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        subnets = {
+            "attack": {
+                "uuid": "subnet-123",
+                "subnet_id": "projects/test/regions/us-central1/subnetworks/range-1",
+                "subnet_cidr": "10.50.1.0/28",
+                "security_group_id": "shifter-target-tag",
+                "route_table_id": "",
+                "gcp_subnetwork_name": "range-1",
+                "gcp_subnetwork_id": "1234567890",
+                "gcp_subnetwork_self_link": "projects/test/regions/us-central1/subnetworks/range-1",
+                "gcp_target_tag": "shifter-target-tag",
+            }
+        }
+        instances = [
+            {
+                "uuid": "inst-123",
+                "name": "workstation-1",
+                "role": "victim",
+                "os": "windows",
+                "subnet_name": "attack",
+                "instance_id": "shifter-range-vm-1",
+                "private_ip": "10.50.1.10",
+                "ssh_key_secret_arn": "projects/test/secrets/range-ssh-key",
+                "gcp_instance_name": "shifter-range-vm-1",
+                "gcp_instance_id": "9988776655",
+                "gcp_instance_self_link": "projects/test/zones/us-central1-b/instances/shifter-range-vm-1",
+                "gcp_zone": "us-central1-b",
+                "gcp_subnetwork": "projects/test/regions/us-central1/subnetworks/range-1",
+            }
+        ]
+
+        with (
+            patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True),
+            patch("main.get_db_connection", return_value=mock_conn),
+        ):
+            write_provisioned_state(range_id=42, subnets=subnets, instances=instances, ngfw_instance_id=None)
+
+        subnet_state = json.loads(mock_cursor.execute.call_args_list[0].args[1][0])
+        instance_state = json.loads(mock_cursor.execute.call_args_list[1].args[1][0])
+        provisioned_instances = json.loads(mock_cursor.execute.call_args_list[2].args[1][0])
+
+        assert subnet_state["cloud_provider"] == "gcp"
+        assert subnet_state["aws_subnet_id"] is None
+        assert subnet_state["provider_metadata"]["gcp"]["subnetwork_id"] == "1234567890"
+        assert instance_state["cloud_provider"] == "gcp"
+        assert instance_state["aws_instance_id"] is None
+        assert instance_state["provider_metadata"]["gcp"]["zone"] == "us-central1-b"
+        assert provisioned_instances[0]["cloud_provider"] == "gcp"
+        assert provisioned_instances[0]["instance_id"] == "shifter-range-vm-1"
+        assert provisioned_instances[0]["provider_metadata"]["gcp"]["instance_id"] == "9988776655"
 
 
 class TestPollForSerialAndCert:

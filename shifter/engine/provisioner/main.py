@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import psycopg
 from psycopg import sql
@@ -36,8 +37,8 @@ from events import (
     publish_status_update,
 )
 from executors.aws_executor import AWSExecutor
+from executors.factory import build_guest_execution_context, get_ssh_username
 from executors.ngfw_executor import NGFWExecutor
-from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
@@ -353,6 +354,103 @@ def _validate_provisioned_outputs(
             logger.warning("Unexpected subnets in output: %s", extra)
 
 
+def _get_cloud_provider() -> str:
+    """Return the active cloud provider for range state persistence."""
+    return os.environ.get("CLOUD_PROVIDER", "aws")
+
+
+def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Drop empty provider metadata fields so persisted state stays readable."""
+    return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}
+
+
+def _extract_provider_metadata(resource: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Collect provider-prefixed keys into a nested metadata block."""
+    provider_prefix = f"{provider}_"
+    return _compact_state_fields(
+        {key.removeprefix(provider_prefix): value for key, value in resource.items() if key.startswith(provider_prefix)}
+    )
+
+
+def _build_subnet_provider_metadata(subnet_data: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Build provider-specific subnet metadata for persisted state."""
+    if provider == "aws":
+        metadata = {
+            "subnet_id": subnet_data.get("subnet_id"),
+            "cidr": subnet_data.get("subnet_cidr"),
+            "security_group_id": subnet_data.get("security_group_id"),
+            "route_table_id": subnet_data.get("route_table_id"),
+        }
+    else:
+        metadata = _extract_provider_metadata(subnet_data, provider)
+
+    return {provider: metadata} if metadata else {}
+
+
+def _build_instance_provider_metadata(instance_data: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Build provider-specific instance metadata for persisted state."""
+    if provider == "aws":
+        metadata = {
+            "instance_id": instance_data.get("instance_id"),
+        }
+    else:
+        metadata = _extract_provider_metadata(instance_data, provider)
+
+    return {provider: metadata} if metadata else {}
+
+
+def _build_subnet_state(subnet_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+    """Build the persisted engine_subnet.state payload."""
+    resolved_provider = provider or _get_cloud_provider()
+    state = {
+        "cloud_provider": resolved_provider,
+        "subnet_id": subnet_data.get("subnet_id"),
+        "subnet_cidr": subnet_data.get("subnet_cidr"),
+        "security_group_id": subnet_data.get("security_group_id"),
+        "route_table_id": subnet_data.get("route_table_id"),
+        "provider_metadata": _build_subnet_provider_metadata(subnet_data, resolved_provider),
+        # Preserve the current AWS field names for existing AWS callers.
+        "aws_subnet_id": subnet_data.get("subnet_id") if resolved_provider == "aws" else None,
+        "aws_cidr": subnet_data.get("subnet_cidr") if resolved_provider == "aws" else None,
+        "aws_security_group_id": subnet_data.get("security_group_id") if resolved_provider == "aws" else None,
+        "aws_route_table_id": subnet_data.get("route_table_id") if resolved_provider == "aws" else None,
+    }
+    return state
+
+
+def _build_instance_state(instance_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+    """Build the persisted engine_instance.state payload for range guests."""
+    resolved_provider = provider or _get_cloud_provider()
+    state = {
+        "cloud_provider": resolved_provider,
+        "instance_id": instance_data.get("instance_id"),
+        "private_ip": instance_data.get("private_ip"),
+        "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        "subnet_name": instance_data.get("subnet_name"),
+        "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
+        # Preserve the current AWS field name for existing pause/resume readers.
+        "aws_instance_id": instance_data.get("instance_id") if resolved_provider == "aws" else None,
+    }
+    return state
+
+
+def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+    """Build the legacy Range.provisioned_instances entry with provider metadata."""
+    resolved_provider = provider or _get_cloud_provider()
+    return {
+        "uuid": instance_data.get("uuid"),
+        "name": instance_data.get("name"),
+        "role": instance_data.get("role"),
+        "os_type": instance_data.get("os"),
+        "subnet_name": instance_data.get("subnet_name"),
+        "instance_id": instance_data.get("instance_id"),
+        "private_ip": instance_data.get("private_ip"),
+        "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        "cloud_provider": resolved_provider,
+        "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
+    }
+
+
 def write_provisioned_state(
     range_id: int,
     subnets: dict[str, dict],
@@ -366,10 +464,11 @@ def write_provisioned_state(
 
     Args:
         range_id: The range ID being provisioned.
-        subnets: Dict of subnet_name -> subnet details with uuid and AWS resource IDs.
+        subnets: Dict of subnet_name -> subnet details with uuid and provider resource IDs.
         instances: List of instance dicts with uuid, instance_id, private_ip, etc.
         ngfw_instance_id: ID of the NGFW Instance this range is attached to (if any).
     """
+    provider = _get_cloud_provider()
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             # Update engine_subnet.state for each subnet
@@ -379,12 +478,7 @@ def write_provisioned_state(
                     logger.warning("Subnet %s missing UUID, skipping DB write", subnet_name)
                     continue
 
-                state = {
-                    "aws_subnet_id": subnet_data.get("subnet_id"),
-                    "aws_cidr": subnet_data.get("subnet_cidr"),
-                    "aws_security_group_id": subnet_data.get("security_group_id"),
-                    "aws_route_table_id": subnet_data.get("route_table_id"),
-                }
+                state = _build_subnet_state(subnet_data, provider=provider)
 
                 cur.execute(
                     """
@@ -409,13 +503,7 @@ def write_provisioned_state(
                     )
                     continue
 
-                # Build state dict with AWS resource details
-                instance_state = {
-                    "aws_instance_id": inst.get("instance_id"),
-                    "private_ip": inst.get("private_ip"),
-                    "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
-                    "subnet_name": inst.get("subnet_name"),
-                }
+                instance_state = _build_instance_state(inst, provider=provider)
 
                 cur.execute(
                     """
@@ -429,19 +517,7 @@ def write_provisioned_state(
                     raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
                 logger.debug("Updated engine_instance state: uuid=%s", instance_uuid)
 
-                # Also build legacy provisioned_instances for Range.provisioned_instances
-                provisioned_instances.append(
-                    {
-                        "uuid": instance_uuid,
-                        "name": inst.get("name"),
-                        "role": inst.get("role"),
-                        "os_type": inst.get("os"),
-                        "subnet_name": inst.get("subnet_name"),
-                        "instance_id": inst.get("instance_id"),
-                        "private_ip": inst.get("private_ip"),
-                        "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
-                    }
-                )
+                provisioned_instances.append(_build_provisioned_instance_payload(inst, provider=provider))
 
             # Update Range.provisioned_instances and ngfw_instance_id
             cur.execute(
@@ -1485,6 +1561,7 @@ def configure_ngfw_subnets(
 
 
 def _run_single_instance_setup(
+    instance_data: dict[str, Any],
     instance_id: str,
     role: str,
     os_type: str,
@@ -1520,17 +1597,14 @@ def _run_single_instance_setup(
     """
     logger.info("Starting setup for %s instance %s...", role, instance_id)
 
-    # Create executor and orchestrator
-    executor = SSMExecutor()
+    execution = build_guest_execution_context(instance_data, os_type=os_type, role=role)
+    executor = execution.executor
     orchestrator = SetupOrchestrator(executor=executor)
+    document_name = execution.document_name
 
-    # Select SSM document based on OS type
-    document_name = "AWS-RunShellScript" if os_type in ("kali", "ubuntu", "amazon-linux") else "AWS-RunPowerShellScript"
-
-    # Wait for SSM agent to come online
-    logger.info("Waiting for SSM agent on %s...", instance_id)
-    executor.wait_for_agent(instance_id, timeout_seconds=300)
-    logger.info("Instance %s is ready (SSM agent online)", instance_id)
+    logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
+    execution.wait_for_ready(timeout_seconds=300)
+    logger.info("Target %s is ready via %s", execution.target, execution.transport_name)
 
     # Create context object for plan get_context()
     # Use the scenario template name directly as the hostname (e.g., "webdev01", "kali")
@@ -1542,97 +1616,109 @@ def _run_single_instance_setup(
             self.hostname = hostname
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url
-            self.ssh_user = "kali" if os_type == "kali" else "ubuntu"
+            self.ssh_user = get_ssh_username(os_type, role)
 
     ctx = InstanceContext()
 
-    # Select and run plans based on role and OS type
-    if role == "attacker":
-        # Kali: hostname + SSH setup
-        plan = LinuxBootstrapPlan()
-        context = plan.get_context(ctx)
-        result = orchestrator.orchestrate(instance_id, plan, context, document_name=document_name)
-        if not result.success:
-            raise SetupError(f"Kali setup failed: {result.error}")
-        logger.info("Kali setup complete for %s", instance_id)
-
-    elif role == "victim":
-        if os_type in ("kali", "ubuntu", "amazon-linux"):
-            # Linux victim: Bootstrap + XDR
-            bootstrap_plan = LinuxBootstrapPlan()
-            bootstrap_ctx = bootstrap_plan.get_context(ctx)
-            result = orchestrator.orchestrate(instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name)
+    try:
+        # Select and run plans based on role and OS type
+        if role == "attacker":
+            plan = LinuxBootstrapPlan()
+            context = plan.get_context(ctx)
+            result = orchestrator.orchestrate(execution.target, plan, context, document_name=document_name)
             if not result.success:
-                raise SetupError(f"Linux bootstrap failed: {result.error}")
-            logger.info("Linux bootstrap complete for %s", instance_id)
+                raise SetupError(f"Kali setup failed: {result.error}")
+            logger.info("Kali setup complete for %s", instance_id)
 
-            # Install XDR agent
-            if agent_presigned_url:
-                xdr_plan = LinuxXDRAgentInstallPlan()
-                xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-                result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_ctx, document_name=document_name)
+        elif role == "victim":
+            if os_type in ("kali", "ubuntu", "amazon-linux"):
+                bootstrap_plan = LinuxBootstrapPlan()
+                bootstrap_ctx = bootstrap_plan.get_context(ctx)
+                result = orchestrator.orchestrate(
+                    execution.target,
+                    bootstrap_plan,
+                    bootstrap_ctx,
+                    document_name=document_name,
+                )
                 if not result.success:
-                    raise SetupError(f"Linux XDR install failed: {result.error}")
-                logger.info("Linux XDR agent installed on %s", instance_id)
-            elif xdr_required:
-                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
+                    raise SetupError(f"Linux bootstrap failed: {result.error}")
+                logger.info("Linux bootstrap complete for %s", instance_id)
+
+                if agent_presigned_url:
+                    xdr_plan = LinuxXDRAgentInstallPlan()
+                    xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+                    result = orchestrator.orchestrate(execution.target, xdr_plan, xdr_ctx, document_name=document_name)
+                    if not result.success:
+                        raise SetupError(f"Linux XDR install failed: {result.error}")
+                    logger.info("Linux XDR agent installed on %s", instance_id)
+                elif xdr_required:
+                    raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
+                else:
+                    logger.info("No XDR agent URL provided for %s (not required)", instance_id)
+
             else:
-                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
-
-        else:
-            # Windows victim: Bootstrap + XDR + Domain join
-            win_bootstrap_plan = BootstrapPlan()
-            win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
-            result = orchestrator.orchestrate(
-                instance_id, win_bootstrap_plan, win_bootstrap_ctx, document_name=document_name
-            )
-            if not result.success:
-                raise SetupError(f"Windows bootstrap failed: {result.error}")
-            logger.info("Windows bootstrap complete for %s", instance_id)
-
-            # Install XDR agent
-            if agent_presigned_url:
-                win_xdr_plan = XDRAgentInstallPlan()
-                win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-                result = orchestrator.orchestrate(instance_id, win_xdr_plan, win_xdr_ctx, document_name=document_name)
+                win_bootstrap_plan = BootstrapPlan()
+                win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
+                result = orchestrator.orchestrate(
+                    execution.target,
+                    win_bootstrap_plan,
+                    win_bootstrap_ctx,
+                    document_name=document_name,
+                )
                 if not result.success:
-                    raise SetupError(f"Windows XDR install failed: {result.error}")
-                logger.info("Windows XDR agent installed on %s", instance_id)
-            elif xdr_required:
-                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
-            else:
-                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
+                    raise SetupError(f"Windows bootstrap failed: {result.error}")
+                logger.info("Windows bootstrap complete for %s", instance_id)
 
-            # Domain join (only for Windows victims with join_domain=True)
-            if join_domain and dc_ip and domain_name:
-                domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
-                if domain_password:
-                    logger.info("Joining domain %s for %s...", domain_name, instance_id)
-                    domain_join_plan = DomainJoinPlan()
-                    dj_context = domain_join_plan.get_context(
-                        {
-                            "dc_ip": dc_ip,
-                            "domain_name": domain_name,
-                            "domain_admin_password": domain_password,
-                        }
-                    )
+                if agent_presigned_url:
+                    win_xdr_plan = XDRAgentInstallPlan()
+                    win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
                     result = orchestrator.orchestrate(
-                        instance_id, domain_join_plan, dj_context, document_name=document_name
+                        execution.target,
+                        win_xdr_plan,
+                        win_xdr_ctx,
+                        document_name=document_name,
                     )
                     if not result.success:
-                        raise SetupError(f"Domain join failed for {instance_id}")
-                    logger.info("Domain join complete for %s", instance_id)
+                        raise SetupError(f"Windows XDR install failed: {result.error}")
+                    logger.info("Windows XDR agent installed on %s", instance_id)
+                elif xdr_required:
+                    raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
                 else:
-                    # join_domain=True means domain join is required
-                    raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
-            elif join_domain:
-                # join_domain=True means domain join is required
-                raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
+                    logger.info("No XDR agent URL provided for %s (not required)", instance_id)
 
-    return True
+                if join_domain and dc_ip and domain_name:
+                    domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+                    if domain_password:
+                        logger.info("Joining domain %s for %s...", domain_name, instance_id)
+                        domain_join_plan = DomainJoinPlan()
+                        dj_context = domain_join_plan.get_context(
+                            {
+                                "dc_ip": dc_ip,
+                                "domain_name": domain_name,
+                                "domain_admin_password": domain_password,
+                            }
+                        )
+                        result = orchestrator.orchestrate(
+                            execution.target,
+                            domain_join_plan,
+                            dj_context,
+                            document_name=document_name,
+                        )
+                        if not result.success:
+                            raise SetupError(f"Domain join failed for {instance_id}")
+                        logger.info("Domain join complete for %s", instance_id)
+                    else:
+                        raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
+                elif join_domain:
+                    raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
+
+        return True
+    finally:
+        execution.close()
 
 
 def _run_dc_setup(
+    instance_data: dict[str, Any],
     instance_id: str,
     dc_config: dict,
     agent_presigned_url: str,
@@ -1659,22 +1745,22 @@ def _run_dc_setup(
     netbios_name = dc_config.get("netbios_name", "")
     logger.info("Domain: %s, NetBIOS: %s", domain_name, netbios_name)
 
-    # Create executor and orchestrator
-    executor = SSMExecutor()
+    execution = build_guest_execution_context(instance_data, os_type="windows", role="dc")
+    executor = execution.executor
     orchestrator = SetupOrchestrator(executor=executor)
 
-    # Wait for SSM agent to come online
-    logger.info("Waiting for SSM agent on DC %s...", instance_id)
-    executor.wait_for_agent(instance_id, timeout_seconds=600)
-    logger.info("DC %s SSM agent online", instance_id)
+    logger.info("Waiting for %s connectivity on DC %s...", execution.transport_name, execution.target)
+    execution.wait_for_ready(timeout_seconds=600)
+    logger.info("DC %s ready via %s", instance_id, execution.transport_name)
 
     # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
     logger.info("Using prebaked DC AMI - skipping hostname change")
 
-    # Configure SSH key for terminal access (before DC verification)
-    if public_key:
-        logger.info("Configuring SSH key on DC %s...", instance_id)
-        ssh_key_script = f'''
+    try:
+        # Configure SSH key for terminal access (before DC verification)
+        if public_key:
+            logger.info("Configuring SSH key on DC %s...", instance_id)
+            ssh_key_script = f'''
 $ErrorActionPreference = "Stop"
 $publicKey = "{public_key}"
 
@@ -1696,57 +1782,69 @@ Restart-Service sshd -Force -ErrorAction SilentlyContinue
 
 Write-Host "SSH key configured successfully"
 '''
-        ssh_result = executor.run_command(
-            instance_id=instance_id,
-            script=ssh_key_script,
-            document_name="AWS-RunPowerShellScript",
-            timeout_seconds=60,
-        )
-        if not ssh_result.success:
-            logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
+            ssh_result = executor.run_command(
+                instance_id=execution.target,
+                script=ssh_key_script,
+                document_name=execution.document_name,
+                timeout_seconds=60,
+            )
+            if not ssh_result.success:
+                logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
+            else:
+                logger.info("SSH key configured on DC %s", instance_id)
         else:
-            logger.info("SSH key configured on DC %s", instance_id)
-    else:
-        logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
+            logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
 
-    # Verify Domain Controller via DCSetupPlan
-    logger.info("Verifying Domain Controller (%s)...", domain_name)
-    dc_plan = DCSetupPlan()
+        # Verify Domain Controller via DCSetupPlan
+        logger.info("Verifying Domain Controller (%s)...", domain_name)
+        dc_plan = DCSetupPlan()
 
-    # Create config object for DCSetupPlan context
-    class DCPromoteConfig:
-        def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
-            self.domain_name = domain_name
-            self.netbios_name = netbios_name
-            self.dsrm_password = dsrm_password
-            self.domain_admin_password = domain_admin_password
+        # Create config object for DCSetupPlan context
+        class DCPromoteConfig:
+            def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
+                self.domain_name = domain_name
+                self.netbios_name = netbios_name
+                self.dsrm_password = dsrm_password
+                self.domain_admin_password = domain_admin_password
 
-    # Passwords come from env var, not from spec (same as InstanceComponent)
-    domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
-    dsrm_password = domain_admin_password  # Reuse for DSRM (same as InstanceComponent)
+        # Passwords come from env var, not from spec (same as InstanceComponent)
+        domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+        dsrm_password = domain_admin_password  # Reuse for DSRM (same as InstanceComponent)
 
-    config_obj = DCPromoteConfig(domain_name, netbios_name, dsrm_password, domain_admin_password)
-    dc_context = dc_plan.get_context(config_obj)
-    dc_result = orchestrator.orchestrate(instance_id, dc_plan, dc_context)
-    if not dc_result.success:
-        raise SetupError(f"DC verification failed: {dc_result.error}")
-    logger.info("DC verification complete")
+        config_obj = DCPromoteConfig(domain_name, netbios_name, dsrm_password, domain_admin_password)
+        dc_context = dc_plan.get_context(config_obj)
+        dc_result = orchestrator.orchestrate(
+            execution.target,
+            dc_plan,
+            dc_context,
+            document_name=execution.document_name,
+        )
+        if not dc_result.success:
+            raise SetupError(f"DC verification failed: {dc_result.error}")
+        logger.info("DC verification complete")
 
-    # Install XDR agent on DC
-    if agent_presigned_url:
-        logger.info("Installing XDR agent on DC %s...", instance_id)
-        xdr_plan = XDRAgentInstallPlan()
-        xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-        xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_context)
-        if not xdr_result.success:
-            raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
-        logger.info("XDR agent installed successfully on DC")
-    elif xdr_required:
-        raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
-    else:
-        logger.info("No XDR agent URL provided for DC (not required)")
+        # Install XDR agent on DC
+        if agent_presigned_url:
+            logger.info("Installing XDR agent on DC %s...", instance_id)
+            xdr_plan = XDRAgentInstallPlan()
+            xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+            xdr_result = orchestrator.orchestrate(
+                execution.target,
+                xdr_plan,
+                xdr_context,
+                document_name=execution.document_name,
+            )
+            if not xdr_result.success:
+                raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+            logger.info("XDR agent installed successfully on DC")
+        elif xdr_required:
+            raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
+        else:
+            logger.info("No XDR agent URL provided for DC (not required)")
 
-    return True
+        return True
+    finally:
+        execution.close()
 
 
 def run_instance_setup(
@@ -1791,9 +1889,10 @@ def run_instance_setup(
         xdr_required = bool(inst_config.get("agent"))  # XDR required if agent data present
         public_key = dc_inst.get("public_key", "")
         _run_dc_setup(
-            dc_inst["instance_id"],
-            dc_config,
-            agent_url or "",
+            instance_data=dc_inst,
+            instance_id=dc_inst["instance_id"],
+            dc_config=dc_config,
+            agent_presigned_url=agent_url or "",
             public_key=public_key,
             xdr_required=xdr_required,
         )
@@ -1819,6 +1918,7 @@ def run_instance_setup(
             inst_config = uuid_to_config.get(inst_uuid, {})
             try:
                 _run_single_instance_setup(
+                    instance_data=inst,
                     instance_id=inst_id,
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),

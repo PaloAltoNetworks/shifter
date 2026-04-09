@@ -32,6 +32,9 @@ def test_linux_boxes_wait_for_background_apt_work() -> None:
         assert "apt_install()" in content
         assert "/var/lib/dpkg/lock-frontend" in content
         assert "pgrep -x unattended-upgr" in content
+        assert "stop_background_apt()" in content
+        assert "systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service" in content
+        assert "pkill -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal'" in content
         assert "wait_for_apt" in content
 
 

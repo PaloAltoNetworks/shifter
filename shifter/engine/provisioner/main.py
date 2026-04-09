@@ -359,6 +359,36 @@ def _get_cloud_provider() -> str:
     return os.environ.get("CLOUD_PROVIDER", "aws")
 
 
+def _get_bool_env(name: str) -> bool | None:
+    """Parse a boolean env var if set, otherwise return None."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return None
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean-like value, got: {raw_value!r}")
+
+
+def _should_promote_dc_at_runtime(provider: str | None = None) -> bool:
+    """Decide whether DC promotion should run during setup."""
+    override = _get_bool_env("DC_RUNTIME_PROMOTION")
+    if override is not None:
+        return override
+    return (provider or _get_cloud_provider()) == "gcp"
+
+
+def _should_run_dc_bootstrap_plan(provider: str | None = None) -> bool:
+    """Decide whether DC hostname/SSH bootstrap should run via setup plans."""
+    override = _get_bool_env("DC_BOOTSTRAP_VIA_SETUP_PLAN")
+    if override is not None:
+        return override
+    return (provider or _get_cloud_provider()) == "gcp"
+
+
 def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
     """Drop empty provider metadata fields so persisted state stays readable."""
     return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}
@@ -1577,7 +1607,7 @@ def _run_single_instance_setup(
     """Run setup for a single non-DC instance.
 
     Args:
-        instance_id: EC2 instance ID.
+        instance_id: Provider-specific instance identifier (or name).
         role: Instance role ('attacker' or 'victim').
         os_type: OS type ('kali', 'ubuntu', 'windows').
         public_key: SSH public key for terminal access.
@@ -1728,7 +1758,7 @@ def _run_dc_setup(
     """Run setup for a DC instance.
 
     Args:
-        instance_id: EC2 instance ID.
+        instance_id: Provider-specific instance identifier (or name).
         dc_config: DC configuration dict with domain_name, netbios_name, etc.
         agent_presigned_url: Pre-signed URL for XDR agent download.
         public_key: SSH public key for terminal access.
@@ -1745,6 +1775,7 @@ def _run_dc_setup(
     netbios_name = dc_config.get("netbios_name", "")
     logger.info("Domain: %s, NetBIOS: %s", domain_name, netbios_name)
 
+    provider = _get_cloud_provider()
     execution = build_guest_execution_context(instance_data, os_type="windows", role="dc")
     executor = execution.executor
     orchestrator = SetupOrchestrator(executor=executor)
@@ -1753,10 +1784,34 @@ def _run_dc_setup(
     execution.wait_for_ready(timeout_seconds=600)
     logger.info("DC %s ready via %s", instance_id, execution.transport_name)
 
-    # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
-    logger.info("Using prebaked DC AMI - skipping hostname change")
-
     try:
+        if _should_run_dc_bootstrap_plan(provider):
+            logger.info("Running DC bootstrap plan via %s setup path", provider)
+
+            bootstrap_plan = BootstrapPlan()
+
+            class DCBootstrapContext:
+                def __init__(self, hostname: str, public_key: str):
+                    self.hostname = hostname
+                    self.public_key = public_key
+
+            bootstrap_hostname = (
+                sanitize_hostname(instance_data.get("hostname", "") or instance_data.get("name", ""))
+                or f"dc-{instance_id[-8:]}"
+            )
+            bootstrap_context = bootstrap_plan.get_context(
+                DCBootstrapContext(hostname=bootstrap_hostname, public_key=public_key)
+            )
+            bootstrap_result = orchestrator.orchestrate(
+                execution.target,
+                bootstrap_plan,
+                bootstrap_context,
+                document_name=execution.document_name,
+            )
+            if not bootstrap_result.success:
+                raise SetupError(f"DC bootstrap failed: {bootstrap_result.error}")
+            logger.info("DC bootstrap complete for %s", instance_id)
+
         # Configure SSH key for terminal access (before DC verification)
         if public_key:
             logger.info("Configuring SSH key on DC %s...", instance_id)
@@ -1797,7 +1852,12 @@ Write-Host "SSH key configured successfully"
 
         # Verify Domain Controller via DCSetupPlan
         logger.info("Verifying Domain Controller (%s)...", domain_name)
-        dc_plan = DCSetupPlan()
+        runtime_promotion = _should_promote_dc_at_runtime(provider)
+        if runtime_promotion:
+            logger.info("Using runtime DC promotion for provider=%s", provider)
+        else:
+            logger.info("Using prebaked DC verification path for provider=%s", provider)
+        dc_plan = DCSetupPlan(runtime_promotion=runtime_promotion)
 
         # Create config object for DCSetupPlan context
         class DCPromoteConfig:

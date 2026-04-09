@@ -358,3 +358,113 @@ class TestPollForSerialAndCert:
                 timeout_seconds=0,
                 poll_interval=30,
             )
+
+
+class TestDcSetupRouting:
+    """Tests for provider-aware DC setup behavior."""
+
+    def test_should_promote_dc_at_runtime_defaults_by_provider(self):
+        from main import _should_promote_dc_at_runtime
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("DC_RUNTIME_PROMOTION", raising=False)
+            assert _should_promote_dc_at_runtime("aws") is False
+            assert _should_promote_dc_at_runtime("gcp") is True
+
+    def test_should_promote_dc_at_runtime_honors_override(self):
+        from main import _should_promote_dc_at_runtime
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DC_RUNTIME_PROMOTION", "false")
+            assert _should_promote_dc_at_runtime("gcp") is False
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DC_RUNTIME_PROMOTION", "true")
+            assert _should_promote_dc_at_runtime("aws") is True
+
+    def test_run_dc_setup_bootstraps_and_promotes_for_gcp(self, mocker):
+        from main import _run_dc_setup
+
+        mock_execution = MagicMock()
+        mock_execution.target = "10.50.1.10"
+        mock_execution.document_name = "AWS-RunPowerShellScript"
+        mock_execution.transport_name = "ssh"
+        mock_execution.executor = MagicMock()
+        mock_execution.executor.run_command.return_value = MagicMock(success=True, stderr="")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, error=None)
+
+        mock_bootstrap_plan = MagicMock()
+        mock_bootstrap_plan.get_context.return_value = {"hostname": "dc-01", "public_key": "ssh-rsa AAAA"}
+        mock_dc_plan = MagicMock()
+        mock_dc_plan.get_context.return_value = {
+            "domain_name": "range.local",
+            "netbios_name": "RANGE",
+            "dsrm_password": "Secret123!",
+            "domain_admin_password": "Secret123!",
+        }
+
+        build_context = mocker.patch("main.build_guest_execution_context", return_value=mock_execution)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        bootstrap_plan_cls = mocker.patch("main.BootstrapPlan", return_value=mock_bootstrap_plan)
+        dc_plan_cls = mocker.patch("main.DCSetupPlan", return_value=mock_dc_plan)
+        mocker.patch("main._should_run_dc_bootstrap_plan", return_value=True)
+        mocker.patch("main._should_promote_dc_at_runtime", return_value=True)
+        mocker.patch.dict("os.environ", {"DC_DOMAIN_PASSWORD": "Secret123!"}, clear=False)
+
+        _run_dc_setup(
+            instance_data={"hostname": "dc-01", "name": "dc-01", "public_key": "ssh-rsa AAAA"},
+            instance_id="gcp-dc-01",
+            dc_config={"domain_name": "range.local", "netbios_name": "RANGE"},
+            agent_presigned_url="",
+            public_key="ssh-rsa AAAA",
+        )
+
+        build_context.assert_called_once()
+        bootstrap_plan_cls.assert_called_once_with()
+        dc_plan_cls.assert_called_once_with(runtime_promotion=True)
+        assert mock_orchestrator.orchestrate.call_count == 2
+        mock_execution.close.assert_called_once_with()
+
+    def test_run_dc_setup_keeps_prebaked_mode_for_aws(self, mocker):
+        from main import _run_dc_setup
+
+        mock_execution = MagicMock()
+        mock_execution.target = "i-1234567890"
+        mock_execution.document_name = "AWS-RunPowerShellScript"
+        mock_execution.transport_name = "ssm"
+        mock_execution.executor = MagicMock()
+        mock_execution.executor.run_command.return_value = MagicMock(success=True, stderr="")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, error=None)
+
+        mock_dc_plan = MagicMock()
+        mock_dc_plan.get_context.return_value = {
+            "domain_name": "range.local",
+            "netbios_name": "RANGE",
+            "dsrm_password": "Secret123!",
+            "domain_admin_password": "Secret123!",
+        }
+
+        mocker.patch("main.build_guest_execution_context", return_value=mock_execution)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        bootstrap_plan_cls = mocker.patch("main.BootstrapPlan")
+        dc_plan_cls = mocker.patch("main.DCSetupPlan", return_value=mock_dc_plan)
+        mocker.patch("main._should_run_dc_bootstrap_plan", return_value=False)
+        mocker.patch("main._should_promote_dc_at_runtime", return_value=False)
+        mocker.patch.dict("os.environ", {"DC_DOMAIN_PASSWORD": "Secret123!"}, clear=False)
+
+        _run_dc_setup(
+            instance_data={"hostname": "dc-01", "name": "dc-01", "public_key": "ssh-rsa AAAA"},
+            instance_id="i-1234567890",
+            dc_config={"domain_name": "range.local", "netbios_name": "RANGE"},
+            agent_presigned_url="",
+            public_key="ssh-rsa AAAA",
+        )
+
+        bootstrap_plan_cls.assert_not_called()
+        dc_plan_cls.assert_called_once_with(runtime_promotion=False)
+        assert mock_orchestrator.orchestrate.call_count == 1
+        mock_execution.close.assert_called_once_with()

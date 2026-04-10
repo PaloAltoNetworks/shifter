@@ -210,7 +210,10 @@ repos:
 
       - id: k8s-image-registry
         name: k8s image registry check
-        entry: bash -c 'for f in platform/k8s/gcp/overlays/*/kustomization.yaml; do if grep -E "newName:" "$f" | grep -qv "pkg\.dev/"; then echo "ERROR: Images must use Artifact Registry (pkg.dev) in $f" && exit 1; fi; done'
+        entry: >-
+          bash -c 'for f in platform/k8s/gcp/overlays/*/kustomization.yaml; do
+          if grep -E "newName:" "$f" | grep -qv "pkg\.dev/"; then
+          echo "ERROR: Images must use Artifact Registry (pkg.dev) in $f" && exit 1; fi; done'
         language: system
         files: ^platform/k8s/gcp/overlays/.*/kustomization\.yaml$
         pass_filenames: false
@@ -223,7 +226,10 @@ repos:
     hooks:
       - id: mypy-shifter-platform
         name: mypy (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing PYTHONPATH="..:$PYTHONPATH" mypy .'
+        entry: >-
+          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
+          DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing
+          PYTHONPATH="..:$PYTHONPATH" mypy .'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
@@ -269,7 +275,10 @@ repos:
 
       - id: k8s-pss-labels
         name: architecture (k8s PSS labels)
-        entry: bash -c 'for f in platform/k8s/gcp/base/namespaces.yaml; do if ! grep -q "pod-security.kubernetes.io/enforce" "$f"; then echo "ERROR: $f must include Pod Security Standards labels" && exit 1; fi; done'
+        entry: >-
+          bash -c 'for f in platform/k8s/gcp/base/namespaces.yaml; do if ! grep
+          -q "pod-security.kubernetes.io/enforce" "$f"; then echo "ERROR: $f
+          must include Pod Security Standards labels" && exit 1; fi; done'
         language: system
         files: ^platform/k8s/gcp/base/namespaces\.yaml$
         pass_filenames: false
@@ -292,7 +301,11 @@ repos:
     hooks:
       - id: pytest-packer
         name: pytest (packer)
-        entry: bash -c 'cd shifter/packer && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/packer --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd shifter/packer && uv run pytest tests/ -q --cov=.
+          --cov-report=html:../../coverage/packer
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/packer/
         pass_filenames: false
@@ -302,7 +315,12 @@ repos:
     hooks:
       - id: pytest-provisioner
         name: pytest (provisioner)
-        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q --cov=. --cov-report=html:../../../coverage/provisioner --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate &&
+          TESTING=1 python -m pytest tests/ -q --cov=.
+          --cov-report=html:../../../coverage/provisioner
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/engine/provisioner/
         pass_filenames: false
@@ -312,7 +330,11 @@ repos:
     hooks:
       - id: pytest-bootstrap
         name: pytest (bootstrap)
-        entry: bash -c 'cd scripts/bootstrap && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/bootstrap --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd scripts/bootstrap && uv run pytest tests/ -q --cov=.
+          --cov-report=html:../../coverage/bootstrap
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/bootstrap/
         pass_filenames: false
@@ -322,7 +344,11 @@ repos:
     hooks:
       - id: pytest-check-layer-imports
         name: pytest (check_layer_imports)
-        entry: bash -c 'cd scripts/check_layer_imports && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/check_layer_imports --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd scripts/check_layer_imports && uv run pytest tests/ -q
+          --cov=. --cov-report=html:../../coverage/check_layer_imports
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/check_layer_imports/
         pass_filenames: false
@@ -366,7 +392,14 @@ repos:
     hooks:
       - id: pytest-shifter
         name: pytest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
+          TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python
+          -m pytest tests/ --ignore=tests/documentation
+          --ignore=tests/risk_register -q --cov=.
+          --cov-report=html:../../coverage/shifter_platform
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false

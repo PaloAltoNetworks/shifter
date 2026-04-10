@@ -81,11 +81,6 @@ def _resolve_instance_host(instance: dict[str, Any]) -> str:
     )
 
 
-def _resolve_instance_asset_type(instance: dict[str, Any]) -> str:
-    """Resolve the declared asset backing type for a provisioned range asset."""
-    return _first_connection_value(instance.get("asset_type")).lower() or "vm_runtime_vm"
-
-
 def _resolve_instance_ssh_key_secret_ref(instance: dict[str, Any]) -> str:
     """Resolve the active secret reference for the instance SSH key."""
     provider_metadata = _get_instance_provider_metadata(instance)
@@ -792,9 +787,6 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if not instance:
         raise ValueError(f"Instance {instance_uuid} not found in range")
-    if _resolve_instance_asset_type(instance) == "scenario_pod":
-        raise ValueError(f"RDP not available for pod-backed asset {instance_uuid}")
-
     # Check if instance has GUI
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
     if os_type not in ("kali", "ubuntu", "windows"):
@@ -894,9 +886,6 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
             instance_uuid,
         )
         raise ValueError(f"Instance {instance_uuid} not found in range")
-    if _resolve_instance_asset_type(instance) == "scenario_pod":
-        raise ValueError(f"SSH not available for pod-backed asset {instance_uuid}")
-
     ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
     if not ssh_key_ref:
         logger.error("No SSH key reference for instance: %s", instance_uuid)

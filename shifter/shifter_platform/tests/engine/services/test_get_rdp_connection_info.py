@@ -39,29 +39,6 @@ class TestGetRdpConnectionInfo:
         assert result["connection_name"] == "range-42-win-target"
         assert result["ssh_key"] == "fake-ssh-key-for-testing"
 
-    def test_rejects_pod_backed_assets_for_rdp(self):
-        from engine.models import Range
-        from engine.services import get_rdp_connection_info
-
-        mock_user = Mock(id=1)
-        instance_data = {
-            "uuid": "pod-instance-uuid-123",
-            "asset_type": "scenario_pod",
-            "role": "victim",
-            "os_type": "ubuntu",
-            "cloud_provider": "gcp",
-        }
-        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
-        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
-
-        with patch.object(Range, "get_active_for_user", return_value=mock_range):
-            try:
-                get_rdp_connection_info(mock_user, "pod-instance-uuid-123")
-            except ValueError as exc:
-                assert "pod-backed asset" in str(exc)
-            else:
-                raise AssertionError("Expected ValueError for pod-backed asset RDP")
-
     def test_gcp_linux_rdp_uses_runtime_password_env(self):
         from engine.models import Range
         from engine.services import get_rdp_connection_info

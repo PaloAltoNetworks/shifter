@@ -176,6 +176,48 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
     return None, None
 
 
+def _get_ngfw_provider_metadata(state: dict[str, Any]) -> dict[str, Any]:
+    """Return the provider-specific metadata block for an NGFW state payload."""
+    provider_metadata = state.get("provider_metadata")
+    if not isinstance(provider_metadata, dict):
+        return {}
+
+    provider = _first_connection_value(state.get("cloud_provider")).lower()
+    if provider:
+        metadata = provider_metadata.get(provider)
+        if isinstance(metadata, dict):
+            return metadata
+
+    for provider_name in ("gcp", "gdc", "aws"):
+        metadata = provider_metadata.get(provider_name)
+        if isinstance(metadata, dict):
+            return metadata
+
+    return {}
+
+
+def _resolve_ngfw_management_ip(state: dict[str, Any]) -> str:
+    """Resolve the best management IP for an NGFW state payload."""
+    provider_metadata = _get_ngfw_provider_metadata(state)
+    return _first_connection_value(
+        state.get("management_ip"),
+        provider_metadata.get("management_ip"),
+    )
+
+
+def _resolve_ngfw_ssh_key_secret_ref(state: dict[str, Any]) -> str:
+    """Resolve the SSH key secret reference for NGFW terminal access."""
+    provider_metadata = _get_ngfw_provider_metadata(state)
+    return _first_connection_value(
+        state.get("ssh_key_secret_arn"),
+        state.get("ssh_key_secret_id"),
+        provider_metadata.get("ssh_key_secret_arn"),
+        provider_metadata.get("ssh_key_secret_id"),
+        provider_metadata.get("ssh_secret_ref"),
+        provider_metadata.get("ssh_secret_id"),
+    )
+
+
 def create_range(request_spec: RequestSpec) -> UUID:
     """Provision infrastructure for range.
 
@@ -996,18 +1038,18 @@ def connect_ngfw_terminal(user: User, ngfw_uuid: str) -> SSHConnection:
         logger.error("NGFW has no state: ngfw_uuid=%s", ngfw_uuid)
         raise ValueError(f"NGFW {ngfw_uuid} has no infrastructure state")
 
-    management_ip = ngfw_instance.state.get("management_ip")
+    management_ip = _resolve_ngfw_management_ip(ngfw_instance.state)
     if not management_ip:
         logger.error("No management IP in NGFW state: ngfw_uuid=%s", ngfw_uuid)
         raise ValueError(f"NGFW {ngfw_uuid} has no management IP configured")
 
-    ssh_key_arn = ngfw_instance.state.get("ssh_key_secret_arn")
-    if not ssh_key_arn:
+    ssh_key_ref = _resolve_ngfw_ssh_key_secret_ref(ngfw_instance.state)
+    if not ssh_key_ref:
         logger.error("No SSH key ARN in NGFW state: ngfw_uuid=%s", ngfw_uuid)
         raise ValueError(f"NGFW {ngfw_uuid} has no SSH key configured")
 
     # Get SSH key from secrets
-    ssh_key = get_ssh_key(ssh_key_arn)
+    ssh_key = get_ssh_key(ssh_key_ref)
 
     # Create SSH connection for PAN-OS CLI
     # - Username: admin (PAN-OS default admin)

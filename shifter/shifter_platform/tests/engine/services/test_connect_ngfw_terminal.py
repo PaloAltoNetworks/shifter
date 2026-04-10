@@ -62,6 +62,43 @@ class TestConnectNGFWTerminal:
             assert result.port == 22
             assert result.session_id is None  # PAN-OS doesn't support tmux
 
+    def test_resolves_gcp_ngfw_management_state_from_provider_metadata(self):
+        """Service resolves management IP and secret ref from provider metadata."""
+        from engine import connect_ngfw_terminal
+        from engine.models import Instance, Request
+
+        mock_user = Mock(id=1)
+        mock_request = Mock(spec=Request, user=mock_user)
+
+        mock_ngfw = Mock(
+            spec=Instance,
+            uuid="ngfw-uuid-123",
+            role=Instance.Role.NGFW,
+            status=ResourceStatus.READY.value,
+            state={
+                "cloud_provider": "gcp",
+                "provider_metadata": {
+                    "gcp": {
+                        "management_ip": "10.200.0.10",
+                        "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+                    }
+                },
+            },
+        )
+        mock_ngfw.request = mock_request
+
+        mock_queryset = Mock()
+        mock_queryset.get = Mock(return_value=mock_ngfw)
+
+        with (
+            patch.object(Instance.objects, "select_related", return_value=mock_queryset),
+            patch("engine.secrets.get_ssh_key", return_value="fake-ssh-key-for-testing") as mock_get_key,
+        ):
+            result = connect_ngfw_terminal(mock_user, "ngfw-uuid-123")
+
+        mock_get_key.assert_called_once_with("projects/test/secrets/ngfw-admin")
+        assert result.host == "10.200.0.10"
+
     # -------------------------------------------------------------------------
     # Side effects - none expected (read-only)
     # -------------------------------------------------------------------------

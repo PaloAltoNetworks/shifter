@@ -7,7 +7,6 @@ It handles:
 - Terraform-based provisioning and destruction
 """
 
-import ipaddress
 import json
 import logging
 import os
@@ -26,7 +25,13 @@ from catalog.instances import (
     _get_windows_instance_type,
 )
 from components.instance import sanitize_hostname
-from config import generate_presigned_url, get_range_availability_zone, load_range_network_config
+from config import (
+    generate_presigned_url,
+    get_range_availability_zone,
+    has_ngfw_attachment_state,
+    load_range_network_config,
+    resolve_ngfw_attachment_config,
+)
 from events import (
     STATUS_DESTROYED,
     STATUS_FAILED,
@@ -155,26 +160,6 @@ def get_ami_id(ami_type: str) -> str:
 # Default timeout for waiting for NGFW SSH to become available (seconds)
 # PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500  # 25 minutes
-
-
-def get_vpc_gateway_ip(cidr: str) -> str:
-    """Compute VPC gateway IP from CIDR (first IP + 1).
-
-    AWS reserves the first IP (.0) for the network address and uses
-    the second IP (.1) as the VPC gateway/router.
-
-    Example: 10.1.4.0/22 -> 10.1.4.1
-
-    Args:
-        cidr: CIDR block string (e.g., "10.1.4.0/22")
-
-    Returns:
-        Gateway IP address string (e.g., "10.1.4.1")
-    """
-    import ipaddress
-
-    network = ipaddress.ip_network(cidr, strict=False)
-    return str(network.network_address + 1)
 
 
 def _get_working_dir() -> str:
@@ -653,16 +638,16 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
 def get_user_ngfw_data(user_id: int) -> dict | None:
     """Get NGFW data for a user (if they have one provisioned).
 
-    Queries for a ready/paused NGFW Instance belonging to this user.
-    Includes 'pausing' status because range provisioner will wait for
-    pause to complete, then resume the NGFW.
+    Queries for a ready/paused NGFW Instance belonging to this user and
+    resolves provider-neutral access and attachment details from state.
 
     Args:
         user_id: Django User ID.
 
     Returns:
-        Dictionary with ec2_instance_id, management_ip, ssh_key_secret_arn,
-        data_eni_id, and ngfw_request_id. Returns None if user has no NGFW.
+        Dictionary with request correlation IDs, provider-neutral management
+        access fields, attachment/routing fields, and legacy AWS aliases.
+        Returns None if user has no NGFW.
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -688,15 +673,92 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
         request_id = str(row[0])
         state = row[1] if row[1] else {}
         status = row[2]
+        attachment = resolve_ngfw_attachment_config(state)
 
         return {
             "ngfw_request_id": request_id,
+            "cloud_provider": attachment.cloud_provider,
             "ec2_instance_id": state.get("ec2_instance_id"),
-            "management_ip": state.get("management_ip"),
-            "ssh_key_secret_arn": state.get("ssh_key_secret_arn"),
-            "data_eni_id": state.get("data_eni_id"),
+            "management_ip": attachment.management_ip,
+            "ssh_key_secret_arn": attachment.ssh_key_secret_ref,
+            "ssh_key_secret_ref": attachment.ssh_key_secret_ref,
+            "dataplane_ip": attachment.dataplane_ip,
+            "route_next_hop_ip": attachment.route_next_hop_ip,
+            "data_eni_id": attachment.data_attachment_id,
+            "data_attachment_id": attachment.data_attachment_id,
+            "attachment_mode": attachment.attachment_mode,
+            "provider_metadata": attachment.provider_metadata,
+            "attached_ranges": state.get("attached_ranges", []),
             "status": status,
         }
+
+
+def _build_ngfw_range_attachment_record(
+    *,
+    range_id: int,
+    request_id: str,
+    subnets: list[dict[str, Any]],
+    ngfw_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the persisted attachment record for a range bound to an NGFW."""
+    return {
+        "range_id": range_id,
+        "request_id": request_id,
+        "cloud_provider": _get_cloud_provider(),
+        "attachment_mode": ngfw_data.get("attachment_mode", ""),
+        "route_next_hop_ip": ngfw_data.get("route_next_hop_ip", ""),
+        "data_attachment_id": ngfw_data.get("data_attachment_id", ""),
+        "subnets": [
+            {
+                "name": subnet.get("name", ""),
+                "cidr": subnet.get("cidr", ""),
+                "connected_to": list(subnet.get("connected_to", [])),
+                "provider_metadata": subnet.get("provider_metadata", {}),
+            }
+            for subnet in subnets
+        ],
+    }
+
+
+def _record_ngfw_range_attachment(
+    *,
+    ngfw_request_id: str,
+    ngfw_status: str,
+    attachment_record: dict[str, Any],
+) -> None:
+    """Merge the current range attachment into the NGFW instance state."""
+    ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
+    current_state = ngfw_data.get("state") or {}
+    current_attachments = list(current_state.get("attached_ranges") or [])
+    current_attachments = [
+        attachment
+        for attachment in current_attachments
+        if attachment.get("range_id") != attachment_record.get("range_id")
+    ]
+    current_attachments.append(attachment_record)
+    update_instance_state(
+        ngfw_request_id,
+        ngfw_status,
+        attached_ranges=current_attachments,
+    )
+
+
+def _remove_ngfw_range_attachment(
+    *,
+    ngfw_request_id: str,
+    ngfw_status: str,
+    range_id: int,
+) -> None:
+    """Remove a range attachment from the NGFW instance state."""
+    ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
+    current_state = ngfw_data.get("state") or {}
+    current_attachments = list(current_state.get("attached_ranges") or [])
+    remaining_attachments = [attachment for attachment in current_attachments if attachment.get("range_id") != range_id]
+    update_instance_state(
+        ngfw_request_id,
+        ngfw_status,
+        attached_ranges=remaining_attachments,
+    )
 
 
 def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
@@ -930,20 +992,19 @@ def get_range_data_by_request_id(request_id: str) -> dict:
         if range_config.get("ngfw", False):
             cur.execute(
                 """
-                SELECT ei.id
+                SELECT ei.id, ei.state
                 FROM engine_instance ei
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
                   AND ei.status IN ('ready', 'paused', 'pausing', 'resuming')
-                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
                 (user_id,),
             )
             ngfw_row = cur.fetchone()
-            if ngfw_row:
+            if ngfw_row and has_ngfw_attachment_state(ngfw_row[1]):
                 ngfw_instance_id = ngfw_row[0]
 
         return {
@@ -1499,12 +1560,12 @@ def configure_ngfw_subnets(
     range_id: int,
     management_ip: str,
     ssh_key_secret_arn: str,
-    ngfw_subnet_cidr: str,
+    route_next_hop_ip: str,
     ssm_endpoints_subnet_cidr: str = "",
 ) -> None:
     """Configure NGFW with routes for range subnets.
 
-    This runs AFTER pulumi up (subnets exist) and BEFORE instance setup.
+    This runs after range infrastructure exists and before instance setup.
     Configures static routes on the NGFW so traffic can flow between subnets.
     When ssm_endpoints_subnet_cidr is provided, also configures routing for
     Bedrock/SSM endpoint traffic through the NGFW.
@@ -1514,16 +1575,13 @@ def configure_ngfw_subnets(
         range_id: Range ID for unique naming.
         management_ip: NGFW management IP for SSH.
         ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
-        ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+        route_next_hop_ip: Next-hop IP address for range subnet routes.
         ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
     """
-    # Compute VPC gateway IP (first IP + 1 in the subnet)
-    network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
-    vpc_gateway_ip = str(network.network_address + 1)
     logger.info(
-        "Configuring NGFW: %d subnets, gateway=%s",
+        "Configuring NGFW: %d subnets, next_hop=%s",
         len(subnets),
-        vpc_gateway_ip,
+        route_next_hop_ip,
     )
 
     # Get SSH private key from Secrets Manager
@@ -1579,7 +1637,11 @@ def configure_ngfw_subnets(
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
     steps = NGFWConfigureSubnetsPlan().get_steps(
-        subnets, range_id, vpc_gateway_ip, stale_routes, ssm_endpoints_subnet_cidr
+        subnets,
+        range_id,
+        route_next_hop_ip,
+        stale_routes,
+        ssm_endpoints_subnet_cidr,
     )
     plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
@@ -2055,8 +2117,9 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         if ngfw_data and ngfw_data.get("management_ip"):
             logger.info("NGFW enabled for range %s", range_id)
             ngfw_status = ngfw_data.get("status")
+            ngfw_provider = ngfw_data.get("cloud_provider", "aws")
             ec2_instance_id = ngfw_data.get("ec2_instance_id")
-            if ngfw_status in ("paused", "pausing", "resuming"):
+            if ngfw_provider == "aws" and ngfw_status in ("paused", "pausing", "resuming"):
                 if ngfw_status == "pausing" and ec2_instance_id:
                     logger.info("NGFW is pausing, waiting for pause to complete...")
                     aws_executor = AWSExecutor()
@@ -2084,6 +2147,11 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                 else:
                     logger.info("Resuming paused NGFW for range provisioning...")
                     run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+            elif ngfw_provider != "aws" and ngfw_status != "ready":
+                raise RuntimeError(
+                    "GDC-attached NGFW ranges require the NGFW to already be in ready state. "
+                    f"Current status={ngfw_status!r} for request_id={ngfw_data['ngfw_request_id']}"
+                )
 
     try:
         if operation == "up":
@@ -2215,21 +2283,18 @@ def _run_terraform_provision(
     # Validate NGFW routes were created if range requires NGFW
     if range_spec.get("ngfw", False):
         ngfw_data = get_user_ngfw_data(user_id)
-        if not ngfw_data or not ngfw_data.get("data_eni_id"):
+        if not ngfw_data or not resolve_ngfw_attachment_config(ngfw_data).is_attachable:
             raise RuntimeError(
-                "NGFW routing validation failed: Range requires NGFW but data_eni_id is missing. "
-                "This should have been caught earlier - investigation required."
+                "NGFW routing validation failed: range requires NGFW but the active NGFW "
+                "is missing attachable routing state."
             )
-        logger.info(
-            "NGFW-enabled range validated: inter-subnet routes created via data_eni_id=%s",
-            ngfw_data["data_eni_id"],
-        )
+        logger.info("NGFW-enabled range validated: attachment_mode=%s", ngfw_data.get("attachment_mode", ""))
 
     # Configure NGFW with routes for range subnets (only if range requires NGFW)
     if range_spec.get("ngfw", False):
         ngfw_data = get_user_ngfw_data(user_id)
-        ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-        if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
+        route_next_hop_ip = ngfw_data.get("route_next_hop_ip") if ngfw_data else ""
+        if ngfw_data and ngfw_data.get("management_ip") and route_next_hop_ip:
             logger.info("Configuring NGFW with subnet routes...")
             subnets_for_ngfw = []
             for spec_subnet in spec_subnets:
@@ -2240,6 +2305,15 @@ def _run_terraform_provision(
                         "name": subnet_name,
                         "cidr": subnet_output.get("subnet_cidr", ""),
                         "connected_to": spec_subnet.get("connected_to", []),
+                        "provider_metadata": {
+                            "gcp": {
+                                "namespace": subnet_output.get("gdc_namespace", ""),
+                                "network_name": subnet_output.get("gdc_network_name", ""),
+                                "gateway_ip": subnet_output.get("gdc_gateway_ip", ""),
+                            }
+                        }
+                        if _get_cloud_provider() == "gcp"
+                        else {},
                     }
                 )
             configure_ngfw_subnets(
@@ -2247,8 +2321,18 @@ def _run_terraform_provision(
                 range_id=range_id,
                 management_ip=ngfw_data["management_ip"],
                 ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-                ngfw_subnet_cidr=ngfw_subnet_cidr,
+                route_next_hop_ip=route_next_hop_ip,
                 ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
+            )
+            _record_ngfw_range_attachment(
+                ngfw_request_id=ngfw_data["ngfw_request_id"],
+                ngfw_status=ngfw_data["status"],
+                attachment_record=_build_ngfw_range_attachment_record(
+                    range_id=range_id,
+                    request_id=request_id,
+                    subnets=subnets_for_ngfw,
+                    ngfw_data=ngfw_data,
+                ),
             )
 
     # Run instance setup (DC first, then others in parallel)
@@ -2293,7 +2377,14 @@ def _run_terraform_destroy(
     spec_subnets = range_spec.get("subnets", [])
     if spec_subnets:
         try:
+            ngfw_data = get_user_ngfw_data(user_id) if range_spec.get("ngfw", False) else None
             remove_ngfw_subnets(user_id, spec_subnets, range_id)
+            if ngfw_data:
+                _remove_ngfw_range_attachment(
+                    ngfw_request_id=ngfw_data["ngfw_request_id"],
+                    ngfw_status=ngfw_data["status"],
+                    range_id=range_id,
+                )
         except Exception as e:
             logger.warning("NGFW subnet removal failed (continuing): %s", e)
 
@@ -2337,7 +2428,7 @@ def _run_terraform_destroy(
         try:
             if not user_has_active_ranges(user_id, range_id):
                 ngfw_data = get_user_ngfw_data(user_id)
-                if ngfw_data and ngfw_data["status"] == "ready":
+                if ngfw_data and ngfw_data["status"] == "ready" and ngfw_data.get("cloud_provider") == "aws":
                     logger.info("No other active ranges, pausing NGFW")
                     run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
         except Exception as e:
@@ -2433,8 +2524,9 @@ def _build_range_terraform_variables(
             }
         )
 
-    # Get NGFW data ENI ID from database for inter-subnet routing
+    # Resolve NGFW attachment data for inter-subnet routing
     ngfw_data_eni_id = ""
+    ngfw_attachment: dict[str, Any] | None = None
     if range_spec.get("ngfw", False):
         ngfw_data = get_user_ngfw_data(user_id)
         if not ngfw_data:
@@ -2442,14 +2534,28 @@ def _build_range_terraform_variables(
                 f"Range requires NGFW (ngfw: true in spec) but user {user_id} has no provisioned NGFW. "
                 "User must provision an NGFW before creating NGFW-enabled ranges."
             )
-        ngfw_data_eni_id = ngfw_data.get("data_eni_id", "")
-        if not ngfw_data_eni_id:
+        attachment = resolve_ngfw_attachment_config(ngfw_data)
+        if not attachment.is_attachable:
             raise ValueError(
-                f"Range requires NGFW but user {user_id}'s NGFW is missing data_eni_id in state. "
-                "NGFW may have failed provisioning or is from an old version. "
+                f"Range requires NGFW but user {user_id}'s NGFW is missing attachable routing state. "
                 f"NGFW request_id: {ngfw_data.get('ngfw_request_id')}"
             )
-        logger.info("Using NGFW data_eni_id=%s for range %s inter-subnet routing", ngfw_data_eni_id, range_id)
+        ngfw_data_eni_id = attachment.data_attachment_id
+        ngfw_attachment = {
+            "cloud_provider": attachment.cloud_provider,
+            "management_ip": attachment.management_ip,
+            "ssh_key_secret_ref": attachment.ssh_key_secret_ref,
+            "dataplane_ip": attachment.dataplane_ip,
+            "route_next_hop_ip": attachment.route_next_hop_ip,
+            "data_attachment_id": attachment.data_attachment_id,
+            "attachment_mode": attachment.attachment_mode,
+            "provider_metadata": attachment.provider_metadata,
+        }
+        logger.info(
+            "Using NGFW attachment_mode=%s for range %s",
+            attachment.attachment_mode or "unknown",
+            range_id,
+        )
 
     range_network = load_range_network_config()
 
@@ -2475,6 +2581,8 @@ def _build_range_terraform_variables(
     }
 
     if provider == "gcp":
+        if ngfw_attachment:
+            variables["ngfw_attachment"] = ngfw_attachment
         return variables
 
     variables.update(
@@ -2525,8 +2633,47 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     instance_uuid = ngfw_data["instance_id"]  # Our UUID, not AWS instance ID
     app_id = ngfw_data["app_id"]
     state = ngfw_data.get("state", {})
+    provider = resolve_ngfw_attachment_config(state).cloud_provider
 
-    # EC2 instance ID is stored in state after Pulumi provisioning
+    if provider != "aws":
+        if provider != "gcp":
+            raise RuntimeError(
+                f"NGFW runtime operation {operation!r} is not implemented for cloud_provider={provider!r}"
+            )
+
+        import gdc_vmseries_ngfw
+
+        in_progress_status, success_status = status_map[operation]
+        update_instance_state(request_id, in_progress_status)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=in_progress_status,
+        )
+        try:
+            gdc_operation = "start" if operation == "start" else "stop"
+            gdc_vmseries_ngfw.run_power_operation(gdc_operation, state)
+            update_instance_state(request_id, success_status)
+            publish_ngfw_event(
+                request_id=request_id,
+                instance_id=instance_uuid,
+                app_id=app_id,
+                status=success_status,
+            )
+            return
+        except Exception as e:
+            logger.error("GDC VM-Series NGFW operation failed: %s", e)
+            update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
+            publish_ngfw_event(
+                request_id=request_id,
+                instance_id=instance_uuid,
+                app_id=app_id,
+                status=STATUS_FAILED,
+            )
+            raise
+
+    # EC2 instance ID is stored in state after Terraform provisioning
     ec2_instance_id = state.get("ec2_instance_id")
     if not ec2_instance_id:
         raise ValueError(f"EC2 instance ID not found in state for request: {request_id}")

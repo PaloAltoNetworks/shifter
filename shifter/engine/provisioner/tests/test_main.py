@@ -469,6 +469,121 @@ class TestGdcProvisioning:
         mock_dc_setup.assert_not_called()
         mock_single_setup.assert_not_called()
 
+    def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self, mocker):
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "ENVIRONMENT": "gcp-dev",
+                "RANGE_NETWORK_ID": "cluster1",
+                "RANGE_NETWORK_CIDR": "10.200.0.0/24",
+                "RANGE_NETWORK_REGION": "us-central1",
+            },
+            clear=True,
+        )
+        mocker.patch(
+            "main.get_user_ngfw_data",
+            return_value={
+                "cloud_provider": "gcp",
+                "ngfw_request_id": "ngfw-req-1",
+                "management_ip": "10.200.0.10",
+                "ssh_key_secret_arn": "projects/test/secrets/ngfw-admin",
+                "route_next_hop_ip": "10.200.0.2",
+                "attachment_mode": "gdc-static-route",
+                "provider_metadata": {"gcp": {"namespace": "ngfw-user-1"}},
+            },
+        )
+        mocker.patch("main.generate_presigned_url", return_value="")
+        mocker.patch("main.get_range_availability_zone", return_value="us-central1-a")
+        mocker.patch("main._get_kali_instance_type", return_value="n2-standard-2")
+        mocker.patch("main._get_victim_instance_type", return_value="n2-standard-2")
+        mocker.patch("main._get_windows_instance_type", return_value="n2-standard-4")
+        mocker.patch("main._get_dc_instance_type", return_value="n2-standard-4")
+
+        variables = _build_range_terraform_variables(
+            request_id="req-123",
+            range_id=42,
+            user_id=7,
+            range_spec={
+                "ngfw": True,
+                "subnets": [
+                    {
+                        "name": "attack",
+                        "uuid": "subnet-1",
+                        "connected_to": [],
+                        "instances": [
+                            {
+                                "uuid": "inst-1",
+                                "name": "attacker",
+                                "role": "attacker",
+                                "os_type": "kali",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        assert variables["ngfw_data_eni_id"] == ""
+        assert variables["ngfw_attachment"]["cloud_provider"] == "gcp"
+        assert variables["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
+
+    def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, mocker):
+        from main import run_range_terraform
+
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={"range_id": 42, "user_id": 7, "spec": {"ngfw": True}},
+        )
+        mocker.patch(
+            "main.get_user_ngfw_data",
+            return_value={
+                "cloud_provider": "gcp",
+                "management_ip": "10.200.0.10",
+                "status": "paused",
+                "ngfw_request_id": "ngfw-req-1",
+            },
+        )
+
+        with pytest.raises(RuntimeError, match="already be in ready state"):
+            run_range_terraform("up", "req-123")
+
+    def test_record_and_remove_ngfw_range_attachment_updates_state(self, mocker):
+        from main import _record_ngfw_range_attachment, _remove_ngfw_range_attachment
+
+        mocker.patch(
+            "main.get_ngfw_data_by_request_id",
+            side_effect=[
+                {"state": {"attached_ranges": [{"range_id": 10}]}},
+                {"state": {"attached_ranges": [{"range_id": 10}, {"range_id": 42}]}},
+            ],
+        )
+        mock_update = mocker.patch("main.update_instance_state")
+
+        attachment_record = {
+            "range_id": 42,
+            "request_id": "req-123",
+            "cloud_provider": "gcp",
+            "subnets": [{"name": "attack", "cidr": "10.200.0.96/28", "connected_to": []}],
+        }
+
+        _record_ngfw_range_attachment(
+            ngfw_request_id="ngfw-req-1",
+            ngfw_status="ready",
+            attachment_record=attachment_record,
+        )
+        _remove_ngfw_range_attachment(
+            ngfw_request_id="ngfw-req-1",
+            ngfw_status="ready",
+            range_id=42,
+        )
+
+        assert mock_update.call_args_list[0].args[:2] == ("ngfw-req-1", "ready")
+        assert mock_update.call_args_list[0].kwargs["attached_ranges"] == [{"range_id": 10}, attachment_record]
+        assert mock_update.call_args_list[1].kwargs["attached_ranges"] == [{"range_id": 10}]
+
 
 class TestPollForSerialAndCert:
     """Tests for poll_for_serial_and_cert function."""
@@ -635,3 +750,41 @@ class TestDcSetupRouting:
         dc_plan_cls.assert_called_once_with(runtime_promotion=False)
         assert mock_orchestrator.orchestrate.call_count == 1
         mock_execution.close.assert_called_once_with()
+
+
+class TestNgfwRuntimeOperations:
+    """Tests for provider-aware NGFW runtime ops."""
+
+    def test_run_ngfw_operation_runs_gdc_vmseries_power_operation(self, mocker):
+        from main import run_ngfw_operation
+
+        state = {
+            "cloud_provider": "gcp",
+            "management_ip": "10.200.0.10",
+            "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+            "route_next_hop_ip": "10.200.0.2",
+            "provider_metadata": {
+                "gcp": {
+                    "namespace": "ngfw-user-42",
+                    "vm_name": "ngfw-user-42-abcdef",
+                }
+            },
+        }
+        mocker.patch(
+            "main.get_ngfw_data_by_request_id",
+            return_value={
+                "instance_id": "ngfw-inst-1",
+                "app_id": "ngfw-app-1",
+                "state": state,
+            },
+        )
+        mock_update = mocker.patch("main.update_instance_state")
+        mock_publish = mocker.patch("main.publish_ngfw_event")
+        mock_power = mocker.patch("gdc_vmseries_ngfw.run_power_operation")
+
+        run_ngfw_operation("start", "ngfw-req-1")
+
+        mock_power.assert_called_once_with("start", state)
+        assert mock_update.call_args_list[0].args[:2] == ("ngfw-req-1", "resuming")
+        assert mock_update.call_args_list[1].args[:2] == ("ngfw-req-1", "ready")
+        assert [call.kwargs["status"] for call in mock_publish.call_args_list] == ["resuming", "ready"]

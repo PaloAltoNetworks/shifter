@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
     GDCNetworkAccessConfig,
+    GDCPaloAltoVMSeriesConfig,
     GDCVMRuntimeConfig,
     GDCVMRuntimeProfile,
     InstanceConfig,
@@ -25,6 +26,7 @@ from config import (
     get_range_availability_zone,
     get_range_from_db,
     load_gdc_network_access_config,
+    load_gdc_palo_alto_vmseries_config,
     load_gdc_vmruntime_config,
     load_range_network_config,
 )
@@ -104,7 +106,14 @@ class TestGetRangeFromDb:
             # First call returns range row, second call returns NGFW data ENI ID
             mock_cursor.fetchone.side_effect = [
                 sample_db_range_row_with_ngfw,
-                ("eni-test123", 123),  # NGFW lookup: (data_eni_id, instance_id)
+                (
+                    {
+                        "management_ip": "10.1.5.10",
+                        "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+                        "data_eni_id": "eni-test123",
+                    },
+                    123,
+                ),
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -117,6 +126,46 @@ class TestGetRangeFromDb:
 
             assert result["ngfw_enabled"] is True
             assert result["ngfw_data_eni_id"] == "eni-test123"
+            assert result["ngfw_attachment"]["attachment_mode"] == "aws-route-table-eni"
+            assert result["ngfw_attachment"]["ssh_key_secret_ref"].endswith(":secret:key")
+
+    def test_gcp_ngfw_attachment_uses_route_next_hop_state(
+        self, mock_boto3_clients, mock_env_vars_minimal, sample_db_range_row_with_ngfw
+    ):
+        """GCP/GDC NGFWs should resolve attachable state without AWS ENI fields."""
+        with patch("psycopg.connect") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.side_effect = [
+                sample_db_range_row_with_ngfw,
+                (
+                    {
+                        "cloud_provider": "gcp",
+                        "management_ip": "10.200.0.10",
+                        "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+                        "route_next_hop_ip": "10.200.0.2",
+                        "provider_metadata": {
+                            "gcp": {
+                                "attachment_mode": "gdc-static-route",
+                            }
+                        },
+                    },
+                    123,
+                ),
+            ]
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_connect.return_value = mock_conn
+
+            result = get_range_from_db(42)
+
+            assert result["ngfw_enabled"] is True
+            assert result["ngfw_data_eni_id"] == ""
+            assert result["ngfw_instance_id"] == 123
+            assert result["ngfw_attachment"]["cloud_provider"] == "gcp"
+            assert result["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
 
 
 class TestDataclassDefaults:
@@ -186,6 +235,8 @@ class TestDataclassDefaults:
             portal_vpc_cidr="10.0.0.0/16",
         )
         assert config.ngfw_data_eni_id == ""
+        assert config.ngfw_attachment_mode == ""
+        assert config.ngfw_route_next_hop_ip == ""
         assert config.ngfw_enabled is False
         assert config.dc_ami_id == ""
         assert config.portal_vpc_cidr == "10.0.0.0/16"
@@ -386,6 +437,63 @@ class TestRangeNetworkEnv:
         assert config.get_profile(role="victim", os_type="ubuntu").source_url == "https://example.com/ubuntu.img"
         with pytest.raises(RuntimeError, match="Missing GDC VM Runtime image URL"):
             config.get_profile(role="dc", os_type="windows")
+
+    def test_load_gdc_palo_alto_vmseries_config_reads_required_contract(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
+                "GDC_VMSERIES_BOOTSTRAP_BUCKET": "shifter-gcp-dev-vmseries-bootstrap",
+                "GDC_VMSERIES_STORAGE_CLASS": "local-shared",
+                "GDC_VMSERIES_IMAGE_GCS_SECRET_ID": "projects/test/secrets/gcs-import",
+                "GDC_VMSERIES_NAMESPACE_PREFIX": "ngfw",
+                "GDC_VMSERIES_MGMT_NETWORK_NAME": "pod-network",
+                "GDC_VMSERIES_MGMT_IP_CIDR": "10.200.0.20/24",
+                "GDC_VMSERIES_DATA_NETWORK_NAME": "ngfw-data",
+                "GDC_VMSERIES_DATA_IP_CIDR": "10.200.1.10/24",
+                "GDC_VMSERIES_ROUTE_NEXT_HOP_IP": "10.200.1.1",
+                "GDC_VMSERIES_VCPUS": "8",
+                "GDC_VMSERIES_MEMORY": "16Gi",
+                "GDC_VMSERIES_DISK_SIZE_GIB": "100",
+                "GDC_VMSERIES_BOOTSTRAP_DISK_SIZE_GIB": "2",
+                "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID": "projects/test/secrets/bootstrap-xml",
+            },
+            clear=True,
+        )
+
+        config = load_gdc_palo_alto_vmseries_config()
+
+        assert config == GDCPaloAltoVMSeriesConfig(
+            image_url="gs://images/panos-vmseries.qcow2",
+            bootstrap_bucket="shifter-gcp-dev-vmseries-bootstrap",
+            storage_class_name="local-shared",
+            image_gcs_secret_id="projects/test/secrets/gcs-import",
+            namespace_prefix="ngfw",
+            management_network_name="pod-network",
+            management_ip_cidr="10.200.0.20/24",
+            data_network_name="ngfw-data",
+            data_ip_cidr="10.200.1.10/24",
+            route_next_hop_ip="10.200.1.1",
+            vcpus=8,
+            memory="16Gi",
+            disk_size_gib=100,
+            bootstrap_disk_size_gib=2,
+            bootstrap_xml_template_secret_id="projects/test/secrets/bootstrap-xml",
+        )
+
+    def test_gdc_palo_alto_vmseries_config_requires_palo_alto_runtime_fields(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="GDC_VMSERIES_BOOTSTRAP_BUCKET"):
+            load_gdc_palo_alto_vmseries_config()
 
 
 class TestDecryptField:

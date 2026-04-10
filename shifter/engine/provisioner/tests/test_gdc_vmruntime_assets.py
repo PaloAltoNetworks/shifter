@@ -11,6 +11,7 @@ from gdc_vmruntime_assets import (
     _resolve_image_source,
     apply_range_assets,
     destroy_range_assets,
+    run_power_operation,
 )
 
 
@@ -320,3 +321,90 @@ class TestDestroyRangeAssets:
 
         assert result == []
         custom_api.create_namespaced_custom_object.assert_not_called()
+
+
+@patch("gdc_vmruntime_assets.subprocess.run")
+@patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())
+@patch("gdc_vmruntime_assets.load_gdc_network_access_config")
+def test_run_power_operation_starts_vm_and_waits_for_ready(mock_access, mock_client_builder, mock_run):
+    custom_api = MagicMock()
+    fake_client_module = SimpleNamespace(CustomObjectsApi=MagicMock(return_value=custom_api))
+    fake_api_exception = type("ApiException", (Exception,), {"status": 500})
+    mock_access.return_value = GDCNetworkAccessConfig(
+        access_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-access",
+        kubeconfig="apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nusers: []\n",
+        cluster_id="cluster1",
+        vxlan_cidr="10.200.0.0/24",
+        region="us-central1",
+    )
+
+    with (
+        patch(
+            "gdc_vmruntime_assets._import_kubernetes_modules",
+            return_value=(None, fake_client_module, None, fake_api_exception),
+        ),
+        patch("gdc_vmruntime_assets._wait_for_vm_ready") as mock_wait_ready,
+    ):
+        run_power_operation(
+            "start",
+            {
+                "provider_metadata": {
+                    "gcp": {
+                        "namespace": "range-42",
+                        "vm_name": "range-42-victims-victim-1234",
+                    }
+                }
+            },
+        )
+
+    command = mock_run.call_args.args[0]
+    assert command[0] == "kubectl"
+    assert "virt" in command
+    assert "start" in command
+    assert "range-42-victims-victim-1234" in command
+    assert "range-42" in command
+    mock_wait_ready.assert_called_once_with(custom_api, "range-42", "range-42-victims-victim-1234", fake_api_exception)
+
+
+@patch("gdc_vmruntime_assets.subprocess.run")
+@patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())
+@patch("gdc_vmruntime_assets.load_gdc_network_access_config")
+def test_run_power_operation_stops_vm_and_waits_for_stopped(mock_access, mock_client_builder, mock_run):
+    custom_api = MagicMock()
+    fake_client_module = SimpleNamespace(CustomObjectsApi=MagicMock(return_value=custom_api))
+    fake_api_exception = type("ApiException", (Exception,), {"status": 500})
+    mock_access.return_value = GDCNetworkAccessConfig(
+        access_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-access",
+        kubeconfig="apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nusers: []\n",
+        cluster_id="cluster1",
+        vxlan_cidr="10.200.0.0/24",
+        region="us-central1",
+    )
+
+    with (
+        patch(
+            "gdc_vmruntime_assets._import_kubernetes_modules",
+            return_value=(None, fake_client_module, None, fake_api_exception),
+        ),
+        patch("gdc_vmruntime_assets._wait_for_vm_stopped") as mock_wait_stopped,
+    ):
+        run_power_operation(
+            "stop",
+            {
+                "gdc_namespace": "range-42",
+                "gdc_vm_name": "range-42-victims-victim-1234",
+            },
+        )
+
+    command = mock_run.call_args.args[0]
+    assert command[0] == "kubectl"
+    assert "virt" in command
+    assert "stop" in command
+    assert "range-42-victims-victim-1234" in command
+    assert "range-42" in command
+    mock_wait_stopped.assert_called_once_with(
+        custom_api,
+        "range-42",
+        "range-42-victims-victim-1234",
+        fake_api_exception,
+    )

@@ -1,6 +1,6 @@
 """Range pause/resume operations.
 
-Handles pausing and resuming all EC2 instances in a range.
+Handles pausing and resuming all provisioned assets in a range.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import gdc_vmruntime_assets
 from events import publish_ngfw_event, publish_status_update
 from executors.aws_executor import AWSExecutor
 from main import get_db_connection, get_range_data_by_request_id, update_range_status
@@ -25,20 +26,21 @@ NGFW_START_RETRY_DELAYS = (10, 30, 60)
 
 
 def get_range_instance_ids(request_id: str) -> list[dict]:
-    """Get all instance IDs for a range.
+    """Get all range assets for pause/resume operations.
 
     Queries engine_instance records for the given request and extracts
-    provider-specific instance IDs from the state JSON field.
+    provider/runtime-specific lifecycle targets from the state JSON field.
 
     Args:
         request_id: UUID string of the Request.
 
     Returns:
-        List of dicts with 'uuid' (our instance UUID) and 'aws_instance_id'.
+        List of dicts describing how each asset should participate in
+        lifecycle operations.
 
     Raises:
-        ValueError: If no instances found or missing AWS instance IDs.
-        NotImplementedError: If the range uses a non-AWS provider.
+        ValueError: If no instances are found or an instance cannot be mapped
+            onto a supported lifecycle mode.
     """
     logger.info("get_range_instance_ids: request_id=%s", request_id)
 
@@ -61,33 +63,42 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
     instances = []
     for uuid, state, role in rows:
         state_dict = state if isinstance(state, dict) else {}
-        cloud_provider = state_dict.get("cloud_provider", "aws")
-        if cloud_provider != "aws":
-            raise NotImplementedError(
-                "Range pause/resume is still AWS-only. "
-                f"Found cloud_provider={cloud_provider!r} for request {request_id}. "
-                "The GDC/GCP lifecycle rewrite must land before range pause/resume can support this provider."
-            )
-        aws_instance_id = state_dict.get("aws_instance_id")
+        cloud_provider = str(state_dict.get("cloud_provider", "aws")).strip().lower() or "aws"
+        asset_type = str(state_dict.get("asset_type", "vm_runtime_vm")).strip() or "vm_runtime_vm"
 
-        if not aws_instance_id:
-            logger.warning(
-                "Instance %s (role=%s) missing aws_instance_id in state, skipping",
-                uuid,
-                role,
-            )
-            continue
+        entry = {
+            "uuid": str(uuid),
+            "role": role,
+            "cloud_provider": cloud_provider,
+            "asset_type": asset_type,
+            "state": state_dict,
+        }
 
-        instances.append(
-            {
-                "uuid": str(uuid),
-                "aws_instance_id": aws_instance_id,
-                "role": role,
-            }
-        )
+        if cloud_provider == "aws":
+            aws_instance_id = state_dict.get("aws_instance_id")
+            if not aws_instance_id:
+                logger.warning(
+                    "Instance %s (role=%s) missing aws_instance_id in state, skipping",
+                    uuid,
+                    role,
+                )
+                continue
+            entry["operation_mode"] = "aws"
+            entry["aws_instance_id"] = aws_instance_id
+        elif cloud_provider == "gcp" and asset_type == "vm_runtime_vm":
+            entry["operation_mode"] = "gdc_vm_runtime"
+        elif cloud_provider == "gcp" and asset_type == "scenario_pod":
+            entry["operation_mode"] = "noop"
+        else:
+            raise ValueError(
+                "Unsupported range lifecycle target "
+                f"for request {request_id}: cloud_provider={cloud_provider!r} asset_type={asset_type!r}"
+            )
+
+        instances.append(entry)
 
     if not instances:
-        raise ValueError(f"No instances with AWS instance IDs found for request: {request_id}")
+        raise ValueError(f"No lifecycle-managed assets found for request: {request_id}")
 
     logger.info(
         "get_range_instance_ids: found %d instances for request_id=%s",
@@ -471,26 +482,43 @@ def ensure_ngfw_running(request_id: str) -> None:
 
 
 def _execute_instance_operation(
-    executor: AWSExecutor,
-    orchestrator: OpsOrchestrator,
-    plan: RangePausePlan | RangeResumePlan,
+    executor: AWSExecutor | None,
+    orchestrator: OpsOrchestrator | None,
+    plan: RangePausePlan | RangeResumePlan | None,
     instance: dict,
+    *,
+    operation: str,
 ) -> tuple[str, bool, str | None]:
     """Execute pause/resume operation on a single instance.
 
     Args:
-        executor: AWSExecutor instance.
-        orchestrator: OpsOrchestrator instance.
-        plan: Plan to execute (RangePausePlan or RangeResumePlan).
-        instance: Dict with uuid, aws_instance_id, role.
+        executor: AWSExecutor instance for AWS-backed assets.
+        orchestrator: OpsOrchestrator instance for AWS-backed assets.
+        plan: Plan to execute for AWS-backed assets.
+        instance: Dict describing the asset and its lifecycle mode.
+        operation: Operation name ("pause" or "resume").
 
     Returns:
         Tuple of (uuid, success, error_message).
     """
-    aws_instance_id = instance["aws_instance_id"]
     uuid = instance["uuid"]
+    mode = instance["operation_mode"]
 
     try:
+        if mode == "noop":
+            logger.info("Skipping %s for no-op asset uuid=%s", operation, uuid)
+            return (uuid, True, None)
+
+        if mode == "gdc_vm_runtime":
+            gdc_operation = "stop" if operation == "pause" else "start"
+            gdc_vmruntime_assets.run_power_operation(gdc_operation, instance["state"])
+            logger.info("GDC VM Runtime %s succeeded for uuid=%s", gdc_operation, uuid)
+            return (uuid, True, None)
+
+        if mode != "aws" or executor is None or orchestrator is None or plan is None:
+            raise RuntimeError(f"Unsupported lifecycle execution mode {mode!r} for uuid={uuid}")
+
+        aws_instance_id = instance["aws_instance_id"]
         context = plan.get_context(aws_instance_id)
         result = orchestrator.orchestrate(aws_instance_id, plan, context)
 
@@ -513,11 +541,7 @@ def _execute_instance_operation(
 
     except Exception as e:
         error_msg = str(e)
-        logger.exception(
-            "Exception during operation for instance %s (uuid=%s)",
-            aws_instance_id,
-            uuid,
-        )
+        logger.exception("Exception during %s for uuid=%s mode=%s", operation, uuid, mode)
         return (uuid, False, error_msg)
 
 
@@ -550,10 +574,11 @@ def run_range_pause(request_id: str) -> None:
     # Get all instances to pause
     instances = get_range_instance_ids(request_id)
 
-    # Create executor and orchestrator
-    executor = AWSExecutor()
-    orchestrator = OpsOrchestrator(executor)
-    plan = RangePausePlan()
+    # Create AWS lifecycle helpers lazily; GCP-only ranges do not need them.
+    has_aws_assets = any(instance["operation_mode"] == "aws" for instance in instances)
+    executor = AWSExecutor() if has_aws_assets else None
+    orchestrator = OpsOrchestrator(executor) if executor is not None else None
+    plan = RangePausePlan() if executor is not None else None
 
     # Execute stop operations in parallel
     results = []
@@ -565,6 +590,7 @@ def run_range_pause(request_id: str) -> None:
                 orchestrator,
                 plan,
                 instance,
+                operation="pause",
             ): instance
             for instance in instances
         }
@@ -576,8 +602,8 @@ def run_range_pause(request_id: str) -> None:
                 results.append(result)
             except Exception as e:
                 logger.exception(
-                    "Unexpected error pausing instance %s",
-                    instance["aws_instance_id"],
+                    "Unexpected error pausing instance uuid=%s",
+                    instance["uuid"],
                 )
                 results.append((instance["uuid"], False, str(e)))
 
@@ -675,10 +701,10 @@ def run_range_resume(request_id: str) -> None:
     # Get all instances to resume
     instances = get_range_instance_ids(request_id)
 
-    # Create executor and orchestrator
-    executor = AWSExecutor()
-    orchestrator = OpsOrchestrator(executor)
-    plan = RangeResumePlan()
+    has_aws_assets = any(instance["operation_mode"] == "aws" for instance in instances)
+    executor = AWSExecutor() if has_aws_assets else None
+    orchestrator = OpsOrchestrator(executor) if executor is not None else None
+    plan = RangeResumePlan() if executor is not None else None
 
     # Execute start operations in parallel
     results = []
@@ -690,6 +716,7 @@ def run_range_resume(request_id: str) -> None:
                 orchestrator,
                 plan,
                 instance,
+                operation="resume",
             ): instance
             for instance in instances
         }
@@ -701,8 +728,8 @@ def run_range_resume(request_id: str) -> None:
                 results.append(result)
             except Exception as e:
                 logger.exception(
-                    "Unexpected error resuming instance %s",
-                    instance["aws_instance_id"],
+                    "Unexpected error resuming instance uuid=%s",
+                    instance["uuid"],
                 )
                 results.append((instance["uuid"], False, str(e)))
 

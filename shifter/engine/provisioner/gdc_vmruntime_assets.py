@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import subprocess  # nosec B404 - used for kubectl virt runtime operations
+import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -32,6 +34,7 @@ _IMAGE_IMPORT_SECRET_SUFFIX = "-".join(("gdc", "vm", "image", "gcs"))
 _POLL_INTERVAL_SECONDS = 5
 _DISK_READY_TIMEOUT_SECONDS = 1800
 _VM_READY_TIMEOUT_SECONDS = 1800
+_VM_STOP_TIMEOUT_SECONDS = 900
 _DELETE_TIMEOUT_SECONDS = 300
 _MANAGED_BY_LABEL = "shifter-provisioner"
 
@@ -411,6 +414,34 @@ def _wait_for_vm_ready(custom_api, namespace: str, vm_name: str, api_exception) 
     raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to become ready")
 
 
+def _wait_for_vm_stopped(custom_api, namespace: str, vm_name: str, api_exception) -> dict[str, Any]:
+    deadline = time.monotonic() + _VM_STOP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            vm = custom_api.get_namespaced_custom_object(
+                group=_VM_GROUP,
+                version=_VM_VERSION,
+                plural=_VM_PLURAL,
+                namespace=namespace,
+                name=vm_name,
+            )
+        except api_exception as exc:
+            if exc.status == 404:
+                time.sleep(_POLL_INTERVAL_SECONDS)
+                continue
+            raise
+
+        status = vm.get("status", {})
+        state = str(status.get("state", "")).lower()
+        if state == "stopped":
+            return vm
+        if state in {"failed", "error"}:
+            raise RuntimeError(f"VirtualMachine {namespace}/{vm_name} entered state={state}")
+        time.sleep(_POLL_INTERVAL_SECONDS)
+
+    raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to stop")
+
+
 def _wait_for_deleted(
     custom_api,
     namespace: str,
@@ -551,6 +582,28 @@ def _collect_vmi_metadata(custom_api, namespace: str, vm_name: str, api_exceptio
         "gdc_node_name": str(status.get("nodeName", "")).strip(),
     }
     return {key: value for key, value in metadata.items() if value}
+
+
+def _get_runtime_metadata(state: dict[str, Any]) -> dict[str, Any]:
+    provider_metadata = state.get("provider_metadata")
+    if not isinstance(provider_metadata, dict):
+        return {}
+
+    for provider_name in ("gcp", "gdc"):
+        metadata = provider_metadata.get(provider_name)
+        if isinstance(metadata, dict):
+            return metadata
+
+    return {}
+
+
+def _resolve_power_target(state: dict[str, Any]) -> tuple[str, str]:
+    metadata = _get_runtime_metadata(state)
+    namespace = str(metadata.get("namespace") or state.get("gdc_namespace", "")).strip()
+    vm_name = str(metadata.get("vm_name") or state.get("gdc_vm_name") or state.get("instance_id", "")).strip()
+    if not namespace or not vm_name:
+        raise RuntimeError("GDC VM Runtime state is missing namespace or VM name")
+    return namespace, vm_name
 
 
 def _instance_os_label(os_type: str) -> str:
@@ -789,3 +842,38 @@ def destroy_range_assets(
         except api_exception as exc:
             if exc.status != 404:
                 raise
+
+
+def run_power_operation(operation: str, state: dict[str, Any]) -> None:
+    """Run a VM Runtime start/stop operation through kubectl virt and wait for completion."""
+    if operation not in {"start", "stop"}:
+        raise ValueError(f"Unknown GDC VM Runtime operation: {operation}")
+
+    access = load_gdc_network_access_config()
+    if access is None:
+        raise RuntimeError("GDC VM Runtime power operations require GDC_ACCESS_SECRET_ID")
+
+    namespace, vm_name = _resolve_power_target(state)
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as kubeconfig_file:
+        kubeconfig_file.write(access.kubeconfig)
+        kubeconfig_path = kubeconfig_file.name
+
+    try:
+        command = ["kubectl", "--kubeconfig", kubeconfig_path, "virt", operation, vm_name, "--namespace", namespace]
+        subprocess.run(command, check=True, capture_output=True)  # noqa: S603
+    except FileNotFoundError as exc:
+        raise RuntimeError("GDC VM Runtime power operations require kubectl with the virt plugin") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else str(exc)
+        raise RuntimeError(f"kubectl virt {operation} failed for {namespace}/{vm_name}: {stderr}") from exc
+    finally:
+        Path(kubeconfig_path).unlink(missing_ok=True)
+
+    _, client_module, _, api_exception = _import_kubernetes_modules()
+    api_client = _build_kube_api_client(access.kubeconfig)
+    custom_api = client_module.CustomObjectsApi(api_client)
+    if operation == "start":
+        _wait_for_vm_ready(custom_api, namespace, vm_name, api_exception)
+    else:
+        _wait_for_vm_stopped(custom_api, namespace, vm_name, api_exception)

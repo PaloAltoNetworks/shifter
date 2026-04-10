@@ -28,6 +28,45 @@ from plans.ngfw_provision import NGFWProvisionPlan
 logger = logging.getLogger(__name__)
 
 
+def _build_provider_state(output_data: dict[str, Any]) -> dict[str, Any]:
+    """Build provider-neutral NGFW state fields for the Terraform outputs."""
+    cloud_provider = output_data.get("cloud_provider") or os.environ.get("CLOUD_PROVIDER", "aws")
+    management_ip = output_data.get("management_ip", "")
+    dataplane_ip = output_data.get("dataplane_ip", "")
+    data_attachment_id = output_data.get("data_eni_id", "")
+    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn", "")
+    if cloud_provider == "gcp":
+        data_attachment_id = output_data.get("data_attachment_id", "")
+        return {
+            "cloud_provider": "gcp",
+            "route_next_hop_ip": output_data.get("route_next_hop_ip", ""),
+            "attachment_mode": output_data.get("attachment_mode", "gdc-vmruntime-palo-alto-vmseries"),
+            "data_attachment_id": data_attachment_id,
+            "attached_ranges": [],
+            "provider_metadata": output_data.get("provider_metadata", {}),
+        }
+
+    provider_state = {
+        "management_ip": management_ip,
+        "dataplane_ip": dataplane_ip,
+        "route_next_hop_ip": dataplane_ip,
+        "attachment_mode": "aws-route-table-eni" if cloud_provider == "aws" else "",
+        "data_attachment_id": data_attachment_id,
+        "data_eni_id": data_attachment_id,
+        "ssh_key_secret_arn": ssh_key_secret_arn,
+    }
+    return {
+        "cloud_provider": cloud_provider,
+        "route_next_hop_ip": dataplane_ip,
+        "attachment_mode": provider_state["attachment_mode"],
+        "data_attachment_id": data_attachment_id,
+        "attached_ranges": [],
+        "provider_metadata": {
+            cloud_provider: provider_state,
+        },
+    }
+
+
 def run_ngfw_terraform(operation: str, request_id: str) -> None:
     """Run NGFW Terraform operation (provision or deprovision).
 
@@ -71,9 +110,15 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
     try:
         if operation == "up":
             sls_region = app_spec.get("sls_region", "americas")
-            _run_provision(request_id, instance_id, app_id, app_spec, sls_region)
+            if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
+                _run_gdc_provision(request_id, instance_id, app_id, app_spec, sls_region)
+            else:
+                _run_provision(request_id, instance_id, app_id, app_spec, sls_region)
         elif operation == "destroy":
-            _run_deprovision(request_id, instance_id, app_id)
+            if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
+                _run_gdc_deprovision(request_id, instance_id, app_id)
+            else:
+                _run_deprovision(request_id, instance_id, app_id)
         else:
             raise ValueError(f"Unknown operation: {operation}")
 
@@ -85,13 +130,22 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
             # Auto-cleanup on failure
             logger.info("NGFW provision failed - attempting auto-cleanup...")
             try:
-                tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
-                terraform_runner.destroy_ngfw(
-                    request_id,
-                    terraform_runner.NGFW_MODULE_PATH,
-                    variables=tf_vars,
-                )
-                terraform_runner.cleanup_ngfw_state(request_id)
+                if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
+                    from main import get_ngfw_data_by_request_id
+
+                    gdc_state = get_ngfw_data_by_request_id(request_id).get("state", {})
+                    if gdc_state:
+                        import gdc_vmseries_ngfw
+
+                        gdc_vmseries_ngfw.destroy_ngfw(gdc_state)
+                else:
+                    tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
+                    terraform_runner.destroy_ngfw(
+                        request_id,
+                        terraform_runner.NGFW_MODULE_PATH,
+                        variables=tf_vars,
+                    )
+                    terraform_runner.cleanup_ngfw_state(request_id)
             except Exception as cleanup_error:
                 logger.warning("Auto-cleanup failed: %s", cleanup_error)
 
@@ -137,6 +191,156 @@ def _build_tf_variables(
     }
 
 
+def _run_pan_os_post_provision(
+    *,
+    request_id: str,
+    instance_id: str,
+    app_id: str,
+    output_data: dict[str, Any],
+    sls_region: str,
+) -> None:
+    """Run shared PAN-OS VM-Series post-boot configuration for any provider."""
+    from main import (
+        NGFW_SSH_WAIT_TIMEOUT_DEFAULT,
+        poll_for_serial_number,
+        update_instance_state,
+    )
+
+    # Skip post-infrastructure config in local dev mode.
+    if os.environ.get("DB_PASSWORD"):
+        logger.info("LOCAL DEV MODE: Skipping post-infrastructure NGFW configuration")
+        update_instance_state(request_id, STATUS_READY, **output_data, **_build_provider_state(output_data))
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status=STATUS_READY,
+        )
+        logger.info("LOCAL DEV MODE: Setting NGFW status to paused")
+        update_instance_state(request_id, "paused")
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_id,
+            app_id=app_id,
+            status="paused",
+        )
+        return
+
+    logger.info("Running post-infrastructure NGFW configuration...")
+
+    management_ip = output_data.get("management_ip")
+    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn")
+    if not ssh_key_secret_arn:
+        raise RuntimeError("NGFW provisioning output missing ssh_key_secret_arn")
+    if not management_ip:
+        raise RuntimeError("NGFW provisioning output missing management_ip")
+
+    from cloud import get_secrets_store
+
+    try:
+        private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
+    except Exception as e:
+        raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
+
+    ssh_executor = NGFWExecutor(private_key=private_key)
+
+    # Wait for SSH availability (VM-Series can take 15-25 min to boot).
+    ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
+    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
+    ssh_executor.wait_for_agent(management_ip, timeout_seconds=ssh_timeout)
+
+    # Poll for serial number BEFORE running provision plan - this ensures the
+    # PAN-OS management plane is operational.
+    logger.info("Polling for NGFW serial number (management plane readiness check)...")
+    serial_number = poll_for_serial_number(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=600,
+        poll_interval=30,
+    )
+    logger.info("NGFW management plane ready, serial=%s", serial_number)
+
+    logger.info("Waiting 30s for management plane to stabilize before configuration...")
+    time.sleep(30)
+
+    # Re-verify SSH availability with extended timeout to handle potential VM-Series reboots.
+    logger.info("Re-verifying SSH availability (allowing for potential NGFW reboot)...")
+    ssh_executor.wait_for_agent(management_ip, timeout_seconds=600)
+    logger.info("SSH confirmed available, proceeding with configuration...")
+
+    orchestrator = SetupOrchestrator(executor=ssh_executor)
+    context = {
+        "ec2_instance_id": output_data.get("ec2_instance_id"),
+        "management_ip": management_ip,
+        "dataplane_ip": output_data.get("dataplane_ip"),
+        "data_eni_id": output_data.get("data_eni_id"),
+        "sls_region": sls_region,
+    }
+
+    provision_plan = NGFWProvisionPlan()
+    logger.info("Running NGFW provision plan...")
+    provision_result = orchestrator.orchestrate(
+        instance_id=management_ip,
+        plan=provision_plan,
+        context=context,
+    )
+    if not provision_result.success:
+        raise RuntimeError("NGFW post-infrastructure configuration failed")
+
+    state = {
+        **output_data,
+        **_build_provider_state(output_data),
+        "serial_number": serial_number,
+    }
+    update_instance_state(request_id, STATUS_PROVISIONING, **state)
+
+    logger.info("Fetching NGFW license: request_id=%s", request_id)
+    license_result = ssh_executor.run_command(
+        instance_id=management_ip,
+        script="request license fetch",
+        timeout_seconds=120,
+    )
+    if not license_result.success:
+        logger.warning("License fetch returned non-success: %s", license_result.stderr)
+    logger.info(
+        "License fetch output: %s",
+        license_result.stdout[:500] if license_result.stdout else "(empty)",
+    )
+
+    from main import poll_for_serial_and_cert, run_ngfw_operation
+
+    logger.info("Polling for valid device certificate: request_id=%s", request_id)
+    poll_timeout = int(os.environ.get("NGFW_CERT_POLL_TIMEOUT", 2400))
+    cert_serial = poll_for_serial_and_cert(
+        ssh_executor=ssh_executor,
+        host=management_ip,
+        timeout_seconds=poll_timeout,
+        poll_interval=30,
+    )
+    if cert_serial:
+        serial_number = cert_serial
+
+    update_instance_state(request_id, STATUS_READY, serial_number=serial_number)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_READY,
+        serial_number=serial_number,
+    )
+    logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
+
+    logger.info("Auto-stopping NGFW: request_id=%s", request_id)
+    try:
+        run_ngfw_operation("stop", request_id)
+        logger.info("Auto-stop completed: request_id=%s", request_id)
+    except Exception:
+        logger.exception(
+            "Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
+            request_id,
+        )
+
+
 def _run_provision(
     request_id: str,
     instance_id: str,
@@ -145,10 +349,7 @@ def _run_provision(
     sls_region: str,
 ) -> None:
     """Run Terraform apply for NGFW, then run post-Terraform configuration."""
-    from main import (
-        NGFW_SSH_WAIT_TIMEOUT_DEFAULT,
-        update_instance_state,
-    )
+    from main import update_instance_state
 
     # Update local DB and emit provisioning status event
     update_instance_state(request_id, STATUS_PROVISIONING)
@@ -167,160 +368,124 @@ def _run_provision(
     output_data = terraform_runner.apply_ngfw(request_id, tf_variables, terraform_runner.NGFW_MODULE_PATH)
     logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
 
-    # Skip post-Terraform config in local dev mode
-    if os.environ.get("DB_PASSWORD"):
-        logger.info("LOCAL DEV MODE: Skipping post-Terraform NGFW configuration")
-        update_instance_state(request_id, STATUS_READY, **output_data)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_id,
-            app_id=app_id,
-            status=STATUS_READY,
-        )
-        logger.info("LOCAL DEV MODE: Setting NGFW status to paused")
-        update_instance_state(request_id, "paused")
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_id,
-            app_id=app_id,
-            status="paused",
-        )
-        return
-
-    logger.info("Running post-Terraform NGFW configuration...")
-
-    # Get SSH private key from Secrets Manager
-    management_ip = output_data.get("management_ip")
-    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn")
-    if not ssh_key_secret_arn:
-        raise RuntimeError("NGFW Terraform missing ssh_key_secret_arn output")
-    if not management_ip:
-        raise RuntimeError("NGFW Terraform missing management_ip output")
-
-    from cloud import get_secrets_store
-
-    try:
-        private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
-    except Exception as e:
-        raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
-
-    # Create NGFWExecutor for all SSH operations (uses piping, not paramiko)
-    ssh_executor = NGFWExecutor(private_key=private_key)
-
-    # Wait for SSH availability (NGFW can take 15-25 min to boot)
-    ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
-    logger.info("Waiting for SSH on NGFW at %s...", management_ip)
-    ssh_executor.wait_for_agent(management_ip, timeout_seconds=ssh_timeout)
-
-    # Poll for serial number BEFORE running provision plan - this ensures management
-    # plane is ready to accept configuration commands. Serial number appearing
-    # indicates the PAN-OS management server is operational.
-    from main import poll_for_serial_number
-
-    logger.info("Polling for NGFW serial number (management plane readiness check)...")
-    serial_number = poll_for_serial_number(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=600,  # 10 min - serial should appear after mgmt plane is up
-        poll_interval=30,
-    )
-    logger.info("NGFW management plane ready, serial=%s", serial_number)
-
-    # Brief pause after serial poll to let management plane stabilize
-    logger.info("Waiting 30s for management plane to stabilize before configuration...")
-    time.sleep(30)
-
-    # Re-verify SSH availability with extended timeout to handle potential NGFW reboots
-    # PAN-OS may auto-reboot after licensing, causing SSH to become temporarily unavailable
-    logger.info("Re-verifying SSH availability (allowing for potential NGFW reboot)...")
-    ssh_executor.wait_for_agent(management_ip, timeout_seconds=600)  # 10 min retry period
-    logger.info("SSH confirmed available, proceeding with configuration...")
-
-    # Create orchestrator with SSH executor
-    orchestrator = SetupOrchestrator(executor=ssh_executor)
-
-    # Create context dict with the Terraform outputs for template rendering
-    context = {
-        "ec2_instance_id": output_data.get("ec2_instance_id"),
-        "management_ip": management_ip,
-        "dataplane_ip": output_data.get("dataplane_ip"),
-        "data_eni_id": output_data.get("data_eni_id"),
-        "sls_region": sls_region,
-    }
-
-    # Run the NGFW provision plan
-    provision_plan = NGFWProvisionPlan()
-    logger.info("Running NGFW provision plan...")
-    provision_result = orchestrator.orchestrate(
-        instance_id=management_ip,
-        plan=provision_plan,
-        context=context,
+    _run_pan_os_post_provision(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        output_data=output_data,
+        sls_region=sls_region,
     )
 
-    if not provision_result.success:
-        raise RuntimeError("NGFW post-Terraform configuration failed")
 
-    # Build state dict with all outputs including data_eni_id for range routing
-    state = {
-        **output_data,
-        "serial_number": serial_number,
-    }
+def _run_gdc_provision(
+    request_id: str,
+    instance_id: str,
+    app_id: str,
+    app_spec: dict[str, Any],
+    sls_region: str,
+) -> None:
+    """Create a Palo Alto VM-Series firewall on GDC VM Runtime, then configure PAN-OS."""
+    import gdc_vmseries_ngfw
+    from main import update_instance_state
 
-    # Save state to DB so run_ngfw_operation can find ec2_instance_id
-    update_instance_state(request_id, STATUS_PROVISIONING, **state)
-
-    # Fetch license (retrieves Logging Service license)
-    logger.info("Fetching NGFW license: request_id=%s", request_id)
-    license_result = ssh_executor.run_command(
-        instance_id=management_ip,
-        script="request license fetch",
-        timeout_seconds=120,
-    )
-    if not license_result.success:
-        logger.warning("License fetch returned non-success: %s", license_result.stderr)
-    logger.info(
-        "License fetch output: %s",
-        license_result.stdout[:500] if license_result.stdout else "(empty)",
-    )
-
-    # Poll for valid device certificate
-    from main import poll_for_serial_and_cert
-
-    logger.info("Polling for valid device certificate: request_id=%s", request_id)
-    poll_timeout = int(os.environ.get("NGFW_CERT_POLL_TIMEOUT", 2400))  # 40 min default
-    cert_serial = poll_for_serial_and_cert(
-        ssh_executor=ssh_executor,
-        host=management_ip,
-        timeout_seconds=poll_timeout,
-        poll_interval=30,
-    )
-    # Use cert poll serial if available (more recent), otherwise keep initial serial
-    if cert_serial:
-        serial_number = cert_serial
-
-    # Mark NGFW as ready
-    update_instance_state(request_id, STATUS_READY, serial_number=serial_number)
+    update_instance_state(request_id, STATUS_PROVISIONING)
     publish_ngfw_event(
         request_id=request_id,
         instance_id=instance_id,
         app_id=app_id,
-        status=STATUS_READY,
-        serial_number=serial_number,
+        status=STATUS_PROVISIONING,
     )
-    logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
 
-    # Auto-stop NGFW to save costs (non-fatal)
-    from main import run_ngfw_operation
+    logger.info("Running GDC VM Runtime provisioning for Palo Alto VM-Series...")
+    output_data = gdc_vmseries_ngfw.apply_ngfw(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_spec=app_spec,
+    )
+    logger.info("GDC VM-Series outputs: %s", json.dumps(output_data, indent=2))
 
-    logger.info("Auto-stopping NGFW: request_id=%s", request_id)
-    try:
-        run_ngfw_operation("stop", request_id)
-        logger.info("Auto-stop completed: request_id=%s", request_id)
-    except Exception:
-        logger.exception(
-            "Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
-            request_id,
+    # Persist the VM Runtime state before waiting on PAN-OS so failure cleanup has enough context.
+    update_instance_state(request_id, STATUS_PROVISIONING, **output_data, **_build_provider_state(output_data))
+
+    _run_pan_os_post_provision(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        output_data=output_data,
+        sls_region=sls_region,
+    )
+
+
+def _deactivate_vmseries_license(
+    *,
+    management_ip: str,
+    ssh_key_secret_arn: str,
+) -> None:
+    """Best-effort VM-Series license deactivation over PAN-OS SSH."""
+    from cloud import get_secrets_store
+
+    private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
+    ssh_executor = NGFWExecutor(private_key=private_key)
+    logger.info("Waiting for SSH availability before license deactivation...")
+    ssh_executor.wait_for_agent(management_ip, timeout_seconds=300)
+
+    logger.info("Deactivating VM-Series license...")
+    ssh_executor.run_command(
+        instance_id=management_ip,
+        script="",
+        stdin_input="request license deactivate VM-Capacity mode auto\n",
+        timeout_seconds=120,
+    )
+
+
+def _run_gdc_deprovision(
+    request_id: str,
+    instance_id: str,
+    app_id: str,
+) -> None:
+    """Deactivate and destroy a Palo Alto VM-Series firewall on GDC VM Runtime."""
+    import gdc_vmseries_ngfw
+    from main import get_ngfw_data_by_request_id, update_instance_state
+
+    update_instance_state(request_id, STATUS_DESTROYING)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_DESTROYING,
+    )
+
+    ngfw_data = get_ngfw_data_by_request_id(request_id)
+    current_state = ngfw_data.get("state", {})
+    management_ip = current_state.get("management_ip")
+    ssh_key_secret_arn = current_state.get("ssh_key_secret_arn")
+
+    if management_ip and ssh_key_secret_arn:
+        try:
+            gdc_vmseries_ngfw.run_power_operation("start", current_state)
+            _deactivate_vmseries_license(
+                management_ip=management_ip,
+                ssh_key_secret_arn=ssh_key_secret_arn,
+            )
+        except Exception as e:
+            logger.warning("GDC VM-Series license deactivation error: %s, proceeding with destroy", e)
+    else:
+        logger.warning(
+            "Missing GDC VM-Series state fields for license deactivation (management_ip=%s, ssh_key=%s), skipping",
+            bool(management_ip),
+            bool(ssh_key_secret_arn),
         )
+
+    logger.info("Destroying GDC VM Runtime Palo Alto VM-Series resources...")
+    gdc_vmseries_ngfw.destroy_ngfw(current_state)
+
+    update_instance_state(request_id, STATUS_DESTROYED)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_DESTROYED,
+    )
 
 
 def _run_deprovision(

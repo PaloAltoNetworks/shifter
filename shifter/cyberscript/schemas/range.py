@@ -71,7 +71,6 @@ class InstanceSpec(SpecBase):
     """
 
     uuid: str | None = None  # TODO: Remove - inherited from SpecBase (#522)
-    asset_type: Literal["vm_runtime_vm", "scenario_pod"] = "vm_runtime_vm"
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
     agent: AgentDetails | None = None
@@ -124,75 +123,11 @@ class InstanceSpec(SpecBase):
             uuid=str(uuid_module.uuid4()),
             role=cast(Literal["attacker", "victim", "dc", "ngfw"], role),
             os_type=cast(Literal["kali", "ubuntu", "windows", "panos"], os_type),
-            asset_type=cast(
-                Literal["vm_runtime_vm", "scenario_pod"],
-                data.get("asset_type", "vm_runtime_vm"),
-            ),
             agent=agent_details,
             dc_config=dc_config,
             join_domain=data.get("join_domain", False),
             ami_key=data.get("ami_key"),
         )
-
-    @field_validator("asset_type")
-    @classmethod
-    def validate_asset_type_not_empty(cls, v: str) -> str:
-        """Validate asset_type is populated."""
-        if not v or not v.strip():
-            raise ValueError("asset_type cannot be empty")
-        return v
-
-    @field_validator("join_domain")
-    @classmethod
-    def validate_join_domain_for_asset_type(cls, v: bool, info) -> bool:
-        """Pod-backed scenario assets cannot participate in domain join flows."""
-        if info.data.get("asset_type") == "scenario_pod" and v:
-            raise ValueError("scenario_pod assets cannot join a domain")
-        return v
-
-    @field_validator("agent")
-    @classmethod
-    def validate_agent_for_asset_type(cls, v: AgentDetails | None, info) -> AgentDetails | None:
-        """Pod-backed scenario assets do not support agent installation in Slice 12."""
-        if info.data.get("asset_type") == "scenario_pod" and v is not None:
-            raise ValueError("scenario_pod assets cannot include agent installation details")
-        return v
-
-    @field_validator("dc_config")
-    @classmethod
-    def validate_dc_config_for_asset_type(cls, v: DCConfig | None, info) -> DCConfig | None:
-        """Pod-backed scenario assets cannot be domain controllers."""
-        if info.data.get("asset_type") == "scenario_pod" and v is not None:
-            raise ValueError("scenario_pod assets cannot define dc_config")
-        return v
-
-    @field_validator("ami_key")
-    @classmethod
-    def validate_ami_key_for_asset_type(cls, v: str | None, info) -> str | None:
-        """AMI overrides are VM-only concepts."""
-        if info.data.get("asset_type") == "scenario_pod" and v:
-            raise ValueError("scenario_pod assets cannot define ami_key")
-        return v
-
-    @field_validator("os_type")
-    @classmethod
-    def validate_os_type_for_asset_type(cls, v: str, info) -> str:
-        """Pod-backed scenario assets are currently limited to Linux guest types."""
-        if info.data.get("asset_type") != "scenario_pod":
-            return v
-        if v not in {"kali", "ubuntu"}:
-            raise ValueError("scenario_pod assets must use kali or ubuntu os_type")
-        return v
-
-    @field_validator("role")
-    @classmethod
-    def validate_role_for_asset_type(cls, v: str, info) -> str:
-        """Pod-backed scenario assets are limited to attacker/victim roles."""
-        if info.data.get("asset_type") != "scenario_pod":
-            return v
-        if v not in {"attacker", "victim"}:
-            raise ValueError("scenario_pod assets must use attacker or victim roles")
-        return v
 
 
 def _extract_required_fields(data: dict[str, Any]) -> tuple[str, str, str]:
@@ -341,7 +276,6 @@ class InstanceContextBase(BaseModel):
     name: str = ""
     role: Literal["attacker", "victim", "dc", "ngfw"]
     os_type: Literal["kali", "ubuntu", "windows", "panos"]
-    asset_type: Literal["vm_runtime_vm", "scenario_pod"] = "vm_runtime_vm"
     join_domain: bool = False
     ami_key: str | None = None
 

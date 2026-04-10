@@ -1,14 +1,15 @@
 # Setup
 
-Deploying Shifter from a bare AWS account to full production.
+Deploying Shifter from a bare cloud account to a running environment.
 
 ## Prerequisites
 
 - Python 3.12+
 - Terraform 1.7+
-- AWS CLI v2 configured with SSO or IAM credentials
 - GitHub CLI (`gh`) authenticated
 - Docker
+- **AWS**: AWS CLI v2 configured with SSO or IAM credentials
+- **GCP**: `gcloud` CLI authenticated with appropriate project
 
 ## Cold-Start Deployment (New AWS Account)
 
@@ -283,3 +284,52 @@ aws ecr describe-images --repository-name shifter-prod-portal
 ```
 
 If empty, push a container first.
+
+## GCP Cold-Start Deployment
+
+GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus Kustomize for Kubernetes workloads.
+
+### 1. GCP Project Setup
+
+Create a GCP project and enable required APIs. The bootstrap script handles this:
+
+```bash
+# See scripts/gcp/ for bootstrap tooling
+```
+
+### 2. Configure Workload Identity Federation
+
+Set up OIDC federation for GitHub Actions:
+
+1. Create a Workload Identity Pool and Provider
+2. Create a service account with required roles
+3. Add GitHub secrets:
+
+| Secret | Value |
+|--------|-------|
+| `GCP_SERVICE_ACCOUNT` | Service account email |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name |
+
+### 3. Configure terraform.tfvars
+
+```bash
+cd platform/terraform/gcp/environments/gcp-dev
+```
+
+Edit `terraform.tfvars` with project ID, region, CIDR ranges, and other environment config.
+
+### 4. Deploy
+
+Push to the target branch (e.g., `gcp-dev`) to trigger the `_gcp-dev.yml` workflow, which runs:
+
+1. `terraform apply` (GKE, Cloud SQL, Memorystore, Pub/Sub, etc.)
+2. Generates runtime ConfigMap from Terraform outputs
+3. Applies Kubernetes manifests via Kustomize
+4. Syncs secrets into K8s Secrets
+5. Applies Ingress and managed TLS certificate
+
+### 5. DNS and TLS
+
+If `public_hostname` is configured, the workflow creates a Google-managed TLS certificate and configures Ingress. Point your domain to the global static IP from Terraform output.
+
+Until the certificate is active, the deployment runs in debug auth mode (no OIDC). Once TLS is ready, the workflow automatically promotes to secure mode.

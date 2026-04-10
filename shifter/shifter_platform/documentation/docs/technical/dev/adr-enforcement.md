@@ -24,8 +24,11 @@ The current enforcement stack has six parts:
 6. Existing ecosystem tooling
    - `import-linter` for Python package contracts
    - `actionlint` for GitHub Actions workflows
-   - `TFLint` for Terraform linting
+   - `TFLint` for Terraform linting (including the `tflint-ruleset-google` plugin for GCP resources)
    - `gitleaks` for new secret leakage detection
+   - `kubeconform` for Kubernetes manifest schema validation
+   - `kube-linter` for Kubernetes security and best-practice enforcement
+   - `Checkov` for IaC security scanning (Terraform and Kubernetes)
 
 There is also agent-specific wiring:
 
@@ -72,6 +75,35 @@ The first slice intentionally stays small:
 - `gitleaks`
   Scans newly introduced commits for likely secrets, with a small repo config for approved false positives.
 
+- `cloud-factory-seam`
+  Enforces ADR-005-R1: every cloud adapter module in `cloud/aws/` must have a
+  counterpart in `cloud/gcp/` and vice versa. Catches provider parity drift
+  when one side adds a new adapter without the other. Runs in both fast and ci
+  levels.
+
+- `kubeconform`
+  Validates Kubernetes manifests against official schemas. Catches misspelled
+  fields, invalid resource types, and schema violations before they reach a
+  cluster. Pinned to the target GKE Kubernetes version.
+
+- `kube-linter`
+  Enforces Kubernetes security and best practices: non-root containers,
+  read-only root filesystems, resource limits, privilege escalation prevention,
+  and more. Configured via `.kube-linter.yaml`.
+
+- `checkov-k8s`
+  CIS Kubernetes benchmark and container security checks on manifests in
+  `platform/k8s/`. Currently soft-fail while existing manifests are being
+  hardened.
+
+- `k8s-image-registry`
+  Verifies that Kustomize overlay image references point to Artifact Registry
+  (`pkg.dev`), preventing accidental use of public or untrusted registries.
+
+- `k8s-pss-labels`
+  Architecture check ensuring namespace manifests carry Pod Security Standards
+  `pod-security.kubernetes.io/enforce` labels. Enforces ADR-006-R1.
+
 ## Local Usage
 
 Run the fast profile on the full repo:
@@ -92,6 +124,8 @@ Useful ecosystem checks:
 cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter
 TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"
 actionlint
+kube-linter lint --config .kube-linter.yaml platform/k8s/
+kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 platform/k8s/gcp/base/*.yaml
 ```
 
 Run on specific files:

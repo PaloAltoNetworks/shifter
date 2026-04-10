@@ -90,6 +90,16 @@
         "id": "ADR-004-R4",
         "description": "New commits are scanned for secrets with gitleaks.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R5",
+        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter.",
+        "checks": []
+      },
+      {
+        "id": "ADR-004-R6",
+        "description": "GCP Terraform is linted with the tflint-ruleset-google plugin.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -98,6 +108,7 @@
       ".importlinter",
       ".tflint.hcl",
       ".gitleaks.toml",
+      ".kube-linter.yaml",
       ".pre-commit-config.yaml",
       ".github/workflows/_quality.yml"
     ]
@@ -112,7 +123,7 @@
       {
         "id": "ADR-005-R1",
         "description": "Shared cloud factories must route supported providers through adapter packages rather than provider-specific call sites in domain code.",
-        "checks": []
+        "checks": ["cloud-factory-seam"]
       },
       {
         "id": "ADR-005-R2",
@@ -133,6 +144,37 @@
       "platform/terraform/gcp/README.md",
       "platform/k8s/gcp/README.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
+    ]
+  },
+  {
+    "id": "ADR-006",
+    "title": "Kubernetes workloads must meet Pod Security Standards",
+    "status": "accepted",
+    "scope": "platform/k8s",
+    "decision": "All Kubernetes namespaces enforce the restricted Pod Security Standard. Workloads must define security contexts, and each namespace must have NetworkPolicies.",
+    "rules": [
+      {
+        "id": "ADR-006-R1",
+        "description": "Namespace manifests must carry pod-security.kubernetes.io/enforce labels.",
+        "checks": []
+      },
+      {
+        "id": "ADR-006-R2",
+        "description": "Containers must define securityContext with non-root and read-only root filesystem.",
+        "checks": []
+      },
+      {
+        "id": "ADR-006-R3",
+        "description": "Each namespace must have at least one NetworkPolicy (deferred until policies are authored).",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci"],
+    "evidence": [
+      "platform/k8s/gcp/base/namespaces.yaml",
+      ".kube-linter.yaml",
+      ".pre-commit-config.yaml"
     ]
   }
 ]

@@ -71,14 +71,25 @@ The orchestrator uses path filters to run only relevant jobs:
 Runs on every PR and push:
 
 - **ADR conformance**: `python3 scripts/adr_guard/adr_guard.py --all --level ci`
+  Includes `adr-registry`, `layer-imports`, `cross-layer-model-imports`, and
+  `cloud-factory-seam` (ADR-005-R1 cloud adapter parity).
 - **Workflow linting**: `actionlint`
-- **Terraform linting**: `tflint`
+- **Terraform linting**: `tflint` with `tflint-ruleset-google` plugin
   The repo currently runs a narrow TFLint profile that excludes existing
   version/provider and unused-declaration debt until that backlog is burned down.
+  The Google plugin adds GCP-specific rules (invalid machine types, deprecated
+  attributes, etc.).
 - **Python import contracts**: `lint-imports --config ../../.importlinter`
 - **Python linting**: `ruff check`, `ruff format --check`
+- **K8s schema validation**: `kubeconform` validates Kubernetes manifests against
+  official schemas, pinned to the target GKE version.
+- **K8s security and best practices**: `kube-linter` enforces security contexts,
+  resource limits, privilege escalation prevention, and other best practices
+  via `.kube-linter.yaml`.
+- **K8s security scanning**: Checkov with the `kubernetes` framework (soft fail
+  while manifests are being hardened).
 - **Tests**: `pytest` with PostgreSQL service container
-- **IaC scanning**: Checkov (soft fail - warnings only)
+- **IaC scanning**: Checkov for Terraform (soft fail - warnings only)
 - **Secret scanning**: gitleaks on newly introduced commits
 - **Coverage**: Shifter Engine requires 80% minimum
 

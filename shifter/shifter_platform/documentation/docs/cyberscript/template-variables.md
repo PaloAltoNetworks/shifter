@@ -18,7 +18,7 @@ Instance names must match a `name` from the scenario template's `instances` list
 |----------|-------------|---------------|
 | **`ip`** | Private IP address of the instance | `10.1.1.5` |
 | **`name`** | Display name of the instance | `Workstation` |
-| **`instance_id`** | EC2 instance ID | `i-0abc123def456` |
+| **`instance_id`** | Cloud instance identifier | `i-0abc123def456` (AWS), GDC VM name (GCP) |
 
 Source: `ALLOWED_PROPERTIES` in `cyberscript/template_vars.py`
 

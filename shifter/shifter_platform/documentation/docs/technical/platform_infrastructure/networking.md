@@ -1,14 +1,26 @@
 # Networking
 
-Two VPCs per environment, connected via VPC peering.
+Dual-network architecture on both clouds: a platform network for the application and a range network for guest isolation, connected via peering.
 
-## VPC Architecture
+## Common Pattern
+
+Both AWS and GCP follow the same topology:
+
+1. **Platform network** - Hosts the application (web, database, cache, workers)
+2. **Range network** - Hosts ephemeral guest instances, isolated per range
+3. **Peering** - Bidirectional connectivity between platform and range networks for terminal access
+4. **Egress filtering** - Domain-based outbound rules on the range network
+5. **NAT** - Outbound internet for private resources
+
+## AWS
+
+Two VPCs per environment, connected via VPC peering.
 
 ```mermaid
 graph TB
     Internet((Internet))
 
-    subgraph PortalVPC["Portal VPC (10.0.0.0/16)"]
+    subgraph PortalVPC["Portal VPC"]
         WAF["WAF"]
         subgraph PublicSubnets["Public Subnets (×3 AZs)"]
             ALB["ALB"]
@@ -21,10 +33,10 @@ graph TB
         end
     end
 
-    subgraph RangeVPC["Range VPC (10.1.0.0/16)"]
-        FirewallSubnet["Firewall Subnet (10.1.0.0/28)"]
-        NATSubnet["NAT Subnet (10.1.0.16/28)"]
-        UserSubnets["User Subnets (10.1.{1-254}.0/24)"]
+    subgraph RangeVPC["Range VPC"]
+        FirewallSubnet["Firewall Subnet"]
+        NATSubnet["NAT Subnet"]
+        UserSubnets["User Subnets"]
     end
 
     Internet --> WAF --> ALB
@@ -37,50 +49,41 @@ graph TB
     UserSubnets --> FirewallSubnet --> NATSubnet --> Internet
 ```
 
-## Portal VPC
+### Portal VPC
 
-| Subnet Type | CIDR | Components |
-|-------------|------|------------|
-| Public (×3 AZs) | `/20` subnets | ALB, NAT Gateway (single) |
-| Private (×3 AZs) | `/20` subnets | EC2 or ASG*, RDS subnet group, Redis subnet group |
-
-*Dev uses ASG (multi-AZ). Prod uses single EC2 (one subnet).
+| Subnet Type | Components |
+|-------------|------------|
+| Public (×3 AZs) | ALB, NAT Gateway |
+| Private (×3 AZs) | EC2 (single instance or ASG, configurable), RDS subnet group, Redis subnet group |
 
 Components:
 - **WAF** - Rate limiting, IP reputation, OWASP rules. Attached to ALB.
-- **ALB** - Public-facing. HTTPS only (HTTP redirects). Blocks `/admin`.
-- **NAT Gateway** - Single, in one public subnet (cost-optimized).
+- **ALB** - Public-facing. HTTPS only (HTTP redirects).
+- **NAT Gateway** - Single, in one public subnet.
 - **RDS** - Subnet group spans all private subnets (Multi-AZ capable).
 - **Redis** - Subnet group spans all private subnets.
 
 Defined in `platform/terraform/modules/portal/vpc/` and `platform/terraform/modules/portal/alb/`.
 
-## Range VPC
+### Range VPC
 
-| Component | CIDR | Purpose |
-|-----------|------|---------|
-| Firewall Subnet | `10.1.0.0/28` | AWS Network Firewall endpoint (single AZ) |
-| NAT Subnet | `10.1.0.16/28` | NAT Gateway for egress |
-| User Subnets | `10.1.{1-254}.0/24` | Range instances (created by Engine) |
+| Component | Purpose |
+|-----------|---------|
+| Firewall Subnet | AWS Network Firewall endpoint (single AZ) |
+| NAT Subnet | NAT Gateway for egress |
+| User Subnets | Range instances (allocated at runtime by provisioner) |
 
 Traffic flow: `User Subnet → Network Firewall → NAT Gateway → IGW → Internet`
 
-Network Firewall applies domain-based egress filtering. User subnets created at runtime by Pulumi, not Terraform.
+Network Firewall applies domain-based egress filtering. User subnets created at runtime, not by Terraform.
 
 Defined in `platform/terraform/modules/range/vpc/`.
 
-## VPC Peering
+### VPC Peering
 
-Bidirectional peering between Portal and Range VPCs. Enables SSH from Portal to range instances (terminal UI).
+Bidirectional peering between Portal and Range VPCs. Enables SSH/RDP from the platform to range instances (terminal UI).
 
-| Direction | Route |
-|-----------|-------|
-| Portal → Range | Portal private subnets route `10.1.0.0/16` via peering |
-| Range → Portal | Range private route table routes `10.0.0.0/16` via peering |
-
-Peering connection created in `platform/terraform/environments/{env}/portal/main.tf`.
-
-## Security Groups
+### Security Groups
 
 | Location | Groups |
 |----------|--------|
@@ -88,3 +91,39 @@ Peering connection created in `platform/terraform/environments/{env}/portal/main
 | Range | Defined per instance type (see Engine docs) |
 
 Range security groups allow SSH ingress from Portal VPC CIDR for terminal access.
+
+## GCP
+
+Two VPC networks, connected via VPC peering.
+
+### Platform Network
+
+Hosts the GKE cluster and shared services.
+
+| Component | Connectivity |
+|-----------|-------------|
+| GKE nodes | Private (no external IPs). Cloud NAT for outbound. |
+| Cloud SQL | Private Services Access (internal IP only) |
+| Memorystore | Private VPC connection |
+
+GKE uses VPC-native networking with secondary IP ranges for pods and services. Control plane endpoint is private.
+
+### Range Network
+
+Hosts guest subnets for range instances. Cloud Router + NAT for egress.
+
+On GDC, guest isolation uses custom L2 networks (VXLAN-based) with per-range Kubernetes namespaces and Network Attachment Definitions instead of VPC subnets. See [GDC Provisioning](gdc-provisioning).
+
+### Network Peering
+
+Bidirectional peering between platform and range networks for terminal access, same pattern as AWS.
+
+## CIDRs
+
+Both clouds use configurable CIDR ranges defined in environment tfvars. The specific allocations are deployment config, not architecture.
+
+## Related Docs
+
+- [GCP Infrastructure](gcp-infrastructure) - GKE cluster and platform services
+- [GDC Provisioning](gdc-provisioning) - GDC guest networking details
+- [Guacamole](guacamole) - Browser-based terminal access (uses the peering connection)

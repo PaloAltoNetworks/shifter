@@ -22,15 +22,15 @@ Field reference for `InstanceConfig` in `cms/scenarios/schema.py`. Each entry in
 | **`victim`** | Target host with XDR agent. The machine being defended/attacked. |
 | **`dc`** | Active Directory domain controller. Always Windows. |
 
-Roles map directly to AMI selection and provisioning behavior in the Engine.
+Roles map directly to machine image selection and provisioning behavior in the Engine.
 
 ## OS Types
 
 | Value | Resolves To | Notes |
 |-------|------------|-------|
-| **`kali`** | Kali Linux AMI | Standard for attacker instances. |
-| **`windows`** | Windows Server AMI | Used for DCs and Windows victims. |
-| **`ubuntu`** | Ubuntu Server AMI | Linux victim/server instances. |
+| **`kali`** | Kali Linux image | Standard for attacker instances. |
+| **`windows`** | Windows Server image | Used for DCs and Windows victims. |
+| **`ubuntu`** | Ubuntu Server image | Linux victim/server instances. |
 | **`from_agent`** | Determined at hydration | OS is inferred from the user-selected XDR agent. Windows agents resolve to `windows`; Linux agents resolve to `ubuntu`. |
 
 ### `from_agent` Resolution

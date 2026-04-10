@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.63.0] - 2026-04-09
+
+### Added
+- Kubernetes manifest validation: kubeconform schema checks and kube-linter security/best-practice enforcement in pre-commit and CI
+- Checkov Kubernetes framework scanning for CIS benchmark checks on `platform/k8s/` manifests (soft-fail)
+- Cloud factory parity check (`cloud-factory-seam`) enforcing ADR-005-R1: every cloud adapter in `cloud/aws/` must have a counterpart in `cloud/gcp/`
+- TFLint `tflint-ruleset-google` plugin for GCP-specific Terraform linting
+- Image registry check ensuring Kustomize overlay images reference Artifact Registry (`pkg.dev`)
+- Pod Security Standards labels (`restricted` profile) on Kubernetes namespace manifests
+- PSS namespace labels architecture check in pre-commit Stage 4 (ADR-006-R1)
+- ADR-006: Kubernetes workloads must meet Pod Security Standards
+- ADR-004-R5 (kubeconform + kube-linter) and ADR-004-R6 (tflint-ruleset-google) rules
+- CI jobs: `k8s-lint`, `k8s-schema`, `security-k8s` in quality workflow
+- Time-bounded exceptions for known K8s manifest gaps (securityContext, NetworkPolicies) expiring 2026-07-08
+
 ## [3.62.1] - 2026-04-06
 
 ### Fixed

@@ -133,6 +133,17 @@ repos:
       - id: terraform_validate
         files: ^platform/terraform/
 
+  # Kubernetes schema validation
+  - repo: local
+    hooks:
+      - id: kubeconform
+        name: kubeconform (k8s schemas)
+        entry: kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+        language: system
+        files: ^platform/k8s/.*\.yaml$
+        exclude: kustomization\.yaml$
+        types: [yaml]
+
   # =============================================================================
   # STAGE 2: Security (SAST/DAST)
   # =============================================================================
@@ -176,9 +187,33 @@ repos:
     rev: 3.2.346
     hooks:
       - id: checkov
+        name: checkov (terraform)
         files: ^platform/terraform/
         args:
           [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
+      - id: checkov
+        name: checkov (k8s)
+        files: ^platform/k8s/
+        args:
+          [--quiet, --compact, --framework, kubernetes, --directory, platform/k8s/, --soft-fail]
+
+  # Kubernetes security and best practices
+  - repo: local
+    hooks:
+      - id: kube-linter
+        name: kube-linter (k8s security)
+        entry: kube-linter lint --config .kube-linter.yaml platform/k8s/
+        language: system
+        files: ^platform/k8s/
+        pass_filenames: false
+        types: [yaml]
+
+      - id: k8s-image-registry
+        name: k8s image registry check
+        entry: bash -c 'for f in platform/k8s/gcp/overlays/*/kustomization.yaml; do if grep -E "newName:" "$f" | grep -qv "pkg\.dev/"; then echo "ERROR: Images must use Artifact Registry (pkg.dev) in $f" && exit 1; fi; done'
+        language: system
+        files: ^platform/k8s/gcp/overlays/.*/kustomization\.yaml$
+        pass_filenames: false
 
   # =============================================================================
   # STAGE 3: Type Checking
@@ -212,7 +247,7 @@ repos:
         name: architecture (adr guard fast)
         entry: python3 scripts/adr_guard/adr_guard.py --changed --level fast
         language: system
-        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$)
+        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$)
         pass_filenames: false
         verbose: true
 
@@ -229,6 +264,14 @@ repos:
         entry: bash -c 'cd scripts/check_layer_imports && uv run python check_layer_imports.py -q'
         language: system
         files: ^shifter/shifter_platform/
+        pass_filenames: false
+        verbose: true
+
+      - id: k8s-pss-labels
+        name: architecture (k8s PSS labels)
+        entry: bash -c 'for f in platform/k8s/gcp/base/namespaces.yaml; do if ! grep -q "pod-security.kubernetes.io/enforce" "$f"; then echo "ERROR: $f must include Pod Security Standards labels" && exit 1; fi; done'
+        language: system
+        files: ^platform/k8s/gcp/base/namespaces\.yaml$
         pass_filenames: false
         verbose: true
 

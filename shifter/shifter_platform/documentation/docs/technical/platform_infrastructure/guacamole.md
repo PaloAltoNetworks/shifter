@@ -6,12 +6,12 @@ Apache Guacamole provides browser-based RDP access to range instances (Kali Linu
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              PORTAL VPC (10.0.0.0/16)                       │
+│                              Platform Network                               │
 │  ┌───────────┐    ┌────────────────┐    ┌─────────────────────────────────┐ │
-│  │           │    │                │    │      ECS Cluster: guacamole     │ │
-│  │  Portal   │    │    Portal      │    │  ┌───────────────────────────┐  │ │
-│  │   ALB     │───▶│    Django      │    │  │  guacamole-client (8080)  │  │ │
-│  │           │    │    (EC2)       │    │  │  - JSON Auth Extension    │  │ │
+│  │           │    │                │    │      Guacamole Services         │ │
+│  │   Load    │    │    Portal      │    │  ┌───────────────────────────┐  │ │
+│  │  Balancer │───▶│    Django      │    │  │  guacamole-client (8080)  │  │ │
+│  │           │    │                │    │  │  - JSON Auth Extension    │  │ │
 │  │ /guacamole│───▶│────────────────│    │  │  - OIDC Extension         │  │ │
 │  │    path   │    │                │    │  └───────────┬───────────────┘  │ │
 │  └───────────┘    └────────────────┘    │              │ port 4822        │ │
@@ -24,24 +24,24 @@ Apache Guacamole provides browser-based RDP access to range instances (Kali Linu
 │       │                  │                             │                    │
 │       │                  ▼                             │                    │
 │       │        ┌─────────────────┐                     │                    │
-│       │        │  Secrets Mgr    │                     │                    │
+│       │        │  Secret Store   │                     │                    │
 │       │        │ - JSON_SECRET   │                     │                    │
 │       │        │ - DB_CREDS      │                     │                    │
 │       │        └─────────────────┘                     │                    │
 │       │                                                │                    │
 │       │        ┌─────────────────┐                     │                    │
-│       │        │ RDS PostgreSQL  │◀───────────────────▶│                    │
+│       │        │   PostgreSQL    │◀───────────────────▶│                    │
 │       │        │ (session state) │                     │                    │
 │       │        └─────────────────┘                     │                    │
 └───────│────────────────────────────────────────────────│────────────────────┘
         │                                                │
-        │                    VPC Peering                 │
+        │                   Network Peering              │
         │                                                │
 ┌───────│────────────────────────────────────────────────│────────────────────┐
-│       │              RANGE VPC (10.1.0.0/16)           │                    │
+│       │                   Range Network                │                    │
 │       │                                                ▼                    │
 │       │     ┌──────────────────────────────────────────────────────┐       │
-│       │     │              User Range Subnet (10.1.X.0/24)         │       │
+│       │     │              Range Subnet                            │       │
 │       │     │  ┌────────────────────┐   ┌────────────────────┐     │       │
 │       │     │  │ Kali/Windows       │   │ Victim (Win/Linux) │     │       │
 │       │     │  │ - RDP: 3389        │   │ - RDP: 3389        │     │       │
@@ -54,15 +54,17 @@ Apache Guacamole provides browser-based RDP access to range instances (Kali Linu
    [ User Browser ]
 ```
 
+On AWS, Guacamole runs as ECS Fargate services with an RDS PostgreSQL backend. On GCP, it runs as Kubernetes deployments with Cloud SQL. The Django integration and JSON Auth flow are identical on both clouds.
+
 ## Components
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **guacamole-client** | ECS Fargate | Web application serving HTML5 interface |
-| **guacd** | ECS Fargate | Protocol proxy (translates Guacamole protocol to RDP) |
-| **RDS PostgreSQL** | Portal VPC | Session state and connection history |
+| **guacamole-client** | Container service (ECS on AWS, K8s pod on GCP) | Web application serving HTML5 interface |
+| **guacd** | Container service (ECS on AWS, K8s pod on GCP) | Protocol proxy (translates Guacamole protocol to RDP) |
+| **PostgreSQL** | Managed database (RDS on AWS, Cloud SQL on GCP) | Session state and connection history |
 | **JSON Auth Extension** | guacamole-client | Enables on-the-fly RDP connections via signed URLs |
-| **OIDC Extension** | guacamole-client | Cognito authentication for direct access |
+| **OIDC Extension** | guacamole-client | Identity provider authentication for direct access |
 
 ## Network Traffic Flow
 
@@ -72,7 +74,7 @@ The Portal ALB routes based on path pattern:
 
 | Path Pattern | Target | Port |
 |--------------|--------|------|
-| `/guacamole/*`, `/guacamole` | guacamole-client ECS tasks | 8080 |
+| `/guacamole/*`, `/guacamole` | guacamole-client containers | 8080 |
 | `/*` (default) | Portal Django | 443 |
 
 Configuration: [alb.tf](../../../platform/terraform/modules/guacamole/alb.tf)
@@ -233,8 +235,8 @@ The Portal Django application generates signed Guacamole URLs for RDP connection
 
 ```
 ┌──────────┐     ┌─────────────┐     ┌───────────────┐     ┌────────────────┐     ┌─────────┐     ┌────────────┐
-│  Browser │     │terminal.html│     │ views.py      │     │ guacamole.py   │     │ guacd   │     │ Range EC2  │
-│  (User)  │     │ (Frontend)  │     │ (Django API)  │     │ (Crypto Utils) │     │ (ECS)   │     │ (RDP 3389) │
+│  Browser │     │terminal.html│     │ views.py      │     │ guacamole.py   │     │ guacd   │     │ Range Host │
+│  (User)  │     │ (Frontend)  │     │ (Django API)  │     │ (Crypto Utils) │     │         │     │ (RDP 3389) │
 └────┬─────┘     └──────┬──────┘     └───────┬───────┘     └───────┬────────┘     └────┬────┘     └─────┬──────┘
      │                  │                    │                     │                   │                │
      │ Click RDP button │                    │                     │                   │                │
@@ -332,17 +334,24 @@ The Portal Django application generates signed Guacamole URLs for RDP connection
 | [terminal.html:113-149](../../../shifter_platform/templates/mission_control/terminal.html#L113-L149) | RDP button click handler |
 | [terminal.css:101-156](../../../shifter_platform/static/css/terminal.css#L101-L156) | Button styling |
 
-### Terraform Infrastructure
+### Infrastructure (AWS)
 
 | File | Purpose |
 |------|---------|
-| [modules/guacamole/main.tf](../../../platform/terraform/modules/guacamole/main.tf) | ECS cluster, CloudWatch logs, service discovery |
-| [modules/guacamole/ecs.tf](../../../platform/terraform/modules/guacamole/ecs.tf) | Task definitions, services, auto-scaling |
-| [modules/guacamole/rds.tf](../../../platform/terraform/modules/guacamole/rds.tf) | PostgreSQL database, JSON auth secret |
-| [modules/guacamole/security.tf](../../../platform/terraform/modules/guacamole/security.tf) | Security groups |
-| [modules/guacamole/alb.tf](../../../platform/terraform/modules/guacamole/alb.tf) | Target group, listener rule |
-| [modules/guacamole/iam.tf](../../../platform/terraform/modules/guacamole/iam.tf) | ECS execution/task roles |
-| [modules/range/vpc/main.tf](../../../platform/terraform/modules/range/vpc/main.tf) | Range SG rules for RDP ingress |
+| `platform/terraform/modules/guacamole/main.tf` | ECS cluster, CloudWatch logs, service discovery |
+| `platform/terraform/modules/guacamole/ecs.tf` | Task definitions, services, auto-scaling |
+| `platform/terraform/modules/guacamole/rds.tf` | PostgreSQL database, JSON auth secret |
+| `platform/terraform/modules/guacamole/security.tf` | Security groups |
+| `platform/terraform/modules/guacamole/alb.tf` | Target group, listener rule |
+| `platform/terraform/modules/range/vpc/main.tf` | Range SG rules for RDP ingress |
+
+### Infrastructure (GCP)
+
+| File | Purpose |
+|------|---------|
+| `platform/k8s/gcp/base/guacd-deployment.yaml` | guacd K8s deployment |
+| `platform/k8s/gcp/base/guacamole-client-deployment.yaml` | guacamole-client K8s deployment |
+| `platform/terraform/gcp/modules/platform-core/main.tf` | Cloud SQL (shared), Secret Manager |
 
 ### Docker
 
@@ -356,38 +365,40 @@ The Portal Django application generates signed Guacamole URLs for RDP connection
 
 ### Environment Variables
 
-#### guacamole-client ECS Task
+#### guacamole-client Container
 
 | Variable | Source | Description |
 |----------|--------|-------------|
 | `GUACD_HOSTNAME` | Hardcoded | Service discovery hostname for guacd |
 | `GUACD_PORT` | Hardcoded | `4822` |
-| `POSTGRESQL_HOSTNAME` | Terraform | RDS instance address |
+| `POSTGRESQL_HOSTNAME` | Terraform | Database instance address (RDS or Cloud SQL) |
 | `POSTGRESQL_PORT` | Terraform | `5432` |
 | `POSTGRESQL_DATABASE` | Hardcoded | `guacamole` |
 | `POSTGRESQL_AUTO_CREATE_ACCOUNTS` | Hardcoded | `true` |
-| `POSTGRESQL_USER` | Secrets Manager | From `db_credentials` secret |
-| `POSTGRESQL_PASSWORD` | Secrets Manager | From `db_credentials` secret |
-| `JSON_SECRET_KEY` | Secrets Manager | 128-bit hex key for JSON auth |
+| `POSTGRESQL_USER` | Secret store | From `db_credentials` secret |
+| `POSTGRESQL_PASSWORD` | Secret store | From `db_credentials` secret |
+| `JSON_SECRET_KEY` | Secret store | 128-bit hex key for JSON auth |
 | `OPENID_*` | Terraform | OIDC configuration (when enabled) |
 
 #### Portal Django
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `GUACAMOLE_JSON_AUTH_SECRET` | Secrets Manager | Must match `JSON_SECRET_KEY` above |
+| `GUACAMOLE_JSON_AUTH_SECRET` | Secret store | Must match `JSON_SECRET_KEY` above |
 | `GUACAMOLE_BASE_URL` | Environment | Default: `/guacamole` |
 
 ---
 
 ## Secrets
 
-| Secret | ARN Output | Purpose |
-|--------|------------|---------|
-| `shifter-{env}-guacamole-db` | `db_credentials_secret_arn` | PostgreSQL credentials |
-| `shifter-{env}-guacamole-json-auth` | `json_auth_secret_arn` | JSON auth 128-bit key |
+| Secret Name Pattern | Purpose |
+|---------------------|---------|
+| `shifter-{env}-guacamole-db` | PostgreSQL credentials |
+| `shifter-{env}-guacamole-json-auth` | JSON auth 128-bit key |
 
-**Important**: The `json_auth_secret_arn` must be wired to the Portal Django application deployment to set `GUACAMOLE_JSON_AUTH_SECRET` environment variable.
+Stored in AWS Secrets Manager or GCP Secret Manager depending on the deployment target.
+
+**Important**: The JSON auth secret must be wired to the Portal Django application deployment to set `GUACAMOLE_JSON_AUTH_SECRET` environment variable.
 
 ---
 
@@ -396,7 +407,7 @@ The Portal Django application generates signed Guacamole URLs for RDP connection
 ### Secret Key Sync
 
 The JSON auth secret must be identical in:
-1. **guacamole-client ECS task** (injected via `secrets` block from Secrets Manager)
+1. **guacamole-client container** (injected from secret store)
 2. **Portal Django** (set as `GUACAMOLE_JSON_AUTH_SECRET` env var)
 
 If these don't match, URL signatures will fail validation.

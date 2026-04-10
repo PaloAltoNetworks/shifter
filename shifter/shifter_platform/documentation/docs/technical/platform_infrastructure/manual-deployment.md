@@ -148,3 +148,13 @@ For a fresh environment:
 3. **Dev Box** - Optional. Only needed for Windows development.
 
 After IAM is deployed, CI/CD can manage all other infrastructure automatically.
+
+## GCP
+
+GCP manual setup is separate from the AWS stacks above:
+
+1. **GCP project setup** - Create project, enable APIs, configure billing
+2. **Workload Identity Federation** - Configure OIDC provider for GitHub Actions
+3. **Terraform state bucket** - Bootstrap GCS bucket (handled by first `terraform apply`)
+
+After WIF is configured and GitHub secrets (`GCP_SERVICE_ACCOUNT`, `GCP_WORKLOAD_IDENTITY_PROVIDER`) are set, CI/CD manages all GCP infrastructure via the `_gcp-dev.yml` workflow.

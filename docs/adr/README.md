@@ -31,10 +31,13 @@ Current mechanisms:
 - `.claude/hooks/adr_guard_hook.py`: Claude post-edit validation
 - `AGENTS.md`: Codex repo-local policy
 - `.importlinter`: Python package-level architecture contracts
-- `.tflint.hcl`: Terraform lint configuration. The initial rule set is
-  intentionally conservative so it can hard-fail on current signal without
-  immediately breaking on unrelated legacy Terraform debt.
+- `.tflint.hcl`: Terraform lint configuration with `tflint-ruleset-google`
+  plugin. The initial rule set is intentionally conservative so it can
+  hard-fail on current signal without immediately breaking on unrelated
+  legacy Terraform debt.
 - `.gitleaks.toml`: secret scanning configuration
+- `.kube-linter.yaml`: Kubernetes security and best-practice linting
+  configuration (enforces ADR-006 checks)
 
 ## Adding A Rule
 

@@ -3,6 +3,12 @@ config {
   force            = false
 }
 
+plugin "google" {
+  enabled = true
+  version = "0.31.0"
+  source  = "github.com/terraform-linters/tflint-ruleset-google"
+}
+
 # Start with rules that are actionable in the current tree. The repo has
 # substantial legacy debt around version/provider declarations and unused
 # declarations; turning those on immediately would make the new gate noisy and

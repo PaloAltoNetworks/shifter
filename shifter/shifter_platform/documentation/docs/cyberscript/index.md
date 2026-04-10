@@ -17,7 +17,7 @@ flowchart LR
 2. `ScenarioTemplate` (Pydantic) validates the YAML on load
 3. Hydration resolves `from_agent` OS types and embeds agent details
 4. Engine receives the `RangeSpec` and dispatches to the Provisioner
-5. Provisioner creates AWS infrastructure
+5. Provisioner creates cloud infrastructure
 
 Source: `cms/scenarios/schema.py`, `cms/scenarios/hydrator.py`
 

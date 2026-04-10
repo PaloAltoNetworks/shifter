@@ -9,7 +9,7 @@ Infrastructure lifecycle. Range provisioning, NGFW operations, terminal connecti
 - Subnet allocation
 - Scenario configuration
 - SSH terminal connections
-- ECS task orchestration
+- Container task orchestration (via cloud adapter)
 
 ## Models
 
@@ -60,15 +60,13 @@ Not exposed to MC. Used within Engine.
 | `allocation` | Subnet index allocation with row locking |
 | `scenarios` | Scenario validation and instance config |
 | `serialization` | Range to DTO conversion |
-| `ecs` | ECS Fargate task execution* |
-| `ssh` | Async SSH connection management* |
-| `secrets` | AWS Secrets Manager retrieval* |
-
-*Currently in `mission_control/services/`, to be moved.
+| `ecs` | Container task execution (uses cloud adapter internally) |
+| `ssh` | Async SSH connection management |
+| `secrets` | Secret retrieval (uses cloud adapter internally) |
 
 ## Event Handling
 
-Engine receives events from the Provisioner via SNS/SQS. The `engine/handlers.py` module processes these events:
+Engine receives events from the Provisioner via the message bus (SNS/SQS on AWS, Pub/Sub on GCP). The `engine/handlers.py` module processes these events:
 
 ```python
 def process_range_event(message):

@@ -287,7 +287,7 @@ If empty, push a container first.
 
 ## GCP Cold-Start Deployment
 
-GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus Kustomize for Kubernetes workloads.
+GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus a Helm-packaged control plane (`platform/charts/shifter/`).
 
 ### 1. GCP Project Setup
 
@@ -316,20 +316,33 @@ Set up OIDC federation for GitHub Actions:
 cd platform/terraform/gcp/environments/gcp-dev
 ```
 
-Edit `terraform.tfvars` with project ID, region, CIDR ranges, and other environment config.
+Edit `terraform.tfvars` with the real project/environment values. At minimum the secure bootstrap requires:
+
+```hcl
+project_id                 = "prod-rwctxzl6shxk"
+public_hostname            = "shifter.keplerops.com"
+enable_managed_tls         = true
+gke_master_authorized_cidrs = ["173.181.31.170/32"]
+```
+
+Update `gke_master_authorized_cidrs` if the operator egress IP changes.
 
 ### 4. Deploy
 
-Push to the target branch (e.g., `gcp-dev`) to trigger the `_gcp-dev.yml` workflow, which runs:
+The authoritative branch-local GCP bring-up path is:
 
-1. `terraform apply` (GKE, Cloud SQL, Memorystore, Pub/Sub, etc.)
-2. Generates runtime ConfigMap from Terraform outputs
-3. Applies Kubernetes manifests via Kustomize
-4. Syncs secrets into K8s Secrets
-5. Applies Ingress and managed TLS certificate
+```bash
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+```
+
+That flow:
+
+1. builds or reconciles the GDC substrate
+2. applies GCP Terraform (GKE, Cloud SQL, Memorystore, Pub/Sub, etc.)
+3. builds and pushes control-plane images
+4. renders secure Helm values from Terraform outputs and Secret Manager
+5. installs or upgrades the Shifter Helm release
 
 ### 5. DNS and TLS
 
-If `public_hostname` is configured, the workflow creates a Google-managed TLS certificate and configures Ingress. Point your domain to the global static IP from Terraform output.
-
-Until the certificate is active, the deployment runs in debug auth mode (no OIDC). Once TLS is ready, the workflow automatically promotes to secure mode.
+The secure bootstrap path expects a real hostname and managed TLS from the start. Point `shifter.keplerops.com` to the reserved global ingress IP so the Google-managed certificate can become active. The GCP path no longer uses the old debug-auth fallback as an acceptable first-boot mode.

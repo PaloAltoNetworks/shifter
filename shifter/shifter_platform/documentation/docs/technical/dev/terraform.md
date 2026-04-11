@@ -45,24 +45,24 @@ platform/terraform/
     └── dev-box/              # Windows dev instance
 ```
 
-GCP work is staged in a parallel tree so it cannot collide with the current
-AWS deploy path:
+GCP work lives in a parallel tree so it cannot collide with the AWS deploy path:
 
 ```
 platform/terraform/gcp/
 ├── environments/
-│   └── gcp-dev/             # GCP control-plane foundation for gcp-dev, including optional hostname and DNS settings
+│   └── gcp-dev/             # GCP control-plane foundation for gcp-dev
 └── modules/
-    └── platform-core/       # VPC, GKE, Cloud SQL, Memorystore, Artifact Registry, Pub/Sub, GCS, ingress IP, optional DNS, secrets
+    └── platform-core/       # VPC, GKE, Cloud SQL, Memorystore, Artifact Registry, Pub/Sub, GCS, ingress IP, Cloud Armor, optional DNS, secrets
 ```
 
-The staged GKE runtime manifests live alongside that Terraform tree:
+The GCP control plane is packaged separately as a Helm chart:
 
 ```
-platform/k8s/gcp/
-├── base/                   # Shared GKE deployments, services, RBAC
-└── overlays/
-    └── gcp-dev/            # gcp-dev-specific config, images, generated runtime/edge artifacts, Workload Identity
+platform/charts/shifter/
+├── templates/              # Deployments, services, ingress, BackendConfig, RBAC
+├── values.yaml             # Chart defaults
+├── values-gcp-dev.yaml     # gcp-dev environment overrides
+└── values-gcp-prod.yaml    # gcp-prod environment overrides
 ```
 
 ## State Management
@@ -100,24 +100,19 @@ terraform validate
 CI bootstraps a GCS backend bucket named `${project_id}-terraform-state` for
 `gcp-dev` pushes before running `terraform init`.
 
-The `gcp-dev` tfvars file also exposes the first hostname/DNS controls for the
-GKE edge path:
+The `gcp-dev` tfvars file now carries the security-critical public edge and operator-access settings:
 
 ```hcl
-public_hostname         = ""
-enable_managed_tls      = false
+public_hostname             = "shifter.keplerops.com"
+enable_managed_tls          = true
+gke_master_authorized_cidrs = ["173.181.31.170/32"]
 create_dns_managed_zone = false
 dns_managed_zone_name   = ""
 dns_zone_dns_name       = ""
 dns_record_ttl          = 300
 ```
 
-With the defaults, `gcp-dev` stays on the reserved ingress IP and the portal
-remains in debug-auth mode. When a hostname is configured and managed TLS is
-enabled, the deploy workflow can switch the portal runtime to the non-debug
-OIDC path once the OIDC secret is populated and the GKE managed certificate is
-active. The generated edge manifest now includes a GKE `FrontendConfig` that
-redirects browser traffic to HTTPS during that secure mode.
+`gdc-bootstrap` now fails before Terraform apply if those secure inputs are missing. The GCP path no longer treats a public IP/debug runtime as an acceptable bootstrap fallback.
 
 ### Plan
 
@@ -153,8 +148,9 @@ Terraform variables are committed to the repo. CI/CD reads them directly after c
 Database passwords, API keys, and runtime signing keys are stored in the cloud
 secret manager and accessed at runtime. For the current `gcp-dev` slice,
 Terraform seeds the app, DB, and Guacamole runtime bundles needed for first
-boot. The OIDC secret remains separately managed so the deploy workflow can
-gate the non-debug portal path on actual identity-provider readiness.
+boot. GCP no longer relies on a separately managed OIDC runtime secret; it
+provisions Identity Platform directly and bootstrap seeds the first operator
+account for the secure portal path.
 
 ## Module Patterns
 
@@ -265,7 +261,7 @@ For GCP work:
 1. Add reusable modules under `platform/terraform/gcp/modules/`
 2. Wire them into `platform/terraform/gcp/environments/gcp-dev/`
 3. Provision provider-native shared services there first: Pub/Sub, GCS, Secret Manager, Cloud SQL, Memorystore, ingress IPs
-4. Stage matching runtime manifests under `platform/k8s/gcp/`, including separate edge resources when path routing depends on healthy workloads
+4. Stage matching chart or generated deployment assets under `platform/charts/shifter/` and `platform/k8s/gcp/` as appropriate
 5. Keep the remote backend, deploy credentials, and rendered runtime config aligned with the Terraform outputs
 6. Do not weaken or replace the existing AWS environment trees while expanding GCP
 

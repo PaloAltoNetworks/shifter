@@ -349,8 +349,10 @@ The Portal Django application generates signed Guacamole URLs for RDP connection
 
 | File | Purpose |
 |------|---------|
-| `platform/k8s/gcp/base/guacd-deployment.yaml` | guacd K8s deployment |
-| `platform/k8s/gcp/base/guacamole-client-deployment.yaml` | guacamole-client K8s deployment |
+| `platform/charts/shifter/templates/guacd-deployment.yaml` | guacd deployment |
+| `platform/charts/shifter/templates/guacamole-client-deployment.yaml` | guacamole-client deployment |
+| `platform/charts/shifter/templates/guacamole-client-service.yaml` | public service wiring for `/guacamole` |
+| `platform/charts/shifter/templates/guacamole-backendconfig.yaml` | Cloud Armor attachment for the public Guacamole backend |
 | `platform/terraform/gcp/modules/platform-core/main.tf` | Cloud SQL (shared), Secret Manager |
 
 ### Docker

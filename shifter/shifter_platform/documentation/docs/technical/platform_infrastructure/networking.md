@@ -103,10 +103,18 @@ Hosts the GKE cluster and shared services.
 | Component | Connectivity |
 |-----------|-------------|
 | GKE nodes | Private (no external IPs). Cloud NAT for outbound. |
+| GKE control plane | Public endpoint retained for bootstrap compatibility, restricted by authorized CIDRs. |
 | Cloud SQL | Private Services Access (internal IP only) |
 | Memorystore | Private VPC connection |
 
-GKE uses VPC-native networking with secondary IP ranges for pods and services. Control plane endpoint is private.
+GKE uses VPC-native networking with secondary IP ranges for pods and services. The current GCP bootstrap path keeps the control-plane endpoint public so the operator can run `get-credentials` and Helm locally, but that endpoint must be restricted with `gke_master_authorized_cidrs`.
+
+The public application edge is separate from operator access:
+
+- portal and Guacamole are exposed through GKE Ingress on a reserved global IP
+- Cloud Armor attaches to both public backends through `BackendConfig`
+- managed TLS is required for the intended `gcp-dev` posture
+- GDC workstation and cluster hosts are private-only and reached over IAP instead of public SSH
 
 ### Range Network
 

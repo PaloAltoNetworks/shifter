@@ -1,7 +1,8 @@
 locals {
-  name_prefix                = "shifter-${var.environment}"
-  normalized_public_hostname = trimspace(trim(var.public_hostname, "."))
-  portal_network_cidrs       = compact([var.gke_subnet_cidr, var.gke_pods_cidr])
+  name_prefix                 = "shifter-${var.environment}"
+  normalized_public_hostname  = trimspace(trim(var.public_hostname, "."))
+  portal_network_cidrs        = compact([var.gke_subnet_cidr, var.gke_pods_cidr])
+  identity_authorized_domains = distinct(compact([local.normalized_public_hostname]))
   common_labels = merge(var.labels, {
     environment = var.environment
     managed_by  = "terraform"
@@ -26,7 +27,6 @@ locals {
     "app"                 = "Django runtime secret bundle (SECRET_KEY and field encryption key)."
     "db"                  = "Database connection secret bundle for the platform control plane."
     "guacamole-db"        = "Database connection secret bundle for the Guacamole client."
-    "oidc"                = "OIDC client credentials for the non-AWS gcp-dev identity provider."
     "guacamole-json-auth" = "Guacamole JSON auth signing key."
   }
 
@@ -72,6 +72,7 @@ locals {
     "artifactregistry.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
+    "identitytoolkit.googleapis.com",
     "pubsub.googleapis.com",
     "redis.googleapis.com",
     "run.googleapis.com",
@@ -233,6 +234,50 @@ resource "google_compute_global_address" "platform_ingress" {
   project = var.project_id
 }
 
+resource "google_compute_security_policy" "platform_edge" {
+  name        = "${local.name_prefix}-edge"
+  project     = var.project_id
+  description = "Baseline Cloud Armor policy for the public Shifter ingress"
+
+  rule {
+    action      = "deny(403)"
+    priority    = 1000
+    description = "Block common SQL injection requests"
+
+    match {
+      expr {
+        expression = "evaluatePreconfiguredWaf('sqli-v33-stable')"
+      }
+    }
+  }
+
+  rule {
+    action      = "deny(403)"
+    priority    = 1010
+    description = "Block common cross-site scripting requests"
+
+    match {
+      expr {
+        expression = "evaluatePreconfiguredWaf('xss-v33-stable')"
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 2147483647
+    description = "Default allow"
+
+    match {
+      versioned_expr = "SRC_IPS_V1"
+
+      config {
+        src_ip_ranges = ["*"]
+      }
+    }
+  }
+}
+
 resource "google_dns_managed_zone" "platform" {
   count = var.create_dns_managed_zone ? 1 : 0
 
@@ -275,6 +320,56 @@ resource "google_pubsub_subscription" "platform_events" {
   ack_deadline_seconds       = 20
   message_retention_duration = "604800s"
   labels                     = merge(local.common_labels, { worker = each.key })
+}
+
+resource "google_identity_platform_config" "platform" {
+  project = var.project_id
+
+  authorized_domains = local.identity_authorized_domains
+
+  sign_in {
+    allow_duplicate_emails = false
+
+    anonymous {
+      enabled = false
+    }
+
+    email {
+      enabled           = true
+      password_required = true
+    }
+
+    phone_number {
+      enabled = false
+    }
+  }
+
+  client {
+    permissions {
+      disabled_user_deletion = true
+      disabled_user_signup   = true
+    }
+  }
+
+  mfa {
+    state = "ENABLED"
+
+    provider_configs {
+      state = "ENABLED"
+
+      totp_provider_config {
+        adjacent_intervals = 1
+      }
+    }
+  }
+
+  monitoring {
+    request_logging {
+      enabled = true
+    }
+  }
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_secret_manager_secret" "runtime" {
@@ -439,6 +534,21 @@ resource "google_container_cluster" "platform" {
     enable_private_nodes    = true
     enable_private_endpoint = false
     master_ipv4_cidr_block  = var.gke_master_ipv4_cidr
+  }
+
+  dynamic "master_authorized_networks_config" {
+    for_each = length(var.gke_master_authorized_cidrs) == 0 ? [] : [1]
+
+    content {
+      dynamic "cidr_blocks" {
+        for_each = var.gke_master_authorized_cidrs
+
+        content {
+          cidr_block   = cidr_blocks.value
+          display_name = "admin-${replace(replace(cidr_blocks.value, "/", "-"), ".", "-")}"
+        }
+      }
+    }
   }
 
   release_channel {

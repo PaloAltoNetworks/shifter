@@ -15,6 +15,7 @@ dependencies = [
     "django-health-check",
     "django-ses",
     "djangorestframework",
+    "firebase-admin",
     "gunicorn",
     "markdown",
     "mozilla-django-oidc",
@@ -23,6 +24,7 @@ dependencies = [
     "pycurl>=7.45.7",
     "pydantic>=2.12.5",
     "python-dotenv",
+    "requests",
     "whitenoise",
 ]
 

@@ -3,6 +3,7 @@ Django settings for Shifter platform.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,6 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+AUTH_PROVIDER = os.environ.get("AUTH_PROVIDER", "oidc").strip().lower()
+IS_TEST_RUN = os.environ.get("TESTING") == "1" or Path(sys.argv[0]).name == "pytest"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -17,8 +20,15 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return os.environ.get(name, str(default)).lower() == "true"
 
 
+def _env_csv(name: str) -> list[str]:
+    """Parse comma-separated environment variables into normalized lists."""
+    return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
 # Security
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+_test_secret_key_default = "django-tests-secret-key" if IS_TEST_RUN else None
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _test_secret_key_default)
 if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
 DEBUG = _env_bool("DJANGO_DEBUG", False)
@@ -32,7 +42,7 @@ FIELD_ENCRYPTION_KEY = os.environ.get(
     "FIELD_ENCRYPTION_KEY",
     # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required)
     "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # NOSONAR - test-only key, not a production credential
-    if os.environ.get("TESTING") == "1"
+    if IS_TEST_RUN
     else None,
 )
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
@@ -57,7 +67,6 @@ INSTALLED_APPS = [
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
-    "mozilla_django_oidc",
     "rest_framework",
     "mission_control.apps.MissionControlConfig",
     "risk_register.apps.RiskRegisterConfig",
@@ -69,6 +78,9 @@ INSTALLED_APPS = [
     "cms.experiments.apps.ExperimentsConfig",
     "ctf.apps.CtfConfig",
 ]
+
+if AUTH_PROVIDER == "oidc":
+    INSTALLED_APPS.append("mozilla_django_oidc")
 
 MIDDLEWARE = [
     "config.middleware.HealthCheckMiddleware",  # Must be first to bypass ALLOWED_HOSTS for ALB
@@ -83,10 +95,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-# OIDC SessionRefresh middleware - only in production
-# In DEBUG mode, we use dev_login bypass. In production, OIDC must be configured.
-if not DEBUG:
-    if not os.environ.get("OIDC_RP_CLIENT_ID"):
+# OIDC SessionRefresh middleware - only for the OIDC/Cognito auth path.
+if not DEBUG and AUTH_PROVIDER == "oidc":
+    if not (os.environ.get("OIDC_RP_CLIENT_ID") or IS_TEST_RUN):
         raise ValueError("OIDC_RP_CLIENT_ID required in production (DEBUG=False)")
     MIDDLEWARE.append("mozilla_django_oidc.middleware.SessionRefresh")
 
@@ -209,28 +220,44 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", True)
 
 # ------------------------------------------------------------------------------
-# OIDC Authentication (Cognito)
+# Authentication
 # ------------------------------------------------------------------------------
 
-AUTHENTICATION_BACKENDS = [
-    "config.oidc.ShifterOIDCBackend",
-    "django.contrib.auth.backends.ModelBackend",
-]
+if AUTH_PROVIDER == "identity_platform":
+    AUTHENTICATION_BACKENDS = [
+        "config.identity_platform.IdentityPlatformBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+else:
+    AUTHENTICATION_BACKENDS = [
+        "config.oidc.ShifterOIDCBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
 
 # Magic link authentication (PLAT-101)
 MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
 MAGIC_LINK_SINGLE_USE = _env_bool("MAGIC_LINK_SINGLE_USE", False)
 
-# Cognito OIDC settings - loaded from environment
-OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "")
-OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "")
+# OIDC settings - loaded from environment for AWS/Cognito deployments.
+OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "test-oidc-client-id" if IS_TEST_RUN else "")
+OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "test-oidc-client-secret" if IS_TEST_RUN else "")
+IDENTITY_PLATFORM_API_KEY = os.environ.get("IDENTITY_PLATFORM_API_KEY", "")
+IDENTITY_PLATFORM_PROJECT_ID = os.environ.get("IDENTITY_PLATFORM_PROJECT_ID", "")
+IDENTITY_ALLOWED_EMAIL_DOMAIN = os.environ.get("IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com")
+IDENTITY_PLATFORM_ISSUER = os.environ.get("IDENTITY_PLATFORM_ISSUER", "Shifter")
+IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
+    "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
+    "Shifter Authenticator",
+)
+PLATFORM_BOOTSTRAP_STAFF_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_STAFF_EMAILS")
+PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS")
 
 # Cognito endpoints
 # Cognito has two different base URLs:
 # - Auth domain: for OAuth endpoints (authorize, token, userInfo)
 # - Issuer URL: for JWKS (token verification)
-_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
-_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
+_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "https://auth.example.test" if IS_TEST_RUN else "")
+_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "https://issuer.example.test" if IS_TEST_RUN else "")
 
 # Always define OIDC_OP_* variables to avoid runtime errors
 OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
@@ -238,7 +265,7 @@ OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
 OIDC_OP_USER_ENDPOINT = ""  # nosec B105
 OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
 
-if _oidc_auth_domain and _oidc_issuer:
+if AUTH_PROVIDER == "oidc" and _oidc_auth_domain and _oidc_issuer:
     # OAuth endpoints use the auth domain
     OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
     OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
@@ -248,11 +275,12 @@ if _oidc_auth_domain and _oidc_issuer:
 else:
     import warnings
 
-    warnings.warn(
-        "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
-        RuntimeWarning,
-        stacklevel=2,
-    )
+    if AUTH_PROVIDER == "oidc":
+        warnings.warn(
+            "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
 
@@ -264,11 +292,11 @@ OIDC_RP_SCOPES = "openid email profile"
 LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
-# Login URL - dev bypass in DEBUG, OIDC in production
-LOGIN_URL = "/dev-login/" if DEBUG else "oidc_authentication_init"
+# Login URL - dev bypass in DEBUG, provider router in production
+LOGIN_URL = "/dev-login/" if DEBUG else "platform_login"
 
 # OIDC logout endpoint - clears the identity provider session in addition to Django session
-OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"
+OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url" if AUTH_PROVIDER == "oidc" else ""
 
 # Create users on first login
 OIDC_CREATE_USER = True
@@ -282,6 +310,8 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
+    "/dev-login/",  # View enforces production blocking directly
+    "/dev-logout/",  # View enforces production blocking directly
     "/ctf/register/",  # CTF magic link registration (token is the auth)
     "/ctf/help/",  # CTF help page
 ]
@@ -300,7 +330,7 @@ SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
 
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 if not FIELD_ENCRYPTION_KEY:
-    if DEBUG or os.environ.get("TESTING") == "1":
+    if DEBUG or IS_TEST_RUN:
         # Dev/test default - not a production credential
         FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # NOSONAR - dev/test-only key
     else:

@@ -37,9 +37,10 @@ def _outputs(
                 "app": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-app",
                 "db": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-db",
                 "guacamole-json-auth": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-guacamole-json-auth",
-                "oidc": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-oidc",
             }
         },
+        "identity_platform_api_key": {"value": "identity-platform-api-key"},
+        "identity_platform_project_id": {"value": "shifter-gcp-dev"},
         "control_plane_database": {
             "value": {
                 "private_ip": "10.0.0.10",
@@ -86,9 +87,12 @@ def test_render_env_uses_ip_fallback_in_debug_mode():
     assert "TF_STATE_BUCKET=shifter-gcp-dev-terraform-state\n" in rendered
     assert "SESSION_COOKIE_SECURE=false\n" in rendered
     assert "CSRF_COOKIE_SECURE=false\n" in rendered
+    assert "AUTH_PROVIDER=oidc\n" in rendered
     assert "SITE_URL=http://10.0.0.30\n" in rendered
     assert "DJANGO_ALLOWED_HOSTS=10.0.0.30,localhost,127.0.0.1\n" in rendered
-    assert "OIDC_SECRET_ID=" not in rendered
+    assert "IDENTITY_PLATFORM_API_KEY=identity-platform-api-key\n" in rendered
+    assert "IDENTITY_PLATFORM_PROJECT_ID=shifter-gcp-dev\n" in rendered
+    assert "IDENTITY_ALLOWED_EMAIL_DOMAIN=paloaltonetworks.com\n" in rendered
     assert "GDC_ACCESS_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-access\n" in rendered
     assert "RANGE_NETWORK_ID=projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range\n" in rendered
     assert "RANGE_NETWORK_CIDR=10.50.0.0/16\n" in rendered
@@ -126,6 +130,33 @@ def test_render_env_enables_secure_portal_mode_with_hostname_and_tls():
     assert "DJANGO_DEBUG=false\n" in rendered
     assert "SESSION_COOKIE_SECURE=true\n" in rendered
     assert "CSRF_COOKIE_SECURE=true\n" in rendered
+    assert "AUTH_PROVIDER=identity_platform\n" in rendered
     assert "SITE_URL=https://portal.example.test\n" in rendered
     assert "DJANGO_ALLOWED_HOSTS=portal.example.test,10.0.0.30,localhost,127.0.0.1\n" in rendered
-    assert "OIDC_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-oidc\n" in rendered
+    assert "IDENTITY_PLATFORM_API_KEY=identity-platform-api-key\n" in rendered
+
+
+def test_render_env_preserves_bootstrap_admin_lists_from_environment(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    monkeypatch.setenv("PLATFORM_BOOTSTRAP_STAFF_EMAILS", "bedwards@paloaltonetworks.com")
+    monkeypatch.setenv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", "bedwards@paloaltonetworks.com")
+
+    rendered = module.render_env(
+        _outputs(public_hostname="portal.example.test", managed_tls_enabled=True),
+        secure_portal_mode=True,
+    )
+
+    assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+    assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+
+
+def test_render_env_secure_portal_mode_requires_hostname_and_managed_tls():
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+
+    try:
+        module.render_env(_outputs(), secure_portal_mode=True)
+    except ValueError as exc:
+        assert "public_hostname" in str(exc)
+        assert "managed_tls_enabled" in str(exc)
+    else:
+        raise AssertionError("secure portal mode should reject missing hostname/TLS inputs")

@@ -110,15 +110,20 @@ boreas-consulting org (visibility: public)
 8. Add repos to teams via API
 9. Push pre-built git repos via `git push` with admin creds
 
-### Remaining Work
+### Build Status — COMPLETE
 
-1. **Build all 6 repo contents as local git repos with crafted history**
-   - `boreas-consulting/client-tools` — red herring scripts
-   - `boreas-consulting/internal-docs` — IT docs, hostnames
-   - `aurora/navigation-controller` — locomotion AI code + config with `BRAIN_AUTH_TOKEN` + flag 24 git history
-   - `aurora/weapons-integration` — `brain_client.py` (A13 protocol) + `crypto_config.py` (A6 GPG passphrase)
-   - `aurora/manufacturing-orchestrator` — Ansible playbooks with A10/A11 unlock hints
-   - `aurora/leviathan-assembly` — schematic SVG (flag 29) + BOM + status tracker
-2. **Write the full bootstrap script** (bash, ~100 lines of curl + git commands)
-3. **Write Dockerfile** (gitea base + bootstrap script + pre-built repo archives)
-4. **Test from Kali box**
+All content built and tested. Golden artifacts in `A7-source-repo/`:
+- `bootstrap.sh` — idempotent script, takes fresh Gitea to fully populated (~15 seconds)
+- `bare-repos.tar.gz` — 87KB archive of all 6 repos as bare git clones with crafted history
+
+**Tested:** Wiped Gitea completely, ran bootstrap from scratch, full test suite passed (20/20).
+
+**Bootstrap verified behaviors:**
+- Creates admin user via CLI (works before API is ready)
+- Creates 7 regular users via API
+- Creates 2 orgs with correct visibility (public, limited)
+- Creates 2 teams (Lab-Access, Project-L) with correct membership
+- Creates 6 repos with correct visibility (public, private, internal)
+- Assigns repos to teams
+- Pushes all repo content from bare archives
+- Idempotent — safe to run multiple times (skips existing content)

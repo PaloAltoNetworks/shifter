@@ -79,6 +79,22 @@ output "public_ingress_ip_address" {
   value       = google_compute_global_address.platform_ingress.address
 }
 
+output "cloud_armor_security_policy_name" {
+  description = "Cloud Armor security policy attached to the public GKE ingress backends."
+  value       = google_compute_security_policy.platform_edge.name
+}
+
+output "identity_platform_api_key" {
+  description = "Identity Platform web API key for the project."
+  value       = google_identity_platform_config.platform.client[0].api_key
+  sensitive   = true
+}
+
+output "identity_platform_project_id" {
+  description = "Project ID backing the Identity Platform configuration."
+  value       = var.project_id
+}
+
 output "public_hostname" {
   description = "Optional public hostname configured for the ingress."
   value       = local.normalized_public_hostname

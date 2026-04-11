@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 
@@ -32,6 +33,10 @@ def _derive_sibling_secret_id(secret_id: str, current_suffix: str, new_suffix: s
     return secret_id
 
 
+def _csv_env(name: str) -> list[str]:
+    return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
 def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) -> str:
     assets_bucket = _value(outputs, "assets_bucket_name")
     terraform_state_bucket = _value(outputs, "terraform_state_bucket_name")
@@ -42,6 +47,8 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     cache = _value(outputs, "control_plane_cache")
     guacamole_database = _value(outputs, "guacamole_database")
     image_roots = _value(outputs, "artifact_registry_image_roots")
+    identity_platform_api_key = _value(outputs, "identity_platform_api_key")
+    identity_platform_project_id = _value(outputs, "identity_platform_project_id")
     public_ingress_ip = _value(outputs, "public_ingress_ip_address")
     public_hostname = _value(outputs, "public_hostname").strip()
     managed_tls_enabled = bool(_value(outputs, "managed_tls_enabled"))
@@ -49,6 +56,11 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     range_network_cidr = _value(outputs, "range_network_cidr")
     range_network_region = _value(outputs, "range_network_region")
     portal_network_cidrs = _value(outputs, "portal_network_cidrs")
+
+    if secure_portal_mode and (not public_hostname or not managed_tls_enabled):
+        raise ValueError(
+            "secure portal mode requires public_hostname and managed_tls_enabled to be configured"
+        )
 
     use_hostname = secure_portal_mode and public_hostname and managed_tls_enabled
     public_origin_host = public_hostname if use_hostname else public_ingress_ip
@@ -58,6 +70,9 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     csrf_origins = [site_url]
     if not secure_portal_mode and public_hostname:
         csrf_origins.append(f"http://{public_hostname}")
+
+    bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))
+    bootstrap_superuser_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"))
 
     values = {
         "STORAGE_BUCKET_NAME": assets_bucket,
@@ -92,6 +107,12 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "GUACAMOLE_POSTGRESQL_PORT": str(guacamole_database["port"]),
         "GUACAMOLE_POSTGRESQL_DATABASE": guacamole_database["database_name"],
         "ENGINE_TASK_IMAGE": f"{image_roots['pulumi-provisioner']}:latest",
+        "AUTH_PROVIDER": "identity_platform" if secure_portal_mode else "oidc",
+        "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
+        "IDENTITY_PLATFORM_PROJECT_ID": identity_platform_project_id,
+        "IDENTITY_ALLOWED_EMAIL_DOMAIN": "paloaltonetworks.com",
+        "IDENTITY_PLATFORM_ISSUER": "Shifter",
+        "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME": "Shifter Authenticator",
         "RANGE_NETWORK_ID": range_network_id,
         "RANGE_NETWORK_CIDR": range_network_cidr,
         "RANGE_NETWORK_REGION": range_network_region,
@@ -103,8 +124,11 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "RANGE_VPC_ID": range_network_id,
         "RANGE_VPC_CIDR": range_network_cidr,
     }
-    if secure_portal_mode:
-        values["OIDC_SECRET_ID"] = secret_ids["oidc"]
+
+    if bootstrap_staff_emails:
+        values["PLATFORM_BOOTSTRAP_STAFF_EMAILS"] = bootstrap_staff_emails
+    if bootstrap_superuser_emails:
+        values["PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"] = bootstrap_superuser_emails
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 

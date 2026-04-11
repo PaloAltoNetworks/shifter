@@ -44,6 +44,12 @@ variable "gke_master_ipv4_cidr" {
   type        = string
 }
 
+variable "gke_master_authorized_cidrs" {
+  description = "CIDR blocks allowed to access the public GKE control-plane endpoint."
+  type        = list(string)
+  default     = []
+}
+
 variable "range_network_cidr" {
   description = "Base CIDR reserved for Compute Engine range subnet allocation."
   type        = string

@@ -12,7 +12,7 @@ GitHub Actions with self-hosted runners.
 ├── _range.yml              # Range VPC infrastructure
 ├── _shifter-engine.yml     # Engine container build and push
 ├── _shifter-platform.yml   # Portal infrastructure and app deployment
-├── _gcp-dev.yml            # GCP environment (Terraform + Kustomize deploy)
+├── _gcp-dev.yml            # GCP validation/deploy workflow (still being reconciled with the Helm cutover)
 ├── packer.yml              # AMI builds (AWS)
 └── packer-promote.yml      # AMI promotion to prod (AWS)
 ```
@@ -59,3 +59,27 @@ OIDC federation per cloud. No long-lived credentials.
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | GCP Workload Identity Federation provider |
 
 AWS roles defined in `platform/terraform/global/iam/github-oidc.tf`. GCP WIF configured in the GCP project.
+
+## GCP Current State
+
+The authoritative GCP bring-up path on this branch is the bootstrap flow:
+
+```bash
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <project> --cluster-id <cluster>
+```
+
+That path now:
+
+1. reconciles the GDC substrate
+2. applies GCP Terraform
+3. builds and pushes control-plane images
+4. renders secure Helm values from Terraform outputs and Secret Manager
+5. installs or upgrades the Shifter Helm release
+
+The bootstrap path is security-gated and fails closed unless:
+
+- `public_hostname` is set
+- `enable_managed_tls = true`
+- `gke_master_authorized_cidrs` is non-empty
+
+The branch-local GitHub workflow still contains older staged GCP deployment logic and should not be treated as the authoritative GCP deploy path until it is reconciled with the Helm/bootstrap cutover.

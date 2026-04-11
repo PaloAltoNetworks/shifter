@@ -26,6 +26,7 @@ The current enforcement stack has six parts:
    - `actionlint` for GitHub Actions workflows
    - `TFLint` for Terraform linting (including the `tflint-ruleset-google` plugin for GCP resources)
    - `gitleaks` for new secret leakage detection
+   - `helm lint` for Helm chart validation where files are templates rather than plain YAML
    - `kubeconform` for Kubernetes manifest schema validation
    - `kube-linter` for Kubernetes security and best-practice enforcement
    - `Checkov` for IaC security scanning (Terraform and Kubernetes)
@@ -86,6 +87,11 @@ The first slice intentionally stays small:
   fields, invalid resource types, and schema violations before they reach a
   cluster. Pinned to the target GKE Kubernetes version.
 
+- `helm lint`
+  Validates the Helm-packaged GCP control plane. This is the correct validation
+  boundary for raw chart templates, which are not parseable by generic YAML
+  tooling before render time.
+
 - `kube-linter`
   Enforces Kubernetes security and best practices: non-root containers,
   read-only root filesystems, resource limits, privilege escalation prevention,
@@ -97,8 +103,10 @@ The first slice intentionally stays small:
   hardened.
 
 - `k8s-image-registry`
-  Verifies that Kustomize overlay image references point to Artifact Registry
-  (`pkg.dev`), preventing accidental use of public or untrusted registries.
+  Verifies that the staged GCP Kubernetes deployment assets still point at
+  Artifact Registry (`pkg.dev`), preventing accidental use of public or
+  untrusted registries while the GCP workflow and generated assets are being
+  reconciled around the Helm cutover.
 
 - `k8s-pss-labels`
   Architecture check ensuring namespace manifests carry Pod Security Standards
@@ -124,6 +132,7 @@ Useful ecosystem checks:
 cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter
 TFLINT_CONFIG="$(pwd)/.tflint.hcl"; cd platform/terraform && tflint --recursive --config "$TFLINT_CONFIG"
 actionlint
+helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-dev.yaml
 kube-linter lint --config .kube-linter.yaml platform/k8s/
 kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 platform/k8s/gcp/base/*.yaml
 ```

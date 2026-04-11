@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.64.0] - 2026-04-11
+
+### Changed
+- GCP control-plane deployment cut over to a Helm-based release under `platform/charts/shifter/` with layered values (`values.yaml`, `values-gcp-dev.yaml`, `values-gcp-prod.yaml`) plus bootstrap-generated runtime overrides
+- `gdc-bootstrap` now deploys the GCP control plane through the Helm chart instead of the previous raw-manifest path
+
+### Added
+- Chart-managed GKE `BackendConfig` for the portal Service so Google Cloud ingress health checks are explicitly pinned to `/health/`
+- Environment-scoped Helm values files for `gcp-dev` and `gcp-prod`
+- Live bootstrap proof notes for the Helm-based GCP control-plane path in `temp/k8s/gcp-feature-audit.md`
+- Terraform-managed GCP Identity Platform auth for `gcp-dev`, including bootstrap-owned first-operator creation and runtime-configured bootstrap admin elevation
+
+### Fixed
+- GCP bootstrap rerun safety for substrate stages: bootstrap key reuse, secret-version churn avoidance, SSH metadata drift checks, and staged bundle replacement
+- Engine migration consistency for `SubnetAllocation` so GCP bootstrap can run the platform database migrations cleanly on a fresh control plane
+- GCP bootstrap now leaves a usable externally reachable Shifter platform after control-plane bring-up, including healthy portal ingress and expected Mission Control login redirect behavior
+- AWS auth continuity while adding GCP identity support: AWS keeps the existing Cognito/OIDC path and GCP uses a provider-seamed first-party Identity Platform login flow
+
 ## [3.63.0] - 2026-04-09
 
 ### Added

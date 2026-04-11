@@ -63,12 +63,20 @@ with open(midnight) as f:
 check("flag 25 in MIDNIGHT-7 results", "FLAG{3f6a9d1e7c4b0258}" in content)
 check("MIDNIGHT-7 mentions MN07 simulation ID", "MN07" in content)
 
-# === Flag 26: COG analysis hidden sheet ===
-cog = os.path.join(BASE, "home/p.nielsen/designs/cog_analysis/Integration.csv")
-check("Integration.csv exists", os.path.isfile(cog))
-with open(cog) as f:
-    content = f.read()
-check("flag 26 in Integration sheet", "FLAG{7e2b0c5d9a4f8163}" in content)
+# === Flag 26: COG analysis hidden sheet in real XLSX ===
+import openpyxl as oxl
+cog_path = os.path.join(BASE, "home/p.nielsen/designs/center_of_gravity_analysis.xlsx")
+check("COG xlsx exists", os.path.isfile(cog_path))
+if os.path.isfile(cog_path):
+    wb = oxl.load_workbook(cog_path)
+    check("xlsx has 3 sheets", len(wb.sheetnames) == 3, f"got {wb.sheetnames}")
+    check("xlsx has Frame sheet", "Frame" in wb.sheetnames)
+    check("xlsx has Locomotion sheet", "Locomotion" in wb.sheetnames)
+    check("xlsx has Integration sheet", "Integration" in wb.sheetnames)
+    ws_int = wb["Integration"]
+    check("Integration sheet is hidden", ws_int.sheet_state == "hidden", f"state={ws_int.sheet_state}")
+    flag_val = ws_int.cell(row=10, column=2).value
+    check("flag 26 in hidden Integration sheet", flag_val == "FLAG{7e2b0c5d9a4f8163}", f"got: {flag_val}")
 
 # === Flag 30 chain artifacts ===
 gpg_file = os.path.join(BASE, "tmp/.deleted/full_integration_sim.mp4.gpg")

@@ -1,0 +1,147 @@
+releaseNamespace: shifter-system
+
+namespaces:
+  platform: shifter-platform
+  jobs: shifter-jobs
+
+serviceAccounts:
+  portal:
+    name: portal
+    annotations: {}
+  workers:
+    name: workers
+    annotations: {}
+  provisioner:
+    name: provisioner
+    annotations: {}
+
+runtimeEnv: {}
+
+guacamoleRuntimeSecret:
+  enabled: true
+  name: guacamole-runtime
+  stringData: {}
+
+images:
+  portal:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  guacd:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  guacamoleClient:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+
+portal:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+workers:
+  cms:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  engine:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  mc:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  ctfScheduler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+guacd:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+guacamoleClient:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+security:
+  pod:
+    seccompProfile: RuntimeDefault
+  app:
+    runAsUser: 1000
+    runAsGroup: 1000
+  guacd:
+    runAsUser: 1000
+    runAsGroup: 1000
+  guacamole:
+    runAsUser: 1001
+    runAsGroup: 1001
+
+services:
+  portal:
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+    backendConfig:
+      enabled: true
+      name: portal-web
+      healthCheck:
+        type: HTTP
+        requestPath: /health/
+        port: 8000
+        checkIntervalSec: 15
+        timeoutSec: 5
+        healthyThreshold: 1
+        unhealthyThreshold: 2
+  guacamoleClient:
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+
+ingress:
+  enabled: true
+  class: gce
+  staticIpName: ""
+  host: ""
+  managedTls:
+    enabled: false
+    certificateName: platform-managed-cert
+    frontendConfigName: platform-frontend-config

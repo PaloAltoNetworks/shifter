@@ -18,11 +18,21 @@ spec:
         app.kubernetes.io/part-of: shifter
         app.kubernetes.io/component: worker-cms
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: workers
       containers:
         - name: worker-cms
           image: placeholder-portal:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
           args: ["python", "manage.py", "run_worker", "--queue", "cms"]
           envFrom:
             - configMapRef:

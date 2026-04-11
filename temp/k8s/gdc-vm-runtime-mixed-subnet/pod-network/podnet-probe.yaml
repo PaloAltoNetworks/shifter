@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: podnet-probe
+  namespace: vmrt-mixed-subnet
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: cluster1-abm-w2-001
+  containers:
+    - name: netshoot
+      image: nicolaka/netshoot:latest
+      command:
+        - /bin/sh
+        - -c
+        - sleep infinity

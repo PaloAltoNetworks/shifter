@@ -18,11 +18,21 @@ spec:
         app.kubernetes.io/part-of: shifter
         app.kubernetes.io/component: guacd
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: workers
       containers:
         - name: guacd
           image: placeholder-guacd:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
           ports:
             - name: guacd
               containerPort: 4822

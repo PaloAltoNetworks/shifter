@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal-web
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: portal
+spec:
+  replicas: {{ .Values.portal.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: portal
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: portal
+      annotations:
+        checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ .Values.serviceAccounts.portal.name }}
+      containers:
+        - name: portal
+          image: {{ include "shifter.portalImage" . }}
+          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          envFrom:
+            - configMapRef:
+                name: platform-runtime
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.portal.resources | nindent 12 }}

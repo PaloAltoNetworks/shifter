@@ -18,12 +18,22 @@ spec:
         app.kubernetes.io/part-of: shifter
         app.kubernetes.io/component: guacamole-client
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: workers
       terminationGracePeriodSeconds: 180
       containers:
         - name: guacamole-client
           image: placeholder-guacamole-client:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
           env:
             - name: GUACD_HOSTNAME
               value: guacd

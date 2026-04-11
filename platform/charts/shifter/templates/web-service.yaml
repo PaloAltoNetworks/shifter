@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal-web
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: portal
+  {{- if or .Values.services.portal.annotations .Values.services.portal.backendConfig.enabled }}
+  annotations:
+    {{- with .Values.services.portal.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.services.portal.backendConfig.enabled }}
+    cloud.google.com/backend-config: {{ dict "default" .Values.services.portal.backendConfig.name | toJson | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: portal
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

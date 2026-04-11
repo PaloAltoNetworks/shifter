@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctf-scheduler
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ctf-scheduler
+spec:
+  replicas: {{ .Values.workers.ctfScheduler.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: ctf-scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ctf-scheduler
+      annotations:
+        checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      containers:
+        - name: ctf-scheduler
+          image: {{ include "shifter.portalImage" . }}
+          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          args: ["python", "manage.py", "run_ctf_scheduler"]
+          envFrom:
+            - configMapRef:
+                name: platform-runtime
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "find /tmp/ctf-scheduler-heartbeat -mmin -2 | grep -q ."]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.workers.ctfScheduler.resources | nindent 12 }}

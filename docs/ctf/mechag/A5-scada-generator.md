@@ -88,9 +88,12 @@ This only needs to happen once. First person to complete the sequence triggers i
    - The HMI's thermal safety toggle does NOT work until the interlock register is cleared
 
 3. **Implement the interlock bypass logic**
-   - Specific register write sequence required (documented in maintenance manual on A4 IT share)
-   - 60-second timeout: if sequence not completed in time, interlock auto-resets
-   - Correct sequence: write specific values to specific registers in order
+   - Interlock PLC holding register 100 = 1 (engaged). Must write 0 to disable.
+   - But register 100 is write-protected until unlock sequence:
+     - Write `7734` to holding register 200 (maintenance key, documented in A4 IT share maintenance manual)
+     - Write `0` to holding register 100 within 60 seconds
+   - HMI thermal safety toggle sends Modbus write to reg 100 but it bounces unless unlocked
+   - Timeout: 60 seconds from key write to interlock disable, else auto-resets
 
 4. **Implement the thermal runaway sequence**
    - After interlock bypass: fuel injection to 100%, cooling to 0%
@@ -99,8 +102,9 @@ This only needs to happen once. First person to complete the sequence triggers i
    - On completion: fire webhook/event to CTFd announcing the collective gate
 
 5. **Implement authentication**
-   - `svc-scada` credentials (from A2 Kerberoast or IT share on A4)
+   - Username: `svc-scada`, Password: `Sc@da#2025!` (from A2 Kerberoast or A4 IT share)
    - Simple form-based auth on the control panel
+   - Monitoring dashboard requires no auth
 
 6. **Implement the collective gate event**
    - When thermal runaway completes, POST to CTFd API or shared event bus
@@ -121,3 +125,13 @@ This only needs to happen once. First person to complete the sequence triggers i
 9. **Collective gate integration**
    - Define the webhook/event mechanism to CTFd
    - Define how Bunker access is unlocked (NetworkPolicy update? Sidecar that watches for event?)
+
+### Build Notes
+
+- **Server script:** `A5-scada-generator/server.py` — combined Flask + pymodbus in one process
+- **Tested and passing:** dashboard, auth, architecture page, logs, Modbus registers, interlock bypass, thermal runaway, flags 18+19
+- **Maintenance key:** 7734 written to Modbus reg 200 unlocks interlock writes for 60s
+- **Runaway sequence:** interlock bypass + fuel 100% + cooling 0% triggers 10s temperature climb → CRITICAL → flag 19
+- **State is shared between Flask and Modbus** via `state` dict with threading lock
+- **Register sync:** getValues syncs state→registers before each read so HMI and Modbus stay consistent
+- **Test port:** Modbus on 5050, web on 8080 (production: 502 + 8080)

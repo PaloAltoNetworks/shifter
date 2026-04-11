@@ -1,6 +1,8 @@
 # Flags 7–19: Front Office
 
-These flags come from the intranet (A3), mail server (A1), file share (A4), domain controller (A2), and SCADA system (A5).
+> **Start here:** Read [00-range-access.md](00-range-access.md) first for SSH instructions, how to start services, ports, and credentials.
+
+These flags come from the intranet (A3), mail server (A1), file share (A4), domain controller (A2), and SCADA system (A5). A1 and A4 are content-on-disk in the test environment — read files directly from `/tmp/a1-content/` and `/tmp/a4-content/`.
 
 ---
 

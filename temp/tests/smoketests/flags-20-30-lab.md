@@ -1,6 +1,8 @@
 # Flags 20–30: Lab
 
-These flags come from the engineering workstation (A6), source repos (A7), and research database (A8). Lab access requires Front Office credentials (Lab-Access group from AD).
+> **Start here:** Read [00-range-access.md](00-range-access.md) first for SSH instructions, how to start services, ports, and credentials.
+
+These flags come from the engineering workstation (A6), source repos (A7), and research database (A8). A6 is content-on-disk at `/tmp/a6-content/`. Gitea is at `http://127.0.0.1:3000`. PostgreSQL is at localhost (use `sudo -u postgres psql`).
 
 ---
 

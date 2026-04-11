@@ -1,6 +1,8 @@
 # Flags 31–36: Bunker
 
-These flags require the collective gate (flag 19) to have been triggered first. You access the Bunker via the splice landing box (A9), which connects to the OT network: three Modbus controllers and the brain.
+> **Start here:** Read [00-range-access.md](00-range-access.md) first for SSH instructions, how to start services, ports, and credentials.
+
+These flags require the collective gate (flag 19) to have been triggered first in production. In the test environment, the controllers are directly accessible. **Test ports differ from production:** A10=5020, A11=5021, A12=5022 (production: all 502). A13 brain is on port 9100 in both.
 
 ---
 

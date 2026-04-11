@@ -1,6 +1,8 @@
 # Flags 1–6: OSINT (Boreas Website)
 
-All of these flags come from the public Boreas Systems website. No authentication required.
+> **Start here:** Read [00-range-access.md](00-range-access.md) first for SSH instructions, how to start services, ports, and credentials.
+
+All of these flags come from the public Boreas Systems website (`$A0_URL`, default `http://127.0.0.1:8082`). No authentication required.
 
 ---
 

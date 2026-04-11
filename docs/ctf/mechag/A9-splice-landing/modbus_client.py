@@ -3,12 +3,12 @@
 Modbus/TCP client helper for OT network enumeration.
 
 Usage:
-  modbus_client.py <host> read <register> [count]     Read holding registers
-  modbus_client.py <host> read-input <register> [count] Read input registers
-  modbus_client.py <host> write <register> <value>     Write single holding register
-  modbus_client.py <host> write-coil <coil> <0|1>      Write single coil
-  modbus_client.py <host> devid                        Read device identification
-  modbus_client.py <host> scan                         Scan common registers
+  modbus_client.py <host> [--port PORT] read <register> [count]
+  modbus_client.py <host> [--port PORT] read-input <register> [count]
+  modbus_client.py <host> [--port PORT] write <register> <value>
+  modbus_client.py <host> [--port PORT] write-coil <coil> <0|1>
+  modbus_client.py <host> [--port PORT] devid
+  modbus_client.py <host> [--port PORT] scan
 
 Examples:
   modbus_client.py 10.10.40.10 read 0 10
@@ -124,9 +124,19 @@ def main():
         print(__doc__)
         sys.exit(1)
 
-    host = sys.argv[1]
-    command = sys.argv[2]
+    args = list(sys.argv[1:])
+    host = args.pop(0)
+
+    # Optional --port argument
     port = 502
+    if args and args[0] == "--port":
+        args.pop(0)
+        port = int(args.pop(0))
+
+    if not args:
+        print(__doc__)
+        sys.exit(1)
+    command = args.pop(0)
 
     client = ModbusTcpClient(host, port=port)
     if not client.connect():
@@ -135,26 +145,26 @@ def main():
 
     try:
         if command == "read":
-            address = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-            count = int(sys.argv[4]) if len(sys.argv) > 4 else 1
+            address = int(args[0]) if len(args) > 0 else 0
+            count = int(args[1]) if len(args) > 1 else 1
             read_registers(client, address, count)
 
         elif command == "read-input":
-            address = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-            count = int(sys.argv[4]) if len(sys.argv) > 4 else 1
+            address = int(args[0]) if len(args) > 0 else 0
+            count = int(args[1]) if len(args) > 1 else 1
             read_input_registers(client, address, count)
 
         elif command == "write":
-            if len(sys.argv) < 5:
+            if len(args) < 2:
                 print("Usage: write <register> <value>")
                 sys.exit(1)
-            write_register(client, int(sys.argv[3]), int(sys.argv[4]))
+            write_register(client, int(args[0]), int(args[1]))
 
         elif command == "write-coil":
-            if len(sys.argv) < 5:
+            if len(args) < 2:
                 print("Usage: write-coil <coil> <0|1>")
                 sys.exit(1)
-            write_coil(client, int(sys.argv[3]), int(sys.argv[4]))
+            write_coil(client, int(args[0]), int(args[1]))
 
         elif command == "devid":
             read_device_id(client)

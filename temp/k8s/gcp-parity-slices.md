@@ -16,6 +16,9 @@ Status:
 - Bootstrap prerequisite status: `gdc-bootstrap` rerun safety for the substrate stages is now implemented and locally/live-readonly verified before the next full bootstrap proof run.
 - Pre-bootstrap hardening status: the next GCP bootstrap now has enforced secure prerequisites, IAP-only GDC admin access, GKE master authorized networks, and Cloud Armor wiring in code and tests before the next fresh rebuild proof.
 - `P5` live proof succeeded on 2026-04-10/11: `gdc-bootstrap` now reconciles the GDC substrate, control-plane Terraform, image pushes, Helm release, and public ingress to a usable Shifter platform in `gcp-dev`.
+- Bootstrap auth status on 2026-04-11:
+  - AWS path remains Cognito/OIDC.
+  - GCP path now provisions Identity Platform directly, seeds the first operator during bootstrap, and elevates the configured bootstrap operator through runtime config without committing identities to source.
 
 Guiding rule:
 - Parity means every existing Shifter platform capability that works on AWS must work on GCP.

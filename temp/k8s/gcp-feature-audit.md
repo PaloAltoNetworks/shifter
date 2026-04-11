@@ -218,6 +218,22 @@ Checkpoint 9: non-GCP-specific drift discovered during audit
 - `ai_agent` appears in built-in scenario templates and CMS docs, but is not modeled in the active scenario schema or hydration path.
 - This appears to be product/doc drift rather than a GCP-specific regression.
 - The sibling NORTHSTORM/MechaG docs describe additional scenario-pack requirements:
+
+Checkpoint 10: GCP identity/bootstrap cutover
+- The earlier GCP path wrongly depended on a manually populated OIDC runtime secret. That was not equivalent to the AWS bootstrap experience.
+- The GCP control-plane path now provisions Identity Platform directly in Terraform and exposes the project API key/project ID to runtime.
+- Django auth is now provider-seamed:
+  - AWS keeps Cognito/OIDC through `mozilla-django-oidc`
+  - GCP uses first-party Identity Platform login inside Shifter
+- The first GCP operator is now bootstrap-seeded through the Identity Platform admin API using env-backed credentials or an interactive prompt.
+- Operator-only corporate login requirements are enforced in-app:
+  - `@paloaltonetworks.com` allowlist
+  - verified email
+  - TOTP MFA enrollment/sign-in
+- Bootstrap operator privilege elevation is runtime-configured through `PLATFORM_BOOTSTRAP_STAFF_EMAILS` and `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS`, so identities do not need to be committed to the repo.
+- AWS regression check:
+  - `/login/` still routes to the OIDC init path when `AUTH_PROVIDER=oidc`
+  - dev auth routes remain blocked in production after exempting them from OIDC session refresh interception
   - per-asset service-specific images or behaviors
   - containerized Kali with AI tooling preinstalled
   - Samba DC as the first choice for scale

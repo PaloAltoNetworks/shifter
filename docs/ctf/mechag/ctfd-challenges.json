@@ -1,0 +1,282 @@
+{
+  "meta": {
+    "name": "Operation NORTHSTORM",
+    "description": "4-hour AI-assisted CTF — infiltrate BOREAS SYSTEMS and seize PROJECT LEVIATHAN",
+    "version": "1.0"
+  },
+  "challenges": [
+    {
+      "id": 1, "name": "Company Info", "category": "M1 — OSINT",
+      "description": "Identify the Boreas Systems registration number. Look at the company website carefully.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{8f3a2c1e9b7d4056}"}],
+      "tags": ["easy", "osint"], "state": "visible"
+    },
+    {
+      "id": 2, "name": "Employee Directory", "category": "M1 — OSINT",
+      "description": "Find the organizational chart. Who reports to whom? The flag is embedded in the document.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{d4e7b1f283a6c950}"}],
+      "tags": ["easy", "osint"], "state": "visible"
+    },
+    {
+      "id": 3, "name": "Tech Stack Revealed", "category": "M1 — OSINT",
+      "description": "The careers page reveals what technologies Boreas uses. Look at everything on the page — not just what's visible.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{a1c9e3f7054b82d6}"}],
+      "tags": ["easy", "osint"], "state": "visible"
+    },
+    {
+      "id": 4, "name": "Client Contracts", "category": "M1 — OSINT",
+      "description": "Old versions of websites sometimes reveal more than the current one. Find the client list.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{72b5e0d8f1a34c69}"}],
+      "tags": ["easy", "osint"], "state": "visible"
+    },
+    {
+      "id": 5, "name": "DNS Reconnaissance", "category": "M1 — OSINT",
+      "description": "Enumerate the DNS records for boreas-systems.ctf. Some DNS servers allow zone transfers...",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{5e9c2a0f73b148d6}"}],
+      "tags": ["easy", "osint"], "state": "visible"
+    },
+    {
+      "id": 6, "name": "Follow the Money", "category": "M1 — OSINT",
+      "description": "Boreas published financial reports. One supplier received an unusually large payment. Submit the supplier name and amount in format: SUPPLIERNAME-AMOUNT (e.g., ACME-5000000)",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{c6f8d2b3e91a4507}"}],
+      "hints": [{"content": "Look for a pattern in the filenames in /internal/", "cost": 25}],
+      "tags": ["medium", "osint"], "state": "visible"
+    },
+    {
+      "id": 7, "name": "Configuration Leak", "category": "M1 — Front Office",
+      "description": "Web applications sometimes expose their configuration files. Check common paths.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{4f2e8b7a1c6d9035}"}],
+      "tags": ["easy", "web"], "state": "visible"
+    },
+    {
+      "id": 8, "name": "Project Hints", "category": "M1 — Front Office",
+      "description": "Someone at Boreas sent a status report about 'the project.' Access their email and find the attachment.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{3b7e9a2d1c8f4063}"}],
+      "tags": ["easy", "email"], "state": "visible"
+    },
+    {
+      "id": 9, "name": "Terminated Engineer", "category": "M1 — Front Office",
+      "description": "James Chen was terminated. His personnel file is on the corporate file share. What's the case reference number?",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{7a1b3d9e2c8f0546}"}],
+      "tags": ["easy", "smb"], "state": "visible"
+    },
+    {
+      "id": 10, "name": "Password Reuse", "category": "M1 — Front Office",
+      "description": "Many employees don't change their default passwords. Try logging into the webmail with common credentials.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{e5d1f8c2a7b03946}"}],
+      "tags": ["easy", "email"], "state": "visible"
+    },
+    {
+      "id": 11, "name": "Mundane File Share", "category": "M1 — Front Office",
+      "description": "The corporate file share has public documents. Even mundane files can hide information — check the metadata.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{0e6f9c2d4a8b7135}"}],
+      "tags": ["easy", "smb"], "state": "visible"
+    },
+    {
+      "id": 12, "name": "The Project", "category": "M1 — Front Office",
+      "description": "The internal wiki has a page about 'Project Coordination.' Read it carefully — all of it.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{d8a3c5e9f1b07264}"}],
+      "tags": ["easy", "web"], "state": "visible"
+    },
+    {
+      "id": 13, "name": "Procurement Trail", "category": "M2 — Front Office",
+      "description": "PO-2847 is for something unusual. Follow the reference in the special instructions to find the detailed specifications.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{8c5a0d3f7e1b2964}"}],
+      "tags": ["medium", "smb"], "state": "visible"
+    },
+    {
+      "id": 14, "name": "Hidden Group", "category": "M2 — Front Office",
+      "description": "Active Directory groups can be nested. Some groups are hidden inside others. Enumerate recursively.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{2f8b4a6c1d9e7053}"}],
+      "hints": [{"content": "Look at e.vasik's transitive group memberships", "cost": 50}],
+      "tags": ["medium", "ad"], "state": "visible"
+    },
+    {
+      "id": 15, "name": "Lateral Movement", "category": "M3 — Front Office",
+      "description": "Credentials found in one system can unlock access to another. The IT admin's email has credentials for a different service.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{9a4c7e2f58d0b163}"}],
+      "tags": ["medium", "lateral"], "state": "visible"
+    },
+    {
+      "id": 16, "name": "Unreliable Guard", "category": "M1 — Front Office",
+      "description": "Badge access logs tell a story. Cross-reference the guard rotation schedule with the actual badge swipes. Someone is going where they shouldn't.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{b3d7e1f0c8a24596}"}],
+      "tags": ["medium", "analysis"], "state": "visible"
+    },
+    {
+      "id": 17, "name": "Domain Admin", "category": "M3 — Front Office",
+      "description": "The backup service account has more privileges than it should. Kerberoast it, crack the password, and use its misconfigured permissions to access the domain admin's secrets.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{6c0a9d4e7f2b8135}"}],
+      "hints": [{"content": "svc-backup has Replicating Directory Changes rights (DCSync)", "cost": 100}],
+      "tags": ["hard", "ad", "kerberoast"], "state": "visible"
+    },
+    {
+      "id": 18, "name": "SCADA Discovery", "category": "M3 — Front Office",
+      "description": "The generator control system is on an isolated network. You'll need to pivot through a compromised Front Office host to reach it. Look for network documentation about VLAN 40.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{1d4e7b0a3c9f8265}"}],
+      "tags": ["hard", "scada", "pivot"], "state": "visible"
+    },
+    {
+      "id": 19, "name": "Lights Out", "category": "M3 — Front Office",
+      "description": "Override the generator's safety systems and cause a thermal runaway. The interlock PLC must be bypassed via raw Modbus commands before the HMI controls will work. This is the collective gate — first team to complete it opens the Bunker for everyone.",
+      "value": 300, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{a7f2c8d0e5b34169}"}],
+      "hints": [{"content": "The interlock is on Modbus port 502. Check the System Architecture page on the HMI.", "cost": 100}],
+      "tags": ["expert", "scada", "collective"], "state": "visible"
+    },
+    {
+      "id": 20, "name": "Default Credentials", "category": "M2 — Lab",
+      "description": "The engineering workstation has a CI service account with default credentials. Check common service account names.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{5b8e1d3a7c0f9246}"}],
+      "tags": ["easy", "ssh"], "state": "visible"
+    },
+    {
+      "id": 21, "name": "Research Data", "category": "M2 — Lab",
+      "description": "The research database has structural specifications. Connect with discovered credentials and query the data.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{4b9e2a7d0c8f1365}"}],
+      "tags": ["easy", "sql"], "state": "visible"
+    },
+    {
+      "id": 22, "name": "Shipping Manifest", "category": "M2 — Lab",
+      "description": "A delivery is arriving soon. The specifications document is in the build artifacts directory.",
+      "value": 50, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{e2a9c4f7d8b01536}"}],
+      "tags": ["easy", "files"], "state": "visible"
+    },
+    {
+      "id": 23, "name": "Simulation Archives", "category": "M2 — Lab",
+      "description": "47 simulation archives, but only a few contain bipedal references. Find the right .dat file and look inside the binary.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{0c7d8a2e5f1b3946}"}],
+      "hints": [{"content": "grep the .log files for 'bipedal' first, then examine the corresponding .dat with strings", "cost": 50}],
+      "tags": ["medium", "binary"], "state": "visible"
+    },
+    {
+      "id": 24, "name": "Source Code Secrets", "category": "M2 — Lab",
+      "description": "Developers sometimes commit secrets to git and then remove them in a later commit. Check the repository history.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{8a0e3c7f2d5b1946}"}],
+      "tags": ["medium", "git"], "state": "visible"
+    },
+    {
+      "id": 25, "name": "MIDNIGHT Test Series", "category": "M2 — Lab",
+      "description": "The MIDNIGHT simulations were run after hours. The results are in a restricted directory. Find a way to access them.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{3f6a9d1e7c4b0258}"}],
+      "tags": ["medium", "privesc"], "state": "visible"
+    },
+    {
+      "id": 26, "name": "Engineering Notes", "category": "M2 — Lab",
+      "description": "The mechanical engineer's design files include a center-of-gravity analysis. But one worksheet is hidden. Unhide it.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{7e2b0c5d9a4f8163}"}],
+      "tags": ["medium", "excel"], "state": "visible"
+    },
+    {
+      "id": 27, "name": "Weapons Compartment", "category": "M2 — Lab",
+      "description": "The research database has compartmentalized access. The weapons data is in a restricted schema. Find a way in.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{6d1a8f3c7e0b4952}"}],
+      "hints": [{"content": "There's a search function in the public schema that runs with elevated privileges", "cost": 50}],
+      "tags": ["medium", "sql", "sqli"], "state": "visible"
+    },
+    {
+      "id": 28, "name": "Assembly Status", "category": "M2 — Lab",
+      "description": "The manufacturing data shows what's been built and what's still pending. The final assembly record has nested metadata. Dig deep.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{a3f7d9e1c0b52846}"}],
+      "tags": ["hard", "sql", "json"], "state": "visible"
+    },
+    {
+      "id": 29, "name": "Deleted Schematic", "category": "M2 — Lab",
+      "description": "The assembly repository had a schematic that was deleted 'per security policy.' But git never truly forgets. Recover the file and examine the raw source.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{1f9b4e7c0a3d8265}"}],
+      "tags": ["hard", "git"], "state": "visible"
+    },
+    {
+      "id": 30, "name": "Simulation Video", "category": "M2 — Lab",
+      "description": "A full integration simulation video was encrypted and 'deleted.' The private key is in the weapons database. The passphrase is in the source code. Chain them together.",
+      "value": 300, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{d4c8f0a2e6b71935}"}],
+      "hints": [{"content": "GPG private key is base64-encoded in compartment_b. Passphrase is LEGACY_PASSPHRASE in crypto_config.py.", "cost": 150}],
+      "tags": ["expert", "crypto", "chain"], "state": "visible"
+    },
+    {
+      "id": 31, "name": "OT Enumeration", "category": "M4 — Bunker",
+      "description": "The Bunker has three industrial controllers. Query each one's device identification (Modbus function code 43) and concatenate the three model numbers in network order.",
+      "value": 100, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{2e8c0a5d7f3b1946}"}],
+      "tags": ["medium", "ot", "modbus"], "state": "hidden",
+      "requirements": {"prerequisites": [19]}
+    },
+    {
+      "id": 32, "name": "Tail Controller", "category": "M4 — Bunker",
+      "description": "The tail controller has a diagnostic mode. Find the hint in the Lab's deployment playbooks, then use it to unlock the controller's hidden registers.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{9b3e7c1d0f5a2846}"}],
+      "tags": ["hard", "ot", "modbus"], "state": "hidden",
+      "requirements": {"prerequisites": [19]}
+    },
+    {
+      "id": 33, "name": "Leg Controller", "category": "M4 — Bunker",
+      "description": "The leg controller requires a specific calibration walk cycle to unlock. The sequence is documented in an Ansible playbook. Execute it via Modbus within the time window.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{c7a1e3f9d0b52864}"}],
+      "tags": ["hard", "ot", "modbus"], "state": "hidden",
+      "requirements": {"prerequisites": [19]}
+    },
+    {
+      "id": 34, "name": "Arms Controller", "category": "M4 — Bunker",
+      "description": "The arms controller uses a rolling challenge-response. You need a number from the Front Office procurement records to compute the correct response.",
+      "value": 200, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{f0d8b2e6a4c71935}"}],
+      "tags": ["hard", "ot", "modbus", "cross-zone"], "state": "hidden",
+      "requirements": {"prerequisites": [19]}
+    },
+    {
+      "id": 35, "name": "Brain Access", "category": "M4 — Bunker",
+      "description": "The central controller speaks a custom binary protocol. Find the protocol documentation in the source code, gather the authentication credentials, and connect.",
+      "value": 300, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{8d2f5a0e7c9b3146}"}],
+      "tags": ["expert", "protocol", "chain"], "state": "hidden",
+      "requirements": {"prerequisites": [19]}
+    },
+    {
+      "id": 36, "name": "Combat System Seized", "category": "M4 — Bunker",
+      "description": "The override code is split across three zones. Assemble it from the website, the simulation data, and the assembly database. Enter it into the brain controller.",
+      "value": 300, "type": "standard",
+      "flags": [{"type": "static", "content": "FLAG{0b7e3d9a1f6c4258}"}],
+      "hints": [{"content": "Format: XXXX-XXXX-XXXX. Pieces from: A0 registration number, A6 MIDNIGHT-7 simulation ID, A8 assembly log integration code.", "cost": 150}],
+      "tags": ["expert", "chain", "final"], "state": "hidden",
+      "requirements": {"prerequisites": [19]}
+    }
+  ],
+  "point_totals": {
+    "easy": {"count": 14, "points_each": 50, "total": 700},
+    "medium": {"count": 11, "points_each": 100, "total": 1100},
+    "hard": {"count": 7, "points_each": 200, "total": 1400},
+    "expert": {"count": 4, "points_each": 300, "total": 1200},
+    "grand_total": 4400
+  }
+}

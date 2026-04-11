@@ -2,12 +2,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: portal-web
-  namespace: shifter-platform
+  namespace: {{ .Values.namespaces.platform }}
   labels:
-    app.kubernetes.io/part-of: shifter
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
     app.kubernetes.io/component: portal
 spec:
-  replicas: 2
+  replicas: {{ .Values.portal.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/part-of: shifter
@@ -15,24 +15,18 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/part-of: shifter
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
         app.kubernetes.io/component: portal
+      annotations:
+        checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
     spec:
-      securityContext:
-        seccompProfile:
-          type: RuntimeDefault
-      serviceAccountName: portal
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ .Values.serviceAccounts.portal.name }}
       containers:
         - name: portal
-          image: placeholder-portal:latest
-          imagePullPolicy: Always
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            runAsNonRoot: true
-            runAsUser: 1000
-            runAsGroup: 1000
+          image: {{ include "shifter.portalImage" . }}
+          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           envFrom:
             - configMapRef:
                 name: platform-runtime
@@ -52,9 +46,4 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 30
           resources:
-            requests:
-              cpu: 250m
-              memory: 512Mi
-            limits:
-              cpu: "1"
-              memory: 1Gi
+            {{- toYaml .Values.portal.resources | nindent 12 }}

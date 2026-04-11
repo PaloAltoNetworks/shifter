@@ -28,6 +28,7 @@ import sys
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
@@ -227,6 +228,12 @@ GDC_SERVICE_ACCOUNT_ROLES = [
     "roles/stackdriver.resourceMetadata.writer",
     "roles/kubernetesmetadata.publisher",
 ]
+
+GCP_TERRAFORM_BOOTSTRAP_ROLES = [
+    "roles/owner",
+]
+
+GCP_TERRAFORM_BOOTSTRAP_BUCKET_ROLE = "roles/storage.objectAdmin"
 
 
 def s3_bucket_exists(bucket_name: str, profile: str) -> bool:
@@ -439,6 +446,18 @@ class GDCBootstrapConfig:
     @property
     def service_account_email(self) -> str:
         return f"{self.service_account_name}@{self.project_id}.iam.gserviceaccount.com"
+
+    @property
+    def terraform_bootstrap_service_account_name(self) -> str:
+        return f"shifter-{self.environment}-tf-bootstrap"
+
+    @property
+    def terraform_bootstrap_service_account_email(self) -> str:
+        return f"{self.terraform_bootstrap_service_account_name}@{self.project_id}.iam.gserviceaccount.com"
+
+    @property
+    def terraform_state_bucket_name(self) -> str:
+        return f"{self.project_id}-terraform-state"
 
     @property
     def cluster_namespace(self) -> str:
@@ -1560,98 +1579,99 @@ def render_gcp_platform_runtime_env(config: GDCBootstrapConfig) -> str:
     return "".join(f"{line}\n" for line in lines)
 
 
-def render_gcp_service_account_patch(outputs: dict[str, dict[str, object]]) -> str:
-    """Render the Workload Identity bindings for the active project."""
-    service_accounts = _get_output_value(outputs, "workload_service_accounts")
-    return dedent(
-        f"""\
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: portal
-          namespace: shifter-platform
-          annotations:
-            iam.gke.io/gcp-service-account: {service_accounts["portal"]}
-        ---
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: workers
-          namespace: shifter-platform
-          annotations:
-            iam.gke.io/gcp-service-account: {service_accounts["workers"]}
-        ---
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: provisioner
-          namespace: shifter-jobs
-          annotations:
-            iam.gke.io/gcp-service-account: {service_accounts["provisioner"]}
-        """
-    )
+def parse_env_contract(rendered: str) -> dict[str, str]:
+    """Parse KEY=VALUE env contract text into a mapping, ignoring blank lines and comments."""
+    values: dict[str, str] = {}
+    for raw_line in rendered.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator:
+            raise ValueError(f"Invalid env contract line: {raw_line!r}")
+        values[key] = value
+    return values
 
 
-def render_gcp_overlay_kustomization(outputs: dict[str, dict[str, object]]) -> str:
-    """Render the GKE overlay with live Artifact Registry image roots."""
+def render_gcp_helm_values(
+    config: GDCBootstrapConfig,
+    outputs: dict[str, dict[str, object]],
+    *,
+    guacamole_db_payload: dict[str, str],
+    guacamole_json_secret: str,
+) -> dict[str, object]:
+    """Render Helm values for the Shifter release from Terraform outputs and runtime secrets."""
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
-    return dedent(
-        f"""\
-        apiVersion: kustomize.config.k8s.io/v1beta1
-        kind: Kustomization
-
-        resources:
-          - ../../base
-
-        generatorOptions:
-          disableNameSuffixHash: true
-
-        configMapGenerator:
-          - name: platform-runtime
-            envs:
-              - platform-runtime.env
-              - platform-runtime.generated.env
-
-        images:
-          - name: placeholder-portal
-            newName: {image_roots["portal"]}
-            newTag: latest
-          - name: placeholder-guacd
-            newName: {image_roots["guacd"]}
-            newTag: latest
-          - name: placeholder-guacamole-client
-            newName: {image_roots["guacamole-client"]}
-            newTag: latest
-
-        patches:
-          - path: patch-serviceaccounts.yaml
-          - target:
-              kind: ConfigMap
-              name: platform-runtime
-            patch: |-
-              - op: add
-                path: /metadata/namespace
-                value: shifter-platform
-        """
+    service_accounts = _get_output_value(outputs, "workload_service_accounts")
+    public_hostname = str(_get_output_value(outputs, "public_hostname")).strip()
+    managed_tls_enabled = bool(_get_output_value(outputs, "managed_tls_enabled"))
+    runtime_renderer = _load_python_script_module(
+        get_repo_root() / "scripts" / "gcp" / "render_runtime_env.py",
+        "bootstrap_render_runtime_env",
     )
+    runtime_env = {
+        **parse_env_contract(render_gcp_platform_runtime_env(config)),
+        **parse_env_contract(runtime_renderer.render_env(outputs)),
+    }
 
-
-def render_gcp_guacamole_runtime_secret_manifest(db_payload: dict[str, str], json_secret_key: str) -> str:
-    """Render the Guacamole runtime Secret manifest from Secret Manager payloads."""
-    return dedent(
-        f"""\
-        apiVersion: v1
-        kind: Secret
-        metadata:
-          name: guacamole-runtime
-          namespace: shifter-platform
-        type: Opaque
-        stringData:
-          POSTGRESQL_USER: {db_payload["username"]}
-          POSTGRESQL_PASSWORD: {db_payload["password"]}
-          JSON_SECRET_KEY: {json_secret_key}
-        """
-    )
+    return {
+        "releaseNamespace": "shifter-system",
+        "serviceAccounts": {
+            "portal": {
+                "annotations": {
+                    "iam.gke.io/gcp-service-account": service_accounts["portal"],
+                }
+            },
+            "workers": {
+                "annotations": {
+                    "iam.gke.io/gcp-service-account": service_accounts["workers"],
+                }
+            },
+            "provisioner": {
+                "annotations": {
+                    "iam.gke.io/gcp-service-account": service_accounts["provisioner"],
+                }
+            },
+        },
+        "runtimeEnv": runtime_env,
+        "guacamoleRuntimeSecret": {
+            "enabled": True,
+            "name": "guacamole-runtime",
+            "stringData": {
+                "POSTGRESQL_USER": guacamole_db_payload["username"],
+                "POSTGRESQL_PASSWORD": guacamole_db_payload["password"],
+                "JSON_SECRET_KEY": guacamole_json_secret,
+            },
+        },
+        "images": {
+            "portal": {
+                "repository": image_roots["portal"],
+                "tag": "latest",
+                "pullPolicy": "Always",
+            },
+            "guacd": {
+                "repository": image_roots["guacd"],
+                "tag": "latest",
+                "pullPolicy": "Always",
+            },
+            "guacamoleClient": {
+                "repository": image_roots["guacamole-client"],
+                "tag": "latest",
+                "pullPolicy": "Always",
+            },
+        },
+        "ingress": {
+            "enabled": True,
+            "class": "gce",
+            "staticIpName": _get_output_value(outputs, "public_ingress_ip_name"),
+            "host": public_hostname,
+            "managedTls": {
+                "enabled": managed_tls_enabled,
+                "certificateName": "platform-managed-cert",
+                "frontendConfigName": "platform-frontend-config",
+            },
+        },
+    }
 
 
 def fetch_gcp_secret_payload(secret_id: str, project_id: str) -> str:
@@ -1690,6 +1710,372 @@ def get_latest_gcp_secret_payload(secret_id: str, project_id: str) -> str | None
         raise
 
 
+def _is_retryable_gcp_terraform_init_error(message: str) -> bool:
+    """Return True when terraform init failed due to bootstrap key or bucket IAM propagation."""
+    normalized_message = message.lower()
+    return "invalid jwt signature" in normalized_message or (
+        "failed to get existing workspaces" in normalized_message
+        and "403" in normalized_message
+        and (
+            "storage.objects.list" in normalized_message
+            or "access to the google cloud storage bucket" in normalized_message
+        )
+    )
+
+
+def _is_retryable_gcp_terraform_apply_error(message: str) -> bool:
+    """Return True when terraform apply failed due to temporary bootstrap auth propagation."""
+    normalized_message = message.lower()
+    return "invalid jwt signature" in normalized_message or (
+        "permission denied" in normalized_message
+        or ("permission '" in normalized_message and " denied" in normalized_message)
+        or " denied on resource " in normalized_message
+        or "iam_permission_denied" in normalized_message
+        or "does not have" in normalized_message
+        or "error 403" in normalized_message
+    )
+
+
+def run_gcp_terraform_init_with_retry(
+    config: GDCBootstrapConfig,
+    tf_state_bucket: str,
+    credentials_path: Path,
+    *,
+    max_attempts: int = 12,
+    sleep_seconds: int = 5,
+) -> None:
+    """Run terraform init and retry only documented GCS backend IAM propagation failures."""
+    init_cmd = [
+        "terraform",
+        "init",
+        "-reconfigure",
+        f"-backend-config=bucket={tf_state_bucket}",
+        f"-backend-config=prefix=shifter/{config.environment}/platform-core",
+        f"-backend-config=credentials={credentials_path}",
+    ]
+    info(f"Running: {' '.join(init_cmd)}")
+
+    for attempt in range(1, max_attempts + 1):
+        result = subprocess.run(init_cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        if result.returncode == 0:
+            return
+
+        combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+        if _is_retryable_gcp_terraform_init_error(combined_output) and attempt < max_attempts:
+            warn(
+                "Terraform bootstrap credentials are still propagating; "
+                f"retrying terraform init in {sleep_seconds}s ({attempt}/{max_attempts})"
+            )
+            time.sleep(sleep_seconds)
+            continue
+
+        error(
+            "Command failed: "
+            f"Command '{' '.join(init_cmd)}' returned non-zero exit status {result.returncode}."
+        )
+        sys.exit(1)
+
+
+def run_gcp_terraform_apply_with_retry(
+    config: GDCBootstrapConfig, *, max_attempts: int = 24, sleep_seconds: int = 5
+) -> None:
+    """Run terraform apply and retry only temporary bootstrap-auth propagation failures."""
+    apply_cmd = ["terraform", "apply", "-auto-approve", f"-var=project_id={config.project_id}"]
+    info(f"Running: {' '.join(apply_cmd)}")
+
+    for attempt in range(1, max_attempts + 1):
+        result = subprocess.run(apply_cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        if result.returncode == 0:
+            return
+
+        combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+        if _is_retryable_gcp_terraform_apply_error(combined_output) and attempt < max_attempts:
+            warn(
+                "Terraform apply hit a temporary bootstrap-auth propagation error; "
+                f"retrying in {sleep_seconds}s ({attempt}/{max_attempts})"
+            )
+            time.sleep(sleep_seconds)
+            continue
+
+        error(
+            "Command failed: "
+            f"Command '{' '.join(apply_cmd)}' returned non-zero exit status {result.returncode}."
+        )
+        sys.exit(1)
+
+
+def _run_gcp_bootstrap_probe(cmd: list[str], credentials_path: Path) -> subprocess.CompletedProcess[str]:
+    """Run a gcloud probe using the temporary bootstrap credential file."""
+    env = os.environ.copy()
+    env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"] = str(credentials_path)
+    env["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
+    return subprocess.run(  # nosec B603 B607
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+
+def wait_for_gcp_terraform_bootstrap_access(
+    config: GDCBootstrapConfig,
+    credentials_path: Path,
+    *,
+    max_attempts: int = 24,
+    sleep_seconds: int = 5,
+) -> None:
+    """Wait until the bootstrap credentials can read the project resources Terraform manages."""
+    probe_cmds = [
+        [
+            "gcloud",
+            "storage",
+            "buckets",
+            "describe",
+            f"gs://{config.terraform_state_bucket_name}",
+            "--project",
+            config.project_id,
+        ],
+        [
+            "gcloud",
+            "storage",
+            "buckets",
+            "list",
+            "--project",
+            config.project_id,
+        ],
+        [
+            "gcloud",
+            "artifacts",
+            "repositories",
+            "list",
+            "--location",
+            config.region,
+            "--project",
+            config.project_id,
+        ],
+    ]
+
+    for attempt in range(1, max_attempts + 1):
+        failures: list[str] = []
+        for probe_cmd in probe_cmds:
+            result = _run_gcp_bootstrap_probe(probe_cmd, credentials_path)
+            if result.returncode == 0:
+                continue
+            failures.append("\n".join(part for part in (result.stdout, result.stderr) if part).strip())
+
+        if not failures:
+            return
+
+        combined_output = "\n".join(failures).strip()
+        if _is_retryable_gcp_terraform_apply_error(combined_output) and attempt < max_attempts:
+            warn(
+                "Terraform bootstrap credentials are not usable yet; "
+                f"retrying readiness probes in {sleep_seconds}s ({attempt}/{max_attempts})"
+            )
+            time.sleep(sleep_seconds)
+            continue
+
+        error("Bootstrap credentials never became usable for Terraform-managed GCP resources.")
+        if combined_output:
+            print(combined_output, file=sys.stderr)
+        sys.exit(1)
+
+
+def prune_stale_gcp_terraform_bootstrap_keys(config: GDCBootstrapConfig) -> None:
+    """Delete any leftover user-managed keys on the bootstrap service account before minting a fresh one."""
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "gcloud",
+            "iam",
+            "service-accounts",
+            "keys",
+            "list",
+            "--iam-account",
+            config.terraform_bootstrap_service_account_email,
+            "--project",
+            config.project_id,
+            "--managed-by=user",
+            "--format=value(name.basename())",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(f"Failed to list Terraform bootstrap service-account keys: {stderr}")
+
+    key_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    for key_id in key_ids:
+        run_cmd(
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "keys",
+                "delete",
+                key_id,
+                "--iam-account",
+                config.terraform_bootstrap_service_account_email,
+                "--project",
+                config.project_id,
+                "--quiet",
+            ],
+            check=False,
+        )
+
+
+@contextmanager
+def gcp_terraform_bootstrap_credentials(config: GDCBootstrapConfig):
+    """Provision temporary ADC-compatible credentials for Terraform bootstrap."""
+    if not gcloud_resource_exists(
+        [
+            "gcloud",
+            "iam",
+            "service-accounts",
+            "describe",
+            config.terraform_bootstrap_service_account_email,
+            "--project",
+            config.project_id,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "create",
+                config.terraform_bootstrap_service_account_name,
+                "--project",
+                config.project_id,
+            ],
+            check=False,
+        )
+
+    member = f"serviceAccount:{config.terraform_bootstrap_service_account_email}"
+    bucket_url = f"gs://{config.terraform_state_bucket_name}"
+    for role in GCP_TERRAFORM_BOOTSTRAP_ROLES:
+        run_cmd(
+            [
+                "gcloud",
+                "projects",
+                "add-iam-policy-binding",
+                config.project_id,
+                "--member",
+                member,
+                "--role",
+                role,
+                "--no-user-output-enabled",
+            ]
+        )
+    run_cmd(
+        [
+            "gcloud",
+            "storage",
+            "buckets",
+            "add-iam-policy-binding",
+            bucket_url,
+            "--member",
+            member,
+            "--role",
+            GCP_TERRAFORM_BOOTSTRAP_BUCKET_ROLE,
+        ]
+    )
+
+    env_keys = ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_BACKEND_CREDENTIALS", "GOOGLE_CREDENTIALS")
+    previous_env = {key: os.environ.get(key) for key in env_keys}
+    key_id = ""
+
+    with tempfile.TemporaryDirectory(prefix="shifter-gcp-tf-creds-") as temp_dir:
+        credentials_path = Path(temp_dir) / "terraform-bootstrap.json"
+        prune_stale_gcp_terraform_bootstrap_keys(config)
+        run_cmd(
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "keys",
+                "create",
+                str(credentials_path),
+                "--iam-account",
+                config.terraform_bootstrap_service_account_email,
+                "--project",
+                config.project_id,
+            ]
+        )
+        key_id = str(json.loads(credentials_path.read_text()).get("private_key_id", "")).strip()
+
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
+        os.environ.pop("GOOGLE_BACKEND_CREDENTIALS", None)
+        os.environ.pop("GOOGLE_CREDENTIALS", None)
+
+        try:
+            yield credentials_path
+        finally:
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+            if key_id:
+                run_cmd(
+                    [
+                        "gcloud",
+                        "iam",
+                        "service-accounts",
+                        "keys",
+                        "delete",
+                        key_id,
+                        "--iam-account",
+                        config.terraform_bootstrap_service_account_email,
+                        "--project",
+                        config.project_id,
+                        "--quiet",
+                    ],
+                    check=False,
+                )
+
+            for role in GCP_TERRAFORM_BOOTSTRAP_ROLES:
+                run_cmd(
+                    [
+                        "gcloud",
+                        "projects",
+                        "remove-iam-policy-binding",
+                        config.project_id,
+                        "--member",
+                        member,
+                        "--role",
+                        role,
+                        "--no-user-output-enabled",
+                    ],
+                    check=False,
+                )
+            run_cmd(
+                [
+                    "gcloud",
+                    "storage",
+                    "buckets",
+                    "remove-iam-policy-binding",
+                    bucket_url,
+                    "--member",
+                    member,
+                    "--role",
+                    GCP_TERRAFORM_BOOTSTRAP_BUCKET_ROLE,
+                ],
+                check=False,
+            )
+
+
 def apply_gcp_control_plane_terraform(
     config: GDCBootstrapConfig, dry_run: bool = False
 ) -> dict[str, dict[str, object]]:
@@ -1700,7 +2086,7 @@ def apply_gcp_control_plane_terraform(
         error(f"GCP Terraform directory not found: {tf_dir}")
         sys.exit(1)
 
-    tf_state_bucket = f"{config.project_id}-terraform-state"
+    tf_state_bucket = config.terraform_state_bucket_name
     if not gcloud_resource_exists(
         ["gcloud", "storage", "buckets", "describe", f"gs://{tf_state_bucket}", "--project", config.project_id]
     ):
@@ -1728,68 +2114,68 @@ def apply_gcp_control_plane_terraform(
     original_dir = os.getcwd()
     os.chdir(tf_dir)
     try:
-        run_cmd(
-            [
-                "terraform",
-                "init",
-                "-reconfigure",
-                f"-backend-config=bucket={tf_state_bucket}",
-                f"-backend-config=prefix=shifter/{config.environment}/platform-core",
-            ],
-            dry_run=dry_run,
-        )
-        run_cmd(
-            [
-                "terraform",
-                "apply",
-                "-auto-approve",
-                f"-var=project_id={config.project_id}",
-            ],
-            dry_run=dry_run,
-        )
         if dry_run:
+            run_cmd(
+                [
+                    "terraform",
+                    "init",
+                    "-reconfigure",
+                    f"-backend-config=bucket={tf_state_bucket}",
+                    f"-backend-config=prefix=shifter/{config.environment}/platform-core",
+                ],
+                dry_run=dry_run,
+            )
+            run_cmd(
+                [
+                    "terraform",
+                    "apply",
+                    "-auto-approve",
+                    f"-var=project_id={config.project_id}",
+                ],
+                dry_run=dry_run,
+            )
             return {}
 
-        output_result = subprocess.run(  # nosec B603 B607
-            ["terraform", "output", "-json"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if output_result.returncode != 0:
-            stderr = output_result.stderr.strip() if output_result.stderr else "unknown error"
-            raise RuntimeError(f"Failed to capture Terraform outputs: {stderr}")
-        return json.loads(output_result.stdout)
+        with gcp_terraform_bootstrap_credentials(config) as credentials_path:
+            run_gcp_terraform_init_with_retry(config, tf_state_bucket, credentials_path)
+            wait_for_gcp_terraform_bootstrap_access(config, credentials_path)
+            run_gcp_terraform_apply_with_retry(config)
+
+            output_result = subprocess.run(  # nosec B603 B607
+                ["terraform", "output", "-json"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if output_result.returncode != 0:
+                stderr = output_result.stderr.strip() if output_result.stderr else "unknown error"
+                raise RuntimeError(f"Failed to capture Terraform outputs: {stderr}")
+            return json.loads(output_result.stdout)
     finally:
         os.chdir(original_dir)
 
 
-def stage_gcp_control_plane_overlay(
-    config: GDCBootstrapConfig, outputs: dict[str, dict[str, object]], staging_root: Path
+def stage_gcp_control_plane_values(
+    config: GDCBootstrapConfig,
+    outputs: dict[str, dict[str, object]],
+    staging_root: Path,
 ) -> Path:
-    """Stage a project-aware copy of the GKE overlay with live Terraform outputs."""
-    repo_root = get_repo_root()
-    source_root = repo_root / "platform" / "k8s" / "gcp"
-    staged_root = staging_root / "platform" / "k8s" / "gcp"
-    shutil.copytree(source_root, staged_root)
-
-    overlay_dir = staged_root / "overlays" / config.environment
-    (overlay_dir / "platform-runtime.env").write_text(render_gcp_platform_runtime_env(config))
-    (overlay_dir / "patch-serviceaccounts.yaml").write_text(render_gcp_service_account_patch(outputs))
-    (overlay_dir / "kustomization.yaml").write_text(render_gcp_overlay_kustomization(outputs))
-
-    runtime_renderer = _load_python_script_module(
-        repo_root / "scripts" / "gcp" / "render_runtime_env.py",
-        "bootstrap_render_runtime_env",
+    """Stage the generated Helm values file for the Shifter release."""
+    runtime_secret_ids = _get_output_value(outputs, "runtime_secret_ids")
+    guacamole_db_payload = json.loads(fetch_gcp_secret_payload(runtime_secret_ids["guacamole-db"], config.project_id))
+    guacamole_json_secret = fetch_gcp_secret_payload(
+        runtime_secret_ids["guacamole-json-auth"],
+        config.project_id,
+    ).strip()
+    values = render_gcp_helm_values(
+        config,
+        outputs,
+        guacamole_db_payload=guacamole_db_payload,
+        guacamole_json_secret=guacamole_json_secret,
     )
-    edge_renderer = _load_python_script_module(
-        repo_root / "scripts" / "gcp" / "render_edge_manifest.py",
-        "bootstrap_render_edge_manifest",
-    )
-
-    (overlay_dir / "platform-runtime.generated.env").write_text(runtime_renderer.render_env(outputs))
-    (overlay_dir / "platform-edge.generated.yaml").write_text(edge_renderer.render_manifest(outputs))
-    return overlay_dir
+    values_path = staging_root / "shifter.values.generated.json"
+    values_path.write_text(json.dumps(values, indent=2, sort_keys=True))
+    return values_path
 
 
 def push_gcp_control_plane_images(
@@ -1835,15 +2221,309 @@ def push_gcp_control_plane_images(
         run_cmd(["docker", "push", tag], dry_run=dry_run)
 
 
-def roll_out_gcp_control_plane(
+def install_gke_gcloud_auth_plugin_user_space(dry_run: bool = False) -> None:
+    """Install the GKE kubectl auth plugin into ~/.local/bin without root privileges."""
+    if dry_run:
+        info("Would install gke-gcloud-auth-plugin into ~/.local/bin via apt package extraction")
+        return
+
+    if not shutil.which("apt") or not shutil.which("dpkg-deb"):
+        error(
+            "gke-gcloud-auth-plugin is required for kubectl access to GKE and is not installed. "
+            "User-space install requires both apt and dpkg-deb."
+        )
+        sys.exit(1)
+
+    with tempfile.TemporaryDirectory(prefix="gke-auth-plugin-") as temp_dir:
+        temp_path = Path(temp_dir)
+        subprocess.run(  # nosec B603 B607
+            ["apt", "download", "google-cloud-cli-gke-gcloud-auth-plugin"],
+            cwd=temp_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        deb_packages = sorted(temp_path.glob("google-cloud-cli-gke-gcloud-auth-plugin_*.deb"))
+        if not deb_packages:
+            error("Unable to locate downloaded google-cloud-cli-gke-gcloud-auth-plugin package.")
+            sys.exit(1)
+
+        extract_dir = temp_path / "extract"
+        subprocess.run(  # nosec B603 B607
+            ["dpkg-deb", "-x", str(deb_packages[0]), str(extract_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        source_binary = extract_dir / "usr" / "lib" / "google-cloud-sdk" / "bin" / "gke-gcloud-auth-plugin"
+        if not source_binary.exists():
+            error("Downloaded gke-gcloud-auth-plugin package did not contain the expected binary.")
+            sys.exit(1)
+
+        destination_dir = Path.home() / ".local" / "bin"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination_binary = destination_dir / "gke-gcloud-auth-plugin"
+        shutil.copy2(source_binary, destination_binary)
+        destination_binary.chmod(0o755)
+
+
+def ensure_gke_gcloud_auth_plugin(dry_run: bool = False) -> None:
+    """Ensure the kubectl GKE auth plugin is present on the bootstrap host."""
+    if shutil.which("gke-gcloud-auth-plugin"):
+        return
+
+    if shutil.which("apt-get"):
+        command_prefix: list[str] = []
+        if os.geteuid() == 0:
+            warn("Installing gke-gcloud-auth-plugin for kubectl access to GKE")
+            run_cmd([*command_prefix, "apt-get", "update"], dry_run=dry_run)
+            run_cmd(
+                [*command_prefix, "apt-get", "install", "-y", "google-cloud-cli-gke-gcloud-auth-plugin"],
+                dry_run=dry_run,
+            )
+        elif shutil.which("sudo"):
+            command_prefix = ["sudo"]
+            warn("Installing gke-gcloud-auth-plugin for kubectl access to GKE")
+            run_cmd([*command_prefix, "apt-get", "update"], dry_run=dry_run)
+            run_cmd(
+                [*command_prefix, "apt-get", "install", "-y", "google-cloud-cli-gke-gcloud-auth-plugin"],
+                dry_run=dry_run,
+            )
+        else:
+            warn("Installing gke-gcloud-auth-plugin into ~/.local/bin for kubectl access to GKE")
+            install_gke_gcloud_auth_plugin_user_space(dry_run=dry_run)
+    else:
+        error(
+            "gke-gcloud-auth-plugin is required for kubectl access to GKE and is not installed. "
+            "Automatic installation requires apt-based package tooling."
+        )
+        sys.exit(1)
+
+    if dry_run:
+        return
+
+    if not shutil.which("gke-gcloud-auth-plugin"):
+        error("gke-gcloud-auth-plugin install completed but the binary is still unavailable on PATH.")
+        sys.exit(1)
+
+
+def helm_release_exists(release_name: str, namespace: str) -> bool:
+    """Return True when the named Helm release already exists in the target namespace."""
+    result = subprocess.run(  # nosec B603 B607
+        ["helm", "status", release_name, "--namespace", namespace],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def list_gcp_helm_cutover_resources(namespace: str) -> list[str]:
+    """List legacy Shifter resources in a namespace that must be purged before Helm takes ownership."""
+    labeled_result = subprocess.run(  # nosec B603 B607
+        [
+            "kubectl",
+            "-n",
+            namespace,
+            "get",
+            "deploy,svc,sa,cm,secret,ingress,rs,pod,job,cronjob,sts,ds",
+            "-l",
+            "app.kubernetes.io/part-of=shifter",
+            "-o",
+            "name",
+            "--ignore-not-found",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if labeled_result.returncode != 0:
+        stderr = labeled_result.stderr.strip().lower() if labeled_result.stderr else ""
+        if f'namespaces "{namespace}" not found' in stderr:
+            return []
+        raise RuntimeError(
+            f"Failed to inspect legacy Helm-cutover resources in namespace {namespace}: {labeled_result.stderr}"
+        )
+
+    explicit_resource_names = {
+        "shifter-platform": ["configmap/platform-runtime", "secret/guacamole-runtime"],
+        "shifter-jobs": ["serviceaccount/provisioner"],
+    }
+    explicit_resources = explicit_resource_names.get(namespace, [])
+    named_result = None
+    if explicit_resources:
+        named_result = subprocess.run(  # nosec B603 B607
+            [
+                "kubectl",
+                "-n",
+                namespace,
+                "get",
+                *explicit_resources,
+                "-o",
+                "name",
+                "--ignore-not-found",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if named_result.returncode != 0:
+            stderr = named_result.stderr.strip().lower() if named_result.stderr else ""
+            if f'namespaces "{namespace}" not found' in stderr:
+                return []
+            raise RuntimeError(
+                f"Failed to inspect explicit Helm-cutover resources in namespace {namespace}: {named_result.stderr}"
+            )
+
+    resources = [line.strip() for line in labeled_result.stdout.splitlines() if line.strip()]
+    if named_result is not None:
+        resources.extend(line.strip() for line in named_result.stdout.splitlines() if line.strip())
+    return sorted(set(resources))
+
+
+def prepare_gcp_helm_cutover(dry_run: bool = False) -> None:
+    """Delete legacy unmanaged Shifter resources before the first Helm-managed install."""
+    release_name = "shifter"
+    release_namespace = "shifter-system"
+    managed_namespaces = ["shifter-system", "shifter-platform", "shifter-jobs"]
+
+    if helm_release_exists(release_name, release_namespace):
+        return
+
+    found_resources = {
+        namespace: list_gcp_helm_cutover_resources(namespace)
+        for namespace in managed_namespaces
+    }
+    if not any(found_resources.values()):
+        return
+
+    warn("No Helm release exists yet. Deleting legacy Shifter resources before Helm cutover.")
+    for namespace, resources_to_delete in found_resources.items():
+        if not resources_to_delete:
+            continue
+        run_cmd(
+            [
+                "kubectl",
+                "-n",
+                namespace,
+                "delete",
+                *resources_to_delete,
+                "--ignore-not-found=true",
+                "--wait=true",
+                "--timeout=10m",
+            ],
+            dry_run=dry_run,
+        )
+
+
+def _get_kubernetes_namespace(name: str) -> dict[str, object] | None:
+    """Return namespace JSON or None when the namespace does not exist."""
+    result = subprocess.run(  # nosec B603 B607
+        ["kubectl", "get", "namespace", name, "-o", "json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+
+    stderr = result.stderr.strip().lower() if result.stderr else ""
+    if f'namespaces "{name}" not found' in stderr:
+        return None
+
+    raise RuntimeError(f"Failed to inspect namespace {name}: {result.stderr}")
+
+
+def _wait_for_namespace_absent(name: str, timeout_seconds: int = 300, poll_seconds: int = 2) -> None:
+    """Wait until a namespace no longer exists."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        namespace = _get_kubernetes_namespace(name)
+        if namespace is None:
+            return
+        time.sleep(poll_seconds)
+
+    raise RuntimeError(f"Namespace {name} is still terminating after {timeout_seconds} seconds")
+
+
+def _wait_for_namespace_active(name: str, timeout_seconds: int = 120, poll_seconds: int = 2) -> None:
+    """Wait until a namespace exists and is Active."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        namespace = _get_kubernetes_namespace(name)
+        if namespace and namespace.get("status", {}).get("phase") == "Active":
+            return
+        time.sleep(poll_seconds)
+
+    raise RuntimeError(f"Namespace {name} did not become Active within {timeout_seconds} seconds")
+
+
+def ensure_gcp_control_plane_namespaces(dry_run: bool = False) -> None:
+    """Ensure Helm target namespaces exist outside of the release lifecycle."""
+    namespace_specs = {
+        "shifter-platform": {
+            "app.kubernetes.io/part-of": "shifter",
+            "shifter.dev/plane": "control",
+            "pod-security.kubernetes.io/enforce": "restricted",
+            "pod-security.kubernetes.io/audit": "restricted",
+            "pod-security.kubernetes.io/warn": "restricted",
+        },
+        "shifter-jobs": {
+            "app.kubernetes.io/part-of": "shifter",
+            "shifter.dev/plane": "jobs",
+            "pod-security.kubernetes.io/enforce": "restricted",
+            "pod-security.kubernetes.io/audit": "restricted",
+            "pod-security.kubernetes.io/warn": "restricted",
+        },
+    }
+
+    for namespace_name, labels in namespace_specs.items():
+        namespace = _get_kubernetes_namespace(namespace_name)
+        if namespace and namespace.get("metadata", {}).get("deletionTimestamp"):
+            warn(f"Namespace {namespace_name} is terminating; waiting for deletion before recreating it")
+            if not dry_run:
+                _wait_for_namespace_absent(namespace_name)
+
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "name": namespace_name,
+                "labels": labels,
+            },
+        }
+
+        if dry_run:
+            info(f"Would apply namespace manifest for {namespace_name}")
+            continue
+
+        subprocess.run(  # nosec B603 B607
+            ["kubectl", "apply", "-f", "-"],
+            input=json.dumps(manifest),
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+        _wait_for_namespace_active(namespace_name)
+
+
+def deploy_gcp_control_plane_with_helm(
     config: GDCBootstrapConfig,
     outputs: dict[str, dict[str, object]],
-    overlay_dir: Path,
+    values_path: Path,
     dry_run: bool = False,
 ) -> None:
-    """Apply the staged overlay to GKE and wait for the Shifter control plane to become healthy."""
+    """Deploy Shifter onto GKE via Helm and wait for a healthy release."""
     cluster_name = str(_get_output_value(outputs, "gke_cluster_name"))
     cluster_location = str(_get_output_value(outputs, "gke_cluster_location"))
+    chart_path = get_repo_root() / "platform" / "charts" / "shifter"
+    environment_values_path = chart_path / f"values-{config.environment}.yaml"
+
+    if not environment_values_path.exists():
+        error(f"Missing Helm values override for environment {config.environment}: {environment_values_path}")
+        sys.exit(1)
+
+    ensure_gke_gcloud_auth_plugin(dry_run=dry_run)
 
     run_cmd(
         [
@@ -1859,50 +2539,31 @@ def roll_out_gcp_control_plane(
         ],
         dry_run=dry_run,
     )
-
-    run_cmd(["kubectl", "apply", "-k", str(overlay_dir)], dry_run=dry_run)
-
-    runtime_secret_ids = _get_output_value(outputs, "runtime_secret_ids")
-    guacamole_db_payload = json.loads(fetch_gcp_secret_payload(runtime_secret_ids["guacamole-db"], config.project_id))
-    guacamole_json_secret = fetch_gcp_secret_payload(
-        runtime_secret_ids["guacamole-json-auth"],
-        config.project_id,
-    ).strip()
-    guacamole_secret_manifest = overlay_dir / "guacamole-runtime.generated.yaml"
-    guacamole_secret_manifest.write_text(
-        render_gcp_guacamole_runtime_secret_manifest(guacamole_db_payload, guacamole_json_secret)
+    prepare_gcp_helm_cutover(dry_run=dry_run)
+    ensure_gcp_control_plane_namespaces(dry_run=dry_run)
+    run_cmd(
+        [
+            "helm",
+            "upgrade",
+            "--install",
+            "shifter",
+            str(chart_path),
+            "--namespace",
+            "shifter-system",
+            "--create-namespace",
+            "--values",
+            str(environment_values_path),
+            "--values",
+            str(values_path),
+            "--atomic",
+            "--wait",
+            "--timeout",
+            "15m",
+            "--history-max",
+            "10",
+        ],
+        dry_run=dry_run,
     )
-    run_cmd(["kubectl", "apply", "-f", str(guacamole_secret_manifest)], dry_run=dry_run)
-
-    deployments = [
-        "portal-web",
-        "guacd",
-        "guacamole-client",
-        "worker-cms",
-        "worker-engine",
-        "worker-mc",
-        "ctf-scheduler",
-    ]
-    for deployment in deployments:
-        run_cmd(
-            ["kubectl", "rollout", "restart", f"deployment/{deployment}", "-n", "shifter-platform"],
-            dry_run=dry_run,
-        )
-    for deployment in deployments:
-        run_cmd(
-            [
-                "kubectl",
-                "rollout",
-                "status",
-                f"deployment/{deployment}",
-                "-n",
-                "shifter-platform",
-                "--timeout=15m",
-            ],
-            dry_run=dry_run,
-        )
-
-    run_cmd(["kubectl", "apply", "-f", str(overlay_dir / "platform-edge.generated.yaml")], dry_run=dry_run)
 
 
 def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, dict[str, object]]:
@@ -1914,8 +2575,8 @@ def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = Fals
 
     push_gcp_control_plane_images(config, outputs, dry_run=dry_run)
     with tempfile.TemporaryDirectory(prefix="shifter-gcp-platform-") as staging_root_name:
-        overlay_dir = stage_gcp_control_plane_overlay(config, outputs, Path(staging_root_name))
-        roll_out_gcp_control_plane(config, outputs, overlay_dir, dry_run=dry_run)
+        values_path = stage_gcp_control_plane_values(config, outputs, Path(staging_root_name))
+        deploy_gcp_control_plane_with_helm(config, outputs, values_path, dry_run=dry_run)
     success(f"{config.environment} Shifter platform deployed")
     return outputs
 
@@ -2849,6 +3510,7 @@ def check_dependencies(command: str | None = None):
                 "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
                 "docker": "Docker - https://docs.docker.com/engine/install/",
                 "kubectl": "kubectl - https://kubernetes.io/docs/tasks/tools/",
+                "helm": "Helm - https://helm.sh/docs/intro/install/",
             }
         )
 

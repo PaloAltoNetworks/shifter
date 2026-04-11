@@ -36,6 +36,12 @@ locals {
     "provisioner",
   ])
 
+  workload_identity_members = {
+    portal      = "serviceAccount:${var.project_id}.svc.id.goog[shifter-platform/portal]"
+    workers     = "serviceAccount:${var.project_id}.svc.id.goog[shifter-platform/workers]"
+    provisioner = "serviceAccount:${var.project_id}.svc.id.goog[shifter-jobs/provisioner]"
+  }
+
   node_roles = toset([
     "roles/artifactregistry.reader",
     "roles/logging.logWriter",
@@ -50,6 +56,7 @@ locals {
       "roles/storage.objectAdmin",
     ])
     workers = toset([
+      "roles/pubsub.publisher",
       "roles/pubsub.subscriber",
       "roles/secretmanager.secretAccessor",
       "roles/storage.objectViewer",
@@ -504,6 +511,14 @@ resource "google_project_iam_member" "workload_roles" {
   project = var.project_id
   role    = each.value.role
   member  = "serviceAccount:${google_service_account.workload[each.value.account_name].email}"
+}
+
+resource "google_service_account_iam_member" "workload_identity" {
+  for_each = local.workload_identity_members
+
+  service_account_id = google_service_account.workload[each.key].name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = each.value
 }
 
 resource "google_container_node_pool" "workers" {

@@ -12,7 +12,10 @@ or subprocess executions occur during tests.
 """
 
 import json
+import os
+import shutil
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -344,6 +347,8 @@ class TestCheckDependencies:
                 if cmd == "docker"
                 else "/usr/bin/kubectl"
                 if cmd == "kubectl"
+                else "/usr/bin/helm"
+                if cmd == "helm"
                 else "/usr/bin/git"
                 if cmd == "git"
                 else None
@@ -994,7 +999,11 @@ class TestGdcControlPlaneTerraform:
         with (
             patch("deploy.get_repo_root", return_value=mock_repo_root),
             patch("deploy.gcloud_resource_exists", return_value=False),
-            patch("deploy.run_cmd") as mock_run_cmd,
+            patch("deploy.gcp_terraform_bootstrap_credentials", return_value=nullcontext(Path("bootstrap.json"))),
+            patch("deploy.run_gcp_terraform_init_with_retry") as mock_init,
+            patch("deploy.wait_for_gcp_terraform_bootstrap_access") as mock_wait,
+            patch("deploy.run_gcp_terraform_apply_with_retry") as mock_apply,
+            patch("deploy.run_cmd"),
             patch("os.chdir"),
             patch(
                 "subprocess.run",
@@ -1003,82 +1012,513 @@ class TestGdcControlPlaneTerraform:
         ):
             outputs = deploy.apply_gcp_control_plane_terraform(config)
 
-        init_call = mock_run_cmd.call_args_list[2]
-        assert init_call.args[0] == [
+        mock_init.assert_called_once_with(config, config.terraform_state_bucket_name, Path("bootstrap.json"))
+        mock_wait.assert_called_once_with(config, Path("bootstrap.json"))
+        assert mock_init.call_args.args[1] == "prod-rwctxzl6shxk-terraform-state"
+        assert mock_init.call_args.args[0] is config
+        expected_init = [
             "terraform",
             "init",
             "-reconfigure",
             "-backend-config=bucket=prod-rwctxzl6shxk-terraform-state",
             "-backend-config=prefix=shifter/gcp-dev/platform-core",
+            "-backend-config=credentials=bootstrap.json",
         ]
+        assert [
+            "terraform",
+            "init",
+            "-reconfigure",
+            f"-backend-config=bucket={config.terraform_state_bucket_name}",
+            f"-backend-config=prefix=shifter/{config.environment}/platform-core",
+            "-backend-config=credentials=bootstrap.json",
+        ] == expected_init
 
-        apply_call = mock_run_cmd.call_args_list[3]
-        assert apply_call.args[0] == [
+        mock_apply.assert_called_once_with(config)
+        expected_apply = [
             "terraform",
             "apply",
             "-auto-approve",
             "-var=project_id=prod-rwctxzl6shxk",
         ]
+        assert ["terraform", "apply", "-auto-approve", f"-var=project_id={config.project_id}"] == expected_apply
         assert outputs["gke_cluster_name"]["value"] == "shifter-gcp-dev-platform"
 
 
-class TestGdcControlPlaneOverlay:
-    """Tests for project-aware staging of the GCP platform overlay."""
+class TestGdcTerraformBootstrapCredentials:
+    """Tests for the ephemeral Terraform credential path used by GCP bootstrap."""
 
-    def test_stages_overlay_with_live_project_specific_values(self, tmp_path):
-        """The staged overlay must not retain hardcoded shifter-gcp-dev project values."""
+    def test_bootstrap_credentials_set_google_env_vars_and_cleanup(self, monkeypatch):
+        """Terraform bootstrap must provision temporary credentials and clean them up afterwards."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        def fake_run_cmd(cmd, *args, **kwargs):
+            if cmd[:5] == ["gcloud", "iam", "service-accounts", "keys", "create"]:
+                Path(cmd[5]).write_text('{"private_key_id":"bootstrap-key-id"}\n')
+            return None
+
+        for key in ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_BACKEND_CREDENTIALS", "GOOGLE_CREDENTIALS"):
+            monkeypatch.delenv(key, raising=False)
+
+        with (
+            patch("deploy.gcloud_resource_exists", return_value=False),
+            patch("deploy.prune_stale_gcp_terraform_bootstrap_keys") as mock_prune,
+            patch("deploy.run_cmd", side_effect=fake_run_cmd) as mock_run_cmd,
+            deploy.gcp_terraform_bootstrap_credentials(config) as credentials_path,
+        ):
+            assert Path(credentials_path).read_text() == '{"private_key_id":"bootstrap-key-id"}\n'
+            assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(credentials_path)
+            assert "GOOGLE_BACKEND_CREDENTIALS" not in os.environ
+            assert "GOOGLE_CREDENTIALS" not in os.environ
+
+        mock_prune.assert_called_once_with(config)
+        executed = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert any(
+            cmd[:4] == ["gcloud", "iam", "service-accounts", "create"]
+            and cmd[4] == config.terraform_bootstrap_service_account_name
+            for cmd in executed
+        )
+        assert any(
+            cmd[:4] == ["gcloud", "projects", "add-iam-policy-binding", config.project_id]
+            and "roles/owner" in cmd
+            for cmd in executed
+        )
+        assert any(
+            cmd[:5] == ["gcloud", "storage", "buckets", "add-iam-policy-binding", f"gs://{config.terraform_state_bucket_name}"]
+            and "roles/storage.objectAdmin" in cmd
+            for cmd in executed
+        )
+        assert any(
+            cmd[:5] == ["gcloud", "iam", "service-accounts", "keys", "delete"]
+            and "bootstrap-key-id" in cmd
+            for cmd in executed
+        )
+        assert any(
+            cmd[:4] == ["gcloud", "projects", "remove-iam-policy-binding", config.project_id]
+            and "roles/owner" in cmd
+            for cmd in executed
+        )
+        assert any(
+            cmd[:5]
+            == ["gcloud", "storage", "buckets", "remove-iam-policy-binding", f"gs://{config.terraform_state_bucket_name}"]
+            and "roles/storage.objectAdmin" in cmd
+            for cmd in executed
+        )
+        for key in ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_BACKEND_CREDENTIALS", "GOOGLE_CREDENTIALS"):
+            assert key not in os.environ
+
+    def test_prunes_stale_user_managed_bootstrap_keys_before_creating_a_new_one(self):
+        """Interrupted reruns must not accumulate leftover bootstrap keys."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        listed_keys = subprocess.CompletedProcess(
+            ["gcloud"],
+            0,
+            stdout="stale-key-1\nstale-key-2\n",
+            stderr="",
+        )
+
+        with (
+            patch("deploy.subprocess.run", return_value=listed_keys),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.prune_stale_gcp_terraform_bootstrap_keys(config)
+
+        executed = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert executed == [
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "keys",
+                "delete",
+                "stale-key-1",
+                "--iam-account",
+                config.terraform_bootstrap_service_account_email,
+                "--project",
+                config.project_id,
+                "--quiet",
+            ],
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "keys",
+                "delete",
+                "stale-key-2",
+                "--iam-account",
+                config.terraform_bootstrap_service_account_email,
+                "--project",
+                config.project_id,
+                "--quiet",
+            ],
+        ]
+
+
+class TestGdcTerraformInitRetries:
+    """Tests for retrying Terraform init on GCS backend IAM propagation."""
+
+    def test_retries_init_on_eventual_bucket_iam_consistency(self):
+        """Documented GCS backend 403s must be retried until init succeeds."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        denied = subprocess.CompletedProcess(
+            ["terraform"],
+            1,
+            stdout="Initializing the backend...\n",
+            stderr=(
+                "Error: Failed to get existing workspaces: querying Cloud Storage failed: "
+                "googleapi: Error 403: shifter-gcp-dev-tf-bootstrap@prod-rwctxzl6shxk.iam.gserviceaccount.com "
+                "does not have storage.objects.list access to the Google Cloud Storage bucket."
+            ),
+        )
+        allowed = subprocess.CompletedProcess(["terraform"], 0, stdout="Initializing the backend...\n", stderr="")
+
+        with patch("subprocess.run", side_effect=[denied, allowed]) as mock_subprocess, patch(
+            "deploy.time.sleep"
+        ) as mock_sleep:
+            deploy.run_gcp_terraform_init_with_retry(
+                config,
+                config.terraform_state_bucket_name,
+                Path("bootstrap.json"),
+                max_attempts=2,
+                sleep_seconds=0,
+            )
+
+        commands = [call.args[0] for call in mock_subprocess.call_args_list]
+        assert commands == [
+            [
+                "terraform",
+                "init",
+                "-reconfigure",
+                f"-backend-config=bucket={config.terraform_state_bucket_name}",
+                f"-backend-config=prefix=shifter/{config.environment}/platform-core",
+                "-backend-config=credentials=bootstrap.json",
+            ],
+            [
+                "terraform",
+                "init",
+                "-reconfigure",
+                f"-backend-config=bucket={config.terraform_state_bucket_name}",
+                f"-backend-config=prefix=shifter/{config.environment}/platform-core",
+                "-backend-config=credentials=bootstrap.json",
+            ],
+        ]
+        mock_sleep.assert_called_once_with(0)
+
+    def test_retries_invalid_jwt_signature_until_key_propagates(self):
+        """Fresh service-account keys must be retried until Terraform can exchange them."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        invalid_auth = subprocess.CompletedProcess(
+            ["terraform"],
+            1,
+            stdout="Initializing the backend...\n",
+            stderr='Response: {"error":"invalid_grant","error_description":"Invalid JWT Signature."}',
+        )
+        allowed = subprocess.CompletedProcess(["terraform"], 0, stdout="Initializing the backend...\n", stderr="")
+
+        with (
+            patch("subprocess.run", side_effect=[invalid_auth, allowed]) as mock_subprocess,
+            patch("deploy.time.sleep") as mock_sleep,
+        ):
+            deploy.run_gcp_terraform_init_with_retry(
+                config,
+                config.terraform_state_bucket_name,
+                Path("bootstrap.json"),
+                max_attempts=2,
+                sleep_seconds=0,
+            )
+
+        assert mock_subprocess.call_count == 2
+        mock_sleep.assert_called_once_with(0)
+
+    def test_fails_fast_on_non_retryable_init_error(self):
+        """Non-propagation Terraform failures must abort immediately."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        invalid_backend = subprocess.CompletedProcess(
+            ["terraform"],
+            1,
+            stdout="Initializing the backend...\n",
+            stderr="Error: unsupported backend configuration",
+        )
+
+        with (
+            patch("subprocess.run", return_value=invalid_backend) as mock_subprocess,
+            patch("deploy.time.sleep") as mock_sleep,
+            pytest.raises(SystemExit),
+        ):
+            deploy.run_gcp_terraform_init_with_retry(
+                config,
+                config.terraform_state_bucket_name,
+                Path("bootstrap.json"),
+                max_attempts=3,
+                sleep_seconds=0,
+            )
+
+        assert mock_subprocess.call_count == 1
+        mock_sleep.assert_not_called()
+
+
+class TestGdcTerraformApplyRetries:
+    """Tests for retrying Terraform apply on temporary bootstrap-auth failures."""
+
+    def test_retries_apply_on_iam_permission_propagation(self):
+        """403 permission errors from freshly granted project roles must be retried."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        denied = subprocess.CompletedProcess(
+            ["terraform"],
+            1,
+            stdout="module.platform_core.google_artifact_registry_repository.docker[\"portal\"]: Creating...\n",
+            stderr=(
+                "Error: Error creating Repository: googleapi: Error 403: Permission "
+                "'artifactregistry.repositories.create' denied on resource "
+                "'//artifactregistry.googleapis.com/projects/prod-rwctxzl6shxk/locations/us-central1'."
+            ),
+        )
+        allowed = subprocess.CompletedProcess(["terraform"], 0, stdout="Apply complete!\n", stderr="")
+
+        with patch("subprocess.run", side_effect=[denied, allowed]) as mock_subprocess, patch(
+            "deploy.time.sleep"
+        ) as mock_sleep:
+            deploy.run_gcp_terraform_apply_with_retry(config, max_attempts=2, sleep_seconds=0)
+
+        commands = [call.args[0] for call in mock_subprocess.call_args_list]
+        assert commands == [
+            ["terraform", "apply", "-auto-approve", f"-var=project_id={config.project_id}"],
+            ["terraform", "apply", "-auto-approve", f"-var=project_id={config.project_id}"],
+        ]
+        mock_sleep.assert_called_once_with(0)
+
+    def test_fails_fast_on_non_retryable_apply_error(self):
+        """Non-permission Terraform apply failures must abort immediately."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        invalid_apply = subprocess.CompletedProcess(
+            ["terraform"],
+            1,
+            stdout="Planning failed.\n",
+            stderr="Error: Invalid function argument",
+        )
+
+        with (
+            patch("subprocess.run", return_value=invalid_apply) as mock_subprocess,
+            patch("deploy.time.sleep") as mock_sleep,
+            pytest.raises(SystemExit),
+        ):
+            deploy.run_gcp_terraform_apply_with_retry(config, max_attempts=3, sleep_seconds=0)
+
+        assert mock_subprocess.call_count == 1
+        mock_sleep.assert_not_called()
+
+
+class TestGdcTerraformBootstrapAccess:
+    """Tests for waiting until bootstrap credentials can really read GCP resources."""
+
+    def test_waits_until_storage_and_artifact_registry_access_are_usable(self):
+        """Bootstrap must not start apply until the temporary credentials can list required resources."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        denied = subprocess.CompletedProcess(
+            ["gcloud"],
+            1,
+            stdout="",
+            stderr=(
+                "ERROR: (gcloud.artifacts.repositories.list) googleapi: Error 403: "
+                "Permission 'artifactregistry.repositories.list' denied on resource "
+                "'//artifactregistry.googleapis.com/projects/prod-rwctxzl6shxk/locations/us-central1'."
+            ),
+        )
+        allowed = subprocess.CompletedProcess(["gcloud"], 0, stdout="ok\n", stderr="")
+        probe_attempts = {"artifact_list": 0}
+
+        def fake_probe(cmd, credentials_path):
+            if cmd[:4] == ["gcloud", "artifacts", "repositories", "list"]:
+                probe_attempts["artifact_list"] += 1
+                return denied if probe_attempts["artifact_list"] == 1 else allowed
+            return allowed
+
+        with (
+            patch("deploy._run_gcp_bootstrap_probe", side_effect=fake_probe) as mock_probe,
+            patch("deploy.time.sleep") as mock_sleep,
+        ):
+            deploy.wait_for_gcp_terraform_bootstrap_access(
+                config,
+                Path("bootstrap.json"),
+                max_attempts=2,
+                sleep_seconds=0,
+            )
+
+        assert mock_probe.call_count == 6
+        mock_sleep.assert_called_once_with(0)
+
+    def test_probe_uses_credential_file_override(self, tmp_path):
+        """The readiness probes must use the same temporary credential file Terraform uses."""
+        completed = subprocess.CompletedProcess(["gcloud"], 0, stdout="", stderr="")
+        credentials_path = tmp_path / "bootstrap.json"
+
+        with patch("deploy.subprocess.run", return_value=completed) as mock_subprocess:
+            deploy._run_gcp_bootstrap_probe(["gcloud", "storage", "buckets", "list"], credentials_path)
+
+        env = mock_subprocess.call_args.kwargs["env"]
+        assert env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"] == str(credentials_path)
+        assert env["GOOGLE_APPLICATION_CREDENTIALS"] == str(credentials_path)
+
+    def test_fails_fast_when_probe_error_is_not_retryable(self):
+        """Permanent probe failures must abort instead of looping blindly."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        invalid = subprocess.CompletedProcess(
+            ["gcloud"],
+            1,
+            stdout="",
+            stderr="ERROR: (gcloud.artifacts.repositories.list) INVALID_ARGUMENT: bad request",
+        )
+
+        with (
+            patch("deploy._run_gcp_bootstrap_probe", return_value=invalid) as mock_probe,
+            patch("deploy.time.sleep") as mock_sleep,
+            pytest.raises(SystemExit),
+        ):
+            deploy.wait_for_gcp_terraform_bootstrap_access(
+                config,
+                Path("bootstrap.json"),
+                max_attempts=2,
+                sleep_seconds=0,
+            )
+
+        assert mock_probe.call_count == 3
+        mock_sleep.assert_not_called()
+
+
+class TestGdcControlPlaneHelmValues:
+    """Tests for rendering Helm values for the GCP Shifter release."""
+
+    def test_renders_values_with_live_project_specific_inputs(self):
+        """The generated values must carry project-specific images, env contracts, and identity bindings."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
-        repo_root = Path(__file__).resolve().parents[3]
-
-        with patch("deploy.get_repo_root", return_value=repo_root):
-            overlay_dir = deploy.stage_gcp_control_plane_overlay(config, outputs, tmp_path)
-
-        runtime_env = (overlay_dir / "platform-runtime.env").read_text()
-        assert "GCP_PROJECT_ID=prod-rwctxzl6shxk\n" in runtime_env
-        assert "GOOGLE_CLOUD_PROJECT=prod-rwctxzl6shxk\n" in runtime_env
-        assert (
-            "GDC_VM_IMAGE_GCS_SECRET_ID=projects/prod-rwctxzl6shxk/secrets/shifter-gcp-dev-gdc-vm-image-gcs\n"
-            in runtime_env
+        values = deploy.render_gcp_helm_values(
+            config,
+            outputs,
+            guacamole_db_payload={"username": "guac", "password": "supersecret"},
+            guacamole_json_secret="json-auth-key",
         )
 
-        service_accounts = (overlay_dir / "patch-serviceaccounts.yaml").read_text()
-        assert "shiftergcpdev-portal@prod-rwctxzl6shxk.iam.gserviceaccount.com" in service_accounts
-        assert "shiftergcpdev-workers@prod-rwctxzl6shxk.iam.gserviceaccount.com" in service_accounts
-        assert "shiftergcpdev-provisioner@prod-rwctxzl6shxk.iam.gserviceaccount.com" in service_accounts
-
-        kustomization = (overlay_dir / "kustomization.yaml").read_text()
-        assert "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-portal/portal" in kustomization
-        assert "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-guacd/guacd" in kustomization
+        assert values["releaseNamespace"] == "shifter-system"
+        assert values["runtimeEnv"]["GCP_PROJECT_ID"] == "prod-rwctxzl6shxk"
+        assert values["runtimeEnv"]["GOOGLE_CLOUD_PROJECT"] == "prod-rwctxzl6shxk"
         assert (
+            values["runtimeEnv"]["GDC_VM_IMAGE_GCS_SECRET_ID"]
+            == "projects/prod-rwctxzl6shxk/secrets/shifter-gcp-dev-gdc-vm-image-gcs"
+        )
+        assert (
+            values["serviceAccounts"]["portal"]["annotations"]["iam.gke.io/gcp-service-account"]
+            == "shiftergcpdev-portal@prod-rwctxzl6shxk.iam.gserviceaccount.com"
+        )
+        assert (
+            values["serviceAccounts"]["workers"]["annotations"]["iam.gke.io/gcp-service-account"]
+            == "shiftergcpdev-workers@prod-rwctxzl6shxk.iam.gserviceaccount.com"
+        )
+        assert (
+            values["serviceAccounts"]["provisioner"]["annotations"]["iam.gke.io/gcp-service-account"]
+            == "shiftergcpdev-provisioner@prod-rwctxzl6shxk.iam.gserviceaccount.com"
+        )
+        assert values["images"]["portal"]["repository"] == (
+            "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-portal/portal"
+        )
+        assert values["images"]["guacd"]["repository"] == (
+            "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-guacd/guacd"
+        )
+        assert values["images"]["guacamoleClient"]["repository"] == (
             "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/"
-            "shifter-gcp-dev-guacamole-client/guacamole-client" in kustomization
+            "shifter-gcp-dev-guacamole-client/guacamole-client"
         )
+        assert values["guacamoleRuntimeSecret"]["stringData"] == {
+            "POSTGRESQL_USER": "guac",
+            "POSTGRESQL_PASSWORD": "supersecret",
+            "JSON_SECRET_KEY": "json-auth-key",
+        }
+
+
+class TestGdcControlPlaneHelmChart:
+    """Tests for the Helm chart that packages the GCP Shifter deployment."""
+
+    def test_chart_renders_restricted_security_contexts_and_numeric_runtime_ids(self, tmp_path):
+        """The chart must render restricted-compatible workloads with pinned runtime IDs."""
+        helm = shutil.which("helm")
+        if helm is None:
+            pytest.skip("helm is required for chart render validation")
+
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        values_path = tmp_path / "values.json"
+        values_path.write_text(
+            json.dumps(
+                deploy.render_gcp_helm_values(
+                    config,
+                    outputs,
+                    guacamole_db_payload={"username": "guac", "password": "supersecret"},
+                    guacamole_json_secret="json-auth-key",
+                )
+            )
+        )
+        chart_dir = Path(__file__).resolve().parents[3] / "platform" / "charts" / "shifter"
+
+        rendered = subprocess.Popen(  # nosec B603 B607
+            [
+                helm,
+                "template",
+                "shifter",
+                str(chart_dir),
+                "--namespace",
+                "shifter-system",
+                "--values",
+                str(values_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = rendered.communicate()
+
+        assert rendered.returncode == 0, stderr
+        output = stdout
+        assert "kind: Deployment" in output
+        assert "name: portal-web" in output
+        assert "name: worker-cms" in output
+        assert "name: guacd" in output
+        assert "name: guacamole-client" in output
+        assert "type: RuntimeDefault" in output
+        assert "allowPrivilegeEscalation: false" in output
+        assert "runAsNonRoot: true" in output
+        assert "runAsUser: 1000" in output
+        assert "runAsGroup: 1000" in output
+        assert "runAsUser: 1001" in output
+        assert "runAsGroup: 1001" in output
+        assert "kind: Namespace" not in output
+        assert "kind: BackendConfig" in output
+        assert "requestPath: \"/health/\"" in output
+        assert 'cloud.google.com/backend-config: "{\\"default\\":\\"portal-web\\"}"' in output
 
 
 class TestGdcControlPlaneRollout:
-    """Tests for rolling out the GCP control plane onto GKE."""
+    """Tests for deploying Shifter onto GKE through Helm."""
 
-    def test_rollout_sequence_fetches_credentials_syncs_secret_and_waits_for_deployments(self, tmp_path):
-        """The rollout path must apply manifests, sync Guacamole runtime secrets, and wait for every deployment."""
+    def test_rollout_sequence_fetches_credentials_and_runs_atomic_helm_release(self, tmp_path):
+        """The rollout path must fetch cluster credentials and perform one atomic Helm release."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
-        overlay_dir = tmp_path / "overlay"
-        overlay_dir.mkdir()
-        (overlay_dir / "platform-edge.generated.yaml").write_text("apiVersion: networking.k8s.io/v1\nkind: Ingress\n")
+        values_path = tmp_path / "values.json"
+        values_path.write_text("{}")
+        chart_dir = Path(__file__).resolve().parents[3] / "platform" / "charts" / "shifter"
+        environment_values_path = chart_dir / "values-gcp-dev.yaml"
 
         with (
             patch("deploy.run_cmd") as mock_run_cmd,
-            patch(
-                "deploy.fetch_gcp_secret_payload",
-                side_effect=[
-                    json.dumps({"username": "guac", "password": "supersecret"}),
-                    "json-auth-key",
-                ],
-            ),
+            patch("deploy.ensure_gke_gcloud_auth_plugin") as mock_ensure_plugin,
+            patch("deploy.prepare_gcp_helm_cutover") as mock_prepare_cutover,
+            patch("deploy.ensure_gcp_control_plane_namespaces") as mock_ensure_namespaces,
+            patch("deploy.get_repo_root", return_value=Path(__file__).resolve().parents[3]),
         ):
-            deploy.roll_out_gcp_control_plane(config, outputs, overlay_dir)
+            deploy.deploy_gcp_control_plane_with_helm(config, outputs, values_path)
 
+        mock_ensure_plugin.assert_called_once_with(dry_run=False)
+        mock_prepare_cutover.assert_called_once_with(dry_run=False)
+        mock_ensure_namespaces.assert_called_once_with(dry_run=False)
         commands = [call.args[0] for call in mock_run_cmd.call_args_list]
         assert commands[0] == [
             "gcloud",
@@ -1091,22 +1531,389 @@ class TestGdcControlPlaneRollout:
             "--project",
             "prod-rwctxzl6shxk",
         ]
-        assert ["kubectl", "apply", "-k", str(overlay_dir)] in commands
-        assert ["kubectl", "apply", "-f", str(overlay_dir / "guacamole-runtime.generated.yaml")] in commands
-        assert ["kubectl", "apply", "-f", str(overlay_dir / "platform-edge.generated.yaml")] in commands
+        assert commands[1] == [
+            "helm",
+            "upgrade",
+            "--install",
+            "shifter",
+            str(chart_dir),
+            "--namespace",
+            "shifter-system",
+            "--create-namespace",
+            "--values",
+            str(environment_values_path),
+            "--values",
+            str(values_path),
+            "--atomic",
+            "--wait",
+            "--timeout",
+            "15m",
+            "--history-max",
+            "10",
+        ]
 
-        rollout_status_calls = [cmd for cmd in commands if cmd[:3] == ["kubectl", "rollout", "status"]]
-        assert len(rollout_status_calls) == 7
-        for deployment in (
-            "portal-web",
-            "guacd",
-            "guacamole-client",
-            "worker-cms",
-            "worker-engine",
-            "worker-mc",
-            "ctf-scheduler",
+
+class TestGdcControlPlaneNamespaces:
+    """Tests for namespace lifecycle outside the Helm release."""
+
+    def test_creates_required_namespaces_with_restricted_labels(self):
+        """Bootstrap must create Helm target namespaces before the release installs."""
+        missing_platform = subprocess.CompletedProcess(
+            ["kubectl"],
+            1,
+            stdout="",
+            stderr='Error from server (NotFound): namespaces "shifter-platform" not found',
+        )
+        active_platform = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout=json.dumps({"status": {"phase": "Active"}}),
+            stderr="",
+        )
+        missing_jobs = subprocess.CompletedProcess(
+            ["kubectl"],
+            1,
+            stdout="",
+            stderr='Error from server (NotFound): namespaces "shifter-jobs" not found',
+        )
+        active_jobs = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout=json.dumps({"status": {"phase": "Active"}}),
+            stderr="",
+        )
+
+        with patch(
+            "deploy.subprocess.run",
+            side_effect=[
+                missing_platform,
+                subprocess.CompletedProcess(["kubectl"], 0, stdout="namespace/shifter-platform created\n", stderr=""),
+                active_platform,
+                missing_jobs,
+                subprocess.CompletedProcess(["kubectl"], 0, stdout="namespace/shifter-jobs created\n", stderr=""),
+                active_jobs,
+            ],
+        ) as mock_subprocess:
+            deploy.ensure_gcp_control_plane_namespaces()
+
+        apply_calls = [
+            call
+            for call in mock_subprocess.call_args_list
+            if call.args[0][:3] == ["kubectl", "apply", "-f"]
+        ]
+        assert len(apply_calls) == 2
+        platform_manifest = json.loads(apply_calls[0].kwargs["input"])
+        jobs_manifest = json.loads(apply_calls[1].kwargs["input"])
+        assert platform_manifest["metadata"]["name"] == "shifter-platform"
+        assert platform_manifest["metadata"]["labels"]["app.kubernetes.io/part-of"] == "shifter"
+        assert platform_manifest["metadata"]["labels"]["pod-security.kubernetes.io/enforce"] == "restricted"
+        assert jobs_manifest["metadata"]["name"] == "shifter-jobs"
+        assert jobs_manifest["metadata"]["labels"]["shifter.dev/plane"] == "jobs"
+
+    def test_waits_for_terminating_namespace_then_recreates_it(self):
+        """A terminating namespace from a failed install must be allowed to clear first."""
+        terminating_platform = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout=json.dumps(
+                {
+                    "metadata": {"deletionTimestamp": "2026-04-10T00:00:00Z"},
+                    "status": {"phase": "Terminating"},
+                }
+            ),
+            stderr="",
+        )
+        missing_platform = subprocess.CompletedProcess(
+            ["kubectl"],
+            1,
+            stdout="",
+            stderr='Error from server (NotFound): namespaces "shifter-platform" not found',
+        )
+        active_platform = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout=json.dumps({"status": {"phase": "Active"}}),
+            stderr="",
+        )
+        active_jobs = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout=json.dumps({"status": {"phase": "Active"}}),
+            stderr="",
+        )
+
+        with (
+            patch(
+                "deploy.subprocess.run",
+                side_effect=[
+                    terminating_platform,
+                    missing_platform,
+                    subprocess.CompletedProcess(
+                        ["kubectl"],
+                        0,
+                        stdout="namespace/shifter-platform created\n",
+                        stderr="",
+                    ),
+                    active_platform,
+                    active_jobs,
+                    subprocess.CompletedProcess(
+                        ["kubectl"],
+                        0,
+                        stdout="namespace/shifter-jobs configured\n",
+                        stderr="",
+                    ),
+                    active_jobs,
+                ],
+            ) as mock_subprocess,
+            patch("deploy.time.sleep") as mock_sleep,
         ):
-            assert any(f"deployment/{deployment}" in arg for cmd in rollout_status_calls for arg in cmd)
+            deploy.ensure_gcp_control_plane_namespaces()
+
+        mock_sleep.assert_not_called()
+        apply_calls = [
+            call
+            for call in mock_subprocess.call_args_list
+            if call.args[0][:3] == ["kubectl", "apply", "-f"]
+        ]
+        assert len(apply_calls) == 2
+
+
+class TestGdcHelmCutover:
+    """Tests for the breaking cutover from legacy raw manifests to Helm."""
+
+    def test_first_install_deletes_legacy_resources_before_helm_takes_over(self):
+        """A non-Helm legacy deployment must be removed before the first Helm install."""
+        with (
+            patch("deploy.helm_release_exists", return_value=False),
+            patch(
+                "deploy.list_gcp_helm_cutover_resources",
+                side_effect=lambda namespace: {
+                    "shifter-system": [],
+                    "shifter-platform": [
+                        "configmap/platform-runtime",
+                        "deployment.apps/portal-web",
+                        "secret/guacamole-runtime",
+                        "serviceaccount/portal",
+                    ],
+                    "shifter-jobs": ["serviceaccount/provisioner"],
+                }[namespace],
+            ),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.prepare_gcp_helm_cutover()
+
+        commands = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert commands == [
+            [
+                "kubectl",
+                "-n",
+                "shifter-platform",
+                "delete",
+                "configmap/platform-runtime",
+                "deployment.apps/portal-web",
+                "secret/guacamole-runtime",
+                "serviceaccount/portal",
+                "--ignore-not-found=true",
+                "--wait=true",
+                "--timeout=10m",
+            ],
+            [
+                "kubectl",
+                "-n",
+                "shifter-jobs",
+                "delete",
+                "serviceaccount/provisioner",
+                "--ignore-not-found=true",
+                "--wait=true",
+                "--timeout=10m",
+            ],
+        ]
+
+    def test_existing_helm_release_skips_namespace_cleanup(self):
+        """Reruns must not delete namespaces once Helm already owns the environment."""
+        with (
+            patch("deploy.helm_release_exists", return_value=True),
+            patch("deploy.list_gcp_helm_cutover_resources") as mock_list,
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.prepare_gcp_helm_cutover()
+
+        mock_list.assert_not_called()
+        mock_run_cmd.assert_not_called()
+
+    def test_missing_namespace_is_treated_as_no_legacy_resources(self):
+        """Cutover inspection must tolerate namespaces that do not exist yet."""
+        not_found = subprocess.CompletedProcess(
+            ["kubectl"],
+            1,
+            stdout="",
+            stderr='Error from server (NotFound): namespaces "shifter-jobs" not found',
+        )
+
+        with patch("deploy.subprocess.run", return_value=not_found):
+            assert deploy.list_gcp_helm_cutover_resources("shifter-jobs") == []
+
+    def test_explicit_runtime_objects_are_included_even_without_labels(self):
+        """Legacy runtime config objects from the raw path must still be purged."""
+        labeled = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout="serviceaccount/portal\n",
+            stderr="",
+        )
+        explicit = subprocess.CompletedProcess(
+            ["kubectl"],
+            0,
+            stdout="configmap/platform-runtime\nsecret/guacamole-runtime\n",
+            stderr="",
+        )
+
+        with patch("deploy.subprocess.run", side_effect=[labeled, explicit]):
+            assert deploy.list_gcp_helm_cutover_resources("shifter-platform") == [
+                "configmap/platform-runtime",
+                "secret/guacamole-runtime",
+                "serviceaccount/portal",
+            ]
+
+
+class TestGkeGcloudAuthPlugin:
+    """Tests for ensuring the local GKE kubectl auth plugin."""
+
+    def test_skips_install_when_plugin_already_present(self):
+        """No package-manager calls should run when the plugin is already on PATH."""
+        with (
+            patch("deploy.shutil.which", return_value="/usr/bin/gke-gcloud-auth-plugin"),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.ensure_gke_gcloud_auth_plugin()
+
+        mock_run_cmd.assert_not_called()
+
+    def test_installs_plugin_with_apt_when_running_as_root(self):
+        """On apt-based systems, bootstrap should install the plugin automatically."""
+        def fake_which(cmd: str) -> str | None:
+            if cmd == "gke-gcloud-auth-plugin":
+                return None if fake_which.calls == 0 else "/usr/bin/gke-gcloud-auth-plugin"
+            if cmd == "apt-get":
+                return "/usr/bin/apt-get"
+            return None
+
+        fake_which.calls = 0
+
+        def which_side_effect(cmd: str) -> str | None:
+            result = fake_which(cmd)
+            if cmd == "gke-gcloud-auth-plugin":
+                fake_which.calls += 1
+            return result
+
+        with (
+            patch("deploy.shutil.which", side_effect=which_side_effect),
+            patch("deploy.os.geteuid", return_value=0),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.ensure_gke_gcloud_auth_plugin()
+
+        commands = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert commands == [
+            ["apt-get", "update"],
+            ["apt-get", "install", "-y", "google-cloud-cli-gke-gcloud-auth-plugin"],
+        ]
+
+    def test_uses_sudo_when_not_running_as_root(self):
+        """Non-root bootstrap runs should elevate for the plugin install."""
+        def fake_which(cmd: str) -> str | None:
+            if cmd == "gke-gcloud-auth-plugin":
+                return None if fake_which.calls == 0 else "/usr/bin/gke-gcloud-auth-plugin"
+            if cmd == "apt-get":
+                return "/usr/bin/apt-get"
+            if cmd == "sudo":
+                return "/usr/bin/sudo"
+            return None
+
+        fake_which.calls = 0
+
+        def which_side_effect(cmd: str) -> str | None:
+            result = fake_which(cmd)
+            if cmd == "gke-gcloud-auth-plugin":
+                fake_which.calls += 1
+            return result
+
+        with (
+            patch("deploy.shutil.which", side_effect=which_side_effect),
+            patch("deploy.os.geteuid", return_value=1000),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.ensure_gke_gcloud_auth_plugin()
+
+        commands = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert commands == [
+            ["sudo", "apt-get", "update"],
+            ["sudo", "apt-get", "install", "-y", "google-cloud-cli-gke-gcloud-auth-plugin"],
+        ]
+
+    def test_uses_user_space_install_when_not_root_and_sudo_unavailable(self):
+        """Bootstrap should fall back to a user-space plugin install when sudo is unavailable."""
+        with (
+            patch(
+                "deploy.shutil.which",
+                side_effect=lambda cmd: (
+                    None
+                    if cmd in {"gke-gcloud-auth-plugin", "sudo"}
+                    else "/usr/bin/apt-get"
+                    if cmd == "apt-get"
+                    else None
+                ),
+            ),
+            patch("deploy.os.geteuid", return_value=1000),
+            patch("deploy.install_gke_gcloud_auth_plugin_user_space") as mock_user_space_install,
+        ):
+            deploy.ensure_gke_gcloud_auth_plugin(dry_run=True)
+
+        mock_user_space_install.assert_called_once_with(dry_run=True)
+
+    def test_fails_when_plugin_missing_and_host_is_not_apt_based(self):
+        """Bootstrap must fail clearly when it cannot satisfy the plugin prerequisite."""
+        with (
+            patch("deploy.shutil.which", return_value=None),
+            patch("deploy.error") as mock_error,
+            pytest.raises(SystemExit),
+        ):
+            deploy.ensure_gke_gcloud_auth_plugin()
+
+        mock_error.assert_called_once()
+        assert "Automatic installation requires apt-based package tooling" in mock_error.call_args.args[0]
+
+
+class TestGkeGcloudAuthPluginUserSpaceInstall:
+    """Tests for the user-space GKE auth plugin install path."""
+
+    def test_extracts_package_and_copies_binary_into_local_bin(self, tmp_path):
+        """The user-space installer must stage the binary into ~/.local/bin."""
+        def fake_subprocess(cmd, cwd=None, **kwargs):
+            if cmd[:2] == ["apt", "download"]:
+                package = Path(cwd) / "google-cloud-cli-gke-gcloud-auth-plugin_564.0.0-0_amd64.deb"
+                package.write_text("fake-deb")
+            elif cmd[:2] == ["dpkg-deb", "-x"]:
+                extract_root = Path(cmd[3])
+                binary = extract_root / "usr" / "lib" / "google-cloud-sdk" / "bin" / "gke-gcloud-auth-plugin"
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_text("plugin")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch(
+                "deploy.shutil.which",
+                side_effect=lambda cmd: "/usr/bin/" + cmd if cmd in {"apt", "dpkg-deb"} else None,
+            ),
+            patch("deploy.tempfile.TemporaryDirectory", return_value=nullcontext(str(tmp_path))),
+            patch("deploy.Path.home", return_value=tmp_path),
+            patch("deploy.subprocess.run", side_effect=fake_subprocess),
+        ):
+            deploy.install_gke_gcloud_auth_plugin_user_space()
+
+        destination = tmp_path / ".local" / "bin" / "gke-gcloud-auth-plugin"
+        assert destination.exists()
+        assert destination.read_text() == "plugin"
 
 
 class TestGdcBootstrapPrerequisites:
@@ -1135,6 +1942,46 @@ class TestGdcBootstrapPrerequisites:
 
         granted_roles = [call.args[0][7] for call in mock_run_cmd.call_args_list]
         assert "roles/compute.viewer" in granted_roles
+
+
+class TestGcpPlatformCoreContracts:
+    """Tests for the Terraform platform-core contract that bootstrap depends on."""
+
+    def test_workload_identity_bindings_exist_for_platform_service_accounts(self):
+        """Portal, workers, and provisioner KSAs must be able to impersonate their GSAs."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        assert 'resource "google_service_account_iam_member" "workload_identity"' in module_main
+        assert 'role               = "roles/iam.workloadIdentityUser"' in module_main
+        assert '"serviceAccount:${var.project_id}.svc.id.goog[shifter-platform/portal]"' in module_main
+        assert '"serviceAccount:${var.project_id}.svc.id.goog[shifter-platform/workers]"' in module_main
+        assert '"serviceAccount:${var.project_id}.svc.id.goog[shifter-jobs/provisioner]"' in module_main
+
+    def test_workers_have_pubsub_publish_and_subscribe_permissions(self):
+        """The shared workers service account must publish as well as consume Pub/Sub events."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        workers_section = module_main.split("workers = toset([", 1)[1].split("])", 1)[0]
+        assert '"roles/pubsub.publisher"' in workers_section
+        assert '"roles/pubsub.subscriber"' in workers_section
 
 
 class TestGdcBootstrapAssetUpload:

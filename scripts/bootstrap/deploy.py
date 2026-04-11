@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -210,9 +211,11 @@ GDC_API_SERVICES = [
     "secretmanager.googleapis.com",
     "serviceusage.googleapis.com",
     "stackdriver.googleapis.com",
+    "storage.googleapis.com",
 ]
 
 GDC_SERVICE_ACCOUNT_ROLES = [
+    "roles/compute.viewer",
     "roles/gkehub.connect",
     "roles/gkehub.admin",
     "roles/logging.logWriter",
@@ -458,6 +461,10 @@ class GDCBootstrapConfig:
         return f"{self.staging_dir}/{self.cluster_id}"
 
     @property
+    def bmctl_gcs_source(self) -> str:
+        return f"gs://anthos-baremetal-release/bmctl/{self.bmctl_version}/linux-amd64/bmctl"
+
+    @property
     def instance_tag(self) -> str:
         return f"{self.cluster_id}-gdc"
 
@@ -674,16 +681,11 @@ def render_gdc_prepare_workstation_script(config: GDCBootstrapConfig) -> str:
           chmod +x /usr/local/sbin/kubectl
         fi
 
-        if ! command -v bmctl >/dev/null 2>&1; then
-          curl -fsSLo /usr/local/sbin/bmctl \
-            "https://storage.googleapis.com/anthos-baremetal-release/bmctl/{config.bmctl_version}/linux-amd64/bmctl"
-          chmod +x /usr/local/sbin/bmctl
-        fi
-
         install -d -m 700 /root/.ssh {config.staging_dir} {config.cluster_workspace_dir}
         install -m 600 {config.staging_bundle_dir}/id_rsa /root/.ssh/id_rsa
         install -m 644 {config.staging_bundle_dir}/id_rsa.pub /root/.ssh/id_rsa.pub
         install -m 600 {config.staging_bundle_dir}/bm-gcr.json /root/bm-gcr.json
+        install -m 755 {config.staging_bundle_dir}/bmctl /usr/local/sbin/bmctl
         printf 'Host *\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n' >/root/.ssh/config
         chmod 600 /root/.ssh/config
         """
@@ -693,77 +695,60 @@ def render_gdc_prepare_workstation_script(config: GDCBootstrapConfig) -> str:
 def render_gdc_prepare_hosts_script(config: GDCBootstrapConfig) -> str:
     """Render the host prep script that creates vxlan0 and hardening on all nodes."""
     peer_ips = " ".join(host.primary_ip for host in config.all_hosts)
-    local_vxlan_setup = dedent(
-        f"""\
-        default_iface="$(ip route show default | awk '/default/ {{print $5; exit}}')"
-        if ! ip link show vxlan0 >/dev/null 2>&1; then
-          ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472
-        fi
-        for peer_ip in {peer_ips}; do
-          bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true
-        done
-        ip addr replace {config.workstation.vxlan_ip}/24 dev vxlan0
-        ip link set up dev vxlan0
-        """
-    )
-    remote_hosts = "\n".join(
-        f'configure_remote_host "{host.primary_ip}" "{host.vxlan_ip}"' for host in config.cluster_node_hosts
-    )
-    return dedent(
-        f"""\
-        #!/usr/bin/env bash
-        set -euo pipefail
-
-        configure_node() {{
-          local vxlan_ip="$1"
-          local default_iface
-          default_iface="$(ip route show default | awk '/default/ {{print $5; exit}}')"
-          if ! ip link show vxlan0 >/dev/null 2>&1; then
-            ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472
-          fi
-          for peer_ip in {peer_ips}; do
-            bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true
-          done
-          ip addr replace "${{vxlan_ip}}/24" dev vxlan0
-          ip link set up dev vxlan0
-
-          install -d -m 755 /mnt/localpv-disk /mnt/localpv-share
-          cat >/etc/sysctl.d/99-gdc-vmruntime-inotify.conf <<'EOF'
-        fs.inotify.max_user_instances = 1024
-        fs.inotify.max_user_watches = 1048576
-        EOF
-          sysctl --load /etc/sysctl.d/99-gdc-vmruntime-inotify.conf
-        }}
-
-        configure_remote_host() {{
-          local host_ip="$1"
-          local vxlan_ip="$2"
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "root@${{host_ip}}" "bash -s" -- "${{vxlan_ip}}" <<'EOF'
-        set -euo pipefail
-        vxlan_ip="$1"
-        default_iface="$(ip route show default | awk '/default/ {{print $5; exit}}')"
-        if ! ip link show vxlan0 >/dev/null 2>&1; then
-          ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472
-        fi
-        for peer_ip in {peer_ips}; do
-          bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true
-        done
-        ip addr replace "${{vxlan_ip}}/24" dev vxlan0
-        ip link set up dev vxlan0
-        install -d -m 755 /mnt/localpv-disk /mnt/localpv-share
-        cat >/etc/sysctl.d/99-gdc-vmruntime-inotify.conf <<'EON'
-        fs.inotify.max_user_instances = 1024
-        fs.inotify.max_user_watches = 1048576
-        EON
-        sysctl --load /etc/sysctl.d/99-gdc-vmruntime-inotify.conf
-        EOF
-        }}
-
-        {local_vxlan_setup}
-        {remote_hosts}
-        """
-    )
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        "configure_node() {",
+        '  local vxlan_ip="$1"',
+        "  local default_iface",
+        "  default_iface=\"$(ip route show default | awk '/default/ {print $5; exit}')\"",
+        "  if ! ip link show vxlan0 >/dev/null 2>&1; then",
+        '    ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472',
+        "  fi",
+        f"  for peer_ip in {peer_ips}; do",
+        '    bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true',
+        "  done",
+        '  ip addr replace "${vxlan_ip}/24" dev vxlan0',
+        "  ip link set up dev vxlan0",
+        "",
+        "  install -d -m 755 /mnt/localpv-disk /mnt/localpv-share",
+        "  cat >/etc/sysctl.d/99-gdc-vmruntime-inotify.conf <<'EOF'",
+        "fs.inotify.max_user_instances = 1024",
+        "fs.inotify.max_user_watches = 1048576",
+        "EOF",
+        "  sysctl --load /etc/sysctl.d/99-gdc-vmruntime-inotify.conf",
+        "}",
+        "",
+        "configure_remote_host() {",
+        '  local host_ip="$1"',
+        '  local vxlan_ip="$2"',
+        "  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\",
+        '    "root@${host_ip}" "bash -s" -- "${vxlan_ip}" <<\'EOF\'',
+        "set -euo pipefail",
+        'vxlan_ip="$1"',
+        "default_iface=\"$(ip route show default | awk '/default/ {print $5; exit}')\"",
+        "if ! ip link show vxlan0 >/dev/null 2>&1; then",
+        '  ip link add vxlan0 type vxlan id 42 dev "$default_iface" dstport 8472',
+        "fi",
+        f"for peer_ip in {peer_ips}; do",
+        '  bridge fdb append to 00:00:00:00:00:00 dst "$peer_ip" dev vxlan0 2>/dev/null || true',
+        "done",
+        'ip addr replace "${vxlan_ip}/24" dev vxlan0',
+        "ip link set up dev vxlan0",
+        "install -d -m 755 /mnt/localpv-disk /mnt/localpv-share",
+        "cat >/etc/sysctl.d/99-gdc-vmruntime-inotify.conf <<'EON'",
+        "fs.inotify.max_user_instances = 1024",
+        "fs.inotify.max_user_watches = 1048576",
+        "EON",
+        "sysctl --load /etc/sysctl.d/99-gdc-vmruntime-inotify.conf",
+        "EOF",
+        "}",
+        "",
+        f'configure_node "{config.workstation.vxlan_ip}"',
+    ]
+    lines.extend(f'configure_remote_host "{host.primary_ip}" "{host.vxlan_ip}"' for host in config.cluster_node_hosts)
+    return "\n".join(lines) + "\n"
 
 
 def render_gdc_create_cluster_script(config: GDCBootstrapConfig) -> str:
@@ -831,6 +816,97 @@ def build_gdc_access_secret_payload(config: GDCBootstrapConfig, kubeconfig: str)
     return json.dumps(payload, indent=2)
 
 
+def _gdc_ssh_read_file(config: GDCBootstrapConfig, remote_path: str) -> str | None:
+    """Read a workstation file over gcloud ssh, returning None when absent."""
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "gcloud",
+            "compute",
+            "ssh",
+            f"root@{config.workstation.name}",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            "--command",
+            f"sudo cat {remote_path}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _service_account_key_is_active(config: GDCBootstrapConfig, key_payload: str) -> bool:
+    """Return True when the service-account key embedded in the payload still exists."""
+    try:
+        private_key_id = json.loads(key_payload)["private_key_id"]
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise RuntimeError("Existing workstation service-account key payload is invalid") from exc
+
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "gcloud",
+            "iam",
+            "service-accounts",
+            "keys",
+            "list",
+            "--iam-account",
+            config.service_account_email,
+            "--project",
+            config.project_id,
+            "--format=value(name)",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(f"Failed to list service-account keys for {config.service_account_email}: {stderr}")
+
+    active_key_ids = {line.rstrip("/").split("/")[-1] for line in result.stdout.splitlines() if line.strip()}
+    return private_key_id in active_key_ids
+
+
+def _fetch_existing_gdc_bootstrap_material(config: GDCBootstrapConfig) -> dict[str, str] | None:
+    """Reuse the workstation bootstrap credentials when they already exist and remain valid."""
+    if not gcloud_resource_exists(
+        [
+            "gcloud",
+            "compute",
+            "instances",
+            "describe",
+            config.workstation.name,
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+        ]
+    ):
+        return None
+
+    material = {
+        "private_key": _gdc_ssh_read_file(config, "/root/.ssh/id_rsa"),
+        "public_key": _gdc_ssh_read_file(config, "/root/.ssh/id_rsa.pub"),
+        "service_account_key": _gdc_ssh_read_file(config, "/root/bm-gcr.json"),
+    }
+    if any(value is None or not value.strip() for value in material.values()):
+        return None
+
+    if not _service_account_key_is_active(config, material["service_account_key"]):
+        warn(
+            "Workstation bootstrap service-account key is no longer active; a fresh key will be created for this rerun"
+        )
+        return None
+
+    info(f"Reusing existing bootstrap credentials from {config.workstation.name}")
+    return material
+
+
 def stage_gdc_bootstrap_assets(config: GDCBootstrapConfig, staging_dir: Path, dry_run: bool = False) -> dict[str, Path]:
     """Create the local assets that will be uploaded to the admin workstation."""
     assets_dir = staging_dir / config.cluster_id
@@ -839,6 +915,7 @@ def stage_gdc_bootstrap_assets(config: GDCBootstrapConfig, staging_dir: Path, dr
     private_key_path = assets_dir / "id_rsa"
     public_key_path = assets_dir / "id_rsa.pub"
     service_account_key_path = assets_dir / "bm-gcr.json"
+    bmctl_binary_path = assets_dir / "bmctl"
     ssh_metadata_path = assets_dir / "ssh-metadata"
     cluster_config_path = assets_dir / "cluster.yaml"
     workstation_script = assets_dir / "prepare-workstation.sh"
@@ -849,21 +926,31 @@ def stage_gdc_bootstrap_assets(config: GDCBootstrapConfig, staging_dir: Path, dr
     if dry_run:
         info(f"[DRY-RUN] Would generate bootstrap assets in {assets_dir}")
     else:
-        run_cmd(["ssh-keygen", "-t", "rsa", "-N", "", "-f", str(private_key_path)])
-        run_cmd(
-            [
-                "gcloud",
-                "iam",
-                "service-accounts",
-                "keys",
-                "create",
-                str(service_account_key_path),
-                "--iam-account",
-                config.service_account_email,
-                "--project",
-                config.project_id,
-            ]
-        )
+        existing_material = _fetch_existing_gdc_bootstrap_material(config)
+        if existing_material:
+            private_key_path.write_text(existing_material["private_key"])
+            public_key_path.write_text(existing_material["public_key"])
+            service_account_key_path.write_text(existing_material["service_account_key"])
+        else:
+            run_cmd(["ssh-keygen", "-t", "rsa", "-N", "", "-f", str(private_key_path)])
+            run_cmd(
+                [
+                    "gcloud",
+                    "iam",
+                    "service-accounts",
+                    "keys",
+                    "create",
+                    str(service_account_key_path),
+                    "--iam-account",
+                    config.service_account_email,
+                    "--project",
+                    config.project_id,
+                ]
+            )
+        run_cmd(["gcloud", "storage", "cp", config.bmctl_gcs_source, str(bmctl_binary_path)])
+        private_key_path.chmod(0o600)
+        public_key_path.chmod(0o644)
+        service_account_key_path.chmod(0o600)
         ssh_metadata_path.write_text(f"root:{public_key_path.read_text().strip()}\n")
         cluster_config_path.write_text(render_gdc_cluster_config(config))
         workstation_script.write_text(render_gdc_prepare_workstation_script(config))
@@ -878,6 +965,7 @@ def stage_gdc_bootstrap_assets(config: GDCBootstrapConfig, staging_dir: Path, dr
         "private_key": private_key_path,
         "public_key": public_key_path,
         "service_account_key": service_account_key_path,
+        "bmctl_binary": bmctl_binary_path,
         "ssh_metadata": ssh_metadata_path,
         "cluster_config": cluster_config_path,
         "workstation_script": workstation_script,
@@ -1161,9 +1249,39 @@ def ensure_gdc_instances(config: GDCBootstrapConfig, ssh_metadata_path: Path, dr
             run_cmd(gdc_instance_create_command(config, host, ssh_metadata_path), dry_run=dry_run)
 
 
+def get_gdc_instance_ssh_metadata(config: GDCBootstrapConfig, host_name: str) -> str:
+    """Return the current ssh-keys metadata value for the given host."""
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "gcloud",
+            "compute",
+            "instances",
+            "describe",
+            host_name,
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            "--format=get(metadata.items[ssh-keys])",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(f"Failed to read ssh metadata for {host_name}: {stderr}")
+    return result.stdout
+
+
 def sync_gdc_instance_ssh_metadata(config: GDCBootstrapConfig, ssh_metadata_path: Path, dry_run: bool = False) -> None:
     """Ensure all instances trust the current bootstrap key pair."""
+    expected_metadata = ssh_metadata_path.read_text().strip()
     for host in config.all_hosts:
+        if not dry_run:
+            current_metadata = get_gdc_instance_ssh_metadata(config, host.name).strip()
+            if current_metadata == expected_metadata:
+                continue
         run_cmd(
             [
                 "gcloud",
@@ -1217,6 +1335,21 @@ def wait_for_gdc_ssh(config: GDCBootstrapConfig, host: GDCHost, dry_run: bool = 
 
 def upload_gdc_assets(config: GDCBootstrapConfig, assets_dir: Path, dry_run: bool = False) -> None:
     """Upload the rendered bootstrap bundle to the admin workstation."""
+    run_cmd(
+        [
+            "gcloud",
+            "compute",
+            "ssh",
+            f"root@{config.workstation.name}",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            "--command",
+            f"rm -rf {config.staging_bundle_dir} && mkdir -p {config.staging_dir}",
+        ],
+        dry_run=dry_run,
+    )
     run_cmd(
         [
             "gcloud",
@@ -1292,6 +1425,10 @@ def sync_gdc_access_secret(config: GDCBootstrapConfig, dry_run: bool = False) ->
     if dry_run:
         info(f"[DRY-RUN] Would add a new version to Secret Manager secret {config.gdc_access_secret_id}")
         return
+    latest_payload = get_latest_gcp_secret_payload(config.gdc_access_secret_id, config.project_id)
+    if latest_payload == payload:
+        info(f"GDC access secret {config.gdc_access_secret_id} already matches the desired payload")
+        return
 
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as handle:
         handle.write(payload)
@@ -1318,6 +1455,15 @@ def sync_gdc_access_secret(config: GDCBootstrapConfig, dry_run: bool = False) ->
 def sync_gdc_vm_image_secret(config: GDCBootstrapConfig, service_account_key_path: Path, dry_run: bool = False) -> None:
     """Publish the GCS image-import key to Secret Manager for range provisioning."""
     ensure_gdc_vm_image_secret(config, dry_run=dry_run)
+    if not dry_run:
+        latest_payload = get_latest_gcp_secret_payload(config.gdc_vm_image_gcs_secret_id, config.project_id)
+        desired_payload = service_account_key_path.read_text()
+        if latest_payload == desired_payload:
+            info(
+                f"GDC VM image secret {config.gdc_vm_image_gcs_secret_id} already matches "
+                "the desired service-account key"
+            )
+            return
     run_cmd(
         [
             "gcloud",
@@ -1332,6 +1478,446 @@ def sync_gdc_vm_image_secret(config: GDCBootstrapConfig, service_account_key_pat
         ],
         dry_run=dry_run,
     )
+
+
+def _load_python_script_module(script_path: Path, module_name: str):
+    """Load a local Python script as a module without changing repo packaging."""
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load Python module from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _get_output_value(outputs: dict[str, dict[str, object]], key: str):
+    """Return the Terraform output value for a key or raise a clear error."""
+    try:
+        return outputs[key]["value"]
+    except KeyError as exc:
+        raise KeyError(f"Missing Terraform output: {key}") from exc
+
+
+def render_gcp_platform_runtime_env(config: GDCBootstrapConfig) -> str:
+    """Render the static, project-aware runtime env contract for the GKE control plane."""
+    gdc_vm_image_secret = f"projects/{config.project_id}/secrets/{config.gdc_vm_image_gcs_secret_id}"
+    lines = [
+        "CLOUD_PROVIDER=gcp",
+        f"ENVIRONMENT={config.environment}",
+        f"CLOUD_REGION={config.region}",
+        f"GCP_REGION={config.region}",
+        f"GCP_PROJECT_ID={config.project_id}",
+        f"GOOGLE_CLOUD_PROJECT={config.project_id}",
+        "ENGINE_TASK_NAMESPACE=shifter-jobs",
+        "ENGINE_TASK_SERVICE_ACCOUNT_NAME=provisioner",
+        "ENGINE_TASK_IMAGE_PULL_POLICY=Always",
+        "GDC_VM_STORAGE_CLASS=local-shared",
+        f"GDC_VM_IMAGE_GCS_SECRET_ID={gdc_vm_image_secret}",
+        "# Palo Alto VM-Series on GDC VM Runtime. These are required before creating",
+        "# a GCP/GDC NGFW; values are intentionally explicit because this is not a",
+        "# generic firewall path.",
+        "GDC_VMSERIES_IMAGE_URL=",
+        "GDC_VMSERIES_BOOTSTRAP_BUCKET=",
+        "GDC_VMSERIES_STORAGE_CLASS=local-shared",
+        f"GDC_VMSERIES_IMAGE_GCS_SECRET_ID={gdc_vm_image_secret}",
+        "GDC_VMSERIES_NAMESPACE_PREFIX=ngfw",
+        "GDC_VMSERIES_MGMT_NETWORK_NAME=pod-network",
+        "GDC_VMSERIES_MGMT_IP_CIDR=",
+        "GDC_VMSERIES_DATA_NETWORK_NAME=",
+        "GDC_VMSERIES_DATA_IP_CIDR=",
+        "GDC_VMSERIES_ROUTE_NEXT_HOP_IP=",
+        "GDC_VMSERIES_VCPUS=4",
+        "GDC_VMSERIES_MEMORY=8Gi",
+        "GDC_VMSERIES_DISK_SIZE_GIB=81",
+        "GDC_VMSERIES_BOOTSTRAP_DISK_SIZE_GIB=1",
+        "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID=",
+        "# Guest access defaults for VM Runtime assets.",
+        "GDC_WINDOWS_ADMIN_PASSWORD=CortexSavesTheDay!",
+        "GDC_KALI_PASSWORD=kali",
+        "GDC_UBUNTU_PASSWORD=ubuntu",
+        "# Set these to the VM Runtime boot images for each guest class.",
+        "GDC_KALI_IMAGE_URL=",
+        "GDC_KALI_VCPUS=2",
+        "GDC_KALI_MEMORY=4Gi",
+        "GDC_KALI_DISK_SIZE_GIB=20",
+        "GDC_UBUNTU_IMAGE_URL=",
+        "GDC_UBUNTU_VCPUS=1",
+        "GDC_UBUNTU_MEMORY=2Gi",
+        "GDC_UBUNTU_DISK_SIZE_GIB=20",
+        "GDC_WINDOWS_IMAGE_URL=",
+        "GDC_WINDOWS_VCPUS=2",
+        "GDC_WINDOWS_MEMORY=8Gi",
+        "GDC_WINDOWS_DISK_SIZE_GIB=64",
+        "GDC_DC_IMAGE_URL=",
+        "GDC_DC_VCPUS=2",
+        "GDC_DC_MEMORY=8Gi",
+        "GDC_DC_DISK_SIZE_GIB=64",
+        "# Optional overrides for lower-fidelity in-range scenario Pods.",
+        "GDC_SCENARIO_POD_IMAGE_PULL_POLICY=IfNotPresent",
+        "GDC_SCENARIO_POD_KALI_IMAGE=docker.io/kalilinux/kali-rolling:latest",
+        "GDC_SCENARIO_POD_UBUNTU_IMAGE=docker.io/library/ubuntu:24.04",
+    ]
+    return "".join(f"{line}\n" for line in lines)
+
+
+def render_gcp_service_account_patch(outputs: dict[str, dict[str, object]]) -> str:
+    """Render the Workload Identity bindings for the active project."""
+    service_accounts = _get_output_value(outputs, "workload_service_accounts")
+    return dedent(
+        f"""\
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: portal
+          namespace: shifter-platform
+          annotations:
+            iam.gke.io/gcp-service-account: {service_accounts["portal"]}
+        ---
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: workers
+          namespace: shifter-platform
+          annotations:
+            iam.gke.io/gcp-service-account: {service_accounts["workers"]}
+        ---
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: provisioner
+          namespace: shifter-jobs
+          annotations:
+            iam.gke.io/gcp-service-account: {service_accounts["provisioner"]}
+        """
+    )
+
+
+def render_gcp_overlay_kustomization(outputs: dict[str, dict[str, object]]) -> str:
+    """Render the GKE overlay with live Artifact Registry image roots."""
+    image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
+    return dedent(
+        f"""\
+        apiVersion: kustomize.config.k8s.io/v1beta1
+        kind: Kustomization
+
+        resources:
+          - ../../base
+
+        generatorOptions:
+          disableNameSuffixHash: true
+
+        configMapGenerator:
+          - name: platform-runtime
+            envs:
+              - platform-runtime.env
+              - platform-runtime.generated.env
+
+        images:
+          - name: placeholder-portal
+            newName: {image_roots["portal"]}
+            newTag: latest
+          - name: placeholder-guacd
+            newName: {image_roots["guacd"]}
+            newTag: latest
+          - name: placeholder-guacamole-client
+            newName: {image_roots["guacamole-client"]}
+            newTag: latest
+
+        patches:
+          - path: patch-serviceaccounts.yaml
+          - target:
+              kind: ConfigMap
+              name: platform-runtime
+            patch: |-
+              - op: add
+                path: /metadata/namespace
+                value: shifter-platform
+        """
+    )
+
+
+def render_gcp_guacamole_runtime_secret_manifest(db_payload: dict[str, str], json_secret_key: str) -> str:
+    """Render the Guacamole runtime Secret manifest from Secret Manager payloads."""
+    return dedent(
+        f"""\
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: guacamole-runtime
+          namespace: shifter-platform
+        type: Opaque
+        stringData:
+          POSTGRESQL_USER: {db_payload["username"]}
+          POSTGRESQL_PASSWORD: {db_payload["password"]}
+          JSON_SECRET_KEY: {json_secret_key}
+        """
+    )
+
+
+def fetch_gcp_secret_payload(secret_id: str, project_id: str) -> str:
+    """Return the latest Secret Manager payload for the given secret resource/name."""
+    secret_name = secret_id.rstrip("/").split("/")[-1]
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "gcloud",
+            "secrets",
+            "versions",
+            "access",
+            "latest",
+            "--secret",
+            secret_name,
+            "--project",
+            project_id,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(f"Failed to read Secret Manager payload for {secret_name}: {stderr}")
+    return result.stdout
+
+
+def get_latest_gcp_secret_payload(secret_id: str, project_id: str) -> str | None:
+    """Return the latest secret payload when one exists, otherwise None."""
+    try:
+        return fetch_gcp_secret_payload(secret_id, project_id)
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        if "not found" in message or "has no versions" in message:
+            return None
+        raise
+
+
+def apply_gcp_control_plane_terraform(
+    config: GDCBootstrapConfig, dry_run: bool = False
+) -> dict[str, dict[str, object]]:
+    """Apply the GCP control-plane Terraform environment for the active project."""
+    repo_root = get_repo_root()
+    tf_dir = repo_root / "platform" / "terraform" / "gcp" / "environments" / config.environment
+    if not tf_dir.exists():
+        error(f"GCP Terraform directory not found: {tf_dir}")
+        sys.exit(1)
+
+    tf_state_bucket = f"{config.project_id}-terraform-state"
+    if not gcloud_resource_exists(
+        ["gcloud", "storage", "buckets", "describe", f"gs://{tf_state_bucket}", "--project", config.project_id]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "storage",
+                "buckets",
+                "create",
+                f"gs://{tf_state_bucket}",
+                "--project",
+                config.project_id,
+                "--location",
+                config.region,
+                "--uniform-bucket-level-access",
+            ],
+            dry_run=dry_run,
+        )
+
+    run_cmd(
+        ["gcloud", "storage", "buckets", "update", f"gs://{tf_state_bucket}", "--versioning"],
+        dry_run=dry_run,
+    )
+
+    original_dir = os.getcwd()
+    os.chdir(tf_dir)
+    try:
+        run_cmd(
+            [
+                "terraform",
+                "init",
+                "-reconfigure",
+                f"-backend-config=bucket={tf_state_bucket}",
+                f"-backend-config=prefix=shifter/{config.environment}/platform-core",
+            ],
+            dry_run=dry_run,
+        )
+        run_cmd(
+            [
+                "terraform",
+                "apply",
+                "-auto-approve",
+                f"-var=project_id={config.project_id}",
+            ],
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return {}
+
+        output_result = subprocess.run(  # nosec B603 B607
+            ["terraform", "output", "-json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if output_result.returncode != 0:
+            stderr = output_result.stderr.strip() if output_result.stderr else "unknown error"
+            raise RuntimeError(f"Failed to capture Terraform outputs: {stderr}")
+        return json.loads(output_result.stdout)
+    finally:
+        os.chdir(original_dir)
+
+
+def stage_gcp_control_plane_overlay(
+    config: GDCBootstrapConfig, outputs: dict[str, dict[str, object]], staging_root: Path
+) -> Path:
+    """Stage a project-aware copy of the GKE overlay with live Terraform outputs."""
+    repo_root = get_repo_root()
+    source_root = repo_root / "platform" / "k8s" / "gcp"
+    staged_root = staging_root / "platform" / "k8s" / "gcp"
+    shutil.copytree(source_root, staged_root)
+
+    overlay_dir = staged_root / "overlays" / config.environment
+    (overlay_dir / "platform-runtime.env").write_text(render_gcp_platform_runtime_env(config))
+    (overlay_dir / "patch-serviceaccounts.yaml").write_text(render_gcp_service_account_patch(outputs))
+    (overlay_dir / "kustomization.yaml").write_text(render_gcp_overlay_kustomization(outputs))
+
+    runtime_renderer = _load_python_script_module(
+        repo_root / "scripts" / "gcp" / "render_runtime_env.py",
+        "bootstrap_render_runtime_env",
+    )
+    edge_renderer = _load_python_script_module(
+        repo_root / "scripts" / "gcp" / "render_edge_manifest.py",
+        "bootstrap_render_edge_manifest",
+    )
+
+    (overlay_dir / "platform-runtime.generated.env").write_text(runtime_renderer.render_env(outputs))
+    (overlay_dir / "platform-edge.generated.yaml").write_text(edge_renderer.render_manifest(outputs))
+    return overlay_dir
+
+
+def push_gcp_control_plane_images(
+    config: GDCBootstrapConfig,
+    outputs: dict[str, dict[str, object]],
+    dry_run: bool = False,
+):
+    """Build and push the control-plane images to Artifact Registry."""
+    image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
+    artifact_registry_host = str(image_roots["portal"]).split("/")[0]
+    repo_root = get_repo_root()
+
+    run_cmd(["gcloud", "auth", "configure-docker", artifact_registry_host, "--quiet"], dry_run=dry_run)
+
+    image_builds = [
+        (
+            f"{image_roots['portal']}:latest",
+            repo_root / "shifter",
+            repo_root / "shifter" / "shifter_platform" / "Dockerfile",
+        ),
+        (
+            f"{image_roots['pulumi-provisioner']}:latest",
+            repo_root / "shifter" / "engine" / "provisioner",
+            repo_root / "shifter" / "engine" / "provisioner" / "Dockerfile",
+        ),
+        (
+            f"{image_roots['guacd']}:latest",
+            repo_root / "shifter" / "engine" / "guacd",
+            repo_root / "shifter" / "engine" / "guacd" / "Dockerfile",
+        ),
+        (
+            f"{image_roots['guacamole-client']}:latest",
+            repo_root / "shifter" / "engine" / "guacamole",
+            repo_root / "shifter" / "engine" / "guacamole" / "Dockerfile",
+        ),
+    ]
+
+    for tag, context_dir, dockerfile in image_builds:
+        run_cmd(
+            ["docker", "build", "-f", str(dockerfile), "-t", tag, str(context_dir)],
+            dry_run=dry_run,
+        )
+        run_cmd(["docker", "push", tag], dry_run=dry_run)
+
+
+def roll_out_gcp_control_plane(
+    config: GDCBootstrapConfig,
+    outputs: dict[str, dict[str, object]],
+    overlay_dir: Path,
+    dry_run: bool = False,
+) -> None:
+    """Apply the staged overlay to GKE and wait for the Shifter control plane to become healthy."""
+    cluster_name = str(_get_output_value(outputs, "gke_cluster_name"))
+    cluster_location = str(_get_output_value(outputs, "gke_cluster_location"))
+
+    run_cmd(
+        [
+            "gcloud",
+            "container",
+            "clusters",
+            "get-credentials",
+            cluster_name,
+            "--location",
+            cluster_location,
+            "--project",
+            config.project_id,
+        ],
+        dry_run=dry_run,
+    )
+
+    run_cmd(["kubectl", "apply", "-k", str(overlay_dir)], dry_run=dry_run)
+
+    runtime_secret_ids = _get_output_value(outputs, "runtime_secret_ids")
+    guacamole_db_payload = json.loads(fetch_gcp_secret_payload(runtime_secret_ids["guacamole-db"], config.project_id))
+    guacamole_json_secret = fetch_gcp_secret_payload(
+        runtime_secret_ids["guacamole-json-auth"],
+        config.project_id,
+    ).strip()
+    guacamole_secret_manifest = overlay_dir / "guacamole-runtime.generated.yaml"
+    guacamole_secret_manifest.write_text(
+        render_gcp_guacamole_runtime_secret_manifest(guacamole_db_payload, guacamole_json_secret)
+    )
+    run_cmd(["kubectl", "apply", "-f", str(guacamole_secret_manifest)], dry_run=dry_run)
+
+    deployments = [
+        "portal-web",
+        "guacd",
+        "guacamole-client",
+        "worker-cms",
+        "worker-engine",
+        "worker-mc",
+        "ctf-scheduler",
+    ]
+    for deployment in deployments:
+        run_cmd(
+            ["kubectl", "rollout", "restart", f"deployment/{deployment}", "-n", "shifter-platform"],
+            dry_run=dry_run,
+        )
+    for deployment in deployments:
+        run_cmd(
+            [
+                "kubectl",
+                "rollout",
+                "status",
+                f"deployment/{deployment}",
+                "-n",
+                "shifter-platform",
+                "--timeout=15m",
+            ],
+            dry_run=dry_run,
+        )
+
+    run_cmd(["kubectl", "apply", "-f", str(overlay_dir / "platform-edge.generated.yaml")], dry_run=dry_run)
+
+
+def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, dict[str, object]]:
+    """Bootstrap the GCP control-plane infrastructure and workloads for gcp-dev."""
+    header(f"Deploying {config.environment} Shifter Platform")
+    outputs = apply_gcp_control_plane_terraform(config, dry_run=dry_run)
+    if dry_run:
+        return outputs
+
+    push_gcp_control_plane_images(config, outputs, dry_run=dry_run)
+    with tempfile.TemporaryDirectory(prefix="shifter-gcp-platform-") as staging_root_name:
+        overlay_dir = stage_gcp_control_plane_overlay(config, outputs, Path(staging_root_name))
+        roll_out_gcp_control_plane(config, outputs, overlay_dir, dry_run=dry_run)
+    success(f"{config.environment} Shifter platform deployed")
+    return outputs
 
 
 def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, str]:
@@ -1372,6 +1958,8 @@ def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> 
         sync_gdc_access_secret(config, dry_run=dry_run)
         sync_gdc_vm_image_secret(config, staged_assets["service_account_key"], dry_run=dry_run)
 
+    control_plane_outputs = bootstrap_gcp_control_plane(config, dry_run=dry_run)
+
     success("GDC bootstrap complete")
     print("\nNext commands:")
     code_block(
@@ -1391,6 +1979,9 @@ shifter-gdc-kubeconfig"""
         "kubeconfig_path": config.kubeconfig_path,
         "gdc_access_secret_id": config.gdc_access_secret_id,
         "gdc_vm_image_gcs_secret_id": config.gdc_vm_image_gcs_secret_id,
+        "gke_cluster_name": (
+            str(_get_output_value(control_plane_outputs, "gke_cluster_name")) if control_plane_outputs else ""
+        ),
     }
 
 
@@ -2255,6 +2846,9 @@ def check_dependencies(command: str | None = None):
             {
                 "gcloud": "Google Cloud CLI - https://cloud.google.com/sdk/docs/install",
                 "ssh-keygen": "OpenSSH client tools - https://www.openssh.com/",
+                "terraform": "Terraform - https://developer.hashicorp.com/terraform/downloads",
+                "docker": "Docker - https://docs.docker.com/engine/install/",
+                "kubectl": "kubectl - https://kubernetes.io/docs/tasks/tools/",
             }
         )
 

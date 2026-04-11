@@ -217,6 +217,157 @@ def _wait_for_pod_deleted(core_api, namespace: str, pod_name: str, api_exception
     raise RuntimeError(f"Timed out waiting for scenario Pod {namespace}/{pod_name} to delete")
 
 
+def _get_runtime_metadata(state: dict[str, Any]) -> dict[str, Any]:
+    provider_metadata = state.get("provider_metadata")
+    if not isinstance(provider_metadata, dict):
+        return {}
+
+    for key in ("gcp", "gdc"):
+        metadata = provider_metadata.get(key)
+        if isinstance(metadata, dict):
+            return metadata
+    return {}
+
+
+def _resolve_power_target(instance: dict[str, Any]) -> dict[str, Any]:
+    raw_state = instance.get("state")
+    state: dict[str, Any] = raw_state if isinstance(raw_state, dict) else {}
+    metadata = _get_runtime_metadata(state)
+
+    namespace = str(metadata.get("namespace") or state.get("gdc_namespace") or "").strip()
+    pod_name = str(metadata.get("pod_name") or state.get("gdc_pod_name") or state.get("instance_id") or "").strip()
+    network_name = str(
+        metadata.get("nad_name")
+        or metadata.get("network_name")
+        or state.get("gdc_nad_name")
+        or state.get("gdc_network_name")
+        or ""
+    ).strip()
+    static_ip = str(metadata.get("ip") or state.get("gdc_ip") or state.get("private_ip") or "").strip()
+    image = str(metadata.get("container_image") or state.get("gdc_container_image") or "").strip()
+    subnet_name = str(state.get("subnet_name") or instance.get("subnet_name") or "").strip()
+    hostname = _sanitize_name(str(instance.get("name", "")).strip() or pod_name, max_length=63)
+
+    if not namespace or not pod_name or not network_name or not static_ip or not image:
+        raise RuntimeError(
+            "Scenario Pod lifecycle state is incomplete for power operation: "
+            f"namespace={namespace!r} pod_name={pod_name!r} network_name={network_name!r} "
+            f"static_ip={static_ip!r} image={image!r}"
+        )
+
+    labels = {
+        "app.kubernetes.io/managed-by": _MANAGED_BY_LABEL,
+        "shifter.dev/range-plane": "gdc-vmruntime",
+        "shifter.dev/asset-type": "scenario-pod",
+    }
+    if subnet_name:
+        labels["shifter.dev/subnet-name"] = _sanitize_name(subnet_name)
+    instance_uuid = str(instance.get("uuid", "")).strip()
+    if instance_uuid:
+        labels["shifter.dev/instance-uuid"] = instance_uuid
+
+    return {
+        "namespace": namespace,
+        "pod_name": pod_name,
+        "network_name": network_name,
+        "static_ip": static_ip,
+        "image": image,
+        "hostname": hostname,
+        "labels": labels,
+    }
+
+
+def _is_pod_ready(
+    core_api,
+    *,
+    namespace: str,
+    pod_name: str,
+    expected_ip: str,
+    network_name: str,
+    api_exception,
+) -> bool:
+    try:
+        pod = core_api.read_namespaced_pod(name=pod_name, namespace=namespace).to_dict()
+    except api_exception as exc:
+        if exc.status == 404:
+            return False
+        raise
+
+    phase = str(((pod.get("status") or {}).get("phase")) or "").lower()
+    assigned_ip = _extract_network_status_ip(pod, network_name, namespace)
+    return phase == "running" and assigned_ip == expected_ip
+
+
+def run_power_operation(operation: str, instance: dict[str, Any]) -> None:
+    """Run a start/stop operation for a scenario Pod."""
+    if operation not in {"start", "stop"}:
+        raise ValueError(f"Unknown scenario Pod operation: {operation}")
+
+    access = load_gdc_network_access_config()
+    if access is None:
+        raise RuntimeError("GDC range plane requires GDC_ACCESS_SECRET_ID for scenario Pod power operations")
+
+    target = _resolve_power_target(instance)
+    pod_config = load_gdc_scenario_pod_config()
+    client, _, api_exception = _import_kubernetes_modules()
+    api_client = _build_kube_api_client(access.kubeconfig)
+    core_api = client.CoreV1Api(api_client)
+
+    namespace = target["namespace"]
+    pod_name = target["pod_name"]
+
+    if operation == "stop":
+        try:
+            core_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            logger.info("Stopped scenario Pod %s/%s", namespace, pod_name)
+        except api_exception as exc:
+            if exc.status == 404:
+                logger.info("Scenario Pod %s/%s already absent during stop", namespace, pod_name)
+                return
+            raise
+        _wait_for_pod_deleted(core_api, namespace, pod_name, api_exception)
+        return
+
+    if _is_pod_ready(
+        core_api,
+        namespace=namespace,
+        pod_name=pod_name,
+        expected_ip=target["static_ip"],
+        network_name=target["network_name"],
+        api_exception=api_exception,
+    ):
+        logger.info("Scenario Pod %s/%s already running", namespace, pod_name)
+        return
+
+    try:
+        core_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+        _wait_for_pod_deleted(core_api, namespace, pod_name, api_exception)
+    except api_exception as exc:
+        if exc.status != 404:
+            raise
+
+    pod_manifest = _build_pod_manifest(
+        namespace=namespace,
+        pod_name=pod_name,
+        hostname=target["hostname"],
+        network_name=target["network_name"],
+        static_ip=target["static_ip"],
+        image=target["image"],
+        image_pull_policy=pod_config.image_pull_policy,
+        labels=target["labels"],
+    )
+    core_api.create_namespaced_pod(namespace=namespace, body=pod_manifest)
+    logger.info("Started scenario Pod %s/%s", namespace, pod_name)
+    _wait_for_pod_ready(
+        core_api,
+        namespace,
+        pod_name,
+        target["static_ip"],
+        target["network_name"],
+        api_exception,
+    )
+
+
 def apply_range_assets(
     request_uuid: str,
     variables: dict[str, Any],

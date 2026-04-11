@@ -114,6 +114,7 @@ echo ""
 echo "--- Building A6 content ---"
 bash /tmp/build-a6-content.sh > /dev/null 2>&1
 python3 /tmp/a6_xlsx.py > /dev/null 2>&1
+rm -rf /tmp/a6-content/home/p.nielsen/designs/cog_analysis  # remove CSV version, xlsx is canonical
 mkdir -p /tmp/a6-content/home/p.nielsen
 echo "researchdb.boreas.local:5432:*:lab_mfg:Mfg2025!" > /tmp/a6-content/home/p.nielsen/.pgpass
 echo "  A6 content built at /tmp/a6-content/"
@@ -141,7 +142,18 @@ sudo -u postgres psql -c "UPDATE compartment_b.key_storage SET key_data = '$GPG_
 echo "  GPG chain built and wired (A6 encrypted file + A8 key blob)"
 
 # ============================================
-# Step 8: Set up A9 content
+# Step 8a: Ensure BIND9 DNS is running (flag 5)
+# ============================================
+echo ""
+echo "--- Ensuring BIND9 DNS (flag 5) ---"
+if sudo systemctl is-active named > /dev/null 2>&1; then
+    echo "  BIND9 already running"
+else
+    sudo systemctl start named 2>/dev/null || echo "  WARNING: BIND9 not installed — flag 5 will fail"
+fi
+
+# ============================================
+# Step 9: Set up A9 content
 # ============================================
 echo ""
 echo "--- Setting up A9 content ---"

@@ -134,6 +134,7 @@ These flags come from the intranet (A3), mail server (A1), file share (A4), doma
 1. Access the badge log share on the DC:
    ```
    smbclient //dc01.boreas.local/badgelogs -U "svc-backup%Password1"
+   In the test environment, badge data is also at `/tmp/badge.csv` (content-on-disk).
    ```
 2. Download `access_log_march_2026.csv`.
 3. Cross-reference Petrov's entries with the guard rotation schedule (from Morrison's email on A1).
@@ -211,3 +212,25 @@ These flags come from the intranet (A3), mail server (A1), file share (A4), doma
 7. **This is the collective gate** — it opens the Bunker for all participants.
 
 **Expected flag:** `FLAG{a7f2c8d0e5b34169}`
+
+---
+
+## Smoketest Results — 2026-04-10
+
+| Flag | Description | Expected | Observed | Result | Notes |
+|------|-------------|----------|----------|--------|-------|
+| 7 | Creds in Web App Config | `FLAG{4f2e8b7a1c6d9035}` | `FLAG{4f2e8b7a1c6d9035}` | **PASS** | Both `/.env` and `/config.bak` return the config |
+| 8 | Employee Email with Project Hints | `FLAG{3b7e9a2d1c8f4063}` | `FLAG{3b7e9a2d1c8f4063}` | **PASS** | PDF attachment decoded; flag in "Report ID" field |
+| 9 | HR Records / Terminated Engineer | `FLAG{7a1b3d9e2c8f0546}` | `FLAG{7a1b3d9e2c8f0546}` | **PASS** | Page 2 "Case Reference Number" field in termination PDF |
+| 10 | Password Reuse Gives Mail Access | `FLAG{e5d1f8c2a7b03946}` | `FLAG{e5d1f8c2a7b03946}` | **PASS** | Welcome email "Account activation token" |
+| 11 | Cafeteria Menu / Mundane File Share | `FLAG{0e6f9c2d4a8b7135}` | `FLAG{0e6f9c2d4a8b7135}` | **PASS** | PDF Author metadata field |
+| 12 | Internal Wiki / "The Project" | `FLAG{d8a3c5e9f1b07264}` | `FLAG{d8a3c5e9f1b07264}` | **PASS** | HTML comment in page source |
+| 13 | Procurement Orders / Hydraulic Actuators | `FLAG{8c5a0d3f7e1b2964}` | `FLAG{8c5a0d3f7e1b2964}` | **PASS** | Specification ID in actuator_requirements_v4.pdf |
+| 14 | AD Enumeration / Suspicious Accounts | `FLAG{2f8b4a6c1d9e7053}` | `FLAG{2f8b4a6c1d9e7053}` | **PASS** | LDAP query for Project-L `info` attribute against DC at 10.100.0.4 |
+| 15 | Lateral Movement to Second Host | `FLAG{9a4c7e2f58d0b163}` | `FLAG{9a4c7e2f58d0b163}` | **PASS** | backup_verification.log in IT share (content-on-disk) |
+| 16 | Guard Rotation Logs / Unreliable Guard | `FLAG{b3d7e1f0c8a24596}` | `FLAG{b3d7e1f0c8a24596}` | **PASS** | Petrov entry 2026-03-18T02:22 at Underground Hatch in /tmp/badge.csv |
+| 17 | Privilege Escalation / Domain Admin | `FLAG{6c0a9d4e7f2b8135}` | `FLAG{6c0a9d4e7f2b8135}` | **PASS** | Full chain: Kerberoast -> svc-backup:Password1 -> DCSync -> admin_flag share |
+| 18 | SCADA Interface Discovered | `FLAG{1d4e7b0a3c9f8265}` | `FLAG{1d4e7b0a3c9f8265}` | **PASS** | Footer "S/N" on HMI dashboard at :8080 |
+| 19 | Generator SCADA Override / Collective Gate | `FLAG{a7f2c8d0e5b34169}` | `FLAG{a7f2c8d0e5b34169}` | **PASS** | Modbus bypass (port 5050) + fuel 100% / cooling 0% -> thermal runaway screen |
+
+**Summary: 13/13 PASS**

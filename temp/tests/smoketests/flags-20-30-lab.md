@@ -224,3 +224,23 @@ This is a multi-asset chain: A6 → A8 → A7.
 6. The decrypted content is a simulation recording. The flag is at the bottom as a "Simulation ID."
 
 **Expected flag:** `FLAG{d4c8f0a2e6b71935}`
+
+---
+
+## Smoketest Results -- 2026-04-10
+
+| Flag | Name | Expected | Actual | Result | Notes |
+|------|------|----------|--------|--------|-------|
+| 20 | Default Creds on Dev Tooling | `FLAG{5b8e1d3a7c0f9246}` | `FLAG{5b8e1d3a7c0f9246}` | PASS | Found in `/tmp/a6-content/home/jenkins/.credentials` as deploy_token |
+| 21 | Research File Share / Compartment A | `FLAG{4b9e2a7d0c8f1365}` | `FLAG{4b9e2a7d0c8f1365}` | PASS | Query returned correct flag in notes column |
+| 22 | Shipping Manifest / Reactor Delivery | `FLAG{e2a9c4f7d8b01536}` | `FLAG{e2a9c4f7d8b01536}` | PASS | Tracking field in reactor_interface_spec.txt |
+| 23 | Simulation Archive / Bipedal Stress Test | `FLAG{0c7d8a2e5f1b3946}` | `FLAG{0c7d8a2e5f1b3946}` | PASS | 47 archives present; bipedal refs in logs 28/31/44; flag in stress_test_44.dat via strings |
+| 24 | Source Repo / Control Software | `FLAG{8a0e3c7f2d5b1946}` | `FLAG{8a0e3c7f2d5b1946}` | PASS | Cloned navigation-controller; flag visible in git history of deploy.yml |
+| 25 | MIDNIGHT Test Series | `FLAG{3f6a9d1e7c4b0258}` | `FLAG{3f6a9d1e7c4b0258}` | PASS | MIDNIGHT-7_results.dat accessible; flag at bottom as Result Hash |
+| 26 | Engineering Notes / 100m Structure | `FLAG{7e2b0c5d9a4f8163}` | `FLAG{7e2b0c5d9a4f8163}` | PASS | Integration sheet is hidden (state=hidden); flag in cell B10. Required openpyxl install (not present by default). |
+| 27 | Compartment Pivot / Weapons Specs | `FLAG{6d1a8f3c7e0b4952}` | `FLAG{6d1a8f3c7e0b4952}` | PASS | SQL injection via search_research works; flag in serial_number of "Primary: Directed Energy Array" row |
+| 28 | Assembly Status Log | `FLAG{a3f7d9e1c0b52846}` | `FLAG{a3f7d9e1c0b52846}` | PASS | lab_mfg role can access compartment_c; flag nested in JSONB metadata->'integration'->'flag' |
+| 29 | Full Leviathan Schematic Assembly | `FLAG{1f9b4e7c0a3d8265}` | `FLAG{1f9b4e7c0a3d8265}` | PASS | Cloned leviathan-assembly; recovered deleted schematic.svg from git history; flag in XML comment |
+| 30 | Leviathan Simulation Video Recovered | `FLAG{d4c8f0a2e6b71935}` | `FLAG{d4c8f0a2e6b71935}` | PASS | Multi-asset chain A6->A8->A7 complete. GPG key from compartment_b, passphrase from weapons-integration repo, decrypted mp4.gpg successfully. |
+
+**Summary:** 11/11 PASS (flags 20-30)

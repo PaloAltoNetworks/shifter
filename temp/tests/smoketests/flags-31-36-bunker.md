@@ -16,9 +16,9 @@ These flags require the collective gate (flag 19) to have been triggered first i
 
 2. Query each controller's device identification using Modbus function code 43. Use the helper script:
    ```
-   python3 /usr/local/bin/modbus_client.py 10.10.40.10 devid
-   python3 /usr/local/bin/modbus_client.py 10.10.40.11 devid
-   python3 /usr/local/bin/modbus_client.py 10.10.40.12 devid
+   python3 /usr/local/bin/modbus_client.py (test env: /tmp/a9-content/modbus_client.py) 10.10.40.10 devid
+   python3 /usr/local/bin/modbus_client.py (test env: /tmp/a9-content/modbus_client.py) 10.10.40.11 devid
+   python3 /usr/local/bin/modbus_client.py (test env: /tmp/a9-content/modbus_client.py) 10.10.40.12 devid
    ```
    Each returns a model number:
    - 10.10.40.10: `AHS-TAIL-7741`
@@ -212,3 +212,19 @@ These flags require the collective gate (flag 19) to have been triggered first i
    ```
 
 **Expected flag:** `FLAG{0b7e3d9a1f6c4258}`
+
+---
+
+## Smoketest Results -- 2026-04-10
+
+| Flag | Name | Expected | Got | Result | Notes |
+|------|------|----------|-----|--------|-------|
+| 31 | OT Network Enumeration | `FLAG{2e8c0a5d7f3b1946}` | (static) | PASS | devid returns correct model numbers for all 3 controllers; scan_results.txt present in /tmp/a9-content/ (not /root/) |
+| 32 | Tail Motor Controller Data | `FLAG{9b3e7c1d0f5a2846}` | `FLAG{9b3e7c1d0f5a2846}` | PASS | Diagnostic mode (reg 20=3) and serial challenge (reg 99=482) work correctly |
+| 33 | Leg Joint Actuator Data | `FLAG{c7a1e3f9d0b52864}` | `FLAG{c7a1e3f9d0b52864}` | PASS | Gait sequence 0-1-2-0 triggers calibration code (got 4783); code->reg 99 unlocks flag |
+| 34 | Arms Controller / Weapons Integration | `FLAG{f0d8b2e6a4c71935}` | `FLAG{f0d8b2e6a4c71935}` | PASS | Coil 50 enable, nonce XOR 2847 challenge-response works; confirmation=1 |
+| 35 | Brain Access | `FLAG{8d2f5a0e7c9b3146}` | `FLAG{8d2f5a0e7c9b3146}` | PASS | Binary handshake, vasik auth with token, `status` command returns flag |
+| 36 | Combat System Seized | `FLAG{0b7e3d9a1f6c4258}` | `FLAG{0b7e3d9a1f6c4258}` | PASS | `override 7741-MN07-AL42` accepted; full victory banner displayed |
+
+**Summary:** 6/6 PASS. All bunker flags operational on test range.
+

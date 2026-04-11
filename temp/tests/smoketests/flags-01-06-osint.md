@@ -74,3 +74,16 @@ All of these flags come from the public Boreas Systems website (`$A0_URL`, defau
 5. This is a CTFd challenge question — submit the supplier name and dollar amount in the format the challenge specifies.
 
 **Expected flag:** `FLAG{c6f8d2b3e91a4507}` (accepted when correct answer submitted to CTFd)
+
+---
+
+## Smoketest Results — 2026-04-10
+
+| Flag | Description | Expected | Found | Result | Notes |
+|------|-------------|----------|-------|--------|-------|
+| 1 | Company Info (HTML comment on /about) | `FLAG{8f3a2c1e9b7d4056}` | `FLAG{8f3a2c1e9b7d4056}` | **PASS** | Comment appears near registration number as expected |
+| 2 | Org Chart metadata (/internal/org_chart.txt) | `FLAG{d4e7b1f283a6c950}` | `FLAG{d4e7b1f283a6c950}` | **PASS** | robots.txt lists /internal/, directory listing works, metadata line present |
+| 3 | Hidden form field on /careers | `FLAG{a1c9e3f7054b82d6}` | `FLAG{a1c9e3f7054b82d6}` | **PASS** | Hidden input tracking_id contains flag |
+| 4 | Client list HTML comment (/old/clients) | `FLAG{72b5e0d8f1a34c69}` | `FLAG{72b5e0d8f1a34c69}` | **PASS** | HTML comment at top of client table |
+| 5 | DNS zone transfer TXT record | `FLAG{5e9c2a0f73b148d6}` | `FLAG{5e9c2a0f73b148d6}` | **PASS** | Zone transfer enabled, flag in _flag.boreas-systems.ctf TXT record |
+| 6 | Supplier from annual report | `FLAG{c6f8d2b3e91a4507}` | N/A (CTFd question) | **PASS** | Report accessible at /internal/boreas-annual-2025.txt (discoverable via /old/ HTML comment or URL fuzzing). Kursk Heavy Industries — $12,000,000 is clearly the standout entry. Flag would be awarded by CTFd on correct submission. |

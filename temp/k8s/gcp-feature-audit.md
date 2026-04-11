@@ -425,3 +425,69 @@ Checkpoint 17: pre-bootstrap hardening for the next fresh GCP rebuild
   - `ADR-008` captures the fail-closed GCP bootstrap posture: managed TLS, real hostname, authorized admin CIDRs, Cloud Armor on public backends, and IAP-only operator access to private GDC hosts
 - Validation:
   - `python3 scripts/adr_guard/adr_guard.py --all --level ci`
+
+### Checkpoint 19: Fresh GCP Bootstrap to Live Shifter Platform
+
+- Ran the real bootstrap entrypoint against the clean `prod-rwctxzl6shxk` project:
+  - `./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1`
+- Manual operator step during bootstrap:
+  - updated Cloudflare `A` record for `shifter.keplerops.com` to `107.178.250.99`
+  - disabled proxying until Google-managed TLS became active
+- Live results:
+  - GDC substrate reconciled successfully
+  - platform Terraform applied successfully
+  - container images built and pushed successfully
+  - Helm release installed successfully into `shifter-system`
+  - GKE managed certificate became `Active`
+  - bootstrap completed with:
+    - `Verified public portal over HTTPS at https://shifter.keplerops.com/`
+    - `gcp-dev Shifter platform deployed`
+    - `GDC bootstrap complete`
+- Live platform state after bootstrap:
+  - ingress:
+    - `shifter.keplerops.com -> 107.178.250.99`
+    - `managedcertificate/networking.gke.io platform-managed-cert` status `Active`
+  - workloads in `shifter-platform`:
+    - `portal-web` ready
+    - `worker-cms` ready
+    - `worker-engine` ready
+    - `worker-mc` ready
+    - `ctf-scheduler` ready
+    - `guacd` ready
+    - `guacamole-client` ready
+  - public edge proof:
+    - `curl -Ik https://shifter.keplerops.com/` returned `HTTP/2 200`
+    - `curl -Ik https://shifter.keplerops.com/mission-control/` returned `HTTP/2 302` to `/login/?next=/mission-control/`
+  - load balancer backend proof:
+    - portal backend health `HEALTHY`
+    - guacamole backend health `HEALTHY`
+
+### Checkpoint 20: Live Identity Platform Login and Bootstrap Admin Proof
+
+- The first authenticated login exposed a real production bug:
+  - TOTP enrollment completed against Identity Platform, but final token verification failed with `INSUFFICIENT_PERMISSION`
+  - root cause: the portal GSA lacked read permission for Identity Platform / Firebase Authentication user lookups required by `verify_id_token(..., check_revoked=True)`
+- Permanent fix:
+  - added `roles/firebaseauth.viewer` to the portal workload GSA in `platform/terraform/gcp/modules/platform-core/main.tf`
+  - added contract coverage in `scripts/bootstrap/tests/test_deploy.py`
+- Validation for the fix:
+  - `uv run --with pytest pytest -q scripts/bootstrap/tests/test_deploy.py::TestGcpPlatformCoreContracts`
+  - `tflint --chdir platform/terraform/gcp/modules/platform-core --config /home/atomik/src/shifter-k8s/.tflint.hcl`
+  - `tflint --chdir platform/terraform/gcp/environments/gcp-dev --config /home/atomik/src/shifter-k8s/.tflint.hcl`
+  - `python3 scripts/adr_guard/adr_guard.py --all --level ci`
+- Reconciled the live project by rerunning the real bootstrap entrypoint.
+- Live auth proof after the fix:
+  - password sign-in returns the TOTP challenge instead of a server `500`
+  - completing the TOTP challenge for `bedwards@paloaltonetworks.com` lands on `/mission-control/`
+  - authenticated Mission Control request returned `HTTP 200`
+  - authenticated `/admin/` request returned `HTTP 200`
+  - direct Django user proof:
+    - `bedwards@paloaltonetworks.com True True True`
+    - bootstrap email lists in settings resolve to `['bedwards@paloaltonetworks.com']` for both staff and superuser
+- Result:
+  - bootstrap now produces a working Shifter rollout on GCP with:
+    - public HTTPS portal
+    - functioning Identity Platform login
+    - TOTP MFA flow
+    - working Mission Control session
+    - seeded bootstrap operator elevated to staff and superuser

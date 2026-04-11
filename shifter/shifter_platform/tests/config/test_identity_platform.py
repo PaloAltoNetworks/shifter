@@ -57,8 +57,8 @@ def test_platform_login_renders_identity_platform_form(client):
 
     assert response.status_code == 200
     assert b"Sign in to Shifter" in response.content
-    assert b"name=\"email\"" in response.content
-    assert b"name=\"password\"" in response.content
+    assert b'name="email"' in response.content
+    assert b'name="password"' in response.content
 
 
 @override_settings(

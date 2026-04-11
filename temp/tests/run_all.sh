@@ -59,6 +59,10 @@ echo "========================================"
 echo ""
 
 # --- Individual asset tests ---
+echo "=== Configuration Tests ==="
+run_test "test_ctfd_config"  "$DIR/test_ctfd_config.sh"
+
+echo ""
 echo "=== Asset Tests ==="
 run_test "test_a2_dc"       "$DIR/test_a2.sh"
 run_test "test_a7_gitea"    "$DIR/test_a7.sh"

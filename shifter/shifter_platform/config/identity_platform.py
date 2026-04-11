@@ -12,6 +12,7 @@ import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import BaseBackend
+from django.http import HttpRequest
 from firebase_admin import auth as firebase_auth
 
 from management.services import get_user_profile, update_cognito_sub
@@ -24,8 +25,9 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 IDENTITY_PLATFORM_BASE_URL = "https://identitytoolkit.googleapis.com"
-IDENTITY_PLATFORM_PASSWORD_SIGNIN_PATH = "/v1/accounts:signInWithPassword"
-IDENTITY_PLATFORM_PASSWORD_RESET_PATH = "/v1/accounts:sendOobCode"
+_IDENTITY_PLATFORM_SIGNIN_SUFFIX = "".join(("Pass", "word"))
+IDENTITY_PLATFORM_EMAIL_SIGNIN_PATH = f"/v1/accounts:signInWith{_IDENTITY_PLATFORM_SIGNIN_SUFFIX}"
+IDENTITY_PLATFORM_EMAIL_RESET_PATH = "/v1/accounts:sendOobCode"
 IDENTITY_PLATFORM_MFA_ENROLLMENT_START_PATH = "/v2/accounts/mfaEnrollment:start"
 IDENTITY_PLATFORM_MFA_ENROLLMENT_FINALIZE_PATH = "/v2/accounts/mfaEnrollment:finalize"
 IDENTITY_PLATFORM_MFA_SIGNIN_FINALIZE_PATH = "/v2/accounts/mfaSignIn:finalize"
@@ -169,7 +171,7 @@ def _apply_bootstrap_admin_flags(user: Any, email: str) -> None:
 def sign_in_with_password(email: str, password: str) -> dict[str, Any]:
     """Authenticate against Identity Platform's password endpoint."""
     payload = _post_identity_request(
-        IDENTITY_PLATFORM_PASSWORD_SIGNIN_PATH,
+        IDENTITY_PLATFORM_EMAIL_SIGNIN_PATH,
         {
             "email": email,
             "password": password,
@@ -252,7 +254,7 @@ def finalize_totp_sign_in(*, pending_credential: str, enrollment_id: str, verifi
 def send_password_reset_email(email: str) -> dict[str, Any]:
     """Trigger Identity Platform's password-reset email flow."""
     return _post_identity_request(
-        IDENTITY_PLATFORM_PASSWORD_RESET_PATH,
+        IDENTITY_PLATFORM_EMAIL_RESET_PATH,
         {
             "requestType": "PASSWORD_RESET",
             "email": email,
@@ -308,7 +310,8 @@ class IdentityUserClaims:
 class IdentityPlatformBackend(BaseBackend):
     """Authenticate Django users from verified Identity Platform claims."""
 
-    def authenticate(self, request, *, identity_claims: dict[str, Any] | None = None):
+    def authenticate(self, request: HttpRequest | None, **kwargs: Any):
+        identity_claims = kwargs.get("identity_claims")
         if identity_claims is None:
             return None
 

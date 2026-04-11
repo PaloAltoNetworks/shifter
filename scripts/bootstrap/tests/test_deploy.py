@@ -2359,7 +2359,7 @@ class TestGcpBootstrapIdentityPlatform:
         """Simple env parsing should strip matching quotes and ignore comments."""
         env_path = tmp_path / ".env"
         env_path.write_text(
-            '\n'.join(
+            "\n".join(
                 [
                     "# Comment",
                     'OIDC_RP_CLIENT_ID="client-id"',

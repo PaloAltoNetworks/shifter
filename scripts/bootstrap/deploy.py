@@ -156,8 +156,10 @@ def prompt_required_value(prompt: str, *, secret: bool = False) -> str:
         raise RuntimeError(f"{prompt} must be provided via environment for non-interactive bootstrap")
 
     while True:
-        value = getpass.getpass(f"{Colors.CYAN}{prompt}: {Colors.END}") if secret else input(
-            f"{Colors.CYAN}{prompt}: {Colors.END}"
+        value = (
+            getpass.getpass(f"{Colors.CYAN}{prompt}: {Colors.END}")
+            if secret
+            else input(f"{Colors.CYAN}{prompt}: {Colors.END}")
         )
         value = value.strip()
         if value:
@@ -1794,7 +1796,7 @@ def _gcp_identity_admin_request(
     )
 
     try:
-        with urllib_request.urlopen(request, timeout=30) as response:  # noqa: S310
+        with urllib_request.urlopen(request, timeout=30) as response:  # nosec B310  # noqa: S310
             return json.loads(response.read().decode("utf-8"))
     except urllib_error.HTTPError as exc:  # pragma: no cover - exercised via unit tests with monkeypatch
         body = exc.read().decode("utf-8") if exc.fp is not None else ""

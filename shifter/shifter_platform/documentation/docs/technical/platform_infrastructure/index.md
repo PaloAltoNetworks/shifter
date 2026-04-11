@@ -55,22 +55,22 @@ platform/
 ├── terraform/gcp/
 │   ├── modules/platform-core/    # All GCP infrastructure
 │   └── environments/gcp-dev/     # Environment config
-└── k8s/gcp/
-    ├── base/                     # Kubernetes manifests
-    └── overlays/gcp-dev/         # Environment-specific patches
+├── charts/shifter/               # Helm chart for the GCP control plane
+└── k8s/gcp/                      # GCP base manifests and generated deployment assets
 ```
 
 ### Components
 
 | Component | Service | Purpose |
 |-----------|---------|---------|
-| **GKE Cluster** | GKE | Private cluster with node pools (web, workers, provisioner) |
+| **GKE Cluster** | GKE | Private nodes with node pools (web, workers, provisioner) and public control-plane endpoint restricted by authorized CIDRs |
 | **Cloud SQL** | Cloud SQL | PostgreSQL (platform + Guacamole databases) |
 | **Memorystore** | Memorystore | Redis (channel layer, worker coordination) |
 | **Pub/Sub** | Pub/Sub | Event topic with per-domain subscriptions |
 | **Artifact Registry** | Artifact Registry | Container image repositories |
 | **Secret Manager** | Secret Manager | Runtime secret bundles |
 | **Cloud DNS** | Cloud DNS | Optional public hostname with managed TLS |
+| **Cloud Armor** | Cloud Armor | Baseline WAF policy on the public portal and Guacamole backends |
 
 ### State Management
 
@@ -78,7 +78,7 @@ Terraform state stored in GCS bucket per environment.
 
 ## Related Docs
 
-- [GCP Infrastructure](gcp-infrastructure) - GKE, Kustomize, and GCP services
+- [GCP Infrastructure](gcp-infrastructure) - GKE, Helm, Cloud Armor, and GCP services
 - [GDC Provisioning](gdc-provisioning) - Range guest provisioning on GDC
 - [AMI Management](ami-management) - Packer builds and SSM parameter management (AWS)
 - [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD

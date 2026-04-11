@@ -1,4 +1,4 @@
-project_id                 = "shifter-gcp-dev"
+project_id                 = "prod-rwctxzl6shxk"
 environment                = "gcp-dev"
 region                     = "us-central1"
 artifact_registry_location = "us-central1"
@@ -8,7 +8,12 @@ gke_subnet_cidr      = "10.40.0.0/20"
 gke_pods_cidr        = "10.44.0.0/16"
 gke_services_cidr    = "10.45.0.0/20"
 gke_master_ipv4_cidr = "172.16.0.0/28"
-range_network_cidr   = "10.50.0.0/16"
+gke_master_authorized_cidrs = [
+  # Current admin egress from the WSL workstation running bootstrap.
+  # Update this if the operator egress IP changes.
+  "173.181.31.170/32",
+]
+range_network_cidr = "10.50.0.0/16"
 
 web_machine_type         = "e2-standard-4"
 worker_machine_type      = "e2-standard-4"
@@ -27,8 +32,8 @@ cloud_sql_user_name        = "shifter"
 redis_tier           = "BASIC"
 redis_memory_size_gb = 1
 
-public_hostname         = ""
-enable_managed_tls      = false
+public_hostname         = "shifter.keplerops.com"
+enable_managed_tls      = true
 create_dns_managed_zone = false
 dns_managed_zone_name   = ""
 dns_zone_dns_name       = ""

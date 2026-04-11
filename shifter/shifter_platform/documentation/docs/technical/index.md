@@ -17,7 +17,7 @@ Platform architecture, infrastructure, and development documentation.
 ## Infrastructure
 
 - [Infrastructure Overview](platform_infrastructure/) - AWS and GCP components
-- [GCP Infrastructure](platform_infrastructure/gcp-infrastructure) - GKE, Cloud SQL, Kustomize
+- [GCP Infrastructure](platform_infrastructure/gcp-infrastructure) - GKE, Cloud SQL, Helm, Cloud Armor, and GCP services
 - [GDC Provisioning](platform_infrastructure/gdc-provisioning) - Range guests on GDC (KubeVirt, pods)
 - [Networking](platform_infrastructure/networking) - Network architecture (both clouds)
 - [CI/CD](platform_infrastructure/cicd) - Deployment pipelines

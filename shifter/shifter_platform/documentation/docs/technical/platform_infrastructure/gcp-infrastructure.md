@@ -9,12 +9,11 @@ platform/
 ├── terraform/gcp/
 │   ├── modules/platform-core/    # All GCP infrastructure
 │   └── environments/gcp-dev/     # Environment config
-└── k8s/gcp/
-    ├── base/                     # Kubernetes manifests
-    └── overlays/gcp-dev/         # Environment-specific patches
+├── charts/shifter/               # Helm chart for the control plane
+└── k8s/gcp/                      # Base manifests and generated deployment assets
 ```
 
-Terraform provisions GCP resources. Kustomize manages Kubernetes workloads. CI/CD bridges them: Terraform outputs feed Kustomize ConfigMaps via render scripts.
+Terraform provisions GCP resources. The Shifter control plane is packaged as a Helm chart, and bootstrap renders generated values from Terraform outputs plus Secret Manager payloads before installing the chart.
 
 ## Terraform Module: platform-core
 
@@ -23,7 +22,7 @@ Single module provisions the entire GCP control plane.
 | Resource | Service | Purpose |
 |----------|---------|---------|
 | **VPC Networks** (×2) | VPC | `platform` (GKE, shared services) and `range` (guest isolation) |
-| **GKE Cluster** | GKE | Private cluster, VPC-native, Workload Identity enabled |
+| **GKE Cluster** | GKE | Private nodes, VPC-native, Workload Identity enabled, public control-plane endpoint restricted by authorized CIDRs |
 | **Node Pools** (×3) | GKE | `web` (portal, Guacamole), `workers` (domain workers), `provisioner` (range provisioning jobs) |
 | **Cloud SQL** | Cloud SQL | PostgreSQL. Hosts platform DB and Guacamole DB. Private IP only. |
 | **Memorystore** | Memorystore | Redis. Channel layer and worker coordination. |
@@ -31,17 +30,19 @@ Single module provisions the entire GCP control plane.
 | **Artifact Registry** | Artifact Registry | Container repositories (portal, guacd, guacamole-client, pulumi-provisioner). |
 | **Secret Manager** | Secret Manager | Runtime secret bundles (app, db, guacamole-db, oidc, guacamole-json-auth). |
 | **Cloud DNS** | Cloud DNS | Optional. Public hostname with Google-managed TLS certificate. |
+| **Cloud Armor** | Cloud Armor | Baseline WAF policy attached to the public portal and Guacamole GKE backends. |
 | **GCS Buckets** | Cloud Storage | Assets/artifacts and Terraform state. |
 | **Service Accounts** | IAM | Separate accounts for GKE nodes and workloads (portal, workers, provisioner). Workload Identity binds K8s SAs to GCP SAs. |
 
 ## GKE Cluster
 
-Private cluster with no public node IPs. Cloud NAT provides outbound connectivity.
+Private nodes with no public node IPs. Cloud NAT provides outbound connectivity.
 
 - **Release channel**: REGULAR (automatic patching)
 - **Workload Identity**: Enabled. Pod service accounts map to GCP service accounts.
 - **Networking**: VPC-native with secondary IP ranges for pods and services
 - **Logging/Monitoring**: System components and workload logging enabled
+- **Control-plane access**: public endpoint retained for bootstrap compatibility, restricted by authorized CIDRs
 
 ### Node Pools
 
@@ -55,9 +56,9 @@ Machine types and node counts are configurable per environment.
 
 ## Kubernetes Workloads
 
-Managed via Kustomize with base manifests and per-environment overlays.
+Managed via Helm with base chart defaults, environment values, and bootstrap-generated runtime values.
 
-### Base Resources (`platform/k8s/gcp/base/`)
+### Chart Resources (`platform/charts/shifter/templates/`)
 
 | Manifest | Workload |
 |----------|----------|
@@ -70,13 +71,16 @@ Managed via Kustomize with base manifests and per-environment overlays.
 | `ctf-scheduler-deployment.yaml` | CTF batch scheduler |
 | `rbac-job-launcher.yaml` | RBAC for provisioner K8s Jobs |
 | `serviceaccounts.yaml` | K8s service accounts (portal, workers, provisioner) |
+| `portal-backendconfig.yaml` | Portal health check + Cloud Armor attachment |
+| `guacamole-backendconfig.yaml` | Guacamole Cloud Armor attachment |
+| `ingress.yaml` | Public ingress, managed certificate, HTTPS redirect |
 
-### Overlays (`platform/k8s/gcp/overlays/{env}/`)
+### Values files
 
-- Image retagging to Artifact Registry paths
-- ConfigMap generation from static + Terraform-generated env files
-- Workload Identity annotations on service accounts
-- Ingress and FrontendConfig (generated at deploy time)
+- `platform/charts/shifter/values.yaml` - chart defaults
+- `platform/charts/shifter/values-gcp-dev.yaml` - `gcp-dev` overrides
+- `platform/charts/shifter/values-gcp-prod.yaml` - `gcp-prod` overrides
+- bootstrap-generated values - live Terraform outputs, runtime env, image roots, secret payloads, and edge policy names
 
 ## Networking
 
@@ -91,21 +95,34 @@ Networks are peered bidirectionally for platform-to-range connectivity.
 
 GDC deployments use custom L2 networks (VXLAN-based) for per-range guest isolation instead of VPC subnets.
 
-## CI/CD
+## Deployment Path
 
-GitHub Actions workflow per environment (e.g., `_gcp-dev.yml`).
+The authoritative GCP bring-up path on this branch is the bootstrap entrypoint:
 
-**Validate** (on PR): Terraform fmt/validate, Kustomize render + kubeconform schema check.
+```bash
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+```
 
-**Deploy** (on push to target branch):
-1. Authenticate via Workload Identity Federation (OIDC)
-2. `terraform apply`
-3. Generate runtime ConfigMap from Terraform outputs (`scripts/gcp/render_runtime_env.py`)
-4. Generate Ingress manifest (`scripts/gcp/render_edge_manifest.py`)
-5. Apply Kubernetes manifests
-6. Sync secrets into K8s Secrets
-7. Roll deployments
-8. Apply edge resources (Ingress, managed certificate, FrontendConfig)
+That flow:
+
+1. reconciles the GDC substrate
+2. applies GCP Terraform
+3. builds and pushes control-plane images
+4. renders secure runtime env values from Terraform outputs and Secret Manager
+5. renders generated Helm values
+6. installs or upgrades the Shifter chart
+7. waits for rollout and managed-certificate convergence
+
+GitHub Actions validation for `gcp-dev` still exists, but the staged workflow is not the authoritative deployment contract until it is reconciled with the Helm/bootstrap path.
+
+## Current `gcp-dev` concrete values
+
+- Project: `prod-rwctxzl6shxk`
+- Hostname: `shifter.keplerops.com`
+- Managed TLS: enabled
+- Current authorized admin CIDR: `173.181.31.170/32` from the WSL bootstrap host as of 2026-04-11
+
+If the operator egress IP changes, `gke_master_authorized_cidrs` must be updated before the next bootstrap.
 
 ## Related Docs
 

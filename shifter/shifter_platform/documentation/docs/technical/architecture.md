@@ -9,7 +9,7 @@ Infrastructure is defined per cloud provider. A `CLOUD_PROVIDER` environment var
 ```mermaid
 graph TB
     subgraph Platform["Platform Infrastructure"]
-        Global["Global<br/>(IAM, OIDC)"]
+        Global["Global<br/>(IAM, identity federation)"]
         Core["Core<br/>(Container registry, base resources)"]
         Range["Range<br/>(Networking, guest isolation)"]
     end
@@ -20,7 +20,7 @@ graph TB
 
 | Component | Purpose |
 |-----------|---------|
-| **Global** | IAM roles, OIDC providers, CI/CD identity federation. |
+| **Global** | IAM roles, cloud identity services, CI/CD identity federation. |
 | **Core** | Container registries, base environment resources. |
 | **Range** | Range networking and guest isolation. |
 | **Portal*** | Shifter application infrastructure (load balancer, compute, database, object storage). |
@@ -29,7 +29,7 @@ graph TB
 
 | | AWS | GCP |
 |---|---|---|
-| **IaC** | Terraform (`platform/terraform/modules/`, `environments/`) | Terraform (`platform/terraform/gcp/`) + Kustomize (`platform/k8s/gcp/`) |
+| **IaC** | Terraform (`platform/terraform/modules/`, `environments/`) | Terraform (`platform/terraform/gcp/`) + Helm (`platform/charts/shifter/`) with bootstrap-generated values |
 | **Compute** | EC2 (configurable ASG) + ECS Fargate | GKE (node pools: web, workers, provisioner) |
 | **Database** | RDS PostgreSQL | Cloud SQL PostgreSQL |
 | **Cache** | ElastiCache Redis | Memorystore Redis |
@@ -37,13 +37,18 @@ graph TB
 | **Messaging** | SNS (fanout) → SQS (per-domain queues) | Pub/Sub (topic → per-domain subscriptions) |
 | **Container Registry** | ECR | Artifact Registry |
 | **Secrets** | Secrets Manager + SSM Parameter Store | Secret Manager |
-| **Identity** | Cognito | Configurable OIDC provider |
-| **Range Guests** | EC2 instances in isolated VPC subnets | GDC VM Runtime (KubeVirt) or pods on GDC cluster |
+| **Identity** | Cognito via OIDC | Identity Platform with first-party email/password + TOTP |
+| **Range Guests** | EC2 instances in isolated VPC subnets | GDC VM Runtime (KubeVirt) with optional lower-fidelity pod execution on GDC cluster |
 | **Egress Filtering** | AWS Network Firewall (domain-based rules) | Per-range namespace and L2 network isolation |
 
 ### Identity
 
-OIDC-based authentication via `mozilla-django-oidc`. The OIDC provider is configurable per deployment (Cognito on AWS, any OIDC-compatible provider on GCP). Common configuration:
+AWS and GCP keep provider-specific identity stacks behind a shared auth seam:
+
+- AWS uses Cognito through `mozilla-django-oidc`
+- GCP uses Identity Platform with a first-party login flow inside Shifter
+
+Common operator requirements:
 - Email as username
 - MFA required (TOTP)
 - Domain restriction for allowed email domains
@@ -126,5 +131,5 @@ See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
 | UI separation | Mission Control is presentation only | Clean separation of presentation from domain logic. Views handle HTTP; services own business rules. |
 | API style | REST via Django REST Framework | Proven, simple, mature Django ecosystem support. |
 | Cloud abstraction | Protocol-based adapters per provider | Same Django app runs on AWS or GCP. Cloud-specific code isolated behind interfaces. |
-| Identity | OIDC via mozilla-django-oidc | Provider-agnostic. Cognito on AWS, configurable on GCP. MFA required, email-based usernames. |
-| Domains | keplerops.com | Operator-owned domain. DNS on Cloudflare (AWS) or Cloud DNS (GCP). |
+| Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform. Both require MFA and email-based usernames. |
+| Domains | keplerops.com | Operator-owned domain. DNS may be hosted externally or in cloud-managed DNS. Current `gcp-dev` hostname is `shifter.keplerops.com`. |

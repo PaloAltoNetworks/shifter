@@ -124,6 +124,7 @@ services:
     backendConfig:
       enabled: true
       name: portal-web
+      securityPolicyName: ""
       healthCheck:
         type: HTTP
         requestPath: /health/
@@ -135,6 +136,10 @@ services:
   guacamoleClient:
     annotations:
       cloud.google.com/neg: '{"ingress": true}'
+    backendConfig:
+      enabled: false
+      name: guacamole-client
+      securityPolicyName: ""
 
 ingress:
   enabled: true

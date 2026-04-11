@@ -14,6 +14,7 @@ repos:
         exclude: ^assets/styles/
       - id: check-yaml
         args: [--unsafe] # Allow custom YAML constructors (mkdocs plugins)
+        exclude: ^platform/charts/.*/templates/.*\.ya?ml$
       - id: check-json
       - id: check-added-large-files
         args: [--maxkb=500]
@@ -136,6 +137,14 @@ repos:
   # Kubernetes schema validation
   - repo: local
     hooks:
+      - id: helm-lint-shifter-chart
+        name: helm lint (shifter chart)
+        entry: >-
+          bash -c 'helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-dev.yaml &&
+          helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-prod.yaml'
+        language: system
+        files: ^platform/charts/shifter/
+        pass_filenames: false
       - id: kubeconform
         name: kubeconform (k8s schemas)
         entry: kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0

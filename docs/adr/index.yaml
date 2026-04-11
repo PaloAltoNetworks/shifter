@@ -176,5 +176,109 @@
       ".kube-linter.yaml",
       ".pre-commit-config.yaml"
     ]
+  },
+  {
+    "id": "ADR-007",
+    "title": "GCP control-plane deployments are Helm-packaged and bootstrap-managed",
+    "status": "accepted",
+    "scope": "gcp",
+    "decision": "The GCP Shifter control plane is deployed through the Shifter Helm chart with layered values files and bootstrap-generated runtime values. Raw GCP manifests and staged workflows are supporting assets, not the authoritative deployment contract.",
+    "rules": [
+      {
+        "id": "ADR-007-R1",
+        "description": "GCP environment defaults live in chart values files, with bootstrap-generated runtime values layered last.",
+        "checks": []
+      },
+      {
+        "id": "ADR-007-R2",
+        "description": "Branch-local GCP bring-up must flow through the bootstrap entrypoint rather than relying on ad hoc kubectl or legacy staged workflow logic.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "platform/charts/shifter/Chart.yaml",
+      "platform/charts/shifter/values.yaml",
+      "platform/charts/shifter/values-gcp-dev.yaml",
+      "platform/charts/shifter/values-gcp-prod.yaml",
+      "scripts/bootstrap/deploy.py",
+      "platform/k8s/gcp/README.md",
+      "platform/terraform/gcp/README.md",
+      "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/gcp-infrastructure.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
+    ]
+  },
+  {
+    "id": "ADR-008",
+    "title": "GCP bootstrap fails closed and uses private operator access",
+    "status": "accepted",
+    "scope": "gcp",
+    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, Cloud Armor on public backends, and IAP-based access to private GDC operator hosts.",
+    "rules": [
+      {
+        "id": "ADR-008-R1",
+        "description": "Bootstrap must reject insecure GCP inputs instead of falling back to public debug or dev-login behavior.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R2",
+        "description": "GDC operator hosts must be private-only and reached through IAP rather than public SSH.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "scripts/bootstrap/deploy.py",
+      "scripts/gcp/render_runtime_env.py",
+      "platform/terraform/gcp/modules/platform-core/main.tf",
+      "platform/terraform/gcp/modules/platform-core/variables.tf",
+      "platform/terraform/gcp/environments/gcp-dev/terraform.tfvars",
+      "platform/charts/shifter/templates/portal-backendconfig.yaml",
+      "platform/charts/shifter/templates/guacamole-backendconfig.yaml",
+      "platform/terraform/gcp/README.md",
+      "platform/k8s/gcp/README.md",
+      "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/networking.md"
+    ]
+  },
+  {
+    "id": "ADR-009",
+    "title": "AWS and GCP keep provider-specific identity stacks behind a shared auth seam",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with first-party email-password plus TOTP MFA, domain allowlisting, and bootstrap-owned first-operator seeding. The Django app selects the provider through configuration without changing shared business workflows.",
+    "rules": [
+      {
+        "id": "ADR-009-R1",
+        "description": "AWS deployments continue to use the existing OIDC redirect flow and must not depend on GCP identity configuration.",
+        "checks": []
+      },
+      {
+        "id": "ADR-009-R2",
+        "description": "GCP bootstrap must provision Identity Platform and seed the first corporate operator instead of relying on a manually managed OIDC runtime secret.",
+        "checks": []
+      },
+      {
+        "id": "ADR-009-R3",
+        "description": "Bootstrap operator privilege elevation is runtime-configured and must not hardcode identities in committed source.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/config/urls.py",
+      "shifter/shifter_platform/config/views.py",
+      "shifter/shifter_platform/config/identity_platform.py",
+      "scripts/bootstrap/deploy.py",
+      "scripts/gcp/render_runtime_env.py",
+      "platform/terraform/gcp/modules/platform-core/main.tf",
+      "platform/terraform/gcp/modules/platform-core/outputs.tf",
+      ".github/workflows/_gcp-dev.yml",
+      "shifter/shifter_platform/documentation/docs/technical/architecture.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/secrets.md"
+    ]
   }
 ]

@@ -68,6 +68,17 @@ output "public_ingress_ip_address" {
   value       = module.platform_core.public_ingress_ip_address
 }
 
+output "identity_platform_api_key" {
+  description = "Identity Platform web API key for the environment."
+  value       = module.platform_core.identity_platform_api_key
+  sensitive   = true
+}
+
+output "identity_platform_project_id" {
+  description = "Project ID backing Identity Platform for this environment."
+  value       = module.platform_core.identity_platform_project_id
+}
+
 output "public_hostname" {
   description = "Optional public hostname configured for the ingress."
   value       = module.platform_core.public_hostname

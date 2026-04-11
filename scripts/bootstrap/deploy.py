@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import getpass
 import importlib.util
 import json
 import os
@@ -32,6 +33,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 # Import runner setup module
 try:
@@ -146,6 +150,21 @@ def wait_for_user(msg: str) -> None:
         print("Press Enter to continue, or type 'skip' to skip this step")
 
 
+def prompt_required_value(prompt: str, *, secret: bool = False) -> str:
+    """Prompt until a non-empty value is provided."""
+    if not sys.stdin.isatty():
+        raise RuntimeError(f"{prompt} must be provided via environment for non-interactive bootstrap")
+
+    while True:
+        value = getpass.getpass(f"{Colors.CYAN}{prompt}: {Colors.END}") if secret else input(
+            f"{Colors.CYAN}{prompt}: {Colors.END}"
+        )
+        value = value.strip()
+        if value:
+            return value
+        print("Value is required")
+
+
 def run_cmd(
     cmd: list[str],
     dry_run: bool = False,
@@ -201,6 +220,7 @@ GDC_API_SERVICES = [
     "compute.googleapis.com",
     "connectgateway.googleapis.com",
     "container.googleapis.com",
+    "iap.googleapis.com",
     "gkeconnect.googleapis.com",
     "gkehub.googleapis.com",
     "gkeonprem.googleapis.com",
@@ -234,6 +254,7 @@ GCP_TERRAFORM_BOOTSTRAP_ROLES = [
 ]
 
 GCP_TERRAFORM_BOOTSTRAP_BUCKET_ROLE = "roles/storage.objectAdmin"
+GCP_IAP_TCP_SOURCE_RANGE = "35.235.240.0/20"
 
 
 def s3_bucket_exists(bucket_name: str, profile: str) -> bool:
@@ -557,6 +578,45 @@ def parse_env_file(path: Path) -> dict[str, str]:
         key, value = stripped.split("=", 1)
         values[key.strip()] = value.strip().strip("'").strip('"')
     return values
+
+
+def read_gcp_control_plane_security_inputs(tf_dir: Path) -> dict[str, object]:
+    """Read the security-sensitive Terraform inputs from terraform.tfvars."""
+    tfvars_path = tf_dir / "terraform.tfvars"
+    contents = tfvars_path.read_text() if tfvars_path.exists() else ""
+
+    public_hostname_match = re.search(r'(?m)^\s*public_hostname\s*=\s*"([^"]*)"\s*$', contents)
+    managed_tls_match = re.search(r"(?m)^\s*enable_managed_tls\s*=\s*(true|false)\s*$", contents)
+    cidr_block_match = re.search(r"gke_master_authorized_cidrs\s*=\s*\[(.*?)\]", contents, re.DOTALL)
+
+    return {
+        "public_hostname": public_hostname_match.group(1).strip() if public_hostname_match else "",
+        "enable_managed_tls": bool(managed_tls_match and managed_tls_match.group(1) == "true"),
+        "gke_master_authorized_cidrs": (
+            [match.strip() for match in re.findall(r'"([^"]+)"', cidr_block_match.group(1))] if cidr_block_match else []
+        ),
+    }
+
+
+def validate_gcp_control_plane_security_inputs(tf_dir: Path) -> None:
+    """Fail fast when the GCP control plane would be bootstrapped with an insecure public posture."""
+    settings = read_gcp_control_plane_security_inputs(tf_dir)
+
+    if not settings["public_hostname"]:
+        raise ValueError(
+            "GCP bootstrap requires a public hostname before applying the control plane. "
+            "Set public_hostname in terraform.tfvars."
+        )
+    if not settings["enable_managed_tls"]:
+        raise ValueError(
+            "GCP bootstrap requires managed TLS for the public ingress. "
+            "Set enable_managed_tls = true in terraform.tfvars."
+        )
+    if not settings["gke_master_authorized_cidrs"]:
+        raise ValueError(
+            "GCP bootstrap requires gke_master_authorized_cidrs so the public GKE control-plane endpoint "
+            "is restricted to admin networks."
+        )
 
 
 def get_default_gdc_project_id() -> str:
@@ -1160,7 +1220,7 @@ def ensure_gdc_network(config: GDCBootstrapConfig, dry_run: bool = False) -> Non
         (
             config.ssh_firewall_rule_name,
             "tcp:22",
-            "0.0.0.0/0",
+            GCP_IAP_TCP_SOURCE_RANGE,
         ),
         (
             config.internal_firewall_rule_name,
@@ -1170,7 +1230,7 @@ def ensure_gdc_network(config: GDCBootstrapConfig, dry_run: bool = False) -> Non
         (
             config.lb_firewall_rule_name,
             "tcp:443,tcp:6444",
-            "0.0.0.0/0",
+            config.subnet_cidr,
         ),
     ]
 
@@ -1230,6 +1290,7 @@ def gdc_instance_create_command(
         "ubuntu-os-cloud",
         "--subnet",
         config.resolved_subnetwork_name,
+        "--no-address",
         "--private-network-ip",
         host.primary_ip,
         "--can-ip-forward",
@@ -1332,6 +1393,7 @@ def wait_for_gdc_ssh(config: GDCBootstrapConfig, host: GDCHost, dry_run: bool = 
                 "compute",
                 "ssh",
                 f"root@{host.name}",
+                "--tunnel-through-iap",
                 "--project",
                 config.project_id,
                 "--zone",
@@ -1360,6 +1422,7 @@ def upload_gdc_assets(config: GDCBootstrapConfig, assets_dir: Path, dry_run: boo
             "compute",
             "ssh",
             f"root@{config.workstation.name}",
+            "--tunnel-through-iap",
             "--project",
             config.project_id,
             "--zone",
@@ -1375,6 +1438,7 @@ def upload_gdc_assets(config: GDCBootstrapConfig, assets_dir: Path, dry_run: boo
             "compute",
             "scp",
             "--recurse",
+            "--tunnel-through-iap",
             "--project",
             config.project_id,
             "--zone",
@@ -1398,6 +1462,7 @@ def run_gdc_workstation_script(
             "compute",
             "ssh",
             f"root@{config.workstation.name}",
+            "--tunnel-through-iap",
             "--project",
             config.project_id,
             "--zone",
@@ -1420,6 +1485,7 @@ def fetch_gdc_kubeconfig(config: GDCBootstrapConfig, dry_run: bool = False) -> s
             "compute",
             "ssh",
             f"root@{config.workstation.name}",
+            "--tunnel-through-iap",
             "--project",
             config.project_id,
             "--zone",
@@ -1517,9 +1583,37 @@ def _get_output_value(outputs: dict[str, dict[str, object]], key: str):
         raise KeyError(f"Missing Terraform output: {key}") from exc
 
 
-def render_gcp_platform_runtime_env(config: GDCBootstrapConfig) -> str:
+def _merge_csv_env_values(*groups: list[str]) -> str:
+    """Merge comma-separated values while preserving order and uniqueness."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for raw_value in group:
+            for part in raw_value.split(","):
+                value = part.strip().lower()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                ordered.append(value)
+    return ",".join(ordered)
+
+
+def render_gcp_platform_runtime_env(
+    config: GDCBootstrapConfig,
+    *,
+    bootstrap_operator_email: str | None = None,
+) -> str:
     """Render the static, project-aware runtime env contract for the GKE control plane."""
     gdc_vm_image_secret = f"projects/{config.project_id}/secrets/{config.gdc_vm_image_gcs_secret_id}"
+    bootstrap_values = load_bootstrap_env_values()
+    bootstrap_staff_emails = _merge_csv_env_values(
+        [bootstrap_values.get("PLATFORM_BOOTSTRAP_STAFF_EMAILS", "")],
+        [bootstrap_operator_email or ""],
+    )
+    bootstrap_superuser_emails = _merge_csv_env_values(
+        [bootstrap_values.get("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", "")],
+        [bootstrap_operator_email or ""],
+    )
     lines = [
         "CLOUD_PROVIDER=gcp",
         f"ENVIRONMENT={config.environment}",
@@ -1575,6 +1669,8 @@ def render_gcp_platform_runtime_env(config: GDCBootstrapConfig) -> str:
         "GDC_SCENARIO_POD_IMAGE_PULL_POLICY=IfNotPresent",
         "GDC_SCENARIO_POD_KALI_IMAGE=docker.io/kalilinux/kali-rolling:latest",
         "GDC_SCENARIO_POD_UBUNTU_IMAGE=docker.io/library/ubuntu:24.04",
+        f"PLATFORM_BOOTSTRAP_STAFF_EMAILS={bootstrap_staff_emails}",
+        f"PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS={bootstrap_superuser_emails}",
     ]
     return "".join(f"{line}\n" for line in lines)
 
@@ -1593,12 +1689,171 @@ def parse_env_contract(rendered: str) -> dict[str, str]:
     return values
 
 
+def parse_simple_env_file(path: Path) -> dict[str, str]:
+    """Parse a basic KEY=VALUE env file into a mapping."""
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        parsed_value = value.strip()
+        if len(parsed_value) >= 2 and parsed_value[0] == parsed_value[-1] and parsed_value[0] in {"'", '"'}:
+            parsed_value = parsed_value[1:-1]
+        values[key.strip()] = parsed_value
+    return values
+
+
+def load_bootstrap_env_values() -> dict[str, str]:
+    """Load bootstrap values from repo-local env files, then overlay the process environment."""
+    repo_root = get_repo_root()
+    values: dict[str, str] = {}
+    for env_path in [repo_root / ".env", repo_root.parent / "shifter" / ".env"]:
+        values.update(parse_simple_env_file(env_path))
+    values.update(os.environ)
+    return values
+
+
+def resolve_gcp_bootstrap_operator_credentials() -> tuple[str, str] | None:
+    """Resolve the first operator email/password for the GCP identity bootstrap."""
+    values = load_bootstrap_env_values()
+
+    email = (
+        values.get("GCP_BOOTSTRAP_ADMIN_EMAIL")
+        or values.get("SHIFTER_BOOTSTRAP_ADMIN_EMAIL")
+        or values.get("BOOTSTRAP_ADMIN_EMAIL")
+    )
+    password = (
+        values.get("GCP_BOOTSTRAP_ADMIN_PASSWORD")
+        or values.get("SHIFTER_BOOTSTRAP_ADMIN_PASSWORD")
+        or values.get("BOOTSTRAP_ADMIN_PASSWORD")
+    )
+    if not email or not password:
+        return None
+    return email.strip().lower(), password.strip()
+
+
+def prompt_for_gcp_bootstrap_operator_credentials() -> tuple[str, str]:
+    """Collect the first GCP operator email/password interactively."""
+    header("Configure GCP Operator Login")
+    print(
+        "Bootstrap will create the first corporate Shifter operator in Identity Platform.\n"
+        "They will enroll TOTP MFA on first sign-in.\n"
+    )
+
+    email = prompt_required_value("Operator email").lower()
+    password = prompt_required_value("Operator password", secret=True)
+    return email, password
+
+
+def _validate_gcp_bootstrap_operator_email(email: str) -> None:
+    if not email.endswith("@paloaltonetworks.com"):
+        raise ValueError("GCP operator email must use the paloaltonetworks.com domain")
+
+
+def _gcp_identity_api_key(outputs: dict[str, dict[str, object]]) -> str:
+    return str(_get_output_value(outputs, "identity_platform_api_key")).strip()
+
+
+def _gcp_identity_access_token() -> str:
+    result = subprocess.run(  # nosec B603 B607
+        ["gcloud", "auth", "print-access-token"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(f"Failed to acquire a GCP access token for Identity Platform: {stderr}")
+    return result.stdout.strip()
+
+
+def _gcp_identity_admin_request(
+    *,
+    config: GDCBootstrapConfig,
+    outputs: dict[str, dict[str, object]],
+    path: str,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    access_token = _gcp_identity_access_token()
+    url = f"https://identitytoolkit.googleapis.com/v1{path}?key={_gcp_identity_api_key(outputs)}"
+    parsed_url = urllib_parse.urlparse(url)
+    if parsed_url.scheme != "https" or parsed_url.netloc != "identitytoolkit.googleapis.com":
+        raise RuntimeError(f"Refusing to call unexpected Identity Platform endpoint: {url}")
+    request = urllib_request.Request(  # noqa: S310 - URL is validated immediately above
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(request, timeout=30) as response:  # noqa: S310
+            return json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:  # pragma: no cover - exercised via unit tests with monkeypatch
+        body = exc.read().decode("utf-8") if exc.fp is not None else ""
+        try:
+            parsed = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            parsed = {}
+        message = parsed.get("error", {}).get("message", exc.reason)
+        raise RuntimeError(str(message)) from exc
+
+
+def ensure_gcp_identity_platform_operator(
+    config: GDCBootstrapConfig,
+    outputs: dict[str, dict[str, object]],
+    dry_run: bool = False,
+) -> str | None:
+    """Create the first GCP operator account if it does not already exist."""
+    credentials = resolve_gcp_bootstrap_operator_credentials()
+    if credentials is None:
+        if dry_run:
+            info("[DRY-RUN] Would prompt for the first GCP operator email and password")
+            return None
+        credentials = prompt_for_gcp_bootstrap_operator_credentials()
+
+    email, password = credentials
+    _validate_gcp_bootstrap_operator_email(email)
+
+    if dry_run:
+        info(f"[DRY-RUN] Would create or verify the Identity Platform operator account for {email}")
+        return email
+
+    try:
+        _gcp_identity_admin_request(
+            config=config,
+            outputs=outputs,
+            path=f"/projects/{config.project_id}/accounts",
+            payload={
+                "email": email,
+                "password": password,
+                "displayName": "Shifter Operator",
+                "emailVerified": True,
+            },
+        )
+        success(f"Created Identity Platform operator {email}")
+        return email
+    except RuntimeError as exc:
+        if "EMAIL_EXISTS" in str(exc):
+            info(f"Identity Platform operator {email} already exists")
+            return email
+        raise
+
+
 def render_gcp_helm_values(
     config: GDCBootstrapConfig,
     outputs: dict[str, dict[str, object]],
     *,
     guacamole_db_payload: dict[str, str],
     guacamole_json_secret: str,
+    bootstrap_operator_email: str | None = None,
 ) -> dict[str, object]:
     """Render Helm values for the Shifter release from Terraform outputs and runtime secrets."""
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
@@ -1610,9 +1865,12 @@ def render_gcp_helm_values(
         "bootstrap_render_runtime_env",
     )
     runtime_env = {
-        **parse_env_contract(render_gcp_platform_runtime_env(config)),
-        **parse_env_contract(runtime_renderer.render_env(outputs)),
+        **parse_env_contract(
+            render_gcp_platform_runtime_env(config, bootstrap_operator_email=bootstrap_operator_email)
+        ),
+        **parse_env_contract(runtime_renderer.render_env(outputs, secure_portal_mode=True)),
     }
+    edge_policy_name = str(_get_output_value(outputs, "cloud_armor_security_policy_name")).strip()
 
     return {
         "releaseNamespace": "shifter-system",
@@ -1669,6 +1927,22 @@ def render_gcp_helm_values(
                 "enabled": managed_tls_enabled,
                 "certificateName": "platform-managed-cert",
                 "frontendConfigName": "platform-frontend-config",
+            },
+        },
+        "services": {
+            "portal": {
+                "backendConfig": {
+                    "enabled": True,
+                    "name": "portal-web",
+                    "securityPolicyName": edge_policy_name,
+                }
+            },
+            "guacamoleClient": {
+                "backendConfig": {
+                    "enabled": True,
+                    "name": "guacamole-client",
+                    "securityPolicyName": edge_policy_name,
+                }
             },
         },
     }
@@ -1773,10 +2047,7 @@ def run_gcp_terraform_init_with_retry(
             time.sleep(sleep_seconds)
             continue
 
-        error(
-            "Command failed: "
-            f"Command '{' '.join(init_cmd)}' returned non-zero exit status {result.returncode}."
-        )
+        error(f"Command failed: Command '{' '.join(init_cmd)}' returned non-zero exit status {result.returncode}.")
         sys.exit(1)
 
 
@@ -1805,10 +2076,7 @@ def run_gcp_terraform_apply_with_retry(
             time.sleep(sleep_seconds)
             continue
 
-        error(
-            "Command failed: "
-            f"Command '{' '.join(apply_cmd)}' returned non-zero exit status {result.returncode}."
-        )
+        error(f"Command failed: Command '{' '.join(apply_cmd)}' returned non-zero exit status {result.returncode}.")
         sys.exit(1)
 
 
@@ -2085,6 +2353,11 @@ def apply_gcp_control_plane_terraform(
     if not tf_dir.exists():
         error(f"GCP Terraform directory not found: {tf_dir}")
         sys.exit(1)
+    try:
+        validate_gcp_control_plane_security_inputs(tf_dir)
+    except ValueError as exc:
+        error(str(exc))
+        sys.exit(1)
 
     tf_state_bucket = config.terraform_state_bucket_name
     if not gcloud_resource_exists(
@@ -2159,6 +2432,8 @@ def stage_gcp_control_plane_values(
     config: GDCBootstrapConfig,
     outputs: dict[str, dict[str, object]],
     staging_root: Path,
+    *,
+    bootstrap_operator_email: str | None = None,
 ) -> Path:
     """Stage the generated Helm values file for the Shifter release."""
     runtime_secret_ids = _get_output_value(outputs, "runtime_secret_ids")
@@ -2172,6 +2447,7 @@ def stage_gcp_control_plane_values(
         outputs,
         guacamole_db_payload=guacamole_db_payload,
         guacamole_json_secret=guacamole_json_secret,
+        bootstrap_operator_email=bootstrap_operator_email,
     )
     values_path = staging_root / "shifter.values.generated.json"
     values_path.write_text(json.dumps(values, indent=2, sort_keys=True))
@@ -2390,10 +2666,7 @@ def prepare_gcp_helm_cutover(dry_run: bool = False) -> None:
     if helm_release_exists(release_name, release_namespace):
         return
 
-    found_resources = {
-        namespace: list_gcp_helm_cutover_resources(namespace)
-        for namespace in managed_namespaces
-    }
+    found_resources = {namespace: list_gcp_helm_cutover_resources(namespace) for namespace in managed_namespaces}
     if not any(found_resources.values()):
         return
 
@@ -2566,6 +2839,122 @@ def deploy_gcp_control_plane_with_helm(
     )
 
 
+def get_gcp_managed_certificate_status(
+    certificate_name: str = "platform-managed-cert",
+    namespace: str = "shifter-platform",
+) -> str:
+    """Return the current managed certificate status from the cluster."""
+    result = subprocess.run(  # nosec B603 B607
+        [
+            "kubectl",
+            "-n",
+            namespace,
+            "get",
+            "managedcertificate",
+            certificate_name,
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(f"Failed to inspect managed certificate {certificate_name}: {stderr}")
+
+    payload = json.loads(result.stdout)
+    return str(payload.get("status", {}).get("certificateStatus", "")).strip()
+
+
+def wait_for_gcp_managed_certificate_active(
+    timeout_seconds: int = 1800,
+    poll_seconds: int = 10,
+) -> None:
+    """Wait until the GKE managed certificate reports Active."""
+    deadline = time.time() + timeout_seconds
+    last_status = ""
+    while time.time() < deadline:
+        status = get_gcp_managed_certificate_status()
+        last_status = status or "UNKNOWN"
+        normalized_status = last_status.lower()
+        if normalized_status == "active":
+            success("GKE managed certificate is active")
+            return
+        if normalized_status.startswith("failed"):
+            raise RuntimeError(f"GKE managed certificate entered terminal status: {last_status}")
+        info(f"Waiting for GKE managed certificate to become Active (current status: {last_status})")
+        time.sleep(poll_seconds)
+
+    raise RuntimeError(
+        f"GKE managed certificate did not become Active within {timeout_seconds} seconds "
+        f"(last status: {last_status or 'UNKNOWN'})"
+    )
+
+
+def verify_gcp_public_portal(hostname: str) -> None:
+    """Verify the public Shifter endpoints are reachable over HTTPS."""
+    health_result = subprocess.run(  # nosec B603 B607
+        ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", f"https://{hostname}/health/"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    health_code = health_result.stdout.strip()
+    if health_result.returncode != 0 or health_code != "200":
+        raise RuntimeError(
+            f"Portal health check failed for https://{hostname}/health/ "
+            f"(exit={health_result.returncode}, code={health_code or 'n/a'})"
+        )
+
+    mission_control_result = subprocess.run(  # nosec B603 B607
+        ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", f"https://{hostname}/mission-control/"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    mission_control_code = mission_control_result.stdout.strip()
+    if mission_control_result.returncode != 0 or mission_control_code not in {"200", "301", "302", "303", "307", "308"}:
+        raise RuntimeError(
+            f"Mission Control endpoint failed for https://{hostname}/mission-control/ "
+            f"(exit={mission_control_result.returncode}, code={mission_control_code or 'n/a'})"
+        )
+
+    success(f"Verified public portal over HTTPS at https://{hostname}/")
+
+
+def walkthrough_gcp_dns_setup_and_wait_for_tls(
+    outputs: dict[str, dict[str, object]],
+    dry_run: bool = False,
+) -> None:
+    """Guide the operator through DNS cutover and wait for the managed certificate to become active."""
+    header("Point Domain to GCP Load Balancer")
+
+    hostname = str(_get_output_value(outputs, "public_hostname")).strip()
+    ingress_ip = str(_get_output_value(outputs, "public_ingress_ip_address")).strip()
+
+    print("The GCP ingress and global IP now exist.\n")
+    subheader("Create or update this DNS record")
+    print(f"  {Colors.BOLD}Type:{Colors.END}  A")
+    print(f"  {Colors.BOLD}Name:{Colors.END}  {hostname}")
+    print(f"  {Colors.BOLD}Value:{Colors.END} {ingress_ip}")
+    print(
+        f"\n{Colors.DIM}If the hostname is proxied through Cloudflare or another CDN, "
+        f"disable proxying until the Google-managed certificate reports Active.{Colors.END}"
+    )
+
+    if dry_run:
+        info(f"[DRY-RUN] Would wait for DNS to point {hostname} at {ingress_ip} and verify HTTPS")
+        return
+
+    wait_for_user(
+        f"Update DNS so {hostname} points to {ingress_ip}.\n"
+        "Once the record is live, bootstrap will wait for the managed certificate and verify the portal."
+    )
+    wait_for_gcp_managed_certificate_active()
+    verify_gcp_public_portal(hostname)
+
+
 def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = False) -> dict[str, dict[str, object]]:
     """Bootstrap the GCP control-plane infrastructure and workloads for gcp-dev."""
     header(f"Deploying {config.environment} Shifter Platform")
@@ -2573,10 +2962,17 @@ def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = Fals
     if dry_run:
         return outputs
 
+    bootstrap_operator_email = ensure_gcp_identity_platform_operator(config, outputs, dry_run=dry_run)
     push_gcp_control_plane_images(config, outputs, dry_run=dry_run)
     with tempfile.TemporaryDirectory(prefix="shifter-gcp-platform-") as staging_root_name:
-        values_path = stage_gcp_control_plane_values(config, outputs, Path(staging_root_name))
+        values_path = stage_gcp_control_plane_values(
+            config,
+            outputs,
+            Path(staging_root_name),
+            bootstrap_operator_email=bootstrap_operator_email,
+        )
         deploy_gcp_control_plane_with_helm(config, outputs, values_path, dry_run=dry_run)
+    walkthrough_gcp_dns_setup_and_wait_for_tls(outputs, dry_run=dry_run)
     success(f"{config.environment} Shifter platform deployed")
     return outputs
 
@@ -2623,8 +3019,12 @@ def gdc_bootstrap_cluster(config: GDCBootstrapConfig, dry_run: bool = False) -> 
 
     success("GDC bootstrap complete")
     print("\nNext commands:")
+    ssh_command = (
+        f"gcloud compute ssh root@{config.workstation.name} --tunnel-through-iap "
+        f"--project {config.project_id} --zone {config.zone}"
+    )
     code_block(
-        f"""gcloud compute ssh root@{config.workstation.name} --project {config.project_id} --zone {config.zone}
+        f"""{ssh_command}
 shifter-gdc-kubectl get nodes
 shifter-gdc-kubeconfig"""
     )

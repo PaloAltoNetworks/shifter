@@ -7,6 +7,10 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
 spec:
+  {{- if .Values.services.portal.backendConfig.securityPolicyName }}
+  securityPolicy:
+    name: {{ .Values.services.portal.backendConfig.securityPolicyName }}
+  {{- end }}
   healthCheck:
     type: {{ .Values.services.portal.backendConfig.healthCheck.type }}
     requestPath: {{ .Values.services.portal.backendConfig.healthCheck.requestPath | quote }}

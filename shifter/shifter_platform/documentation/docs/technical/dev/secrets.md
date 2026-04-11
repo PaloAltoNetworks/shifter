@@ -20,6 +20,10 @@ These must be configured in repository Settings > Secrets and variables > Action
 | `AWS_ROLE_ARN_DEV` | GitHub Actions IAM role for **dev** (OIDC) |
 | `GCP_SERVICE_ACCOUNT` | GitHub Actions service account email for `gcp-dev` deploys |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | GitHub Actions workload identity provider resource for `gcp-dev` deploys |
+| `GCP_BOOTSTRAP_ADMIN_EMAIL` | Optional first GCP operator email for Identity Platform bootstrap |
+| `GCP_BOOTSTRAP_ADMIN_PASSWORD` | Optional first GCP operator password for Identity Platform bootstrap |
+| `PLATFORM_BOOTSTRAP_STAFF_EMAILS` | Optional comma-separated runtime staff bootstrap emails |
+| `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` | Optional comma-separated runtime superuser bootstrap emails |
 
 AWS uses IAM role ARNs for OIDC federation. `gcp-dev` uses Google workload
 identity federation. No static access keys are required.
@@ -54,16 +58,21 @@ already expects at startup:
 | `shifter-gcp-dev-app` | Django `SECRET_KEY`, field encryption key |
 | `shifter-gcp-dev-db` | Database connection JSON bundle |
 | `shifter-gcp-dev-guacamole-db` | Guacamole PostgreSQL connection JSON bundle |
-| `shifter-gcp-dev-oidc` | OIDC client ID, client secret, issuer URL, auth domain |
 | `shifter-gcp-dev-guacamole-json-auth` | Guacamole JSON auth signing key |
 
 Current rollout behavior:
 
 - `shifter-gcp-dev-app` and `shifter-gcp-dev-db` are seeded by Terraform for the first deployable control-plane slice
 - `shifter-gcp-dev-guacamole-db` and `shifter-gcp-dev-guacamole-json-auth` are now seeded by Terraform and synced into the `guacamole-runtime` Kubernetes Secret during deploy
-- `shifter-gcp-dev-oidc` still needs to be populated before the non-debug portal auth path is enabled
-- The `gcp-dev` deploy workflow only exports `OIDC_SECRET_ID` into the portal runtime when all of these conditions hold: `public_hostname` is set, managed TLS is enabled, the OIDC secret has a readable latest version, and the GKE managed certificate reaches `Active`
-- If any of those checks fail, the workflow intentionally keeps `DJANGO_DEBUG=true` and insecure cookies disabled so `gcp-dev` remains reachable through the debug-auth path instead of failing hard during startup
+- Identity Platform is provisioned by Terraform for the secure GCP portal login path
+- The first GCP operator is seeded by bootstrap using `GCP_BOOTSTRAP_ADMIN_EMAIL` / `GCP_BOOTSTRAP_ADMIN_PASSWORD` (or an interactive prompt)
+- Bootstrap operator elevation is runtime-configured with `PLATFORM_BOOTSTRAP_STAFF_EMAILS` / `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS`; these values must stay out of committed source
+- The GCP bootstrap path now assumes the secure portal posture. It no longer preserves the old debug-auth fallback when hostname/TLS settings are missing
+- The operational dependency chain is now explicit:
+  - `public_hostname` must be configured
+  - managed TLS must be enabled
+  - Identity Platform must be provisioned successfully
+  - the public DNS record must point at the GKE ingress IP so the managed certificate can become active
 
 ## What's NOT a Secret
 

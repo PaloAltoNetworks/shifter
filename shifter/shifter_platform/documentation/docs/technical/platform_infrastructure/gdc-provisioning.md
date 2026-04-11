@@ -2,19 +2,23 @@
 
 Range guest provisioning on Google Distributed Cloud (GDC). GDC uses KubeVirt for VM workloads and Kubernetes-native networking for guest isolation.
 
-On AWS, ranges are EC2 instances in isolated VPC subnets. On GDC, ranges are either KubeVirt VMs or lightweight pods on a GDC cluster, connected via custom L2 networks.
+On AWS, ranges are EC2 instances in isolated VPC subnets. On GDC, ranges can be KubeVirt VMs or lightweight pods on a GDC cluster, connected via custom L2 networks.
 
-## Asset Types
+## Runtime Primitives
 
-The provisioner supports three GDC asset types, selected per-scenario:
+The provisioner supports three GDC runtime primitives:
 
 | Type | Module | What It Creates | Use Case |
 |------|--------|----------------|----------|
 | **VM Runtime** | `gdc_vmruntime_assets.py` | `VirtualMachine` + `VirtualMachineDisk` CRDs | Full OS guests (Kali, Ubuntu, Windows, Domain Controller) |
-| **Scenario Pods** | `gdc_scenario_pods.py` | Kubernetes Pods with network attachments | Lightweight container-based guests (lower overhead) |
+| **Scenario Pods** | `gdc_scenario_pods.py` | Kubernetes Pods with network attachments | Lower-fidelity container execution where full guest semantics are not required |
 | **VM-Series NGFW** | `gdc_vmseries_ngfw.py` | VM-Series firewall VMs on GDC VM Runtime | Palo Alto Networks NGFW integration |
 
-Mixed ranges can combine VMs and pods on the same L2 network.
+Current direction:
+
+- full Shifter feature parity on GCP is defined against the VM Runtime path
+- pod execution is an internal optimization/runtime mode, not an author-facing scenario contract
+- mixed ranges are valid when the provisioner determines different runtimes are appropriate for different guests on the same L2 network
 
 ## Network Provisioning
 
@@ -44,7 +48,7 @@ Per-profile configuration (vCPU, memory, disk size, image URL) is defined in `GD
 
 Module: `gdc_scenario_pods.py`
 
-Lighter-weight alternative to full VMs. Pods attach to range L2 networks via CNI network attachment annotations. Supports Kali and Ubuntu container images. Lower resource overhead but no Windows or bare-metal OS support.
+Lighter-weight alternative to full VMs. Pods attach to range L2 networks via CNI network attachment annotations. Lower resource overhead, but they are not the parity baseline for features that require full guest semantics.
 
 ## VM-Series NGFW on GDC
 

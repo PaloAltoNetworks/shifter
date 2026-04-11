@@ -11,6 +11,14 @@ on:
         required: false
       GCP_WORKLOAD_IDENTITY_PROVIDER:
         required: false
+      GCP_BOOTSTRAP_ADMIN_EMAIL:
+        required: false
+      GCP_BOOTSTRAP_ADMIN_PASSWORD:
+        required: false
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS:
+        required: false
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS:
+        required: false
 
 permissions:
   id-token: write
@@ -59,6 +67,10 @@ jobs:
       K8S_OVERLAY_DIR: platform/k8s/gcp/overlays/${{ inputs.environment }}
       TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core
       EDGE_CERT_NAME: platform-managed-cert
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
+      GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
+      GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Ensure GCP deploy auth is configured
@@ -112,6 +124,29 @@ jobs:
       - name: Capture Terraform outputs
         working-directory: ${{ env.TF_DIR }}
         run: terraform output -json > /tmp/gcp-terraform-outputs.json
+      - name: Seed Identity Platform bootstrap operator
+        if: env.GCP_BOOTSTRAP_ADMIN_EMAIL != '' && env.GCP_BOOTSTRAP_ADMIN_PASSWORD != ''
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+
+          module_path = Path("scripts/bootstrap/deploy.py")
+          spec = importlib.util.spec_from_file_location("bootstrap_deploy", module_path)
+          if spec is None or spec.loader is None:
+              raise RuntimeError(f"Unable to load bootstrap module from {module_path}")
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          outputs = json.loads(Path("/tmp/gcp-terraform-outputs.json").read_text())
+          config = module.GDCBootstrapConfig(
+              project_id=os.environ["PROJECT_ID"],
+              cluster_id="cluster1",
+          )
+          module.ensure_gcp_identity_platform_operator(config, outputs)
+          PY
       - name: Export deploy metadata
         run: |
           python3 - <<'PY'
@@ -135,18 +170,12 @@ jobs:
               env_file.write(f"ARTIFACT_REGISTRY_HOST={image_roots['portal'].split('/')[0]}\n")
               env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
               env_file.write(f"MANAGED_TLS_ENABLED={'true' if value('managed_tls_enabled') else 'false'}\n")
-              env_file.write(f"OIDC_SECRET_RESOURCE={value('runtime_secret_ids')['oidc']}\n")
           PY
       - name: Resolve requested portal auth mode
         run: |
           SECURE_PORTAL_MODE_REQUESTED=false
           if [ -n "${PUBLIC_HOSTNAME}" ] && [ "${MANAGED_TLS_ENABLED}" = "true" ]; then
-            OIDC_SECRET_NAME="${OIDC_SECRET_RESOURCE##*/}"
-            if gcloud secrets versions access latest --secret "${OIDC_SECRET_NAME}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-              SECURE_PORTAL_MODE_REQUESTED=true
-            else
-              echo "::warning::Managed TLS is configured for ${PUBLIC_HOSTNAME}, but the OIDC secret has no readable version. The portal will stay in DEBUG mode."
-            fi
+            SECURE_PORTAL_MODE_REQUESTED=true
           fi
           echo "SECURE_PORTAL_MODE_REQUESTED=${SECURE_PORTAL_MODE_REQUESTED}" >> "$GITHUB_ENV"
       - name: Login to Artifact Registry

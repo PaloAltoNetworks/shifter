@@ -1,0 +1,14 @@
+{{- if .Values.services.guacamoleClient.backendConfig.enabled }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ .Values.services.guacamoleClient.backendConfig.name }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  {{- if .Values.services.guacamoleClient.backendConfig.securityPolicyName }}
+  securityPolicy:
+    name: {{ .Values.services.guacamoleClient.backendConfig.securityPolicyName }}
+  {{- end }}
+{{- end }}

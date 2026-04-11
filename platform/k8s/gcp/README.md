@@ -1,34 +1,41 @@
-# GKE Manifests
+# GKE Deployment Assets
 
-This tree stages the GKE-native control-plane deployment path for `gcp-dev`.
+This tree contains the GCP/GKE deployment assets that support the Helm-based Shifter control-plane rollout.
 
 Current scope:
 
-- Django web deployment
-- GKE-native `guacd` and `guacamole-client` deployments
-- CMS, Engine, and Mission Control worker deployments
-- CTF scheduler deployment
-- Kubernetes namespaces, service accounts, and RBAC for the Job-launching path
-- `kustomize` overlay for `gcp-dev`
-- generated runtime ConfigMap values derived from Terraform outputs
-- generated range-network env contract for ephemeral provisioner Jobs
-- generated edge manifest for `/` and `/guacamole`
-- optional hostname-aware ingress rules with Google-managed certificate annotations and HTTPS redirect FrontendConfig
-- rollout automation on `gcp-dev` pushes after images are pushed to Artifact Registry
-- namespace Secret sync for Guacamole runtime credentials sourced from Secret Manager
-- conditional enablement of the non-debug OIDC portal path when hostname, TLS, OIDC secret readiness, and managed-certificate readiness all line up
+- Helm chart packaging for the Shifter control plane (`platform/charts/shifter`)
+- chart-owned portal, worker, scheduler, `guacd`, and `guacamole-client` workloads
+- chart-owned Services, service accounts, RBAC, runtime ConfigMap, and Guacamole Secret
+- GKE Ingress resources with Google-managed certificate and HTTPS redirect support
+- chart-owned `BackendConfig` resources for:
+  - portal health checks
+  - Cloud Armor attachment on the public portal backend
+  - Cloud Armor attachment on the public Guacamole backend
+- generated runtime values derived from Terraform outputs and bootstrap-owned secret fetches
+- secure portal runtime contract for the GCP Identity Platform auth path
+- generated range-network env contract for provisioner jobs
+- bootstrap-driven rollout via `helm upgrade --install`
 
 Current non-goals:
 
 - VM / NGFW runtime integration
 
-CI renders the `gcp-dev` overlay with `kubectl kustomize` and validates the
-rendered output together with the committed generated edge manifest using
-`kubeconform` on every PR. Pushes to `gcp-dev` also render the runtime env file
-and edge manifest from Terraform outputs, apply the workloads to GKE, sync the
-Guacamole namespace Secret, roll the deployments, apply the edge resources, and
-promote the runtime from the IP/debug path to the hostname/TLS path once the
-managed certificate becomes active.
+Deployment model:
+
+- Base chart defaults live in `platform/charts/shifter/values.yaml`.
+- Environment overrides live in `platform/charts/shifter/values-gcp-dev.yaml` and `platform/charts/shifter/values-gcp-prod.yaml`.
+- Bootstrap renders a final generated values file from live Terraform outputs and Secret Manager payloads, then applies the chart.
+- GCP bootstrap now always renders the secure runtime path. It no longer silently falls back to the public IP/debug/dev-login path.
+- Runtime config can elevate the bootstrap operator through `PLATFORM_BOOTSTRAP_STAFF_EMAILS` and `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` without committing identities to the chart.
+
+Security posture:
+
+- Portal and Guacamole are the only intended public backends.
+- Both public backends attach to a Cloud Armor policy through `BackendConfig`.
+- The public hostname for `gcp-dev` is `shifter.keplerops.com`.
+- Managed TLS is required for bootstrap.
+- DNS is currently expected to be managed outside this tree, so the hostname must be pointed at the ingress IP for certificate activation.
 
 The generated runtime env now carries the provider-neutral range-network
 contract and the GDC access settings used by the provisioner for the active

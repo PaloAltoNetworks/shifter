@@ -25,6 +25,78 @@ import deploy
 # =============================================================================
 
 
+def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> dict[str, dict[str, object]]:
+    """Return representative Terraform outputs for the GCP control-plane path."""
+    return {
+        "gke_cluster_name": {"value": "shifter-gcp-dev-platform"},
+        "gke_cluster_location": {"value": "us-central1"},
+        "artifact_registry_image_roots": {
+            "value": {
+                "portal": f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-portal/portal",
+                "guacd": f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-guacd/guacd",
+                "guacamole-client": (
+                    f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-guacamole-client/guacamole-client"
+                ),
+                "pulumi-provisioner": (
+                    f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-pulumi-provisioner/pulumi-provisioner"
+                ),
+            }
+        },
+        "assets_bucket_name": {"value": f"{project_id}-gcp-dev-assets"},
+        "terraform_state_bucket_name": {"value": f"{project_id}-terraform-state"},
+        "platform_events_topic_id": {"value": f"projects/{project_id}/topics/shifter-gcp-dev-events"},
+        "platform_event_subscriptions": {
+            "value": {
+                "cms": f"projects/{project_id}/subscriptions/shifter-gcp-dev-cms",
+                "engine": f"projects/{project_id}/subscriptions/shifter-gcp-dev-engine",
+                "mc": f"projects/{project_id}/subscriptions/shifter-gcp-dev-mc",
+                "experiments": f"projects/{project_id}/subscriptions/shifter-gcp-dev-experiments",
+            }
+        },
+        "runtime_secret_ids": {
+            "value": {
+                "app": f"projects/{project_id}/secrets/shifter-gcp-dev-app",
+                "db": f"projects/{project_id}/secrets/shifter-gcp-dev-db",
+                "guacamole-db": f"projects/{project_id}/secrets/shifter-gcp-dev-guacamole-db",
+                "guacamole-json-auth": f"projects/{project_id}/secrets/shifter-gcp-dev-guacamole-json-auth",
+                "oidc": f"projects/{project_id}/secrets/shifter-gcp-dev-oidc",
+            }
+        },
+        "control_plane_database": {
+            "value": {
+                "private_ip": "10.40.0.10",
+                "port": 5432,
+                "database_name": "shifter",
+                "user_name": "shifter",
+            }
+        },
+        "control_plane_cache": {"value": {"host": "10.40.0.20", "port": 6379}},
+        "guacamole_database": {
+            "value": {
+                "host": "10.40.0.10",
+                "port": 5432,
+                "database_name": "guacamole",
+                "user_name": "guacamole",
+            }
+        },
+        "public_ingress_ip_name": {"value": "shifter-gcp-dev-platform-ip"},
+        "public_ingress_ip_address": {"value": "34.123.45.67"},
+        "public_hostname": {"value": ""},
+        "managed_tls_enabled": {"value": False},
+        "range_network_id": {"value": f"projects/{project_id}/global/networks/shifter-gcp-dev-range"},
+        "range_network_cidr": {"value": "10.50.0.0/16"},
+        "range_network_region": {"value": "us-central1"},
+        "portal_network_cidrs": {"value": ["10.40.0.0/20", "10.44.0.0/16"]},
+        "workload_service_accounts": {
+            "value": {
+                "portal": f"shiftergcpdev-portal@{project_id}.iam.gserviceaccount.com",
+                "workers": f"shiftergcpdev-workers@{project_id}.iam.gserviceaccount.com",
+                "provisioner": f"shiftergcpdev-provisioner@{project_id}.iam.gserviceaccount.com",
+            }
+        },
+    }
+
+
 @pytest.fixture
 def mock_stdin_tty():
     """Mock sys.stdin.isatty() to return True (interactive terminal)."""
@@ -258,14 +330,20 @@ class TestCheckDependencies:
             assert "https://developer.hashicorp.com" in captured.out
             assert "https://git-scm.com" in captured.out
 
-    def test_gdc_bootstrap_checks_gcloud_and_ssh_keygen_instead_of_aws(self):
-        """The GDC bootstrap path should require gcloud/ssh-keygen, not AWS/Terraform."""
+    def test_gdc_bootstrap_checks_gcp_platform_toolchain(self):
+        """The GDC bootstrap path should require the full GCP deploy toolchain."""
         with patch("shutil.which") as mock_which:
             mock_which.side_effect = lambda cmd: (
                 "/usr/bin/gcloud"
                 if cmd == "gcloud"
                 else "/usr/bin/ssh-keygen"
                 if cmd == "ssh-keygen"
+                else "/usr/bin/terraform"
+                if cmd == "terraform"
+                else "/usr/bin/docker"
+                if cmd == "docker"
+                else "/usr/bin/kubectl"
+                if cmd == "kubectl"
                 else "/usr/bin/git"
                 if cmd == "git"
                 else None
@@ -795,6 +873,37 @@ class TestGdcRenderers:
         assert "fs.inotify.max_user_instances = 1024" in rendered
         assert 'configure_remote_host "10.240.0.3" "10.200.0.3"' in rendered
 
+    def test_prepare_workstation_script_installs_staged_bmctl(self):
+        """The workstation prep must install the pinned staged bmctl binary, not curl it remotely."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        rendered = deploy.render_gdc_prepare_workstation_script(config)
+
+        assert f"install -m 755 {config.staging_bundle_dir}/bmctl /usr/local/sbin/bmctl" in rendered
+        assert "anthos-baremetal-release" not in rendered
+
+    def test_rendered_gdc_shell_scripts_parse_with_bash(self, tmp_path):
+        """Rendered bootstrap shell scripts must be syntactically valid bash."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        rendered_scripts = {
+            "prepare-workstation.sh": deploy.render_gdc_prepare_workstation_script(config),
+            "prepare-hosts.sh": deploy.render_gdc_prepare_hosts_script(config),
+            "create-cluster.sh": deploy.render_gdc_create_cluster_script(config),
+            "install-helper.sh": deploy.render_gdc_install_helper_script(config),
+        }
+
+        for name, rendered in rendered_scripts.items():
+            script_path = tmp_path / name
+            script_path.write_text(rendered)
+            process = subprocess.Popen(
+                ["bash", "-n", str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stdout, stderr = process.communicate()
+            assert process.returncode == 0, f"{name} failed bash -n: {stdout}{stderr}"
+
     def test_create_cluster_script_is_safe_to_rerun(self):
         """The cluster create script should skip cluster creation if the kubeconfig already exists."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
@@ -840,6 +949,10 @@ class TestGdcBootstrapCluster:
             patch("deploy.run_gdc_workstation_script") as mock_remote,
             patch("deploy.sync_gdc_access_secret") as mock_access_secret,
             patch("deploy.sync_gdc_vm_image_secret") as mock_vm_image_secret,
+            patch(
+                "deploy.bootstrap_gcp_control_plane",
+                return_value=_sample_gcp_control_plane_outputs(),
+            ) as mock_platform,
         ):
             result = deploy.gdc_bootstrap_cluster(config)
 
@@ -860,8 +973,336 @@ class TestGdcBootstrapCluster:
             ]
             mock_access_secret.assert_called_once_with(config, dry_run=False)
             mock_vm_image_secret.assert_called_once_with(config, staged_assets["service_account_key"], dry_run=False)
+            mock_platform.assert_called_once_with(config, dry_run=False)
             assert result["gdc_access_secret_id"] == "shifter-gcp-dev-gdc-access"
             assert result["gdc_vm_image_gcs_secret_id"] == "shifter-gcp-dev-gdc-vm-image-gcs"
+            assert result["gke_cluster_name"] == "shifter-gcp-dev-platform"
+
+
+class TestGdcControlPlaneTerraform:
+    """Tests for the GCP control-plane Terraform bootstrap path."""
+
+    def test_uses_requested_project_for_backend_and_apply(self, mock_repo_root):
+        """Terraform bootstrap must target the live project instead of the committed gcp-dev placeholder."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        tf_dir = mock_repo_root / "platform" / "terraform" / "gcp" / "environments" / "gcp-dev"
+        tf_dir.mkdir(parents=True)
+        (tf_dir / "terraform.tfvars").write_text('project_id = "shifter-gcp-dev"\nregion = "us-central1"\n')
+
+        terraform_output = json.dumps(_sample_gcp_control_plane_outputs(config.project_id))
+
+        with (
+            patch("deploy.get_repo_root", return_value=mock_repo_root),
+            patch("deploy.gcloud_resource_exists", return_value=False),
+            patch("deploy.run_cmd") as mock_run_cmd,
+            patch("os.chdir"),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(["terraform"], 0, stdout=terraform_output),
+            ),
+        ):
+            outputs = deploy.apply_gcp_control_plane_terraform(config)
+
+        init_call = mock_run_cmd.call_args_list[2]
+        assert init_call.args[0] == [
+            "terraform",
+            "init",
+            "-reconfigure",
+            "-backend-config=bucket=prod-rwctxzl6shxk-terraform-state",
+            "-backend-config=prefix=shifter/gcp-dev/platform-core",
+        ]
+
+        apply_call = mock_run_cmd.call_args_list[3]
+        assert apply_call.args[0] == [
+            "terraform",
+            "apply",
+            "-auto-approve",
+            "-var=project_id=prod-rwctxzl6shxk",
+        ]
+        assert outputs["gke_cluster_name"]["value"] == "shifter-gcp-dev-platform"
+
+
+class TestGdcControlPlaneOverlay:
+    """Tests for project-aware staging of the GCP platform overlay."""
+
+    def test_stages_overlay_with_live_project_specific_values(self, tmp_path):
+        """The staged overlay must not retain hardcoded shifter-gcp-dev project values."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        repo_root = Path(__file__).resolve().parents[3]
+
+        with patch("deploy.get_repo_root", return_value=repo_root):
+            overlay_dir = deploy.stage_gcp_control_plane_overlay(config, outputs, tmp_path)
+
+        runtime_env = (overlay_dir / "platform-runtime.env").read_text()
+        assert "GCP_PROJECT_ID=prod-rwctxzl6shxk\n" in runtime_env
+        assert "GOOGLE_CLOUD_PROJECT=prod-rwctxzl6shxk\n" in runtime_env
+        assert (
+            "GDC_VM_IMAGE_GCS_SECRET_ID=projects/prod-rwctxzl6shxk/secrets/shifter-gcp-dev-gdc-vm-image-gcs\n"
+            in runtime_env
+        )
+
+        service_accounts = (overlay_dir / "patch-serviceaccounts.yaml").read_text()
+        assert "shiftergcpdev-portal@prod-rwctxzl6shxk.iam.gserviceaccount.com" in service_accounts
+        assert "shiftergcpdev-workers@prod-rwctxzl6shxk.iam.gserviceaccount.com" in service_accounts
+        assert "shiftergcpdev-provisioner@prod-rwctxzl6shxk.iam.gserviceaccount.com" in service_accounts
+
+        kustomization = (overlay_dir / "kustomization.yaml").read_text()
+        assert "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-portal/portal" in kustomization
+        assert "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-guacd/guacd" in kustomization
+        assert (
+            "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/"
+            "shifter-gcp-dev-guacamole-client/guacamole-client" in kustomization
+        )
+
+
+class TestGdcControlPlaneRollout:
+    """Tests for rolling out the GCP control plane onto GKE."""
+
+    def test_rollout_sequence_fetches_credentials_syncs_secret_and_waits_for_deployments(self, tmp_path):
+        """The rollout path must apply manifests, sync Guacamole runtime secrets, and wait for every deployment."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        overlay_dir = tmp_path / "overlay"
+        overlay_dir.mkdir()
+        (overlay_dir / "platform-edge.generated.yaml").write_text("apiVersion: networking.k8s.io/v1\nkind: Ingress\n")
+
+        with (
+            patch("deploy.run_cmd") as mock_run_cmd,
+            patch(
+                "deploy.fetch_gcp_secret_payload",
+                side_effect=[
+                    json.dumps({"username": "guac", "password": "supersecret"}),
+                    "json-auth-key",
+                ],
+            ),
+        ):
+            deploy.roll_out_gcp_control_plane(config, outputs, overlay_dir)
+
+        commands = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert commands[0] == [
+            "gcloud",
+            "container",
+            "clusters",
+            "get-credentials",
+            "shifter-gcp-dev-platform",
+            "--location",
+            "us-central1",
+            "--project",
+            "prod-rwctxzl6shxk",
+        ]
+        assert ["kubectl", "apply", "-k", str(overlay_dir)] in commands
+        assert ["kubectl", "apply", "-f", str(overlay_dir / "guacamole-runtime.generated.yaml")] in commands
+        assert ["kubectl", "apply", "-f", str(overlay_dir / "platform-edge.generated.yaml")] in commands
+
+        rollout_status_calls = [cmd for cmd in commands if cmd[:3] == ["kubectl", "rollout", "status"]]
+        assert len(rollout_status_calls) == 7
+        for deployment in (
+            "portal-web",
+            "guacd",
+            "guacamole-client",
+            "worker-cms",
+            "worker-engine",
+            "worker-mc",
+            "ctf-scheduler",
+        ):
+            assert any(f"deployment/{deployment}" in arg for cmd in rollout_status_calls for arg in cmd)
+
+
+class TestGdcBootstrapPrerequisites:
+    """Tests for GDC bootstrap IAM and API prerequisites."""
+
+    def test_gdc_api_enablement_includes_cloud_storage(self):
+        """Bootstrap must enable the Cloud Storage API used by GDC workflows."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        with patch("deploy.run_cmd") as mock_run_cmd:
+            deploy.ensure_gdc_apis(config)
+
+        enable_call = mock_run_cmd.call_args_list[1]
+        assert enable_call.args[0][:3] == ["gcloud", "services", "enable"]
+        assert "storage.googleapis.com" in enable_call.args[0]
+
+    def test_gdc_service_account_grants_compute_viewer_for_bmctl(self):
+        """The bootstrap service account must be able to read Compute zone metadata for bmctl."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        with (
+            patch("deploy.gcloud_resource_exists", return_value=True),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.ensure_gdc_service_account(config)
+
+        granted_roles = [call.args[0][7] for call in mock_run_cmd.call_args_list]
+        assert "roles/compute.viewer" in granted_roles
+
+
+class TestGdcBootstrapAssetUpload:
+    """Tests for staging the GDC bootstrap bundle on the workstation."""
+
+    def test_creates_remote_staging_directory_before_recursive_scp(self, tmp_path):
+        """The uploader must provision the remote staging dir before attempting scp."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        assets_dir = tmp_path / "cluster1"
+        assets_dir.mkdir()
+
+        with patch("deploy.run_cmd") as mock_run_cmd:
+            deploy.upload_gdc_assets(config, assets_dir)
+
+        mkdir_call = mock_run_cmd.call_args_list[0]
+        assert mkdir_call.args[0] == [
+            "gcloud",
+            "compute",
+            "ssh",
+            f"root@{config.workstation.name}",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            "--command",
+            f"rm -rf {config.staging_bundle_dir} && mkdir -p {config.staging_dir}",
+        ]
+        assert mkdir_call.kwargs == {"dry_run": False}
+
+        scp_call = mock_run_cmd.call_args_list[1]
+        assert scp_call.args[0] == [
+            "gcloud",
+            "compute",
+            "scp",
+            "--recurse",
+            "--project",
+            config.project_id,
+            "--zone",
+            config.zone,
+            str(assets_dir),
+            f"root@{config.workstation.name}:{config.staging_dir}/",
+        ]
+        assert scp_call.kwargs == {"dry_run": False}
+
+
+class TestGdcStagedAssets:
+    """Tests for the local GDC bootstrap bundle assembly."""
+
+    def test_reuses_existing_workstation_credentials_when_present(self, tmp_path):
+        """Reruns must reuse the workstation bootstrap credentials instead of minting fresh ones."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        existing_material = {
+            "private_key": "PRIVATE KEY\n",
+            "public_key": "ssh-rsa AAAAexisting bootstrap@ws\n",
+            "service_account_key": '{"private_key_id":"d6edc4b1cc096f95b105b810d838e786b040a3e9"}\n',
+        }
+
+        def fake_run_cmd(cmd, *args, **kwargs):
+            if cmd[:3] == ["gcloud", "storage", "cp"]:
+                Path(cmd[4]).write_text("bmctl-binary")
+            return None
+
+        with (
+            patch("deploy._fetch_existing_gdc_bootstrap_material", return_value=existing_material),
+            patch("deploy.run_cmd", side_effect=fake_run_cmd) as mock_run_cmd,
+        ):
+            staged_assets = deploy.stage_gdc_bootstrap_assets(config, tmp_path)
+
+        assert staged_assets["private_key"].read_text() == "PRIVATE KEY\n"
+        assert staged_assets["public_key"].read_text() == "ssh-rsa AAAAexisting bootstrap@ws\n"
+        assert (
+            staged_assets["service_account_key"].read_text()
+            == '{"private_key_id":"d6edc4b1cc096f95b105b810d838e786b040a3e9"}\n'
+        )
+        executed = [call.args[0] for call in mock_run_cmd.call_args_list]
+        assert ["ssh-keygen", "-t", "rsa", "-N", "", "-f", str(staged_assets["private_key"])] not in executed
+        assert not any(cmd[:5] == ["gcloud", "iam", "service-accounts", "keys", "create"] for cmd in executed)
+
+    def test_stages_bmctl_binary_from_gcs_into_bundle(self, tmp_path):
+        """Asset staging must fetch the pinned bmctl binary into the uploaded bundle."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        def fake_run_cmd(cmd, *args, **kwargs):
+            if cmd[:4] == ["ssh-keygen", "-t", "rsa", "-N"]:
+                private_key = Path(cmd[-1])
+                private_key.write_text("PRIVATE KEY\n")
+                private_key.with_suffix(".pub").write_text("ssh-rsa AAAATESTKEY\n")
+            elif cmd[:5] == ["gcloud", "iam", "service-accounts", "keys", "create"]:
+                Path(cmd[5]).write_text('{"type": "service_account"}\n')
+            elif cmd[:3] == ["gcloud", "storage", "cp"]:
+                Path(cmd[4]).write_text("bmctl-binary")
+            return None
+
+        with (
+            patch("deploy._fetch_existing_gdc_bootstrap_material", return_value=None),
+            patch("deploy.run_cmd", side_effect=fake_run_cmd) as mock_run_cmd,
+        ):
+            staged_assets = deploy.stage_gdc_bootstrap_assets(config, tmp_path)
+
+        assert staged_assets["bmctl_binary"].read_text() == "bmctl-binary"
+        assert mock_run_cmd.call_args_list[2].args[0] == [
+            "gcloud",
+            "storage",
+            "cp",
+            config.bmctl_gcs_source,
+            str(staged_assets["bmctl_binary"]),
+        ]
+
+
+class TestGdcRerunSafety:
+    """Tests for rerun-safe secret and metadata synchronization."""
+
+    def test_sync_instance_ssh_metadata_skips_hosts_already_in_sync(self, tmp_path):
+        """Instance metadata writes should be skipped when the expected key is already present."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        metadata_path = tmp_path / "ssh-metadata"
+        metadata_path.write_text("root:ssh-rsa AAAAexisting atomik@Phoenix\n")
+
+        with (
+            patch("deploy.get_gdc_instance_ssh_metadata") as mock_get_metadata,
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            mock_get_metadata.side_effect = [
+                "root:ssh-rsa AAAAexisting atomik@Phoenix",
+                "root:ssh-rsa AAAAdifferent atomik@Phoenix",
+                "root:ssh-rsa AAAAexisting atomik@Phoenix",
+                "root:ssh-rsa AAAAexisting atomik@Phoenix",
+                "root:ssh-rsa AAAAexisting atomik@Phoenix",
+                "root:ssh-rsa AAAAexisting atomik@Phoenix",
+            ]
+
+            deploy.sync_gdc_instance_ssh_metadata(config, metadata_path)
+
+        assert mock_run_cmd.call_count == 1
+        assert "cluster1-abm-cp1-001" in mock_run_cmd.call_args.args[0]
+
+    def test_sync_gdc_access_secret_skips_unchanged_payload(self):
+        """Bootstrap should not add a new secret version when the access payload is unchanged."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        payload = deploy.build_gdc_access_secret_payload(config, "apiVersion: v1\nclusters: []\n")
+
+        with (
+            patch("deploy.ensure_gdc_access_secret"),
+            patch("deploy.fetch_gdc_kubeconfig", return_value="apiVersion: v1\nclusters: []\n"),
+            patch("deploy.get_latest_gcp_secret_payload", return_value=payload),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.sync_gdc_access_secret(config)
+
+        mock_run_cmd.assert_not_called()
+
+    def test_sync_gdc_vm_image_secret_skips_unchanged_payload(self, tmp_path):
+        """Bootstrap should not add a new VM image secret version when the key payload is unchanged."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        key_path = tmp_path / "bm-gcr.json"
+        key_path.write_text('{"private_key_id":"d6edc4b1cc096f95b105b810d838e786b040a3e9"}\n')
+
+        with (
+            patch("deploy.ensure_gdc_vm_image_secret"),
+            patch(
+                "deploy.get_latest_gcp_secret_payload",
+                return_value='{"private_key_id":"d6edc4b1cc096f95b105b810d838e786b040a3e9"}\n',
+            ),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.sync_gdc_vm_image_secret(config, key_path)
+
+        mock_run_cmd.assert_not_called()
 
 
 # =============================================================================

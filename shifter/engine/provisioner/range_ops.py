@@ -9,7 +9,6 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import gdc_vmruntime_assets
 from events import publish_ngfw_event, publish_status_update
 from executors.aws_executor import AWSExecutor
 from main import get_db_connection, get_range_data_by_request_id, update_range_status
@@ -23,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 NGFW_START_MAX_RETRIES = 3
 NGFW_START_RETRY_DELAYS = (10, 30, 60)
+_GCP_RANGE_LIFECYCLE_NOT_IMPLEMENTED = (
+    "GCP range pause/resume is not implemented yet. "
+    "Pod-backed assets do not preserve runtime state across pause/resume, "
+    "so the GCP lifecycle path is intentionally disabled until parity work is complete."
+)
 
 
 def get_range_instance_ids(request_id: str) -> list[dict]:
@@ -47,7 +51,7 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT i.uuid, i.state, i.role
+            SELECT i.uuid, i.state, i.role, i.name
             FROM engine_instance i
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.request_id = %s
@@ -61,13 +65,14 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
         raise ValueError(f"No instances found for request: {request_id}")
 
     instances = []
-    for uuid, state, role in rows:
+    for uuid, state, role, name in rows:
         state_dict = state if isinstance(state, dict) else {}
         cloud_provider = str(state_dict.get("cloud_provider", "aws")).strip().lower() or "aws"
         asset_type = str(state_dict.get("asset_type", "vm_runtime_vm")).strip() or "vm_runtime_vm"
 
         entry = {
             "uuid": str(uuid),
+            "name": name or "",
             "role": role,
             "cloud_provider": cloud_provider,
             "asset_type": asset_type,
@@ -88,7 +93,7 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
         elif cloud_provider == "gcp" and asset_type == "vm_runtime_vm":
             entry["operation_mode"] = "gdc_vm_runtime"
         elif cloud_provider == "gcp" and asset_type == "scenario_pod":
-            entry["operation_mode"] = "noop"
+            entry["operation_mode"] = "gdc_scenario_pod"
         else:
             raise ValueError(
                 "Unsupported range lifecycle target "
@@ -505,15 +510,11 @@ def _execute_instance_operation(
     mode = instance["operation_mode"]
 
     try:
-        if mode == "noop":
-            logger.info("Skipping %s for no-op asset uuid=%s", operation, uuid)
-            return (uuid, True, None)
-
         if mode == "gdc_vm_runtime":
-            gdc_operation = "stop" if operation == "pause" else "start"
-            gdc_vmruntime_assets.run_power_operation(gdc_operation, instance["state"])
-            logger.info("GDC VM Runtime %s succeeded for uuid=%s", gdc_operation, uuid)
-            return (uuid, True, None)
+            raise NotImplementedError(_GCP_RANGE_LIFECYCLE_NOT_IMPLEMENTED)
+
+        if mode == "gdc_scenario_pod":
+            raise NotImplementedError(_GCP_RANGE_LIFECYCLE_NOT_IMPLEMENTED)
 
         if mode != "aws" or executor is None or orchestrator is None or plan is None:
             raise RuntimeError(f"Unsupported lifecycle execution mode {mode!r} for uuid={uuid}")

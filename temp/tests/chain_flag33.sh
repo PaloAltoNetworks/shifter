@@ -38,27 +38,26 @@ check("playbook mentions 10 second window", "10 second" in playbook.lower() or "
 check("playbook mentions input register 60", "register 60" in playbook or "input register" in playbook.lower())
 shutil.rmtree(d)
 
-# Step 2: Execute the sequence on A11
+# Step 2: Check if already unlocked
 from pymodbus.client import ModbusTcpClient
 c = ModbusTcpClient(HOST, port=PORT)
 c.connect()
 
-for mode in [0, 1, 2, 0]:
-    c.write_register(address=30, value=mode)
-    time.sleep(0.5)
-time.sleep(0.5)
-
-# Step 3: Read calibration code from input register 60
-r = c.read_input_registers(address=60, count=1)
-code = r.registers[0]
-check("calibration code appeared", code > 0, f"got {code}")
-
-# Step 4: Write code to register 99
-c.write_register(address=99, value=code)
-time.sleep(0.5)
-
-# Step 5: Read flag
 r = c.read_holding_registers(address=100, count=24)
+already_unlocked = any(v > 0 for v in r.registers)
+
+if not already_unlocked:
+    for mode in [0, 1, 2, 0]:
+        c.write_register(address=30, value=mode)
+        time.sleep(0.5)
+    time.sleep(0.5)
+    r = c.read_input_registers(address=60, count=1)
+    code = r.registers[0]
+    check("calibration code appeared", code > 0, f"got {code}")
+    c.write_register(address=99, value=code)
+    time.sleep(0.5)
+    r = c.read_holding_registers(address=100, count=24)
+
 flag = "".join(chr(v) for v in r.registers if v > 0)
 check("flag 33 unlocked via A7 hint chain", flag == "FLAG{c7a1e3f9d0b52864}", f"got: {flag!r}")
 c.close()

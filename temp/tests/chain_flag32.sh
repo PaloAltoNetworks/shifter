@@ -51,11 +51,16 @@ resp = c.execute(False, rq)
 has_vendor = hasattr(resp, "information") and resp.information
 check("device ID returns vendor info", has_vendor)
 
-# Step 3: Write mode 3, write 482, read flag
-c.write_register(address=20, value=3)
-c.write_register(address=99, value=482)
-import time; time.sleep(0.5)
+# Step 3: Check if already unlocked, otherwise do the unlock
 r = c.read_holding_registers(address=100, count=24)
+already_unlocked = any(v > 0 for v in r.registers)
+
+if not already_unlocked:
+    c.write_register(address=20, value=3)
+    c.write_register(address=99, value=482)
+    import time; time.sleep(0.5)
+    r = c.read_holding_registers(address=100, count=24)
+
 flag = "".join(chr(v) for v in r.registers if v > 0)
 check("flag 32 unlocked via A7 hint chain", flag == "FLAG{9b3e7c1d0f5a2846}", f"got: {flag!r}")
 c.close()

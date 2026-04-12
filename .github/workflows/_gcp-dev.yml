@@ -38,6 +38,7 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.7.1"
+          terraform_wrapper: false
       - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415
         with:
           version: v1.34.1
@@ -100,6 +101,7 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.7.1"
+          terraform_wrapper: false
       - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415
       - name: Bootstrap Terraform backend metadata
         run: |

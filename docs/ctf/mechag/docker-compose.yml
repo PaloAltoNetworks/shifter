@@ -211,7 +211,9 @@ services:
     restart: unless-stopped
 
   a12-arms:
-    build: ./a12
+    build:
+      context: .
+      dockerfile: ./a12/Dockerfile
     container_name: a12-arms
     hostname: arms-ctrl
     networks:

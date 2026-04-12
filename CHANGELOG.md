@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.69.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/A4-file-share/smoketest.sh`: A4 file share
+  end-to-end smoketest (33 checks). Exercises every share ACL and
+  every flag path from the a14-kali container: anonymous read of
+  Public share and flag 11 from `cafeteria_menu_april.pdf` PDF
+  Author metadata; authenticated read of HR as `v.harlan` with
+  flag 9 on page 2 of `chen_james_termination.pdf` Case Reference
+  Number field; Procurement read with PO-2847 "Special
+  Instructions" cross-reference followed into
+  `specs/actuator_requirements_v4.pdf` for flag 13; IT share
+  anonymous-deny plus `svc-fileshare` (A1 Kowalski creds pivot)
+  authenticated read of `backup_verification.log` for flag 15;
+  Executive share read. Verifies design-specified share contents
+  (network_diagram, server_inventory, PO-3102/3455, reactor
+  invoice, org chart, Chen NDA, board minutes, budget summary).
+
 ## [3.68.0] - 2026-04-12
 
 ### Fixed

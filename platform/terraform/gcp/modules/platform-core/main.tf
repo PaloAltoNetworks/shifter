@@ -317,7 +317,7 @@ resource "google_cloudfunctions2_function" "identity_platform_before_create" {
   }
 
   service_config {
-    available_memory               = "128M"
+    available_memory               = "128Mi"
     timeout_seconds                = 10
     ingress_settings               = "ALLOW_ALL"
     all_traffic_on_latest_revision = true

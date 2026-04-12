@@ -170,6 +170,9 @@ log "  Project-L: weapons-integration"
 # ============================================
 log "Pushing repo content..."
 
+# Fix git safe.directory for repos owned by different user
+git config --global --add safe.directory '*'
+
 PUSH_URL="${GITEA_URL/http:\/\//http:\/\/${ADMIN_USER}:${ADMIN_PASS}@}"
 
 REPO_MAP=(

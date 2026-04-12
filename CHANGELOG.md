@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.70.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/A5-scada-generator/smoketest.py`: A5 SCADA
+  generator HMI + Modbus PLC end-to-end smoketest (19 checks).
+  Runs from inside a3-intranet (the multi-homed corporate+scada
+  pivot — A14 cannot reach A5 directly per design). Uses only
+  stdlib (socket + urllib) so it needs no pymodbus install in
+  the container. Verifies: flag 18 in dashboard footer;
+  architecture page reveals Modbus port 502 / HR 100 interlock
+  / HR 200 maintenance key; system logs contain D. Kowalski
+  sensor drift incident; `svc-scada` / `Sc@da#2025!` auth gated
+  on /control with wrong-password rejection; raw Modbus TCP
+  reads the register map; wrong maintenance key to HR 200 is
+  rejected; correct key 7734 bypasses HR 100 interlock and
+  disables thermal safety; fuel=100 + cooling=0 triggers
+  thermal runaway; flag 19 on the destroyed CRITICAL page.
+  Test is idempotent for destroyed containers (extracts flags
+  from the final page) but requires a fresh a5-scada container
+  to re-prove the attack chain.
+
 ## [3.69.0] - 2026-04-12
 
 ### Added

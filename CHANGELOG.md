@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.73.0] - 2026-04-12
+
+### Fixed
+
+- A8 repo path drift (same pattern as A6/A7): `a8/Dockerfile`
+  COPYs `01-init.sql` from context root but the file lives in
+  `A8-research-database/`. Moved `a8-database` docker-compose
+  build context to `.` with `dockerfile: ./a8/Dockerfile` so
+  the build works from a fresh repo checkout.
+
+### Changed
+
+- `a3/Dockerfile`: added `postgresql-client` so a3-intranet can
+  run `psql` against A8 as the designed pivot host (A8 is on
+  lab VLAN 30, not reachable from a14-kali directly).
+
+### Added
+
+- `docs/ctf/mechag/A8-research-database/smoketest.sh`: A8
+  research database end-to-end smoketest (16 checks). Runs
+  from a3-intranet via psql. Verifies lab_general auth via
+  A3 /.env discovery path, compartment isolation
+  (lab_general denied on compartment_b/c, lab_mfg denied on
+  compartment_b), flag 21 in compartment_a.structural_specs
+  frame_dorsal_plate row, both flag 27 paths (vasik direct
+  via AD password reuse + SECURITY DEFINER SQL injection in
+  research_public.search_research as lab_general) with
+  verification that the function actually has SECURITY
+  DEFINER, flag 28 via JSONB path
+  `metadata->'integration'->>'flag'` in compartment_c.assembly_log
+  as lab_mfg (A6 .pgpass pivot), A13 override-code piece
+  AL42 via `metadata->'integration'->>'code'`, and A6 flag 30
+  chain prerequisite (Vasik GPG private key base64 blob in
+  compartment_b.key_storage).
+
 ## [3.72.0] - 2026-04-12
 
 ### Fixed

@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        openssh-client sshpass ca-certificates \
+        openssh-client sshpass ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir flask
 COPY server.py /app/server.py

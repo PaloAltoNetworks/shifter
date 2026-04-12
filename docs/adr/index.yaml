@@ -118,7 +118,7 @@
     "title": "Cloud expansion must preserve provider seams and AWS continuity",
     "status": "accepted",
     "scope": "repository",
-    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths.",
+    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths. Deploy-branch behavior may be provider-specific when the integration branch still carries the full validation burden.",
     "rules": [
       {
         "id": "ADR-005-R1",
@@ -128,6 +128,11 @@
       {
         "id": "ADR-005-R2",
         "description": "Deployment branch routing must keep deploy branches provider-specific (`aws-dev`, `gcp-dev`) while reserving `dev` for validation-only integration and preserving AWS prod behavior on `main`.",
+        "checks": []
+      },
+      {
+        "id": "ADR-005-R3",
+        "description": "Non-production deploy branches may use provider-local fast paths only when the shared integration branch still runs the broad validation matrix before promotion.",
         "checks": []
       }
     ],

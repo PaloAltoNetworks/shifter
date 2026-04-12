@@ -82,7 +82,7 @@ class TestBuildConfigureInput:
 
     def test_creates_static_routes(self, sample_subnets):
         """Static routes should be created for each subnet."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "set network virtual-router default routing-table ip static-route" in result
         assert "range-97-attack destination 10.1.2.0/28" in result
@@ -90,53 +90,53 @@ class TestBuildConfigureInput:
 
     def test_routes_use_gateway_ip(self, sample_subnets):
         """Routes should use the provided VPC gateway IP as next-hop."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "nexthop ip-address 10.1.4.1" in result
 
     def test_routes_use_ethernet1_1(self, sample_subnets):
         """Routes should use ethernet1/1 interface."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "interface ethernet1/1" in result
 
     def test_creates_address_objects(self, sample_subnets):
         """Address objects should be created for each subnet."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "set address range-97-attack ip-netmask 10.1.2.0/28" in result
         assert "set address range-97-target ip-netmask 10.1.2.16/28" in result
 
     def test_creates_security_rules_with_zones(self, sample_subnets):
         """Security rules should use 'ranges' zone."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "from ranges to ranges" in result
 
     def test_security_rules_have_xdr_logging(self, sample_subnets):
         """Security rules should have XDR-Forward logging enabled."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "log-setting XDR-Forward" in result
         assert "log-end yes" in result
 
     def test_bidirectional_rules(self, sample_subnets):
         """Security rules should be created in both directions."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         assert "range-97-attack-to-target" in result
         assert "range-97-target-to-attack" in result
 
     def test_starts_with_configure(self, sample_subnets):
         """Output should start with 'configure' command."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         lines = result.split("\n")
         assert lines[0] == "configure"
 
     def test_ends_with_commit_exit(self, sample_subnets):
         """Output should end with 'commit' and 'exit' commands."""
-        result = build_configure_input(sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1")
+        result = build_configure_input(sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1")
 
         lines = result.split("\n")
         assert lines[-2] == "commit"
@@ -148,7 +148,7 @@ class TestBuildConfigureInput:
         result = build_configure_input(
             sample_subnets,
             range_id=97,
-            vpc_gateway_ip="10.1.4.1",
+            route_next_hop_ip="10.1.4.1",
             stale_routes_to_delete=stale_routes,
         )
 
@@ -167,12 +167,12 @@ class TestBuildConfigureInput:
     def test_no_deletes_when_no_stale_routes(self, sample_subnets):
         """No delete commands when stale_routes_to_delete is None or empty."""
         result = build_configure_input(
-            sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1", stale_routes_to_delete=None
+            sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1", stale_routes_to_delete=None
         )
         assert "delete" not in result
 
         result = build_configure_input(
-            sample_subnets, range_id=97, vpc_gateway_ip="10.1.4.1", stale_routes_to_delete=[]
+            sample_subnets, range_id=97, route_next_hop_ip="10.1.4.1", stale_routes_to_delete=[]
         )
         assert "delete" not in result
 
@@ -241,7 +241,7 @@ class TestNGFWConfigureSubnetsPlan:
         """get_steps should return a single step."""
         plan = NGFWConfigureSubnetsPlan()
         subnets = [{"name": "attack", "cidr": "10.1.2.0/28", "connected_to": []}]
-        steps = plan.get_steps(subnets, range_id=1, vpc_gateway_ip="10.1.4.1")
+        steps = plan.get_steps(subnets, range_id=1, route_next_hop_ip="10.1.4.1")
 
         assert len(steps) == 1
         assert steps[0].name == "configure_subnets"
@@ -250,7 +250,7 @@ class TestNGFWConfigureSubnetsPlan:
         """Step should have stdin_input with the configure commands."""
         plan = NGFWConfigureSubnetsPlan()
         subnets = [{"name": "attack", "cidr": "10.1.2.0/28", "connected_to": []}]
-        steps = plan.get_steps(subnets, range_id=1, vpc_gateway_ip="10.1.4.1")
+        steps = plan.get_steps(subnets, range_id=1, route_next_hop_ip="10.1.4.1")
 
         assert steps[0].stdin_input is not None
         assert "configure" in steps[0].stdin_input
@@ -260,7 +260,7 @@ class TestNGFWConfigureSubnetsPlan:
         """Step should have empty script (commands are via stdin)."""
         plan = NGFWConfigureSubnetsPlan()
         subnets = [{"name": "attack", "cidr": "10.1.2.0/28", "connected_to": []}]
-        steps = plan.get_steps(subnets, range_id=1, vpc_gateway_ip="10.1.4.1")
+        steps = plan.get_steps(subnets, range_id=1, route_next_hop_ip="10.1.4.1")
 
         assert steps[0].script == ""
 

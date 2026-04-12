@@ -25,6 +25,15 @@ def mock_sns_env(monkeypatch):
 class TestGetSNSTopicARN:
     """Tests for _get_sns_topic_arn() function."""
 
+    def test_prefers_generic_topic_id_when_set(self, monkeypatch):
+        """Returns RANGE_EVENTS_TOPIC_ID when present."""
+        monkeypatch.setenv("RANGE_EVENTS_TOPIC_ID", "projects/test/topics/range-events")
+        monkeypatch.setenv("SNS_RANGE_EVENTS_ARN", "arn:aws:sns:ignored")
+
+        from events import _get_sns_topic_arn
+
+        assert _get_sns_topic_arn() == "projects/test/topics/range-events"
+
     def test_returns_arn_from_environment(self, monkeypatch):
         """Returns SNS_RANGE_EVENTS_ARN from environment."""
         monkeypatch.setenv(
@@ -39,11 +48,12 @@ class TestGetSNSTopicARN:
 
     def test_raises_when_arn_not_set(self, monkeypatch):
         """Raises ValueError when SNS_RANGE_EVENTS_ARN not set."""
+        monkeypatch.delenv("RANGE_EVENTS_TOPIC_ID", raising=False)
         monkeypatch.delenv("SNS_RANGE_EVENTS_ARN", raising=False)
 
         from events import _get_sns_topic_arn
 
-        with pytest.raises(ValueError, match="SNS_RANGE_EVENTS_ARN"):
+        with pytest.raises(ValueError, match="RANGE_EVENTS_TOPIC_ID"):
             _get_sns_topic_arn()
 
 

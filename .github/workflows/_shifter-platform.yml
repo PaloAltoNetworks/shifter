@@ -9,6 +9,9 @@ on:
       is_dev:
         required: true
         type: boolean
+      apply_changes:
+        required: true
+        type: boolean
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -61,6 +64,7 @@ jobs:
     needs: plan
     if: |
       always() &&
+      inputs.apply_changes &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       github.event_name != 'pull_request'
     env:
@@ -107,6 +111,7 @@ jobs:
     needs: [plan, push-guacamole-images]
     if: |
       always() &&
+      inputs.apply_changes &&
       (needs.plan.result == 'success' || needs.plan.result == 'skipped') &&
       (needs.push-guacamole-images.result == 'success' || needs.push-guacamole-images.result == 'skipped') &&
       github.event_name != 'pull_request'
@@ -253,7 +258,7 @@ jobs:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
     needs: apply
-    if: github.event_name != 'pull_request'
+    if: inputs.apply_changes && github.event_name != 'pull_request'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -288,7 +293,7 @@ jobs:
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
     needs: build
-    if: github.event_name != 'pull_request'
+    if: inputs.apply_changes && github.event_name != 'pull_request'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}

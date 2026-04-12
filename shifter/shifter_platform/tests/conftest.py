@@ -13,6 +13,7 @@ if str(SHIFTER_DIR) not in sys.path:
 
 # Set testing flag before Django loads settings
 os.environ["TESTING"] = "1"
+os.environ.setdefault("DJANGO_SECRET_KEY", "shifter-platform-tests-secret-key")
 
 from unittest.mock import MagicMock, Mock  # noqa: E402
 

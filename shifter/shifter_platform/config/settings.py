@@ -3,6 +3,7 @@ Django settings for Shifter platform.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,12 +11,32 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+AUTH_PROVIDER = os.environ.get("AUTH_PROVIDER", "oidc").strip().lower()
+IS_TEST_RUN = os.environ.get("TESTING") == "1" or Path(sys.argv[0]).name == "pytest"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse boolean environment variables using explicit true/false strings."""
+    return os.environ.get(name, str(default)).lower() == "true"
+
+
+def _env_csv(name: str) -> list[str]:
+    """Parse comma-separated environment variables into normalized lists."""
+    return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+def _env_list(name: str) -> list[str]:
+    """Parse comma-separated environment variables into stripped string lists."""
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
 
 # Security
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+_test_secret_key_default = "django-tests-secret-key" if IS_TEST_RUN else None
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _test_secret_key_default)
 if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY environment variable is required")
-DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
+DEBUG = _env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 
@@ -26,7 +47,7 @@ FIELD_ENCRYPTION_KEY = os.environ.get(
     "FIELD_ENCRYPTION_KEY",
     # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required)
     "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # NOSONAR - test-only key, not a production credential
-    if os.environ.get("TESTING") == "1"
+    if IS_TEST_RUN
     else None,
 )
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
@@ -51,7 +72,6 @@ INSTALLED_APPS = [
     "health_check.db",
     "health_check.cache",
     "health_check.storage",
-    "mozilla_django_oidc",
     "rest_framework",
     "mission_control.apps.MissionControlConfig",
     "risk_register.apps.RiskRegisterConfig",
@@ -63,6 +83,9 @@ INSTALLED_APPS = [
     "cms.experiments.apps.ExperimentsConfig",
     "ctf.apps.CtfConfig",
 ]
+
+if AUTH_PROVIDER == "oidc":
+    INSTALLED_APPS.append("mozilla_django_oidc")
 
 MIDDLEWARE = [
     "config.middleware.HealthCheckMiddleware",  # Must be first to bypass ALLOWED_HOSTS for ALB
@@ -77,10 +100,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-# OIDC SessionRefresh middleware - only in production
-# In DEBUG mode, we use dev_login bypass. In production, OIDC must be configured.
-if not DEBUG:
-    if not os.environ.get("OIDC_RP_CLIENT_ID"):
+# OIDC SessionRefresh middleware - only for the OIDC/Cognito auth path.
+if not DEBUG and AUTH_PROVIDER == "oidc":
+    if not (os.environ.get("OIDC_RP_CLIENT_ID") or IS_TEST_RUN):
         raise ValueError("OIDC_RP_CLIENT_ID required in production (DEBUG=False)")
     MIDDLEWARE.append("mozilla_django_oidc.middleware.SessionRefresh")
 
@@ -115,13 +137,14 @@ ASGI_APPLICATION = "config.asgi.application"
 # Redis for channel layer (multi-instance ASG deployment)
 # Falls back to in-memory for local dev when REDIS_HOST not set
 REDIS_HOST = os.environ.get("REDIS_HOST", "")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
 if REDIS_HOST:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [(REDIS_HOST, 6379)],
+                "hosts": [(REDIS_HOST, REDIS_PORT)],
             },
         },
     }
@@ -198,30 +221,50 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", True)
+    CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", True)
 
 # ------------------------------------------------------------------------------
-# OIDC Authentication (Cognito)
+# Authentication
 # ------------------------------------------------------------------------------
 
-AUTHENTICATION_BACKENDS = [
-    "config.oidc.ShifterOIDCBackend",
-    "django.contrib.auth.backends.ModelBackend",
-]
+if AUTH_PROVIDER == "identity_platform":
+    AUTHENTICATION_BACKENDS = [
+        "config.identity_platform.IdentityPlatformBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+else:
+    AUTHENTICATION_BACKENDS = [
+        "config.oidc.ShifterOIDCBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
 
 # Magic link authentication (PLAT-101)
 MAGIC_LINK_EXPIRY_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRY_HOURS", "24"))
-MAGIC_LINK_SINGLE_USE = os.environ.get("MAGIC_LINK_SINGLE_USE", "false").lower() == "true"
+MAGIC_LINK_SINGLE_USE = _env_bool("MAGIC_LINK_SINGLE_USE", False)
 
-# Cognito OIDC settings - loaded from environment
-OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "")
-OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "")
+# OIDC settings - loaded from environment for AWS/Cognito deployments.
+OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "test-oidc-client-id" if IS_TEST_RUN else "")
+OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "test-oidc-client-secret" if IS_TEST_RUN else "")
+IDENTITY_PLATFORM_API_KEY = os.environ.get("IDENTITY_PLATFORM_API_KEY", "")
+IDENTITY_PLATFORM_PROJECT_ID = os.environ.get("IDENTITY_PLATFORM_PROJECT_ID", "")
+IDENTITY_PLATFORM_AUTH_DOMAIN = os.environ.get("IDENTITY_PLATFORM_AUTH_DOMAIN", "")
+IDENTITY_ALLOWED_EMAIL_DOMAIN = os.environ.get("IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com")
+IDENTITY_ALLOWED_EMAILS = _env_csv("IDENTITY_ALLOWED_EMAILS")
+IDENTITY_PLATFORM_ISSUER = os.environ.get("IDENTITY_PLATFORM_ISSUER", "Shifter")
+IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
+    "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
+    "Shifter Authenticator",
+)
+PLATFORM_BOOTSTRAP_STAFF_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_STAFF_EMAILS")
+PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS = _env_csv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS")
 
 # Cognito endpoints
 # Cognito has two different base URLs:
 # - Auth domain: for OAuth endpoints (authorize, token, userInfo)
 # - Issuer URL: for JWKS (token verification)
-_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "")
-_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
+_oidc_auth_domain = os.environ.get("OIDC_AUTH_DOMAIN", "https://auth.example.test" if IS_TEST_RUN else "")
+_oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "https://issuer.example.test" if IS_TEST_RUN else "")
 
 # Always define OIDC_OP_* variables to avoid runtime errors
 OIDC_OP_AUTHORIZATION_ENDPOINT = ""  # nosec B105 - not a password, placeholder URL
@@ -229,7 +272,7 @@ OIDC_OP_TOKEN_ENDPOINT = ""  # nosec B105
 OIDC_OP_USER_ENDPOINT = ""  # nosec B105
 OIDC_OP_JWKS_ENDPOINT = ""  # nosec B105
 
-if _oidc_auth_domain and _oidc_issuer:
+if AUTH_PROVIDER == "oidc" and _oidc_auth_domain and _oidc_issuer:
     # OAuth endpoints use the auth domain
     OIDC_OP_AUTHORIZATION_ENDPOINT = f"{_oidc_auth_domain}/oauth2/authorize"
     OIDC_OP_TOKEN_ENDPOINT = f"{_oidc_auth_domain}/oauth2/token"
@@ -239,11 +282,12 @@ if _oidc_auth_domain and _oidc_issuer:
 else:
     import warnings
 
-    warnings.warn(
-        "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
-        RuntimeWarning,
-        stacklevel=2,
-    )
+    if AUTH_PROVIDER == "oidc":
+        warnings.warn(
+            "OIDC_AUTH_DOMAIN or OIDC_ISSUER_URL is not set. OIDC endpoints are not configured.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 # Token verification
 OIDC_RP_SIGN_ALGO = "RS256"
 
@@ -255,11 +299,11 @@ OIDC_RP_SCOPES = "openid email profile"
 LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 
-# Login URL - dev bypass in DEBUG, OIDC in production
-LOGIN_URL = "/dev-login/" if DEBUG else "oidc_authentication_init"
+# Login URL - dev bypass in DEBUG, provider router in production
+LOGIN_URL = "/dev-login/" if DEBUG else "platform_login"
 
-# Cognito logout endpoint - clears Cognito session in addition to Django session
-OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url"
+# OIDC logout endpoint - clears the identity provider session in addition to Django session
+OIDC_OP_LOGOUT_URL_METHOD = "config.oidc.provider_logout_url" if AUTH_PROVIDER == "oidc" else ""
 
 # Create users on first login
 OIDC_CREATE_USER = True
@@ -273,6 +317,8 @@ OIDC_EXEMPT_URLS = [
     "/",  # Landing page
     "/health",  # Health check
     "/health/",  # Health check with trailing slash
+    "/dev-login/",  # View enforces production blocking directly
+    "/dev-logout/",  # View enforces production blocking directly
     "/ctf/register/",  # CTF magic link registration (token is the auth)
     "/ctf/help/",  # CTF help page
 ]
@@ -291,7 +337,7 @@ SESSION_COOKIE_AGE = 60 * 60 * 24 * 14  # 14 days
 
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 if not FIELD_ENCRYPTION_KEY:
-    if DEBUG or os.environ.get("TESTING") == "1":
+    if DEBUG or IS_TEST_RUN:
         # Dev/test default - not a production credential
         FIELD_ENCRYPTION_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="  # NOSONAR - dev/test-only key
     else:
@@ -313,6 +359,9 @@ PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
 
 # Which cloud provider to use: "aws" (default) or "gcp" (future)
 CLOUD_PROVIDER = os.environ.get("CLOUD_PROVIDER", "aws")
+GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or GOOGLE_CLOUD_PROJECT
+GCP_REGION = os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION", "")
 
 # Generic names — adapters use these; AWS-specific names kept as fallbacks
 CLOUD_REGION = (
@@ -329,20 +378,50 @@ AWS_S3_REGION = CLOUD_REGION  # Backward compat alias
 AWS_REGION = CLOUD_REGION  # Backward compat alias
 AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")  # LocalStack support
 
-# SNS Topic for publishing events (provisioner -> workers)
-SNS_RANGE_EVENTS_ARN = os.environ.get("SNS_RANGE_EVENTS_ARN", "")
+# Topic for publishing events (provisioner -> workers)
+RANGE_EVENTS_TOPIC_ID = os.environ.get("RANGE_EVENTS_TOPIC_ID") or os.environ.get("SNS_RANGE_EVENTS_ARN", "")
+SNS_RANGE_EVENTS_ARN = RANGE_EVENTS_TOPIC_ID  # Backward compat alias
 
-# Shifter Engine (ECS Fargate) — PULUMI_ fallbacks removed after infra deploys new names
-ENGINE_ECS_CLUSTER_ARN = os.environ.get("ENGINE_ECS_CLUSTER_ARN") or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
-ENGINE_TASK_DEFINITION_ARN = os.environ.get("ENGINE_TASK_DEFINITION_ARN") or os.environ.get(
-    "PULUMI_TASK_DEFINITION_ARN", ""
+# Shifter Engine task runner configuration.
+# AWS uses ECS-compatible values. GCP uses a Kubernetes namespace plus a
+# container image that the GKE-native task runner launches as a Job.
+ENGINE_TASK_CLUSTER = (
+    os.environ.get("ENGINE_TASK_NAMESPACE")
+    or os.environ.get("ENGINE_TASK_CLUSTER")
+    or os.environ.get("ENGINE_JOB_LOCATION")
+    or os.environ.get("ENGINE_ECS_CLUSTER_ARN")
+    or os.environ.get("PULUMI_ECS_CLUSTER_ARN", "")
 )
-ENGINE_ECS_SECURITY_GROUP_ID = os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID") or os.environ.get(
-    "PULUMI_ECS_SECURITY_GROUP_ID", ""
+ENGINE_TASK_DEFINITION = (
+    os.environ.get("ENGINE_TASK_DEFINITION")
+    or os.environ.get("ENGINE_TASK_IMAGE")
+    or os.environ.get("ENGINE_TASK_DEFINITION_ARN")
+    or os.environ.get("PULUMI_TASK_DEFINITION_ARN", "")
 )
-ENGINE_PRIVATE_SUBNET_IDS = os.environ.get("ENGINE_PRIVATE_SUBNET_IDS") or os.environ.get(
-    "PULUMI_PRIVATE_SUBNET_IDS", ""
+ENGINE_TASK_SERVICE_ACCOUNT_NAME = os.environ.get("ENGINE_TASK_SERVICE_ACCOUNT_NAME", "")
+ENGINE_TASK_IMAGE_PULL_POLICY = os.environ.get("ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent")
+ENGINE_TASK_BACKOFF_LIMIT = int(os.environ.get("ENGINE_TASK_BACKOFF_LIMIT", "0"))
+ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED = int(os.environ.get("ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED", "3600"))
+ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = (
+    os.environ.get("ENGINE_TASK_NETWORK_SECURITY_GROUP_ID")
+    or os.environ.get("ENGINE_ECS_SECURITY_GROUP_ID")
+    or os.environ.get("PULUMI_ECS_SECURITY_GROUP_ID", "")
 )
+ENGINE_TASK_NETWORK_SUBNET_IDS = (
+    os.environ.get("ENGINE_TASK_NETWORK_SUBNET_IDS")
+    or os.environ.get("ENGINE_PRIVATE_SUBNET_IDS")
+    or os.environ.get("PULUMI_PRIVATE_SUBNET_IDS", "")
+)
+
+# Backward compat aliases for existing AWS call sites and tests
+ENGINE_ECS_CLUSTER_ARN = ENGINE_TASK_CLUSTER
+ENGINE_TASK_DEFINITION_ARN = ENGINE_TASK_DEFINITION
+ENGINE_ECS_SECURITY_GROUP_ID = ENGINE_TASK_NETWORK_SECURITY_GROUP_ID
+ENGINE_PRIVATE_SUBNET_IDS = ENGINE_TASK_NETWORK_SUBNET_IDS
+EXPERIMENT_TASK_DEFINITION = os.environ.get("EXPERIMENT_TASK_DEFINITION") or os.environ.get(
+    "EXPERIMENT_TASK_DEFINITION_ARN", ""
+)
+EXPERIMENT_TASK_DEFINITION_ARN = EXPERIMENT_TASK_DEFINITION
 
 # Local Provisioner (for local dev - runs provisioner as subprocess instead of ECS)
 LOCAL_PROVISIONER = os.environ.get("LOCAL_PROVISIONER", "")
@@ -375,27 +454,40 @@ GUACAMOLE_API_BASE_URL = os.environ.get("GUACAMOLE_API_BASE_URL", "") or GUACAMO
 # ------------------------------------------------------------------------------
 # SQS Worker Configuration
 # ------------------------------------------------------------------------------
-# Queue URLs are passed via environment variables by the deployment workflow.
-# Each worker polls one queue and dispatches to the corresponding handler.
+# Queue identifiers are passed via environment variables by the deployment workflow.
+# On AWS the consumer and publisher both use the same SQS URL. On GCP workers
+# consume Pub/Sub subscriptions while publishers target topics, so the config
+# allows those identifiers to diverge without changing existing AWS call sites.
 
-SQS_QUEUE_CONFIG = {
-    "cms": {
-        "url": os.environ.get("SQS_CMS_URL", ""),
-        "handler": "cms.handlers.process_event",
-    },
-    "engine": {
-        "url": os.environ.get("SQS_ENGINE_URL", ""),
-        "handler": "engine.handlers.process_event",
-    },
-    "mc": {
-        "url": os.environ.get("SQS_MC_URL", ""),
-        "handler": "mission_control.handlers.process_event",
-    },
-    "experiments": {
-        "url": os.environ.get("SQS_EXPERIMENTS_URL", ""),
-        "handler": "cms.experiments.handlers.process_event",
-    },
+
+def _build_queue_config(name: str, legacy_env: str, handler: str) -> dict[str, str]:
+    consumer_id = (
+        os.environ.get(f"QUEUE_{name}_CONSUMER_ID")
+        or os.environ.get(f"QUEUE_{name}_ID")
+        or os.environ.get(legacy_env, "")
+    )
+    publisher_id = (
+        os.environ.get(f"QUEUE_{name}_PUBLISHER_ID") or os.environ.get(f"QUEUE_{name}_TOPIC_ID") or consumer_id
+    )
+    return {
+        "url": consumer_id,
+        "consumer_id": consumer_id,
+        "publisher_id": publisher_id,
+        "handler": handler,
+    }
+
+
+QUEUE_CONFIG = {
+    "cms": _build_queue_config("CMS", "SQS_CMS_URL", "cms.handlers.process_event"),
+    "engine": _build_queue_config("ENGINE", "SQS_ENGINE_URL", "engine.handlers.process_event"),
+    "mc": _build_queue_config("MC", "SQS_MC_URL", "mission_control.handlers.process_event"),
+    "experiments": _build_queue_config(
+        "EXPERIMENTS",
+        "SQS_EXPERIMENTS_URL",
+        "cms.experiments.handlers.process_event",
+    ),
 }
+SQS_QUEUE_CONFIG = QUEUE_CONFIG  # Backward compat alias
 
 # ------------------------------------------------------------------------------
 # CTF Configuration
@@ -431,6 +523,8 @@ REST_FRAMEWORK = {
 # ------------------------------------------------------------------------------
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+DEV_LOGIN_ALLOWED_HOSTS = _env_list("DEV_LOGIN_ALLOWED_HOSTS") or ["localhost", "127.0.0.1", "[::1]"]
+DEV_LOGIN_ALLOWED_CIDRS = _env_list("DEV_LOGIN_ALLOWED_CIDRS")
 
 # ------------------------------------------------------------------------------
 # Logging Configuration

@@ -1,6 +1,6 @@
 """Tests for provisioner cloud abstraction protocol definitions."""
 
-from cloud.types import ConfigStore, DBAuth, EventBus, ObjectStorage, SecretsStore
+from cloud.types import ConfigStore, DBAuth, EventBus, NetworkInventory, ObjectStorage, SecretsStore
 
 
 class TestProtocolsAreRuntimeCheckable:
@@ -20,6 +20,9 @@ class TestProtocolsAreRuntimeCheckable:
 
     def test_secrets_store_is_runtime_checkable(self):
         assert hasattr(SecretsStore, "_is_runtime_protocol")
+
+    def test_network_inventory_is_runtime_checkable(self):
+        assert hasattr(NetworkInventory, "_is_runtime_protocol")
 
 
 class TestProtocolStructuralTyping:
@@ -65,6 +68,16 @@ class TestProtocolStructuralTyping:
                 return ""
 
         assert isinstance(FakeSecrets(), SecretsStore)
+
+    def test_network_inventory_satisfied_by_conforming_class(self):
+        class FakeNetworkInventory:
+            def list_subnet_cidrs(self, network_id):
+                return []
+
+            def publish_subnet_exhaustion_alarm(self, network_id, cidr_prefix, subnet_size):
+                pass
+
+        assert isinstance(FakeNetworkInventory(), NetworkInventory)
 
     def test_non_conforming_class_does_not_satisfy(self):
         class NotAnEventBus:

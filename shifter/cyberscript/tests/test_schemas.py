@@ -191,7 +191,6 @@ class TestInstanceSpecValidation:
             )
             assert spec.os_type == os_type
 
-
 class TestEventValidation:
     """Tests for event model validation."""
 

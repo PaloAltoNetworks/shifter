@@ -157,6 +157,38 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  k8s-lint:
+    name: Lint (k8s manifests)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kube-linter
+        run: |
+          curl -fsSL -o /tmp/kube-linter.tar.gz \
+            "https://github.com/stackrox/kube-linter/releases/download/v0.7.2/kube-linter-linux.tar.gz"
+          tar -xzf /tmp/kube-linter.tar.gz -C /tmp kube-linter
+
+      - name: Run kube-linter
+        run: /tmp/kube-linter lint --config .kube-linter.yaml platform/k8s/
+
+  k8s-schema:
+    name: Lint (k8s schemas)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+
+      - name: Validate k8s manifests
+        run: |
+          find platform/k8s -name '*.yaml' ! -name 'kustomization.yaml' -print0 | \
+            xargs -0 /tmp/kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+
   # ===========================================================================
   # Type Checking (non-blocking quality gate)
   # ===========================================================================
@@ -509,6 +541,30 @@ jobs:
           directory: platform/terraform/
           framework: terraform
           download_external_modules: true
+          quiet: true
+          compact: true
+          soft_fail: true
+
+  security-k8s:
+    name: Security (k8s)
+    runs-on: self-hosted
+    continue-on-error: true  # Soft-fail until manifest remediation complete
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Checkov
+        uses: actions/cache@v4
+        with:
+          path: ~/.local
+          key: ${{ runner.os }}-checkov-k8s-${{ hashFiles('.github/workflows/_quality.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-checkov-k8s-
+
+      - name: Checkov k8s Security
+        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        with:
+          directory: platform/k8s/
+          framework: kubernetes
           quiet: true
           compact: true
           soft_fail: true

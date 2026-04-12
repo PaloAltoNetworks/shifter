@@ -1,0 +1,21 @@
+portal:
+  replicas: 2
+
+workers:
+  cms:
+    replicas: 1
+  engine:
+    replicas: 1
+  mc:
+    replicas: 1
+  ctfScheduler:
+    replicas: 1
+
+guacd:
+  replicas: 1
+
+guacamoleClient:
+  replicas: 1
+
+ingress:
+  enabled: true

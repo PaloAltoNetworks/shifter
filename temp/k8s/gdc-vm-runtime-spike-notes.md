@@ -1,0 +1,186 @@
+# GDC VM Runtime Spike Notes
+
+## Purpose
+
+Track concrete lessons, execution steps, and validation results while bootstrapping a Google Distributed Cloud VM Runtime testbed in `prod-rwctxzl6shxk`.
+
+## Current Context
+
+- Date: 2026-04-08
+- Repo: `shifter-k8s`
+- Project: `prod-rwctxzl6shxk`
+- Goal: validate whether VM Runtime VMs and Pods can share an attacker-visible subnet model closely enough for range use cases
+
+## Lessons Learned So Far
+
+- The repo-root `.env` in this worktree is symlinked to `../shifter/.env`.
+- `PANW_GCP_DEV=prod-rwctxzl6shxk` is the only project identifier in `.env` and should be treated as the target GCP project for this spike.
+- This is an empty project, so planning must assume we create the full test substrate ourselves.
+- Google Distributed Cloud bare metal evaluation on Compute Engine VMs is the relevant path for this spike, not standard public GKE.
+- The sample/tutorial path does not create everything from the project alone; it expects backing VM/node and network inputs, which we need to provision as part of the spike.
+- Notes for later work should live in-repo under `temp/k8s/` so they survive the current shell session.
+- Using the bootstrap service account as the active `gcloud` identity is fine for API calls, but SSHing to the admin VM should use the human account plus the existing Google Compute SSH key.
+- The Anthos sample stack assumes a `default` or auto-mode VPC. In an empty project, a custom VPC/subnet has to be created first and the sample needs explicit `subnetwork` wiring.
+- Current working GDC version for this spike is `1.34.200-gke.68`.
+- The older sample permissions were insufficient for current GDC bootstrap. The project needed `kubernetesmetadata.googleapis.com` plus additional permissions for `baremetal-gcr`.
+- The cluster was created with `spec.clusterNetwork.multipleNetworkInterfaces: true`, so Multus-style additional pod interfaces are part of the enabled cluster feature set.
+- The default `pod-network` is a `networking.gke.io/v1 Network` of type `L3` with internal IPAM, not the custom L2 network shape needed for a true shared-subnet experiment.
+- For the official GDC-on-Compute-Engine evaluation topology, the cross-node L2 fabric is the host-created `vxlan0` network (`10.200.0.0/24`), not the Compute Engine primary NIC `ens4`.
+- In this environment, `vxlan0` is the correct interface to target for the custom shared-subnet spike because the Google tutorial explicitly creates it to provide L2 connectivity between the demo nodes.
+- The kubeconfig access failure from the admin workstation was not a broken cluster artifact: `/home/tfadmin` is `750`, so a secondary SSH user such as `bedwards` can't traverse it directly. The correct non-root access path is `sudo -u tfadmin` with the kubeconfig under `/home/tfadmin/bmctl-workspace/...`.
+- On this eval cluster, the `local-shared` storage class still bound imported VM boot disks to node-affine local PVs. Pinning a VM to a different node than its boot disk's PV makes the launcher pod unschedulable.
+- For this environment, the right scheduling rule is: let the VM land where the imported disk binds first, then place "same-node" and "cross-node" probes relative to the VM's actual node.
+- On `pod-network`, the VM Runtime VM does not behave like a flat same-subnet peer of a normal pod. The VM status exposed the launcher-facing `192.168.x.x` address while the Cirros guest console showed the guest itself DHCP-ing `10.1.2.2` behind that interface.
+- On a custom `Network` attached to `vxlan0`, the VM Runtime VM did receive the configured subnet IP directly (`10.200.0.110`) and both a same-node and cross-node normal Pod with Multus `net1` addresses on that subnet could ping it successfully.
+- The remaining GCP plan should therefore treat GDC VM Runtime plus custom L2 networks as the default GCP range-plane model, with normal Pods allowed on those same scenario subnets when lower fidelity is acceptable.
+- The failed HTTP checks were a guest startup issue, not a network issue. Cirros logged `/run/cirros/datasource/data/user-data was not '#!' or executable`, so the `#cloud-config` user-data didn't start the test `httpd`.
+- The first saved shared-L2 manifest version allowed the Whereabouts pool to allocate the same address used as the configured gateway. The in-repo manifests were corrected afterward to reserve the VM and gateway IPs explicitly.
+- Slice 9 implementation should live in `scripts/bootstrap/deploy.py`, not in another spike-only script, because bootstrap ownership already lives there.
+- The repeatable bootstrap path should generate a staged asset bundle locally and upload it to the admin workstation, instead of relying on shell history or hand-edited remote files.
+- The bootstrap path should use the official GDC-on-Compute-Engine hybrid-cluster model, but with repo-owned fixes:
+  - explicit custom VPC/subnet creation
+  - deterministic instance naming and IP assignment
+  - `multipleNetworkInterfaces: true` in the cluster config
+  - persistent inotify sysctl hardening before VM Runtime is enabled
+- Re-runs need to keep the SSH trust model in sync. If the bootstrap regenerates the cluster key pair, it must also push the updated public key metadata to every VM instead of assuming only freshly created instances exist.
+- The active GDC range plane needs a bootstrap-owned Secret Manager bundle for cluster access. The provisioner should consume kubeconfig, `vxlan_cidr`, cluster ID, and interface settings from that bundle instead of trying to infer them from the GKE control-plane environment.
+- Under the active GDC range plane, subnet allocation should reconcile against cluster `Network` objects, not Compute Engine subnetworks.
+- The GDC range runner should own `Network` plus `NetworkAttachmentDefinition` lifecycle now, and keep full range readiness blocked until VM Runtime guest lifecycle lands.
+- The retired GCP Compute Engine range path should be removed entirely rather than left as a selector or fallback, because `gcp-dev` has never had a deployed CE range plane to preserve.
+
+## Running Log
+
+- Created repo-local notes file for ongoing spike tracking.
+- Confirmed the active `gcloud` account had switched to the bootstrap service account, which breaks SSH access to the admin VM.
+- Remote admin access should use `bedwards@paloaltonetworks.com` with `/home/atomik/.dotfiles-sync/ssh/google_compute_engine`.
+- Verified the second `bmctl create cluster -c cluster1` retry is still running on `cluster1-abm-ws0-001`.
+- Verified the create retry progressed through bootstrap manifest install and into machine/network/GCP preflight checks.
+- Confirmed the cluster-level GCP preflight check succeeded for `prod-rwctxzl6shxk`.
+- Confirmed individual machine GCP checks passed and the network preflight completed its Ansible run without surfacing a concrete failure in the captured logs.
+- Confirmed the full machines/network validation category passed for all nodes plus `gcp`, `node-network`, and `pod-cidr`.
+- The current bootstrap stage is post-preflight controller reconciliation, followed by kernel checking and control-plane load balancer initialization.
+- The cluster kubeconfig is now written at `/home/tfadmin/bmctl-workspace/cluster1/cluster1-kubeconfig`.
+- The initial `Secret "cluster1-kubeconfig" not found` reconciliation error was transient; the bootstrap controllers later created the kubeconfig secret.
+- Current live blocker is the new cluster API endpoint `https://10.200.0.49:443`, which is reachable enough for reconciliation to proceed but currently returns `EOF` instead of a stable Kubernetes API response.
+- The `EOF` condition was also transient. Direct health probing now returns `HTTP/2 200` with `ok` from `https://10.200.0.49:443/readyz`.
+- The control-plane machine log for `10.200.0.5` shows `kubeadm init` completing and subsequent control-plane/bootstrap tasks continuing afterward.
+- The user cluster is now queryable with its kubeconfig. `cluster1-abm-cp3-001` reached `Ready`.
+- VM Runtime components are being installed as part of cluster bring-up, and the current install blocker is the VM Runtime admission webhook: `failed calling webhook "vvmruntime.kb.io" ... connection refused`.
+- The VM Runtime controller pod eventually scheduled and became `2/2 Running`; the webhook connection-refused condition was transient while its serving cert and pod were coming up.
+- Current VM Runtime-specific warning from controller logs: `skipping reconciliation because there is more than one VMRuntime object`.
+- Cluster inspection shows a single `VMRuntime` object named `vmruntime` with `status.ready: true` and `spec.enabled: false`.
+- This matches the current Google docs: VM Runtime is installed automatically on recent GDC versions but must be explicitly enabled before creating VMs.
+- Node inspection on `cluster1-abm-cp3-001` shows `ens4` as the main underlay interface and no `/dev/kvm` device.
+- For this specific Compute Engine-backed demo cluster, VM Runtime will need `useEmulation: true` unless the cluster is rebuilt with nested virtualization enabled.
+- Attempting to set `spec.useEmulation: true` on the live `VMRuntime` object was rejected by the `vvmruntime.kb.io` validating webhook with: `useEmulation is deprecated and should only ever be set to false`.
+- There is now a docs/product discrepancy to track: current Google docs still describe `useEmulation: true`, but the live 1.34 runtime webhook does not allow it.
+- Enabling VM Runtime with `spec.enabled: true` and leaving `useEmulation: false` succeeded.
+- The live `VMRuntime` preflight check passed `CPU`, `KVM`, and `VSOCK`, which means the runtime sees usable virtualization support even though `/dev/kvm` was not visible from a normal SSH shell on the node.
+- Enabling VM Runtime also coincided with the cluster bringing up additional nodes (`cluster1-abm-cp1-001`, `cluster1-abm-w1-001`, `cluster1-abm-w2-001`) and VM Runtime control-plane pods.
+- One VM Runtime daemon is unstable on `cluster1-abm-cp3-001`: `macvtap-deviceplugin` crashes with a nil-pointer panic in `fsnotify`/`device-plugin-manager`.
+- The other `macvtap` DaemonSet pods on `cluster1-abm-cp1-001`, `cluster1-abm-w1-001`, and `cluster1-abm-w2-001` are running, so spike workloads should target those nodes instead of `cluster1-abm-cp3-001`.
+- Root cause for the `macvtap` crash on `cluster1-abm-cp3-001`: inotify exhaustion.
+- Evidence:
+  - `cluster1-abm-cp3-001` had `162` live `anon_inode:inotify` file descriptors with `fs.inotify.max_user_instances=128`.
+  - `cluster1-abm-cp1-001` was already near the ceiling at `125`.
+  - The panic stack in `macvtap-deviceplugin` is consistent with `fsnotify.NewWatcher()` failing and the plugin dereferencing a nil watcher.
+- Fix applied across all cluster nodes (`cluster1-abm-cp1-001`, `cluster1-abm-cp2-001`, `cluster1-abm-cp3-001`, `cluster1-abm-w1-001`, `cluster1-abm-w2-001`):
+  - wrote `/etc/sysctl.d/99-gdc-vmruntime-inotify.conf`
+  - set `fs.inotify.max_user_instances = 1024`
+  - set `fs.inotify.max_user_watches = 1048576`
+  - loaded the sysctl file immediately with `sysctl --load`
+- After deleting the broken pod, the replacement `macvtap` pod on `cluster1-abm-cp3-001` came up `1/1 Running`.
+- This is not just a spike workaround; any future automated GDC bootstrap should bake in higher inotify limits before VM Runtime components are enabled.
+- Verified the live cluster config with `kubectl get clusters.baremetal.cluster.gke.io -A -o yaml`: the cluster is `Running`, `Ready=True`, and `multipleNetworkInterfaces: true`.
+- Verified the live `VMRuntime` object remains `enabled: true`, `ready: true`, and its preflight checks pass `CPU`, `KVM`, and `VSOCK`.
+- Verified the default `pod-network` object is `type: L3` with internal IPAM and routes for the pod and service CIDRs.
+- Verified the `NetworkAttachmentDefinition` CRD exists in the cluster, even though no NAD resources are currently defined.
+- Verified `kubectl virt` is not installed on the admin workstation. For this spike, direct YAML manifests are available, but if we want the official Google quickstart UX later, `bmctl install virtctl` is the documented path.
+- Created a reproducible spike bundle under `temp/k8s/gdc-vm-runtime-mixed-subnet/` and copied it to the admin workstation for live application.
+- Baseline `pod-network` test result:
+  - `podnet-vm` reached `Running` on `cluster1-abm-w2-001`.
+  - `podnet-probe` could ping the exposed `192.168.2.159` VM address.
+  - Guest console logs showed the actual Cirros guest DHCP lease was `10.1.2.2` from `10.1.2.1`, which means this path is not the flat mixed-subnet model needed for high-fidelity scenario networking.
+- Custom shared-L2 test result on `vxlan0`:
+  - `vmrt-shared-l2` reached `Ready=True`.
+  - `l2-vm` reached `Running` on `cluster1-abm-w1-001` with VM interface `10.200.0.110`.
+  - `l2-probe-same-node` got `net1=10.200.0.98` on `cluster1-abm-w1-001`.
+  - `l2-probe-cross-node` got `net1=10.200.0.97` on `cluster1-abm-w2-001`.
+  - Both probes successfully pinged `10.200.0.110`, demonstrating working same-subnet connectivity across nodes for a normal Pod and a VM Runtime VM on the custom network.
+- Wrote the execution-plan rewrite to:
+  - `temp/k8s/gdc-gcp-plan-rewrite.md`
+  - `/tmp/shifter-gcp-next-slices-plan.md`
+- Started Slice 9 implementation in `scripts/bootstrap/deploy.py` with a dedicated `gdc-bootstrap` command instead of overloading the AWS bootstrap flow.
+- The first config-render pass produced invalid YAML indentation; fixing the renderer before wiring the CLI is part of the bootstrap hardening work, not a cosmetic cleanup.
+- Slice 9 now renders a staged bootstrap bundle locally and uploads it to the admin workstation. The owned remote scripts are:
+  - `prepare-workstation.sh`
+  - `prepare-hosts.sh`
+  - `create-cluster.sh`
+  - `install-helper.sh`
+- The repeatable bootstrap path now owns the following sequence:
+  - enable APIs
+  - create the shared `baremetal-gcr` service account and IAM bindings
+  - create the custom VPC, subnet, and firewall rules
+  - create or reuse the six Compute Engine hosts
+  - sync the generated root SSH metadata to every host
+  - upload the bootstrap bundle to the workstation
+  - prepare the workstation, configure `vxlan0`/local PV dirs/sysctls, create the cluster, enable VM Runtime, and install workstation helpers
+- Validation run for Slice 9:
+  - `uv run pytest tests/test_deploy.py -q`
+  - `uv run ruff check deploy.py tests/test_deploy.py`
+  - `python3 scripts/adr_guard/adr_guard.py --files scripts/bootstrap/deploy.py --level fast`
+  - `python3 -m py_compile scripts/bootstrap/deploy.py`
+  - `bash -n` on all four rendered remote scripts
+- Completed a code-level reconciliation pass for the old GCP slices and wrote the result to `temp/k8s/gdc-gcp-implementation-reconciliation.md`.
+- Main reconciliation outcome:
+  - keep the control-plane work and provider seams
+  - stop extending the old Compute Engine `gcp-range` module as the active GCP range path
+  - retarget persistence, execution, and Guacamole integration to VM Runtime assets
+  - plan a later rewrite of the still-AWS-only `range_ops.py` lifecycle path
+- Slice 10 implementation is now in progress around three owned seams:
+  - bootstrap sync of a `shifter-gcp-dev-gdc-access` Secret Manager bundle
+  - provider-routed GDC `Network` and `NetworkAttachmentDefinition` lifecycle in the provisioner
+  - GKE Job env forwarding for the new GDC access/network settings
+- Slice 11 is now implemented in the active GCP path:
+  - the provisioner creates `VirtualMachineDisk` and `VirtualMachine` resources for range guests
+  - subnet reservation now guarantees at least one static IP per VM on each GDC scenario network
+  - per-instance SSH keys are deterministic Secret Manager assets owned by the provisioner lifecycle
+  - bootstrap now syncs `shifter-gcp-dev-gdc-vm-image-gcs` so GCS-backed VM image imports have an owned credential path
+  - rerun-safe GDC reconciliation should use `patch_*_custom_object` instead of full-object `replace_*_custom_object`
+- Slice 12 is now implemented in the active GCP path:
+  - scenario schemas now distinguish `vm_runtime_vm` from `scenario_pod`
+  - subnet IP planning now assigns deterministic addresses across both VM and pod assets on the same GDC custom subnet
+  - the provisioner creates Multus-attached scenario Pods for lower-fidelity assets while still creating VM Runtime VMs for VM-backed assets
+  - pod-backed assets intentionally skip guest bootstrap/setup and explicitly reject VM-style SSH/RDP access helpers
+- Slice 13 is now implemented in the active GCP path:
+  - VM Runtime guest user-data now installs or enables the access tooling the platform expects instead of assuming AMI-era baked state
+  - Linux guests now set explicit desktop credentials, install/enable OpenSSH and xrdp, and enable SSH password auth for desktop tooling
+  - Windows guests now set explicit Administrator credentials, ensure OpenSSH Server is installed, and enable RDP/SSH firewall rules
+  - the portal and provisioner now share one env-driven guest credential contract for GCP VM Runtime guests
+  - the previous DC password mismatch between VM Runtime bootstrap and RDP helper resolution is fixed by using `DC_DOMAIN_PASSWORD` on the GCP path
+- Slice 14 is now implemented in the active GCP path:
+  - NGFW attachment state is now provider-neutral instead of assuming AWS `data_eni_id`
+  - range provisioning and range lookup now resolve attachable NGFW state from:
+    - management IP
+    - SSH secret reference
+    - dataplane / next-hop IP
+    - attachment mode
+  - GCP/GDC range attachment is now explicitly persisted back onto the NGFW instance state under `attached_ranges`
+  - Django-side NGFW terminal access now resolves provider metadata instead of only top-level AWS-shaped state keys
+  - range provisioning no longer drops into AWS EC2 resume/stop behavior for non-AWS NGFWs
+  - non-AWS NGFW runtime start/stop now fail fast until a real GCP/GDC runtime operation path exists
+- Slice 14 follow-up now narrows the GCP firewall implementation back to the required product: Palo Alto VM-Series, not a generic firewall abstraction.
+  - the existing AWS VM-Series Terraform/PAN-OS post-config path remains the proven baseline and is preserved
+  - a new GDC VM Runtime VM-Series shim creates per-instance VM-Series `VirtualMachineDisk` and `VirtualMachine` resources
+  - the GDC shim creates per-instance VM-Series bootstrap ISO media in GCS and attaches it as a VM Runtime bootstrap disk
+  - the GDC shim models a two-interface VM-Series VM: `eth0` for management and `eth1` for data/range routing
+  - GDC VM-Series state now persists the concrete Palo Alto product marker, management IP, dataplane IP, route next-hop IP, VM name, namespace, disk names, bootstrap object, and Secret Manager SSH key reference
+  - GCP NGFW start/stop now routes to the GDC VM-Series power operation path instead of failing as non-AWS
+  - the next live validation risk is the exact VM Runtime disk behavior for the Palo Alto KVM bootstrap ISO; the code intentionally makes this explicit via `GDC_VMSERIES_BOOTSTRAP_BUCKET` and VM-Series-specific env vars rather than pretending a generic firewall path exists
+- 2026-04-10 VM-Series GCP image/licensing research:
+  - Palo Alto's official GCP path is Compute Engine Marketplace. The available Marketplace choices include VM-Series Bundle 1, Bundle 2, and BYOL, and the currently visible public image project contains READY CE images such as `pa-vm-gcp-10-1-14-h8` and `pa-vm-gcp-11-1-6-h7`.
+  - That Marketplace image path is not the right default for GDC VM Runtime. Palo Alto's custom-image guidance says to start from GCP Marketplace so the CE custom image can be licensed, and it explicitly warns not to create the image from an existing firewall. Treat this as a CE-specific licensing/image workflow, not as permission to export or repurpose the image into VM Runtime.
+  - The GDC VM Runtime path should be treated as a KVM/OpenShift-virtualization-style deployment: VM Runtime uses KubeVirt and raw/qcow2 VM disk images, while Palo Alto's compatibility matrix lists OpenShift Virtualization support and KVM qcow2 base images downloadable from the Palo Alto Networks Support Portal.
+  - The bootstrap ISO approach remains aligned with the VM Runtime path because Palo's bootstrap package matrix supports ISO delivery for KVM, while GCP CE uses a storage-bucket bootstrap path.
+  - The practical firewall approach is: obtain the supported VM-Series KVM qcow2 base image from Palo Alto Support Portal, stage it in our GCP project storage/registry for GDC VM Runtime consumption, use BYOL/Flex/software-NGFW auth codes through the bootstrap package, and keep Compute Engine Marketplace VM-Series as a separate fallback only if GDC VM Runtime support is rejected by Palo support.
+  - Open questions before live rollout: confirm with Palo Alto support that GDC VM Runtime's KubeVirt implementation is covered under the OpenShift/KVM support umbrella; validate one boot of the KVM qcow2 plus generated bootstrap ISO on our GDC cluster; decide whether to add a code preflight that rejects CE image names/URLs in `GDC_VMSERIES_IMAGE_URL`.

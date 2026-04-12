@@ -1,0 +1,22 @@
+{{- if .Values.services.portal.backendConfig.enabled }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ .Values.services.portal.backendConfig.name }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  {{- if .Values.services.portal.backendConfig.securityPolicyName }}
+  securityPolicy:
+    name: {{ .Values.services.portal.backendConfig.securityPolicyName }}
+  {{- end }}
+  healthCheck:
+    type: {{ .Values.services.portal.backendConfig.healthCheck.type }}
+    requestPath: {{ .Values.services.portal.backendConfig.healthCheck.requestPath | quote }}
+    port: {{ .Values.services.portal.backendConfig.healthCheck.port }}
+    checkIntervalSec: {{ .Values.services.portal.backendConfig.healthCheck.checkIntervalSec }}
+    timeoutSec: {{ .Values.services.portal.backendConfig.healthCheck.timeoutSec }}
+    healthyThreshold: {{ .Values.services.portal.backendConfig.healthCheck.healthyThreshold }}
+    unhealthyThreshold: {{ .Values.services.portal.backendConfig.healthCheck.unhealthyThreshold }}
+{{- end }}

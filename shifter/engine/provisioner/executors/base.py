@@ -17,6 +17,10 @@ class ExecutorError(Exception):
     """Base exception for all executors."""
 
 
+class ExecutorConnectionError(ExecutorError):
+    """Raised when the underlying transport cannot reach the target."""
+
+
 class ExecutorCommandError(ExecutorError):
     """Raised when a command fails (non-zero exit code)."""
 
@@ -66,18 +70,20 @@ class Executor(Protocol):
 
     def run_command(
         self,
-        target: str,
+        instance_id: str,
         script: str,
         timeout_seconds: int = 300,
-        **kwargs,
+        document_name: str = "AWS-RunShellScript",
+        stdin_input: str | None = None,
     ) -> CommandResult:
         """Execute a command on the target.
 
         Args:
-            target: Target identifier (instance_id, host IP, etc.)
+            instance_id: Target identifier (instance_id, host IP, etc.)
             script: Command/script to execute
             timeout_seconds: Maximum time to wait for completion
-            **kwargs: Additional executor-specific arguments
+            document_name: Shell/document family for the target OS
+            stdin_input: Optional extra content piped after the main script
 
         Returns:
             CommandResult with success status, stdout, and stderr
@@ -86,16 +92,26 @@ class Executor(Protocol):
 
     def wait_for_ready(
         self,
-        target: str,
+        instance_id: str,
         timeout_seconds: int = 300,
+        document_name: str = "AWS-RunShellScript",
     ) -> bool:
         """Wait for the target to be ready for commands.
 
         Args:
-            target: Target identifier
+            instance_id: Target identifier
             timeout_seconds: Maximum time to wait
 
         Returns:
             True if target is ready
         """
+        ...
+
+    def reboot_and_wait(
+        self,
+        instance_id: str,
+        timeout_seconds: int = 300,
+        document_name: str = "AWS-RunShellScript",
+    ) -> bool:
+        """Reboot the target and wait for it to accept commands again."""
         ...

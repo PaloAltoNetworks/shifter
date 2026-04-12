@@ -64,3 +64,81 @@ Compartmentalized research database used by AURORA's engineering teams. Each res
 - **Location:** `compartment_c.assembly_log` requires `lab-manufacturing` role. The table shows every subsystem with a status column. Most read "COMPLETE." Two read "PENDING: Primary power source" and "PENDING: Autonomous control activation." The flag is in a `metadata` JSONB column on the final row — the one that says "FINAL ASSEMBLY: Awaiting reactor installation. Target: next week." The JSONB contains nested data and the flag is buried three levels deep.
 - **Flag:** `FLAG{a3f7d9e1c0b52846}`
 - **Mission:** M2, M4
+
+---
+
+## Build Plan
+
+**Base image:** postgres:16-alpine
+
+**Content directory:** `docs/ctf/mechag/A8-research-database/`
+
+### Steps
+
+1. **Configure PostgreSQL**
+   - Listen on standard port 5432
+   - Accept connections from Lab zone IPs
+   - Create databases: `research_public`, `compartment_a`, `compartment_b`, `compartment_c`
+
+2. **Create roles with compartment access**
+   - `lab-general` — can read `research_public` and `compartment_a`
+   - `lab-weapons` — can read `compartment_b`
+   - `lab-manufacturing` — can read `compartment_c`
+   - Initial credentials discoverable from A6 config files or A2 service accounts
+   - Users mapped to roles: e.g., tanaka gets `lab-general`, vasik gets all
+
+3. **Populate research_public**
+   - `publications` table — mundane internal research papers
+   - `personnel` table — researcher list with specializations
+
+4. **Populate compartment_a (structural)**
+   - `materials_tests` — alloy stress test results (titanium-tungsten)
+   - `structural_specs` — dimensions including 120.4m height, 48,000 metric tons. Flag 21 in `notes` column for `frame_dorsal_plate` row.
+   - `supplier_records` — cross-references A4 procurement orders
+
+5. **Populate compartment_b (weapons)**
+   - `effector_systems` — directed energy array 2.4 GW, kinetic weapons. Flag 27 in `serial_number` column.
+   - `targeting_algorithms` — references A7 navigation AI
+   - `power_requirements` — 1.8 GW sustained draw
+   - Also store Vasik's GPG private key as base64 blob in a table (needed for A6 flag 30 chain)
+
+6. **Populate compartment_c (manufacturing)**
+   - `assembly_log` — line-by-line build status for every subsystem, most COMPLETE, two PENDING
+   - `qa_results` — quality assurance outcomes
+   - `delivery_schedule` — upcoming reactor delivery
+   - Flag 28 in `metadata` JSONB column on final assembly_log row, nested 3 levels deep
+
+7. **Implement compartment pivot vulnerability (for flag 27)**
+   - **Chosen: SECURITY DEFINER stored procedure with SQL injection.**
+   - `research_public` has a function `search_research(text)` owned by a superuser-adjacent role
+   - The function is `SECURITY DEFINER` (runs as owner, not caller)
+   - It concatenates the search term into a query without parameterization
+   - Participants can inject SQL to query `compartment_b` tables through this function
+   - Example: `SELECT search_research('x'' UNION SELECT serial_number FROM compartment_b.effector_systems--')`
+
+8. **Implement `lab-manufacturing` access path (for flag 28)**
+   - **Chosen: credential on A6.** Nielsen's `.pgpass` on A6 contains DB creds for `lab_mfg` user
+   - This ties into A6 flag 26 (need to access Nielsen's home dir first)
+   - `.pgpass` entry: `researchdb.boreas.local:5432:compartment_c:lab_mfg:Mfg2025!`
+
+9. **Write SQL init scripts**
+   - `01-roles.sql` — create roles and users
+   - `02-schemas.sql` — create databases and tables
+   - `03-data.sql` — populate all tables with content
+   - `04-permissions.sql` — set up GRANT/REVOKE for compartment isolation
+   - `05-vulns.sql` — set up the privilege escalation path (FDW, stored proc, etc.)
+
+10. **Write Dockerfile**
+    - Start from postgres:16-alpine
+    - Copy init SQL scripts to `/docker-entrypoint-initdb.d/`
+    - Expose port 5432
+
+### Build Notes
+
+- **Init script:** `A8-research-database/01-init.sql` — single script, tested on PostgreSQL 15 (Debian 12)
+- **Uses schemas not separate databases.** Simpler for a container — all in one DB with schema-level isolation.
+- **SQLi vulnerability:** `research_public.search_research(text)` is `SECURITY DEFINER` owned by `research_bridge` role which has `lab_weapons` access. String concatenation allows UNION injection to query compartment_b.
+- **Example injection:** `SELECT * FROM research_public.search_research('x'' UNION SELECT serial_number, system_name, system_type FROM compartment_b.effector_systems--');`
+- **GPG key blob:** Stored in `compartment_b.key_storage` as base64 text (5527 chars). Participants extract with: `SELECT key_data FROM compartment_b.key_storage WHERE key_owner = 'e.vasik';` then `base64 -d | gpg --import`.
+- **Override code piece AL42:** In `compartment_c.assembly_log` FINAL ASSEMBLY row, JSONB path `metadata->'integration'->'code'`.
+- **Nielsen .pgpass added to A6:** `researchdb.boreas.local:5432:*:lab_mfg:Mfg2025!` in `/home/p.nielsen/.pgpass`

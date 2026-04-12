@@ -44,7 +44,6 @@ class TestRunTerraformDestroySkipsOnlyDestroyed:
         from main import _run_terraform_destroy
 
         mock_get_data.return_value = {"status": "failed"}
-        mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
         mock_build_vars.return_value = {}
 
         _run_terraform_destroy("req-1", 80, 20, {})
@@ -71,7 +70,6 @@ class TestRunTerraformDestroySkipsOnlyDestroyed:
         from main import _run_terraform_destroy
 
         mock_get_data.return_value = {"status": "ready"}
-        mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
         mock_build_vars.return_value = {}
 
         _run_terraform_destroy("req-1", 80, 20, {})
@@ -97,18 +95,13 @@ class TestRunTerraformDestroySkipsOnlyDestroyed:
         from main import _run_terraform_destroy
 
         mock_get_data.return_value = {"status": "ready"}
-        mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
         fake_vars = {"range_id": 80, "user_id": 20, "request_uuid": "req-1", "vpc_id": "vpc-123"}
         mock_build_vars.return_value = fake_vars
         range_spec = {"subnets": []}
 
         _run_terraform_destroy("req-1", 80, 20, range_spec)
 
-        mock_tf_runner.destroy_range.assert_called_once_with(
-            "req-1",
-            mock_tf_runner.RANGE_MODULE_PATH,
-            variables=fake_vars,
-        )
+        mock_tf_runner.destroy_range.assert_called_once_with("req-1", variables=fake_vars)
 
 
 class TestAutoCleanupPassesVariables:
@@ -130,7 +123,6 @@ class TestAutoCleanupPassesVariables:
             "user_id": 20,
             "spec": {"ngfw": False, "subnets": []},
         }
-        mock_tf_runner.RANGE_MODULE_PATH = Path("/fake")
         fake_vars = {"range_id": 80, "user_id": 20, "request_uuid": "req-1"}
         mock_build_vars.return_value = fake_vars
 
@@ -138,9 +130,7 @@ class TestAutoCleanupPassesVariables:
             run_range_terraform("up", "req-1")
 
         mock_build_vars.assert_called_once_with("req-1", 80, 20, {"ngfw": False, "subnets": []})
-        mock_tf_runner.destroy_range.assert_called_once_with(
-            "req-1", mock_tf_runner.RANGE_MODULE_PATH, variables=fake_vars
-        )
+        mock_tf_runner.destroy_range.assert_called_once_with("req-1", variables=fake_vars)
 
     @patch("main.publish_failed")
     @patch("main._build_range_terraform_variables", side_effect=ValueError("NGFW missing"))
@@ -165,7 +155,7 @@ class TestAutoCleanupPassesVariables:
             run_range_terraform("up", "req-1")
 
         assert any("Auto-cleanup FAILED" in record.message for record in caplog.records)
-        assert any("Orphaned AWS resources" in record.message for record in caplog.records)
+        assert any("Orphaned cloud resources" in record.message for record in caplog.records)
 
     @patch("main.publish_failed")
     @patch("main.range_terraform_runner")

@@ -46,7 +46,7 @@ class ObjectStorage(Protocol):
 
 @runtime_checkable
 class TaskRunner(Protocol):
-    """Protocol for container/task orchestration (ECS, Cloud Run, etc.)."""
+    """Protocol for container/task orchestration (ECS, Kubernetes Jobs, etc.)."""
 
     def run_task(
         self,

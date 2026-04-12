@@ -68,24 +68,24 @@ Services own business logic. Views handle HTTP concerns only.
 
 ## Status Updates
 
-Provisioner publishes status events to SNS. Events fan out to SQS where domain handlers process them:
+Provisioner publishes status events to a message topic. Events fan out to per-domain queues where domain handlers process them. On AWS this is SNS → SQS; on GCP this is Pub/Sub topic → subscriptions.
 
 ```mermaid
 sequenceDiagram
     participant P as Provisioner
-    participant SNS as SNS
-    participant SQS as SQS
+    participant T as Event Topic
+    participant Q as Domain Queues
     participant ENG as engine.handlers
     participant CMS as cms.handlers
     participant MC as mc.handlers
     participant R as Redis Channels
     participant B as Browser
 
-    P->>SNS: publish event
-    SNS->>SQS: fanout
-    SQS->>ENG: process_event()
-    SQS->>CMS: process_event()
-    SQS->>MC: process_event()
+    P->>T: publish event
+    T->>Q: fanout
+    Q->>ENG: process_event()
+    Q->>CMS: process_event()
+    Q->>MC: process_event()
     ENG->>ENG: update Range model
     CMS->>CMS: update RangeInstance/App/Instance
     MC->>R: group_send()

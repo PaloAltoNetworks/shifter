@@ -46,6 +46,11 @@ def _import_handler(handler_path: str) -> Callable:
     return getattr(module, func_name)
 
 
+def _get_queue_consumer_id(config: dict[str, str]) -> str:
+    """Resolve the queue identifier a worker should consume from."""
+    return config.get("consumer_id") or config.get("url", "")
+
+
 class Command(BaseCommand):
     """SQS worker that polls a queue and dispatches to handlers."""
 
@@ -86,11 +91,11 @@ class Command(BaseCommand):
         max_messages = options["max_messages"]
 
         config = settings.SQS_QUEUE_CONFIG[self.queue_name]
-        queue_url = config["url"]
+        queue_id = _get_queue_consumer_id(config)
         handler: Callable = _import_handler(config["handler"])
 
-        if not queue_url:
-            self.stderr.write(self.style.ERROR(f"SQS URL not configured for queue '{self.queue_name}'"))
+        if not queue_id:
+            self.stderr.write(self.style.ERROR(f"Queue identifier not configured for queue '{self.queue_name}'"))
             sys.exit(1)
 
         # Set up heartbeat file for health monitoring
@@ -106,12 +111,12 @@ class Command(BaseCommand):
         logger.info(
             "Worker starting: queue=%s url=%s wait_time=%ds max_messages=%d",
             self.queue_name,
-            queue_url,
+            queue_id,
             wait_time,
             max_messages,
         )
 
-        self._poll_loop(queue_url, handler, wait_time, max_messages)
+        self._poll_loop(queue_id, handler, wait_time, max_messages)
 
         # Clean up heartbeat file on graceful shutdown
         self._cleanup_heartbeat()
@@ -157,7 +162,7 @@ class Command(BaseCommand):
 
     def _poll_loop(
         self,
-        queue_url: str,
+        queue_id: str,
         handler: Callable,
         wait_time: int,
         max_messages: int,
@@ -166,7 +171,7 @@ class Command(BaseCommand):
         assert self.consumer is not None, "queue consumer not initialized"
         while not self.shutdown:
             try:
-                messages = self.consumer.receive_messages(queue_url, max_messages, wait_time)
+                messages = self.consumer.receive_messages(queue_id, max_messages, wait_time)
 
                 # Update heartbeat after successful poll (even if no messages)
                 self._touch_heartbeat()
@@ -175,7 +180,7 @@ class Command(BaseCommand):
                     if self.shutdown:
                         break
 
-                    self._process_message(queue_url, handler, message)
+                    self._process_message(queue_id, handler, message)
 
             except Exception:
                 logger.exception("Error polling SQS queue: queue=%s", self.queue_name)
@@ -184,7 +189,7 @@ class Command(BaseCommand):
 
     def _process_message(
         self,
-        queue_url: str,
+        queue_id: str,
         handler: Callable,
         message: dict,
     ):
@@ -196,7 +201,7 @@ class Command(BaseCommand):
         try:
             handler(body)
 
-            self.consumer.delete_message(queue_url, receipt_handle)
+            self.consumer.delete_message(queue_id, receipt_handle)
             logger.debug(
                 "Message acknowledged: queue=%s message_id=%s",
                 self.queue_name,

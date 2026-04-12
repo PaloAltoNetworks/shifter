@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/scenarios/", views.list_scenarios, name="list_scenarios"),
     # Guacamole RDP API
     path("api/guacamole/rdp-url/", views.guacamole_rdp_url, name="guacamole_rdp_url"),
+    path("api/guacamole/ssh-url/", views.guacamole_ssh_url, name="guacamole_ssh_url"),
     # NGFW views
     path("ngfw/", views.ngfw_list, name="ngfw_list"),
     path("ngfw/setup/", views.ngfw_wizard, name="ngfw_wizard"),

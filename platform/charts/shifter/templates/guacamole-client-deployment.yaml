@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guacamole-client
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: guacamole-client
+spec:
+  replicas: {{ .Values.guacamoleClient.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: guacamole-client
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: guacamole-client
+      annotations:
+        checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
+        checksum/guacamole-secret: {{ include "shifter.guacamoleSecretChecksum" . }}
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      terminationGracePeriodSeconds: 180
+      containers:
+        - name: guacamole-client
+          image: {{ include "shifter.guacamoleClientImage" . }}
+          imagePullPolicy: {{ .Values.images.guacamoleClient.pullPolicy }}
+          {{- include "shifter.containerSecurityContextGuacamole" . | nindent 10 }}
+          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          env:
+            - name: GUACD_HOSTNAME
+              value: guacd
+            - name: GUACD_PORT
+              value: "4822"
+            - name: POSTGRESQL_HOSTNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-runtime
+                  key: GUACAMOLE_POSTGRESQL_HOSTNAME
+            - name: POSTGRESQL_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-runtime
+                  key: GUACAMOLE_POSTGRESQL_PORT
+            - name: POSTGRESQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-runtime
+                  key: GUACAMOLE_POSTGRESQL_DATABASE
+            - name: POSTGRESQL_AUTO_CREATE_ACCOUNTS
+              value: "true"
+            - name: JSON_ENABLED
+              value: "true"
+            - name: OPENID_ENABLED
+              value: "false"
+          envFrom:
+            - secretRef:
+                name: {{ .Values.guacamoleRuntimeSecret.name }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /guacamole/
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /guacamole/
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - sleep 60
+          resources:
+            {{- toYaml .Values.guacamoleClient.resources | nindent 12 }}
+      {{- include "shifter.tmpVolume" . | nindent 6 }}

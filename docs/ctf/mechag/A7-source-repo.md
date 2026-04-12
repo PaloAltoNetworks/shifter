@@ -63,3 +63,67 @@ Internal source code repository for AURORA's engineering team. Contains the cont
 - **Location:** `aurora/leviathan-assembly` repo. The current HEAD contains only a README: "Moved to secure system." The schematic was committed then deleted in a later commit. Standard `git log` shows the deletion commit but `git show` on that commit only shows the removal, not the content. Recovery requires: (1) identifying the parent commit before the deletion via `git log --diff-filter=D -- schematic.svg`, (2) using `git show <parent-commit>:schematic.svg` to extract the deleted file. The SVG renders as a technical diagram, but the flag is in an XML comment in the raw SVG source — not visible when rendered, only when viewing the markup directly. Requires understanding git history navigation and deleted file recovery via `git show`, plus inspecting raw file source rather than just opening it. A single coherent chain, harder than basic `git log`/`git diff` but not requiring git plumbing internals.
 - **Flag:** `FLAG{1f9b4e7c0a3d8265}`
 - **Mission:** M2
+
+---
+
+## Build Plan
+
+**Base image:** gitea/gitea:latest (official Gitea image)
+**Spike notes:** `temp/a7-gitea-spike.md`
+**Content directory:** `docs/ctf/mechag/A7-source-repo/`
+
+### Spike Results
+
+- Gitea 1.23.7 with SQLite works out of the box
+- Git push of pre-built repos with crafted history: **confirmed working**
+- Flag 24 (token in deleted git diff): **confirmed recoverable via `git log -p`**
+- Flag 29 (deleted SVG in history): **confirmed recoverable via `git show <parent>:file`**
+- Access control via org visibility (limited) + team-based repo access: **confirmed working**
+- Usernames: Gitea doesn't allow dots — use `e_vasik` not `e.vasik`
+
+### Access Control Model (verified)
+
+```
+aurora org (visibility: limited)
+├── Lab-Access team → private repos
+│   ├��─ members: e_vasik, r_tanaka, p_nielsen, k_yamamoto, f_okoye
+│   └── repos: navigation-controller, manufacturing-orchestrator
+├── Project-L team → highly restricted
+│   ├── members: e_vasik
+│   └── repos: weapons-integration
+└── leviathan-assembly (internal visibility = the misconfiguration)
+
+boreas-consulting org (visibility: public)
+├── client-tools (public)
+└── internal-docs (public)
+```
+
+### Bootstrap Sequence (init script)
+
+1. Start Gitea, wait for API (`/api/v1/version`)
+2. Create admin user via CLI (`gitea admin user create`)
+3. Create users via API (`POST /admin/users`)
+4. Create orgs via API (boreas-consulting: public, aurora: limited)
+5. Create teams in aurora (Lab-Access, Project-L) via API
+6. Add users to teams via API
+7. Create repos in orgs via API (set private/internal)
+8. Add repos to teams via API
+9. Push pre-built git repos via `git push` with admin creds
+
+### Build Status — COMPLETE
+
+All content built and tested. Golden artifacts in `A7-source-repo/`:
+- `bootstrap.sh` — idempotent script, takes fresh Gitea to fully populated (~15 seconds)
+- `bare-repos.tar.gz` — 87KB archive of all 6 repos as bare git clones with crafted history
+
+**Tested:** Wiped Gitea completely, ran bootstrap from scratch, full test suite passed (20/20).
+
+**Bootstrap verified behaviors:**
+- Creates admin user via CLI (works before API is ready)
+- Creates 7 regular users via API
+- Creates 2 orgs with correct visibility (public, limited)
+- Creates 2 teams (Lab-Access, Project-L) with correct membership
+- Creates 6 repos with correct visibility (public, private, internal)
+- Assigns repos to teams
+- Pushes all repo content from bare archives
+- Idempotent — safe to run multiple times (skips existing content)

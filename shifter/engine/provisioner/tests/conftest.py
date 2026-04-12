@@ -74,9 +74,7 @@ def mock_boto3_clients(mocker):
 
     # Mock Secrets Manager client (for SSH keys)
     mock_secretsmanager = MagicMock()
-    mock_secretsmanager.get_secret_value.return_value = {
-        "SecretString": "-----BEGIN RSA PRIVATE KEY-----\nMOCK_KEY\n-----END RSA PRIVATE KEY-----"
-    }
+    mock_secretsmanager.get_secret_value.return_value = {"SecretString": "TEST_SSH_PRIVATE_KEY"}
 
     # Patch boto3.client to return appropriate mock
     def mock_client_factory(service_name, **kwargs):

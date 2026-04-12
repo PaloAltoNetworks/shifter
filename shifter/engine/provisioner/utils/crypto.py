@@ -12,6 +12,29 @@ class KeyGenerationError(Exception):
     """Raised when SSH key pair generation fails."""
 
 
+def derive_ssh_public_key(private_key_pem: str) -> str:
+    """Derive an OpenSSH public key from a PEM-encoded private key."""
+    try:
+        private_key = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
+        public_key_openssh = (
+            private_key.public_key()
+            .public_bytes(
+                encoding=serialization.Encoding.OpenSSH,
+                format=serialization.PublicFormat.OpenSSH,
+            )
+            .decode("utf-8")
+        )
+    except Exception as e:
+        logger.error("Failed to derive public key: %s", e)
+        raise KeyGenerationError(f"Failed to derive SSH public key: {e}") from e
+
+    if not public_key_openssh.startswith("ssh-rsa "):
+        logger.error("Derived public key has unexpected format")
+        raise KeyGenerationError("Derived public key has unexpected format")
+
+    return public_key_openssh
+
+
 def generate_ssh_keypair() -> tuple[str, str]:
     """Generate an RSA 4096-bit SSH key pair.
 
@@ -50,14 +73,7 @@ def generate_ssh_keypair() -> tuple[str, str]:
         raise KeyGenerationError(f"Failed to serialize private key: {e}") from e
 
     try:
-        public_key_openssh = (
-            private_key.public_key()
-            .public_bytes(
-                encoding=serialization.Encoding.OpenSSH,
-                format=serialization.PublicFormat.OpenSSH,
-            )
-            .decode("utf-8")
-        )
+        public_key_openssh = derive_ssh_public_key(private_key_pem)
     except Exception as e:
         logger.error("Failed to serialize public key: %s", e)
         raise KeyGenerationError(f"Failed to serialize public key: {e}") from e

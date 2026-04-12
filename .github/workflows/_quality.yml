@@ -186,8 +186,8 @@ jobs:
 
       - name: Validate k8s manifests
         run: |
-          find platform/k8s -name '*.yaml' ! -name 'kustomization.yaml' | \
-            xargs /tmp/kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+          find platform/k8s -name '*.yaml' ! -name 'kustomization.yaml' -print0 | \
+            xargs -0 /tmp/kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
 
   # ===========================================================================
   # Type Checking (non-blocking quality gate)

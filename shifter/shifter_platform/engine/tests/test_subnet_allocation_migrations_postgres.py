@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- test harness shells out to fixed local docker/python binaries only
 import time
 import uuid
 from collections.abc import Iterator
@@ -16,12 +16,14 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 PLATFORM_DIR = REPO_ROOT / "shifter" / "shifter_platform"
 POSTGRES_IMAGE = "postgres:16-alpine"
 POSTGRES_DATABASE = "shifter"
+POSTGRES_PASSWORD = "postgres"  # nosec B105 -- disposable local test container credential
+DJANGO_TEST_SECRET_KEY = "test-secret-key"  # nosec B105 -- disposable local Django test setting
 DOCKER_BIN = shutil.which("docker") or "docker"
 PYTHON_BIN = shutil.which("python3") or "python3"
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603  # nosec B603 -- args are fixed binary paths and test-controlled constants
         [DOCKER_BIN, *args],
         check=check,
         capture_output=True,
@@ -71,18 +73,18 @@ def _run_manage_py(database_name: str, port: str, *args: str) -> subprocess.Comp
     env = os.environ.copy()
     env.update(
         {
-            "DJANGO_SECRET_KEY": "test-secret-key",
+            "DJANGO_SECRET_KEY": DJANGO_TEST_SECRET_KEY,
             "DJANGO_DEBUG": "true",
             "SITE_URL": "http://localhost",
             "DB_HOST": "127.0.0.1",
             "DB_PORT": port,
             "DB_NAME": database_name,
             "DB_USER": "postgres",
-            "DB_PASSWORD": "postgres",
+            "DB_PASSWORD": POSTGRES_PASSWORD,
             "FIELD_ENCRYPTION_KEY": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
         }
     )
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603  # nosec B603 -- manage.py invocation is fixed and test-controlled
         [PYTHON_BIN, "manage.py", *args],
         check=True,
         capture_output=True,

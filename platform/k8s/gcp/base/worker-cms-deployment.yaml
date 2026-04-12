@@ -24,15 +24,19 @@ spec:
       serviceAccountName: workers
       containers:
         - name: worker-cms
-          image: placeholder-portal:latest
+          image: us-docker.pkg.dev/placeholder-project/shifter/portal:0.0.0
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
             runAsGroup: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           args: ["python", "manage.py", "run_worker", "--queue", "cms"]
           envFrom:
             - configMapRef:
@@ -49,3 +53,6 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}

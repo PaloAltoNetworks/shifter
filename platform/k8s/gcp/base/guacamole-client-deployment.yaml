@@ -25,15 +25,19 @@ spec:
       terminationGracePeriodSeconds: 180
       containers:
         - name: guacamole-client
-          image: placeholder-guacamole-client:latest
+          image: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client:0.0.0
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1001
             runAsGroup: 1001
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           env:
             - name: GUACD_HOSTNAME
               value: guacd
@@ -89,3 +93,6 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+      volumes:
+        - name: tmp
+          emptyDir: {}

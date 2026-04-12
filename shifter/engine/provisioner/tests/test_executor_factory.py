@@ -31,6 +31,7 @@ class TestBuildGuestExecutionContext:
 
     def test_aws_uses_ssm_instance_target(self, monkeypatch):
         monkeypatch.delenv("CLOUD_PROVIDER", raising=False)
+        monkeypatch.setenv("AWS_REGION", "us-east-2")
 
         context = build_guest_execution_context({"instance_id": "i-1234567890", "os": "ubuntu", "role": "victim"})
 

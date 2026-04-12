@@ -91,3 +91,4 @@ Tested from inside Kali container (`a14-kali`) against live Docker Compose range
 | 6 | Supplier from Annual Report | `FLAG{c6f8d2b3e91a4507}` | N/A (CTFd-side) | **PASS** | Annual report at /internal/boreas-annual-2025.txt accessible (unlisted but guessable); Kursk Heavy Industries — $12,000,000 present; flag is validated by CTFd, not embedded in file |
 
 **Summary: 6/6 PASS**
+

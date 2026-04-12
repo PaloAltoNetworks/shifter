@@ -239,3 +239,4 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 1. **Flags 9 and 13**: Test doc says "Use any employee credentials" for HR and Procurement shares, but Samba ACLs restrict access to `v.harlan` and `m.webb` only. `d.kowalski` (the most commonly discovered credential) gets `NT_STATUS_ACCESS_DENIED`. Participants would need to discover v.harlan or m.webb passwords, which are not in the credential reference sheet.
 2. **Flag 18**: In the Docker compose environment, Kali can reach SCADA directly on `172.20.10.50:8080` (no pivot required). The test doc describes needing to pivot through Front Office, which is the intended production experience but not the Docker reality.
+

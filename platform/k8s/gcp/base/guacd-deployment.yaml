@@ -24,15 +24,19 @@ spec:
       serviceAccountName: workers
       containers:
         - name: guacd
-          image: placeholder-guacd:latest
+          image: us-docker.pkg.dev/placeholder-project/shifter/guacd:0.0.0
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
             runAsGroup: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - name: guacd
               containerPort: 4822
@@ -53,3 +57,6 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}

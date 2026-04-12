@@ -22,6 +22,7 @@ securityContext:
   capabilities:
     drop:
       - ALL
+  readOnlyRootFilesystem: true
   runAsNonRoot: true
   runAsUser: {{ .Values.security.app.runAsUser }}
   runAsGroup: {{ .Values.security.app.runAsGroup }}
@@ -33,6 +34,7 @@ securityContext:
   capabilities:
     drop:
       - ALL
+  readOnlyRootFilesystem: true
   runAsNonRoot: true
   runAsUser: {{ .Values.security.guacd.runAsUser }}
   runAsGroup: {{ .Values.security.guacd.runAsGroup }}
@@ -44,9 +46,22 @@ securityContext:
   capabilities:
     drop:
       - ALL
+  readOnlyRootFilesystem: true
   runAsNonRoot: true
   runAsUser: {{ .Values.security.guacamole.runAsUser }}
   runAsGroup: {{ .Values.security.guacamole.runAsGroup }}
+{{- end }}
+
+{{- define "shifter.tmpVolumeMount" -}}
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+{{- end }}
+
+{{- define "shifter.tmpVolume" -}}
+volumes:
+  - name: tmp
+    emptyDir: {}
 {{- end }}
 
 {{- define "shifter.runtimeConfigChecksum" -}}

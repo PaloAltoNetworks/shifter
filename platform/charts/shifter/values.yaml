@@ -24,16 +24,16 @@ guacamoleRuntimeSecret:
 
 images:
   portal:
-    repository: ""
-    tag: latest
+    repository: "us-docker.pkg.dev/placeholder-project/shifter/portal"
+    tag: "0.0.0"
     pullPolicy: Always
   guacd:
-    repository: ""
-    tag: latest
+    repository: "us-docker.pkg.dev/placeholder-project/shifter/guacd"
+    tag: "0.0.0"
     pullPolicy: Always
   guacamoleClient:
-    repository: ""
-    tag: latest
+    repository: "us-docker.pkg.dev/placeholder-project/shifter/guacamole-client"
+    tag: "0.0.0"
     pullPolicy: Always
 
 portal:

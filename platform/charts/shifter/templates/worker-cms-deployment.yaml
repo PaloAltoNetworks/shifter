@@ -27,6 +27,7 @@ spec:
           image: {{ include "shifter.portalImage" . }}
           imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "run_worker", "--queue", "cms"]
           envFrom:
             - configMapRef:
@@ -38,3 +39,4 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.workers.cms.resources | nindent 12 }}
+      {{- include "shifter.tmpVolume" . | nindent 6 }}

@@ -63,7 +63,9 @@ services:
     restart: unless-stopped
 
   a0-website:
-    build: ./a0
+    build:
+      context: .
+      dockerfile: ./a0/Dockerfile
     container_name: a0-website
     hostname: boreas-systems.ctf
     networks:

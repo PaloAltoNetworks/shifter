@@ -1,6 +1,9 @@
 FROM python:3.12-slim
 RUN pip install --no-cache-dir flask
 COPY server.py /app/server.py
+RUN mkdir -p /var/www/docs && \
+    printf 'Boreas Systems internal document archive.\nSee company wiki for document index.\n' > /var/www/docs/README.txt && \
+    printf 'Q3 2025 expense summary placeholder - full file in Procurement share.\n' > /var/www/docs/q3-expense-summary.txt
 WORKDIR /app
 ENV A3_PORT=80
 EXPOSE 80

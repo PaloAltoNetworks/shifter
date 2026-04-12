@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.74.0] - 2026-04-12
+
+### Fixed
+
+- A9 repo path drift (same pattern as A6/A7/A8):
+  `a9/Dockerfile` COPYs README, scan_results, modbus_client.py
+  from context root but they live in `A9-splice-landing/`.
+  Moved `a9-splice` docker-compose build context to `.` with
+  `dockerfile: ./a9/Dockerfile` so the build works from a
+  fresh repo checkout.
+
+### Added
+
+- `docs/ctf/mechag/A9-splice-landing/smoketest.sh`: A9 splice
+  landing box end-to-end smoketest (17 checks). Runs from
+  inside a9-splice (the only container on bunker-ot so no
+  pivot available). Verifies the JTF-2 field relay artifacts
+  (README POLARIS FIELD RELAY text, scan_results nmap dump,
+  modbus_client.py), the field tool set (python3, nmap,
+  ncat, tcpdump, ssh, pymodbus), TCP reachability of all 4
+  bunker hosts (A10-A13), Modbus FC 43 device identification
+  queries against A10/A11/A12 returning the expected
+  ProductName values (AHS-TAIL-7741, AHS-LEG-MN07,
+  AHS-ARM-AL42), and the flag 31 concatenation answer string
+  `AHS-TAIL-7741AHS-LEG-MN07AHS-ARM-AL42` that CTFd accepts.
+
 ## [3.73.0] - 2026-04-12
 
 ### Fixed

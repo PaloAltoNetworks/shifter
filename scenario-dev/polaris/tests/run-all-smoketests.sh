@@ -16,26 +16,27 @@ set -u
 RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
 cd "$RANGE_DIR"
 
-# asset|runner|smoketest path (relative to RANGE_DIR)|interpreter
+# asset|runner|smoketest path (relative to $SMOKETESTS_DIR)|interpreter
 # Order matters: run shared/corporate assets (a14-kali path) first, then
 # pivot through a3-intranet for scada/lab assets, then a9-splice for
 # bunker-ot assets, then a14 self-test, then isolation.
+SMOKETESTS_DIR="${SMOKETESTS_DIR:-$RANGE_DIR/tests/smoketests}"
 TESTS=(
-    "a0|a14-kali|A0-boreas-website/smoketest.sh|bash"
-    "a1|a14-kali|A1-mail-server/smoketest.py|python3"
-    "a2|a14-kali|A2-domain-controller/smoketest.sh|bash"
-    "a3|a14-kali|A3-web-app/smoketest.sh|bash"
-    "a4|a14-kali|A4-file-share/smoketest.sh|bash"
-    "a7|a14-kali|A7-source-repo/smoketest.sh|bash"
-    "a5|a3-intranet|A5-scada-generator/smoketest.py|python3"
-    "a6|a3-intranet|A6-engineering-workstation/smoketest.sh|bash"
-    "a8|a3-intranet|A8-research-database/smoketest.sh|bash"
-    "a9|a9-splice|A9-splice-landing/smoketest.sh|sh"
-    "a10|a9-splice|A10-tail-controller/smoketest.py|python3"
-    "a11|a9-splice|A11-leg-controller/smoketest.py|python3"
-    "a12|a9-splice|A12-arms-controller/smoketest.py|python3"
-    "a13|a9-splice|A13-brain/smoketest.py|python3"
-    "a14|a14-kali|A14-kali/smoketest.sh|bash"
+    "a0|a14-kali|A0-smoketest.sh|bash"
+    "a1|a14-kali|A1-smoketest.py|python3"
+    "a2|a14-kali|A2-smoketest.sh|bash"
+    "a3|a14-kali|A3-smoketest.sh|bash"
+    "a4|a14-kali|A4-smoketest.sh|bash"
+    "a7|a14-kali|A7-smoketest.sh|bash"
+    "a5|a3-intranet|A5-smoketest.py|python3"
+    "a6|a3-intranet|A6-smoketest.sh|bash"
+    "a8|a3-intranet|A8-smoketest.sh|bash"
+    "a9|a9-splice|A9-smoketest.sh|sh"
+    "a10|a9-splice|A10-smoketest.py|python3"
+    "a11|a9-splice|A11-smoketest.py|python3"
+    "a12|a9-splice|A12-smoketest.py|python3"
+    "a13|a9-splice|A13-smoketest.py|python3"
+    "a14|a14-kali|A14-smoketest.sh|bash"
 )
 
 RESULTS=()
@@ -46,7 +47,11 @@ log() { echo "[run-all] $*"; }
 hdr() { echo; echo "========================================"; echo "  $*"; echo "========================================"; }
 
 hdr "PRE-FLIGHT: reset sticky state"
-if ! bash "$RANGE_DIR/reset.sh"; then
+RESET_SCRIPT="${RESET_SCRIPT:-$RANGE_DIR/tests/reset.sh}"
+if [[ ! -f "$RESET_SCRIPT" ]]; then
+    RESET_SCRIPT="$RANGE_DIR/reset.sh"  # legacy flat layout fallback
+fi
+if ! bash "$RESET_SCRIPT"; then
     log "[FATAL] reset.sh failed"
     exit 1
 fi
@@ -55,7 +60,7 @@ for test in "${TESTS[@]}"; do
     IFS='|' read -r name runner path interp <<<"$test"
     TOTAL=$((TOTAL + 1))
     hdr "$name via $runner ($path)"
-    src="$RANGE_DIR/$path"
+    src="$SMOKETESTS_DIR/$path"
     if [[ ! -f "$src" ]]; then
         log "[FAIL] $name: $src not found"
         FAIL=$((FAIL + 1))
@@ -82,7 +87,11 @@ done
 
 hdr "isolation (cross-cutting network boundary sweep)"
 TOTAL=$((TOTAL + 1))
-if bash "$RANGE_DIR/isolation-smoketest.sh"; then
+ISOLATION_SCRIPT="${ISOLATION_SCRIPT:-$RANGE_DIR/tests/isolation-smoketest.sh}"
+if [[ ! -f "$ISOLATION_SCRIPT" ]]; then
+    ISOLATION_SCRIPT="$RANGE_DIR/isolation-smoketest.sh"  # legacy flat layout fallback
+fi
+if bash "$ISOLATION_SCRIPT"; then
     RESULTS+=("PASS isolation")
 else
     FAIL=$((FAIL + 1))

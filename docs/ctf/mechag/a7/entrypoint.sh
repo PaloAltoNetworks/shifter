@@ -1,9 +1,8 @@
 #!/bin/sh
 # Start Gitea in background, then run bootstrap once data is ready
 
-# Ensure data dirs exist with correct ownership
+# Ensure data dirs exist, write config, THEN set ownership
 mkdir -p /data/gitea/conf /data/git/repositories
-chown -R git:git /data
 cat > /data/gitea/conf/app.ini << 'EOF'
 [server]
 HTTP_PORT = 3000
@@ -27,6 +26,9 @@ DISABLE_REGISTRATION = true
 MODE = console
 LEVEL = Warn
 EOF
+
+# Set ownership AFTER writing config
+chown -R git:git /data
 
 # Extract bare repos
 mkdir -p /app/repos

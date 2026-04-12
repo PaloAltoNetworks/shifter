@@ -1,4 +1,5 @@
 FROM gitea/gitea:1.23
+RUN apk add --no-cache python3 curl git bash
 COPY bootstrap.sh /app/bootstrap.sh
 COPY bare-repos.tar.gz /app/bare-repos.tar.gz
 RUN chmod +x /app/bootstrap.sh

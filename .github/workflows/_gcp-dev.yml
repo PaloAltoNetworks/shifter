@@ -81,6 +81,9 @@ jobs:
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-python@42375524ee3024772b491695b97f10ed4ac551a6
+        with:
+          python-version: "3.12"
       - name: Ensure GCP deploy auth is configured
         run: |
           if [ -z "${GCP_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then

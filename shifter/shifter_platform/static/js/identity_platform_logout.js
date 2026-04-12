@@ -3,9 +3,7 @@ import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/12.12.0/fir
 
 const configScript = document.getElementById("identity-platform-logout-config");
 
-if (!configScript) {
-    globalThis.location.assign("/");
-} else {
+if (configScript) {
     const config = JSON.parse(configScript.textContent);
 
     try {
@@ -20,4 +18,6 @@ if (!configScript) {
     } finally {
         globalThis.location.assign(config.redirectUrl || "/");
     }
+} else {
+    globalThis.location.assign("/");
 }

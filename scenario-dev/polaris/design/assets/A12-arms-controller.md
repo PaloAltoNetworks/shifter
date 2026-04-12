@@ -61,7 +61,7 @@ This is where the weapons picture comes together. The Lab had specs and document
 
 **Base image:** python:3.12-alpine (pymodbus server)
 
-**Content directory:** `docs/ctf/mechag/A12-arms-controller/`
+**Content directory:** `scenario-dev/polaris/build/A12-arms-controller/`
 
 ### Steps
 

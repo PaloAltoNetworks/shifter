@@ -50,7 +50,7 @@ Reading the registers reveals:
 
 **Base image:** python:3.12-alpine (pymodbus server)
 
-**Content directory:** `docs/ctf/mechag/A10-tail-controller/`
+**Content directory:** `scenario-dev/polaris/build/A10-tail-controller/`
 
 ### Steps
 

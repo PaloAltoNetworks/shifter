@@ -13,24 +13,34 @@
 
 set -euo pipefail
 RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
-cd "$RANGE_DIR"
+COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
+# Legacy flat-layout fallback: if new location doesn't exist, try $RANGE_DIR/docker-compose.yml
+if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then
+    COMPOSE_FILE="$RANGE_DIR/docker-compose.yml"
+fi
+# -p range keeps the project (and therefore network) names stable across
+# layout moves. Without this, docker compose uses the parent dir of the
+# compose file as the project name: "build" for the new layout, "range"
+# for the old, which creates divergent container/network names.
+COMPOSE="docker compose -p range -f $COMPOSE_FILE"
 
 log() { echo "[setup] $*"; }
 
 log "range dir: $RANGE_DIR"
+log "compose file: $COMPOSE_FILE"
 log "building all images..."
 # Cache is on by default. This is golden-lab development - speed of
 # iteration wins over reproducibility. Docker's cache invalidates
 # correctly whenever Dockerfile content or COPY source hashes change,
 # so real edits rebuild; unchanged Dockerfiles rebuild in seconds.
-docker compose build
+$COMPOSE build
 
 log "starting all services..."
-docker compose up -d
+$COMPOSE up -d
 
 log "waiting for docker-managed containers to report Running..."
 for i in $(seq 1 30); do
-    running=$(docker compose ps --status running 2>/dev/null | tail -n +2 | wc -l)
+    running=$($COMPOSE ps --status running 2>/dev/null | tail -n +2 | wc -l)
     if [[ "$running" -ge 15 ]]; then
         log "$running services running"
         break
@@ -64,6 +74,6 @@ ready_check "a4-fileshare"    172.20.10.40 445  || true
 ready_check "a0-website"      172.20.0.10  80   || true
 
 log "pre-flight service list:"
-docker compose ps --format 'table {{.Service}}\t{{.Status}}' || true
+$COMPOSE ps --format 'table {{.Service}}\t{{.Status}}' || true
 
 log "done. Run run-all-smoketests.sh to validate the full range."

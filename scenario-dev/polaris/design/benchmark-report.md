@@ -2,13 +2,13 @@
 
 ## General Docs
 
-- `docs/ctf/northstorm-architecture.md` — Needs changes
+- `scenario-dev/polaris/design/architecture.md` — Needs changes
 - Recommendation: If flag 26 moves to `Easy` and flag 29 moves to `Expert`, update the zone totals, overall counts, and flag breakdown rows.
-- `docs/ctf/northstorm-range-diagram.md` — Accurate
+- `scenario-dev/polaris/design/range-diagram.md` — Accurate
 
 ## A0 — Boreas Website
 
-- `docs/ctf/mechag/A0-boreas-website.md`
+- `scenario-dev/polaris/design/assets/A0-boreas-website.md`
 
 ### Flag 1 — Boreas Systems company info
 
@@ -42,7 +42,7 @@
 
 ## A1 — Mail Server
 
-- `docs/ctf/mechag/A1-mail-server.md`
+- `scenario-dev/polaris/design/assets/A1-mail-server.md`
 
 ### Flag 8 — Employee email with project hints
 
@@ -61,7 +61,7 @@
 
 ## A2 — Domain Controller
 
-- `docs/ctf/mechag/A2-domain-controller.md`
+- `scenario-dev/polaris/design/assets/A2-domain-controller.md`
 
 ### Flag 14 — AD enumeration — suspicious accounts
 
@@ -80,7 +80,7 @@
 
 ## A3 — Web App / Intranet
 
-- `docs/ctf/mechag/A3-web-app.md`
+- `scenario-dev/polaris/design/assets/A3-web-app.md`
 
 ### Flag 7 — Creds in web app config
 
@@ -94,7 +94,7 @@
 
 ## A4 — File Share
 
-- `docs/ctf/mechag/A4-file-share.md`
+- `scenario-dev/polaris/design/assets/A4-file-share.md`
 
 ### Flag 9 — HR records — terminated engineer
 
@@ -113,7 +113,7 @@
 
 ## A5 — SCADA / Generator HMI
 
-- `docs/ctf/mechag/A5-scada-generator.md`
+- `scenario-dev/polaris/design/assets/A5-scada-generator.md`
 
 ### Flag 18 — SCADA interface discovered on network
 
@@ -127,7 +127,7 @@
 
 ## A6 — Engineering Workstation
 
-- `docs/ctf/mechag/A6-engineering-workstation.md`
+- `scenario-dev/polaris/design/assets/A6-engineering-workstation.md`
 
 ### Flag 20 — Default creds on dev tooling
 
@@ -162,7 +162,7 @@
 
 ## A7 — Source Repo Server
 
-- `docs/ctf/mechag/A7-source-repo.md`
+- `scenario-dev/polaris/design/assets/A7-source-repo.md`
 
 ### Flag 24 — Source repo — control software
 
@@ -177,7 +177,7 @@
 
 ## A8 — Research Database
 
-- `docs/ctf/mechag/A8-research-database.md`
+- `scenario-dev/polaris/design/assets/A8-research-database.md`
 
 ### Flag 21 — Research file share — compartment A
 
@@ -196,7 +196,7 @@
 
 ## A9 — Splice Landing Box
 
-- `docs/ctf/mechag/A9-splice-landing.md`
+- `scenario-dev/polaris/design/assets/A9-splice-landing.md`
 
 ### Flag 31 — OT network enumeration — protocol map
 
@@ -205,7 +205,7 @@
 
 ## A10 — Tail Controller
 
-- `docs/ctf/mechag/A10-tail-controller.md`
+- `scenario-dev/polaris/design/assets/A10-tail-controller.md`
 
 ### Flag 32 — Tail motor controller data
 
@@ -214,7 +214,7 @@
 
 ## A11 — Leg Controller
 
-- `docs/ctf/mechag/A11-leg-controller.md`
+- `scenario-dev/polaris/design/assets/A11-leg-controller.md`
 
 ### Flag 33 — Leg joint actuator data
 
@@ -223,7 +223,7 @@
 
 ## A12 — Arms Controller
 
-- `docs/ctf/mechag/A12-arms-controller.md`
+- `scenario-dev/polaris/design/assets/A12-arms-controller.md`
 
 ### Flag 34 — Arms controller — weapons integration
 
@@ -232,7 +232,7 @@
 
 ## A13 — Mecha-Godzilla Brain
 
-- `docs/ctf/mechag/A13-brain.md`
+- `scenario-dev/polaris/design/assets/A13-brain.md`
 
 ### Flag 35 — Mecha-Godzilla brain access
 
@@ -246,6 +246,6 @@
 
 ## A14 — Kali + AI Agent
 
-- `docs/ctf/mechag/A14-kali.md`
+- `scenario-dev/polaris/design/assets/A14-kali.md`
 - Accurate
 - No flags

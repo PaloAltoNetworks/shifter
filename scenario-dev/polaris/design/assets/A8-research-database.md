@@ -71,7 +71,7 @@ Compartmentalized research database used by AURORA's engineering teams. Each res
 
 **Base image:** postgres:16-alpine
 
-**Content directory:** `docs/ctf/mechag/A8-research-database/`
+**Content directory:** `scenario-dev/polaris/build/A8-research-database/`
 
 ### Steps
 

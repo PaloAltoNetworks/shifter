@@ -9,10 +9,10 @@ Network path established to underground manufacturing systems.
 Four hosts detected on the OT network segment.
 
 Hosts:
-  10.10.40.10:502  — Industrial controller (Modbus/TCP)
-  10.10.40.11:502  — Industrial controller (Modbus/TCP)
-  10.10.40.12:502  — Industrial controller (Modbus/TCP)
-  10.10.40.50:9100 — Unknown service (custom protocol)
+  172.20.50.10:502  — Industrial controller (Modbus/TCP)
+  172.20.50.11:502  — Industrial controller (Modbus/TCP)
+  172.20.50.12:502  — Industrial controller (Modbus/TCP)
+  172.20.50.50:9100 — Unknown service (custom protocol)
 
 Tools available on this relay:
   nmap, netcat, tcpdump, python3, pymodbus

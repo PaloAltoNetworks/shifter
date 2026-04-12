@@ -455,10 +455,10 @@ def network_diagram():
     ]
     vlan_data = [
         ["VLAN", "Name", "Subnet", "Purpose", "Notes"],
-        ["10", "Corporate", "10.10.10.0/24", "Office workstations, printers", ""],
-        ["20", "Security", "10.10.20.0/24", "Badge systems, cameras", ""],
-        ["30", "Lab", "10.10.30.0/24", "Engineering workstations", "Restricted access"],
-        ["40", "SCADA/OT", "10.10.40.0/24", "Generator controls", "Isolated from corporate"],
+        ["10", "Corporate", "172.20.10.0/24", "Office workstations, printers", ""],
+        ["20", "Security", "172.20.20.0/24", "Badge systems, cameras", ""],
+        ["30", "Lab", "172.20.30.0/24", "Engineering workstations", "Restricted access"],
+        ["40", "SCADA/OT", "172.20.40.0/24", "Generator controls", "Isolated from corporate"],
         ["50", "OFFLINE", "—", "Underground facility", "NO CONNECTIONS DRAWN"],
     ]
     t = Table(vlan_data, colWidths=[0.6*inch, 1*inch, 1.3*inch, 1.8*inch, 1.5*inch])
@@ -491,14 +491,14 @@ def server_inventory():
         cell.fill = header_fill
 
     data = [
-        ("dc01.boreas.local", "10.10.10.10", 10, "Windows Server 2022", "4 vCPU", "8 GB", "100 GB", "Domain Controller", "d.kowalski"),
-        ("mail.boreas.local", "10.10.10.20", 10, "Debian 12", "2 vCPU", "4 GB", "50 GB", "Postfix/Dovecot/Roundcube", "d.kowalski"),
-        ("intranet.boreas.local", "10.10.10.30", 10, "Debian 12", "2 vCPU", "4 GB", "30 GB", "Flask wiki/CMS", "d.kowalski"),
-        ("fileserv.boreas.local", "10.10.10.40", 10, "Debian 12", "2 vCPU", "4 GB", "200 GB", "Samba file shares", "d.kowalski"),
-        ("scada-gw.boreas.local", "10.10.40.10", 40, "Embedded Linux", "1 CPU", "512 MB", "8 GB", "Modbus/TCP gateway + HMI", "d.kowalski"),
-        ("eng-ws01.boreas.local", "10.10.30.10", 30, "Debian 12", "8 vCPU", "32 GB", "500 GB", "Engineering workstation", "e.vasik"),
-        ("git.boreas.local", "10.10.30.20", 30, "Debian 12", "2 vCPU", "4 GB", "100 GB", "Gitea source repos", "r.tanaka"),
-        ("researchdb.boreas.local", "10.10.30.30", 30, "Debian 12", "4 vCPU", "16 GB", "1 TB", "PostgreSQL database", "e.vasik"),
+        ("dc01.boreas.local", "172.20.10.10", 10, "Windows Server 2022", "4 vCPU", "8 GB", "100 GB", "Domain Controller", "d.kowalski"),
+        ("mail.boreas.local", "172.20.10.20", 10, "Debian 12", "2 vCPU", "4 GB", "50 GB", "Postfix/Dovecot/Roundcube", "d.kowalski"),
+        ("intranet.boreas.local", "172.20.10.30", 10, "Debian 12", "2 vCPU", "4 GB", "30 GB", "Flask wiki/CMS", "d.kowalski"),
+        ("fileserv.boreas.local", "172.20.10.40", 10, "Debian 12", "2 vCPU", "4 GB", "200 GB", "Samba file shares", "d.kowalski"),
+        ("scada-gw.boreas.local", "172.20.40.10", 40, "Embedded Linux", "1 CPU", "512 MB", "8 GB", "Modbus/TCP gateway + HMI", "d.kowalski"),
+        ("eng-ws01.boreas.local", "172.20.30.10", 30, "Debian 12", "8 vCPU", "32 GB", "500 GB", "Engineering workstation", "e.vasik"),
+        ("git.boreas.local", "172.20.30.20", 30, "Debian 12", "2 vCPU", "4 GB", "100 GB", "Gitea source repos", "r.tanaka"),
+        ("researchdb.boreas.local", "172.20.30.30", 30, "Debian 12", "4 vCPU", "16 GB", "1 TB", "PostgreSQL database", "e.vasik"),
     ]
 
     for row_num, row_data in enumerate(data, 2):

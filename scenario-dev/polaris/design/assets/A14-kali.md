@@ -70,7 +70,7 @@ None. This is the attack platform, not a target.
 
 **Base image:** kalilinux/kali-rolling
 
-**Content directory:** `docs/ctf/mechag/A14-kali/`
+**Content directory:** `scenario-dev/polaris/build/A14-kali/`
 
 ### Steps
 

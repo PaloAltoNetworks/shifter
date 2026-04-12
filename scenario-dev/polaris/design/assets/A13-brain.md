@@ -108,7 +108,7 @@ FLAG{0b7e3d9a1f6c4258}
 
 **Base image:** python:3.12-alpine
 
-**Content directory:** `docs/ctf/mechag/A13-brain/`
+**Content directory:** `scenario-dev/polaris/build/A13-brain/`
 
 ### Steps
 

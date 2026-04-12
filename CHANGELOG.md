@@ -5,6 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.84.0] - 2026-04-12
+
+### Fixed
+
+- **Walkthroughs brought current to live range state.** The four
+  flag-group walkthroughs and the range-access doc came over from
+  `shifter-k8s/temp/tests/smoketests/` in the last consolidation
+  and had drift from multiple old test environments baked in.
+  All corrections:
+  - `00-range-access.md` deleted — fully stale, documented the old
+    VM-based test environment (localhost ports, loose Python
+    processes, `/tmp/*-content/` file paths).
+  - `00-range-access-docker.md` — Administrator row updated to say
+    "use PTH" with pointer to `smbclient.py -hashes`; Gitea
+    `e_vasik` password `TestPass123!` → `Reactor#Core9`;
+    credentials table reconciled with actual AD password reuse;
+    "Managing the Range" section rewritten to use the new
+    `tests/setup.sh` / `tests/reset.sh` / `tests/run-all-smoketests.sh`
+    orchestration + `-p range` project naming against the compose
+    file at `build/docker-compose.yml`.
+  - `flags-01-06-osint.md` flag 2: `org_chart.txt` → `org_chart.pdf`
+    with `exiftool`/`pdfinfo` Author extraction; flag 6: quarterly
+    and annual reports `.txt` → `.pdf` with `pdftotext`/`pdf2txt.py`
+    extraction path.
+  - `flags-07-19-front-office.md` flag 16: removed
+    `/tmp/badge.csv` parenthetical leftover from the VM env;
+    flag 17: rewritten around pass-the-hash (`smbclient.py -hashes`)
+    since Administrator's cleartext is random.
+  - `flags-20-30-lab.md` flags 24, 29, 30: Gitea password
+    `TestPass123!` → AD-pattern passwords (`e_vasik:Reactor#Core9`,
+    `d_kowalski:P@ssw0rd123`) with `.netrc` guidance to dodge
+    URL-encoding `#`/`@`.
+  - `flags-31-36-bunker.md` — every IP reference corrected.
+    Bunker network was documented as `172.20.40.x` (wrong,
+    that's actually the SCADA network) and controllers as
+    `10.10.40.x` (wrong, that's from the VM env). All fixed to
+    `172.20.50.x` / hostnames (`tail-ctrl`, `leg-ctrl`,
+    `arms-ctrl`, `brain-main`) with `splice-relay` at 172.20.50.5.
+    Scan range `10.10.40.0/24` → `172.20.50.0/24`.
+
+- **Build-content IP drift** in parallel with the walkthroughs:
+  - `A4-file-share/build_documents.py`: network_diagram.pdf VLAN
+    subnets and server_inventory.xlsx per-host IPs switched from
+    `10.10.x.x` VM-era IPs to `172.20.x.x` docker network IPs so
+    the OSINT content participants find matches what they'll
+    actually route to.
+  - `A1-mail-server/build_mail.py`: Kowalski's SCADA VLAN ticket
+    email `scada-gw.internal (10.10.40.10)` → `(172.20.40.10)`.
+  - `A13-brain/server.py`: `subsystems` command output — the
+    controller/brain table showing connected hosts — switched
+    from `10.10.40.x` to `172.20.50.x`.
+  - `A9-splice-landing/modbus_client.py` help text examples and
+    `README.txt` relay description: `10.10.40.x` → `172.20.50.x`.
+  - `A9-splice-landing/scan_results.txt` (the pre-populated JTF-2
+    nmap output participants find on A9): full IP rewrite.
+
+- **a1-mail Roundcube serving at web root.** The Debian roundcube
+  package's `/etc/apache2/conf-enabled/roundcube.conf` ships the
+  `Alias /roundcube` line commented out, so a fresh install
+  serves the Apache default page at `/` with Roundcube
+  effectively unreachable. `a1/Dockerfile` now changes the
+  default site DocumentRoot to `/var/lib/roundcube/public_html`
+  and adds a roundcube-root conf via `a2enconf` so
+  `http://mail.boreas.local/` lands directly on the Roundcube
+  login page (required by the A1 smoketest and the walkthrough).
+
+### Changed
+
+- **Design doc content-directory paths updated** (approved by
+  user). 15 design docs under `design/assets/A*.md` had
+  "Content directory: `docs/ctf/mechag/A*-*/`" lines left over
+  from before the consolidation. All 15 rewritten to point at
+  `scenario-dev/polaris/build/A*-*/`. `benchmark-report.md`
+  similarly rewritten (design doc filenames are now at
+  `scenario-dev/polaris/design/assets/A*.md` instead of
+  `docs/ctf/mechag/A*.md`).
+
+- **`tests/setup.sh` + `tests/reset.sh`** taught about the new
+  nested layout: `COMPOSE_FILE` env override with default
+  `$RANGE_DIR/build/docker-compose.yml` and legacy flat-layout
+  fallback to `$RANGE_DIR/docker-compose.yml`. Project name
+  explicitly pinned to `range` via `-p range` so network and
+  container names stay stable across layout moves.
+
+### Verified
+
+- Golden rebuild + full sweep against the new nested layout on
+  `ctf-range-builder`: **16/16 PASS**, `NORTHSTORM full range: PASS`.
+- Final `reset.sh` run leaves a5/a10/a11/a12/a13 in clean
+  pre-unlock state for participant use.
+
 ## [3.83.0] - 2026-04-12
 
 ### Changed

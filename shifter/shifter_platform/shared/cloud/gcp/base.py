@@ -8,6 +8,8 @@ from typing import Any
 
 from django.conf import settings
 
+_PROJECTS_PREFIX = "projects/"
+
 
 def get_project_id() -> str:
     """Return the active GCP project ID."""
@@ -36,7 +38,7 @@ def import_google_module(module_name: str) -> Any:
 
 
 def build_topic_path(topic_id: str, publisher_client: Any) -> str:
-    if topic_id.startswith("projects/"):
+    if topic_id.startswith(_PROJECTS_PREFIX):
         return topic_id
     project_id = get_project_id()
     if not project_id:
@@ -45,7 +47,7 @@ def build_topic_path(topic_id: str, publisher_client: Any) -> str:
 
 
 def build_subscription_path(subscription_id: str, subscriber_client: Any) -> str:
-    if subscription_id.startswith("projects/"):
+    if subscription_id.startswith(_PROJECTS_PREFIX):
         return subscription_id
     project_id = get_project_id()
     if not project_id:
@@ -56,12 +58,12 @@ def build_subscription_path(subscription_id: str, subscriber_client: Any) -> str
 def build_secret_version_name(secret_id: str) -> str:
     if "/versions/" in secret_id:
         return secret_id
-    if secret_id.startswith("projects/"):
+    if secret_id.startswith(_PROJECTS_PREFIX):
         return f"{secret_id}/versions/latest"
     project_id = get_project_id()
     if not project_id:
         raise ValueError("GCP project ID is required to resolve a Secret Manager secret")
-    return f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+    return f"{_PROJECTS_PREFIX}{project_id}/secrets/{secret_id}/versions/latest"
 
 
 _K8S_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")

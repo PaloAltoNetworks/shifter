@@ -74,7 +74,6 @@ class GCPTaskRunner:
     def _build_job(
         self,
         client: Any,
-        namespace: str,
         image: str,
         container_name: str,
         command: list[str],
@@ -140,6 +139,48 @@ class GCPTaskRunner:
                     return getattr(terminated, "message", None) or getattr(terminated, "reason", None)
         return None
 
+    def _read_job_status(self, batch_api: Any, namespace: str, job_name: str, api_exception: type[Exception]) -> Any:
+        try:
+            return batch_api.read_namespaced_job_status(name=job_name, namespace=namespace)
+        except api_exception as e:
+            if getattr(e, "status", None) == 404:
+                return None
+            raise
+
+    def _build_status_payload(self, status: Any, core_api: Any, namespace: str, job_name: str) -> dict[str, Any]:
+        active = int(getattr(status, "active", 0) or 0)
+        failed = int(getattr(status, "failed", 0) or 0)
+        succeeded = int(getattr(status, "succeeded", 0) or 0)
+        started_at = getattr(status, "start_time", None)
+        stopped_at = getattr(status, "completion_time", None)
+        stopped_reason = None
+
+        for condition in list(getattr(status, "conditions", None) or []):
+            if getattr(condition, "type", "") in {"Failed", "Complete"}:
+                stopped_reason = getattr(condition, "message", None) or getattr(condition, "reason", None)
+                break
+
+        if succeeded > 0:
+            state = "SUCCEEDED"
+        elif failed > 0:
+            state = "FAILED"
+        elif active > 0:
+            state = "RUNNING"
+        else:
+            state = "SUBMITTED"
+
+        if state in {"SUCCEEDED", "FAILED"} and not stopped_reason:
+            stopped_reason = self._extract_stopped_reason(core_api, namespace, job_name)
+
+        return {
+            "task_id": f"{namespace}/{job_name}",
+            "status": state,
+            "desired_status": "RUNNING" if state in {"SUBMITTED", "RUNNING"} else "COMPLETED",
+            "started_at": started_at,
+            "stopped_at": stopped_at,
+            "stopped_reason": stopped_reason,
+        }
+
     def run_task(
         self,
         task_definition: str,
@@ -162,7 +203,7 @@ class GCPTaskRunner:
         try:
             batch_api, _core_api, client, _api_exception = self._load_kubernetes_api()
             env = self._build_env(client, env_overrides)
-            job = self._build_job(client, namespace, image, container_name, command, env)
+            job = self._build_job(client, image, container_name, command, env)
             created = batch_api.create_namespaced_job(namespace=namespace, body=job)
             job_name = getattr(getattr(created, "metadata", None), "name", None)
             if not job_name:
@@ -187,48 +228,10 @@ class GCPTaskRunner:
 
         try:
             batch_api, core_api, _client, api_exception = self._load_kubernetes_api()
-            try:
-                job = batch_api.read_namespaced_job_status(name=job_name, namespace=namespace)
-            except api_exception as e:
-                if getattr(e, "status", None) == 404:
-                    return None
-                raise
-
-            status = getattr(job, "status", None)
-            active = int(getattr(status, "active", 0) or 0)
-            failed = int(getattr(status, "failed", 0) or 0)
-            succeeded = int(getattr(status, "succeeded", 0) or 0)
-            started_at = getattr(status, "start_time", None)
-            stopped_at = getattr(status, "completion_time", None)
-            stopped_reason = None
-
-            conditions = list(getattr(status, "conditions", None) or [])
-            if conditions:
-                for condition in conditions:
-                    if getattr(condition, "type", "") in {"Failed", "Complete"}:
-                        stopped_reason = getattr(condition, "message", None) or getattr(condition, "reason", None)
-                        break
-
-            if succeeded > 0:
-                state = "SUCCEEDED"
-            elif failed > 0:
-                state = "FAILED"
-            elif active > 0:
-                state = "RUNNING"
-            else:
-                state = "SUBMITTED"
-
-            if state in {"SUCCEEDED", "FAILED"} and not stopped_reason:
-                stopped_reason = self._extract_stopped_reason(core_api, namespace, job_name)
-
-            return {
-                "task_id": f"{namespace}/{job_name}",
-                "status": state,
-                "desired_status": "RUNNING" if state in {"SUBMITTED", "RUNNING"} else "COMPLETED",
-                "started_at": started_at,
-                "stopped_at": stopped_at,
-                "stopped_reason": stopped_reason,
-            }
+            job = self._read_job_status(batch_api, namespace, job_name, api_exception)
+            if job is None:
+                return None
+            return self._build_status_payload(getattr(job, "status", None), core_api, namespace, job_name)
         except CloudTaskError:
             raise
         except Exception as e:

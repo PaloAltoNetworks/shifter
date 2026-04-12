@@ -33,7 +33,7 @@ function isAllowedEmail(email) {
 }
 
 async function beforeCreateImpl(user) {
-  if (!isAllowedEmail(user.email)) {
+  if (!isAllowedEmail(user?.email)) {
     throw new gcipCloudFunctions.https.HttpsError(
       "permission-denied",
       `Only @${allowedDomain()} users may self-register for corporate access.`

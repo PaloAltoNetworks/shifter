@@ -28,6 +28,7 @@ _AWS_BACKEND = "s3"
 _GCP_BACKEND = "gcs"
 _AWS_STATE_FILENAME = "terraform.tfstate"
 _GCP_STATE_FILENAME = "default.tfstate"
+_TF_INPUT_FALSE = "-input=false"
 _SUPPORTED_BACKEND_URL_SCHEMES = {
     "s3://": _AWS_BACKEND,
     "gs://": _GCP_BACKEND,
@@ -246,7 +247,7 @@ def init_workspace(
         "init",
         "-backend=true",
         f"-backend-config=bucket={backend.bucket}",
-        "-input=false",
+        _TF_INPUT_FALSE,
         "-no-color",
     ]
 

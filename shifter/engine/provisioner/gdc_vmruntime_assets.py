@@ -37,6 +37,8 @@ _VM_READY_TIMEOUT_SECONDS = 1800
 _VM_STOP_TIMEOUT_SECONDS = 900
 _DELETE_TIMEOUT_SECONDS = 300
 _MANAGED_BY_LABEL = "shifter-provisioner"
+_SECRETMANAGER_MODULE = "google.cloud.secretmanager"
+_GOOGLE_EXCEPTIONS_MODULE = "google.api_core.exceptions"
 
 
 def _import_kubernetes_modules():
@@ -471,17 +473,13 @@ def _wait_for_deleted(
 
 
 def _read_secret_payload(secret_id: str) -> tuple[str, str]:
-    secretmanager = import_google_module("google.cloud.secretmanager")
-    google_exceptions = import_google_module("google.api_core.exceptions")
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     client = secretmanager.SecretManagerServiceClient()
     if secret_id.startswith("projects/"):
         full_secret_name = secret_id
     else:
         full_secret_name = f"projects/{get_project_id()}/secrets/{secret_id}"
-    try:
-        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-    except google_exceptions.NotFound:
-        raise
+    response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
     return response.payload.data.decode("utf-8"), full_secret_name
 
 
@@ -490,8 +488,8 @@ def _ensure_ssh_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, st
     if not project_id:
         raise RuntimeError("GCP project ID is required to manage GDC VM Runtime SSH secrets")
 
-    secretmanager = import_google_module("google.cloud.secretmanager")
-    google_exceptions = import_google_module("google.api_core.exceptions")
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
     secret_id = _build_instance_secret_name(range_id, instance)
     full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
@@ -524,8 +522,8 @@ def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
     if not project_id:
         return
 
-    secretmanager = import_google_module("google.cloud.secretmanager")
-    google_exceptions = import_google_module("google.api_core.exceptions")
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
     secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance)}"
     try:
@@ -618,6 +616,151 @@ def _select_namespace(range_id: int, subnet_outputs: dict[str, dict[str, Any]], 
     return _sanitize_name(f"{access.namespace_prefix}-{range_id}")
 
 
+def _delete_vm_runtime_resource(
+    custom_api,
+    *,
+    namespace: str,
+    name: str,
+    plural: str,
+    label: str,
+    api_exception,
+) -> None:
+    _delete_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=plural,
+        namespace=namespace,
+        name=name,
+        api_exception=api_exception,
+    )
+    try:
+        _wait_for_deleted(custom_api, namespace, name, _VM_GROUP, _VM_VERSION, plural, api_exception)
+    except RuntimeError:
+        logger.warning("Timed out waiting for GDC %s %s/%s to delete", label, namespace, name)
+
+
+def _build_pending_vm_runtime_instance(
+    *,
+    range_id: int,
+    request_uuid: str,
+    namespace: str,
+    subnet_name: str,
+    subnet_output: dict[str, Any],
+    instance: dict[str, Any],
+    index: int,
+    asset_ip_assignments: dict[str, Any],
+    subnet_cidr: str,
+    network_name: str,
+    vm_config: GDCVMRuntimeConfig,
+    gcs_secret_name: str | None,
+    custom_api,
+    api_exception,
+) -> dict[str, Any]:
+    static_ip = str(asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
+    if not static_ip:
+        raise RuntimeError(f"Missing deterministic IP assignment for VM Runtime asset {instance!r}")
+    vm_name = _vm_name(range_id, subnet_name, instance)
+    disk_name = _disk_name(vm_name)
+    hostname = _build_instance_hostname(instance, vm_name)
+    ssh_secret_ref, public_key = _ensure_ssh_secret(range_id, instance)
+    user_data = _render_user_data(instance, hostname, public_key)
+    os_type = str(instance.get("os_type", "ubuntu"))
+    profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
+    labels = _asset_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
+    disk_manifest = _build_disk_manifest(
+        namespace=namespace,
+        disk_name=disk_name,
+        source_url=profile.source_url,
+        gcs_secret_name=gcs_secret_name if profile.source_url.startswith("gs://") else None,
+        disk_size_gib=profile.disk_size_gib,
+        storage_class_name=vm_config.storage_class_name,
+        labels=labels,
+    )
+    _apply_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=_VM_DISK_PLURAL,
+        namespace=namespace,
+        body=disk_manifest,
+        api_exception=api_exception,
+    )
+    _wait_for_disk_ready(custom_api, namespace, disk_name, api_exception)
+
+    vm_manifest = _build_vm_manifest(
+        namespace=namespace,
+        vm_name=vm_name,
+        disk_name=disk_name,
+        network_name=network_name,
+        static_ip=static_ip,
+        subnet_cidr=subnet_cidr,
+        user_data=user_data,
+        os_label=_instance_os_label(os_type),
+        vcpus=profile.vcpus,
+        memory=profile.memory,
+        labels=labels,
+    )
+    _apply_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=_VM_PLURAL,
+        namespace=namespace,
+        body=vm_manifest,
+        api_exception=api_exception,
+    )
+    return {
+        "instance": instance,
+        "subnet_name": subnet_name,
+        "subnet_output": subnet_output,
+        "vm_name": vm_name,
+        "disk_name": disk_name,
+        "hostname": hostname,
+        "ssh_secret_ref": ssh_secret_ref,
+        "public_key": public_key,
+        "static_ip": static_ip,
+    }
+
+
+def _build_vm_runtime_output(
+    *,
+    namespace: str,
+    pending: dict[str, Any],
+    custom_api,
+    api_exception,
+) -> dict[str, Any]:
+    vm = _wait_for_vm_ready(custom_api, namespace, pending["vm_name"], api_exception)
+    private_ip = _extract_vm_ip(vm) or pending["static_ip"]
+    vmi_metadata = _collect_vmi_metadata(custom_api, namespace, pending["vm_name"], api_exception)
+    instance = pending["instance"]
+    subnet_output = pending["subnet_output"]
+    os_type = str(instance.get("os_type", "ubuntu"))
+    role = str(instance.get("role", "victim"))
+    return {
+        "uuid": str(instance.get("uuid", "")),
+        "name": str(instance.get("name", "")).strip() or pending["hostname"],
+        "asset_type": "vm_runtime_vm",
+        "hostname": pending["hostname"],
+        "role": role,
+        "os": os_type,
+        "subnet_name": pending["subnet_name"],
+        "instance_id": pending["vm_name"],
+        "private_ip": private_ip,
+        "public_key": pending["public_key"],
+        "ssh_key_secret_arn": pending["ssh_secret_ref"],
+        "ssh_username": get_ssh_username(os_type, role),
+        "gdc_vm_name": pending["vm_name"],
+        "gdc_namespace": namespace,
+        "gdc_network_name": str(subnet_output.get("gdc_network_name", "")),
+        "gdc_nad_name": str(subnet_output.get("gdc_nad_name", "")),
+        "gdc_ip": private_ip,
+        "gdc_interface_name": "eth0",
+        "vmruntime_disk_name": pending["disk_name"],
+        **vmi_metadata,
+    }
+
+
 def apply_range_assets(
     request_uuid: str,
     variables: dict[str, Any],
@@ -655,110 +798,34 @@ def apply_range_assets(
         for index, instance in enumerate(instances):
             if not _is_vm_runtime_asset(instance):
                 continue
-            static_ip = str(asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
-            if not static_ip:
-                raise RuntimeError(f"Missing deterministic IP assignment for VM Runtime asset {instance!r}")
-            vm_name = _vm_name(range_id, subnet_name, instance)
-            disk_name = _disk_name(vm_name)
-            hostname = _build_instance_hostname(instance, vm_name)
-            ssh_secret_ref, public_key = _ensure_ssh_secret(range_id, instance)
-            user_data = _render_user_data(instance, hostname, public_key)
-            os_type = str(instance.get("os_type", "ubuntu"))
-            profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
-            labels = _asset_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
-
-            disk_manifest = _build_disk_manifest(
-                namespace=namespace,
-                disk_name=disk_name,
-                source_url=profile.source_url,
-                gcs_secret_name=gcs_secret_name if profile.source_url.startswith("gs://") else None,
-                disk_size_gib=profile.disk_size_gib,
-                storage_class_name=vm_config.storage_class_name,
-                labels=labels,
-            )
-            _apply_namespaced_custom_object(
-                custom_api,
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_DISK_PLURAL,
-                namespace=namespace,
-                body=disk_manifest,
-                api_exception=api_exception,
-            )
-            _wait_for_disk_ready(custom_api, namespace, disk_name, api_exception)
-
-            vm_manifest = _build_vm_manifest(
-                namespace=namespace,
-                vm_name=vm_name,
-                disk_name=disk_name,
-                network_name=network_name,
-                static_ip=static_ip,
-                subnet_cidr=subnet_cidr,
-                user_data=user_data,
-                os_label=_instance_os_label(os_type),
-                vcpus=profile.vcpus,
-                memory=profile.memory,
-                labels=labels,
-            )
-            _apply_namespaced_custom_object(
-                custom_api,
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_PLURAL,
-                namespace=namespace,
-                body=vm_manifest,
-                api_exception=api_exception,
-            )
-
             pending_instances.append(
-                {
-                    "instance": instance,
-                    "subnet_name": subnet_name,
-                    "subnet_output": subnet_output,
-                    "vm_name": vm_name,
-                    "disk_name": disk_name,
-                    "hostname": hostname,
-                    "ssh_secret_ref": ssh_secret_ref,
-                    "public_key": public_key,
-                    "static_ip": static_ip,
-                }
+                _build_pending_vm_runtime_instance(
+                    range_id=range_id,
+                    request_uuid=request_uuid,
+                    namespace=namespace,
+                    subnet_name=subnet_name,
+                    subnet_output=subnet_output,
+                    instance=instance,
+                    index=index,
+                    asset_ip_assignments=asset_ip_assignments,
+                    subnet_cidr=subnet_cidr,
+                    network_name=network_name,
+                    vm_config=vm_config,
+                    gcs_secret_name=gcs_secret_name,
+                    custom_api=custom_api,
+                    api_exception=api_exception,
+                )
             )
 
-    outputs: list[dict[str, Any]] = []
-    for pending in pending_instances:
-        vm = _wait_for_vm_ready(custom_api, namespace, pending["vm_name"], api_exception)
-        private_ip = _extract_vm_ip(vm) or pending["static_ip"]
-        vmi_metadata = _collect_vmi_metadata(custom_api, namespace, pending["vm_name"], api_exception)
-        instance = pending["instance"]
-        subnet_output = pending["subnet_output"]
-        os_type = str(instance.get("os_type", "ubuntu"))
-        role = str(instance.get("role", "victim"))
-        outputs.append(
-            {
-                "uuid": str(instance.get("uuid", "")),
-                "name": str(instance.get("name", "")).strip() or pending["hostname"],
-                "asset_type": "vm_runtime_vm",
-                "hostname": pending["hostname"],
-                "role": role,
-                "os": os_type,
-                "subnet_name": pending["subnet_name"],
-                "instance_id": pending["vm_name"],
-                "private_ip": private_ip,
-                "public_key": pending["public_key"],
-                "ssh_key_secret_arn": pending["ssh_secret_ref"],
-                "ssh_username": get_ssh_username(os_type, role),
-                "gdc_vm_name": pending["vm_name"],
-                "gdc_namespace": namespace,
-                "gdc_network_name": str(subnet_output.get("gdc_network_name", "")),
-                "gdc_nad_name": str(subnet_output.get("gdc_nad_name", "")),
-                "gdc_ip": private_ip,
-                "gdc_interface_name": "eth0",
-                "vmruntime_disk_name": pending["disk_name"],
-                **vmi_metadata,
-            }
+    return [
+        _build_vm_runtime_output(
+            namespace=namespace,
+            pending=pending,
+            custom_api=custom_api,
+            api_exception=api_exception,
         )
-
-    return outputs
+        for pending in pending_instances
+    ]
 
 
 def destroy_range_assets(
@@ -793,19 +860,14 @@ def destroy_range_assets(
             if not _is_vm_runtime_asset(instance):
                 continue
             vm_name = _vm_name(range_id, subnet_name, instance)
-            _delete_namespaced_custom_object(
+            _delete_vm_runtime_resource(
                 custom_api,
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_PLURAL,
                 namespace=namespace,
                 name=vm_name,
+                plural=_VM_PLURAL,
+                label="VM",
                 api_exception=api_exception,
             )
-            try:
-                _wait_for_deleted(custom_api, namespace, vm_name, _VM_GROUP, _VM_VERSION, _VM_PLURAL, api_exception)
-            except RuntimeError:
-                logger.warning("Timed out waiting for GDC VM %s/%s to delete", namespace, vm_name)
 
     for subnet in subnets:
         subnet_name = str(subnet.get("name", "")).strip()
@@ -813,27 +875,14 @@ def destroy_range_assets(
             if not _is_vm_runtime_asset(instance):
                 continue
             disk_name = _disk_name(_vm_name(range_id, subnet_name, instance))
-            _delete_namespaced_custom_object(
+            _delete_vm_runtime_resource(
                 custom_api,
-                group=_VM_GROUP,
-                version=_VM_VERSION,
-                plural=_VM_DISK_PLURAL,
                 namespace=namespace,
                 name=disk_name,
+                plural=_VM_DISK_PLURAL,
+                label="VM disk",
                 api_exception=api_exception,
             )
-            try:
-                _wait_for_deleted(
-                    custom_api,
-                    namespace,
-                    disk_name,
-                    _VM_GROUP,
-                    _VM_VERSION,
-                    _VM_DISK_PLURAL,
-                    api_exception,
-                )
-            except RuntimeError:
-                logger.warning("Timed out waiting for GDC VM disk %s/%s to delete", namespace, disk_name)
             _delete_ssh_secret(range_id, instance)
 
     if access and access.cluster_id and load_gdc_vmruntime_config().image_gcs_secret_id:

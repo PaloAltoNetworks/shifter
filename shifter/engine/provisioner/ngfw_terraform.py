@@ -67,6 +67,53 @@ def _build_provider_state(output_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_ngfw_operation_for_provider(
+    operation: str,
+    request_id: str,
+    instance_id: str,
+    app_id: str,
+    app_spec: dict[str, Any],
+    sls_region: str,
+) -> None:
+    is_gcp = os.environ.get("CLOUD_PROVIDER", "aws") == "gcp"
+    if operation == "up":
+        if is_gcp:
+            _run_gdc_provision(request_id, instance_id, app_id, app_spec, sls_region)
+            return
+        _run_provision(request_id, instance_id, app_id, app_spec, sls_region)
+        return
+
+    if operation == "destroy":
+        if is_gcp:
+            _run_gdc_deprovision(request_id, instance_id, app_id)
+            return
+        _run_deprovision(request_id, instance_id, app_id)
+        return
+
+    raise ValueError(f"Unknown operation: {operation}")
+
+
+def _cleanup_failed_ngfw_provision(request_id: str, instance_id: str, app_spec: dict[str, Any]) -> None:
+    logger.info("NGFW provision failed - attempting auto-cleanup...")
+    if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
+        from main import get_ngfw_data_by_request_id
+
+        gdc_state = get_ngfw_data_by_request_id(request_id).get("state", {})
+        if gdc_state:
+            import gdc_vmseries_ngfw
+
+            gdc_vmseries_ngfw.destroy_ngfw(gdc_state)
+        return
+
+    tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
+    terraform_runner.destroy_ngfw(
+        request_id,
+        terraform_runner.NGFW_MODULE_PATH,
+        variables=tf_vars,
+    )
+    terraform_runner.cleanup_ngfw_state(request_id)
+
+
 def run_ngfw_terraform(operation: str, request_id: str) -> None:
     """Run NGFW Terraform operation (provision or deprovision).
 
@@ -108,44 +155,16 @@ def run_ngfw_terraform(operation: str, request_id: str) -> None:
     app_spec: dict[str, Any] = ngfw_data.get("app_spec", {})
 
     try:
-        if operation == "up":
-            sls_region = app_spec.get("sls_region", "americas")
-            if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
-                _run_gdc_provision(request_id, instance_id, app_id, app_spec, sls_region)
-            else:
-                _run_provision(request_id, instance_id, app_id, app_spec, sls_region)
-        elif operation == "destroy":
-            if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
-                _run_gdc_deprovision(request_id, instance_id, app_id)
-            else:
-                _run_deprovision(request_id, instance_id, app_id)
-        else:
-            raise ValueError(f"Unknown operation: {operation}")
+        sls_region = app_spec.get("sls_region", "americas")
+        _run_ngfw_operation_for_provider(operation, request_id, instance_id, app_id, app_spec, sls_region)
 
     except Exception as e:
         error_msg = str(e)[:1000]
         logger.error("NGFW Terraform operation failed: %s", error_msg)
 
         if operation == "up":
-            # Auto-cleanup on failure
-            logger.info("NGFW provision failed - attempting auto-cleanup...")
             try:
-                if os.environ.get("CLOUD_PROVIDER", "aws") == "gcp":
-                    from main import get_ngfw_data_by_request_id
-
-                    gdc_state = get_ngfw_data_by_request_id(request_id).get("state", {})
-                    if gdc_state:
-                        import gdc_vmseries_ngfw
-
-                        gdc_vmseries_ngfw.destroy_ngfw(gdc_state)
-                else:
-                    tf_vars = _build_tf_variables(request_id, instance_id, app_spec)
-                    terraform_runner.destroy_ngfw(
-                        request_id,
-                        terraform_runner.NGFW_MODULE_PATH,
-                        variables=tf_vars,
-                    )
-                    terraform_runner.cleanup_ngfw_state(request_id)
+                _cleanup_failed_ngfw_provision(request_id, instance_id, app_spec)
             except Exception as cleanup_error:
                 logger.warning("Auto-cleanup failed: %s", cleanup_error)
 

@@ -122,6 +122,7 @@ class SSHExecutor:
             TimeoutError: If the command doesn't complete in time
             ConnectionError: If SSH connection fails
         """
+        del document_name
         host = instance_id
         client = paramiko.SSHClient()
         # Security context: AutoAddPolicy is acceptable because we connect to freshly
@@ -309,6 +310,7 @@ class SSHExecutor:
         document_name: str = "",
     ) -> bool:
         """Wait for PAN-OS SSH readiness with the shared executor signature."""
+        del document_name
         return self.wait_for_agent(instance_id, timeout_seconds=timeout_seconds)
 
     def _check_ssh_available(self, host: str) -> bool:

@@ -12,7 +12,6 @@ from typing import Any
 from executors.base import (
     CommandResult,
     Executor,
-    ExecutorCommandError,
     ExecutorConnectionError,
     ExecutorError,
     ExecutorTimeoutError,
@@ -138,7 +137,7 @@ class SetupOrchestrator:
                             document_name=document_name,
                         )
                         logger.debug("orchestrate: reboot completed")
-                    except (ExecutorTimeoutError, ExecutorError) as e:
+                    except ExecutorError as e:
                         logger.error("orchestrate: reboot failed step=%s", step.name)
                         raise SetupError(
                             f"Reboot failed after step '{step.name}': {e}",
@@ -146,7 +145,7 @@ class SetupOrchestrator:
                             cause=e,
                         ) from e
 
-            except (ExecutorCommandError, ExecutorTimeoutError, ExecutorError) as e:
+            except ExecutorError as e:
                 logger.error("orchestrate: step failed step=%s error=%s", step.name, e)
                 raise SetupError(
                     f"Step '{step.name}' failed: {e}",
@@ -160,7 +159,7 @@ class SetupOrchestrator:
             logger.debug("orchestrate: running verification step")
             try:
                 verify_result = self._execute_step(instance_id, plan.verify_step, context, document_name)
-            except (ExecutorCommandError, ExecutorTimeoutError, ExecutorError) as e:
+            except ExecutorError as e:
                 logger.error("orchestrate: verification failed error=%s", e)
                 raise SetupError(
                     f"Verification failed: {e}",

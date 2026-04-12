@@ -6,7 +6,8 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 
 fetch_runtime_secret() {
-    python - "$1" <<'PY'
+    local secret_name="$1"
+    python - "$secret_name" <<'PY'
 import os
 import sys
 
@@ -37,6 +38,7 @@ else:
     response = client.get_secret_value(SecretId=secret_id)
     print(response["SecretString"])
 PY
+    return 0
 }
 
 DB_SECRET_ID="${DB_SECRET_ID:-${DB_SECRET_ARN:-}}"

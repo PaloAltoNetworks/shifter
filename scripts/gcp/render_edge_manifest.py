@@ -18,6 +18,9 @@ _EDGE_MANIFEST_RELATIVE_PATHS = {
     "gcp-dev": Path("platform/k8s/gcp/overlays/gcp-dev/platform-edge.generated.yaml"),
     "gcp-prod": Path("platform/k8s/gcp/overlays/gcp-prod/platform-edge.generated.yaml"),
 }
+_YAML_METADATA = "metadata:"
+_YAML_NAMESPACE = "  namespace: shifter-platform"
+_YAML_SPEC = "spec:"
 
 
 def _validated_output_path(path: Path) -> Path:
@@ -58,10 +61,10 @@ def render_manifest(outputs: dict[str, object]) -> str:
                 [
                     "apiVersion: networking.gke.io/v1beta1",
                     "kind: FrontendConfig",
-                    "metadata:",
+                    _YAML_METADATA,
                     "  name: platform-frontend-config",
-                    "  namespace: shifter-platform",
-                    "spec:",
+                    _YAML_NAMESPACE,
+                    _YAML_SPEC,
                     "  redirectToHttps:",
                     "    enabled: true",
                     "    responseCodeName: TEMPORARY_REDIRECT",
@@ -73,10 +76,10 @@ def render_manifest(outputs: dict[str, object]) -> str:
                 [
                     "apiVersion: networking.gke.io/v1",
                     "kind: ManagedCertificate",
-                    "metadata:",
+                    _YAML_METADATA,
                     "  name: platform-managed-cert",
-                    "  namespace: shifter-platform",
-                    "spec:",
+                    _YAML_NAMESPACE,
+                    _YAML_SPEC,
                     "  domains:",
                     f"    - {public_hostname}",
                 ]
@@ -117,12 +120,12 @@ def render_manifest(outputs: dict[str, object]) -> str:
             [
                 "apiVersion: networking.k8s.io/v1",
                 "kind: Ingress",
-                "metadata:",
+                _YAML_METADATA,
                 "  name: platform-external",
-                "  namespace: shifter-platform",
+                _YAML_NAMESPACE,
                 "  annotations:",
                 *annotations,
-                "spec:",
+                _YAML_SPEC,
                 "  defaultBackend:",
                 "    service:",
                 "      name: portal-web",

@@ -277,6 +277,95 @@ def _resolve_power_target(instance: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_subnet_pod_context(
+    *,
+    subnet: dict[str, Any],
+    subnet_outputs: dict[str, dict[str, Any]],
+) -> tuple[str, dict[str, Any], dict[str, Any], str, str]:
+    subnet_name = str(subnet.get("name", "")).strip()
+    subnet_output = subnet_outputs.get(subnet_name, {})
+    network_name = str(subnet_output.get("gdc_nad_name") or subnet_output.get("gdc_network_name") or "").strip()
+    namespace = str(subnet_output.get("gdc_namespace", "")).strip()
+    asset_ip_assignments = dict(subnet_output.get("gdc_asset_ip_assignments") or {})
+    if not subnet_name or not namespace or not network_name:
+        raise RuntimeError(f"GDC subnet output missing scenario Pod network details for {subnet_name!r}")
+    return subnet_name, subnet_output, asset_ip_assignments, namespace, network_name
+
+
+def _create_scenario_pod_asset(
+    *,
+    core_api,
+    api_exception,
+    pod_config,
+    range_id: int,
+    request_uuid: str,
+    subnet_name: str,
+    subnet_output: dict[str, Any],
+    asset_ip_assignments: dict[str, Any],
+    namespace: str,
+    network_name: str,
+    instance: dict[str, Any],
+    index: int,
+) -> dict[str, Any]:
+    static_ip = str(asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
+    if not static_ip:
+        raise RuntimeError(f"Missing deterministic IP assignment for scenario Pod asset {instance!r}")
+
+    os_type = str(instance.get("os_type", "ubuntu"))
+    profile = pod_config.get_profile(os_type=os_type)
+    pod_name = _pod_name(range_id, subnet_name, instance)
+    hostname = _sanitize_name(str(instance.get("name", "")).strip() or pod_name, max_length=63)
+    labels = _pod_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
+    pod_manifest = _build_pod_manifest(
+        namespace=namespace,
+        pod_name=pod_name,
+        hostname=hostname,
+        network_name=network_name,
+        static_ip=static_ip,
+        image=profile.image,
+        image_pull_policy=pod_config.image_pull_policy,
+        labels=labels,
+    )
+    _apply_pod(core_api, namespace, pod_manifest, api_exception)
+    _wait_for_pod_ready(core_api, namespace, pod_name, static_ip, network_name, api_exception)
+
+    return {
+        "uuid": str(instance.get("uuid", "")),
+        "name": str(instance.get("name", "")).strip() or hostname,
+        "asset_type": "scenario_pod",
+        "hostname": hostname,
+        "role": str(instance.get("role", "victim")),
+        "os": os_type,
+        "subnet_name": subnet_name,
+        "instance_id": pod_name,
+        "private_ip": static_ip,
+        "ssh_key_secret_arn": "",
+        "ssh_username": "",
+        "gdc_pod_name": pod_name,
+        "gdc_namespace": namespace,
+        "gdc_network_name": str(subnet_output.get("gdc_network_name", "")),
+        "gdc_nad_name": str(subnet_output.get("gdc_nad_name", "")),
+        "gdc_ip": static_ip,
+        "gdc_interface_name": "net1",
+        "gdc_container_image": profile.image,
+    }
+
+
+def _delete_scenario_pod_asset(core_api, namespace: str, pod_name: str, api_exception) -> None:
+    try:
+        core_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+        logger.info("Deleted scenario Pod %s/%s", namespace, pod_name)
+    except api_exception as exc:
+        if exc.status != 404:
+            raise
+        return
+
+    try:
+        _wait_for_pod_deleted(core_api, namespace, pod_name, api_exception)
+    except RuntimeError:
+        logger.warning("Timed out waiting for scenario Pod %s/%s to delete", namespace, pod_name)
+
+
 def _is_pod_ready(
     core_api,
     *,
@@ -386,61 +475,29 @@ def apply_range_assets(
     range_id = int(variables["range_id"])
     outputs: list[dict[str, Any]] = []
     for subnet in variables.get("subnets", []):
-        subnet_name = str(subnet.get("name", "")).strip()
-        subnet_output = subnet_outputs.get(subnet_name, {})
-        namespace = str(subnet_output.get("gdc_namespace", "")).strip()
-        network_name = str(subnet_output.get("gdc_nad_name") or subnet_output.get("gdc_network_name") or "").strip()
-        asset_ip_assignments = dict(subnet_output.get("gdc_asset_ip_assignments") or {})
-        if not subnet_name or not namespace or not network_name:
-            raise RuntimeError(f"GDC subnet output missing scenario Pod network details for {subnet_name!r}")
+        subnet_name, subnet_output, asset_ip_assignments, namespace, network_name = _build_subnet_pod_context(
+            subnet=subnet,
+            subnet_outputs=subnet_outputs,
+        )
 
         for index, instance in enumerate(list(subnet.get("instances") or [])):
             if not _is_scenario_pod(instance):
                 continue
-
-            static_ip = str(asset_ip_assignments.get(_assignment_key(instance, index), "")).strip()
-            if not static_ip:
-                raise RuntimeError(f"Missing deterministic IP assignment for scenario Pod asset {instance!r}")
-
-            os_type = str(instance.get("os_type", "ubuntu"))
-            profile = pod_config.get_profile(os_type=os_type)
-            pod_name = _pod_name(range_id, subnet_name, instance)
-            hostname = _sanitize_name(str(instance.get("name", "")).strip() or pod_name, max_length=63)
-            labels = _pod_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
-            pod_manifest = _build_pod_manifest(
-                namespace=namespace,
-                pod_name=pod_name,
-                hostname=hostname,
-                network_name=network_name,
-                static_ip=static_ip,
-                image=profile.image,
-                image_pull_policy=pod_config.image_pull_policy,
-                labels=labels,
-            )
-            _apply_pod(core_api, namespace, pod_manifest, api_exception)
-            _wait_for_pod_ready(core_api, namespace, pod_name, static_ip, network_name, api_exception)
-
             outputs.append(
-                {
-                    "uuid": str(instance.get("uuid", "")),
-                    "name": str(instance.get("name", "")).strip() or hostname,
-                    "asset_type": "scenario_pod",
-                    "hostname": hostname,
-                    "role": str(instance.get("role", "victim")),
-                    "os": os_type,
-                    "subnet_name": subnet_name,
-                    "instance_id": pod_name,
-                    "private_ip": static_ip,
-                    "ssh_key_secret_arn": "",
-                    "ssh_username": "",
-                    "gdc_pod_name": pod_name,
-                    "gdc_namespace": namespace,
-                    "gdc_network_name": str(subnet_output.get("gdc_network_name", "")),
-                    "gdc_nad_name": str(subnet_output.get("gdc_nad_name", "")),
-                    "gdc_ip": static_ip,
-                    "gdc_interface_name": "net1",
-                    "gdc_container_image": profile.image,
-                }
+                _create_scenario_pod_asset(
+                    core_api=core_api,
+                    api_exception=api_exception,
+                    pod_config=pod_config,
+                    range_id=range_id,
+                    request_uuid=request_uuid,
+                    subnet_name=subnet_name,
+                    subnet_output=subnet_output,
+                    asset_ip_assignments=asset_ip_assignments,
+                    namespace=namespace,
+                    network_name=network_name,
+                    instance=instance,
+                    index=index,
+                )
             )
 
     return outputs
@@ -476,15 +533,4 @@ def destroy_range_assets(
             if not _is_scenario_pod(instance):
                 continue
             pod_name = _pod_name(range_id, subnet_name, instance)
-            try:
-                core_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
-                logger.info("Deleted scenario Pod %s/%s", namespace, pod_name)
-            except api_exception as exc:
-                if exc.status != 404:
-                    raise
-                continue
-
-            try:
-                _wait_for_pod_deleted(core_api, namespace, pod_name, api_exception)
-            except RuntimeError:
-                logger.warning("Timed out waiting for scenario Pod %s/%s to delete", namespace, pod_name)
+            _delete_scenario_pod_asset(core_api, namespace, pod_name, api_exception)

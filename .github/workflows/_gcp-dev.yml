@@ -296,6 +296,11 @@ jobs:
             RENDER_ARGS+=(--secure-portal-mode)
           fi
           python3 scripts/gcp/render_runtime_env.py "${RENDER_ARGS[@]}"
+      - name: Render generated service account annotations
+        run: |
+          python3 scripts/gcp/render_serviceaccount_patch.py \
+            --terraform-output-json /tmp/gcp-terraform-outputs.json \
+            --output "${K8S_OVERLAY_DIR}/patch-serviceaccounts.generated.yaml"
       - name: Render generated edge manifest
         run: |
           python3 scripts/gcp/render_edge_manifest.py \

@@ -38,6 +38,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: guacamole-home
+              mountPath: /home/guacamole/.guacamole
           env:
             - name: GUACD_HOSTNAME
               value: guacd
@@ -95,4 +97,6 @@ spec:
               memory: 1Gi
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: guacamole-home
           emptyDir: {}

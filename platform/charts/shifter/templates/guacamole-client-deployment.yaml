@@ -30,7 +30,11 @@ spec:
           image: {{ include "shifter.guacamoleClientImage" . }}
           imagePullPolicy: {{ .Values.images.guacamoleClient.pullPolicy }}
           {{- include "shifter.containerSecurityContextGuacamole" . | nindent 10 }}
-          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: guacamole-home
+              mountPath: /home/guacamole/.guacamole
           env:
             - name: GUACD_HOSTNAME
               value: guacd
@@ -84,4 +88,9 @@ spec:
                   - sleep 60
           resources:
             {{- toYaml .Values.guacamoleClient.resources | nindent 12 }}
-      {{- include "shifter.tmpVolume" . | nindent 6 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+        - name: guacamole-home
+          emptyDir: {}

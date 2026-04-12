@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.68.0] - 2026-04-12
+
+### Fixed
+
+- `docs/ctf/mechag/a3/Dockerfile`: create `/var/www/docs` base
+  directory with two placeholder files. Without this, both the
+  legit `/download?file=*` feature and the design-specified path
+  traversal attack (`/download?file=../../../etc/passwd`) failed
+  because Python's `os.path.realpath` lexically normalizes `..`
+  components on non-existent paths (resolving `/var/www/docs/..`
+  to `/var/www` then `/var` etc), so the traversal target
+  resolved to `/var/etc/passwd` instead of `/etc/passwd`. Fix
+  makes both legit downloads and the intended attack path work.
+
+### Added
+
+- `docs/ctf/mechag/A3-web-app/smoketest.sh`: A3 intranet/wiki
+  end-to-end smoketest (24 checks). Verifies public pages,
+  username enumeration via `/forgot`, flag 7 in `/.env` and
+  `/config.bak` (plus A8 research DB cred breadcrumb),
+  admin/admin login, flag 12 in `/wiki/project-coordination`
+  HTML comment, all 4 wiki pages, IT KB internal hostnames
+  (dc01, scada-gw), LEVIATHAN Assembly Schedule draft visible
+  in admin panel with `[MOVED TO SECURE SYSTEM]` body, SQL
+  injection via `/search` dumping the users table, and path
+  traversal in `/download` reading `/etc/passwd`. Runnable from
+  the a14-kali container.
+
 ## [3.67.0] - 2026-04-12
 
 ### Added

@@ -7,7 +7,6 @@ from executors.factory import (
     get_setup_document_name,
     get_ssh_username,
 )
-from executors.ssm_executor import SSMExecutor
 
 
 class TestGuestExecutorFactoryHelpers:
@@ -29,17 +28,20 @@ class TestGuestExecutorFactoryHelpers:
 class TestBuildGuestExecutionContext:
     """Provider-aware setup transport selection."""
 
-    def test_aws_uses_ssm_instance_target(self, monkeypatch):
+    def test_aws_uses_ssm_instance_target(self, mocker, monkeypatch):
         monkeypatch.delenv("CLOUD_PROVIDER", raising=False)
-        monkeypatch.setenv("AWS_REGION", "us-east-2")
+        mock_executor_cls = mocker.patch("executors.factory.SSMExecutor")
+        mock_executor = mock_executor_cls.return_value
 
         context = build_guest_execution_context({"instance_id": "i-1234567890", "os": "ubuntu", "role": "victim"})
 
-        assert isinstance(context.executor, SSMExecutor)
+        assert context.executor is mock_executor
         assert context.target == "i-1234567890"
         assert context.document_name == "AWS-RunShellScript"
         assert context.transport_name == "ssm"
+        mock_executor_cls.assert_called_once_with()
         context.close()
+        mock_executor.close.assert_called_once_with()
 
     def test_gcp_uses_private_ip_and_secret_manager_key(self, mocker, monkeypatch):
         monkeypatch.setenv("CLOUD_PROVIDER", "gcp")

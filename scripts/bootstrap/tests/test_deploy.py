@@ -2308,6 +2308,7 @@ class TestGcpPlatformCoreContracts:
         required_services_section = module_main.split("required_services = toset([", 1)[1].split("])", 1)[0]
         assert '"cloudfunctions.googleapis.com"' in required_services_section
         assert '"cloudbuild.googleapis.com"' in required_services_section
+        assert '"logging.googleapis.com"' in required_services_section
 
     def test_identity_platform_blocking_function_waits_for_service_propagation(self):
         """Cloud Run function creation must wait for required API enablement to propagate on fresh bootstrap."""
@@ -2324,7 +2325,11 @@ class TestGcpPlatformCoreContracts:
 
         assert 'resource "time_sleep" "required_services_propagated"' in module_main
         assert 'create_duration = "60s"' in module_main
-        assert "depends_on = [time_sleep.required_services_propagated]" in module_main
+        assert 'resource "time_sleep" "cloud_run_builder_propagated"' in module_main
+        assert 'create_duration = "90s"' in module_main
+        assert "depends_on = [google_project_iam_member.cloud_run_builder]" in module_main
+        assert "time_sleep.required_services_propagated" in module_main
+        assert "time_sleep.cloud_run_builder_propagated" in module_main
 
     def test_identity_platform_uses_cloud_run_functions_not_legacy_first_gen(self):
         """Identity Platform blocking hooks must use the supported Cloud Run functions runtime."""
@@ -2343,6 +2348,8 @@ class TestGcpPlatformCoreContracts:
         assert 'resource "google_cloudfunctions_function" "identity_platform_before_create"' not in module_main
         assert 'runtime     = "nodejs22"' in module_main
         assert 'available_memory               = "128Mi"' in module_main
+        assert 'resource "google_project_iam_member" "cloud_run_builder"' in module_main
+        assert 'role    = "roles/run.builder"' in module_main
         assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
         assert 'role     = "roles/run.invoker"' in module_main
 

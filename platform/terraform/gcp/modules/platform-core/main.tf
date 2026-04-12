@@ -7,6 +7,7 @@ locals {
     "${var.project_id}.firebaseapp.com",
     "localhost",
   ]))
+  compute_default_service_account = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
   common_labels = merge(var.labels, {
     environment = var.environment
     managed_by  = "terraform"
@@ -80,6 +81,7 @@ locals {
     "compute.googleapis.com",
     "container.googleapis.com",
     "identitytoolkit.googleapis.com",
+    "logging.googleapis.com",
     "pubsub.googleapis.com",
     "redis.googleapis.com",
     "run.googleapis.com",
@@ -106,6 +108,18 @@ resource "time_sleep" "required_services_propagated" {
 
 data "google_project" "project" {
   project_id = var.project_id
+}
+
+resource "google_project_iam_member" "cloud_run_builder" {
+  project = var.project_id
+  role    = "roles/run.builder"
+  member  = "serviceAccount:${local.compute_default_service_account}"
+}
+
+resource "time_sleep" "cloud_run_builder_propagated" {
+  create_duration = "90s"
+
+  depends_on = [google_project_iam_member.cloud_run_builder]
 }
 
 resource "google_compute_network" "platform" {
@@ -328,7 +342,10 @@ resource "google_cloudfunctions2_function" "identity_platform_before_create" {
     }
   }
 
-  depends_on = [time_sleep.required_services_propagated]
+  depends_on = [
+    time_sleep.required_services_propagated,
+    time_sleep.cloud_run_builder_propagated,
+  ]
 }
 
 resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker" {

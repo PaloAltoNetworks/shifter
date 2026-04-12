@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.64.0] - 2026-04-11
+
+### Added
+
+- `.ground-control.yaml` declaring the `aphelion` Ground Control
+  project, shifter's local lint command (ADR guard), sonarcloud key
+  (`Brad-Edwards_shifter`), and plan rules reference.
+- `.gc/plan-rules.md` containing ADR guard, guardrail discipline, and
+  stack-native checker requirements as "plans MUST..." bullets for
+  the `/implement` skill plan phase.
+
+### Changed
+
+- `AGENTS.md` has a new "Ground Control Context" section pointing to
+  `.ground-control.yaml`.
+- `.mcp.json` `ground-control` block now sets
+  `GH_REPO=Brad-Edwards/shifter`.
+
 ## [3.63.0] - 2026-04-08
 
 ## Fixed

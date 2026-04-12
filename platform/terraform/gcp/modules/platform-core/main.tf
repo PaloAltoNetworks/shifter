@@ -75,6 +75,8 @@ locals {
 
   required_services = toset([
     "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "cloudfunctions.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "identitytoolkit.googleapis.com",

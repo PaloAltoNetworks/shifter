@@ -2295,6 +2295,23 @@ class TestGcpPlatformCoreContracts:
             in identity_platform_section
         )
 
+    def test_identity_platform_blocking_function_required_apis_are_enabled(self):
+        """The platform-core module must enable the APIs needed to create the blocking function."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        required_services_section = module_main.split("required_services = toset([", 1)[1].split("])", 1)[0]
+        assert '"cloudfunctions.googleapis.com"' in required_services_section
+        assert '"cloudbuild.googleapis.com"' in required_services_section
+
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""
         module_path = (

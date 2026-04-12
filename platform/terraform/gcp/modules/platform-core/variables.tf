@@ -50,6 +50,12 @@ variable "gke_master_authorized_cidrs" {
   default     = []
 }
 
+variable "gke_master_authorized_ci_cidrs" {
+  description = "Additional ephemeral CIDR blocks allowed to access the public GKE control-plane endpoint during CI/CD deploys."
+  type        = list(string)
+  default     = []
+}
+
 variable "range_network_cidr" {
   description = "Base CIDR reserved for Compute Engine range subnet allocation."
   type        = string

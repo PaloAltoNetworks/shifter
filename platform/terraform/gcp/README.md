@@ -42,6 +42,11 @@ CI still validates this tree with `terraform init -backend=false` and
 `terraform validate` on pull requests. On `gcp-dev` pushes, the workflow
 authenticates to GCP, bootstraps a GCS backend bucket named
 `${project_id}-terraform-state` if needed, and applies the environment.
+During `gcp-dev` deploys, the workflow also detects the current self-hosted
+runner egress IP and injects it as an ephemeral
+`gke_master_authorized_ci_cidrs` entry so Terraform can keep the public GKE
+control-plane endpoint locked down while still allowing CI-driven `kubectl`
+access.
 
 The environment outputs now also expose the provider-neutral range-network
 contract consumed by the provisioner runtime:

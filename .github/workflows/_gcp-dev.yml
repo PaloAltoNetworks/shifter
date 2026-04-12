@@ -112,6 +112,43 @@ jobs:
             echo "REGION=${REGION}"
             echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}"
           } >> "$GITHUB_ENV"
+      - name: Detect CI runner egress CIDR for GKE API access
+        run: |
+          python3 - <<'PY'
+          import ipaddress
+          import json
+          import os
+          import urllib.request
+
+          services = (
+              "https://api.ipify.org",
+              "https://ifconfig.me/ip",
+              "https://icanhazip.com",
+          )
+          public_ip = None
+          for url in services:
+              try:
+                  with urllib.request.urlopen(url, timeout=10) as response:
+                      candidate = response.read().decode("utf-8").strip()
+                  ipaddress.ip_address(candidate)
+                  public_ip = candidate
+                  break
+              except Exception:
+                  continue
+
+          if public_ip is None:
+              raise SystemExit("Unable to determine CI runner public egress IP")
+
+          cidr = f"{public_ip}/32"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"CI_RUNNER_EGRESS_CIDR={cidr}\n")
+              env_file.write(
+                  "TF_VAR_gke_master_authorized_ci_cidrs="
+                  + json.dumps([cidr])
+                  + "\n"
+              )
+          print(f"Detected CI runner egress CIDR for GKE API access: {cidr}")
+          PY
       - name: Bootstrap Terraform state bucket
         run: |
           if ! gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then

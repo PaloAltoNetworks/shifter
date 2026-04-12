@@ -668,6 +668,12 @@ resource "google_secret_manager_secret_version" "runtime_seeded" {
   secret_data = each.value
 }
 
+locals {
+  gke_master_authorized_effective_cidrs = distinct(
+    concat(var.gke_master_authorized_cidrs, var.gke_master_authorized_ci_cidrs)
+  )
+}
+
 resource "google_container_cluster" "platform" {
   name     = "${local.name_prefix}-gke"
   project  = var.project_id
@@ -694,11 +700,11 @@ resource "google_container_cluster" "platform" {
   }
 
   dynamic "master_authorized_networks_config" {
-    for_each = length(var.gke_master_authorized_cidrs) == 0 ? [] : [1]
+    for_each = length(local.gke_master_authorized_effective_cidrs) == 0 ? [] : [1]
 
     content {
       dynamic "cidr_blocks" {
-        for_each = var.gke_master_authorized_cidrs
+        for_each = local.gke_master_authorized_effective_cidrs
 
         content {
           cidr_block   = cidr_blocks.value

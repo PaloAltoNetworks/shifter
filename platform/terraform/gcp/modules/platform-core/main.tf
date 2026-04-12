@@ -122,6 +122,12 @@ resource "google_compute_subnetwork" "gke" {
   ip_cidr_range            = var.gke_subnet_cidr
   private_ip_google_access = true
 
+  log_config {
+    aggregation_interval = "INTERVAL_5_SEC"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
+
   secondary_ip_range {
     range_name    = var.gke_pods_secondary_range_name
     ip_cidr_range = var.gke_pods_cidr
@@ -238,6 +244,37 @@ resource "google_storage_bucket" "assets" {
     enabled = true
   }
 
+  logging {
+    log_bucket        = google_storage_bucket.audit_logs.name
+    log_object_prefix = "assets/"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_storage_bucket" "audit_logs" {
+  name                        = lower("${var.project_id}-${replace(var.environment, "_", "-")}-audit-logs")
+  project                     = var.project_id
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels                      = local.common_labels
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+
+    condition {
+      age = 30
+    }
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -338,6 +375,10 @@ resource "google_dns_managed_zone" "platform" {
   dns_name    = var.dns_zone_dns_name
   description = "Public DNS zone for ${var.environment}"
   labels      = local.common_labels
+
+  dnssec_config {
+    state = "on"
+  }
 
   depends_on = [google_project_service.required]
 }
@@ -489,6 +530,11 @@ resource "google_sql_database_instance" "platform" {
       ipv4_enabled                                  = false
       private_network                               = google_compute_network.platform.id
       enable_private_path_for_google_cloud_services = true
+    }
+
+    database_flags {
+      name  = "log_connections"
+      value = "on"
     }
 
     user_labels = local.common_labels

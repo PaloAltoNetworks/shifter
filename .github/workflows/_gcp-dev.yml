@@ -261,7 +261,7 @@ jobs:
         run: |
           python3 scripts/gcp/render_edge_manifest.py \
             --terraform-output-json /tmp/gcp-terraform-outputs.json \
-            --output "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
+            --environment "${GCP_ENVIRONMENT}"
       - name: Apply GKE manifests
         run: kubectl apply -k "${K8S_OVERLAY_DIR}"
       - name: Sync Guacamole runtime secret

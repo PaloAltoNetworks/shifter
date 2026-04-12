@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.81.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/setup.sh`: NORTHSTORM range setup orchestrator.
+  Runs `docker compose build` + `up -d`, waits for all 15 services
+  to report Running, then polls key readiness ports (a7 gitea
+  3000, a1 IMAP 143, a3 80, a4 445, a0 80) via a14-kali before
+  returning. Single entry point to take a freshly-synced
+  `/home/atomik/range/` to a live range.
+- `docs/ctf/mechag/reset.sh`: sticky-state reset. Force-recreates
+  the five services with one-shot unlock state (a5-scada thermal
+  runaway, a10/a11/a12 flag-register unlocks, a13-brain for
+  parity), then polls each one's primary port on its own
+  container's localhost until the embedded server is actually
+  accepting connections. localhost polling avoids the
+  cross-network unreachability problem where a single probe
+  container couldn't see every docker bridge.
+- `docs/ctf/mechag/run-all-smoketests.sh`: full-range test
+  sweep orchestrator. Calls reset.sh pre-flight, then copies
+  each per-asset smoketest into its designated runner container
+  (a14-kali / a3-intranet / a9-splice) in the correct pivot
+  order, executes with the correct interpreter (bash / python3 /
+  sh), captures per-asset PASS/FAIL, then runs the host-side
+  isolation smoketest, and aggregates a final summary. Proven
+  deterministic with three consecutive 16/16 PASS runs against
+  the live range (15 asset smoketests + isolation sweep = 475
+  underlying checks).
+
+### Changed
+
+- VM cleanup pass on `/home/atomik/range/`: removed stale
+  file duplicates left over from before the parent-context
+  Dockerfile migration. Top-level copies of build-a6-content.sh
+  and build-gpg-chain.sh, plus per-asset copies of build
+  scripts / server.py / 01-init.sql / bare-repos.tar.gz /
+  bootstrap.sh / content files that now live in the A*-
+  content directories. `/home/atomik/range/a*/` now contains
+  only the Dockerfile and runtime configs.
+
 ## [3.80.0] - 2026-04-12
 
 ### Added

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 _ALLOWED_YAML_SUFFIXES = {".yaml", ".yml"}
@@ -143,7 +144,8 @@ def main() -> int:
     outputs = json.loads(_TERRAFORM_OUTPUT_PATH.read_text())
     rendered = render_manifest(outputs)
     output_path = _output_path_for_environment(args.environment)
-    output_path.write_text(rendered)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sys.stdout.write(rendered)
     return 0
 
 

@@ -48,6 +48,9 @@ from mission_control.utils import build_connection_urls
 from shared.exceptions import AssetError, CMSError
 
 logger = logging.getLogger(__name__)
+_GUAC_AUTH_NOT_CONFIGURED = "Guacamole JSON auth is not configured"
+_GUACAMOLE_BASE_PATH = "/guacamole"
+_INTERNAL_SERVER_ERROR = "Internal server error"
 
 # Error message constants
 _NGFW_NOT_FOUND = "NGFW not found"
@@ -175,11 +178,11 @@ def guacamole_rdp_url(request):
     # Get Guacamole secret key from settings
     secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
     if not secret_key:
-        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        logger.error(_GUAC_AUTH_NOT_CONFIGURED)
         return JsonResponse({"error": "RDP service not configured"}, status=503)
 
     # Get Guacamole URLs from settings
-    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", _GUACAMOLE_BASE_PATH)
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
     # Log whether SFTP key is available (do not log key contents)
@@ -279,16 +282,16 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
             user.email,
             app_id,
         )
-        return JsonResponse({"error": "Internal server error"}, status=500)
+        return JsonResponse({"error": _INTERNAL_SERVER_ERROR}, status=500)
 
     # Get Guacamole secret key from settings
     secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
     if not secret_key:
-        logger.error("GUACAMOLE_JSON_AUTH_SECRET not configured")
+        logger.error(_GUAC_AUTH_NOT_CONFIGURED)
         return JsonResponse({"error": "SSH service not configured"}, status=503)
 
     # Get Guacamole URLs from settings
-    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", "/guacamole")
+    guacamole_base_url = getattr(django_settings, "GUACAMOLE_BASE_URL", _GUACAMOLE_BASE_PATH)
     guacamole_api_url = getattr(django_settings, "GUACAMOLE_API_BASE_URL", None)
 
     # Generate Guacamole SSH URL
@@ -310,7 +313,7 @@ def api_ngfw_ssh_url(request: HttpRequest, app_id: str) -> JsonResponse:
         return JsonResponse({"error": "Failed to generate SSH URL"}, status=500)
     except Exception:
         logger.exception("Unexpected error generating NGFW SSH URL: user=%s ngfw_uuid=%s", user.email, app_id)
-        return JsonResponse({"error": "Internal server error"}, status=500)
+        return JsonResponse({"error": _INTERNAL_SERVER_ERROR}, status=500)
 
     logger.info(
         "Guacamole SSH URL generated for NGFW: user=%s ngfw_uuid=%s",
@@ -362,7 +365,7 @@ def guacamole_ssh_url(request: HttpRequest) -> JsonResponse:
             user.email,
             instance_uuid,
         )
-        return JsonResponse({"error": "Internal server error"}, status=500)
+        return JsonResponse({"error": _INTERNAL_SERVER_ERROR}, status=500)
 
     secret_key = getattr(django_settings, "GUACAMOLE_JSON_AUTH_SECRET", "")
     if not secret_key:

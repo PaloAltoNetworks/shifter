@@ -401,3 +401,5 @@ CLAUDE.local.md
 
 # OpenAI Codex CLI
 .codex
+
+.claude/scheduled_tasks.lock

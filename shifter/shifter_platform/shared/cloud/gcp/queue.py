@@ -8,6 +8,8 @@ from shared.cloud.exceptions import CloudQueueError
 from shared.cloud.gcp.base import build_subscription_path, build_topic_path, import_google_module
 
 logger = logging.getLogger(__name__)
+_PUBSUB_MODULE = "google.cloud.pubsub_v1"
+_PUBSUB_IMPORT_ERROR = "GCP queue support requires google-cloud-pubsub"
 
 
 class GCPQueueConsumer:
@@ -20,7 +22,7 @@ class GCPQueueConsumer:
         wait_time: int = 20,
     ) -> list[dict]:
         try:
-            pubsub = import_google_module("google.cloud.pubsub_v1")
+            pubsub = import_google_module(_PUBSUB_MODULE)
             client = pubsub.SubscriberClient()
             subscription = build_subscription_path(queue_id, client)
             response = client.pull(
@@ -36,7 +38,7 @@ class GCPQueueConsumer:
                 for msg in response.received_messages
             ]
         except ImportError as e:
-            raise CloudQueueError("GCP queue support requires google-cloud-pubsub") from e
+            raise CloudQueueError(_PUBSUB_IMPORT_ERROR) from e
         except Exception as e:
             if e.__class__.__name__ == "DeadlineExceeded":
                 return []
@@ -45,12 +47,12 @@ class GCPQueueConsumer:
 
     def delete_message(self, queue_id: str, receipt_handle: str) -> None:
         try:
-            pubsub = import_google_module("google.cloud.pubsub_v1")
+            pubsub = import_google_module(_PUBSUB_MODULE)
             client = pubsub.SubscriberClient()
             subscription = build_subscription_path(queue_id, client)
             client.acknowledge(request={"subscription": subscription, "ack_ids": [receipt_handle]})
         except ImportError as e:
-            raise CloudQueueError("GCP queue support requires google-cloud-pubsub") from e
+            raise CloudQueueError(_PUBSUB_IMPORT_ERROR) from e
         except Exception as e:
             logger.error("delete_message: failed queue=%s error=%s", queue_id, e)
             raise CloudQueueError(f"Failed to ack Pub/Sub message: {e}") from e
@@ -62,12 +64,12 @@ class GCPQueuePublisher:
     def send_message(self, queue_id: str, body: str) -> None:
         logger.debug("send_message: queue=%s", queue_id)
         try:
-            pubsub = import_google_module("google.cloud.pubsub_v1")
+            pubsub = import_google_module(_PUBSUB_MODULE)
             client = pubsub.PublisherClient()
             topic = build_topic_path(queue_id, client)
             client.publish(topic, body.encode("utf-8")).result(timeout=30)
         except ImportError as e:
-            raise CloudQueueError("GCP queue support requires google-cloud-pubsub") from e
+            raise CloudQueueError(_PUBSUB_IMPORT_ERROR) from e
         except Exception as e:
             logger.error("send_message: failed queue=%s error=%s", queue_id, e)
             raise CloudQueueError(f"Failed to publish Pub/Sub message: {e}") from e

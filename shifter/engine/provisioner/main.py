@@ -379,11 +379,11 @@ def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}
 
 
-def _get_provider_metadata_prefixes(provider: str) -> tuple[str, ...]:
+def _get_provider_metadata_prefixes(provider: str) -> list[str]:
     """Return the accepted output prefixes for provider metadata extraction."""
     if provider == "gcp":
-        return ("gcp_", "gdc_", "vmruntime_")
-    return (f"{provider}_",)
+        return ["gcp_", "gdc_", "vmruntime_"]
+    return [f"{provider}_"]
 
 
 def _extract_provider_metadata(resource: dict[str, Any], provider: str) -> dict[str, Any]:
@@ -1858,123 +1858,34 @@ def _run_dc_setup(
     logger.info("DC %s ready via %s", instance_id, execution.transport_name)
 
     try:
-        if _should_run_dc_bootstrap_plan(provider):
-            logger.info("Running DC bootstrap plan via %s setup path", provider)
-
-            bootstrap_plan = BootstrapPlan()
-
-            class DCBootstrapContext:
-                def __init__(self, hostname: str, public_key: str):
-                    self.hostname = hostname
-                    self.public_key = public_key
-
-            bootstrap_hostname = (
-                sanitize_hostname(instance_data.get("hostname", "") or instance_data.get("name", ""))
-                or f"dc-{instance_id[-8:]}"
-            )
-            bootstrap_context = bootstrap_plan.get_context(
-                DCBootstrapContext(hostname=bootstrap_hostname, public_key=public_key)
-            )
-            bootstrap_result = orchestrator.orchestrate(
-                execution.target,
-                bootstrap_plan,
-                bootstrap_context,
-                document_name=execution.document_name,
-            )
-            if not bootstrap_result.success:
-                raise SetupError(f"DC bootstrap failed: {bootstrap_result.error}")
-            logger.info("DC bootstrap complete for %s", instance_id)
-
-        # Configure SSH key for terminal access (before DC verification)
-        if public_key:
-            logger.info("Configuring SSH key on DC %s...", instance_id)
-            ssh_key_script = f'''
-$ErrorActionPreference = "Stop"
-$publicKey = "{public_key}"
-
-Write-Host "Configuring SSH key for Administrator..."
-
-$sshDir = "C:\\ProgramData\\ssh"
-if (!(Test-Path $sshDir)) {{
-    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
-}}
-
-$publicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
-
-# Set proper permissions
-icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
-    /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
-
-# Restart sshd to pick up new key
-Restart-Service sshd -Force -ErrorAction SilentlyContinue
-
-Write-Host "SSH key configured successfully"
-'''
-            ssh_result = executor.run_command(
-                instance_id=execution.target,
-                script=ssh_key_script,
-                document_name=execution.document_name,
-                timeout_seconds=60,
-            )
-            if not ssh_result.success:
-                logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
-            else:
-                logger.info("SSH key configured on DC %s", instance_id)
-        else:
-            logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
-
-        # Verify Domain Controller via DCSetupPlan
-        logger.info("Verifying Domain Controller (%s)...", domain_name)
-        runtime_promotion = _should_promote_dc_at_runtime(provider)
-        if runtime_promotion:
-            logger.info("Using runtime DC promotion for provider=%s", provider)
-        else:
-            logger.info("Using prebaked DC verification path for provider=%s", provider)
-        dc_plan = DCSetupPlan(runtime_promotion=runtime_promotion)
-
-        # Create config object for DCSetupPlan context
-        class DCPromoteConfig:
-            def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
-                self.domain_name = domain_name
-                self.netbios_name = netbios_name
-                self.dsrm_password = dsrm_password
-                self.domain_admin_password = domain_admin_password
-
-        # Passwords come from env var, not from spec (same as InstanceComponent)
-        domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
-        dsrm_password = domain_admin_password  # Reuse for DSRM (same as InstanceComponent)
-
-        config_obj = DCPromoteConfig(domain_name, netbios_name, dsrm_password, domain_admin_password)
-        dc_context = dc_plan.get_context(config_obj)
-        dc_result = orchestrator.orchestrate(
-            execution.target,
-            dc_plan,
-            dc_context,
-            document_name=execution.document_name,
+        _run_dc_bootstrap_plan(
+            provider=provider,
+            instance_data=instance_data,
+            instance_id=instance_id,
+            public_key=public_key,
+            orchestrator=orchestrator,
+            execution=execution,
         )
-        if not dc_result.success:
-            raise SetupError(f"DC verification failed: {dc_result.error}")
-        logger.info("DC verification complete")
-
-        # Install XDR agent on DC
-        if agent_presigned_url:
-            logger.info("Installing XDR agent on DC %s...", instance_id)
-            xdr_plan = XDRAgentInstallPlan()
-            xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-            xdr_result = orchestrator.orchestrate(
-                execution.target,
-                xdr_plan,
-                xdr_context,
-                document_name=execution.document_name,
-            )
-            if not xdr_result.success:
-                raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
-            logger.info("XDR agent installed successfully on DC")
-        elif xdr_required:
-            raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
-        else:
-            logger.info("No XDR agent URL provided for DC (not required)")
-
+        _configure_dc_ssh_access(
+            executor=executor,
+            execution=execution,
+            instance_id=instance_id,
+            public_key=public_key,
+        )
+        _verify_dc_setup(
+            provider=provider,
+            domain_name=domain_name,
+            netbios_name=netbios_name,
+            orchestrator=orchestrator,
+            execution=execution,
+        )
+        _install_dc_xdr(
+            orchestrator=orchestrator,
+            execution=execution,
+            instance_id=instance_id,
+            agent_presigned_url=agent_presigned_url,
+            xdr_required=xdr_required,
+        )
         return True
     finally:
         execution.close()
@@ -2232,36 +2143,7 @@ def _run_terraform_provision(
 
     logger.info("Running terraform apply for range...")
 
-    # Allocate CIDRs for subnets before Terraform
-    spec_subnets = range_spec.get("subnets", [])
-    if spec_subnets:
-        from components.network import allocate_subnets
-
-        range_network = load_range_network_config()
-        vpc_id = range_network.network_id
-        vpc_cidr = range_network.network_cidr or "10.1.0.0/16"
-        # Extract CIDR prefix (e.g., "10.1" from "10.1.0.0/16")
-        cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
-
-        subnet_count = len(spec_subnets)
-        logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
-
-        allocated_cidrs = allocate_subnets(
-            vpc_id,
-            cidr_prefix,
-            subnet_count,
-            subnet_size=28,
-            range_id=range_id,
-            request_id=request_id,
-        )
-        logger.info("Allocated CIDRs: %s", allocated_cidrs)
-
-        # Add CIDRs to range_spec subnets
-        for i, subnet in enumerate(spec_subnets):
-            subnet["cidr"] = allocated_cidrs[i]
-
-        # Persist allocated CIDRs back to range_config so destroy can read them
-        _update_range_config(range_id, range_spec)
+    spec_subnets = _allocate_range_subnet_cidrs(request_id, range_id, range_spec)
 
     # Build Terraform variables from range spec (now with CIDRs)
     tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
@@ -2273,67 +2155,22 @@ def _run_terraform_provision(
     subnets_output = output_data.get("subnets", {})
     instances_output = output_data.get("instances", [])
 
-    expected_subnet_names = {s.get("name") for s in spec_subnets}
+    expected_subnet_names = {str(subnet_name) for subnet in spec_subnets if (subnet_name := subnet.get("name"))}
     _validate_provisioned_outputs(
         subnets=subnets_output,
         instances=instances_output,
         expected_subnet_names=expected_subnet_names,
     )
 
-    # Validate NGFW routes were created if range requires NGFW
-    if range_spec.get("ngfw", False):
-        ngfw_data = get_user_ngfw_data(user_id)
-        if not ngfw_data or not resolve_ngfw_attachment_config(ngfw_data).is_attachable:
-            raise RuntimeError(
-                "NGFW routing validation failed: range requires NGFW but the active NGFW "
-                "is missing attachable routing state."
-            )
-        logger.info("NGFW-enabled range validated: attachment_mode=%s", ngfw_data.get("attachment_mode", ""))
-
-    # Configure NGFW with routes for range subnets (only if range requires NGFW)
-    if range_spec.get("ngfw", False):
-        ngfw_data = get_user_ngfw_data(user_id)
-        route_next_hop_ip = ngfw_data.get("route_next_hop_ip") if ngfw_data else ""
-        if ngfw_data and ngfw_data.get("management_ip") and route_next_hop_ip:
-            logger.info("Configuring NGFW with subnet routes...")
-            subnets_for_ngfw = []
-            for spec_subnet in spec_subnets:
-                subnet_name = spec_subnet.get("name", "")
-                subnet_output = subnets_output.get(subnet_name, {})
-                subnets_for_ngfw.append(
-                    {
-                        "name": subnet_name,
-                        "cidr": subnet_output.get("subnet_cidr", ""),
-                        "connected_to": spec_subnet.get("connected_to", []),
-                        "provider_metadata": {
-                            "gcp": {
-                                "namespace": subnet_output.get("gdc_namespace", ""),
-                                "network_name": subnet_output.get("gdc_network_name", ""),
-                                "gateway_ip": subnet_output.get("gdc_gateway_ip", ""),
-                            }
-                        }
-                        if _get_cloud_provider() == "gcp"
-                        else {},
-                    }
-                )
-            configure_ngfw_subnets(
-                subnets=subnets_for_ngfw,
-                range_id=range_id,
-                management_ip=ngfw_data["management_ip"],
-                ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-                route_next_hop_ip=route_next_hop_ip,
-                ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
-            )
-            _record_ngfw_range_attachment(
-                ngfw_request_id=ngfw_data["ngfw_request_id"],
-                ngfw_status=ngfw_data["status"],
-                attachment_record=_build_ngfw_range_attachment_record(
-                    range_id=range_id,
-                    request_id=request_id,
-                    subnets=subnets_for_ngfw,
-                    ngfw_data=ngfw_data,
-                ),
-            )
+    _validate_ngfw_range_attachment(range_spec, user_id)
+    _configure_ngfw_for_range(
+        request_id=request_id,
+        range_id=range_id,
+        user_id=user_id,
+        range_spec=range_spec,
+        spec_subnets=spec_subnets,
+        subnets_output=subnets_output,
+    )
 
     # Run instance setup (DC first, then others in parallel)
     logger.info("Running instance setup...")
@@ -2352,6 +2189,261 @@ def _run_terraform_provision(
     )
 
     publish_ready(request_id=request_id, range_id=range_id, user_id=user_id)
+
+
+def _allocate_range_subnet_cidrs(request_id: str, range_id: int, range_spec: dict) -> list[dict]:
+    spec_subnets = range_spec.get("subnets", [])
+    if not spec_subnets:
+        return spec_subnets
+
+    from components.network import allocate_subnets
+
+    range_network = load_range_network_config()
+    vpc_id = range_network.network_id
+    vpc_cidr = range_network.network_cidr or "10.1.0.0/16"
+    cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
+    subnet_count = len(spec_subnets)
+    logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
+    allocated_cidrs = allocate_subnets(
+        vpc_id,
+        cidr_prefix,
+        subnet_count,
+        subnet_size=28,
+        range_id=range_id,
+        request_id=request_id,
+    )
+    logger.info("Allocated CIDRs: %s", allocated_cidrs)
+    for i, subnet in enumerate(spec_subnets):
+        subnet["cidr"] = allocated_cidrs[i]
+    _update_range_config(range_id, range_spec)
+    return spec_subnets
+
+
+def _validate_ngfw_range_attachment(range_spec: dict, user_id: int) -> None:
+    if not range_spec.get("ngfw", False):
+        return
+    ngfw_data = get_user_ngfw_data(user_id)
+    if not ngfw_data or not resolve_ngfw_attachment_config(ngfw_data).is_attachable:
+        raise RuntimeError(
+            "NGFW routing validation failed: range requires NGFW but the active NGFW "
+            "is missing attachable routing state."
+        )
+    logger.info("NGFW-enabled range validated: attachment_mode=%s", ngfw_data.get("attachment_mode", ""))
+
+
+def _build_ngfw_subnet_payloads(
+    spec_subnets: list[dict[str, Any]],
+    subnets_output: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    provider = _get_cloud_provider()
+    subnets_for_ngfw = []
+    for spec_subnet in spec_subnets:
+        subnet_name = spec_subnet.get("name", "")
+        subnet_output = subnets_output.get(subnet_name, {})
+        subnets_for_ngfw.append(
+            {
+                "name": subnet_name,
+                "cidr": subnet_output.get("subnet_cidr", ""),
+                "connected_to": spec_subnet.get("connected_to", []),
+                "provider_metadata": {
+                    "gcp": {
+                        "namespace": subnet_output.get("gdc_namespace", ""),
+                        "network_name": subnet_output.get("gdc_network_name", ""),
+                        "gateway_ip": subnet_output.get("gdc_gateway_ip", ""),
+                    }
+                }
+                if provider == "gcp"
+                else {},
+            }
+        )
+    return subnets_for_ngfw
+
+
+def _configure_ngfw_for_range(
+    *,
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    range_spec: dict,
+    spec_subnets: list[dict[str, Any]],
+    subnets_output: dict[str, dict[str, Any]],
+) -> None:
+    if not range_spec.get("ngfw", False):
+        return
+
+    ngfw_data = get_user_ngfw_data(user_id)
+    route_next_hop_ip = ngfw_data.get("route_next_hop_ip") if ngfw_data else ""
+    if not (ngfw_data and ngfw_data.get("management_ip") and route_next_hop_ip):
+        return
+
+    logger.info("Configuring NGFW with subnet routes...")
+    subnets_for_ngfw = _build_ngfw_subnet_payloads(spec_subnets, subnets_output)
+    configure_ngfw_subnets(
+        subnets=subnets_for_ngfw,
+        range_id=range_id,
+        management_ip=ngfw_data["management_ip"],
+        ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+        route_next_hop_ip=route_next_hop_ip,
+        ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
+    )
+    _record_ngfw_range_attachment(
+        ngfw_request_id=ngfw_data["ngfw_request_id"],
+        ngfw_status=ngfw_data["status"],
+        attachment_record=_build_ngfw_range_attachment_record(
+            range_id=range_id,
+            request_id=request_id,
+            subnets=subnets_for_ngfw,
+            ngfw_data=ngfw_data,
+        ),
+    )
+
+
+class _DCBootstrapContext:
+    def __init__(self, hostname: str, public_key: str):
+        self.hostname = hostname
+        self.public_key = public_key
+
+
+class _DCPromoteConfig:
+    def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
+        self.domain_name = domain_name
+        self.netbios_name = netbios_name
+        self.dsrm_password = dsrm_password
+        self.domain_admin_password = domain_admin_password
+
+
+def _run_dc_bootstrap_plan(
+    *,
+    provider: str,
+    instance_data: dict[str, Any],
+    instance_id: str,
+    public_key: str,
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+) -> None:
+    if not _should_run_dc_bootstrap_plan(provider):
+        return
+
+    logger.info("Running DC bootstrap plan via %s setup path", provider)
+    bootstrap_plan = BootstrapPlan()
+    bootstrap_source = instance_data.get("hostname", "") or instance_data.get("name", "")
+    bootstrap_hostname = sanitize_hostname(bootstrap_source) or f"dc-{instance_id[-8:]}"
+    bootstrap_context = bootstrap_plan.get_context(
+        _DCBootstrapContext(hostname=bootstrap_hostname, public_key=public_key)
+    )
+    bootstrap_result = orchestrator.orchestrate(
+        execution.target,
+        bootstrap_plan,
+        bootstrap_context,
+        document_name=execution.document_name,
+    )
+    if not bootstrap_result.success:
+        raise SetupError(f"DC bootstrap failed: {bootstrap_result.error}")
+    logger.info("DC bootstrap complete for %s", instance_id)
+
+
+def _configure_dc_ssh_access(
+    *,
+    executor: Any,
+    execution: Any,
+    instance_id: str,
+    public_key: str,
+) -> None:
+    if not public_key:
+        logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
+        return
+
+    logger.info("Configuring SSH key on DC %s...", instance_id)
+    ssh_key_script = f'''
+$ErrorActionPreference = "Stop"
+$publicKey = "{public_key}"
+
+Write-Host "Configuring SSH key for Administrator..."
+
+$sshDir = "C:\\ProgramData\\ssh"
+if (!(Test-Path $sshDir)) {{
+    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+}}
+
+$publicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
+
+# Set proper permissions
+icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
+    /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
+
+# Restart sshd to pick up new key
+Restart-Service sshd -Force -ErrorAction SilentlyContinue
+
+Write-Host "SSH key configured successfully"
+'''
+    ssh_result = executor.run_command(
+        instance_id=execution.target,
+        script=ssh_key_script,
+        document_name=execution.document_name,
+        timeout_seconds=60,
+    )
+    if not ssh_result.success:
+        logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
+        return
+    logger.info("SSH key configured on DC %s", instance_id)
+
+
+def _verify_dc_setup(
+    *,
+    provider: str,
+    domain_name: str,
+    netbios_name: str,
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+) -> None:
+    logger.info("Verifying Domain Controller (%s)...", domain_name)
+    runtime_promotion = _should_promote_dc_at_runtime(provider)
+    logger.info(
+        "Using %s DC verification path for provider=%s",
+        "runtime" if runtime_promotion else "prebaked",
+        provider,
+    )
+    dc_plan = DCSetupPlan(runtime_promotion=runtime_promotion)
+    domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+    config_obj = _DCPromoteConfig(domain_name, netbios_name, domain_admin_password, domain_admin_password)
+    dc_context = dc_plan.get_context(config_obj)
+    dc_result = orchestrator.orchestrate(
+        execution.target,
+        dc_plan,
+        dc_context,
+        document_name=execution.document_name,
+    )
+    if not dc_result.success:
+        raise SetupError(f"DC verification failed: {dc_result.error}")
+    logger.info("DC verification complete")
+
+
+def _install_dc_xdr(
+    *,
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+    instance_id: str,
+    agent_presigned_url: str,
+    xdr_required: bool,
+) -> None:
+    if agent_presigned_url:
+        logger.info("Installing XDR agent on DC %s...", instance_id)
+        xdr_plan = XDRAgentInstallPlan()
+        xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+        xdr_result = orchestrator.orchestrate(
+            execution.target,
+            xdr_plan,
+            xdr_context,
+            document_name=execution.document_name,
+        )
+        if not xdr_result.success:
+            raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+        logger.info("XDR agent installed successfully on DC")
+        return
+
+    if xdr_required:
+        raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
+    logger.info("No XDR agent URL provided for DC (not required)")
 
 
 def _run_terraform_destroy(
@@ -2599,6 +2691,105 @@ def _build_range_terraform_variables(
     return variables
 
 
+def _validate_ngfw_operation(operation: str) -> tuple[str, str]:
+    status_map = {
+        "start": ("resuming", "ready"),
+        "stop": ("pausing", "paused"),
+    }
+    if operation not in status_map:
+        raise ValueError(f"Unknown operation: {operation}")
+    return status_map[operation]
+
+
+def _publish_ngfw_runtime_status(request_id: str, instance_uuid: str, app_id: str, status: str) -> None:
+    update_instance_state(request_id, status)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_uuid,
+        app_id=app_id,
+        status=status,
+    )
+
+
+def _run_gcp_ngfw_operation(
+    operation: str,
+    request_id: str,
+    instance_uuid: str,
+    app_id: str,
+    state: dict[str, Any],
+) -> None:
+    import gdc_vmseries_ngfw
+
+    in_progress_status, success_status = _validate_ngfw_operation(operation)
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
+    try:
+        gdc_vmseries_ngfw.run_power_operation(operation, state)
+    except Exception as e:
+        logger.error("GDC VM-Series NGFW operation failed: %s", e)
+        update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
+        raise
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
+
+
+def _load_ngfw_ops_plan(operation: str):
+    import importlib
+
+    plan_map = {
+        "start": "plans.ngfw_start.NGFWStartPlan",
+        "stop": "plans.ngfw_stop.NGFWStopPlan",
+    }
+    module_path, class_name = plan_map[operation].rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)()
+
+
+def _run_aws_ngfw_operation(
+    operation: str,
+    request_id: str,
+    instance_uuid: str,
+    app_id: str,
+    ec2_instance_id: str,
+    **kwargs: str,
+) -> None:
+    in_progress_status, success_status = _validate_ngfw_operation(operation)
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
+
+    try:
+        executor = AWSExecutor()
+        orchestrator = OpsOrchestrator(executor)
+        plan = _load_ngfw_ops_plan(operation)
+        context = {"instance_id": ec2_instance_id, **kwargs}
+        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
+        if not result.success:
+            for step_result in result.step_results:
+                if not step_result.success:
+                    logger.error(
+                        "NGFW %s step %s failed: %s",
+                        operation,
+                        step_result.step_name,
+                        step_result.stderr,
+                    )
+            raise RuntimeError(f"Operation {operation} failed")
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
+        raise
+
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
+
+
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     """Run NGFW runtime operation (start/stop).
 
@@ -2619,14 +2810,7 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     if kwargs:
         logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
 
-    # Status transitions for each operation
-    status_map = {
-        "start": ("resuming", "ready"),
-        "stop": ("pausing", "paused"),
-    }
-
-    if operation not in status_map:
-        raise ValueError(f"Unknown operation: {operation}")
+    _validate_ngfw_operation(operation)
 
     # Get NGFW data from database including state with EC2 instance ID
     ngfw_data = get_ngfw_data_by_request_id(request_id)
@@ -2640,118 +2824,14 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
             raise RuntimeError(
                 f"NGFW runtime operation {operation!r} is not implemented for cloud_provider={provider!r}"
             )
-
-        import gdc_vmseries_ngfw
-
-        in_progress_status, success_status = status_map[operation]
-        update_instance_state(request_id, in_progress_status)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=in_progress_status,
-        )
-        try:
-            gdc_operation = "start" if operation == "start" else "stop"
-            gdc_vmseries_ngfw.run_power_operation(gdc_operation, state)
-            update_instance_state(request_id, success_status)
-            publish_ngfw_event(
-                request_id=request_id,
-                instance_id=instance_uuid,
-                app_id=app_id,
-                status=success_status,
-            )
-            return
-        except Exception as e:
-            logger.error("GDC VM-Series NGFW operation failed: %s", e)
-            update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
-            publish_ngfw_event(
-                request_id=request_id,
-                instance_id=instance_uuid,
-                app_id=app_id,
-                status=STATUS_FAILED,
-            )
-            raise
+        _run_gcp_ngfw_operation(operation, request_id, instance_uuid, app_id, state)
+        return
 
     # EC2 instance ID is stored in state after Terraform provisioning
     ec2_instance_id = state.get("ec2_instance_id")
     if not ec2_instance_id:
         raise ValueError(f"EC2 instance ID not found in state for request: {request_id}")
-
-    in_progress_status, success_status = status_map[operation]
-
-    # Update DB and publish event for in-progress status
-    update_instance_state(request_id, in_progress_status)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_uuid,
-        app_id=app_id,
-        status=in_progress_status,
-    )
-
-    try:
-        # Create executor and orchestrator
-        executor = AWSExecutor()
-        orchestrator = OpsOrchestrator(executor)
-
-        # Load the appropriate plan
-        plan_map = {
-            "start": "plans.ngfw_start.NGFWStartPlan",
-            "stop": "plans.ngfw_stop.NGFWStopPlan",
-        }
-
-        plan_path = plan_map[operation]
-        module_path, class_name = plan_path.rsplit(".", 1)
-
-        import importlib
-
-        module = importlib.import_module(module_path)
-        plan_class = getattr(module, class_name)
-        plan = plan_class()
-
-        # Build context dict with EC2 instance ID and any additional kwargs
-        # NOTE ON NAMING: Plans use "instance_id" key for the AWS EC2 Instance ID
-        # (e.g., "i-099ee928142d5f092"), NOT the Django Instance UUID.
-        # This is a legacy naming convention that should eventually be renamed.
-        context = {
-            "instance_id": ec2_instance_id,  # AWS EC2 Instance ID (e.g., "i-...")
-            **kwargs,
-        }
-
-        # Execute the plan - orchestrate(target_id, plan, context)
-        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
-
-        if not result.success:
-            # Log step errors for debugging
-            for step_result in result.step_results:
-                if not step_result.success:
-                    logger.error(
-                        "NGFW %s step %s failed: %s",
-                        operation,
-                        step_result.step_name,
-                        step_result.stderr,
-                    )
-            raise RuntimeError(f"Operation {operation} failed")
-
-        # Update DB and publish event for success status
-        update_instance_state(request_id, success_status)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=success_status,
-        )
-
-    except Exception as e:
-        error_msg = str(e)[:1000]
-        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=STATUS_FAILED,
-        )
-        raise
+    _run_aws_ngfw_operation(operation, request_id, instance_uuid, app_id, ec2_instance_id, **kwargs)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,52 @@ _GCP_RANGE_LIFECYCLE_NOT_IMPLEMENTED = (
 )
 
 
+def _build_range_lifecycle_entry(
+    request_id: str,
+    uuid: object,
+    state: object,
+    role: str,
+    name: str | None,
+) -> dict[str, object] | None:
+    state_dict = state if isinstance(state, dict) else {}
+    cloud_provider = str(state_dict.get("cloud_provider", "aws")).strip().lower() or "aws"
+    asset_type = str(state_dict.get("asset_type", "vm_runtime_vm")).strip() or "vm_runtime_vm"
+    entry: dict[str, object] = {
+        "uuid": str(uuid),
+        "name": name or "",
+        "role": role,
+        "cloud_provider": cloud_provider,
+        "asset_type": asset_type,
+        "state": state_dict,
+    }
+
+    if cloud_provider == "aws":
+        aws_instance_id = state_dict.get("aws_instance_id")
+        if not aws_instance_id:
+            logger.warning(
+                "Instance %s (role=%s) missing aws_instance_id in state, skipping",
+                uuid,
+                role,
+            )
+            return None
+        entry["operation_mode"] = "aws"
+        entry["aws_instance_id"] = aws_instance_id
+        return entry
+
+    if cloud_provider == "gcp" and asset_type == "vm_runtime_vm":
+        entry["operation_mode"] = "gdc_vm_runtime"
+        return entry
+
+    if cloud_provider == "gcp" and asset_type == "scenario_pod":
+        entry["operation_mode"] = "gdc_scenario_pod"
+        return entry
+
+    raise ValueError(
+        "Unsupported range lifecycle target "
+        f"for request {request_id}: cloud_provider={cloud_provider!r} asset_type={asset_type!r}"
+    )
+
+
 def get_range_instance_ids(request_id: str) -> list[dict]:
     """Get all range assets for pause/resume operations.
 
@@ -66,41 +112,9 @@ def get_range_instance_ids(request_id: str) -> list[dict]:
 
     instances = []
     for uuid, state, role, name in rows:
-        state_dict = state if isinstance(state, dict) else {}
-        cloud_provider = str(state_dict.get("cloud_provider", "aws")).strip().lower() or "aws"
-        asset_type = str(state_dict.get("asset_type", "vm_runtime_vm")).strip() or "vm_runtime_vm"
-
-        entry = {
-            "uuid": str(uuid),
-            "name": name or "",
-            "role": role,
-            "cloud_provider": cloud_provider,
-            "asset_type": asset_type,
-            "state": state_dict,
-        }
-
-        if cloud_provider == "aws":
-            aws_instance_id = state_dict.get("aws_instance_id")
-            if not aws_instance_id:
-                logger.warning(
-                    "Instance %s (role=%s) missing aws_instance_id in state, skipping",
-                    uuid,
-                    role,
-                )
-                continue
-            entry["operation_mode"] = "aws"
-            entry["aws_instance_id"] = aws_instance_id
-        elif cloud_provider == "gcp" and asset_type == "vm_runtime_vm":
-            entry["operation_mode"] = "gdc_vm_runtime"
-        elif cloud_provider == "gcp" and asset_type == "scenario_pod":
-            entry["operation_mode"] = "gdc_scenario_pod"
-        else:
-            raise ValueError(
-                "Unsupported range lifecycle target "
-                f"for request {request_id}: cloud_provider={cloud_provider!r} asset_type={asset_type!r}"
-            )
-
-        instances.append(entry)
+        entry = _build_range_lifecycle_entry(request_id, uuid, state, role, name)
+        if entry is not None:
+            instances.append(entry)
 
     if not instances:
         raise ValueError(f"No lifecycle-managed assets found for request: {request_id}")

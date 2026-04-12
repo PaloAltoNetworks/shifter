@@ -461,6 +461,43 @@ def _load_gdc_scenario_pod_profile(prefix: str, *, default_image: str) -> GDCSce
     )
 
 
+def _decode_gdc_access_secret(raw_secret: str) -> tuple[dict[str, Any], str]:
+    payload: dict[str, Any] = {}
+    kubeconfig = raw_secret
+    try:
+        parsed = json.loads(raw_secret)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if not isinstance(parsed, dict):
+        return payload, kubeconfig
+
+    payload = parsed
+    kubeconfig = str(parsed.get("kubeconfig", "")).strip()
+    if not kubeconfig:
+        raise RuntimeError("GDC access secret is missing the kubeconfig field")
+    return payload, kubeconfig
+
+
+def _resolve_gdc_access_region(payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("region")
+        or os.environ.get("RANGE_NETWORK_REGION")
+        or os.environ.get("GCP_REGION")
+        or os.environ.get("CLOUD_REGION")
+        or os.environ.get("AWS_REGION", "")
+    ).strip()
+
+
+def _validate_gdc_access_fields(*, cluster_id: str, vxlan_cidr: str, region: str) -> None:
+    if not cluster_id:
+        raise RuntimeError("GDC access secret must include cluster_id or GDC_CLUSTER_ID must be set")
+    if not vxlan_cidr:
+        raise RuntimeError("GDC access secret must include vxlan_cidr or GDC_VXLAN_CIDR must be set")
+    if not region:
+        raise RuntimeError("GDC access secret must include region or RANGE_NETWORK_REGION/GCP_REGION must be set")
+
+
 def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
     """Load the GDC access bundle from Secret Manager when configured."""
     secret_id = os.environ.get("GDC_ACCESS_SECRET_ID", "").strip()
@@ -470,29 +507,10 @@ def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
     from cloud import get_secrets_store
 
     raw_secret = get_secrets_store().get_secret(secret_id)
-    payload: dict[str, Any] = {}
-    kubeconfig = raw_secret
-
-    try:
-        parsed = json.loads(raw_secret)
-    except json.JSONDecodeError:
-        parsed = None
-
-    if isinstance(parsed, dict):
-        payload = parsed
-        kubeconfig = str(parsed.get("kubeconfig", "")).strip()
-        if not kubeconfig:
-            raise RuntimeError("GDC access secret is missing the kubeconfig field")
-
+    payload, kubeconfig = _decode_gdc_access_secret(raw_secret)
     cluster_id = str(payload.get("cluster_id") or os.environ.get("GDC_CLUSTER_ID", "")).strip()
     vxlan_cidr = str(payload.get("vxlan_cidr") or os.environ.get("GDC_VXLAN_CIDR", "")).strip()
-    region = str(
-        payload.get("region")
-        or os.environ.get("RANGE_NETWORK_REGION")
-        or os.environ.get("GCP_REGION")
-        or os.environ.get("CLOUD_REGION")
-        or os.environ.get("AWS_REGION", "")
-    ).strip()
+    region = _resolve_gdc_access_region(payload)
     namespace_prefix = str(
         payload.get("range_namespace_prefix") or os.environ.get("GDC_RANGE_NAMESPACE_PREFIX", "range")
     )
@@ -503,13 +521,7 @@ def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
     static_ip_reservation_count = int(
         payload.get("static_ip_reservation_count") or os.environ.get("GDC_STATIC_IP_RESERVATION_COUNT", "4")
     )
-
-    if not cluster_id:
-        raise RuntimeError("GDC access secret must include cluster_id or GDC_CLUSTER_ID must be set")
-    if not vxlan_cidr:
-        raise RuntimeError("GDC access secret must include vxlan_cidr or GDC_VXLAN_CIDR must be set")
-    if not region:
-        raise RuntimeError("GDC access secret must include region or RANGE_NETWORK_REGION/GCP_REGION must be set")
+    _validate_gdc_access_fields(cluster_id=cluster_id, vxlan_cidr=vxlan_cidr, region=region)
 
     return GDCNetworkAccessConfig(
         access_secret_id=secret_id,
@@ -519,7 +531,7 @@ def load_gdc_network_access_config() -> GDCNetworkAccessConfig | None:
         region=region,
         namespace_prefix=namespace_prefix.strip() or "range",
         network_interface=network_interface.strip() or "vxlan0",
-        dns_nameservers=tuple(dns_nameservers) or ("8.8.8.8",),
+        dns_nameservers=dns_nameservers or ("8.8.8.8",),
         static_ip_reservation_count=static_ip_reservation_count,
     )
 

@@ -122,6 +122,7 @@ class NGFWExecutor:
         Returns:
             CommandResult with success status, exit code, stdout, stderr.
         """
+        del document_name
         host = instance_id
         command_input = self._build_command_input(script, stdin_input)
         ssh_args = self._build_ssh_args(host)
@@ -213,6 +214,7 @@ class NGFWExecutor:
         document_name: str = "",
     ) -> bool:
         """Wait for NGFW SSH readiness with the shared executor signature."""
+        del document_name
         return self.wait_for_agent(instance_id, timeout_seconds=timeout_seconds)
 
     def reboot_and_wait(
@@ -231,6 +233,7 @@ class NGFWExecutor:
         Returns:
             True if device is back online.
         """
+        del document_name
         host = instance_id
         logger.info("Rebooting %s...", host)
 

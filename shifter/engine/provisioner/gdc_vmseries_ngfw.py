@@ -44,6 +44,12 @@ _ATTACHMENT_MODE = "gdc-vmruntime-palo-alto-vmseries"
 _PRODUCT = "palo-alto-vm-series"
 _MGMT_INTERFACE_NAME = "eth0"
 _DATA_INTERFACE_NAME = "eth1"
+_SECRETMANAGER_MODULE = "google.cloud.secretmanager"
+_GOOGLE_EXCEPTIONS_MODULE = "google.api_core.exceptions"
+_INIT_CFG_FILENAME = "init-cfg.txt"
+_BOOTSTRAP_XML_FILENAME = "bootstrap.xml"
+_KEEP_FILENAME = ".keep"
+_GCS_PREFIX = "gs://"
 
 
 def _namespace_name(config: GDCPaloAltoVMSeriesConfig, user_id: int) -> str:
@@ -101,8 +107,8 @@ def _ensure_ssh_secret(user_id: int, instance_id: str) -> tuple[str, str]:
     if not project_id:
         raise RuntimeError("GCP project ID is required to manage GDC VM-Series SSH secrets")
 
-    secretmanager = import_google_module("google.cloud.secretmanager")
-    google_exceptions = import_google_module("google.api_core.exceptions")
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
     secret_id = _ssh_secret_id(user_id, instance_id)
     full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
@@ -160,8 +166,8 @@ def _ensure_gcs_image_secret(
 def _delete_ssh_secret(secret_ref: str) -> None:
     if not secret_ref:
         return
-    secretmanager = import_google_module("google.cloud.secretmanager")
-    google_exceptions = import_google_module("google.api_core.exceptions")
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
     try:
         client.delete_secret(request={"name": secret_ref})
@@ -242,12 +248,12 @@ def _write_bootstrap_iso(
         software_dir = temp_path / "software"
         for directory in (config_dir, license_dir, content_dir, software_dir):
             directory.mkdir()
-        (config_dir / "init-cfg.txt").write_text(init_cfg, encoding="utf-8")
+        (config_dir / _INIT_CFG_FILENAME).write_text(init_cfg, encoding="utf-8")
         if bootstrap_xml:
-            (config_dir / "bootstrap.xml").write_text(bootstrap_xml, encoding="utf-8")
+            (config_dir / _BOOTSTRAP_XML_FILENAME).write_text(bootstrap_xml, encoding="utf-8")
         (license_dir / "authcodes").write_text(authcode, encoding="utf-8")
-        (content_dir / ".keep").write_text("", encoding="utf-8")
-        (software_dir / ".keep").write_text("", encoding="utf-8")
+        (content_dir / _KEEP_FILENAME).write_text("", encoding="utf-8")
+        (software_dir / _KEEP_FILENAME).write_text("", encoding="utf-8")
 
         iso = pycdlib.PyCdlib()
         try:
@@ -259,12 +265,16 @@ def _write_bootstrap_iso(
                 ("/SOFTWARE", "software"),
             ):
                 iso.add_directory(iso_dir, rr_name=rr_name)
-            iso.add_file(str(config_dir / "init-cfg.txt"), "/CONFIG/INIT_CFG.TXT;1", rr_name="init-cfg.txt")
+            iso.add_file(str(config_dir / _INIT_CFG_FILENAME), "/CONFIG/INIT_CFG.TXT;1", rr_name=_INIT_CFG_FILENAME)
             if bootstrap_xml:
-                iso.add_file(str(config_dir / "bootstrap.xml"), "/CONFIG/BOOTSTRAP.XML;1", rr_name="bootstrap.xml")
+                iso.add_file(
+                    str(config_dir / _BOOTSTRAP_XML_FILENAME),
+                    "/CONFIG/BOOTSTRAP.XML;1",
+                    rr_name=_BOOTSTRAP_XML_FILENAME,
+                )
             iso.add_file(str(license_dir / "authcodes"), "/LICENSE/AUTHCODE.TXT;1", rr_name="authcodes")
-            iso.add_file(str(content_dir / ".keep"), "/CONTENT/KEEP.TXT;1", rr_name=".keep")
-            iso.add_file(str(software_dir / ".keep"), "/SOFTWARE/KEEP.TXT;1", rr_name=".keep")
+            iso.add_file(str(content_dir / _KEEP_FILENAME), "/CONTENT/KEEP.TXT;1", rr_name=_KEEP_FILENAME)
+            iso.add_file(str(software_dir / _KEEP_FILENAME), "/SOFTWARE/KEEP.TXT;1", rr_name=_KEEP_FILENAME)
             iso.write(str(iso_path))
         finally:
             iso.close()
@@ -282,17 +292,17 @@ def _upload_bootstrap_iso(
     key = f"bootstrap/ngfw/{instance_id}/bootstrap.iso"
     blob = client.bucket(config.bootstrap_bucket).blob(key)
     blob.upload_from_filename(str(iso_path), content_type="application/x-iso9660-image")
-    logger.info("Uploaded GDC VM-Series bootstrap ISO to gs://%s/%s", config.bootstrap_bucket, key)
+    logger.info("Uploaded GDC VM-Series bootstrap ISO to %s%s/%s", _GCS_PREFIX, config.bootstrap_bucket, key)
     del request_id
-    return f"gs://{config.bootstrap_bucket}/{key}"
+    return f"{_GCS_PREFIX}{config.bootstrap_bucket}/{key}"
 
 
 def _delete_bootstrap_iso(bootstrap_gcs_url: str) -> None:
-    if not bootstrap_gcs_url.startswith("gs://"):
+    if not bootstrap_gcs_url.startswith(_GCS_PREFIX):
         return
     storage = import_google_module("google.cloud.storage")
-    google_exceptions = import_google_module("google.api_core.exceptions")
-    bucket_and_key = bootstrap_gcs_url.removeprefix("gs://")
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
+    bucket_and_key = bootstrap_gcs_url.removeprefix(_GCS_PREFIX)
     bucket_name, key = bucket_and_key.split("/", 1)
     try:
         storage.Client().bucket(bucket_name).blob(key).delete()
@@ -584,6 +594,38 @@ def apply_ngfw(
     }
 
 
+def _delete_vm_series_resource(
+    custom_api,
+    *,
+    namespace: str,
+    name: str,
+    plural: str,
+    label: str,
+    api_exception,
+) -> None:
+    _delete_namespaced_custom_object(
+        custom_api,
+        group=_VM_GROUP,
+        version=_VM_VERSION,
+        plural=plural,
+        namespace=namespace,
+        name=name,
+        api_exception=api_exception,
+    )
+    try:
+        _wait_for_deleted(custom_api, namespace, name, _VM_GROUP, _VM_VERSION, plural, api_exception)
+    except RuntimeError:
+        logger.warning("Timed out waiting for GDC VM-Series %s %s/%s to delete", label, namespace, name)
+
+
+def _delete_image_import_secret(core_api, namespace: str, api_exception) -> None:
+    try:
+        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
+    except api_exception as exc:
+        if exc.status != 404:
+            raise
+
+
 def destroy_ngfw(state: dict[str, Any]) -> None:
     """Destroy a GDC VM Runtime Palo Alto VM-Series firewall and support assets."""
     access = load_gdc_network_access_config()
@@ -603,46 +645,31 @@ def destroy_ngfw(state: dict[str, Any]) -> None:
     core_api = client_module.CoreV1Api(api_client)
     custom_api = client_module.CustomObjectsApi(api_client)
 
-    _delete_namespaced_custom_object(
+    _delete_vm_series_resource(
         custom_api,
-        group=_VM_GROUP,
-        version=_VM_VERSION,
-        plural=_VM_PLURAL,
         namespace=namespace,
         name=vm_name,
+        plural=_VM_PLURAL,
+        label="VM",
         api_exception=api_exception,
     )
-    try:
-        _wait_for_deleted(custom_api, namespace, vm_name, _VM_GROUP, _VM_VERSION, _VM_PLURAL, api_exception)
-    except RuntimeError:
-        logger.warning("Timed out waiting for GDC VM-Series VM %s/%s to delete", namespace, vm_name)
 
     for disk_name in (bootstrap_disk_name, boot_disk_name):
         if not disk_name:
             continue
-        _delete_namespaced_custom_object(
+        _delete_vm_series_resource(
             custom_api,
-            group=_VM_GROUP,
-            version=_VM_VERSION,
-            plural=_VM_DISK_PLURAL,
             namespace=namespace,
             name=disk_name,
+            plural=_VM_DISK_PLURAL,
+            label="disk",
             api_exception=api_exception,
         )
-        try:
-            _wait_for_deleted(custom_api, namespace, disk_name, _VM_GROUP, _VM_VERSION, _VM_DISK_PLURAL, api_exception)
-        except RuntimeError:
-            logger.warning("Timed out waiting for GDC VM-Series disk %s/%s to delete", namespace, disk_name)
 
     bootstrap_gcs_url = str(metadata.get("bootstrap_gcs_url") or state.get("gdc_bootstrap_gcs_url", "")).strip()
     _delete_bootstrap_iso(bootstrap_gcs_url)
     _delete_ssh_secret(str(metadata.get("ssh_key_secret_id") or state.get("ssh_key_secret_arn", "")).strip())
-
-    try:
-        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
-    except api_exception as exc:
-        if exc.status != 404:
-            raise
+    _delete_image_import_secret(core_api, namespace, api_exception)
 
 
 def run_power_operation(operation: str, state: dict[str, Any]) -> None:

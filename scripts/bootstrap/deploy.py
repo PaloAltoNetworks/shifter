@@ -664,6 +664,11 @@ def gcloud_resource_exists(cmd: list[str]) -> bool:
     return result.returncode == 0
 
 
+_UNKNOWN_ERROR = "unknown error"
+_GKE_WORKLOAD_IDENTITY_ANNOTATION = "iam.gke.io/gcp-service-account"
+_YAML_METADATA = "metadata:"
+
+
 def render_gdc_cluster_config(config: GDCBootstrapConfig) -> str:
     """Render the hybrid-cluster config used by bmctl on the workstation."""
     lines = [
@@ -676,12 +681,12 @@ def render_gdc_cluster_config(config: GDCBootstrapConfig) -> str:
         "---",
         "apiVersion: v1",
         "kind: Namespace",
-        "metadata:",
+        _YAML_METADATA,
         f"  name: {config.cluster_namespace}",
         "---",
         "apiVersion: baremetal.cluster.gke.io/v1",
         "kind: Cluster",
-        "metadata:",
+        _YAML_METADATA,
         f"  name: {config.cluster_id}",
         f"  namespace: {config.cluster_namespace}",
         "spec:",
@@ -747,7 +752,7 @@ def render_gdc_cluster_config(config: GDCBootstrapConfig) -> str:
             "---",
             "apiVersion: baremetal.cluster.gke.io/v1",
             "kind: NodePool",
-            "metadata:",
+            _YAML_METADATA,
             "  name: node-pool-1",
             f"  namespace: {config.cluster_namespace}",
             "spec:",
@@ -968,7 +973,7 @@ def _service_account_key_is_active(config: GDCBootstrapConfig, key_payload: str)
         check=False,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Failed to list service-account keys for {config.service_account_email}: {stderr}")
 
     active_key_ids = {line.rstrip("/").split("/")[-1] for line in result.stdout.splitlines() if line.strip()}
@@ -1472,7 +1477,7 @@ def get_gdc_instance_ssh_metadata(config: GDCBootstrapConfig, host_name: str) ->
         check=False,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Failed to read ssh metadata for {host_name}: {stderr}")
     return result.stdout
 
@@ -1883,7 +1888,7 @@ def _gcp_identity_access_token() -> str:
         check=False,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Failed to acquire a GCP access token for Identity Platform: {stderr}")
     return result.stdout.strip()
 
@@ -1996,17 +2001,17 @@ def render_gcp_helm_values(
         "serviceAccounts": {
             "portal": {
                 "annotations": {
-                    "iam.gke.io/gcp-service-account": service_accounts["portal"],
+                    _GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["portal"],
                 }
             },
             "workers": {
                 "annotations": {
-                    "iam.gke.io/gcp-service-account": service_accounts["workers"],
+                    _GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["workers"],
                 }
             },
             "provisioner": {
                 "annotations": {
-                    "iam.gke.io/gcp-service-account": service_accounts["provisioner"],
+                    _GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["provisioner"],
                 }
             },
         },
@@ -2087,7 +2092,7 @@ def fetch_gcp_secret_payload(secret_id: str, project_id: str) -> str:
         check=False,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Failed to read Secret Manager payload for {secret_name}: {stderr}")
     return result.stdout
 
@@ -2298,7 +2303,7 @@ def prune_stale_gcp_terraform_bootstrap_keys(config: GDCBootstrapConfig) -> None
         check=False,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Failed to list Terraform bootstrap service-account keys: {stderr}")
 
     key_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -2540,7 +2545,7 @@ def apply_gcp_control_plane_terraform(
                 check=False,
             )
             if output_result.returncode != 0:
-                stderr = output_result.stderr.strip() if output_result.stderr else "unknown error"
+                stderr = output_result.stderr.strip() if output_result.stderr else _UNKNOWN_ERROR
                 raise RuntimeError(f"Failed to capture Terraform outputs: {stderr}")
             return json.loads(output_result.stdout)
     finally:
@@ -2573,11 +2578,7 @@ def stage_gcp_control_plane_values(
     return values_path
 
 
-def push_gcp_control_plane_images(
-    config: GDCBootstrapConfig,
-    outputs: dict[str, dict[str, object]],
-    dry_run: bool = False,
-):
+def push_gcp_control_plane_images(outputs: dict[str, dict[str, object]], dry_run: bool = False):
     """Build and push the control-plane images to Artifact Registry."""
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
     artifact_registry_host = str(image_roots["portal"]).split("/")[0]
@@ -2979,7 +2980,7 @@ def get_gcp_managed_certificate_status(
         check=False,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        stderr = result.stderr.strip() if result.stderr else _UNKNOWN_ERROR
         raise RuntimeError(f"Failed to inspect managed certificate {certificate_name}: {stderr}")
 
     payload = json.loads(result.stdout)
@@ -3082,7 +3083,7 @@ def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = Fals
         return outputs
 
     bootstrap_operator_email = ensure_gcp_identity_platform_operator(config, outputs, dry_run=dry_run)
-    push_gcp_control_plane_images(config, outputs, dry_run=dry_run)
+    push_gcp_control_plane_images(outputs, dry_run=dry_run)
     with tempfile.TemporaryDirectory(prefix="shifter-gcp-platform-") as staging_root_name:
         values_path = stage_gcp_control_plane_values(
             config,

@@ -8,7 +8,6 @@ locals {
     "localhost",
   ]))
   compute_default_service_account = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
-  identity_platform_service_agent = "service-${data.google_project.project.number}@gcp-sa-identitytoolkit.iam.gserviceaccount.com"
   common_labels = merge(var.labels, {
     environment = var.environment
     managed_by  = "terraform"
@@ -109,6 +108,12 @@ resource "time_sleep" "required_services_propagated" {
 
 data "google_project" "project" {
   project_id = var.project_id
+}
+
+resource "google_project_service_identity" "identity_platform" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "identitytoolkit.googleapis.com"
 }
 
 resource "google_project_iam_member" "cloud_run_builder" {
@@ -354,7 +359,7 @@ resource "google_cloud_run_service_iam_member" "identity_platform_before_create_
   location = var.region
   service  = google_cloudfunctions2_function.identity_platform_before_create.service_config[0].service
   role     = "roles/run.invoker"
-  member   = "serviceAccount:${local.identity_platform_service_agent}"
+  member   = google_project_service_identity.identity_platform.member
 }
 
 resource "google_compute_global_address" "platform_ingress" {

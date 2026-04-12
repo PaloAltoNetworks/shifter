@@ -54,7 +54,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 1. Attempt a DNS zone transfer against the Boreas DNS server:
    ```
-   dig axfr boreas-systems.ctf @172.20.0.2
+   dig axfr boreas-systems.ctf @<dns-server-ip>
    ```
 2. Zone transfer is enabled (a misconfiguration). You'll see internal hostnames like `scada-gw.boreas-systems.ctf`, `lab-dc.boreas-systems.ctf`, etc.
 3. One of the TXT records contains the flag.
@@ -77,17 +77,17 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 ---
 
-## Smoketest Results — 2026-04-12
+## Smoketest Results — 2026-04-10
 
 Tested from inside Kali container (`a14-kali`) against live Docker Compose range.
 
 | Flag | Description | Expected Flag | Found | Result | Notes |
 |------|-------------|---------------|-------|--------|-------|
 | 1 | Company Info (HTML comment on /about) | `FLAG{8f3a2c1e9b7d4056}` | `FLAG{8f3a2c1e9b7d4056}` | **PASS** | HTML comment next to registration number 7741-BSI-2018 |
-| 2 | Employee Directory (org_chart.txt metadata) | `FLAG{d4e7b1f283a6c950}` | `FLAG{d4e7b1f283a6c950}` | **PASS** | robots.txt disallows /internal/; directory listing enabled; flag in Author metadata line |
+| 2 | Employee Directory (org_chart.txt metadata) | `FLAG{d4e7b1f283a6c950}` | `FLAG{d4e7b1f283a6c950}` | **PASS** | robots.txt disallows /internal/; directory listing enabled; flag in Author metadata field |
 | 3 | Job Posting (hidden form field on /careers) | `FLAG{a1c9e3f7054b82d6}` | `FLAG{a1c9e3f7054b82d6}` | **PASS** | Hidden input `tracking_id` in application form |
 | 4 | Client List (HTML comment on /old/clients) | `FLAG{72b5e0d8f1a34c69}` | `FLAG{72b5e0d8f1a34c69}` | **PASS** | Comment in page source; Project L ($165.3M) visible in table |
 | 5 | DNS Zone Transfer (TXT record) | `FLAG{5e9c2a0f73b148d6}` | `FLAG{5e9c2a0f73b148d6}` | **PASS** | `dig axfr` succeeds; flag in `_flag.boreas-systems.ctf` TXT record |
-| 6 | Supplier from Annual Report | `FLAG{c6f8d2b3e91a4507}` | N/A (CTFd-side) | **PASS** | Annual report at /internal/boreas-annual-2025.txt accessible (unlisted but guessable); /old/ source has HTML comment hint; Kursk Heavy Industries — $12,000,000 present; flag validated by CTFd |
+| 6 | Supplier from Annual Report | `FLAG{c6f8d2b3e91a4507}` | N/A (CTFd-side) | **PASS** | Annual report at /internal/boreas-annual-2025.txt accessible (unlisted but guessable); Kursk Heavy Industries — $12,000,000 present; flag is validated by CTFd, not embedded in file |
 
 **Summary: 6/6 PASS**

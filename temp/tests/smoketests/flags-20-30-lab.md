@@ -231,3 +231,31 @@ This is a multi-asset chain: A6 → A8 → A7.
 
 **Expected flag:** `FLAG{d4c8f0a2e6b71935}`
 
+---
+
+## Smoketest Results — 2026-04-10
+
+| Flag | Name | Expected | Found | Result | Notes |
+|------|------|----------|-------|--------|-------|
+| 20 | Default Creds on Dev Tooling | `FLAG{5b8e1d3a7c0f9246}` | `FLAG{5b8e1d3a7c0f9246}` | **PASS** | |
+| 21 | Research File Share / Compartment A | `FLAG{4b9e2a7d0c8f1365}` | `FLAG{4b9e2a7d0c8f1365}` | **PASS** | |
+| 22 | Shipping Manifest / Reactor Delivery | `FLAG{e2a9c4f7d8b01536}` | `FLAG{e2a9c4f7d8b01536}` | **FAIL** | Flag content correct, but path is wrong: `/opt/builds/latest/` does not exist. File is at `/opt/opt/builds/latest/reactor_interface_spec.txt` (double `opt`). Participants following the walkthrough will get "No such file or directory". |
+| 23 | Simulation Archive / Bipedal Stress Test | `FLAG{0c7d8a2e5f1b3946}` | `FLAG{0c7d8a2e5f1b3946}` | **PASS** | 47 archives present, `strings stress_test_44.dat \| grep FLAG` works as documented. |
+| 24 | Source Repo / Control Software | `FLAG{8a0e3c7f2d5b1946}` | `FLAG{8a0e3c7f2d5b1946}` | **FAIL** | Flag exists in bare repo on disk, but **Gitea is down**. Gitea crashes on startup with: "Gitea is not supposed to be run as root." Container restart-loops indefinitely. Participants cannot clone repos via HTTP. |
+| 25 | MIDNIGHT Test Series | `FLAG{3f6a9d1e7c4b0258}` | `FLAG{3f6a9d1e7c4b0258}` | **PASS** | |
+| 26 | Engineering Notes / 100m Structure | `FLAG{7e2b0c5d9a4f8163}` | `FLAG{7e2b0c5d9a4f8163}` | **PASS** | Hidden Integration sheet confirmed. Note: `openpyxl` is not installed on A6; participants need to use `python3 zipfile`/XML parsing or copy the file to Kali. |
+| 27 | Compartment Pivot / Weapons Specs | `FLAG{6d1a8f3c7e0b4952}` | `FLAG{6d1a8f3c7e0b4952}` | **PASS** | SQLi via `search_research()` works as documented. |
+| 28 | Assembly Status Log | `FLAG{a3f7d9e1c0b52846}` | `FLAG{a3f7d9e1c0b52846}` | **PASS** | JSONB nested query works as documented. |
+| 29 | Full Leviathan Schematic Assembly | `FLAG{1f9b4e7c0a3d8265}` | `FLAG{1f9b4e7c0a3d8265}` | **FAIL** | Flag exists in bare repo on disk, but **Gitea is down** (same root-user crash). Participants cannot clone `leviathan-assembly` repo via HTTP. |
+| 30 | Leviathan Simulation Video Recovered | `FLAG{d4c8f0a2e6b71935}` | `FLAG{d4c8f0a2e6b71935}` | **FAIL** | Two blockers: (1) **Gitea is down** — `weapons-integration` repo unreachable, so passphrase in `crypto_config.py` not discoverable via intended path. (2) **`compartment_b.key_storage`** contains placeholder `PLACEHOLDER_REPLACE_WITH_ACTUAL_B64_KEY` instead of actual base64-encoded private key. Decryption only works using build artifact at `/tmp/gpg-chain/vasik_private.asc` which participants would not know about. |
+
+### Summary
+
+- **PASS: 7/11** (Flags 20, 21, 23, 25, 26, 27, 28)
+- **FAIL: 4/11** (Flags 22, 24, 29, 30)
+
+### Blocking Issues
+
+1. **Gitea crashes on startup (affects Flags 24, 29, 30):** Container `a7-gitea` fails with `"Gitea is not supposed to be run as root"` and restart-loops. The bootstrap script never completes repo creation via API. Bare repos exist at `/app/repos/` but are not served. Fix: run Gitea process as non-root user (e.g., `git` user) inside the container.
+2. **Flag 22 wrong path:** Walkthrough says `/opt/builds/latest/reactor_interface_spec.txt` but the actual path is `/opt/opt/builds/latest/reactor_interface_spec.txt`. Fix: correct the Dockerfile/init script to place the file at `/opt/builds/latest/`.
+3. **Flag 30 placeholder key:** `compartment_b.key_storage.key_data` is `PLACEHOLDER_REPLACE_WITH_ACTUAL_B64_KEY` instead of the actual base64-encoded GPG private key. The A8 database seed script needs the real key. A build artifact exists at `/tmp/gpg-chain/vasik_private.asc` on A6 but this is not the intended participant path.

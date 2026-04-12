@@ -61,8 +61,12 @@ CODE_VALID_S = 60
 EXPECTED_SEQUENCE = [0, 1, 2, 0]
 
 # Joint angles (degrees): hip_pos, hip_tgt, knee_pos, knee_tgt, ankle_pos, ankle_tgt
-LEFT_JOINTS = [0, 0, 15, 15, -5, -5]
-RIGHT_JOINTS = [0, 0, 15, 15, -5, -5]
+# Modbus holding registers are uint16 - negative angles encoded as two's
+# complement would work on real PLCs, but pymodbus 3.12 refuses to pack
+# negative Python ints into the response PDU and silently drops the frame.
+# Use positive values at init (leg straight, ankles neutral).
+LEFT_JOINTS = [0, 0, 15, 15, 5, 5]
+RIGHT_JOINTS = [0, 0, 15, 15, 5, 5]
 PRESSURES = [180, 175, 190, 185, 160, 155]  # MPa per joint
 
 

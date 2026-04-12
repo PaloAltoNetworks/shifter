@@ -24,7 +24,6 @@ on:
         required: false
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -32,13 +31,14 @@ jobs:
     name: Validate (${{ inputs.environment }})
     runs-on: self-hosted
     env:
+      GCP_ENVIRONMENT: ${{ inputs.environment }}
       KUBECONFORM_VERSION: v0.7.0
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.7.1"
-      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415
         with:
           version: v1.34.1
       - name: Install kubeconform
@@ -54,9 +54,9 @@ jobs:
         working-directory: platform/terraform/gcp/environments/${{ inputs.environment }}
       - run: |
           (
-            kubectl kustomize platform/k8s/gcp/overlays/${{ inputs.environment }}
+            kubectl kustomize "platform/k8s/gcp/overlays/${GCP_ENVIRONMENT}"
             printf '\n---\n'
-            cat platform/k8s/gcp/overlays/${{ inputs.environment }}/platform-edge.generated.yaml
+            cat "platform/k8s/gcp/overlays/${GCP_ENVIRONMENT}/platform-edge.generated.yaml"
           ) > /tmp/gcp-platform.yaml
       - run: /tmp/kubeconform -strict -summary /tmp/gcp-platform.yaml
 
@@ -65,6 +65,9 @@ jobs:
     runs-on: self-hosted
     needs: validate
     if: inputs.deploy_changes && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write
     env:
       TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
       K8S_OVERLAY_DIR: platform/k8s/gcp/overlays/${{ inputs.environment }}
@@ -74,24 +77,26 @@ jobs:
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
       GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
       GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Ensure GCP deploy auth is configured
         run: |
-          if [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ] || [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]; then
+          if [ -z "${GCP_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
             echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
             exit 1
           fi
       - id: auth
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
           token_format: access_token
-      - uses: google-github-actions/setup-gcloud@v3
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:
           version: ">= 416.0.0"
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.7.1"
       - name: Bootstrap Terraform backend metadata
@@ -182,16 +187,16 @@ jobs:
           fi
           echo "SECURE_PORTAL_MODE_REQUESTED=${SECURE_PORTAL_MODE_REQUESTED}" >> "$GITHUB_ENV"
       - name: Login to Artifact Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.ARTIFACT_REGISTRY_HOST }}
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
       - name: Set short SHA
         run: echo "SHORT_SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_ENV"
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter
           file: ./shifter/shifter_platform/Dockerfile
@@ -201,7 +206,7 @@ jobs:
             ${{ env.PORTAL_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push provisioner image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter/engine/provisioner
           push: true
@@ -210,7 +215,7 @@ jobs:
             ${{ env.PROVISIONER_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push guacd image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter/engine/guacd
           push: true
@@ -219,7 +224,7 @@ jobs:
             ${{ env.GUACD_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
       - name: Build and push guacamole-client image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./shifter/engine/guacamole
           push: true
@@ -227,7 +232,7 @@ jobs:
             ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:latest
             ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
           no-cache: true
-      - uses: google-github-actions/get-gke-credentials@v3
+      - uses: google-github-actions/get-gke-credentials@3da1e46a907576cefaa90c484278bb5b259dd395
         with:
           cluster_name: ${{ env.GKE_CLUSTER_NAME }}
           location: ${{ env.GKE_CLUSTER_LOCATION }}

@@ -31,6 +31,14 @@ class TestImageSourceResolution:
             }
         }
 
+    def test_rejects_plain_http_sources(self):
+        try:
+            _resolve_image_source("http://example.com/image.qcow2", None)
+        except RuntimeError as exc:
+            assert "https://" in str(exc)
+        else:
+            raise AssertionError("plain HTTP image sources must be rejected")
+
 
 class TestRenderUserData:
     def test_uses_env_driven_linux_passwords(self, monkeypatch):

@@ -7,6 +7,22 @@ import argparse
 import json
 from pathlib import Path
 
+_ALLOWED_YAML_SUFFIXES = {".yaml", ".yml"}
+_MANAGED_CERTIFICATE_OUTPUT_KEY = "managed_tls_enabled"
+_PUBLIC_HOSTNAME_OUTPUT_KEY = "public_hostname"
+_PUBLIC_INGRESS_IP_NAME_OUTPUT_KEY = "public_ingress_ip_name"
+
+
+def _validated_output_path(path: Path) -> Path:
+    resolved = path.resolve()
+    repo_root = Path.cwd().resolve()
+    if repo_root not in resolved.parents:
+        raise ValueError(f"Output path must stay inside the repository: {resolved}")
+    if resolved.suffix not in _ALLOWED_YAML_SUFFIXES:
+        raise ValueError(f"Output path must be a YAML file: {resolved}")
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
+
 
 def _value(outputs: dict[str, object], key: str):
     try:
@@ -16,9 +32,9 @@ def _value(outputs: dict[str, object], key: str):
 
 
 def render_manifest(outputs: dict[str, object]) -> str:
-    public_hostname = _value(outputs, "public_hostname").strip()
-    managed_tls_enabled = bool(_value(outputs, "managed_tls_enabled"))
-    ingress_ip_name = _value(outputs, "public_ingress_ip_name")
+    public_hostname = _value(outputs, _PUBLIC_HOSTNAME_OUTPUT_KEY).strip()
+    managed_tls_enabled = bool(_value(outputs, _MANAGED_CERTIFICATE_OUTPUT_KEY))
+    ingress_ip_name = _value(outputs, _PUBLIC_INGRESS_IP_NAME_OUTPUT_KEY)
 
     manifest_parts: list[str] = []
     if public_hostname and managed_tls_enabled:
@@ -113,7 +129,8 @@ def main() -> int:
 
     outputs = json.loads(args.terraform_output_json.read_text())
     rendered = render_manifest(outputs)
-    args.output.write_text(rendered)
+    output_path = _validated_output_path(args.output)
+    output_path.write_text(rendered)
     return 0
 
 

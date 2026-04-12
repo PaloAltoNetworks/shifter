@@ -61,7 +61,8 @@ volumeMounts:
 {{- define "shifter.tmpVolume" -}}
 volumes:
   - name: tmp
-    emptyDir: {}
+    emptyDir:
+      sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
 {{- end }}
 
 {{- define "shifter.runtimeConfigChecksum" -}}

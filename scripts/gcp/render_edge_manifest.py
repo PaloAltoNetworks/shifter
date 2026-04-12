@@ -11,17 +11,30 @@ _ALLOWED_YAML_SUFFIXES = {".yaml", ".yml"}
 _MANAGED_CERTIFICATE_OUTPUT_KEY = "managed_tls_enabled"
 _PUBLIC_HOSTNAME_OUTPUT_KEY = "public_hostname"
 _PUBLIC_INGRESS_IP_NAME_OUTPUT_KEY = "public_ingress_ip_name"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EDGE_MANIFEST_RELATIVE_PATHS = {
+    "gcp-dev": Path("platform/k8s/gcp/overlays/gcp-dev/platform-edge.generated.yaml"),
+    "gcp-prod": Path("platform/k8s/gcp/overlays/gcp-prod/platform-edge.generated.yaml"),
+}
 
 
 def _validated_output_path(path: Path) -> Path:
     resolved = path.resolve()
-    repo_root = Path.cwd().resolve()
+    repo_root = _REPO_ROOT.resolve()
     if repo_root not in resolved.parents:
         raise ValueError(f"Output path must stay inside the repository: {resolved}")
     if resolved.suffix not in _ALLOWED_YAML_SUFFIXES:
         raise ValueError(f"Output path must be a YAML file: {resolved}")
     resolved.parent.mkdir(parents=True, exist_ok=True)
     return resolved
+
+
+def _output_path_for_environment(environment: str) -> Path:
+    try:
+        relative_path = _EDGE_MANIFEST_RELATIVE_PATHS[environment]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported environment for edge manifest output: {environment}") from exc
+    return _validated_output_path(_REPO_ROOT / relative_path)
 
 
 def _value(outputs: dict[str, object], key: str):
@@ -124,12 +137,12 @@ def render_manifest(outputs: dict[str, object]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--terraform-output-json", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--environment", required=True, choices=sorted(_EDGE_MANIFEST_RELATIVE_PATHS))
     args = parser.parse_args()
 
     outputs = json.loads(args.terraform_output_json.read_text())
     rendered = render_manifest(outputs)
-    output_path = _validated_output_path(args.output)
+    output_path = _output_path_for_environment(args.environment)
     output_path.write_text(rendered)
     return 0
 

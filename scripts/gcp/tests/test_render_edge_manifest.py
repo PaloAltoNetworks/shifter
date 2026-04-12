@@ -55,7 +55,7 @@ def test_render_manifest_adds_managed_certificate_when_tls_is_enabled():
 
 def test_validated_output_path_rejects_non_yaml_files(tmp_path):
     module = _load_module()
-    output_path = Path.cwd() / "temp" / "test-artifacts" / tmp_path.name / "platform-edge.txt"
+    output_path = module._REPO_ROOT / "temp" / "test-artifacts" / tmp_path.name / "platform-edge.txt"
 
     with pytest.raises(ValueError, match="YAML file"):
         module._validated_output_path(output_path)
@@ -68,11 +68,21 @@ def test_validated_output_path_rejects_paths_outside_repo(tmp_path):
         module._validated_output_path(Path("/tmp/platform-edge.generated.yaml"))
 
 
-def test_main_rejects_non_yaml_output_path(tmp_path, monkeypatch):
+def test_output_path_for_environment_returns_repo_managed_manifest_location():
+    module = _load_module()
+
+    output_path = module._output_path_for_environment("gcp-dev")
+
+    assert output_path == module._REPO_ROOT / "platform/k8s/gcp/overlays/gcp-dev/platform-edge.generated.yaml"
+
+
+def test_main_writes_to_repo_managed_output_path(tmp_path, monkeypatch):
     module = _load_module()
     tf_output = tmp_path / "terraform-output.json"
     tf_output.write_text(json.dumps(_outputs()))
-    output_path = Path.cwd() / "temp" / "test-artifacts" / tmp_path.name / "platform-edge.txt"
+    output_path = tmp_path / "platform-edge.generated.yaml"
+
+    monkeypatch.setattr(module, "_output_path_for_environment", lambda environment: output_path)
 
     monkeypatch.setattr(
         "sys.argv",
@@ -80,10 +90,10 @@ def test_main_rejects_non_yaml_output_path(tmp_path, monkeypatch):
             "render_edge_manifest.py",
             "--terraform-output-json",
             str(tf_output),
-            "--output",
-            str(output_path),
+            "--environment",
+            "gcp-dev",
         ],
     )
 
-    with pytest.raises(ValueError, match="YAML file"):
-        module.main()
+    assert module.main() == 0
+    assert output_path.read_text()

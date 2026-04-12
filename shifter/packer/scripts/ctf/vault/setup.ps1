@@ -1,7 +1,7 @@
-# CTF Box 4 - "Vault" - Windows (Pivot target)
-# Chain: From Box3 -> scan 10.0.2.0/24 -> WinRM as vaultadmin -> Backup Operators privesc -> root
+# CTF Box 4 - "Vault" - Windows
+# Chain: Use Vault creds from Box3 -> WinRM as vaultadmin -> Backup Operators privesc -> root
 # Alt path: KeePass .kdbx on SMB share -> local admin password
-# Network: 10.0.2.0/24 ONLY - reachable only from Box3
+# Network: same workshop subnet as the other targets
 $ErrorActionPreference = "Stop"
 
 # WinRM already configured in base AMI (base.ps1 / user_data)
@@ -20,7 +20,7 @@ New-Item -Path "C:\Shares\Backups" -ItemType Directory -Force
 === Vault Server Notes ===
 
 This server holds sensitive backup data and credentials.
-Access is restricted to the internal network (10.0.2.0/24).
+Access is restricted to the workshop range.
 
 Backup Schedule:
 - Full backup: Sunday 2:00 AM
@@ -81,19 +81,18 @@ DO NOT expose this server to the main network!
 # Create SMB share readable by authenticated users
 New-SmbShare -Name "Backups" -Path "C:\Shares\Backups" -ReadAccess "Authenticated Users" -Description "Backup Files"
 
-Write-Host "=== Setting Administrator password for alt path ==="
-$adminPass = ConvertTo-SecureString "V4ultAdm!n2024" -AsPlainText -Force
-# Note: Don't set admin password during Packer build - it breaks WinRM
-# Instead, create a startup script that sets it on first boot
+Write-Host "=== Preparing post-boot Administrator password override ==="
+# Don't set the password during the Packer build; it breaks the active WinRM
+# session. Instead, run a delayed startup script so it wins after the shared
+# victim user_data applies the generic demo password on first boot.
 New-Item -Path "C:\Scripts" -ItemType Directory -Force -ErrorAction SilentlyContinue
 @"
+Start-Sleep -Seconds 180
 `$adminPass = ConvertTo-SecureString "V4ultAdm!n2024" -AsPlainText -Force
 Get-LocalUser -Name "Administrator" | Set-LocalUser -Password `$adminPass
-# Self-delete after running
-Remove-Item -Path `$MyInvocation.MyCommand.Path -Force
 "@ | Out-File -FilePath "C:\Scripts\set-admin-pass.ps1" -Encoding UTF8
 
-# Register startup task to set admin password on first boot
+# Register delayed startup task to set admin password after user_data runs
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Scripts\set-admin-pass.ps1"
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -115,10 +114,10 @@ for disaster recovery purposes. Use this responsibly.
 
 Write-Host "=== Planting flags ==="
 # User flag
-"FLAG{v4ult_us3r_0wn3d}" | Out-File -FilePath "C:\Users\vaultadmin\Desktop\user.txt" -Encoding UTF8 -NoNewline
+"FLAG{vault_user_d1aadc0c3b961f4736d2}" | Out-File -FilePath "C:\Users\vaultadmin\Desktop\user.txt" -Encoding UTF8 -NoNewline
 
 # Root flag
-"FLAG{v4ult_r00t_pwn3d}" | Out-File -FilePath "C:\Users\Administrator\Desktop\root.txt" -Encoding UTF8 -NoNewline
+"FLAG{vault_root_c70f5667d45cabac71d4}" | Out-File -FilePath "C:\Users\Administrator\Desktop\root.txt" -Encoding UTF8 -NoNewline
 
 # Restrict root flag
 $rootAcl = New-Object System.Security.AccessControl.FileSecurity

@@ -5,14 +5,57 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+stop_background_apt() {
+    systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+}
+
+wait_for_apt() {
+    local waited=0
+    local timeout=600
+
+    echo "=== Waiting for background apt/dpkg work to finish ==="
+    stop_background_apt
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+        || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+        || pgrep -x unattended-upgr >/dev/null 2>&1 \
+        || pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1; do
+        if pgrep -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1; then
+            echo "Stopping unattended-upgrade-shutdown helper..."
+            pkill -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1 || true
+            sleep 2
+            continue
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            echo "Timed out waiting for apt/dpkg lock holders to exit"
+            ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
+            return 1
+        fi
+        echo "apt/dpkg still busy; retrying in 5s..."
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+apt_update() {
+    wait_for_apt
+    apt-get update
+}
+
+apt_install() {
+    wait_for_apt
+    apt-get install -y "$@"
+}
+
 echo "=== Installing services ==="
-apt-get update
+apt_update
 
 # Pre-seed postfix to avoid interactive prompts
 echo "postfix postfix/mailname string mailroom.local" | debconf-set-selections
 echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
 
-apt-get install -y vsftpd postfix
+apt_install vsftpd postfix
 
 echo "=== Configuring vsftpd for anonymous access ==="
 cat > /etc/vsftpd.conf << 'FTPEOF'
@@ -94,14 +137,19 @@ SUDOEOF
 chmod 440 /etc/sudoers.d/svc-mail
 
 echo "=== Planting flags ==="
-echo "FLAG{m41lr00m_us3r_0wn3d}" > /home/svc-mail/user.txt
+echo "FLAG{mailroom_user_bd84ca4b49d77ca2436a}" > /home/svc-mail/user.txt
 chown svc-mail:svc-mail /home/svc-mail/user.txt
 chmod 400 /home/svc-mail/user.txt
 
-echo "FLAG{m41lr00m_r00t_pwn3d}" > /root/root.txt
+echo "FLAG{mailroom_root_cd3b0319366eadb8fbd9}" > /root/root.txt
 chmod 400 /root/root.txt
 
-# SSH already installed and configured in base AMI (services.sh)
+echo "=== Enforcing SSH password authentication ==="
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-shifter-password-auth.conf << 'SSHEOF'
+PasswordAuthentication yes
+SSHEOF
+systemctl restart ssh
 
 echo "=== Fixing vsftpd PAM for anonymous login ==="
 # Default PAM config blocks anonymous FTP - replace with permissive auth
@@ -114,7 +162,6 @@ PAMEOF
 
 echo "=== Enabling services ==="
 systemctl enable vsftpd
-# ssh already enabled in base AMI (services.sh)
 systemctl enable postfix
 
 echo "=== MailRoom box setup complete ==="

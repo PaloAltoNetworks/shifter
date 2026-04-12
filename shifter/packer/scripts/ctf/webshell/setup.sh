@@ -5,9 +5,52 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+stop_background_apt() {
+    systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+}
+
+wait_for_apt() {
+    local waited=0
+    local timeout=600
+
+    echo "=== Waiting for background apt/dpkg work to finish ==="
+    stop_background_apt
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+        || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+        || pgrep -x unattended-upgr >/dev/null 2>&1 \
+        || pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1; do
+        if pgrep -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1; then
+            echo "Stopping unattended-upgrade-shutdown helper..."
+            pkill -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1 || true
+            sleep 2
+            continue
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            echo "Timed out waiting for apt/dpkg lock holders to exit"
+            ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
+            return 1
+        fi
+        echo "apt/dpkg still busy; retrying in 5s..."
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+apt_update() {
+    wait_for_apt
+    apt-get update
+}
+
+apt_install() {
+    wait_for_apt
+    apt-get install -y "$@"
+}
+
 echo "=== Installing Apache + PHP ==="
-apt-get update
-apt-get install -y apache2 libapache2-mod-php php
+apt_update
+apt_install apache2 libapache2-mod-php php
 
 echo "=== Creating webshell (cmd.php) ==="
 cat > /var/www/html/cmd.php << 'PHPEOF'
@@ -53,11 +96,11 @@ id john &>/dev/null || useradd -m -s /bin/bash john
 echo "john:SuperSecret123!" | chpasswd
 
 echo "=== Planting flags ==="
-echo "FLAG{w3bsh3ll_us3r_0wn3d}" > /home/john/local.txt
+echo "FLAG{webshell_user_2930c972ff14ce1bc149}" > /home/john/local.txt
 chown john:john /home/john/local.txt
 chmod 400 /home/john/local.txt
 
-echo "FLAG{w3bsh3ll_r00t_pwn3d}" > /root/root.txt
+echo "FLAG{webshell_root_cf87de2595c81e674e0a}" > /root/root.txt
 chmod 400 /root/root.txt
 
 echo "=== Creating SUID backup binary ==="
@@ -79,7 +122,7 @@ int main(int argc, char *argv[]) {
     return system(cmd);
 }
 CEOF
-apt-get install -y gcc
+apt_install gcc
 gcc -o /usr/local/bin/backup /tmp/backup.c
 chmod u+s /usr/local/bin/backup
 rm /tmp/backup.c
@@ -88,7 +131,12 @@ echo "=== Configuring sudo for www-data -> john ==="
 echo "www-data ALL=(john) NOPASSWD: /bin/bash" > /etc/sudoers.d/www-data
 chmod 440 /etc/sudoers.d/www-data
 
-# SSH already installed and configured in base AMI (services.sh)
+echo "=== Enforcing SSH password authentication ==="
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-shifter-password-auth.conf << 'SSHEOF'
+PasswordAuthentication yes
+SSHEOF
+systemctl restart ssh
 
 echo "=== Enabling services ==="
 systemctl enable apache2

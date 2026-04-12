@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.79.0] - 2026-04-12
+
+### Fixed
+
+- A14 Kali repo path drift (last of the A* assets):
+  `a14/Dockerfile` COPYs content files from context root but
+  they live in `A14-kali/`, and it referenced `modbus_client.py`
+  which only exists in `A9-splice-landing/`. Moved `a14-kali`
+  compose build context to `.` with `dockerfile: ./a14/Dockerfile`
+  and updated all Dockerfile COPY paths. Now builds from a
+  fresh repo checkout.
+
+### Added
+
+- `docs/ctf/mechag/A14-kali/smoketest.sh`: A14 attack platform
+  readiness smoketest (47 checks). A14 has no flags (it's the
+  participant's attack box, not a target) so the smoketest
+  verifies the platform is ready for use: home directory
+  content (README, mission_brief.pdf/.txt, flag_submit.sh,
+  modbus_scan.py, Claude system prompt), kali user and
+  sshd/xrdp services running, standard Kali offensive tools
+  (nmap, msfconsole, sqlmap, john, hashcat, gobuster, ffuf,
+  nc, curl, wget, python3, smbclient), full Impacket suite
+  at /opt/tools/bin (GetUserSPNs, secretsdump, psexec,
+  smbclient.py, lookupsid), Python libraries (pymodbus,
+  impacket, pdfminer.six, openpyxl, pdf2txt.py), Claude Code
+  CLI, TCP reachability of all 7 permitted targets (A0, A1,
+  A3, A4, A7, A2 via GCP, DNS), internal DNS resolution, and
+  AXFR zone transfer returning the _flag TXT record (flag 5
+  discovery path).
+
 ## [3.78.0] - 2026-04-12
 
 ### Fixed

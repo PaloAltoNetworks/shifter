@@ -69,6 +69,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      GCP_ENVIRONMENT: ${{ inputs.environment }}
       TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
       K8S_OVERLAY_DIR: platform/k8s/gcp/overlays/${{ inputs.environment }}
       TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core

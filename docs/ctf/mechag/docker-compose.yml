@@ -161,7 +161,9 @@ services:
     restart: unless-stopped
 
   a8-database:
-    build: ./a8
+    build:
+      context: .
+      dockerfile: ./a8/Dockerfile
     container_name: a8-database
     hostname: researchdb.boreas.local
     networks:

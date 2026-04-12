@@ -61,9 +61,10 @@ EOF
 # GPG - public key only (private key goes to A8)
 cat > $VASIK/.gnupg/gpg-agent.conf << 'EOF'
 # GPG Agent Configuration
-# Private key stored on secure research database (researchdb.boreas.local)
-# Access via: psql -h researchdb.boreas.local -d compartment_b -U vasik
-# Key stored as base64 blob in key_storage table
+# Private key stored on secure research database (researchdb.boreas.local).
+# Access via: psql -h researchdb.boreas.local -U vasik -d postgres
+#   then: SELECT key_data FROM compartment_b.key_storage WHERE key_owner='e.vasik';
+# Key stored as base64 blob in the compartment_b.key_storage table.
 pinentry-program /usr/bin/pinentry-curses
 default-cache-ttl 600
 max-cache-ttl 7200

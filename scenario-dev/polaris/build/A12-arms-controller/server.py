@@ -60,6 +60,7 @@ VENDOR = "AURORA HEAVY SYSTEMS"
 MODEL = "AHS-ARM-AL42"
 SERIAL = "AHS-A-00484"
 PRODUCT_CODE = "ARM-WEAP-MK2"
+APP_NAME = f"Arms Weapons Controller v2.4 -- SN: {SERIAL} -- diagnostics: coil 50"
 
 XOR_KEY = 2847  # PO number from Front Office (A4)
 FLAG = "FLAG{f0d8b2e6a4c71935}"
@@ -216,6 +217,7 @@ def build_identity():
     identity.ProductName = MODEL
     identity.ModelName = MODEL
     identity.MajorMinorRevision = "2.4.1"
+    identity.UserApplicationName = APP_NAME
     return identity
 
 

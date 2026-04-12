@@ -51,6 +51,7 @@ VENDOR = "AURORA HEAVY SYSTEMS"
 MODEL = "AHS-LEG-MN07"
 SERIAL = "AHS-L-00483"
 PRODUCT_CODE = "LEG-BIPED-MK2"
+APP_NAME = f"Leg Locomotion Controller v2.4 -- SN: {SERIAL} -- calibration: gait sequence 0->1->2->0"
 
 CALIBRATION_CODE = 4783
 FLAG = "FLAG{c7a1e3f9d0b52864}"
@@ -203,6 +204,7 @@ def build_identity():
     identity.ProductName = MODEL
     identity.ModelName = MODEL
     identity.MajorMinorRevision = "2.4.1"
+    identity.UserApplicationName = APP_NAME
     return identity
 
 

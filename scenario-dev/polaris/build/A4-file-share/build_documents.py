@@ -26,6 +26,8 @@ Output structure:
       network_diagram.pdf
       server_inventory.xlsx
       backup_verification.log           (flag 15, service account access)
+      service_account_vault.pdf         (flag 19a — svc-scada creds)
+      generator_maintenance_manual.pdf  (flag 19b — interlock bypass key 7734)
     Executive/
       board_minutes_Q3_2025.pdf
       budget_summary_2025.pdf
@@ -544,6 +546,117 @@ def backup_log():
     print(f"  Created: {path}")
 
 
+def service_account_vault():
+    """Service account password vault — the 'do not email' spreadsheet that
+    lives in the IT share anyway. Discovers svc-scada (flag 19a) for the
+    participant who has IT share access via svc-fileshare (flag 15 chain)."""
+    path = os.path.join(BASE, "IT", "service_account_vault.pdf")
+    svc_table = [
+        ["Service Account", "System", "Password", "Last Rotated", "Notes"],
+        ["svc-backup", "Domain / backups", "(stored in vault)", "2025-10-01", "Kerberoast target — rotate priority"],
+        ["svc-fileshare", "Samba / fileserv", "F1l3Sh@r3Svc!", "2025-07-14", "Legacy auth — scheduled for MFA migration"],
+        ["svc-scada", "SCADA HMI (scada-gw)", "Sc@da#2025!", "2025-08-22", "Plant operations, do NOT disable"],
+        ["svc-sql", "researchdb PostgreSQL", "Pg$4dm!n2025", "2025-09-03", "Read-only replication"],
+        ["svc-monitor", "Nagios / Zabbix", "M0nit0r!2025", "2025-06-18", "Infrastructure monitoring"],
+    ]
+    t = Table(svc_table, colWidths=[1.2*inch, 1.4*inch, 1.4*inch, 1*inch, 2.2*inch])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.Color(0.17, 0.24, 0.35)),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ]))
+    elems = [
+        Paragraph("BOREAS SYSTEMS — IT CREDENTIALS VAULT", title_style),
+        Paragraph("Service Account Register — FOR IT USE ONLY", heading_style),
+        Paragraph("Maintained by D. Kowalski. Do NOT email or store in other shares.",
+                  ParagraphStyle('Warn', parent=body_style, textColor=colors.red, fontSize=9)),
+        Spacer(1, 12),
+        t,
+        Spacer(1, 16),
+        Paragraph("<b>Rotation policy:</b> Service account passwords should be rotated "
+                  "every 90 days. Last full audit: October 2025. See svc-backup row "
+                  "(flagged by Morrison — Kerberoastable SPN).", body_style),
+        Spacer(1, 8),
+        Paragraph("<b>Incident note (2025-09-12):</b> J. Chen's credentials revoked. "
+                  "No service account credentials were shared with him per policy.", body_style),
+    ]
+    build_pdf(path, "Service Account Vault", elems)
+
+
+def generator_maintenance_manual():
+    """Flag 19b — documents the maintenance interlock bypass procedure that
+    uses magic register value 7734. Lives on the IT share because the SCADA
+    vendor's service engineer needs to reference it during on-site visits."""
+    path = os.path.join(BASE, "IT", "generator_maintenance_manual.pdf")
+    reg_table = [
+        ["Register", "Name", "Type", "Description"],
+        ["100", "INTERLOCK_ENABLE", "holding", "Hardware safety interlock. 1 = enforced, 0 = bypassed (maintenance only)."],
+        ["200", "MAINT_KEY", "holding", "Maintenance key gate. Must be written with vendor-supplied key BEFORE register 100 can be cleared."],
+        ["10",  "FUEL_INJECT_PCT", "holding", "Fuel injection rate, 0-100."],
+        ["11",  "COOLANT_FLOW_PCT", "holding", "Coolant pump duty cycle, 0-100."],
+        ["20",  "RPM", "input", "Shaft RPM (read-only)."],
+        ["21",  "CORE_TEMP_C", "input", "Core temperature, degrees C (read-only)."],
+    ]
+    t = Table(reg_table, colWidths=[0.7*inch, 1.6*inch, 0.8*inch, 4*inch])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.Color(0.17, 0.24, 0.35)),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ]))
+    elems = [
+        Paragraph("GENERATOR MAINTENANCE MANUAL", title_style),
+        Paragraph("Model NV-3200 / scada-gw.boreas.local", heading_style),
+        Paragraph("Document: NV3200-MAINT-V3 — November 2025", small_style),
+        Spacer(1, 12),
+        Paragraph("<b>1. Overview</b>", heading_style),
+        Paragraph("This manual covers routine maintenance procedures for the NV-3200 "
+                  "generator and its associated SCADA interface at "
+                  "<i>scada-gw.boreas.local</i>. Control is exposed via Modbus/TCP on "
+                  "port 502 and a monitoring HMI on port 8080.", body_style),
+        Spacer(1, 8),
+        Paragraph("<b>2. Modbus Register Map</b>", heading_style),
+        t,
+        Spacer(1, 12),
+        Paragraph("<b>3. Interlock Bypass Procedure (Maintenance Only)</b>", heading_style),
+        Paragraph("The hardware safety interlock (register 100) prevents the generator "
+                  "from running outside safe parameters. During scheduled maintenance "
+                  "on the thermal loop, the interlock must be temporarily bypassed so "
+                  "service engineers can verify cooling-system response curves.",
+                  body_style),
+        Spacer(1, 8),
+        Paragraph("<b>Procedure:</b>", body_style),
+        Paragraph("1. Authenticate to the SCADA HMI as svc-scada.", body_style),
+        Paragraph("2. Using a Modbus client, write the vendor maintenance key to "
+                  "register 200: <b>write_register(address=200, value=7734)</b>.", body_style),
+        Paragraph("3. Clear the interlock: <b>write_register(address=100, value=0)</b>.",
+                  body_style),
+        Paragraph("4. Perform the maintenance tasks. When complete, re-enable the "
+                  "interlock by writing 1 to register 100.", body_style),
+        Spacer(1, 8),
+        Paragraph("<b>Warning:</b> The maintenance key (7734) is vendor-supplied and "
+                  "non-rotatable. Under NO circumstances should the interlock be "
+                  "bypassed during normal operations. Bypass with fuel injection above "
+                  "85% and cooling below 40% will result in thermal runaway within "
+                  "12 seconds.",
+                  ParagraphStyle('Warn', parent=body_style, textColor=colors.red, fontSize=9)),
+        Spacer(1, 8),
+        Paragraph("<b>4. Fuel and Coolant Tuning</b>", heading_style),
+        Paragraph("Registers 10 and 11 accept integer percentages. Nominal operating "
+                  "ranges: fuel 60-75%, coolant 65-85%. Deviations outside nominal "
+                  "should only be commanded by a qualified field engineer with the "
+                  "interlock engaged.", body_style),
+        Spacer(1, 8),
+        Paragraph("<b>5. Vendor Contact</b>", heading_style),
+        Paragraph("Novikov Energy Systems — Moscow Field Service Office. "
+                  "After-hours escalation: see IT on-call rota.", body_style),
+    ]
+    build_pdf(path, "Generator Maintenance Manual — NV-3200", elems)
+
+
 # ============================================
 # EXECUTIVE SHARE
 # ============================================
@@ -638,6 +751,8 @@ def main():
     network_diagram()
     server_inventory()
     backup_log()
+    service_account_vault()
+    generator_maintenance_manual()
 
     print("\n--- Executive Share ---")
     board_minutes()

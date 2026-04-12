@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.71.0] - 2026-04-12
+
+### Fixed
+
+- A6 repo drift: `build-a6-content.sh` and `build-gpg-chain.sh`
+  existed on the range VM but were never committed to the repo,
+  so `a6/Dockerfile` could not build from a fresh clone. Added
+  both scripts to `A6-engineering-workstation/` alongside
+  `build_cog_xlsx.py`, moved `a6-workstation` docker-compose
+  build context to `.` with `dockerfile: ./a6/Dockerfile`, and
+  updated the Dockerfile COPY paths so it can reach both the
+  build dir (`a6/`) and the content dir
+  (`A6-engineering-workstation/`) at build time. Rebuilt and
+  recreated a6-workstation on the range successfully.
+
+### Changed
+
+- `a3/Dockerfile`: added `openssh-client`, `sshpass`, and
+  `ca-certificates` so a3-intranet functions as a realistic
+  post-compromise pivot host. This is the only practical path
+  for a14-kali to reach the Lab VLAN (30) and SCADA VLAN (40)
+  per the design (A3 is the only asset multi-homed to all
+  three). Rebuilt and recreated a3-intranet.
+
+### Added
+
+- `docs/ctf/mechag/A6-engineering-workstation/smoketest.sh`:
+  A6 engineering workstation end-to-end smoketest (22 checks).
+  Runs from inside a3-intranet and uses SSH pivot to reach
+  eng-ws01.boreas.local on lab VLAN 30. Verifies jenkins /
+  r.tanaka / p.nielsen logins, flag 20 in jenkins .credentials,
+  flag 22 in /opt/builds/latest/reactor_interface_spec, flag 23
+  as string in stress_test_44.dat binary (with bipedal
+  cross-references in logs 28/31/44), flag 25 in
+  MIDNIGHT-7_results.dat plus MN07-INTEG-20251028 simulation
+  ID (A13 override code piece), flag 26 in the hidden
+  Integration sheet of center_of_gravity_analysis.xlsx
+  extracted via stdlib `zipfile`, restricted perms on
+  r.tanaka/simulations/midnight and p.nielsen/designs,
+  p.nielsen .pgpass A8 cred breadcrumb, flag 30 prerequisites
+  (encrypted file + public key + gpg-agent.conf hint), and
+  simulation.log narrative content. Flag 30's full decryption
+  chain requires A7 passphrase + A8 private key blob so it's
+  deferred to the cross-asset verification task.
+
 ## [3.70.0] - 2026-04-12
 
 ### Added

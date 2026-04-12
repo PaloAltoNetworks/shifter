@@ -147,7 +147,9 @@ services:
   # ============================================
 
   a6-workstation:
-    build: ./a6
+    build:
+      context: .
+      dockerfile: ./a6/Dockerfile
     container_name: a6-workstation
     hostname: eng-ws01.boreas.local
     networks:

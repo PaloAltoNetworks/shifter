@@ -97,15 +97,15 @@ GDC deployments use custom L2 networks (VXLAN-based) for per-range guest isolati
 
 ## Deployment Path
 
-The authoritative GCP bring-up path on this branch is the bootstrap entrypoint:
+The normal GCP deployment path is CI/CD:
 
-```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
-```
+- push to `dev`: validate AWS and GCP paths, but do not deploy
+- push to `aws-dev`: deploy the AWS dev environment
+- push to `gcp-dev`: deploy the GCP dev environment
 
-That flow:
+The GCP deploy flow executed by CI:
 
-1. reconciles the GDC substrate
+1. validates Terraform and Kubernetes manifests
 2. applies GCP Terraform
 3. builds and pushes control-plane images
 4. renders secure runtime env values from Terraform outputs and Secret Manager
@@ -113,7 +113,7 @@ That flow:
 6. installs or upgrades the Shifter chart
 7. waits for rollout and managed-certificate convergence
 
-GitHub Actions validation for `gcp-dev` still exists, but the staged workflow is not the authoritative deployment contract until it is reconciled with the Helm/bootstrap path.
+`gdc-bootstrap` remains the operator bootstrap and recovery harness for first-time setup and controlled break-glass work, but it is no longer the normal deploy contract.
 
 ## Current `gcp-dev` concrete values
 
@@ -122,7 +122,7 @@ GitHub Actions validation for `gcp-dev` still exists, but the staged workflow is
 - Managed TLS: enabled
 - Current authorized admin CIDR: `173.181.31.170/32` from the WSL bootstrap host as of 2026-04-11
 
-If the operator egress IP changes, `gke_master_authorized_cidrs` must be updated before the next bootstrap.
+If the operator egress IP changes, `gke_master_authorized_cidrs` must be updated before the next CI/CD-driven apply or controlled bootstrap run.
 
 ## Related Docs
 

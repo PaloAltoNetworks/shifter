@@ -62,15 +62,15 @@ AWS roles defined in `platform/terraform/global/iam/github-oidc.tf`. GCP WIF con
 
 ## GCP Current State
 
-The authoritative GCP bring-up path on this branch is the bootstrap flow:
+GCP now deploys through CI/CD on `gcp-dev`. The branch model is:
 
-```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <project> --cluster-id <cluster>
-```
+- `dev`: validation-only integration branch for AWS and GCP
+- `aws-dev`: AWS dev deploy branch
+- `gcp-dev`: GCP dev deploy branch
 
-That path now:
+The GCP CI path:
 
-1. reconciles the GDC substrate
+1. validates Terraform and rendered manifests
 2. applies GCP Terraform
 3. builds and pushes control-plane images
 4. renders secure Helm values from Terraform outputs and Secret Manager
@@ -82,4 +82,4 @@ The bootstrap path is security-gated and fails closed unless:
 - `enable_managed_tls = true`
 - `gke_master_authorized_cidrs` is non-empty
 
-The branch-local GitHub workflow still contains older staged GCP deployment logic and should not be treated as the authoritative GCP deploy path until it is reconciled with the Helm/bootstrap cutover.
+`gdc-bootstrap` remains available for first-time bootstrap and controlled recovery, but it is not the normal deployment entrypoint.

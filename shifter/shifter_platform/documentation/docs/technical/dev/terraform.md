@@ -112,7 +112,7 @@ dns_zone_dns_name       = ""
 dns_record_ttl          = 300
 ```
 
-`gdc-bootstrap` now fails before Terraform apply if those secure inputs are missing. The GCP path no longer treats a public IP/debug runtime as an acceptable bootstrap fallback.
+`gdc-bootstrap` now fails before Terraform apply if those secure inputs are missing. The GCP path no longer treats a public IP/debug runtime as an acceptable bootstrap fallback, and normal applies happen through CI/CD on `gcp-dev` rather than ad hoc local deploys.
 
 ### Plan
 

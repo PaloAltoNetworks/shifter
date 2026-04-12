@@ -329,7 +329,7 @@ Update `gke_master_authorized_cidrs` if the operator egress IP changes.
 
 ### 4. Deploy
 
-The authoritative branch-local GCP bring-up path is:
+Normal GCP deployments happen through CI/CD on `gcp-dev`. The bootstrap entrypoint remains available for first-time setup and controlled recovery:
 
 ```bash
 ./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1

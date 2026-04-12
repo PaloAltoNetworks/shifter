@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.77.0] - 2026-04-12
+
+### Fixed
+
+- A12 repo path drift: `a12/Dockerfile` COPYs `server.py`
+  from context root. Moved `a12-arms` compose build context
+  to parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A12-arms-controller/smoketest.py`: A12
+  arms controller end-to-end smoketest (17 checks). Runs
+  from a9-splice. Verifies default register reads (joints,
+  actuator force, mode 0=stowed, primary effector status=0
+  offline / max=2400 MW / draw=1800 MW, kinetic caliber
+  500mm, 12 rounds/mag), flag zero pre-unlock, wrong
+  challenge write rejected before diagnostics, diagnostics
+  enable via coil 50, rolling nonce appears on input reg 60
+  (4-digit), XOR nonce with PO-2847 (cross-zone intel from
+  A4), confirmation readback reg 201 = 1, and ASCII decode
+  of reg 100-121 matching `FLAG{f0d8b2e6a4c71935}`.
+
 ## [3.76.0] - 2026-04-12
 
 ### Fixed

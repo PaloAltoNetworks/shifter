@@ -80,7 +80,7 @@ Public-facing corporate website for Boreas Systems, AURORA COLLECTIVE's front co
 
 **Base image:** nginx:alpine
 
-**Content directory:** `docs/ctf/mechag/A0-boreas-website/`
+**Content directory:** `scenario-dev/polaris/build/A0-boreas-website/`
 
 ### Steps
 

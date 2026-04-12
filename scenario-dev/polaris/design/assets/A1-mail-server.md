@@ -79,7 +79,7 @@ Boreas Systems corporate email. Contains employee correspondence that reveals th
 
 **Base image:** debian:bookworm-slim (Postfix + Dovecot + Roundcube stack)
 
-**Content directory:** `docs/ctf/mechag/A1-mail-server/`
+**Content directory:** `scenario-dev/polaris/build/A1-mail-server/`
 
 ### Steps
 

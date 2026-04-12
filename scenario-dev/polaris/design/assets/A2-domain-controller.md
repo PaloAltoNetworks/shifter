@@ -83,7 +83,7 @@ boreas.local/
 **Platform:** Windows Server 2022 Core on GCE (shared VM, not per-participant)
 **GCE Image:** `ctf-a2-windc-base-v1` (family: `ctf-a2-windc`) — pre-configured, boots ready in ~2 min
 **Spike notes:** `temp/a2-samba-ad-spike.md`
-**Content directory:** `docs/ctf/mechag/A2-domain-controller/`
+**Content directory:** `scenario-dev/polaris/build/A2-domain-controller/`
 
 ### Why Windows, Not Samba
 

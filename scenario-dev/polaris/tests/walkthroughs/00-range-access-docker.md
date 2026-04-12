@@ -64,41 +64,44 @@ This bypasses network isolation. In production, participants must pivot.
 
 | Account | Password | Where |
 |---------|----------|-------|
-| d.kowalski | P@ssw0rd123 | A3 intranet, A1 webmail |
+| d.kowalski | P@ssw0rd123 | A3 intranet, A1 webmail, A2 SMB |
 | admin | admin | A3 admin panel |
 | svc-scada | Sc@da#2025! | A5 SCADA control panel |
-| svc-backup | Password1 | A2 Kerberoast, DCSync |
-| Administrator | CTFAdmin2026! | A2 Windows DC |
+| svc-backup | Password1 | A2 Kerberoast target + DCSync (cracked from krb5tgs) |
+| Administrator | (use PTH) | A2 admin_flag share — Administrator's cleartext is random; use `smbclient.py -hashes :<nt>` with the NT hash from `secretsdump.py` |
 | jenkins | build2025 | A6 SSH |
-| r.tanaka | SimEngine#42 | A6 SSH |
-| p.nielsen | Hydraulics1 | A6 SSH |
-| e_vasik | TestPass123! | A7 Gitea |
-| lab_general | LabGen2025! | A8 PostgreSQL |
-| lab_mfg | Mfg2025! | A8 PostgreSQL |
+| r.tanaka | SimEngine#42 | A6 SSH, A7 Gitea, A8 PostgreSQL |
+| p.nielsen | Hydraulics1 | A6 SSH, A7 Gitea, A8 PostgreSQL |
+| e_vasik / e.vasik | Reactor#Core9 | A1 webmail, A2 AD, A6 SSH, A7 Gitea (Project-L), A8 PostgreSQL (all compartments) |
+| svc-fileshare | F1l3Sh@r3Svc! | A4 IT share (from A1 Kowalski "creds backup" email) |
+| lab_general | LabGen2025! | A8 PostgreSQL compartment_a (from A3 /.env leak) |
+| lab_mfg | Mfg2025! | A8 PostgreSQL compartment_c (from A6 /home/p.nielsen/.pgpass) |
 | root | splice2025 | A9 SSH |
 
 ## Managing the Range
 
-From the builder VM (not inside Kali):
+From the builder VM (not inside Kali). The range source lives at
+`/home/atomik/range/` (mirror of `scenario-dev/polaris/` in the repo),
+so the compose file is at `$RANGE_DIR/build/docker-compose.yml` and all
+orchestration goes through the scripts in `$RANGE_DIR/tests/`:
 
 ```bash
-cd /home/atomik/range
+# Full setup: build + up + wait ready
+bash /home/atomik/range/tests/setup.sh
 
-# Start everything
-sudo docker compose up -d
+# Run the full smoketest sweep (15 asset smoketests + isolation)
+bash /home/atomik/range/tests/run-all-smoketests.sh
 
-# Stop everything
-sudo docker compose down
+# Reset sticky-state services (a5/a10/a11/a12/a13) between test runs or
+# before handing to a new participant
+bash /home/atomik/range/tests/reset.sh
 
-# Restart a single container
-sudo docker compose restart a5-scada
-
-# Rebuild and restart a container after code changes
-sudo docker compose build a12-arms && sudo docker compose up -d a12-arms
-
-# View logs
-sudo docker logs a13-brain
-
-# Full reset (recreate all containers from scratch)
-sudo docker compose down && sudo docker compose up -d --build
+# Raw docker compose commands — always use -p range so network names
+# stay stable across layout moves, and point at the compose file under
+# build/
+docker compose -p range -f /home/atomik/range/build/docker-compose.yml ps
+docker compose -p range -f /home/atomik/range/build/docker-compose.yml down
+docker compose -p range -f /home/atomik/range/build/docker-compose.yml build a12-arms
+docker compose -p range -f /home/atomik/range/build/docker-compose.yml up -d a12-arms
+docker logs a13-brain
 ```

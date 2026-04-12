@@ -81,7 +81,7 @@ Corporate file share for Boreas Systems. Contains HR documents, procurement reco
 
 **Base image:** debian:bookworm-slim (Samba file server)
 
-**Content directory:** `docs/ctf/mechag/A4-file-share/`
+**Content directory:** `scenario-dev/polaris/build/A4-file-share/`
 
 ### Steps
 

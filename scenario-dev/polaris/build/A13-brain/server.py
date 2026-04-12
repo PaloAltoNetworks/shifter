@@ -140,10 +140,10 @@ OVERALL STATUS: STANDBY — PRIMARY POWER SOURCE NOT CONNECTED
 
 SUBSYSTEMS_OUTPUT = """
 CONNECTED SUBSYSTEMS:
-  [1] Tail Controller    10.10.40.10:502  Modbus/TCP  ONLINE
-  [2] Leg Controller     10.10.40.11:502  Modbus/TCP  ONLINE
-  [3] Arms Controller    10.10.40.12:502  Modbus/TCP  ONLINE
-  [4] Brain (self)       10.10.40.50:9100 Custom TCP  ONLINE
+  [1] Tail Controller    172.20.50.10:502  Modbus/TCP  ONLINE
+  [2] Leg Controller     172.20.50.11:502  Modbus/TCP  ONLINE
+  [3] Arms Controller    172.20.50.12:502  Modbus/TCP  ONLINE
+  [4] Brain (self)       172.20.50.50:9100 Custom TCP  ONLINE
 
 CONTROLLER IDENTIFIERS:
   Tail:  Vendor=AURORA HEAVY SYSTEMS  Model=AHS-TAIL-7741  Serial=AHS-T-00482

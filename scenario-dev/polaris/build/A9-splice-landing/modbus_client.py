@@ -11,10 +11,10 @@ Usage:
   modbus_client.py <host> [--port PORT] scan
 
 Examples:
-  modbus_client.py 10.10.40.10 read 0 10
-  modbus_client.py 10.10.40.10 write 20 3
-  modbus_client.py 10.10.40.10 devid
-  modbus_client.py 10.10.40.10 scan
+  modbus_client.py 172.20.50.10 read 0 10
+  modbus_client.py 172.20.50.10 write 20 3
+  modbus_client.py 172.20.50.10 devid
+  modbus_client.py 172.20.50.10 scan
 """
 
 import sys

@@ -45,7 +45,7 @@ An nmap scan from A9 reveals these four hosts and their open ports. The protocol
 
 **Base image:** alpine:3.19 (minimal, field-expedient relay)
 
-**Content directory:** `docs/ctf/mechag/A9-splice-landing/`
+**Content directory:** `scenario-dev/polaris/build/A9-splice-landing/`
 
 ### Steps
 

@@ -70,7 +70,7 @@ Internal source code repository for AURORA's engineering team. Contains the cont
 
 **Base image:** gitea/gitea:latest (official Gitea image)
 **Spike notes:** `temp/a7-gitea-spike.md`
-**Content directory:** `docs/ctf/mechag/A7-source-repo/`
+**Content directory:** `scenario-dev/polaris/build/A7-source-repo/`
 
 ### Spike Results
 

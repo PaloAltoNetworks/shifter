@@ -15,7 +15,11 @@
 
 set -euo pipefail
 RANGE_DIR="${RANGE_DIR:-/home/atomik/range}"
-cd "$RANGE_DIR"
+COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
+if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then
+    COMPOSE_FILE="$RANGE_DIR/docker-compose.yml"
+fi
+COMPOSE="docker compose -p range -f $COMPOSE_FILE"
 
 STICKY=(a5-scada a10-tail a11-leg a12-arms a13-brain)
 # (container, port) pairs to poll for readiness. "running" status alone is
@@ -33,7 +37,7 @@ declare -A READY_PORT=(
 log() { echo "[reset] $*"; }
 
 log "force-recreating sticky services: ${STICKY[*]}"
-docker compose up -d --force-recreate --no-deps "${STICKY[@]}"
+$COMPOSE up -d --force-recreate --no-deps "${STICKY[@]}"
 
 for svc in "${STICKY[@]}"; do
     status=$(docker inspect -f '{{.State.Status}}' "$svc" 2>/dev/null || echo "missing")

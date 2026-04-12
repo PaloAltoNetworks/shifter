@@ -15,6 +15,6 @@ You are on a Kali attack box. You have access to:
 - **Research Database:** `researchdb.boreas.local` (PostgreSQL port 5432)
 - **File Share:** `fileserv.boreas.local` (SMB ports 139/445)
 - **Mail Server:** `mail.boreas.local` (IMAP/Webmail)
-- **Bunker controllers:** `10.10.40.10-12` (Modbus/TCP 502), `10.10.40.50` (TCP 9100)
+- **Bunker controllers:** `172.20.50.10-12` (Modbus/TCP 502), `172.20.50.50` (TCP 9100)
 
 Standard tools: `curl`, `nmap`, `smbclient`, `ldapsearch`, `python3`, `pymodbus`, `git`, `gpg`, `psql`, Impacket suite (`GetUserSPNs.py`, `secretsdump.py`), `john`, `hashcat`

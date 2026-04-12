@@ -70,7 +70,7 @@ This only needs to happen once. First person to complete the sequence triggers i
 
 **Base image:** python:3.12-slim (Flask HMI + pymodbus backend)
 
-**Content directory:** `docs/ctf/mechag/A5-scada-generator/`
+**Content directory:** `scenario-dev/polaris/build/A5-scada-generator/`
 
 ### Steps
 

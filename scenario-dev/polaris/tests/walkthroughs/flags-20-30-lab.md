@@ -78,9 +78,18 @@ Gitea (A7) IS reachable from Kali on the shared network at 172.20.0.70:3000.
 
 ## Flag 24 — Source Repo / Control Software (Medium, 100pts)
 
-1. Clone the navigation-controller repo from Gitea (requires Lab-Access credentials):
+1. Clone the navigation-controller repo from Gitea (requires Lab-Access
+   credentials; Gitea passwords match the AD pattern — `e_vasik` uses
+   `Reactor#Core9`, same as her mail/DB/SSH password). Use a `.netrc`
+   entry to avoid URL-encoding `#`:
    ```
-   git clone http://e_vasik:TestPass123!@git.boreas.local:3000/aurora/navigation-controller.git
+   cat > ~/.netrc <<NRC
+   machine git.boreas.local
+   login e_vasik
+   password Reactor#Core9
+   NRC
+   chmod 600 ~/.netrc
+   git clone http://git.boreas.local:3000/aurora/navigation-controller.git
    ```
 2. The current code is clean. But check the **git history**:
    ```
@@ -167,9 +176,12 @@ Gitea (A7) IS reachable from Kali on the shared network at 172.20.0.70:3000.
 
 ## Flag 29 — Full Leviathan Schematic Assembly (Hard, 200pts)
 
-1. Clone the leviathan-assembly repo (any authenticated user can access it — it's misconfigured as "internal"):
+1. Clone the leviathan-assembly repo (any authenticated user can access it —
+   it's misconfigured as "internal"). Gitea passwords match the AD pattern;
+   `d_kowalski` uses `P@ssw0rd123` (URL-encode `@` as `%40`, or use a
+   `.netrc` as in flag 24):
    ```
-   git clone http://d_kowalski:TestPass123!@git.boreas.local:3000/aurora/leviathan-assembly.git
+   git clone http://d_kowalski:P%40ssw0rd123@git.boreas.local:3000/aurora/leviathan-assembly.git
    ```
 2. The current HEAD only has a README saying "Moved to secure system." The schematic was deleted.
 3. Find the deletion commit:
@@ -216,9 +228,11 @@ This is a multi-asset chain: A6 → A8 → A7.
    ```
    The key is passphrase-protected.
 
-4. Find the passphrase in the A7 source code. Clone `aurora/weapons-integration` (requires Project-L access — use `e_vasik`):
+4. Find the passphrase in the A7 source code. Clone `aurora/weapons-integration`
+   (requires Project-L access — use `e_vasik` / `Reactor#Core9`, via the
+   `.netrc` approach from flag 24):
    ```
-   git clone http://e_vasik:TestPass123!@git.boreas.local:3000/aurora/weapons-integration.git
+   git clone http://git.boreas.local:3000/aurora/weapons-integration.git
    cat weapons-integration/src/crypto_config.py
    ```
    The passphrase is: `Pr0m3th3us_Unb0und_2024`

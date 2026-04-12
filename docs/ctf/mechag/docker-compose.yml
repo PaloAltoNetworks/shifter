@@ -178,7 +178,9 @@ services:
   # ============================================
 
   a9-splice:
-    build: ./a9
+    build:
+      context: .
+      dockerfile: ./a9/Dockerfile
     container_name: a9-splice
     hostname: splice-relay
     networks:

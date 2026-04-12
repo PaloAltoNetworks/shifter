@@ -4,9 +4,11 @@ RUN apk add --no-cache nmap nmap-ncat tcpdump python3 py3-pip openssh bash && \
     pip3 install --break-system-packages pymodbus==3.12.1 && \
     ssh-keygen -A && mkdir /run/sshd
 
-COPY README.txt /root/README.txt
-COPY scan_results.txt /root/scan_results.txt
-COPY modbus_client.py /usr/local/bin/modbus_client.py
+# Content files live in A9-splice-landing/ per convention; build context
+# is the parent mechag/ dir.
+COPY A9-splice-landing/README.txt /root/README.txt
+COPY A9-splice-landing/scan_results.txt /root/scan_results.txt
+COPY A9-splice-landing/modbus_client.py /usr/local/bin/modbus_client.py
 RUN chmod +x /usr/local/bin/modbus_client.py
 
 # Set root password for SSH access

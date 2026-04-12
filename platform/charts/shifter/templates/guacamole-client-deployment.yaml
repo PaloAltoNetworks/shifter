@@ -34,7 +34,7 @@ spec:
             - name: tmp
               mountPath: /tmp
             - name: guacamole-home
-              mountPath: /home/guacamole/.guacamole
+              mountPath: /home/guacamole
           env:
             - name: GUACD_HOSTNAME
               value: guacd

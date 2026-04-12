@@ -39,20 +39,40 @@ Current exclusions unless the product contract changes:
 
 ## Inputs
 
-Expect these to be available or provided separately:
+First, try to discover inputs from local repo context before treating them as
+missing.
 
-- `corporate_user_email`
-- `corporate_user_password`
-- `corporate_user_totp_seed`
+Read and mine these sources:
+
+- `temp/k8s/gcp-smoketest-access.md`
+- `temp/k8s/gcp-smoketest-checklist.md`
+- `/home/atomik/src/shifter/.env`
+
+Use those sources to discover:
+
 - `bootstrap_admin_email`
 - `bootstrap_admin_password`
-- `bootstrap_admin_totp_seed`
-- `participant_invite_token`
-- `launch_agent_name`
-- `launch_scenario_name`
+- default environment URL and project details
 
-If required inputs are missing, stop immediately and report exactly which inputs
-are missing. Do not invent fixtures.
+Input policy:
+
+- `bootstrap_admin_email`: discover locally before asking
+- `bootstrap_admin_password`: discover locally before asking
+- `bootstrap_admin_totp_seed`: required only if the browser flow needs an
+  automated MFA completion and no existing authenticated session is available
+- `corporate_user_*`: if separate corporate-user fixtures are not supplied, use
+  the bootstrap admin account to execute the corporate auth-path checks
+- `launch_scenario_name`: discover from the live Mission Control scenario list
+  after login; prefer `Basic Range`, then `AD Attack Lab`, then the first
+  clearly supported non-NGFW scenario
+- `launch_agent_name`: discover from the live Mission Control agent list after
+  login; prefer an obviously active/default agent, otherwise use the first
+  available agent and record which one was chosen
+- `participant_invite_token`: this is the only positive-flow fixture that should
+  normally remain externally supplied; if absent, run the negative magic-link
+  cases and mark only the positive magic-link case blocked
+
+Do not invent credentials or tokens. Do discover what is already present.
 
 ## Tooling
 
@@ -71,19 +91,27 @@ Prefer:
 - Do **not** mutate infrastructure.
 - Do **not** widen scope beyond the suite.
 - Do **not** stop at the first failure; run the case’s `adjacent_checks` and collect evidence.
+- Do **not** stop before doing discovery and the maximum unblocked subset of the suite.
 
 ## Execution Pattern
 
 1. Read the YAML suite and the markdown protocol.
-2. Execute the phases in order.
-3. For each case, capture:
+2. Discover locally available inputs from the files listed above.
+3. Build an execution plan:
+   - full suite for all cases whose prerequisites can be satisfied
+   - blocked-only list for cases that truly cannot run
+4. Execute the phases in order.
+5. For each case, capture:
    - final URL
    - HTTP status
    - screenshot of the final visible state
    - relevant DOM assertion or response body
    - browser network evidence for auth/API failures
-4. If a case fails, run the listed `adjacent_checks` before moving on.
-5. Treat this as a user-visible audit of the exposed system, not an exploratory poke session.
+6. If a case fails, run the listed `adjacent_checks` before moving on.
+7. Treat this as a user-visible audit of the exposed system, not an exploratory poke session.
+8. Only stop early if a hard prerequisite for an entire phase cannot be discovered
+   or supplied. In that case, execute all still-unblocked phases first and then
+   report the remaining blocked cases.
 
 ## Default Environment
 
@@ -103,6 +131,10 @@ Report in this order:
    - evidence captured
    - likely failing surface
    - adjacent checks performed and what they showed
-4. Compact pass summary for successful cases
+4. Blocked cases, each with:
+   - case ID
+   - exact missing prerequisite
+   - whether the prerequisite was attempted via local discovery
+5. Compact pass summary for successful cases
 
 If all cases pass, say that the remaining work is UAT expansion or deeper scenario-content validation, not deploy-plumbing remediation.

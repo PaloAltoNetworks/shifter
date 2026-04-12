@@ -22,23 +22,35 @@ actors:
 
 required_inputs:
   - name: corporate_user_email
-    required: true
+    required: false
+    discovery: use bootstrap_admin_email if no separate corporate fixture is supplied
   - name: corporate_user_password
-    required: true
+    required: false
+    discovery: use bootstrap_admin_password if no separate corporate fixture is supplied
   - name: corporate_user_totp_seed
-    required: true
+    required: false
+    discovery: use bootstrap_admin_totp_seed if no separate corporate fixture is supplied
   - name: bootstrap_admin_email
     required: true
+    discoverable_from:
+      - temp/k8s/gcp-smoketest-access.md
+      - /home/atomik/src/shifter/.env
   - name: bootstrap_admin_password
     required: true
+    discoverable_from:
+      - /home/atomik/src/shifter/.env
   - name: bootstrap_admin_totp_seed
     required: true
+    discovery: may be supplied externally or sourced from an existing authenticated browser profile if available
   - name: participant_invite_token
-    required: true
+    required: false
+    discovery: if absent, run only the negative magic-link cases and mark the positive case blocked
   - name: launch_agent_name
-    required: true
+    required: false
+    discovery: after login, discover from the live Mission Control agent list and record the selected agent
   - name: launch_scenario_name
-    required: true
+    required: false
+    discovery: after login, prefer Basic Range, then AD Attack Lab, then the first clearly supported non-NGFW scenario
 
 tooling:
   browser:

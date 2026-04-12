@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.75.0] - 2026-04-12
+
+### Fixed
+
+- A10 repo path drift: `a10/Dockerfile` COPYs `server.py` from
+  context root but the file lives in `A10-tail-controller/`.
+  Moved `a10-tail` compose build context to parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A10-tail-controller/smoketest.py`: A10 tail
+  controller end-to-end smoketest (13 checks). Runs from inside
+  a9-splice (bunker OT entry point). Verifies default register
+  reads (motor positions, torque, mode=1 balance, length=120m,
+  mass=8500t), flag registers zero pre-unlock, the flag 32
+  unlock sequence (write reg 20=3 diagnostic mode, then write
+  reg 99=482 serial-derived challenge), ASCII decode of
+  registers 100-121 matching `FLAG{9b3e7c1d0f5a2846}`, mode
+  reset on wrong challenge, and all 10 motor enable coils ON.
+  Device identification test deferred to A9 smoketest which
+  already covers A10/A11/A12 via modbus_client.py devid.
+
 ## [3.74.0] - 2026-04-12
 
 ### Fixed

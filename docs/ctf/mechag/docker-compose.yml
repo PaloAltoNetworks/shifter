@@ -239,7 +239,9 @@ services:
   # ============================================
 
   a14-kali:
-    build: ./a14
+    build:
+      context: .
+      dockerfile: ./a14/Dockerfile
     container_name: a14-kali
     hostname: operator
     networks:

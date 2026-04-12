@@ -35,8 +35,8 @@ RUN echo "kali:kali" | chpasswd && \
     usermod -aG ssl-cert kali 2>/dev/null || true
 
 # Configure xrdp to launch the XFCE session (matches AWS base.sh)
-COPY xsession /home/kali/.xsession
-COPY startwm.sh /etc/xrdp/startwm.sh
+COPY a14/xsession /home/kali/.xsession
+COPY a14/startwm.sh /etc/xrdp/startwm.sh
 RUN chown kali:kali /home/kali/.xsession && \
     chmod +x /home/kali/.xsession /etc/xrdp/startwm.sh
 
@@ -48,19 +48,20 @@ RUN touch /var/log/xrdp.log /var/log/xrdp-sesman.log && \
 # Tmux mouse-on (matches AWS tools.sh)
 RUN echo 'set -g mouse on' > /etc/tmux.conf
 
-# CTF content overlay — these files are docker-only; the AWS AMI is base-only
-# and Shifter overlays scenario content at deploy time.
-COPY README.md /home/kali/README.md
-COPY mission_brief.txt /home/kali/mission_brief.txt
-COPY mission_brief.pdf /home/kali/mission_brief.pdf
-COPY flag_submit.sh /home/kali/tools/flag_submit.sh
-COPY modbus_client.py /home/kali/tools/modbus_scan.py
-COPY claude_system_prompt.txt /home/kali/.config/claude/system_prompt.txt
+# CTF content overlay — these files live in A14-kali/ (content dir) per
+# convention; the Modbus scan helper is shared with A9-splice-landing/.
+# Build context is the parent mechag/ dir so COPY can reach both.
+COPY A14-kali/README.md /home/kali/README.md
+COPY A14-kali/mission_brief.txt /home/kali/mission_brief.txt
+COPY A14-kali/mission_brief.pdf /home/kali/mission_brief.pdf
+COPY A14-kali/flag_submit.sh /home/kali/tools/flag_submit.sh
+COPY A9-splice-landing/modbus_client.py /home/kali/tools/modbus_scan.py
+COPY A14-kali/claude_system_prompt.txt /home/kali/.config/claude/system_prompt.txt
 RUN chmod +x /home/kali/tools/*.sh /home/kali/tools/*.py && \
     chown -R kali:kali /home/kali
 
 # Entrypoint: start sshd + xrdp and stay foreground
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY a14/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 22 3389

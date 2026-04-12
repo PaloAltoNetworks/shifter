@@ -172,5 +172,5 @@ That bootstrap path now expects:
 - a managed-TLS public hostname (`shifter.keplerops.com` in the current `gcp-dev` tfvars)
 - authorized CIDRs restricting the public GKE control-plane endpoint
 - Cloud Armor on the public ingress backends
-- Terraform-managed Identity Platform for corporate login
+- Terraform-managed Identity Platform for corporate login, with browser-side Google auth and server-side verified-token exchange
 - a bootstrap-seeded first operator account

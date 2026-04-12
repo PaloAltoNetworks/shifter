@@ -220,20 +220,3 @@ From A9, the controllers are at their production ports:
 
 **Expected flag:** `FLAG{0b7e3d9a1f6c4258}`
 
----
-
-## Smoketest Results -- 2026-04-10
-
-Tested from A9 splice via `gcloud compute ssh ctf-range-builder ... --command='sudo docker exec a9-splice <command>'`.
-Controllers reached at production IPs: A10=172.20.40.10:502, A11=172.20.40.11:502, A12=172.20.40.12:502, A13=172.20.40.50:9100.
-
-| Flag | Name | Expected | Observed | Result |
-|------|------|----------|----------|--------|
-| 31 | OT Network Enumeration | `FLAG{2e8c0a5d7f3b1946}` | scan_results.txt present; devid returns AHS-TAIL-7741, AHS-LEG-MN07, AHS-ARM-AL42 (all correct); static flag | **PASS** |
-| 32 | Tail Motor Controller Data | `FLAG{9b3e7c1d0f5a2846}` | `FLAG{9b3e7c1d0f5a2846}` | **PASS** |
-| 33 | Leg Joint Actuator Data | `FLAG{c7a1e3f9d0b52864}` | `FLAG{c7a1e3f9d0b52864}` (calibration code: 4783) | **PASS** |
-| 34 | Arms Controller / Weapons Integration | `FLAG{f0d8b2e6a4c71935}` | `FLAG{f0d8b2e6a4c71935}` (nonce XOR 2847, confirmed=1) | **PASS** |
-| 35 | Mecha-Godzilla Brain Access | `FLAG{8d2f5a0e7c9b3146}` | `FLAG{8d2f5a0e7c9b3146}` (handshake OK, auth OK, status shows flag) | **PASS** |
-| 36 | Combat System Seized | `FLAG{0b7e3d9a1f6c4258}` | `FLAG{0b7e3d9a1f6c4258}` (override 7741-MN07-AL42 accepted) | **PASS** |
-
-**Overall: 6/6 PASS**

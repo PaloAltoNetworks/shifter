@@ -150,7 +150,9 @@ secret manager and accessed at runtime. For the current `gcp-dev` slice,
 Terraform seeds the app, DB, and Guacamole runtime bundles needed for first
 boot. GCP no longer relies on a separately managed OIDC runtime secret; it
 provisions Identity Platform directly and bootstrap seeds the first operator
-account for the secure portal path.
+account for the secure portal path. The secure portal flow uses browser-side
+Google auth and app-side verified-token exchange rather than server-side
+password handling in Django.
 
 ## Module Patterns
 

@@ -38,3 +38,6 @@ create_dns_managed_zone = false
 dns_managed_zone_name   = ""
 dns_zone_dns_name       = ""
 dns_record_ttl          = 300
+
+identity_allowed_email_domain = "paloaltonetworks.com"
+identity_allowed_emails       = []

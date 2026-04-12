@@ -1,0 +1,15 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signing out of Shifter</title>
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+</head>
+<body>
+    <p>Signing out…</p>
+    {{ identity_platform_logout_config_json|json_script:"identity-platform-logout-config" }}
+    <script type="module" src="{% static 'js/identity_platform_logout.js' %}"></script>
+</body>
+</html>

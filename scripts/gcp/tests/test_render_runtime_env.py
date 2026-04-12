@@ -92,6 +92,7 @@ def test_render_env_uses_ip_fallback_in_debug_mode():
     assert "DJANGO_ALLOWED_HOSTS=10.0.0.30,localhost,127.0.0.1\n" in rendered
     assert "IDENTITY_PLATFORM_API_KEY=identity-platform-api-key\n" in rendered
     assert "IDENTITY_PLATFORM_PROJECT_ID=shifter-gcp-dev\n" in rendered
+    assert "IDENTITY_PLATFORM_AUTH_DOMAIN=shifter-gcp-dev.firebaseapp.com\n" in rendered
     assert "IDENTITY_ALLOWED_EMAIL_DOMAIN=paloaltonetworks.com\n" in rendered
     assert "GDC_ACCESS_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-access\n" in rendered
     assert "RANGE_NETWORK_ID=projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range\n" in rendered
@@ -134,12 +135,14 @@ def test_render_env_enables_secure_portal_mode_with_hostname_and_tls():
     assert "SITE_URL=https://portal.example.test\n" in rendered
     assert "DJANGO_ALLOWED_HOSTS=portal.example.test,10.0.0.30,localhost,127.0.0.1\n" in rendered
     assert "IDENTITY_PLATFORM_API_KEY=identity-platform-api-key\n" in rendered
+    assert "IDENTITY_PLATFORM_AUTH_DOMAIN=shifter-gcp-dev.firebaseapp.com\n" in rendered
 
 
 def test_render_env_preserves_bootstrap_admin_lists_from_environment(monkeypatch):
     module = _load_module("render_runtime_env.py", "render_runtime_env")
     monkeypatch.setenv("PLATFORM_BOOTSTRAP_STAFF_EMAILS", "bedwards@paloaltonetworks.com")
     monkeypatch.setenv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", "bedwards@paloaltonetworks.com")
+    monkeypatch.setenv("IDENTITY_ALLOWED_EMAILS", "external@example.com")
 
     rendered = module.render_env(
         _outputs(public_hostname="portal.example.test", managed_tls_enabled=True),
@@ -148,6 +151,7 @@ def test_render_env_preserves_bootstrap_admin_lists_from_environment(monkeypatch
 
     assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
     assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+    assert "IDENTITY_ALLOWED_EMAILS=external@example.com\n" in rendered
 
 
 def test_render_env_secure_portal_mode_requires_hostname_and_managed_tls():

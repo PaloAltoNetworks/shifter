@@ -2,6 +2,19 @@
 
 This repo has repo-local architecture enforcement. Use it.
 
+## Ground Control Context
+
+This repo's Ground Control project id (`aphelion` — shifter-k8s shares
+the aphelion project, using the `GC-` UID prefix), workflow commands,
+and plan rules live in `.ground-control.yaml` at repo root, with the
+full plan rules set in `.gc/plan-rules.md`. Agents read it via the
+`gc_get_repo_ground_control_context` MCP tool, which returns the full
+workflow config in a single call.
+
+The authoritative list of "plans MUST..." constraints for the
+`/implement` skill planning phase — including the K8s validators
+(kube-linter, kubeconform) — lives in `.gc/plan-rules.md`.
+
 ## Required Checks
 
 Before declaring work complete for changes touching architecture, workflows, hooks, or `shifter/shifter_platform`, run:

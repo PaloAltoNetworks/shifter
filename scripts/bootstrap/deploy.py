@@ -523,6 +523,14 @@ class GDCBootstrapConfig:
         return f"{self.cluster_id}-allow-lb-traffic-rule"
 
     @property
+    def cloud_router_name(self) -> str:
+        return f"{self.cluster_id}-nat-router"
+
+    @property
+    def cloud_nat_name(self) -> str:
+        return f"{self.cluster_id}-nat"
+
+    @property
     def cluster_context(self) -> str:
         return f"{self.cluster_id}-admin@{self.cluster_id}"
 
@@ -1062,9 +1070,36 @@ def ensure_gdc_apis(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
     run_cmd(["gcloud", "services", "enable", *GDC_API_SERVICES, "--project", config.project_id], dry_run=dry_run)
 
 
+def wait_for_gdc_service_account_visible(
+    config: GDCBootstrapConfig,
+    *,
+    timeout_seconds: int = 60,
+    poll_seconds: int = 2,
+) -> None:
+    """Wait for the shared GDC service account to become visible to follow-on IAM calls."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if gcloud_resource_exists(
+            [
+                "gcloud",
+                "iam",
+                "service-accounts",
+                "describe",
+                config.service_account_email,
+                "--project",
+                config.project_id,
+            ]
+        ):
+            return
+        time.sleep(poll_seconds)
+    raise RuntimeError(
+        f"GDC service account {config.service_account_email} did not become visible within {timeout_seconds} seconds"
+    )
+
+
 def ensure_gdc_service_account(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
     """Create the shared GDC service account and grant the required project roles."""
-    if dry_run or not gcloud_resource_exists(
+    service_account_exists = gcloud_resource_exists(
         [
             "gcloud",
             "iam",
@@ -1074,7 +1109,9 @@ def ensure_gdc_service_account(config: GDCBootstrapConfig, dry_run: bool = False
             "--project",
             config.project_id,
         ]
-    ):
+    )
+
+    if dry_run or not service_account_exists:
         run_cmd(
             [
                 "gcloud",
@@ -1088,6 +1125,8 @@ def ensure_gdc_service_account(config: GDCBootstrapConfig, dry_run: bool = False
             dry_run=dry_run,
             check=False,
         )
+        if not dry_run:
+            wait_for_gdc_service_account_visible(config)
 
     member = f"serviceAccount:{config.service_account_email}"
     for role in GDC_SERVICE_ACCOUNT_ROLES:
@@ -1214,6 +1253,74 @@ def ensure_gdc_network(config: GDCBootstrapConfig, dry_run: bool = False) -> Non
                 "--range",
                 config.subnet_cidr,
                 "--enable-private-ip-google-access",
+            ],
+            dry_run=dry_run,
+        )
+
+    if dry_run or not gcloud_resource_exists(
+        [
+            "gcloud",
+            "compute",
+            "routers",
+            "describe",
+            config.cloud_router_name,
+            "--project",
+            config.project_id,
+            "--region",
+            config.region,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "compute",
+                "routers",
+                "create",
+                config.cloud_router_name,
+                "--project",
+                config.project_id,
+                "--region",
+                config.region,
+                "--network",
+                config.resolved_network_name,
+            ],
+            dry_run=dry_run,
+        )
+
+    if dry_run or not gcloud_resource_exists(
+        [
+            "gcloud",
+            "compute",
+            "routers",
+            "nats",
+            "describe",
+            config.cloud_nat_name,
+            "--project",
+            config.project_id,
+            "--router",
+            config.cloud_router_name,
+            "--region",
+            config.region,
+        ]
+    ):
+        run_cmd(
+            [
+                "gcloud",
+                "compute",
+                "routers",
+                "nats",
+                "create",
+                config.cloud_nat_name,
+                "--project",
+                config.project_id,
+                "--router",
+                config.cloud_router_name,
+                "--region",
+                config.region,
+                "--auto-allocate-nat-external-ips",
+                "--nat-custom-subnet-ip-ranges",
+                config.resolved_subnetwork_name,
+                "--enable-logging",
             ],
             dry_run=dry_run,
         )
@@ -1756,10 +1863,6 @@ def _validate_gcp_bootstrap_operator_email(email: str) -> None:
         raise ValueError("GCP operator email must use the paloaltonetworks.com domain")
 
 
-def _gcp_identity_api_key(outputs: dict[str, dict[str, object]]) -> str:
-    return str(_get_output_value(outputs, "identity_platform_api_key")).strip()
-
-
 def _gcp_identity_access_token() -> str:
     result = subprocess.run(  # nosec B603 B607
         ["gcloud", "auth", "print-access-token"],
@@ -1780,10 +1883,11 @@ def _gcp_identity_admin_request(
     path: str,
     payload: dict[str, object],
 ) -> dict[str, object]:
+    del outputs
     access_token = _gcp_identity_access_token()
-    url = f"https://identitytoolkit.googleapis.com/v1{path}?key={_gcp_identity_api_key(outputs)}"
+    url = f"https://identitytoolkit.googleapis.com/v1{path}"
     parsed_url = urllib_parse.urlparse(url)
-    if parsed_url.scheme != "https" or parsed_url.netloc != "identitytoolkit.googleapis.com":
+    if parsed_url.scheme != "https" or parsed_url.netloc != "identitytoolkit.googleapis.com" or parsed_url.query:
         raise RuntimeError(f"Refusing to call unexpected Identity Platform endpoint: {url}")
     request = urllib_request.Request(  # noqa: S310 - URL is validated immediately above
         url,
@@ -1791,6 +1895,7 @@ def _gcp_identity_admin_request(
         headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
+            "X-Goog-User-Project": config.project_id,
         },
         method="POST",
     )

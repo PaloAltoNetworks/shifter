@@ -68,6 +68,11 @@ output "public_ingress_ip_address" {
   value       = module.platform_core.public_ingress_ip_address
 }
 
+output "cloud_armor_security_policy_name" {
+  description = "Cloud Armor security policy attached to the public ingress backends."
+  value       = module.platform_core.cloud_armor_security_policy_name
+}
+
 output "identity_platform_api_key" {
   description = "Identity Platform web API key for the environment."
   value       = module.platform_core.identity_platform_api_key

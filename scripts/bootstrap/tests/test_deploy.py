@@ -11,6 +11,7 @@ All external dependencies are mocked. No actual AWS calls, file operations,
 or subprocess executions occur during tests.
 """
 
+import io
 import json
 import os
 import shutil
@@ -1662,6 +1663,59 @@ class TestGdcClusterAccessHardening:
         assert any(cmd[4] == config.ssh_firewall_rule_name and "35.235.240.0/20" in cmd for cmd in firewall_creates)
         assert any(cmd[4] == config.lb_firewall_rule_name and config.subnet_cidr in cmd for cmd in firewall_creates)
 
+    def test_ensure_gdc_network_provisions_cloud_nat_for_private_host_egress(self):
+        """Private GDC hosts must get outbound internet access through Cloud NAT."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        with (
+            patch("deploy.gcloud_resource_exists", return_value=False),
+            patch("deploy.run_cmd") as mock_run_cmd,
+        ):
+            deploy.ensure_gdc_network(config)
+
+        router_create = next(
+            call.args[0]
+            for call in mock_run_cmd.call_args_list
+            if call.args[0][:4] == ["gcloud", "compute", "routers", "create"]
+        )
+        nat_create = next(
+            call.args[0]
+            for call in mock_run_cmd.call_args_list
+            if call.args[0][:5] == ["gcloud", "compute", "routers", "nats", "create"]
+        )
+
+        assert router_create == [
+            "gcloud",
+            "compute",
+            "routers",
+            "create",
+            config.cloud_router_name,
+            "--project",
+            config.project_id,
+            "--region",
+            config.region,
+            "--network",
+            config.resolved_network_name,
+        ]
+        assert nat_create == [
+            "gcloud",
+            "compute",
+            "routers",
+            "nats",
+            "create",
+            config.cloud_nat_name,
+            "--project",
+            config.project_id,
+            "--router",
+            config.cloud_router_name,
+            "--region",
+            config.region,
+            "--auto-allocate-nat-external-ips",
+            "--nat-custom-subnet-ip-ranges",
+            config.resolved_subnetwork_name,
+            "--enable-logging",
+        ]
+
 
 class TestGdcControlPlaneRollout:
     """Tests for deploying Shifter onto GKE through Helm."""
@@ -2141,6 +2195,29 @@ class TestGdcBootstrapPrerequisites:
         granted_roles = [call.args[0][7] for call in mock_run_cmd.call_args_list]
         assert "roles/compute.viewer" in granted_roles
 
+    def test_gdc_service_account_waits_for_visibility_after_create(self):
+        """First-run bootstrap must wait for service-account propagation before IAM bindings."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        with (
+            patch("deploy.gcloud_resource_exists", side_effect=[False, False, False, True]),
+            patch("deploy.run_cmd") as mock_run_cmd,
+            patch("deploy.time.sleep") as mock_sleep,
+        ):
+            deploy.ensure_gdc_service_account(config)
+
+        assert mock_run_cmd.call_args_list[0].args[0][:4] == [
+            "gcloud",
+            "iam",
+            "service-accounts",
+            "create",
+        ]
+        assert any(
+            call.args[0][0:3] == ["gcloud", "projects", "add-iam-policy-binding"]
+            for call in mock_run_cmd.call_args_list
+        )
+        assert mock_sleep.call_count == 2
+
 
 class TestGcpPlatformCoreContracts:
     """Tests for the Terraform platform-core contract that bootstrap depends on."""
@@ -2180,6 +2257,59 @@ class TestGcpPlatformCoreContracts:
         workers_section = module_main.split("workers = toset([", 1)[1].split("])", 1)[0]
         assert '"roles/pubsub.publisher"' in workers_section
         assert '"roles/pubsub.subscriber"' in workers_section
+
+    def test_portal_has_identity_platform_viewer_permissions(self):
+        """Portal auth needs read access to Identity Platform user records for token verification."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        portal_section = module_main.split("portal = toset([", 1)[1].split("])", 1)[0]
+        assert '"roles/firebaseauth.viewer"' in portal_section
+
+    def test_identity_platform_self_signup_is_allowed_and_guarded_by_before_create_trigger(self):
+        """GCP corporate registration must stay open to eligible users and be gated by a blocking function."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        identity_platform_section = module_main.split('resource "google_identity_platform_config" "platform" {', 1)[1]
+        assert "disabled_user_signup   = false" in identity_platform_section
+        assert 'event_type   = "beforeCreate"' in identity_platform_section
+        assert (
+            "google_cloudfunctions_function.identity_platform_before_create.https_trigger_url"
+            in identity_platform_section
+        )
+
+    def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
+        """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        assert "evaluatePreconfiguredWaf('sqli-v33-stable'" in module_main
+        assert "owasp-crs-v030301-id942421-sqli" in module_main
 
 
 class TestGdcBootstrapAssetUpload:
@@ -2497,6 +2627,72 @@ class TestGcpBootstrapIdentityPlatform:
 
         assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
         assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+
+
+class TestGcpIdentityAdminApi:
+    """Tests for the authenticated Identity Platform bootstrap admin requests."""
+
+    def test_gcp_identity_admin_request_uses_authenticated_project_endpoint_without_api_key(self):
+        """Bootstrap must use the authenticated project-scoped admin endpoint without appending a web API key."""
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"localId":"user-123"}'
+
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+
+        with (
+            patch("deploy._gcp_identity_access_token", return_value="test-access-token"),
+            patch("deploy.urllib_request.urlopen", return_value=_FakeResponse()) as mock_urlopen,
+        ):
+            result = deploy._gcp_identity_admin_request(
+                config=config,
+                outputs=outputs,
+                path=f"/projects/{config.project_id}/accounts",
+                payload={"email": "analyst@paloaltonetworks.com", "password": "correct-horse-battery-staple"},
+            )
+
+        assert result == {"localId": "user-123"}
+        request = mock_urlopen.call_args.args[0]
+        assert request.full_url == (f"https://identitytoolkit.googleapis.com/v1/projects/{config.project_id}/accounts")
+        assert request.headers["Authorization"] == "Bearer test-access-token"
+        assert request.headers["Content-type"] == "application/json"
+        assert request.headers["X-goog-user-project"] == config.project_id
+
+    def test_gcp_identity_admin_request_surfaces_identity_platform_error_messages(self):
+        """Bootstrap must surface the actual Identity Platform admin error when the request fails."""
+
+        class _FakeHttpError(deploy.urllib_error.HTTPError):
+            def __init__(self) -> None:
+                super().__init__(
+                    url="https://identitytoolkit.googleapis.com/v1/projects/prod-rwctxzl6shxk/accounts",
+                    code=400,
+                    msg="Bad Request",
+                    hdrs=None,
+                    fp=io.BytesIO(b'{"error":{"message":"EMAIL_EXISTS"}}'),
+                )
+
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+
+        with (
+            patch("deploy._gcp_identity_access_token", return_value="test-access-token"),
+            patch("deploy.urllib_request.urlopen", side_effect=_FakeHttpError()),
+            pytest.raises(RuntimeError, match="EMAIL_EXISTS"),
+        ):
+            deploy._gcp_identity_admin_request(
+                config=config,
+                outputs=outputs,
+                path=f"/projects/{config.project_id}/accounts",
+                payload={"email": "analyst@paloaltonetworks.com", "password": "correct-horse-battery-staple"},
+            )
 
 
 class TestGcpBootstrapDnsTlsFlow:

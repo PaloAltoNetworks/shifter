@@ -1,21 +1,21 @@
 """Simple views for the platform."""
 
+import json
 import logging
 
 from django.conf import settings
 from django.contrib.auth import BACKEND_SESSION_KEY, login, logout
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseForbidden, HttpResponseRedirect
+from django.http import HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from config import identity_platform as identity_platform_auth
 from shared.auth import is_ctf_organizer, is_ctf_participant
 
 logger = logging.getLogger(__name__)
-IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY = "identity_platform_enrollment"
-IDENTITY_PLATFORM_SIGNIN_SESSION_KEY = "identity_platform_signin"
 
 
 def home(request):
@@ -23,129 +23,47 @@ def home(request):
     return render(request, "coming_soon.html")
 
 
-def _clear_identity_platform_sessions(request) -> None:
-    request.session.pop(IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY, None)
-    request.session.pop(IDENTITY_PLATFORM_SIGNIN_SESSION_KEY, None)
-
-
-def _render_identity_platform_login(request, *, status_code: int = 200, error_message: str = ""):
+def _render_identity_platform_login(request, *, status_code: int = 200):
+    client_config = identity_platform_auth.identity_platform_client_config()
+    site_url = (settings.SITE_URL or "").rstrip("/") or request.build_absolute_uri("/").rstrip("/")
     return render(
         request,
         "identity_platform_login.html",
         {
-            "error_message": error_message,
-            "pending_enrollment": request.session.get(IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY),
-            "pending_signin": request.session.get(IDENTITY_PLATFORM_SIGNIN_SESSION_KEY),
-            "allowed_email_domain": getattr(settings, "IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com"),
+            "identity_platform_config_json": json.dumps(
+                {
+                    **client_config,
+                    "sessionExchangeUrl": reverse("identity_platform_session"),
+                    "dashboardUrl": reverse("dashboard_router"),
+                    "loginUrl": reverse("platform_login"),
+                    "passwordResetUrl": reverse("platform_login"),
+                    "verificationContinueUrl": f"{site_url}{reverse('platform_login')}",
+                }
+            ),
+            "allowed_email_domain": client_config["allowedEmailDomain"],
         },
         status=status_code,
     )
 
 
-def _identity_platform_complete_login(request, *, id_token: str):
-    user = identity_platform_auth.login_with_identity_token(request, id_token)
-    login(request, user, backend="config.identity_platform.IdentityPlatformBackend")
-    _clear_identity_platform_sessions(request)
-    return HttpResponseRedirect(reverse("dashboard_router"))
+def _render_identity_platform_logout(request):
+    client_config = identity_platform_auth.identity_platform_client_config()
+    return render(
+        request,
+        "identity_platform_logout.html",
+        {
+            "identity_platform_logout_config_json": json.dumps(
+                {
+                    **client_config,
+                    "redirectUrl": settings.LOGOUT_REDIRECT_URL,
+                    "loginUrl": reverse("platform_login"),
+                }
+            )
+        },
+    )
 
 
-def _handle_identity_platform_password_signin(request):
-    email = request.POST.get("email", "").strip().lower()
-    password = request.POST.get("password", "")
-    if not email or not password:
-        return _render_identity_platform_login(
-            request,
-            status_code=400,
-            error_message="Email and password are required.",
-        )
-
-    try:
-        sign_in_result = identity_platform_auth.sign_in_with_password(email, password)
-    except identity_platform_auth.IdentityPlatformMFARequired as exc:
-        request.session[IDENTITY_PLATFORM_SIGNIN_SESSION_KEY] = {
-            "pending_credential": exc.pending_credential,
-            "enrollment_id": exc.enrollment_id,
-            "display_name": exc.display_name,
-        }
-        request.session.pop(IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY, None)
-        request.session.save()
-        return _render_identity_platform_login(request)
-    except identity_platform_auth.IdentityPlatformAuthError as exc:
-        return _render_identity_platform_login(request, status_code=403, error_message=str(exc))
-
-    if not identity_platform_auth.is_allowed_identity_email(email):
-        _clear_identity_platform_sessions(request)
-        return _render_identity_platform_login(
-            request,
-            status_code=403,
-            error_message=f"Only @{settings.IDENTITY_ALLOWED_EMAIL_DOMAIN} users may use corporate login.",
-        )
-
-    if sign_in_result.get("mfaInfo"):
-        request.session[IDENTITY_PLATFORM_SIGNIN_SESSION_KEY] = {
-            "pending_credential": sign_in_result["mfaPendingCredential"],
-            "enrollment_id": sign_in_result["mfaInfo"][0]["mfaEnrollmentId"],
-            "display_name": sign_in_result["mfaInfo"][0].get("displayName", ""),
-        }
-        request.session.pop(IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY, None)
-        request.session.save()
-        return _render_identity_platform_login(request)
-
-    enrollment = identity_platform_auth.start_totp_enrollment(sign_in_result["idToken"], email)
-    request.session[IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY] = {
-        "email": email,
-        "id_token": sign_in_result["idToken"],
-        **enrollment,
-    }
-    request.session.pop(IDENTITY_PLATFORM_SIGNIN_SESSION_KEY, None)
-    request.session.save()
-    return _render_identity_platform_login(request)
-
-
-def _handle_identity_platform_totp_enrollment(request):
-    pending_enrollment = request.session.get(IDENTITY_PLATFORM_ENROLLMENT_SESSION_KEY)
-    verification_code = request.POST.get("verification_code", "").strip()
-    if not pending_enrollment:
-        return _render_identity_platform_login(request, status_code=400, error_message="No MFA enrollment is pending.")
-    if not verification_code:
-        return _render_identity_platform_login(request, status_code=400, error_message="Verification code is required.")
-
-    try:
-        result = identity_platform_auth.finalize_totp_enrollment(
-            id_token=pending_enrollment["id_token"],
-            session_info=pending_enrollment["session_info"],
-            verification_code=verification_code,
-        )
-    except identity_platform_auth.IdentityPlatformAuthError as exc:
-        return _render_identity_platform_login(request, status_code=403, error_message=str(exc))
-
-    return _identity_platform_complete_login(request, id_token=result["idToken"])
-
-
-def _handle_identity_platform_totp_signin(request):
-    pending_signin = request.session.get(IDENTITY_PLATFORM_SIGNIN_SESSION_KEY)
-    verification_code = request.POST.get("verification_code", "").strip()
-    if not pending_signin:
-        return _render_identity_platform_login(
-            request,
-            status_code=400,
-            error_message="No MFA sign-in challenge is pending.",
-        )
-    if not verification_code:
-        return _render_identity_platform_login(request, status_code=400, error_message="Verification code is required.")
-
-    try:
-        result = identity_platform_auth.finalize_totp_sign_in(
-            pending_credential=pending_signin["pending_credential"],
-            enrollment_id=pending_signin["enrollment_id"],
-            verification_code=verification_code,
-        )
-    except identity_platform_auth.IdentityPlatformAuthError as exc:
-        return _render_identity_platform_login(request, status_code=403, error_message=str(exc))
-
-    return _identity_platform_complete_login(request, id_token=result["idToken"])
-
-
+@ensure_csrf_cookie
 def platform_login(request):
     """Route authentication to the configured provider."""
     if request.user.is_authenticated:
@@ -156,17 +74,43 @@ def platform_login(request):
     if settings.AUTH_PROVIDER != "identity_platform":
         return HttpResponseForbidden("Unsupported auth provider")
 
-    if request.method == "GET":
-        return _render_identity_platform_login(request)
+    return _render_identity_platform_login(request)
 
-    action = request.POST.get("action", "").strip()
-    if action == "password_sign_in":
-        return _handle_identity_platform_password_signin(request)
-    if action == "complete_totp_enrollment":
-        return _handle_identity_platform_totp_enrollment(request)
-    if action == "complete_totp_sign_in":
-        return _handle_identity_platform_totp_signin(request)
-    return _render_identity_platform_login(request, status_code=400, error_message="Unknown login action.")
+
+@require_POST
+def identity_platform_session(request):
+    """Create a Django session from a verified Identity Platform ID token."""
+    if settings.AUTH_PROVIDER != "identity_platform":
+        return JsonResponse({"error": "unsupported_auth_provider"}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid_request", "message": "Request body must be valid JSON."}, status=400)
+
+    id_token = str(payload.get("idToken", "")).strip()
+    if not id_token:
+        return JsonResponse({"error": "invalid_request", "message": "An ID token is required."}, status=400)
+
+    try:
+        user = identity_platform_auth.login_with_identity_token(request, id_token)
+    except identity_platform_auth.IdentityPlatformAuthError as exc:
+        return JsonResponse(
+            {"error": exc.code, "message": str(exc)},
+            status=403,
+        )
+
+    login(request, user, backend="config.identity_platform.IdentityPlatformBackend")
+    return JsonResponse({"redirect_url": reverse("dashboard_router")})
+
+
+def legacy_oidc_authenticate(request):
+    """Keep the AWS login URL stable while redirecting GCP deployments to the provider router."""
+    if settings.AUTH_PROVIDER == "oidc":
+        from mozilla_django_oidc.views import OIDCAuthenticationRequestView
+
+        return OIDCAuthenticationRequestView.as_view()(request)
+    return HttpResponseRedirect(reverse("platform_login"))
 
 
 @login_required
@@ -215,8 +159,12 @@ def logout_view(request):
 
             redirect_url = import_string(logout_url_method)(request)
         logger.debug("OIDC logout for %s", email)
+    elif "IdentityPlatformBackend" in backend:
+        logger.debug("Identity Platform logout for %s", email)
     else:
         logger.debug("Session logout for %s", email)
 
     logout(request)
+    if "IdentityPlatformBackend" in backend:
+        return _render_identity_platform_logout(request)
     return HttpResponseRedirect(redirect_url)

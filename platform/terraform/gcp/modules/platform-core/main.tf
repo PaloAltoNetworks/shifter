@@ -1,8 +1,12 @@
 locals {
-  name_prefix                 = "shifter-${var.environment}"
-  normalized_public_hostname  = trimspace(trim(var.public_hostname, "."))
-  portal_network_cidrs        = compact([var.gke_subnet_cidr, var.gke_pods_cidr])
-  identity_authorized_domains = distinct(compact([local.normalized_public_hostname]))
+  name_prefix                = "shifter-${var.environment}"
+  normalized_public_hostname = trimspace(trim(var.public_hostname, "."))
+  portal_network_cidrs       = compact([var.gke_subnet_cidr, var.gke_pods_cidr])
+  identity_authorized_domains = distinct(compact([
+    local.normalized_public_hostname,
+    "${var.project_id}.firebaseapp.com",
+    "localhost",
+  ]))
   common_labels = merge(var.labels, {
     environment = var.environment
     managed_by  = "terraform"
@@ -51,6 +55,7 @@ locals {
 
   workload_roles = {
     portal = toset([
+      "roles/firebaseauth.viewer",
       "roles/pubsub.publisher",
       "roles/secretmanager.secretAccessor",
       "roles/storage.objectAdmin",
@@ -89,6 +94,10 @@ resource "google_project_service" "required" {
   project            = var.project_id
   service            = each.value
   disable_on_destroy = false
+}
+
+data "google_project" "project" {
+  project_id = var.project_id
 }
 
 resource "google_compute_network" "platform" {
@@ -168,6 +177,9 @@ resource "google_compute_network_peering" "range_to_platform" {
   name         = "${local.name_prefix}-range-to-platform"
   network      = google_compute_network.range.id
   peer_network = google_compute_network.platform.id
+
+  # GCP rejects concurrent peering operations touching the same networks.
+  depends_on = [google_compute_network_peering.platform_to_range]
 }
 
 resource "google_compute_global_address" "services" {
@@ -229,6 +241,46 @@ resource "google_storage_bucket" "assets" {
   depends_on = [google_project_service.required]
 }
 
+data "archive_file" "identity_platform_before_create" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/identity-platform"
+  output_path = "${path.root}/.terraform/${local.name_prefix}-identity-platform-before-create.zip"
+}
+
+resource "google_storage_bucket_object" "identity_platform_before_create" {
+  name   = "identity-platform/identity-platform-before-create-${data.archive_file.identity_platform_before_create.output_md5}.zip"
+  bucket = google_storage_bucket.assets.name
+  source = data.archive_file.identity_platform_before_create.output_path
+}
+
+resource "google_cloudfunctions_function" "identity_platform_before_create" {
+  name                  = "${local.name_prefix}-identity-before-create"
+  project               = var.project_id
+  region                = var.region
+  runtime               = "nodejs18"
+  available_memory_mb   = 128
+  timeout               = 10
+  source_archive_bucket = google_storage_bucket.assets.name
+  source_archive_object = google_storage_bucket_object.identity_platform_before_create.name
+  trigger_http          = true
+  entry_point           = "beforeCreate"
+
+  environment_variables = {
+    ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
+    ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloudfunctions_function_iam_member" "identity_platform_before_create_invoker" {
+  project        = var.project_id
+  region         = var.region
+  cloud_function = google_cloudfunctions_function.identity_platform_before_create.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = "allUsers"
+}
+
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${local.name_prefix}-platform-ip"
   project = var.project_id
@@ -246,7 +298,7 @@ resource "google_compute_security_policy" "platform_edge" {
 
     match {
       expr {
-        expression = "evaluatePreconfiguredWaf('sqli-v33-stable')"
+        expression = "evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 4, 'opt_out_rule_ids': ['owasp-crs-v030301-id942421-sqli']})"
       }
     }
   }
@@ -347,7 +399,14 @@ resource "google_identity_platform_config" "platform" {
   client {
     permissions {
       disabled_user_deletion = true
-      disabled_user_signup   = true
+      disabled_user_signup   = false
+    }
+  }
+
+  blocking_functions {
+    triggers {
+      event_type   = "beforeCreate"
+      function_uri = google_cloudfunctions_function.identity_platform_before_create.https_trigger_url
     }
   }
 

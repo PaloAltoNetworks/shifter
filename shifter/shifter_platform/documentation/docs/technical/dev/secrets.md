@@ -67,6 +67,7 @@ Current rollout behavior:
 - Identity Platform is provisioned by Terraform for the secure GCP portal login path
 - The first GCP operator is seeded by bootstrap using `GCP_BOOTSTRAP_ADMIN_EMAIL` / `GCP_BOOTSTRAP_ADMIN_PASSWORD` (or an interactive prompt)
 - Bootstrap operator elevation is runtime-configured with `PLATFORM_BOOTSTRAP_STAFF_EMAILS` / `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS`; these values must stay out of committed source
+- GCP corporate users authenticate in the browser through Identity Platform's FirebaseUI/SDK flow. Django only accepts verified Google identity tokens and creates the application session after email-verification and MFA checks pass.
 - The GCP bootstrap path now assumes the secure portal posture. It no longer preserves the old debug-auth fallback when hostname/TLS settings are missing
 - The operational dependency chain is now explicit:
   - `public_hostname` must be configured

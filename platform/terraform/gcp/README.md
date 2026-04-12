@@ -18,7 +18,7 @@ Current scope:
 - Cloud Armor security policy for the public ingress backends
 - optional Cloud DNS managed zone and ingress A record for a configured hostname
 - Secret Manager runtime bundles, with seeded portal DB/app and Guacamole DB/JSON-auth secrets
-- Identity Platform corporate auth with email/password, TOTP MFA, disabled self-signup, and bootstrap-owned first-operator creation
+- Identity Platform corporate auth with FirebaseUI/browser-side Google auth flows, allowlisted self-signup, required email verification, required TOTP MFA before app-session creation, and bootstrap-owned first-operator seeding
 - reserved private service networking range
 - workload and node service accounts with least-privilege runtime roles
 - GCS-backed Terraform state bootstrap in CI

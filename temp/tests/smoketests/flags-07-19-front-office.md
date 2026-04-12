@@ -213,30 +213,3 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 **Expected flag:** `FLAG{a7f2c8d0e5b34169}`
 
----
-
-## Smoketest Results — 2026-04-10
-
-| Flag | Description | Expected | Found | Result | Notes |
-|------|-------------|----------|-------|--------|-------|
-| 7 | Creds in Web App Config | `FLAG{4f2e8b7a1c6d9035}` | `FLAG{4f2e8b7a1c6d9035}` | **PASS** | Both `/.env` and `/config.bak` return the flag |
-| 8 | Employee Email with PDF | `FLAG{3b7e9a2d1c8f4063}` | `FLAG{3b7e9a2d1c8f4063}` | **PASS** | PDF attachment on e.vasik UID 2; Report ID at bottom of page |
-| 9 | HR Records / Terminated Engineer | `FLAG{7a1b3d9e2c8f0546}` | `FLAG{7a1b3d9e2c8f0546}` | **PASS** | HR share requires `v.harlan` or `m.webb` creds (not "any employee"). `d.kowalski` gets ACCESS_DENIED. Test doc says "Use any employee credentials" which is misleading. |
-| 10 | Password Reuse Gives Mail | `FLAG{e5d1f8c2a7b03946}` | `FLAG{e5d1f8c2a7b03946}` | **PASS** | Welcome email UID 1 in d.kowalski inbox |
-| 11 | Cafeteria Menu PDF Metadata | `FLAG{0e6f9c2d4a8b7135}` | `FLAG{0e6f9c2d4a8b7135}` | **PASS** | Author field in PDF metadata |
-| 12 | Internal Wiki HTML Comment | `FLAG{d8a3c5e9f1b07264}` | `FLAG{d8a3c5e9f1b07264}` | **PASS** | HTML comment at top of project-coordination page |
-| 13 | Procurement / Actuator Specs | `FLAG{8c5a0d3f7e1b2964}` | `FLAG{8c5a0d3f7e1b2964}` | **PASS** | Procurement share also requires `v.harlan`/`m.webb` (not "any employee"). Spec ID in `actuator_requirements_v4.pdf` |
-| 14 | AD Enumeration / Project-L | `FLAG{2f8b4a6c1d9e7053}` | `FLAG{2f8b4a6c1d9e7053}` | **PASS** | `info` attribute on Project-L group via LDAP |
-| 15 | Lateral Movement to IT Share | `FLAG{9a4c7e2f58d0b163}` | `FLAG{9a4c7e2f58d0b163}` | **PASS** | "creds backup" email UID 2 gives svc-fileshare creds; flag in backup_verification.log |
-| 16 | Guard Rotation / Badge Logs | `FLAG{b3d7e1f0c8a24596}` | `FLAG{b3d7e1f0c8a24596}` | **PASS** | Petrov entry on 2026-03-18 02:22 has flag in status field |
-| 17 | Privilege Escalation / DA | `FLAG{6c0a9d4e7f2b8135}` | `FLAG{6c0a9d4e7f2b8135}` | **PASS** | Kerberoast -> svc-backup:Password1 -> DCSync -> admin_flag share |
-| 18 | SCADA Interface Discovered | `FLAG{1d4e7b0a3c9f8265}` | `FLAG{1d4e7b0a3c9f8265}` | **PASS** | Footer S/N on SCADA HMI page (no pivot needed in Docker; Kali is on same network) |
-| 19 | Generator SCADA Override | `FLAG{a7f2c8d0e5b34169}` | `FLAG{a7f2c8d0e5b34169}` | **PASS** | Modbus maint key 7734 -> interlock bypass -> fuel 100%/cooling 0% -> critical failure screen |
-
-**Summary: 13/13 PASS**
-
-### Issues Noted (not fixed)
-
-1. **Flags 9 and 13**: Test doc says "Use any employee credentials" for HR and Procurement shares, but Samba ACLs restrict access to `v.harlan` and `m.webb` only. `d.kowalski` (the most commonly discovered credential) gets `NT_STATUS_ACCESS_DENIED`. Participants would need to discover v.harlan or m.webb passwords, which are not in the credential reference sheet.
-2. **Flag 18**: In the Docker compose environment, Kali can reach SCADA directly on `172.20.10.50:8080` (no pivot required). The test doc describes needing to pivot through Front Office, which is the intended production experience but not the Docker reality.
-

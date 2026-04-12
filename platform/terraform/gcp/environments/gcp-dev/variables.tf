@@ -169,3 +169,15 @@ variable "dns_record_ttl" {
   type        = number
   default     = 300
 }
+
+variable "identity_allowed_email_domain" {
+  description = "Corporate email domain allowed to self-register in Identity Platform."
+  type        = string
+  default     = "paloaltonetworks.com"
+}
+
+variable "identity_allowed_emails" {
+  description = "Explicit non-domain email addresses allowed to self-register in Identity Platform."
+  type        = list(string)
+  default     = []
+}

@@ -108,3 +108,87 @@ The primary R&D workstation used by AURORA's engineering team. Contains design d
 - **Location:** The simulation video has been "deleted" but exists encrypted at `/tmp/.deleted/full_integration_sim.mp4.gpg`. Recovery requires a multi-step chain with key separation (comparable to HTB Vault): (1) Find the encrypted file by searching hidden/tmp directories. (2) Vasik's `.gnupg` directory on A6 does NOT contain the private key — it was moved off-box. Only the public key and a `gpg-agent.conf` pointing to a remote keyserver remain. (3) The private key is stored as a base64-encoded blob in the research database (A8) in `compartment_b` — the weapons compartment that requires its own privilege escalation to access (flag 27 prerequisite). (4) After extracting and importing the private key, it is passphrase-protected. The passphrase is NOT any known account password — it is derived from a string found only in a comment in the `aurora/weapons-integration` source code on A7 (file: `crypto_config.py`, variable `LEGACY_PASSPHRASE`). (5) Decrypt the file with the recovered key + passphrase. The flag is in the final frame of the video as a "simulation ID." This chains A6 + A8 (compartment pivot) + A7 (source code reading) — requiring progress across all three Lab assets.
 - **Flag:** `FLAG{d4c8f0a2e6b71935}`
 - **Mission:** M2
+
+---
+
+## Build Plan
+
+**Base image:** debian:bookworm (needs full userland for SSH, file tools, GPG)
+
+**Content directory:** `docs/ctf/mechag/A6-engineering-workstation/`
+
+### Steps
+
+1. **Install base packages**
+   - OpenSSH server, GPG, Python3, standard CLI tools (strings, tar, gzip, file)
+   - No GUI needed — SSH-only access
+
+2. **Create user accounts with passwords**
+   - e.vasik — password from AD (or local matching cred). Home dir with project docs.
+   - r.tanaka / `SimEngine#42` — simulation engineer
+   - p.nielsen / `Hydraulics1` — mechanical engineer
+   - jenkins / `build2025` — CI service account
+
+3. **Build e.vasik home directory**
+   - `documents/project_overview_phase3.pdf` — project overview doc
+   - `documents/integration_timeline.xlsx` — timeline spreadsheet
+   - `.ssh/authorized_keys` — Vasik's public key
+   - `.gnupg/pubring.kbx` — public key only (NO private key)
+   - `.gnupg/gpg-agent.conf` — references remote key storage, hints at A8
+
+4. **Build r.tanaka home directory**
+   - `simulations/standard/` — 47 tar.gz archives (`stress_test_001.tar.gz` through `stress_test_047.tar.gz`)
+     - Each contains a `.log` and `.dat` file
+     - stress_test_028, 031, 044 contain bipedal references
+     - stress_test_044.dat has flag 23 embedded as string at fixed offset in binary
+   - `simulations/midnight/` — restricted permissions (tanaka:tanaka, 700)
+     - `MIDNIGHT-1.sim` through `MIDNIGHT-7.sim` — binary simulation files
+     - `MIDNIGHT-7_results.dat` — contains flag 25 in summary section
+   - `.bash_history` — shows commands run at 02:00-04:00 AM for MIDNIGHT tests
+
+5. **Build p.nielsen home directory**
+   - `designs/locomotion_assembly_v12.dwg` — placeholder DWG file
+   - `designs/stabilization_array_specs.pdf` — specs document
+   - `designs/center_of_gravity_analysis.xlsx` — three worksheets (Frame, Locomotion, hidden Integration). Flag 26 in CONCATENATE formula across sheets. Integration sheet must be unhidden.
+   - Restricted permissions (nielsen:nielsen, 700)
+
+6. **Build /opt/builds/ directory**
+   - `latest/reactor_interface_spec.pdf` — delivery schedule for compact power generation unit, flag 22 as tracking number in header
+   - `archive/build-2847/test_video.mp4.enc` — encrypted simulation video placeholder
+   - `archive/build-2847/README.txt` — "Encrypted per security policy. Key held by CTO."
+
+7. **Build /var/log/sim/ directory**
+   - `simulation.log` — timestamped entries showing MIDNIGHT tests at 02:00-04:00 AM
+
+8. **Build /tmp/.deleted/ directory**
+   - `full_integration_sim.mp4.gpg` — GPG-encrypted file. Decryption requires Vasik's private key (on A8) + passphrase (from A7 source code). Contains flag 30 in final frame.
+
+9. **Build jenkins home directory**
+   - `.credentials` file containing flag 20 as a "deploy token"
+
+10. **Generate the GPG keypair**
+    - Create Vasik's GPG key pair
+    - Public key goes on A6 in `.gnupg/`
+    - Private key (passphrase-protected) goes to A8 as base64 blob
+    - Passphrase sourced from A7 source code (`crypto_config.py` LEGACY_PASSPHRASE)
+
+11. **Create the encrypted video file**
+    - Generate or source a short simulation video (could be procedurally generated, or a static image sequence with ASCII art of the mecha)
+    - Encrypt with Vasik's GPG public key
+    - Embed flag 30 in final frame as "simulation ID"
+
+12. **Create the simulation archives**
+    - Script to generate 47 tar.gz files with realistic log/dat content
+    - Ensure binary .dat files have correct flag placement
+
+13. **Create the Excel file with hidden sheet**
+    - Three worksheets with cross-references
+    - Integration sheet hidden
+    - CONCATENATE formula builds flag 26 across all three sheets
+
+14. **Write Dockerfile**
+    - Install openssh-server, gpg, python3, standard tools
+    - Create users, set passwords, copy home directories
+    - Set permissions (tanaka/nielsen dirs restricted)
+    - Entrypoint: start sshd
+    - Expose port 22

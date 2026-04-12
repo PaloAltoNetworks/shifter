@@ -73,3 +73,70 @@ Public-facing corporate website for Boreas Systems, AURORA COLLECTIVE's front co
 - **Location:** The annual report PDF is NOT in the /internal/ directory listing. It must be discovered by: (1) noticing the naming pattern of other documents in /internal/ (e.g., `boreas-Q1-2025.pdf`, `boreas-Q2-2025.pdf`) and brute-forcing/fuzzing the date range to find `boreas-annual-2025.pdf` at a non-linked URL, OR (2) finding a reference to the annual report URL in an HTML comment on the /old/ backup site. Once found, the annual report lists 40+ line items — most are legitimate consulting expenses. The suspicious $12M payment to "Kursk Heavy Industries" for "actuator assemblies" is buried in the middle. The flag is NOT in the PDF metadata — it is the answer to a CTFd challenge question that requires submitting the supplier name and dollar amount in the correct format (e.g., `KURSK-12000000`). This tests correlation and attention to detail, not just file discovery.
 - **Flag:** `FLAG{c6f8d2b3e91a4507}` (accepted when correct supplier+amount submitted)
 - **Mission:** M1, M2
+
+---
+
+## Build Plan
+
+**Base image:** nginx:alpine
+
+**Content directory:** `docs/ctf/mechag/A0-boreas-website/`
+
+### Steps
+
+1. **Build the static website (HTML/CSS/JS)**
+   - Homepage, About, Leadership, Careers, Contact, News/Blog pages
+   - Clean corporate template — boring consultancy aesthetic
+   - Employee portal login page (non-functional, red herring)
+   - `/status` maintenance page showing server info
+   - HTML comments with developer notes (flag breadcrumbs)
+
+2. **Generate leadership headshots**
+   - AI-generated or stock photos for Viktor Harlan, Dr. Elena Vasik, Marcus Webb
+   - Plausible corporate headshot style
+
+3. **Create PDF documents**
+   - `org_chart.pdf` — org chart with flag in metadata/watermark (flag 2)
+   - `boreas-Q1-2025.pdf`, `boreas-Q2-2025.pdf` — quarterly reports (pattern for brute-forcing)
+   - `boreas-annual-2025.pdf` — annual report with Kursk $12M line item buried in financials (flag 6)
+
+4. **Build the `/old/` backup site**
+   - Stripped-down version of the main site
+   - "Select clients" page with Project L reference (flag 4)
+   - HTML comment referencing annual report URL
+
+5. **Build the `/internal/` directory**
+   - Directory listing enabled (nginx autoindex on)
+   - Contains the org chart PDF and quarterly reports
+   - Annual report NOT linked here — must be fuzzed by filename pattern
+
+6. **Configure robots.txt**
+   - Disallow `/internal/` and `/admin/`
+
+7. **Set up DNS zone file**
+   - A records for boreas-systems.ctf and subdomains (mail, vpn, wiki, git, scada)
+   - MX record pointing to mail.boreas-systems.ctf
+   - TXT record with SPF referencing internal IP ranges
+   - TXT record containing flag 5
+   - Zone transfer (AXFR) enabled — this is a deliberate misconfiguration
+
+8. **Configure nginx**
+   - Serve static site on port 80
+   - autoindex on for `/internal/`
+   - Standard error pages
+
+9. **Embed flags**
+   - Flag 1: HTML comment near registration number on About page
+   - Flag 2: PDF metadata on org chart
+   - Flag 3: Hidden form field on careers application page
+   - Flag 4: Page source comment on `/old/` clients page
+   - Flag 5: DNS TXT record (served by companion DNS container or CoreDNS config)
+   - Flag 6: CTFd challenge question — submit supplier name + amount
+
+10. **Write Dockerfile**
+    - Copy static site into nginx html root
+    - Copy nginx config
+    - Expose port 80
+
+11. **DNS sidecar decision**
+    - Flag 5 requires a DNS server allowing AXFR. Options: (a) CoreDNS sidecar in the shared namespace, (b) BIND in the same pod. Decide based on simplicity.

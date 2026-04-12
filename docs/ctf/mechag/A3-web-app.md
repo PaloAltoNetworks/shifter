@@ -53,3 +53,57 @@ Boreas Systems internal intranet and wiki. This is the first thing most particip
 - **Location:** After logging in (using creds from the config file or from A0 employee info + weak passwords), navigate the wiki. The "Project Coordination" page has the flag embedded in an HTML comment in the page source.
 - **Flag:** `FLAG{d8a3c5e9f1b07264}`
 - **Mission:** M1, M2
+
+---
+
+## Build Plan
+
+**Base image:** python:3.12-slim (Flask app)
+
+**Content directory:** `docs/ctf/mechag/A3-web-app/`
+
+### Steps
+
+1. **Build Flask web application**
+   - Login page with username/password form
+   - "Forgot password" page that leaks valid usernames via different error messages ("user not found" vs "incorrect password")
+   - `/status` page showing server info (Python version, hostname, uptime)
+   - Admin panel at `/admin` with default creds `admin`/`admin`
+
+2. **Build wiki/CMS content pages (post-auth)**
+   - Company Wiki landing page
+   - HR Policies page
+   - Procurement Portal page (links to A4 file share paths)
+   - IT Knowledge Base — setup guides referencing internal hostnames (mail.boreas.local, dc.boreas.local, scada-gw.boreas.local)
+   - "Project Coordination" page — suspiciously vague, references Phase 3 integration, primary power source delivery, link to Lab network
+   - Admin-only draft page: "LEVIATHAN Assembly Schedule" with body "[MOVED TO SECURE SYSTEM]"
+
+3. **Create user accounts in app database**
+   - Map to same employees as A1/A2 (or accept AD creds if integrating with A2)
+   - admin/admin for the admin panel
+   - Local SQLite DB for simplicity
+
+4. **Plant the exposed config file**
+   - `/.env` or `/config.bak` served as static file
+   - Contains: DB credentials, admin password, flag 7 as a commented "API key"
+   - Ensure nginx/Flask doesn't block dotfile access
+
+5. **Implement SQL injection vulnerability**
+   - Search function with unsanitized query concatenation
+   - Must allow dumping the user table (usernames + password hashes)
+   - Use SQLite so no external DB dependency
+
+6. **Implement directory traversal vulnerability**
+   - File download endpoint like `/download?file=doc.pdf`
+   - Path traversal allows reading `/etc/passwd`, local config files
+   - Not needed for any flag, but adds realism and alternate attack paths
+
+7. **Embed flags**
+   - Flag 7: In the `/.env` config file as `API_KEY=FLAG{...}`
+   - Flag 12: HTML comment in the "Project Coordination" wiki page source
+
+8. **Write Dockerfile**
+   - Install Flask, gunicorn
+   - Copy app code, templates, static files, SQLite DB
+   - Entrypoint: start gunicorn on port 80
+   - Expose port 80

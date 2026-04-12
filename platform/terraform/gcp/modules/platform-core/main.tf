@@ -298,32 +298,45 @@ resource "google_storage_bucket_object" "identity_platform_before_create" {
   source = data.archive_file.identity_platform_before_create.output_path
 }
 
-resource "google_cloudfunctions_function" "identity_platform_before_create" {
-  name                  = "${local.name_prefix}-identity-before-create"
-  project               = var.project_id
-  region                = var.region
-  runtime               = "nodejs18"
-  available_memory_mb   = 128
-  timeout               = 10
-  source_archive_bucket = google_storage_bucket.assets.name
-  source_archive_object = google_storage_bucket_object.identity_platform_before_create.name
-  trigger_http          = true
-  entry_point           = "beforeCreate"
+resource "google_cloudfunctions2_function" "identity_platform_before_create" {
+  name        = "${local.name_prefix}-identity-before-create"
+  project     = var.project_id
+  location    = var.region
+  description = "Identity Platform beforeCreate blocking function"
 
-  environment_variables = {
-    ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
-    ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
+  build_config {
+    runtime     = "nodejs18"
+    entry_point = "beforeCreate"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.assets.name
+        object = google_storage_bucket_object.identity_platform_before_create.name
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "128M"
+    timeout_seconds                = 10
+    ingress_settings               = "ALLOW_ALL"
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
+      ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
+    }
   }
 
   depends_on = [time_sleep.required_services_propagated]
 }
 
-resource "google_cloudfunctions_function_iam_member" "identity_platform_before_create_invoker" {
-  project        = var.project_id
-  region         = var.region
-  cloud_function = google_cloudfunctions_function.identity_platform_before_create.name
-  role           = "roles/cloudfunctions.invoker"
-  member         = "allUsers"
+resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.identity_platform_before_create.service_config[0].service
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 resource "google_compute_global_address" "platform_ingress" {
@@ -455,7 +468,7 @@ resource "google_identity_platform_config" "platform" {
   blocking_functions {
     triggers {
       event_type   = "beforeCreate"
-      function_uri = google_cloudfunctions_function.identity_platform_before_create.https_trigger_url
+      function_uri = google_cloudfunctions2_function.identity_platform_before_create.url
     }
   }
 

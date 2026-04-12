@@ -2290,10 +2290,7 @@ class TestGcpPlatformCoreContracts:
         identity_platform_section = module_main.split('resource "google_identity_platform_config" "platform" {', 1)[1]
         assert "disabled_user_signup   = false" in identity_platform_section
         assert 'event_type   = "beforeCreate"' in identity_platform_section
-        assert (
-            "google_cloudfunctions_function.identity_platform_before_create.https_trigger_url"
-            in identity_platform_section
-        )
+        assert "google_cloudfunctions2_function.identity_platform_before_create.url" in identity_platform_section
 
     def test_identity_platform_blocking_function_required_apis_are_enabled(self):
         """The platform-core module must enable the APIs needed to create the blocking function."""
@@ -2313,7 +2310,7 @@ class TestGcpPlatformCoreContracts:
         assert '"cloudbuild.googleapis.com"' in required_services_section
 
     def test_identity_platform_blocking_function_waits_for_service_propagation(self):
-        """Cloud Function creation must wait for required API enablement to propagate on fresh bootstrap."""
+        """Cloud Run function creation must wait for required API enablement to propagate on fresh bootstrap."""
         module_path = (
             Path(__file__).resolve().parents[3]
             / "platform"
@@ -2328,6 +2325,24 @@ class TestGcpPlatformCoreContracts:
         assert 'resource "time_sleep" "required_services_propagated"' in module_main
         assert 'create_duration = "60s"' in module_main
         assert "depends_on = [time_sleep.required_services_propagated]" in module_main
+
+    def test_identity_platform_uses_cloud_run_functions_not_legacy_first_gen(self):
+        """Identity Platform blocking hooks must use the supported Cloud Run functions runtime."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        assert 'resource "google_cloudfunctions2_function" "identity_platform_before_create"' in module_main
+        assert 'resource "google_cloudfunctions_function" "identity_platform_before_create"' not in module_main
+        assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
+        assert 'role     = "roles/run.invoker"' in module_main
 
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""

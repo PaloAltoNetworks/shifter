@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Engine migration consistency for `SubnetAllocation` so GCP bootstrap can run the platform database migrations cleanly on a fresh control plane
 - GCP bootstrap now leaves a usable externally reachable Shifter platform after control-plane bring-up, including healthy portal ingress and expected Mission Control login redirect behavior
 - AWS auth continuity while adding GCP identity support: AWS keeps the existing Cognito/OIDC path and GCP uses a provider-seamed first-party Identity Platform login flow
+- Fixed agentic workshop scenario configs
 
 ## [3.63.0] - 2026-04-09
 

@@ -55,7 +55,7 @@ check "Root flag exists" test -f /root/root.txt
 check "Root flag owned by root" test "$(stat -c %U /root/root.txt)" = "root"
 
 # SSH config
-check "Password auth enabled" grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config
+check "Effective SSH password auth enabled" sh -c 'sshd -T 2>/dev/null | grep -q "^passwordauthentication yes$"'
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

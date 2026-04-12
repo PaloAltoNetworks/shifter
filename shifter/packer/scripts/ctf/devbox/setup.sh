@@ -2,18 +2,63 @@
 # CTF Box 3 - "DevBox" - Ubuntu
 # Chain: Command injection in DevNotes search -> reverse shell as node ->
 #        SSH key in /opt/backups -> SSH as devops -> sudo node -> GTFOBins -> root
-# Dual-homed: second NIC on 10.0.2.0/24 with .env containing vault creds
+# Vault credentials are staged in .env; the Vault host is another target in the
+# same workshop subnet and does not use a fixed per-scenario IP.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+stop_background_apt() {
+    systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all apt-daily.service apt-daily-upgrade.service unattended-upgrades.service >/dev/null 2>&1 || true
+}
+
+wait_for_apt() {
+    local waited=0
+    local timeout=600
+
+    echo "=== Waiting for background apt/dpkg work to finish ==="
+    stop_background_apt
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+        || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+        || pgrep -x unattended-upgr >/dev/null 2>&1 \
+        || pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1; do
+        if pgrep -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1; then
+            echo "Stopping unattended-upgrade-shutdown helper..."
+            pkill -f '/usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >/dev/null 2>&1 || true
+            sleep 2
+            continue
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            echo "Timed out waiting for apt/dpkg lock holders to exit"
+            ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
+            return 1
+        fi
+        echo "apt/dpkg still busy; retrying in 5s..."
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+apt_update() {
+    wait_for_apt
+    apt-get update
+}
+
+apt_install() {
+    wait_for_apt
+    apt-get install -y "$@"
+}
+
 echo "=== Installing packages ==="
-apt-get update
-apt-get install -y nginx curl
+apt_update
+apt_install nginx curl
 
 # Install Node.js 18.x from NodeSource (apt nodejs is too old for Express 4.18)
+wait_for_apt
 curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-apt-get install -y nodejs
+apt_install nodejs
 
 echo "=== Creating users ==="
 id devops &>/dev/null || useradd -m -s /bin/bash devops
@@ -46,7 +91,7 @@ const notes = [
   { id: 1, title: "Sprint Planning", content: "Review backlog items for Q1 sprint", author: "devops", date: "2024-01-10" },
   { id: 2, title: "API Redesign", content: "Migrate REST endpoints to GraphQL", author: "mgarcia", date: "2024-01-12" },
   { id: 3, title: "Deploy Checklist", content: "Run tests, build docker image, push to registry", author: "devops", date: "2024-01-15" },
-  { id: 4, title: "Vault Setup", content: "Configure vault server on internal network for secrets management", author: "devops", date: "2024-01-20" },
+  { id: 4, title: "Vault Setup", content: "Configure vault server for secrets management", author: "devops", date: "2024-01-20" },
   { id: 5, title: "Backup Script", content: "Backup script moved to /opt/backups, runs nightly via cron", author: "node", date: "2024-02-01" }
 ];
 
@@ -150,10 +195,9 @@ EOF
 
 cat > /opt/devnotes/notes/vault.txt << 'EOF'
 Vault Setup
-- Configure vault server on internal network
-- Vault is on the internal subnet (10.0.2.0/24)
-- Access via SSH from this box only
-- Credentials in /opt/devnotes/.env
+- Configure vault server on the workshop range
+- Vault is another host in the same target subnet
+- Use the credentials in /opt/devnotes/.env with the Vault target IP
 EOF
 
 cat > /opt/devnotes/notes/backup.txt << 'EOF'
@@ -176,8 +220,7 @@ cat > /opt/devnotes/.env << 'ENVEOF'
 NODE_ENV=production
 PORT=3000
 
-# Vault server credentials (internal network)
-VAULT_HOST=10.0.2.10
+# Vault server credentials
 VAULT_ADMIN=vaultadmin
 VAULT_PASS=DevOps2024!
 ENVEOF
@@ -250,13 +293,18 @@ echo "devops ALL=(root) NOPASSWD: /usr/bin/node" > /etc/sudoers.d/devops
 chmod 440 /etc/sudoers.d/devops
 
 echo "=== Planting flags ==="
-echo "FLAG{d3vb0x_us3r_0wn3d}" > /home/devops/user.txt
+echo "FLAG{devbox_user_cc939bfa201647fe5992}" > /home/devops/user.txt
 chown devops:devops /home/devops/user.txt
 chmod 400 /home/devops/user.txt
 
-echo "FLAG{d3vb0x_r00t_pwn3d}" > /root/root.txt
+echo "FLAG{devbox_root_952fb99dc35b0eef6b78}" > /root/root.txt
 chmod 400 /root/root.txt
 
-# SSH already installed and configured in base AMI (services.sh)
+echo "=== Enforcing SSH password authentication ==="
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-shifter-password-auth.conf << 'SSHEOF'
+PasswordAuthentication yes
+SSHEOF
+systemctl restart ssh
 
 echo "=== DevBox setup complete ==="

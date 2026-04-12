@@ -33,6 +33,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: guacamole-home
+              mountPath: /home/guacamole/.guacamole
           env:
             - name: GUACD_HOSTNAME
               value: guacd
@@ -88,5 +90,8 @@ spec:
             {{- toYaml .Values.guacamoleClient.resources | nindent 12 }}
       volumes:
         - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+        - name: guacamole-home
           emptyDir:
             sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}

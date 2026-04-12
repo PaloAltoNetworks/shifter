@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.83.0] - 2026-04-12
+
+### Changed
+
+- Consolidated all POLARIS / NORTHSTORM scenario work into
+  `scenario-dev/polaris/`. Prior to this, scenario artifacts
+  were scattered across `docs/ctf/`, `docs/ctf/mechag/`, and
+  a sibling `shifter-k8s/temp/` worktree. New layout:
+  - `scenario-dev/polaris/design/` — authoritative spec (source
+    of truth): `architecture.md`, `range-diagram.md`,
+    `benchmark-report.md`, `shared-constants.md`, plus per-asset
+    design docs under `design/assets/`.
+  - `scenario-dev/polaris/build/` — `docker-compose.yml`,
+    `ctfd-challenges.json`, `dns/`, `a0/`-`a14/` (Dockerfiles +
+    runtime configs), and `A0-boreas-website/`-`A14-kali/`
+    content dirs (intact to avoid touching Dockerfile COPY paths).
+  - `scenario-dev/polaris/tests/` — `setup.sh`, `reset.sh`,
+    `run-all-smoketests.sh`, `isolation-smoketest.sh`,
+    flattened `smoketests/` (A0-smoketest.sh … A14-smoketest.py),
+    and `walkthroughs/` (copied from `shifter-k8s/temp/tests/smoketests/`
+    — the four flag-group happy-path guides plus range-access
+    prereqs).
+  - `scenario-dev/polaris/notes/` — spike notes and
+    HANDOFF/BUILD-TODO (copied from `shifter-k8s/temp/`).
+  - `scenario-dev/polaris/README.md` — entry point with layout
+    map and "getting started" deploy/test commands.
+- Moves were `git mv` wherever possible to preserve history.
+  Files from `shifter-k8s/` are copies (different repo, no
+  shared git history).
+- `run-all-smoketests.sh` updated: new variables `SMOKETESTS_DIR`,
+  `RESET_SCRIPT`, `ISOLATION_SCRIPT` with sane defaults for the
+  new layout and fallback to the old flat layout if detected.
+  Per-test paths switched from `<Content-Dir>/smoketest.ext`
+  to `A<N>-smoketest.ext` reflecting the flattened tests/smoketests/.
+- `docs/ctf/` and `docs/ctf/mechag/` are now empty and removed.
+
+### Known drift (deferred, needs approval per design-is-source-
+of-truth rule)
+
+- 15 design docs under `design/assets/A*.md` still reference
+  `docs/ctf/mechag/A*-*/` as the "Content directory". Those
+  references are now stale — the content dirs moved to
+  `scenario-dev/polaris/build/A*-*/`. Paths are semantic per
+  feedback_design_is_source_of_truth.md so they need user
+  approval before editing the design to match the new layout.
+
 ## [3.82.0] - 2026-04-12
 
 ### Fixed

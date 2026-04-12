@@ -19,6 +19,10 @@ log() { echo "[setup] $*"; }
 
 log "range dir: $RANGE_DIR"
 log "building all images..."
+# Cache is on by default. This is golden-lab development - speed of
+# iteration wins over reproducibility. Docker's cache invalidates
+# correctly whenever Dockerfile content or COPY source hashes change,
+# so real edits rebuild; unchanged Dockerfiles rebuild in seconds.
 docker compose build
 
 log "starting all services..."

@@ -1,0 +1,210 @@
+# NORTHSTORM Range — Single Participant Instance
+#
+# Network topology matches the architecture diagram:
+#   attacker-net: A14 (Kali) can reach shared assets + Front Office
+#   front-office: A1, A3, A4 + connection to shared
+#   lab:          A6, A8 + connection to A7 (shared)
+#   bunker-ot:    A9, A10, A11, A12, A13 (isolated until gate)
+#   shared:       A0, A2(external), A5, A7, DNS
+#
+# A2 (Windows DC) is an external VM, not a container.
+
+networks:
+  shared:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  front-office:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.10.0/24
+  lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.30.0/24
+  bunker-ot:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.40.0/24
+
+services:
+
+  # ============================================
+  # SHARED ASSETS
+  # ============================================
+
+  dns:
+    build: ./dns
+    container_name: dns
+    networks:
+      shared:
+        ipv4_address: 172.20.0.2
+      front-office:
+        ipv4_address: 172.20.10.2
+      lab:
+        ipv4_address: 172.20.30.2
+    restart: unless-stopped
+
+  a0-website:
+    build: ./a0
+    container_name: a0-website
+    hostname: boreas-systems.ctf
+    networks:
+      shared:
+        ipv4_address: 172.20.0.10
+    dns: 172.20.0.2
+    restart: unless-stopped
+
+  a5-scada:
+    build: ./a5
+    container_name: a5-scada
+    hostname: scada-gw.boreas.local
+    networks:
+      shared:
+        ipv4_address: 172.20.0.50
+      front-office:
+        ipv4_address: 172.20.10.50
+    dns: 172.20.0.2
+    restart: unless-stopped
+
+  a7-gitea:
+    build: ./a7
+    container_name: a7-gitea
+    hostname: git.boreas.local
+    networks:
+      shared:
+        ipv4_address: 172.20.0.70
+      lab:
+        ipv4_address: 172.20.30.20
+    dns: 172.20.0.2
+    restart: unless-stopped
+
+  # ============================================
+  # FRONT OFFICE (per-participant)
+  # ============================================
+
+  a1-mail:
+    build: ./a1
+    container_name: a1-mail
+    hostname: mail.boreas.local
+    networks:
+      front-office:
+        ipv4_address: 172.20.10.20
+    dns: 172.20.10.2
+    restart: unless-stopped
+
+  a3-intranet:
+    build: ./a3
+    container_name: a3-intranet
+    hostname: intranet.boreas.local
+    networks:
+      front-office:
+        ipv4_address: 172.20.10.30
+    dns: 172.20.10.2
+    restart: unless-stopped
+
+  a4-fileshare:
+    build: ./a4
+    container_name: a4-fileshare
+    hostname: fileserv.boreas.local
+    networks:
+      front-office:
+        ipv4_address: 172.20.10.40
+    dns: 172.20.10.2
+    restart: unless-stopped
+
+  # ============================================
+  # LAB (per-participant)
+  # ============================================
+
+  a6-workstation:
+    build: ./a6
+    container_name: a6-workstation
+    hostname: eng-ws01.boreas.local
+    networks:
+      lab:
+        ipv4_address: 172.20.30.10
+    dns: 172.20.30.2
+    restart: unless-stopped
+
+  a8-database:
+    build: ./a8
+    container_name: a8-database
+    hostname: researchdb.boreas.local
+    networks:
+      lab:
+        ipv4_address: 172.20.30.30
+    dns: 172.20.30.2
+    restart: unless-stopped
+
+  # ============================================
+  # BUNKER OT (per-participant, isolated until gate)
+  # ============================================
+
+  a9-splice:
+    build: ./a9
+    container_name: a9-splice
+    hostname: splice-relay
+    networks:
+      bunker-ot:
+        ipv4_address: 172.20.40.5
+    dns: 172.20.0.2
+    restart: unless-stopped
+
+  a10-tail:
+    build: ./a10
+    container_name: a10-tail
+    hostname: tail-ctrl
+    networks:
+      bunker-ot:
+        ipv4_address: 172.20.40.10
+    restart: unless-stopped
+
+  a11-leg:
+    build: ./a11
+    container_name: a11-leg
+    hostname: leg-ctrl
+    networks:
+      bunker-ot:
+        ipv4_address: 172.20.40.11
+    restart: unless-stopped
+
+  a12-arms:
+    build: ./a12
+    container_name: a12-arms
+    hostname: arms-ctrl
+    networks:
+      bunker-ot:
+        ipv4_address: 172.20.40.12
+    restart: unless-stopped
+
+  a13-brain:
+    build: ./a13
+    container_name: a13-brain
+    hostname: brain-main
+    networks:
+      bunker-ot:
+        ipv4_address: 172.20.40.50
+    restart: unless-stopped
+
+  # ============================================
+  # ATTACKER (per-participant)
+  # ============================================
+
+  a14-kali:
+    build: ./a14
+    container_name: a14-kali
+    hostname: operator
+    networks:
+      shared:
+        ipv4_address: 172.20.0.140
+      front-office:
+        ipv4_address: 172.20.10.140
+    dns: 172.20.0.2
+    stdin_open: true
+    tty: true
+    restart: unless-stopped

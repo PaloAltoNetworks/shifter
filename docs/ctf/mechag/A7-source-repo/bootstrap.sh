@@ -62,16 +62,23 @@ fi
 # ============================================
 log "Creating users..."
 for user_spec in \
-    "e_vasik:TestPass123!:e.vasik@boreas.local" \
-    "r_tanaka:TestPass123!:r.tanaka@boreas.local" \
-    "m_webb:TestPass123!:m.webb@boreas.local" \
-    "d_kowalski:TestPass123!:d.kowalski@boreas.local" \
-    "p_nielsen:TestPass123!:p.nielsen@boreas.local" \
-    "k_yamamoto:TestPass123!:k.yamamoto@boreas.local" \
-    "f_okoye:TestPass123!:f.okoye@boreas.local"; do
+    "e_vasik:Reactor#Core9:e.vasik@boreas.local" \
+    "r_tanaka:SimEngine#42:r.tanaka@boreas.local" \
+    "m_webb:Welcome1:m.webb@boreas.local" \
+    "d_kowalski:P@ssw0rd123:d.kowalski@boreas.local" \
+    "p_nielsen:Hydraulics1:p.nielsen@boreas.local" \
+    "k_yamamoto:Sensor2025:k.yamamoto@boreas.local" \
+    "f_okoye:AIModel2025:f.okoye@boreas.local"; do
     IFS=: read -r username password email_addr <<< "$user_spec"
     api_post "$API/admin/users" \
-        -d "{\"username\":\"$username\",\"password\":\"$password\",\"email\":\"$email_addr\",\"must_change_password\":false}" \
+        -d "{\"username\":\"$username\",\"password\":\"$password\",\"email\":\"$email_addr\",\"must_change_password\":false,\"login_name\":\"$username\",\"source_id\":0}" \
+        > /dev/null 2>&1 || true
+    # Gitea auth requires login_name to be set; if the POST didn't take
+    # (e.g. user already existed from a prior run), PATCH it explicitly so
+    # basic-auth with the password works.
+    api_patch "$API/admin/users/$username" \
+        -H "Content-Type: application/json" \
+        -d "{\"password\":\"$password\",\"login_name\":\"$username\",\"source_id\":0}" \
         > /dev/null 2>&1 || true
     log "  User: $username"
 done

@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.72.0] - 2026-04-12
+
+### Fixed
+
+- A7 Gitea bootstrap drift (design vs build mismatch):
+  - `bootstrap.sh` user creation was missing `login_name` in the
+    POST payload, so Gitea stored users with empty login_name
+    and basic-auth failed ("user's password is invalid"). Added
+    `login_name` + `source_id` to the POST, plus a PATCH fallback
+    that corrects existing users on re-runs.
+  - Gitea user passwords were all hardcoded to `TestPass123!`
+    with no discovery path. Updated to match the A1/A2/A6 AD
+    credentials (e_vasik/Reactor#Core9, r_tanaka/SimEngine#42,
+    p_nielsen/Hydraulics1, m_webb/Welcome1, d_kowalski/P@ssw0rd123)
+    so the password-reuse pattern participants discover in the
+    Front Office also unlocks Gitea. k_yamamoto and f_okoye
+    (Lab-Access members without prior AD mapping) get
+    Sensor2025 / AIModel2025 respectively.
+- A7 repo path drift: `a7/Dockerfile` COPYs `bootstrap.sh` and
+  `bare-repos.tar.gz` but they live in `A7-source-repo/`. Moved
+  `a7-gitea` docker-compose build context to `.` with
+  `dockerfile: ./a7/Dockerfile` and updated COPY paths so the
+  image can be built from a fresh repo checkout.
+
+### Added
+
+- `docs/ctf/mechag/A7-source-repo/smoketest.sh`: A7 end-to-end
+  smoketest (20 checks) runnable from a14-kali (A7 is
+  multi-homed on shared+lab so a14-kali reaches it directly via
+  shared). Verifies Gitea API, public org/repo discovery,
+  visibility boundaries (anonymous cannot see `aurora` org or
+  its repos; anonymous cannot clone private repos), authenticated
+  clone of all 4 aurora repos, flag 24 via `git log -p` on
+  navigation-controller removed CI token, flag 29 via
+  `git show <parent>:schematic.svg` recovery on leviathan-assembly,
+  LEGACY_PASSPHRASE cross-asset breadcrumb for A6 flag 30 in
+  weapons-integration/src/crypto_config.py, deploy_combat_ai.yml
+  playbook in manufacturing-orchestrator, and password-reuse
+  validation for r_tanaka and p_nielsen.
+
 ## [3.71.0] - 2026-04-12
 
 ### Fixed

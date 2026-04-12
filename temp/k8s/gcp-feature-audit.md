@@ -224,7 +224,7 @@ Checkpoint 10: GCP identity/bootstrap cutover
 - The GCP control-plane path now provisions Identity Platform directly in Terraform and exposes the project API key/project ID to runtime.
 - Django auth is now provider-seamed:
   - AWS keeps Cognito/OIDC through `mozilla-django-oidc`
-  - GCP uses first-party Identity Platform login inside Shifter
+  - GCP uses browser-side Identity Platform auth with app-side verified-token exchange
 - The first GCP operator is now bootstrap-seeded through the Identity Platform admin API using env-backed credentials or an interactive prompt.
 - Operator-only corporate login requirements are enforced in-app:
   - `@paloaltonetworks.com` allowlist
@@ -491,3 +491,29 @@ Checkpoint 17: pre-bootstrap hardening for the next fresh GCP rebuild
     - TOTP MFA flow
     - working Mission Control session
     - seeded bootstrap operator elevated to staff and superuser
+
+### Checkpoint 21: GCP Auth Contract Correction
+
+- The earlier GCP auth implementation was architecturally wrong:
+  - Django rendered and processed a credential/MFA flow directly against Identity Platform
+  - that recreated the most sensitive part of the auth surface inside the app instead of leaving it in the provider flow
+- Corrective action taken:
+  - removed Django-side password and MFA handling from the GCP auth path
+  - kept AWS Cognito/OIDC intact
+  - retained CTF participant magic-link auth unchanged
+  - restricted `dev-login` / `dev-logout` to local or admin-only access paths outside DEBUG
+- Current GCP auth contract:
+  - `/login/` is a thin browser-side shell around Identity Platform's FirebaseUI widget
+  - FirebaseUI handles registration, sign-in, and password reset in the browser
+  - the Identity Platform web SDK handles email verification prompts plus TOTP factor enrollment/sign-in
+  - Django only exchanges a verified Google identity token for an application session
+  - session creation is denied until:
+    - the email is verified
+    - the email passes the corporate allowlist policy
+    - at least one TOTP factor is enrolled
+  - `/oidc/authenticate/` on GCP redirects to `/login/`
+  - logout clears both the Django session and the browser-side Identity Platform auth state
+- Implementation notes:
+  - Identity Platform `beforeCreate` blocking function keeps self-registration limited to `@paloaltonetworks.com` plus explicit allowlist exceptions
+  - TOTP uses the modular web SDK because Google documents TOTP MFA as modular-only on the web
+  - the repeated failure mode here was favoring short-path integration over semantic parity and ownership boundaries; that tradeoff is explicitly rejected going forward

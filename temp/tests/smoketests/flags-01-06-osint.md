@@ -1,8 +1,8 @@
 # Flags 1–6: OSINT (Boreas Website)
 
-> **Start here:** Read [00-range-access.md](00-range-access.md) first for SSH instructions, how to start services, ports, and credentials.
+> **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range. All commands run FROM INSIDE the Kali container (`sudo docker exec -it a14-kali /bin/bash`).
 
-All of these flags come from the public Boreas Systems website (`$A0_URL`, default `http://127.0.0.1:8082`). No authentication required.
+All of these flags come from the Boreas Systems website at **172.20.0.10** (port 80). DNS is at **172.20.0.2**. No authentication required.
 
 ---
 
@@ -79,11 +79,16 @@ All of these flags come from the public Boreas Systems website (`$A0_URL`, defau
 
 ## Smoketest Results — 2026-04-10
 
-| Flag | Description | Expected | Found | Result | Notes |
-|------|-------------|----------|-------|--------|-------|
-| 1 | Company Info (HTML comment on /about) | `FLAG{8f3a2c1e9b7d4056}` | `FLAG{8f3a2c1e9b7d4056}` | **PASS** | Comment appears near registration number as expected |
-| 2 | Org Chart metadata (/internal/org_chart.txt) | `FLAG{d4e7b1f283a6c950}` | `FLAG{d4e7b1f283a6c950}` | **PASS** | robots.txt lists /internal/, directory listing works, metadata line present |
-| 3 | Hidden form field on /careers | `FLAG{a1c9e3f7054b82d6}` | `FLAG{a1c9e3f7054b82d6}` | **PASS** | Hidden input tracking_id contains flag |
-| 4 | Client list HTML comment (/old/clients) | `FLAG{72b5e0d8f1a34c69}` | `FLAG{72b5e0d8f1a34c69}` | **PASS** | HTML comment at top of client table |
-| 5 | DNS zone transfer TXT record | `FLAG{5e9c2a0f73b148d6}` | `FLAG{5e9c2a0f73b148d6}` | **PASS** | Zone transfer enabled, flag in _flag.boreas-systems.ctf TXT record |
-| 6 | Supplier from annual report | `FLAG{c6f8d2b3e91a4507}` | N/A (CTFd question) | **PASS** | Report accessible at /internal/boreas-annual-2025.txt (discoverable via /old/ HTML comment or URL fuzzing). Kursk Heavy Industries — $12,000,000 is clearly the standout entry. Flag would be awarded by CTFd on correct submission. |
+Tested from inside Kali container (`a14-kali`) against live Docker Compose range.
+
+| Flag | Description | Expected Flag | Found | Result | Notes |
+|------|-------------|---------------|-------|--------|-------|
+| 1 | Company Info (HTML comment on /about) | `FLAG{8f3a2c1e9b7d4056}` | `FLAG{8f3a2c1e9b7d4056}` | **PASS** | HTML comment next to registration number 7741-BSI-2018 |
+| 2 | Employee Directory (org_chart.txt metadata) | `FLAG{d4e7b1f283a6c950}` | `FLAG{d4e7b1f283a6c950}` | **PASS** | robots.txt disallows /internal/; directory listing enabled; flag in Author metadata field |
+| 3 | Job Posting (hidden form field on /careers) | `FLAG{a1c9e3f7054b82d6}` | `FLAG{a1c9e3f7054b82d6}` | **PASS** | Hidden input `tracking_id` in application form |
+| 4 | Client List (HTML comment on /old/clients) | `FLAG{72b5e0d8f1a34c69}` | `FLAG{72b5e0d8f1a34c69}` | **PASS** | Comment in page source; Project L ($165.3M) visible in table |
+| 5 | DNS Zone Transfer (TXT record) | `FLAG{5e9c2a0f73b148d6}` | `FLAG{5e9c2a0f73b148d6}` | **PASS** | `dig axfr` succeeds; flag in `_flag.boreas-systems.ctf` TXT record |
+| 6 | Supplier from Annual Report | `FLAG{c6f8d2b3e91a4507}` | N/A (CTFd-side) | **PASS** | Annual report at /internal/boreas-annual-2025.txt accessible (unlisted but guessable); Kursk Heavy Industries — $12,000,000 present; flag is validated by CTFd, not embedded in file |
+
+**Summary: 6/6 PASS**
+

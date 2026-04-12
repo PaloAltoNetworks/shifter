@@ -48,11 +48,14 @@ done
 # Create admin user (via CLI — works even before API auth is set up)
 # ============================================
 log "Creating admin user..."
-GITEA_WORK_DIR="$GITEA_WORK_DIR" $GITEA_BIN admin user create \
-    --username "$ADMIN_USER" \
-    --password "$ADMIN_PASS" \
-    --email "$ADMIN_EMAIL" \
-    --admin 2>/dev/null || log "Admin user already exists"
+# Run as git user if we're root (Gitea DB is owned by git)
+if [ "$(id -u)" = "0" ]; then
+    su -s /bin/sh git -c "GITEA_WORK_DIR=$GITEA_WORK_DIR $GITEA_BIN admin user create \
+        --username $ADMIN_USER --password $ADMIN_PASS --email $ADMIN_EMAIL --admin" 2>/dev/null || log "Admin user already exists"
+else
+    GITEA_WORK_DIR="$GITEA_WORK_DIR" $GITEA_BIN admin user create \
+        --username "$ADMIN_USER" --password "$ADMIN_PASS" --email "$ADMIN_EMAIL" --admin 2>/dev/null || log "Admin user already exists"
+fi
 
 # ============================================
 # Create regular users

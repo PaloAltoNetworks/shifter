@@ -11,7 +11,7 @@ Last updated: 2026-04-11
 
 ## Auth Model
 
-- Provider: `Identity Platform`
+- Provider: `Identity Platform` with `FirebaseUI`
 - Corporate email restriction: `@paloaltonetworks.com`
 - MFA: `TOTP` is required
 
@@ -25,36 +25,14 @@ Last updated: 2026-04-11
   - `is_staff=True`
   - `is_superuser=True`
 
-## Current TOTP Enrollment
-
-The bootstrap operator has already completed first-time MFA enrollment.
-
-- TOTP enrollment is required; use your authenticator app after first login.
-- Issuer: `Shifter`
-
-Generate a current code with Python:
-
-```bash
-python3 - <<'PY'
-import base64, hashlib, hmac, struct, time
-secret = "REPLACE_WITH_AUTH_APP_SECRET"
-key = base64.b32decode(secret, casefold=True)
-counter = int(time.time() // 30)
-msg = struct.pack(">Q", counter)
-digest = hmac.new(key, msg, hashlib.sha1).digest()
-offset = digest[-1] & 0x0F
-code = (struct.unpack(">I", digest[offset:offset+4])[0] & 0x7fffffff) % 1_000_000
-print(f"{code:06d}")
-PY
-```
-
 Expected login flow:
 
 1. Open `/login/`
-2. Submit the corporate email and bootstrap password
-3. Enter the current TOTP code
-4. You should land on `/mission-control/`
-5. `/admin/` should also be accessible after login
+2. Use the FirebaseUI widget to submit the corporate email and bootstrap password
+3. If this is the first login, verify the email and enroll TOTP when prompted
+4. Complete the TOTP challenge
+5. You should land on `/mission-control/`
+6. `/admin/` should also be accessible after login
 
 ## Live Deployment Facts
 
@@ -110,7 +88,9 @@ shifter-gdc-kubeconfig
 ## Suggested Smoke Test Targets
 
 - Public landing page returns `200`
-- Login form loads and enforces corporate email + MFA flow
+- Login shell loads the FirebaseUI widget and hands off auth to Identity Platform in the browser
+- Corporate self-registration rejects non-`@paloaltonetworks.com` emails
+- Verified email + enrolled TOTP are required before the Django session is created
 - Authenticated Mission Control loads
 - Django admin loads for the bootstrap operator
 - `portal-web`, `worker-cms`, `worker-engine`, `worker-mc`, `ctf-scheduler`, `guacd`, and `guacamole-client` are all `Running`

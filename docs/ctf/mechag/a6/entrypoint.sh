@@ -17,9 +17,9 @@ cp -a /tmp/a6-content/home/p.nielsen/.* /home/p.nielsen/ 2>/dev/null || true
 cp -a /tmp/a6-content/home/jenkins/* /home/jenkins/ 2>/dev/null || true
 cp -a /tmp/a6-content/home/jenkins/.* /home/jenkins/ 2>/dev/null || true
 
-# Deploy system dirs
-cp -a /tmp/a6-content/opt /opt/ 2>/dev/null || true
-cp -a /tmp/a6-content/var /var/ 2>/dev/null || true
+# Deploy system dirs (copy contents, not the directory itself)
+cp -a /tmp/a6-content/opt/* /opt/ 2>/dev/null || true
+cp -a /tmp/a6-content/var/* /var/ 2>/dev/null || true
 mkdir -p /tmp/.deleted
 cp -a /tmp/a6-content/tmp/.deleted/* /tmp/.deleted/ 2>/dev/null || true
 

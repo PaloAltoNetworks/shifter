@@ -156,7 +156,7 @@ Exit criteria:
 - Observed proof:
   - `./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1` completed successfully
   - external portal ingress at `http://34.54.58.95/` returned `HTTP/1.1 200 OK`
-  - external Mission Control ingress returned the expected dev-login redirect
+  - external Mission Control ingress returned the expected secure login redirect
   - Google backend health for the portal NEG converged to `HEALTHY` after the chart-owned `BackendConfig` switched the health check path to `/health/`
 
 ## Slice P6: Core Scenario Parity Verification on GCP

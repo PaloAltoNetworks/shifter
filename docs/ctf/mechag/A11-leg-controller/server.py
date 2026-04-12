@@ -31,6 +31,7 @@ Flag 33 unlock:
 """
 
 import logging
+import os
 import time
 import threading
 
@@ -205,12 +206,13 @@ def main():
     context = build_context()
     identity = build_identity()
 
-    log.info("A11 Leg Controller starting on port 5021")
+    port = int(os.environ.get("MODBUS_PORT", "502"))
+    log.info("A11 Leg Controller starting on port %d", port)
     log.info("  Vendor: %s | Model: %s | Serial: %s", VENDOR, MODEL, SERIAL)
     log.info("  Sequence: %s within %ds", EXPECTED_SEQUENCE, SEQUENCE_TIMEOUT_S)
     log.info("  Calibration code: %d", CALIBRATION_CODE)
 
-    StartTcpServer(context=context, identity=identity, address=("0.0.0.0", 5021))
+    StartTcpServer(context=context, identity=identity, address=("0.0.0.0", port))
 
 
 if __name__ == "__main__":

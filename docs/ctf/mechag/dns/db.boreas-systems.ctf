@@ -8,9 +8,9 @@ www     IN      A       172.20.0.10
 mail    IN      A       172.20.10.20
 vpn     IN      A       172.20.10.50
 wiki    IN      A       172.20.10.30
-git     IN      A       172.20.30.20
-scada   IN      A       172.20.0.50
-scada-gw IN     A       172.20.0.50
+git     IN      A       172.20.0.70
+scada   IN      A       172.20.40.10
+scada-gw IN     A       172.20.40.10
 lab-dc  IN      A       172.20.30.10
 eng-ws01 IN     A       172.20.30.10
 researchdb IN   A       172.20.30.30

@@ -1,8 +1,15 @@
 # Flags 31–36: Bunker
 
-> **Start here:** Read [00-range-access.md](00-range-access.md) first for SSH instructions, how to start services, ports, and credentials.
+> **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range.
 
-These flags require the collective gate (flag 19) to have been triggered first in production. In the test environment, the controllers are directly accessible. **Test ports differ from production:** A10=5020, A11=5021, A12=5022 (production: all 502). A13 brain is on port 9100 in both.
+These flags require the collective gate (flag 19) to have been triggered first in production. **Bunker network (172.20.40.x) is NOT reachable from Kali.** Access is via the splice landing box (A9 at 172.20.40.5).
+
+For testing, exec into A9: `sudo docker exec -it a9-splice /bin/sh`
+From A9, the controllers are at their production ports:
+- A10 tail: **172.20.40.10:502**
+- A11 leg: **172.20.40.11:502**
+- A12 arms: **172.20.40.12:502**
+- A13 brain: **172.20.40.50:9100**
 
 ---
 
@@ -217,14 +224,16 @@ These flags require the collective gate (flag 19) to have been triggered first i
 
 ## Smoketest Results -- 2026-04-10
 
-| Flag | Name | Expected | Got | Result | Notes |
-|------|------|----------|-----|--------|-------|
-| 31 | OT Network Enumeration | `FLAG{2e8c0a5d7f3b1946}` | (static) | PASS | devid returns correct model numbers for all 3 controllers; scan_results.txt present in /tmp/a9-content/ (not /root/) |
-| 32 | Tail Motor Controller Data | `FLAG{9b3e7c1d0f5a2846}` | `FLAG{9b3e7c1d0f5a2846}` | PASS | Diagnostic mode (reg 20=3) and serial challenge (reg 99=482) work correctly |
-| 33 | Leg Joint Actuator Data | `FLAG{c7a1e3f9d0b52864}` | `FLAG{c7a1e3f9d0b52864}` | PASS | Gait sequence 0-1-2-0 triggers calibration code (got 4783); code->reg 99 unlocks flag |
-| 34 | Arms Controller / Weapons Integration | `FLAG{f0d8b2e6a4c71935}` | `FLAG{f0d8b2e6a4c71935}` | PASS | Coil 50 enable, nonce XOR 2847 challenge-response works; confirmation=1 |
-| 35 | Brain Access | `FLAG{8d2f5a0e7c9b3146}` | `FLAG{8d2f5a0e7c9b3146}` | PASS | Binary handshake, vasik auth with token, `status` command returns flag |
-| 36 | Combat System Seized | `FLAG{0b7e3d9a1f6c4258}` | `FLAG{0b7e3d9a1f6c4258}` | PASS | `override 7741-MN07-AL42` accepted; full victory banner displayed |
+Tested from A9 splice via `gcloud compute ssh ctf-range-builder ... --command='sudo docker exec a9-splice <command>'`.
+Controllers reached at production IPs: A10=172.20.40.10:502, A11=172.20.40.11:502, A12=172.20.40.12:502, A13=172.20.40.50:9100.
 
-**Summary:** 6/6 PASS. All bunker flags operational on test range.
+| Flag | Name | Expected | Observed | Result |
+|------|------|----------|----------|--------|
+| 31 | OT Network Enumeration | `FLAG{2e8c0a5d7f3b1946}` | scan_results.txt present; devid returns AHS-TAIL-7741, AHS-LEG-MN07, AHS-ARM-AL42 (all correct); static flag | **PASS** |
+| 32 | Tail Motor Controller Data | `FLAG{9b3e7c1d0f5a2846}` | `FLAG{9b3e7c1d0f5a2846}` | **PASS** |
+| 33 | Leg Joint Actuator Data | `FLAG{c7a1e3f9d0b52864}` | `FLAG{c7a1e3f9d0b52864}` (calibration code: 4783) | **PASS** |
+| 34 | Arms Controller / Weapons Integration | `FLAG{f0d8b2e6a4c71935}` | `FLAG{f0d8b2e6a4c71935}` (nonce XOR 2847, confirmed=1) | **PASS** |
+| 35 | Mecha-Godzilla Brain Access | `FLAG{8d2f5a0e7c9b3146}` | `FLAG{8d2f5a0e7c9b3146}` (handshake OK, auth OK, status shows flag) | **PASS** |
+| 36 | Combat System Seized | `FLAG{0b7e3d9a1f6c4258}` | `FLAG{0b7e3d9a1f6c4258}` (override 7741-MN07-AL42 accepted) | **PASS** |
 
+**Overall: 6/6 PASS**

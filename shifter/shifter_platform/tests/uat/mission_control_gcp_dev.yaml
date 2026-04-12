@@ -1,0 +1,514 @@
+suite:
+  id: mission-control-gcp-dev
+  title: Mission Control GCP Dev UAT
+  version: 1
+  intent: >
+    Audit the live GCP Mission Control surface from the user point of view and
+    collect enough evidence to triage failures without rerunning the entire
+    suite.
+  base_url: https://shifter.keplerops.com
+  environment: gcp-dev
+  source_of_truth_doc: shifter/shifter_platform/documentation/docs/technical/testing/mission-control-gcp-dev-uat.md
+
+actors:
+  - id: public_user
+    description: Unauthenticated internet user.
+  - id: corporate_user
+    description: Palo Alto Networks user with a valid Identity Platform account and MFA.
+  - id: bootstrap_admin
+    description: Seeded staff and superuser account for the environment.
+  - id: ctf_participant
+    description: Participant entering through a valid invite magic link.
+
+required_inputs:
+  - name: corporate_user_email
+    required: true
+  - name: corporate_user_password
+    required: true
+  - name: corporate_user_totp_seed
+    required: true
+  - name: bootstrap_admin_email
+    required: true
+  - name: bootstrap_admin_password
+    required: true
+  - name: bootstrap_admin_totp_seed
+    required: true
+  - name: participant_invite_token
+    required: true
+  - name: launch_agent_name
+    required: true
+  - name: launch_scenario_name
+    required: true
+
+tooling:
+  browser:
+    preferred: playwright
+    capabilities:
+      - screenshots
+      - network_capture
+      - redirects
+      - cookie_and_storage_inspection
+  cli:
+    supported:
+      - curl
+      - gcloud
+      - kubectl
+      - gh
+
+global_evidence:
+  - type: screenshot
+    name: final_state
+  - type: browser_network_log
+    name: network_trace
+  - type: http
+    name: final_status_and_url
+  - type: command
+    name: kubectl_get_pods
+    command: kubectl get pods -n shifter-platform -o wide
+
+phases:
+  - id: preflight
+    cases:
+      - id: preflight.latest_deploy_green
+        title: Latest gcp-dev deploy concluded successfully
+        actor: bootstrap_admin
+        surface: control_plane
+        preconditions: []
+        steps:
+          - use gh to inspect the latest gcp-dev workflow run
+          - confirm validate and deploy jobs both concluded successfully
+        assertions:
+          - latest run conclusion is success
+        evidence:
+          - gh_run_view_json
+        adjacent_checks:
+          - fetch failing job logs if the latest run is not green
+
+      - id: preflight.platform_workloads_ready
+        title: Shifter platform workloads are ready
+        actor: bootstrap_admin
+        surface: control_plane
+        preconditions: []
+        steps:
+          - run kubectl get pods in shifter-platform namespace
+          - inspect deployments for portal, workers, guacd, guacamole client
+        assertions:
+          - no required workload is crashlooping, pending, or unready
+        evidence:
+          - kubectl_get_pods
+          - kubectl_get_deployments
+        adjacent_checks:
+          - portal logs
+          - guacamole client logs
+          - guacd logs
+
+      - id: preflight.public_root_healthy
+        title: Public root responds over HTTPS
+        actor: public_user
+        surface: edge
+        preconditions: []
+        steps:
+          - GET /
+        assertions:
+          - status is 200
+          - response is over HTTPS
+        evidence:
+          - curl_headers
+          - screenshot
+        adjacent_checks:
+          - ingress description
+          - backend health
+
+  - id: public_edge
+    cases:
+      - id: public.login_page_reachable
+        title: Public login page is reachable
+        actor: public_user
+        surface: auth
+        preconditions: []
+        steps:
+          - open /login/
+        assertions:
+          - status is 200
+          - page contains element #firebaseui-auth-container
+          - page does not contain a Django username/password form
+        evidence:
+          - screenshot
+          - dom_snapshot
+        adjacent_checks:
+          - browser console errors
+          - portal logs
+
+      - id: public.dev_login_blocked
+        title: Debug login page is not publicly accessible
+        actor: public_user
+        surface: auth
+        preconditions: []
+        steps:
+          - GET /dev-login/
+        assertions:
+          - status is 403
+        evidence:
+          - curl_headers
+          - screenshot
+        adjacent_checks:
+          - validate no redirect to a working debug login page occurs
+
+      - id: public.legacy_oidc_redirects
+        title: Legacy OIDC authenticate route redirects to login on GCP
+        actor: public_user
+        surface: auth
+        preconditions: []
+        steps:
+          - GET /oidc/authenticate/
+        assertions:
+          - status is a redirect
+          - redirect target is /login/
+        evidence:
+          - curl_headers
+        adjacent_checks:
+          - confirm no mozilla-django-oidc route is exposed on GCP
+
+      - id: public.guacamole_entry_responsive
+        title: Public Guacamole entrypoint responds cleanly
+        actor: public_user
+        surface: edge
+        preconditions: []
+        steps:
+          - GET /guacamole/
+        assertions:
+          - response is not 5xx
+          - response does not expose stack traces or raw container errors
+        evidence:
+          - curl_headers
+          - screenshot
+        adjacent_checks:
+          - guacamole client logs
+          - guacd logs
+
+  - id: corporate_identity
+    cases:
+      - id: corporate.registration_rejects_non_pan_email
+        title: Corporate registration blocks non-paloaltonetworks.com email
+        actor: public_user
+        surface: auth
+        preconditions: []
+        steps:
+          - open /login/
+          - attempt registration with a non-allowed domain through the provider UI
+        assertions:
+          - registration is rejected before a Shifter session is created
+        evidence:
+          - screenshot
+          - browser_network_log
+        adjacent_checks:
+          - identity blocking function status
+          - portal logs around session exchange
+
+      - id: corporate.login_requires_verified_email_and_mfa
+        title: Corporate sign-in requires verified email and MFA
+        actor: corporate_user
+        surface: auth
+        preconditions:
+          - corporate fixture account exists
+          - fixture account is email-verified
+          - fixture account has TOTP enrolled
+        steps:
+          - open /login/
+          - complete provider-backed sign-in
+          - complete TOTP challenge
+        assertions:
+          - no Shifter session is created before MFA completion
+          - final landing page is /mission-control/
+        evidence:
+          - screenshot_before_mfa
+          - screenshot_after_login
+          - final_url
+        adjacent_checks:
+          - portal logs around identity token exchange
+          - browser storage/session inspection
+
+      - id: corporate.bootstrap_admin_has_admin_access
+        title: Bootstrap admin can reach Django admin and Mission Control
+        actor: bootstrap_admin
+        surface: auth
+        preconditions:
+          - bootstrap admin fixture exists
+        steps:
+          - sign in as bootstrap admin
+          - open /mission-control/
+          - open /admin/
+        assertions:
+          - both pages return 200
+          - user is not redirected back to login
+        evidence:
+          - screenshot_mission_control
+          - screenshot_admin
+        adjacent_checks:
+          - portal logs
+          - user role flags in the database if reachable
+
+  - id: mission_control_shell
+    cases:
+      - id: mc.dashboard_loads
+        title: Dashboard loads and exposes launch controls
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - open /mission-control/
+        assertions:
+          - page contains title Ranges
+          - page contains #launch-tile
+          - page contains #scenario-dropdown
+          - page contains #launch-btn
+        evidence:
+          - screenshot
+          - dom_snapshot
+        adjacent_checks:
+          - range status API response
+
+      - id: mc.agents_page_loads
+        title: Agents page loads
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - open /mission-control/agents/
+        assertions:
+          - page contains title Agents
+          - page contains #upload-form
+        evidence:
+          - screenshot
+        adjacent_checks:
+          - GET /mission-control/api/agents/
+
+      - id: mc.files_page_loads
+        title: Files page loads
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - open /mission-control/files/
+        assertions:
+          - page contains title Files
+          - page contains #upload-form
+        evidence:
+          - screenshot
+        adjacent_checks:
+          - GET /mission-control/api/scripts/
+
+      - id: mc.credentials_page_loads
+        title: Credentials page loads
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap_admin session
+        steps:
+          - open /mission-control/credentials/
+        assertions:
+          - page contains title Credentials
+        evidence:
+          - screenshot
+        adjacent_checks:
+          - credential create/delete API with fixture data if available
+
+      - id: mc.settings_page_loads
+        title: Settings page loads
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - open /mission-control/settings/
+        assertions:
+          - page contains title Settings
+        evidence:
+          - screenshot
+        adjacent_checks:
+          - verify account actions render without 5xx responses
+
+      - id: mc.help_page_loads
+        title: Help page loads
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - open /mission-control/help/
+        assertions:
+          - page contains title Help
+        evidence:
+          - screenshot
+        adjacent_checks: []
+
+      - id: mc.walkthrough_page_loads
+        title: Walkthrough page loads
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - open /mission-control/walkthrough/
+        assertions:
+          - page renders without 5xx
+          - page contains expected walkthrough content
+        evidence:
+          - screenshot
+        adjacent_checks: []
+
+  - id: mission_control_api
+    cases:
+      - id: api.agents_list
+        title: Agents API returns authenticated response
+        actor: bootstrap_admin
+        surface: mission_control_api
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - GET /mission-control/api/agents/
+        assertions:
+          - status is 200
+          - payload is valid JSON
+        evidence:
+          - response_body
+        adjacent_checks:
+          - agents page DOM state
+
+      - id: api.scenarios_list
+        title: Scenarios API returns authenticated response
+        actor: bootstrap_admin
+        surface: mission_control_api
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - GET /mission-control/api/scenarios/
+        assertions:
+          - status is 200
+          - payload is valid JSON
+        evidence:
+          - response_body
+        adjacent_checks:
+          - dashboard launch dropdown state
+
+      - id: api.range_status
+        title: Range status API returns authenticated response
+        actor: bootstrap_admin
+        surface: mission_control_api
+        preconditions:
+          - authenticated bootstrap admin session
+        steps:
+          - GET /mission-control/api/range/
+        assertions:
+          - status is 200
+          - payload is valid JSON
+        evidence:
+          - response_body
+        adjacent_checks:
+          - dashboard state
+
+      - id: api.unauthenticated_access_rejected
+        title: Mission Control APIs reject unauthenticated access
+        actor: public_user
+        surface: mission_control_api
+        preconditions: []
+        steps:
+          - GET /mission-control/api/agents/ from a fresh unauthenticated context
+        assertions:
+          - request is rejected cleanly
+          - response is not a raw 500 stack trace
+        evidence:
+          - response_headers
+          - response_body
+        adjacent_checks:
+          - auth middleware behavior
+
+  - id: range_lifecycle
+    cases:
+      - id: range.launch_and_destroy
+        title: Launch and destroy a range from Mission Control
+        actor: bootstrap_admin
+        surface: mission_control_ui
+        preconditions:
+          - authenticated bootstrap admin session
+          - known-good agent exists
+          - known-good scenario exists
+        steps:
+          - launch a range from the dashboard using fixture agent and scenario
+          - wait for status progression to ready
+          - open /mission-control/terminal/
+          - fetch Guacamole SSH or RDP URL if the scenario exposes one
+          - destroy the range from Mission Control
+        assertions:
+          - launch request succeeds
+          - final ready state is visible in UI and API
+          - terminal page becomes reachable
+          - destroy request succeeds
+          - final no-range state is visible in UI and API
+        evidence:
+          - screenshot_ready_state
+          - screenshot_terminal
+          - range_api_payloads
+        adjacent_checks:
+          - portal logs
+          - provisioner logs
+          - websocket status behavior
+
+      - id: range.pause_resume_fail_closed
+        title: Unsupported pause and resume behavior is explicit on GCP
+        actor: bootstrap_admin
+        surface: mission_control_api
+        preconditions:
+          - authenticated bootstrap admin session
+          - range exists if the UI exposes pause or resume controls
+        steps:
+          - invoke pause or resume only if the feature is exposed
+        assertions:
+          - operation does not silently claim success when unsupported
+          - range state is not falsely transitioned
+        evidence:
+          - response_body
+          - screenshot_if_ui_control_exists
+        adjacent_checks:
+          - range status API before and after
+
+  - id: ctf_participant
+    cases:
+      - id: ctf.magic_link_login
+        title: Participant magic link authenticates and lands on Mission Control
+        actor: ctf_participant
+        surface: auth
+        preconditions:
+          - valid participant invite token exists
+        steps:
+          - open /ctf/register/?token=<participant_invite_token>
+        assertions:
+          - request succeeds
+          - user is authenticated through the magic-link flow
+          - final landing page is /mission-control/
+        evidence:
+          - screenshot
+          - final_url
+        adjacent_checks:
+          - participant record validity
+          - CTF auth logs
+
+      - id: ctf.magic_link_negative_cases
+        title: Missing, invalid, and expired invite tokens fail cleanly
+        actor: public_user
+        surface: auth
+        preconditions: []
+        steps:
+          - open /ctf/register/ without token
+          - open /ctf/register/?token=invalid
+          - open /ctf/register/?token=<expired_fixture_token> if fixture is available
+        assertions:
+          - each negative case returns 400
+          - no negative case creates a user session
+        evidence:
+          - response_bodies
+        adjacent_checks:
+          - CTF token validation logs

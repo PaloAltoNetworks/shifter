@@ -11,6 +11,15 @@ Presentation layer. DRF API, Django views, WebSocket consumers.
 
 Mission Control contains no business logic. It validates HTTP input, calls service functions, and formats responses.
 
+## Operational Verification
+
+The architecture view here is complemented by a deployed-system audit protocol:
+
+- [Mission Control GCP Dev UAT](../testing/mission-control-gcp-dev-uat)
+
+That protocol verifies the live user-visible Mission Control surface, identity
+entrypoints, range lifecycle, and participant magic-link flow.
+
 ## WebSocket Consumers
 
 ### SSHConsumer

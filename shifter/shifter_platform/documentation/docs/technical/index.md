@@ -37,6 +37,11 @@ Platform architecture, infrastructure, and development documentation.
 - [Principles](dev/principles) - Engineering philosophy
 - [ADR Enforcement](dev/adr-enforcement) - Architecture guardrails and policy checks
 
+## Testing
+
+- [Testing Overview](testing/) - Operational verification, UAT protocols, and future harness inputs
+- [Mission Control GCP Dev UAT](testing/mission-control-gcp-dev-uat) - Human-readable audit protocol for the live GCP surface
+
 ## Planning & Notes
 
 Internal planning documents and development notes.

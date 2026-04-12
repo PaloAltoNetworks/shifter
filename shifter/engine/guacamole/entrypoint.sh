@@ -54,5 +54,9 @@ fi
 
 echo "Starting Guacamole..."
 
+# Ensure the configured Guacamole home exists before the upstream startup
+# script copies bundled config and extensions into place.
+mkdir -p "${GUACAMOLE_HOME:-/home/guacamole/.guacamole}"
+
 # Execute the original CMD from base image (passed as arguments when ENTRYPOINT is set)
 exec "$@"

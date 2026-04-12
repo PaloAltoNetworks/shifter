@@ -39,6 +39,7 @@ Flag 34 unlock:
 """
 
 import logging
+import os
 import time
 import threading
 import random
@@ -222,12 +223,13 @@ def main():
     context = build_context()
     identity = build_identity()
 
-    log.info("A12 Arms Controller starting on port 5022")
+    port = int(os.environ.get("MODBUS_PORT", "502"))
+    log.info("A12 Arms Controller starting on port %d", port)
     log.info("  Vendor: %s | Model: %s | Serial: %s", VENDOR, MODEL, SERIAL)
     log.info("  XOR key: %d (PO number from A4)", XOR_KEY)
     log.info("  Nonce period: %ds", NONCE_PERIOD_S)
 
-    StartTcpServer(context=context, identity=identity, address=("0.0.0.0", 5022))
+    StartTcpServer(context=context, identity=identity, address=("0.0.0.0", port))
 
 
 if __name__ == "__main__":

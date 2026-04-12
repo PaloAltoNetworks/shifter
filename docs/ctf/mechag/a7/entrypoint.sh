@@ -1,8 +1,9 @@
 #!/bin/sh
 # Start Gitea in background, then run bootstrap once data is ready
 
-# Gitea config
-mkdir -p /data/gitea/conf
+# Ensure data dirs exist with correct ownership
+mkdir -p /data/gitea/conf /data/git/repositories
+chown -R git:git /data
 cat > /data/gitea/conf/app.ini << 'EOF'
 [server]
 HTTP_PORT = 3000
@@ -30,13 +31,14 @@ EOF
 # Extract bare repos
 mkdir -p /app/repos
 cd /app/repos && tar xzf /app/bare-repos.tar.gz
+chown -R git:git /app/repos
 
-# Start Gitea
-/usr/local/bin/gitea web --config /data/gitea/conf/app.ini &
+# Start Gitea as git user
+su -s /bin/sh git -c "/usr/local/bin/gitea web --config /data/gitea/conf/app.ini" &
 GITEA_PID=$!
 
 # Wait for Gitea to be ready, then bootstrap
-sleep 5
+sleep 8
 GITEA_BIN=/usr/local/bin/gitea \
 GITEA_WORK_DIR=/data/gitea \
 GITEA_URL=http://localhost:3000 \

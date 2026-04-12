@@ -27,6 +27,7 @@ Flag 32 unlock:
 """
 
 import logging
+import os
 import time
 import threading
 
@@ -172,7 +173,7 @@ def main():
     log.info("  Vendor: %s | Model: %s | Serial: %s", VENDOR, MODEL, SERIAL)
     log.info("  Flag unlock: reg 20=3, then reg 99=%d", SERIAL_CHALLENGE)
 
-    port = 5020  # Use 5020 for testing; 502 in production (requires root)
+    port = int(os.environ.get("MODBUS_PORT", "502"))
     StartTcpServer(context=context, identity=identity, address=("0.0.0.0", port))
 
 

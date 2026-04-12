@@ -13,7 +13,7 @@ Current scope:
   - Cloud Armor attachment on the public portal backend
   - Cloud Armor attachment on the public Guacamole backend
 - generated runtime values derived from Terraform outputs and bootstrap-owned secret fetches
-- secure portal runtime contract for the GCP Identity Platform auth path
+- secure portal runtime contract for the GCP Identity Platform + FirebaseUI auth path
 - generated range-network env contract for provisioner jobs
 - bootstrap-driven rollout via `helm upgrade --install`
 
@@ -28,6 +28,8 @@ Deployment model:
 - Bootstrap renders a final generated values file from live Terraform outputs and Secret Manager payloads, then applies the chart.
 - GCP bootstrap now always renders the secure runtime path. It no longer silently falls back to the public IP/debug/dev-login path.
 - Runtime config can elevate the bootstrap operator through `PLATFORM_BOOTSTRAP_STAFF_EMAILS` and `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` without committing identities to the chart.
+- GCP `/login/` is a thin browser shell that hosts Identity Platform's FirebaseUI widget. Django only exchanges a verified Google identity token for an app session; it does not process portal credentials server-side.
+- Public `/oidc/authenticate/` requests on GCP are redirected to `/login/` so the AWS OIDC entrypoint remains stable without exposing a dead GCP URL.
 
 Security posture:
 

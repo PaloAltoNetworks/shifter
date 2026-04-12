@@ -25,6 +25,11 @@ def _env_csv(name: str) -> list[str]:
     return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 
+def _env_list(name: str) -> list[str]:
+    """Parse comma-separated environment variables into stripped string lists."""
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
 # Security
 _test_secret_key_default = "django-tests-secret-key" if IS_TEST_RUN else None
 
@@ -243,7 +248,9 @@ OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "test-oidc-client-id" if
 OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "test-oidc-client-secret" if IS_TEST_RUN else "")
 IDENTITY_PLATFORM_API_KEY = os.environ.get("IDENTITY_PLATFORM_API_KEY", "")
 IDENTITY_PLATFORM_PROJECT_ID = os.environ.get("IDENTITY_PLATFORM_PROJECT_ID", "")
+IDENTITY_PLATFORM_AUTH_DOMAIN = os.environ.get("IDENTITY_PLATFORM_AUTH_DOMAIN", "")
 IDENTITY_ALLOWED_EMAIL_DOMAIN = os.environ.get("IDENTITY_ALLOWED_EMAIL_DOMAIN", "paloaltonetworks.com")
+IDENTITY_ALLOWED_EMAILS = _env_csv("IDENTITY_ALLOWED_EMAILS")
 IDENTITY_PLATFORM_ISSUER = os.environ.get("IDENTITY_PLATFORM_ISSUER", "Shifter")
 IDENTITY_PLATFORM_TOTP_DISPLAY_NAME = os.environ.get(
     "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
@@ -516,6 +523,8 @@ REST_FRAMEWORK = {
 # ------------------------------------------------------------------------------
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+DEV_LOGIN_ALLOWED_HOSTS = _env_list("DEV_LOGIN_ALLOWED_HOSTS") or ["localhost", "127.0.0.1", "[::1]"]
+DEV_LOGIN_ALLOWED_CIDRS = _env_list("DEV_LOGIN_ALLOWED_CIDRS")
 
 # ------------------------------------------------------------------------------
 # Logging Configuration

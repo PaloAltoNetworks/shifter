@@ -4,19 +4,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shifter Login</title>
+    <title>Shifter Access</title>
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="stylesheet" href="https://cdn.firebase.com/libs/firebaseui/6.1.0/firebaseui.css">
     <style>
         :root {
-            --bg: #111827;
-            --panel: #1f2937;
+            --bg: #0f172a;
+            --panel: #111827;
             --panel-border: #334155;
             --text: #f8fafc;
             --muted: #cbd5e1;
             --accent: #0ea5e9;
             --accent-hover: #0284c7;
+            --secondary: #1e293b;
+            --secondary-hover: #334155;
             --error-bg: rgba(239, 68, 68, 0.14);
             --error-border: rgba(248, 113, 113, 0.45);
+            --success-bg: rgba(34, 197, 94, 0.16);
+            --success-border: rgba(74, 222, 128, 0.45);
         }
 
         * { box-sizing: border-box; }
@@ -35,7 +40,7 @@
         }
 
         .panel {
-            width: min(100%, 32rem);
+            width: min(100%, 38rem);
             background: var(--panel);
             border: 1px solid var(--panel-border);
             border-radius: 16px;
@@ -45,23 +50,46 @@
 
         h1 { margin: 0 0 0.75rem; font-size: 1.75rem; }
         p { margin: 0 0 1rem; color: var(--muted); line-height: 1.5; }
-        .error {
+        code {
+            background: rgba(15, 23, 42, 0.9);
+            padding: 0.2rem 0.35rem;
+            border-radius: 6px;
+        }
+
+        .banner {
+            display: none;
             margin-bottom: 1rem;
             padding: 0.9rem 1rem;
             border-radius: 10px;
+            border: 1px solid transparent;
+        }
+
+        .banner.visible { display: block; }
+        .banner.error {
             background: var(--error-bg);
-            border: 1px solid var(--error-border);
+            border-color: var(--error-border);
+        }
+
+        .banner.success {
+            background: var(--success-bg);
+            border-color: var(--success-border);
+        }
+
+        .section { display: none; }
+        .section.visible { display: block; }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
         }
 
         label {
-            display: block;
-            margin: 0 0 0.4rem;
             font-size: 0.95rem;
             font-weight: 600;
         }
 
-        input[type="email"],
-        input[type="password"],
         input[type="text"] {
             width: 100%;
             border-radius: 10px;
@@ -70,7 +98,6 @@
             color: var(--text);
             padding: 0.85rem 1rem;
             font-size: 1rem;
-            margin-bottom: 1rem;
         }
 
         button {
@@ -86,73 +113,138 @@
         }
 
         button:hover { background: var(--accent-hover); }
+
+        .secondary-button {
+            background: var(--secondary);
+        }
+
+        .secondary-button:hover {
+            background: var(--secondary-hover);
+        }
+
         .meta {
             margin-top: 1rem;
             font-size: 0.92rem;
             color: var(--muted);
         }
-        code {
-            background: rgba(15, 23, 42, 0.9);
-            padding: 0.2rem 0.35rem;
-            border-radius: 6px;
+
+        .secret-block {
+            margin: 1rem 0;
+            padding: 0.85rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--panel-border);
+            background: rgba(15, 23, 42, 0.75);
+            word-break: break-word;
         }
-        .secret {
-            overflow-wrap: anywhere;
-            font-family: monospace;
-            font-size: 0.95rem;
+
+        #firebaseui-auth-container {
+            min-height: 12rem;
+        }
+
+        .firebaseui-container {
+            background: transparent;
+            color: var(--text);
+            box-shadow: none;
+            max-width: 100%;
+        }
+
+        .firebaseui-card-content,
+        .firebaseui-card-header,
+        .firebaseui-card-footer {
+            background: transparent;
+        }
+
+        .firebaseui-title,
+        .firebaseui-subtitle,
+        .firebaseui-text,
+        .firebaseui-label,
+        .firebaseui-input,
+        .firebaseui-link {
+            color: var(--text);
+        }
+
+        .firebaseui-textfield.mdl-textfield .mdl-textfield__label,
+        .firebaseui-textfield.mdl-textfield .firebaseui-label {
+            color: var(--muted);
+        }
+
+        .firebaseui-button {
+            border-radius: 10px;
+            text-transform: none;
+            font-weight: 600;
+        }
+
+        #identity-auth-loader {
+            color: var(--muted);
+            margin-bottom: 1rem;
+        }
+
+        .help {
+            margin-top: 1rem;
+            font-size: 0.92rem;
+            color: var(--muted);
         }
     </style>
 </head>
 <body>
     <main class="panel">
-        {% if error_message %}
-            <div class="error">{{ error_message }}</div>
-        {% endif %}
+        <div id="auth-banner" class="banner" role="alert"></div>
 
-        {% if pending_enrollment %}
+        <section id="identity-auth-section" class="section visible">
+            <h1>Access Shifter</h1>
+            <p>
+                Corporate access is restricted to <code>@{{ allowed_email_domain }}</code>. Sign-in and registration use
+                Google Identity Platform's prebuilt web UI. Shifter only creates an application session after the
+                provider confirms the identity token, verified email, and enrolled MFA state.
+            </p>
+            <div id="identity-auth-loader">Loading authentication…</div>
+            <div id="firebaseui-auth-container"></div>
+            <p class="help">
+                CTF participant access still uses range invitation magic links and does not go through this page.
+            </p>
+        </section>
+
+        <section id="identity-verify-email-section" class="section">
+            <h1>Verify your email</h1>
+            <p id="identity-verify-email-copy"></p>
+            <button id="identity-back-to-login" class="secondary-button" type="button">Back to sign in</button>
+        </section>
+
+        <section id="identity-totp-enrollment-section" class="section">
             <h1>Set up multi-factor authentication</h1>
             <p>
-                Add this account to your authenticator app, then enter the current verification code to finish sign-in.
+                Add the secret below to your authenticator app, then enter the current six-digit code to finish sign-in.
             </p>
-            <p class="meta">
-                Corporate login is restricted to <code>@{{ allowed_email_domain }}</code>.
-            </p>
-            <p class="meta"><strong>Secret:</strong> <span class="secret">{{ pending_enrollment.shared_secret_key }}</span></p>
-            <p class="meta"><strong>URI:</strong> <span class="secret">{{ pending_enrollment.otpauth_uri }}</span></p>
-            <form method="post">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="complete_totp_enrollment">
-                <label for="verification_code">Verification code</label>
-                <input id="verification_code" name="verification_code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
-                <button type="submit">Complete setup</button>
-            </form>
-        {% elif pending_signin %}
+            <div class="meta">
+                <strong>Authenticator URI</strong>
+                <div id="identity-totp-qr-url" class="secret-block"></div>
+            </div>
+            <div class="meta">
+                <strong>Secret key</strong>
+                <div id="identity-totp-secret" class="secret-block"></div>
+            </div>
+            <div class="field">
+                <label for="identity-totp-enrollment-code">Verification code</label>
+                <input id="identity-totp-enrollment-code" type="text" inputmode="numeric" autocomplete="one-time-code">
+            </div>
+            <button id="identity-totp-enrollment-submit" type="button">Complete MFA setup</button>
+        </section>
+
+        <section id="identity-totp-signin-section" class="section">
             <h1>Enter your authentication code</h1>
-            <p>
-                Enter the code from your authenticator app to finish signing in.
-            </p>
-            <form method="post">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="complete_totp_sign_in">
-                <label for="verification_code">Verification code</label>
-                <input id="verification_code" name="verification_code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
-                <button type="submit">Verify and sign in</button>
-            </form>
-        {% else %}
-            <h1>Sign in to Shifter</h1>
-            <p>
-                Use your corporate <code>@{{ allowed_email_domain }}</code> account. You will be required to enroll a TOTP authenticator on first sign-in.
-            </p>
-            <form method="post">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="password_sign_in">
-                <label for="email">Email</label>
-                <input id="email" name="email" type="email" autocomplete="username" required>
-                <label for="password">Password</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" required>
-                <button type="submit">Sign in</button>
-            </form>
-        {% endif %}
+            <p>Enter the code from your authenticator app to finish signing in.</p>
+            <div class="field">
+                <label for="identity-totp-signin-code">Verification code</label>
+                <input id="identity-totp-signin-code" type="text" inputmode="numeric" autocomplete="one-time-code">
+            </div>
+            <button id="identity-totp-signin-submit" type="button">Verify and sign in</button>
+        </section>
     </main>
+
+    {{ identity_platform_config_json|json_script:"identity-platform-config" }}
+    <script src="https://www.gstatic.com/firebasejs/12.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.12.0/firebase-auth-compat.js"></script>
+    <script src="https://cdn.firebase.com/libs/firebaseui/6.1.0/firebaseui.js"></script>
+    <script src="{% static 'js/identity_platform_auth.js' %}"></script>
 </body>
 </html>

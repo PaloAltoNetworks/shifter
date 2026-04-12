@@ -148,6 +148,7 @@ Push to main      → prod (full deploy)
 - That bootstrap path now fails closed unless GCP ingress and control-plane security prerequisites are present: `public_hostname`, `enable_managed_tls = true`, and `gke_master_authorized_cidrs`
 - The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults
 - The secure GCP bootstrap path does not preserve the old IP/debug fallback. It expects the secure Identity Platform/TLS posture to be configured before deployment
+- The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
 - New multi-cloud work should enter through the shared cloud adapter layers rather than adding provider-specific calls directly in domain services
 
 ## Self-Hosted Runner
@@ -199,5 +200,5 @@ Terraform plans are also posted as PR comments for easy review.
 - Review `terraform output -json` and the generated `platform-runtime.generated.env` values in the workflow logs
 - Review the generated Helm values, ingress resources, and `BackendConfig` resources if hostname, DNS, certificate, or Cloud Armor behavior is wrong
 - Review the `guacamole-runtime` Secret sync step if the Guacamole client pods stay in `CreateContainerConfigError`
-- If the portal auth path is wrong, verify the Terraform outputs expose `public_hostname`, `managed_tls_enabled=true`, that Identity Platform was provisioned successfully, that the bootstrap operator credentials were supplied, and that the managed certificate reaches `Active`
+- If the portal auth path is wrong, verify the Terraform outputs expose `public_hostname`, `managed_tls_enabled=true`, that Identity Platform was provisioned successfully, that the blocking function and MFA configuration are present, that the bootstrap operator credentials were supplied, and that the managed certificate reaches `Active`
 - Check `kubectl rollout status` output for the specific control-plane deployment that stalled

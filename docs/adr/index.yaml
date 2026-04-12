@@ -247,7 +247,7 @@
     "title": "AWS and GCP keep provider-specific identity stacks behind a shared auth seam",
     "status": "accepted",
     "scope": "repository",
-    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with first-party email-password plus TOTP MFA, domain allowlisting, and bootstrap-owned first-operator seeding. The Django app selects the provider through configuration without changing shared business workflows.",
+    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with FirebaseUI/browser-side Google auth flows, domain allowlisting, required email verification, required TOTP MFA before app-session creation, and bootstrap-owned first-operator seeding. The Django app selects the provider through configuration without changing shared business workflows.",
     "rules": [
       {
         "id": "ADR-009-R1",
@@ -263,6 +263,11 @@
         "id": "ADR-009-R3",
         "description": "Bootstrap operator privilege elevation is runtime-configured and must not hardcode identities in committed source.",
         "checks": []
+      },
+      {
+        "id": "ADR-009-R4",
+        "description": "GCP portal auth must not move password handling into Django. The app may host a thin browser auth shell around provider UI components such as FirebaseUI, but credential collection stays in Identity Platform browser flows and Django only performs verified-token session exchange plus app-specific gate checks.",
+        "checks": []
       }
     ],
     "exceptions": [],
@@ -272,6 +277,8 @@
       "shifter/shifter_platform/config/urls.py",
       "shifter/shifter_platform/config/views.py",
       "shifter/shifter_platform/config/identity_platform.py",
+      "shifter/shifter_platform/static/js/identity_platform_auth.js",
+      "shifter/shifter_platform/static/js/identity_platform_logout.js",
       "scripts/bootstrap/deploy.py",
       "scripts/gcp/render_runtime_env.py",
       "platform/terraform/gcp/modules/platform-core/main.tf",

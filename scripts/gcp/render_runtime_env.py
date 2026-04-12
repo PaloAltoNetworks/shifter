@@ -73,6 +73,7 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
 
     bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))
     bootstrap_superuser_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"))
+    identity_allowed_emails = ",".join(_csv_env("IDENTITY_ALLOWED_EMAILS"))
 
     values = {
         "STORAGE_BUCKET_NAME": assets_bucket,
@@ -110,6 +111,7 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "AUTH_PROVIDER": "identity_platform" if secure_portal_mode else "oidc",
         "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
         "IDENTITY_PLATFORM_PROJECT_ID": identity_platform_project_id,
+        "IDENTITY_PLATFORM_AUTH_DOMAIN": f"{identity_platform_project_id}.firebaseapp.com",
         "IDENTITY_ALLOWED_EMAIL_DOMAIN": "paloaltonetworks.com",
         "IDENTITY_PLATFORM_ISSUER": "Shifter",
         "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME": "Shifter Authenticator",
@@ -129,6 +131,8 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         values["PLATFORM_BOOTSTRAP_STAFF_EMAILS"] = bootstrap_staff_emails
     if bootstrap_superuser_emails:
         values["PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"] = bootstrap_superuser_emails
+    if identity_allowed_emails:
+        values["IDENTITY_ALLOWED_EMAILS"] = identity_allowed_emails
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 

@@ -2341,6 +2341,7 @@ class TestGcpPlatformCoreContracts:
 
         assert 'resource "google_cloudfunctions2_function" "identity_platform_before_create"' in module_main
         assert 'resource "google_cloudfunctions_function" "identity_platform_before_create"' not in module_main
+        assert 'runtime     = "nodejs22"' in module_main
         assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
         assert 'role     = "roles/run.invoker"' in module_main
 

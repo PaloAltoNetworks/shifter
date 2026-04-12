@@ -305,7 +305,7 @@ resource "google_cloudfunctions2_function" "identity_platform_before_create" {
   description = "Identity Platform beforeCreate blocking function"
 
   build_config {
-    runtime     = "nodejs18"
+    runtime     = "nodejs22"
     entry_point = "beforeCreate"
 
     source {

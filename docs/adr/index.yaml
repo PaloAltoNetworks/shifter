@@ -127,7 +127,7 @@
       },
       {
         "id": "ADR-005-R2",
-        "description": "Deployment branch routing must keep AWS dev/prod behavior intact while isolating any new provider branch.",
+        "description": "Deployment branch routing must keep deploy branches provider-specific (`aws-dev`, `gcp-dev`) while reserving `dev` for validation-only integration and preserving AWS prod behavior on `main`.",
         "checks": []
       }
     ],

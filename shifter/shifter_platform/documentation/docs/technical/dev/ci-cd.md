@@ -17,11 +17,12 @@ All CI/CD runs through GitHub Actions. The main orchestrator is `deploy.yml`, wh
 | Event | What Runs |
 |-------|-----------|
 | PR to any branch | Quality + Plan (no apply) |
-| Push to `dev` | Quality + Plan + Apply to dev |
-| Push to `gcp-dev` | Quality + staged GCP validation workflow. The authoritative branch-local deploy path is `./scripts/bootstrap/deploy.py gdc-bootstrap`. |
+| Push to `dev` | Quality + AWS validation + GCP validation (no apply) |
+| Push to `aws-dev` | Quality + AWS deploy to dev |
+| Push to `gcp-dev` | Quality + GCP validation + GCP deploy |
 | Push to `main` | Quality + Plan + Apply to prod |
 
-PRs get Terraform plan comments. AWS merges trigger actual deployments. The GCP branch-local source of truth is currently the bootstrap flow, not the staged workflow alone.
+PRs get Terraform plan comments. `dev` is now the integration branch for cross-provider validation only. Actual dev deployments happen only from `aws-dev` and `gcp-dev`.
 
 ## Workflow Files
 
@@ -31,7 +32,7 @@ PRs get Terraform plan comments. AWS merges trigger actual deployments. The GCP 
 ├── _quality.yml            # Linting, tests, Checkov
 ├── _core.yml               # ECR repositories
 ├── _range.yml              # Range VPC
-├── _gcp-dev.yml            # GCP validation workflow being reconciled with the Helm/bootstrap cutover
+├── _gcp-dev.yml            # GCP validate/deploy workflow
 ├── _shifter-engine.yml     # Shifter Engine container
 └── _portal.yml             # Portal infra + deploy
 ```
@@ -128,28 +129,29 @@ After Terraform apply, portal deployment:
 ## Environment Detection
 
 ```
-Branch/Target     → Environment
-PR to dev         → dev
-PR to gcp-dev     → gcp-dev
-PR to main        → prod (plan only)
-Push to dev       → dev (full deploy)
-Push to gcp-dev   → gcp-dev (provider routed away from AWS jobs)
-Push to main      → prod (full deploy)
+Branch/Target     → Behavior
+PR to dev         → AWS plan + GCP validate
+PR to aws-dev     → AWS dev plan
+PR to gcp-dev     → GCP validate
+PR to main        → AWS prod plan
+Push to dev       → AWS plan + GCP validate
+Push to aws-dev   → AWS dev deploy
+Push to gcp-dev   → GCP deploy
+Push to main      → AWS prod deploy
 ```
 
 ## Provider Routing
 
-`deploy.yml` now resolves both an environment and a cloud provider:
+`deploy.yml` now resolves branch intent explicitly:
 
-- `dev` and `main` remain on the AWS deployment chain
-- `gcp-dev` is isolated so it cannot accidentally trigger the AWS `prod` path
-- Pull requests to `gcp-dev` run the dedicated GCP validation workflow for the staged GKE, Pub/Sub, GCS, Secret Manager, Cloud SQL, Memorystore, optional DNS, and control-plane manifests
-- The branch-local authoritative GCP bring-up path is currently `./scripts/bootstrap/deploy.py gdc-bootstrap`, not the older staged workflow logic
-- That bootstrap path now fails closed unless GCP ingress and control-plane security prerequisites are present: `public_hostname`, `enable_managed_tls = true`, and `gke_master_authorized_cidrs`
-- The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults
-- The secure GCP bootstrap path does not preserve the old IP/debug fallback. It expects the secure Identity Platform/TLS posture to be configured before deployment
+- `dev` is the shared integration branch. It must validate both provider paths when shared code changes, but it must not apply infrastructure or deploy workloads.
+- `aws-dev` is the only branch that deploys the AWS dev environment.
+- `gcp-dev` is the only branch that deploys the GCP dev environment.
+- `main` remains the AWS production deploy branch.
+- Shared Shifter application changes trigger both the AWS validation chain and the GCP validation chain on `dev`, so provider overlaps are caught before promotion to either deploy branch.
+- The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults.
 - The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
-- New multi-cloud work should enter through the shared cloud adapter layers rather than adding provider-specific calls directly in domain services
+- New multi-cloud work should enter through the shared cloud adapter layers rather than adding provider-specific calls directly in domain services.
 
 ## Self-Hosted Runner
 
@@ -177,6 +179,7 @@ Terraform plans are also posted as PR comments for easy review.
 - Check branch protection rules
 - Verify path filters match your changes
 - Look for `paths-filter` in deploy.yml
+- Confirm you are pushing to the right branch for the intended behavior: `dev` validates only, `aws-dev` deploys AWS dev, `gcp-dev` deploys GCP dev
 
 ### Terraform Plan Fails
 - Check for formatting issues: `terraform fmt -recursive`
@@ -195,7 +198,6 @@ Terraform plans are also posted as PR comments for easy review.
 
 ### GCP Deploy Fails
 - Verify `GCP_SERVICE_ACCOUNT` and `GCP_WORKLOAD_IDENTITY_PROVIDER` repository secrets are set
-- For branch-local bring-up, start with `./scripts/bootstrap/deploy.py gdc-bootstrap`; do not assume `_gcp-dev.yml` is the authoritative deployment path
 - Check the GCS backend bucket bootstrap step for IAM or bucket-name conflicts
 - Review `terraform output -json` and the generated `platform-runtime.generated.env` values in the workflow logs
 - Review the generated Helm values, ingress resources, and `BackendConfig` resources if hostname, DNS, certificate, or Cloud Armor behavior is wrong

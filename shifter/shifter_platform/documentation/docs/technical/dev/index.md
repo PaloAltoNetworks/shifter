@@ -62,17 +62,22 @@ shifter/
 ## Git Workflow
 
 ```
-feature/* ──► dev ──► main
-              │        │
-              ▼        ▼
-           dev env   prod env
+feature/* ──► dev ──► aws-dev ──► main
+              │        │          │
+              │        ▼          ▼
+              └──────► gcp-dev   prod env
+                       │
+                       ▼
+                    gcp dev env
 ```
 
 - **feature/*** - Development work
-- **dev** - Integration, deploys to dev environment
+- **dev** - Integration, validation only
+- **aws-dev** - AWS dev deployment branch
+- **gcp-dev** - GCP dev deployment branch
 - **main** - Production, deploys to prod environment
 
-All changes go through pull requests. Never commit directly to dev or main.
+All changes go through pull requests. Never commit directly to deploy branches.
 
 ## Next Steps
 

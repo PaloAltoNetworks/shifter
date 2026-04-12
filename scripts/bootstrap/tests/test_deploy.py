@@ -2350,11 +2350,14 @@ class TestGcpPlatformCoreContracts:
         assert 'available_memory               = "128Mi"' in module_main
         assert 'resource "google_project_service_identity" "identity_platform"' in module_main
         assert "provider = google-beta" in module_main
+        assert 'resource "time_sleep" "identity_platform_service_agent_propagated"' in module_main
+        assert "depends_on = [google_project_service_identity.identity_platform]" in module_main
         assert 'resource "google_project_iam_member" "cloud_run_builder"' in module_main
         assert 'role    = "roles/run.builder"' in module_main
         assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
         assert 'role     = "roles/run.invoker"' in module_main
         assert "member   = google_project_service_identity.identity_platform.member" in module_main
+        assert "depends_on = [time_sleep.identity_platform_service_agent_propagated]" in module_main
 
     def test_gcp_dev_environment_wires_google_beta_for_identity_service_agent(self):
         """The gcp-dev root module must provide google-beta for the Identity Platform service agent."""

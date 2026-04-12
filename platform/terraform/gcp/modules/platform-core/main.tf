@@ -116,6 +116,12 @@ resource "google_project_service_identity" "identity_platform" {
   service  = "identitytoolkit.googleapis.com"
 }
 
+resource "time_sleep" "identity_platform_service_agent_propagated" {
+  create_duration = "60s"
+
+  depends_on = [google_project_service_identity.identity_platform]
+}
+
 resource "google_project_iam_member" "cloud_run_builder" {
   project = var.project_id
   role    = "roles/run.builder"
@@ -360,6 +366,8 @@ resource "google_cloud_run_service_iam_member" "identity_platform_before_create_
   service  = google_cloudfunctions2_function.identity_platform_before_create.service_config[0].service
   role     = "roles/run.invoker"
   member   = google_project_service_identity.identity_platform.member
+
+  depends_on = [time_sleep.identity_platform_service_agent_propagated]
 }
 
 resource "google_compute_global_address" "platform_ingress" {

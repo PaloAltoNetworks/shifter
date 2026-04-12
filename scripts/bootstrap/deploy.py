@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: UP045
 """Shifter deployment CLI.
 
 Guides you through deploying Shifter infrastructure from a bare AWS account.
@@ -33,6 +34,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
+from typing import Optional
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -187,7 +189,7 @@ def run_cmd(
     check: bool = True,
     capture: bool = False,
     profile: str = None,
-) -> subprocess.CompletedProcess | None:
+) -> Optional[subprocess.CompletedProcess]:
     """Run a command, optionally in dry-run mode."""
     # Insert --profile flag for AWS CLI commands
     if profile and cmd[0] == "aws":
@@ -457,8 +459,8 @@ class GDCBootstrapConfig:
     zone: str = "us-central1-a"
     bmctl_version: str = "1.34.200-gke.68"
     environment: str = "gcp-dev"
-    network_name: str | None = None
-    subnetwork_name: str | None = None
+    network_name: Optional[str] = None
+    subnetwork_name: Optional[str] = None
     subnet_cidr: str = "10.240.0.0/20"
     vxlan_cidr: str = "10.200.0.0/24"
     pod_cidr: str = "192.168.0.0/16"
@@ -470,7 +472,7 @@ class GDCBootstrapConfig:
     boot_disk_size_gb: int = 200
     boot_disk_type: str = "pd-ssd"
     service_account_name: str = "baremetal-gcr"
-    google_account_email: str | None = None
+    google_account_email: Optional[str] = None
 
     @property
     def resolved_network_name(self) -> str:
@@ -924,7 +926,7 @@ def build_gdc_access_secret_payload(config: GDCBootstrapConfig, kubeconfig: str)
     return json.dumps(payload, indent=2)
 
 
-def _gdc_ssh_read_file(config: GDCBootstrapConfig, remote_path: str) -> str | None:
+def _gdc_ssh_read_file(config: GDCBootstrapConfig, remote_path: str) -> Optional[str]:
     """Read a workstation file over gcloud ssh, returning None when absent."""
     result = subprocess.run(  # nosec B603 B607
         [
@@ -980,7 +982,7 @@ def _service_account_key_is_active(config: GDCBootstrapConfig, key_payload: str)
     return private_key_id in active_key_ids
 
 
-def _fetch_existing_gdc_bootstrap_material(config: GDCBootstrapConfig) -> dict[str, str] | None:
+def _fetch_existing_gdc_bootstrap_material(config: GDCBootstrapConfig) -> Optional[dict[str, str]]:
     """Reuse the workstation bootstrap credentials when they already exist and remain valid."""
     if not gcloud_resource_exists(
         [
@@ -1729,7 +1731,7 @@ def _merge_csv_env_values(*groups: list[str]) -> str:
 def render_gcp_platform_runtime_env(
     config: GDCBootstrapConfig,
     *,
-    bootstrap_operator_email: str | None = None,
+    bootstrap_operator_email: Optional[str] = None,
 ) -> str:
     """Render the static, project-aware runtime env contract for the GKE control plane."""
     gdc_vm_image_secret = f"projects/{config.project_id}/secrets/{config.gdc_vm_image_gcs_secret_id}"
@@ -1843,7 +1845,7 @@ def load_bootstrap_env_values() -> dict[str, str]:
     return values
 
 
-def resolve_gcp_bootstrap_operator_credentials() -> tuple[str, str] | None:
+def resolve_gcp_bootstrap_operator_credentials() -> Optional[tuple[str, str]]:
     """Resolve the first operator email/password for the GCP identity bootstrap."""
     values = load_bootstrap_env_values()
 
@@ -1934,7 +1936,7 @@ def ensure_gcp_identity_platform_operator(
     config: GDCBootstrapConfig,
     outputs: dict[str, dict[str, object]],
     dry_run: bool = False,
-) -> str | None:
+) -> Optional[str]:
     """Create the first GCP operator account if it does not already exist."""
     credentials = resolve_gcp_bootstrap_operator_credentials()
     if credentials is None:
@@ -1977,7 +1979,7 @@ def render_gcp_helm_values(
     *,
     guacamole_db_payload: dict[str, str],
     guacamole_json_secret: str,
-    bootstrap_operator_email: str | None = None,
+    bootstrap_operator_email: Optional[str] = None,
 ) -> dict[str, object]:
     """Render Helm values for the Shifter release from Terraform outputs and runtime secrets."""
     image_roots = _get_output_value(outputs, "artifact_registry_image_roots")
@@ -2097,7 +2099,7 @@ def fetch_gcp_secret_payload(secret_id: str, project_id: str) -> str:
     return result.stdout
 
 
-def get_latest_gcp_secret_payload(secret_id: str, project_id: str) -> str | None:
+def get_latest_gcp_secret_payload(secret_id: str, project_id: str) -> Optional[str]:
     """Return the latest secret payload when one exists, otherwise None."""
     try:
         return fetch_gcp_secret_payload(secret_id, project_id)
@@ -2557,7 +2559,7 @@ def stage_gcp_control_plane_values(
     outputs: dict[str, dict[str, object]],
     staging_root: Path,
     *,
-    bootstrap_operator_email: str | None = None,
+    bootstrap_operator_email: Optional[str] = None,
 ) -> Path:
     """Stage the generated Helm values file for the Shifter release."""
     runtime_secret_ids = _get_output_value(outputs, "runtime_secret_ids")
@@ -2809,7 +2811,7 @@ def prepare_gcp_helm_cutover(dry_run: bool = False) -> None:
         )
 
 
-def _get_kubernetes_namespace(name: str) -> dict[str, object] | None:
+def _get_kubernetes_namespace(name: str) -> Optional[dict[str, object]]:
     """Return namespace JSON or None when the namespace does not exist."""
     result = subprocess.run(  # nosec B603 B607
         ["kubectl", "get", "namespace", name, "-o", "json"],
@@ -4010,7 +4012,7 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     walkthrough_final_steps(env)
 
 
-def check_dependencies(command: str | None = None):
+def check_dependencies(command: Optional[str] = None):
     """Check command-specific dependencies before starting."""
     required = {"git": "Git - https://git-scm.com/downloads"}
 

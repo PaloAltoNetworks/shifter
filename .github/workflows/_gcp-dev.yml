@@ -265,7 +265,42 @@ jobs:
             --environment "${GCP_ENVIRONMENT}" \
             > "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
       - name: Apply GKE manifests
-        run: kubectl apply --validate=false -k "${K8S_OVERLAY_DIR}"
+        run: |
+          kubectl kustomize "${K8S_OVERLAY_DIR}" > /tmp/gcp-platform-apply.yaml
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          rendered = pathlib.Path("/tmp/gcp-platform-apply.yaml").read_text()
+          docs = [doc.strip() for doc in re.split(r"^---\s*$", rendered, flags=re.MULTILINE) if doc.strip()]
+          out_dir = pathlib.Path("/tmp/gcp-platform-apply")
+          out_dir.mkdir(parents=True, exist_ok=True)
+
+          def label_for(doc: str, index: int) -> str:
+              kind_match = re.search(r"^kind:\s*(\S+)", doc, flags=re.MULTILINE)
+              name_match = re.search(r"^\s*name:\s*(\S+)", doc, flags=re.MULTILINE)
+              kind = kind_match.group(1).lower() if kind_match else "resource"
+              name = name_match.group(1).lower() if name_match else f"item-{index:02d}"
+              return f"{index:02d}-{kind}-{name}"
+
+          for index, doc in enumerate(docs, start=1):
+              path = out_dir / f"{label_for(doc, index)}.yaml"
+              path.write_text(doc + "\n")
+              print(f"Applying {path.name}")
+              subprocess.run(
+                  [
+                      "kubectl",
+                      "apply",
+                      "--validate=false",
+                      "--request-timeout=30s",
+                      "-f",
+                      str(path),
+                  ],
+                  check=True,
+              )
+          PY
       - name: Sync Guacamole runtime secret
         run: |
           python3 - <<'PY'

@@ -19,10 +19,12 @@ All CI/CD runs through GitHub Actions. The main orchestrator is `deploy.yml`, wh
 | PR to any branch | Quality + Plan (no apply) |
 | Push to `dev` | Quality + AWS validation + GCP validation (no apply) |
 | Push to `aws-dev` | Quality + AWS deploy to dev |
-| Push to `gcp-dev` | Quality + GCP validation + GCP deploy |
+| Push to `gcp-dev` | Fast GCP validation + GCP deploy |
 | Push to `main` | Quality + Plan + Apply to prod |
 
 PRs get Terraform plan comments. `dev` is now the integration branch for cross-provider validation only. Actual dev deployments happen only from `aws-dev` and `gcp-dev`.
+
+`gcp-dev` pushes intentionally skip the global quality fan-out so GCP break/fix work can move faster. The fast path still runs the provider-local guardrails in `_gcp-dev.yml`: Terraform fmt/init/validate plus rendered-manifest schema validation before deploy. Broad lint/test/security coverage remains required on `dev`, on PRs, and on production.
 
 ## Workflow Files
 
@@ -136,7 +138,7 @@ PR to gcp-dev     → GCP validate
 PR to main        → AWS prod plan
 Push to dev       → AWS plan + GCP validate
 Push to aws-dev   → AWS dev deploy
-Push to gcp-dev   → GCP deploy
+Push to gcp-dev   → Fast GCP validate + GCP deploy
 Push to main      → AWS prod deploy
 ```
 
@@ -146,7 +148,7 @@ Push to main      → AWS prod deploy
 
 - `dev` is the shared integration branch. It must validate both provider paths when shared code changes, but it must not apply infrastructure or deploy workloads.
 - `aws-dev` is the only branch that deploys the AWS dev environment.
-- `gcp-dev` is the only branch that deploys the GCP dev environment.
+- `gcp-dev` is the only branch that deploys the GCP dev environment, and it uses the narrow GCP fast path on branch pushes.
 - `main` remains the AWS production deploy branch.
 - Shared Shifter application changes trigger both the AWS validation chain and the GCP validation chain on `dev`, so provider overlaps are caught before promotion to either deploy branch.
 - The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults.

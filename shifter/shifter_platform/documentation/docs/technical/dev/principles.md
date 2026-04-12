@@ -39,7 +39,7 @@ If something is required, make it fail when missing.
 - `main` is production - always deployable
 - `dev` is integration - validation only
 - `aws-dev` deploys the AWS dev environment
-- `gcp-dev` deploys the GCP dev environment
+- `gcp-dev` deploys the GCP dev environment through the narrow fast path
 - `feature/*` for development work
 
 ### Commits

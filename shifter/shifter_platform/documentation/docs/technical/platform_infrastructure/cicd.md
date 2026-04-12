@@ -12,7 +12,7 @@ GitHub Actions with self-hosted runners.
 ├── _range.yml              # Range VPC infrastructure
 ├── _shifter-engine.yml     # Engine container build and push
 ├── _shifter-platform.yml   # Portal infrastructure and app deployment
-├── _gcp-dev.yml            # GCP validation/deploy workflow (still being reconciled with the Helm cutover)
+├── _gcp-dev.yml            # GCP validation/deploy workflow
 ├── packer.yml              # AMI builds (AWS)
 └── packer-promote.yml      # AMI promotion to prod (AWS)
 ```
@@ -41,11 +41,14 @@ Jobs run only when relevant files change. `deploy.yml` detects changes and trigg
 
 ## Environment Targeting
 
-- Push to `dev` → deploys to dev
-- Push to `main` → deploys to prod
-- PRs to `dev` → plan and apply to dev
-- PRs to `main` → plan only (no apply)
-- Manual dispatch → targets dev (safety default)
+- Push to `dev` → validation only for AWS and GCP
+- Push to `aws-dev` → AWS dev deploy
+- Push to `gcp-dev` → fast GCP validate + GCP dev deploy
+- Push to `main` → AWS prod deploy
+- PRs to `dev` → cross-provider validation only
+- PRs to `aws-dev` → AWS dev plan
+- PRs to `gcp-dev` → GCP validate
+- PRs to `main` → AWS prod plan only
 
 ## Authentication
 
@@ -75,6 +78,8 @@ The GCP CI path:
 3. builds and pushes control-plane images
 4. renders secure Helm values from Terraform outputs and Secret Manager
 5. installs or upgrades the Shifter Helm release
+
+On `gcp-dev` pushes, this path now runs as a fast deploy lane. It skips the repo-wide quality workflow and relies on the provider-local validation in `_gcp-dev.yml` so break/fix iteration on GCP does not wait for the full cross-repo lint/test matrix. The full quality gate still runs on `dev`, on PRs, and on production.
 
 The bootstrap path is security-gated and fails closed unless:
 

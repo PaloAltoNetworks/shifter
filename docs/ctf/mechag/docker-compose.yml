@@ -222,7 +222,9 @@ services:
     restart: unless-stopped
 
   a13-brain:
-    build: ./a13
+    build:
+      context: .
+      dockerfile: ./a13/Dockerfile
     container_name: a13-brain
     hostname: brain-main
     networks:

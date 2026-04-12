@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.78.0] - 2026-04-12
+
+### Fixed
+
+- A13 repo path drift: `a13/Dockerfile` COPYs `server.py`
+  from context root. Moved `a13-brain` compose build context
+  to parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A13-brain/smoketest.py`: A13 Mecha-Godzilla
+  brain end-to-end smoketest (17 checks). Runs from a9-splice.
+  Executes the full boss chain: TCP connect on port 9100,
+  receive 8-byte binary challenge, derive XOR key via
+  `SHA256("AHS-T-00482" + "AHS-L-00483" + "AHS-A-00484")[:8]`
+  (from A10/A11/A12 serials), send handshake response,
+  authenticate as `vasik` with `BRAIN_AUTH_TOKEN` from A7
+  navigation-controller config (not vasik's AD password),
+  run `status` and extract flag 35 from the SYSTEM
+  AUTHORIZATION TOKEN line, run `schematic` verifying
+  LEVIATHAN ASCII art, run `ai status` verifying DORMANT
+  state awaiting primary power, reject wrong override code,
+  and submit the full override code `7741-MN07-AL42`
+  (assembled from A0 registration / A6 MIDNIGHT-7 sim ID /
+  A8 assembly log metadata) to extract flag 36 with the
+  OPERATION NORTHSTORM COMPLETE seizure message.
+
 ## [3.77.0] - 2026-04-12
 
 ### Fixed

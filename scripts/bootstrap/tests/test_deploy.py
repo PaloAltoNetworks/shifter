@@ -2352,6 +2352,9 @@ class TestGcpPlatformCoreContracts:
         assert 'role    = "roles/run.builder"' in module_main
         assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
         assert 'role     = "roles/run.invoker"' in module_main
+        assert 'identity_platform_service_agent = "service-${data.google_project.project.number}@' in module_main
+        assert 'gcp-sa-identitytoolkit.iam.gserviceaccount.com"' in module_main
+        assert 'member   = "serviceAccount:${local.identity_platform_service_agent}"' in module_main
 
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""

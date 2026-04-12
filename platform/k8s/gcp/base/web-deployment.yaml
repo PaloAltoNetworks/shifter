@@ -47,6 +47,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: staticfiles
+              mountPath: /app/staticfiles
           envFrom:
             - configMapRef:
                 name: platform-runtime
@@ -74,4 +76,6 @@ spec:
               memory: 1Gi
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: staticfiles
           emptyDir: {}

@@ -28,7 +28,11 @@ spec:
           image: {{ include "shifter.portalImage" . }}
           imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
-          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: staticfiles
+              mountPath: /app/staticfiles
           args: ["python", "manage.py", "run_worker", "--queue", "engine"]
           envFrom:
             - configMapRef:
@@ -40,4 +44,10 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.workers.engine.resources | nindent 12 }}
-      {{- include "shifter.tmpVolume" . | nindent 6 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+        - name: staticfiles
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}

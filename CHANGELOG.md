@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.65.0] - 2026-04-11
+
+### Added
+
+- NORTHSTORM CTF range carry-over from the `shifter-k8s` branch onto
+  the new `polaris-ctf` branch. Brings in:
+  - All 16 mecha-asset build directories under
+    `docs/ctf/mechag/{a0..a14,dns}/` (Dockerfiles, entrypoints,
+    content, Modbus servers, scenario assets).
+  - All 14 design content folders under
+    `docs/ctf/mechag/A0-boreas-website/` … `A9-splice-landing/`
+    (mission briefs, prepared scripts, fixture data).
+  - `docs/ctf/mechag/docker-compose.yml`,
+    `ctfd-challenges.json`, `shared-constants.md`.
+- A14 Kali container rebuilt against the AWS packer scripts in
+  `shifter/packer/scripts/kali/`: `kali-linux-headless` metapackage,
+  XFCE + xrdp on 3389, sshd on 22, Claude Code CLI via npm, kali user,
+  CTF content overlay under `/home/kali/`. Mission brief generated as
+  PDF (`docs/ctf/mechag/A14-kali/mission_brief.pdf`).
+- Project DNS sidecar verified end-to-end: AXFR-enabled BIND with
+  `boreas-systems.ctf` and `boreas.local` zones, multi-homed onto
+  shared/corporate/lab networks.
+
+### Changed
+
+- All 15 mecha asset design docs (`docs/ctf/mechag/A0-…A9-…md`) and
+  `docs/ctf/northstorm-architecture.md` updated to match the
+  shifter-k8s branch state. A14-kali design no longer specifies
+  per-participant rate limiting (false constraint), uses the `kali`
+  user (matching the AWS AMI), and documents RDP access in place of
+  the ttyd/Guacamole sidecar approach.
+
 ## [3.64.0] - 2026-04-11
 
 ### Added

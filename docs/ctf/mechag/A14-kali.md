@@ -38,15 +38,14 @@ The participant's attack box. Pre-configured with standard offensive tooling plu
 - Custom `modbus_scan.py` helper script
 
 ### AI Agent
-- Claude Code with Sonnet 4.5 API access
-- Pre-configured API key in `~/.config/claude/`
+- Claude Code (installed via npm) with system prompt deployed at `~/.config/claude/`
+- API key / runtime config injected by Shifter at scenario deploy time, not baked into the image
 - System prompt includes POLARIS mission context
-- Rate-limited per participant to prevent API abuse
 
 ## Participant Home Directory
 
 ```
-/home/operator/
+/home/kali/
   README.md          -- Mission brief, getting started guide
   mission_brief.pdf  -- Full POLARIS operation brief (narrative setup)
   tools/
@@ -63,5 +62,70 @@ None. This is the attack platform, not a target.
 ## Notes
 
 - The AI agent's system prompt should include the POLARIS narrative framing but NOT reveal flag locations or solutions
-- Consider rate limiting the AI agent to prevent participants from just asking it to solve everything at machine speed — the point is collaboration, not automation
-- Browser-based terminal access (via Guacamole or ttyd) avoids participants needing to install anything on their corporate laptops
+- Participant access is via RDP into the Kali XFCE desktop (xrdp on port 3389), matching the AWS Kali AMI build (`shifter/packer/scripts/kali/`)
+
+---
+
+## Build Plan
+
+**Base image:** kalilinux/kali-rolling
+
+**Content directory:** `docs/ctf/mechag/A14-kali/`
+
+### Steps
+
+1. **Install standard Kali metapackages**
+   - `kali-tools-top10` or cherry-pick: nmap, masscan, metasploit-framework, john, hashcat, burpsuite, sqlmap, gobuster, ffuf, dirb, netcat, socat, wireshark-common, tcpdump, crackmapexec, responder, smbclient, curl, wget, python3
+   - Impacket suite (GetUserSPNs, secretsdump, psexec, etc.)
+
+2. **Install OT-specific tools**
+   - pymodbus (pip)
+   - modbus-cli (if available as package, otherwise pip/go install)
+   - Copy custom `modbus_scan.py` helper script
+
+3. **Install and configure Claude Code**
+   - Install Claude Code CLI via `npm install -g @anthropic-ai/claude-code`
+   - System prompt with POLARIS mission context (no flag hints) at `~/.config/claude/system_prompt.txt`
+   - API key / runtime model config injected by Shifter at deploy time
+
+4. **Create kali user home directory**
+   - `/home/kali/README.md` — mission brief, getting started guide
+   - `/home/kali/mission_brief.pdf` — full POLARIS operation brief (narrative setup)
+   - `/home/kali/tools/modbus_scan.py` — OT helper script
+   - `/home/kali/tools/flag_submit.sh` — quick CTFd flag submission script
+
+5. **Write the mission brief PDF**
+   - POLARIS operation narrative context
+   - High-level objectives (M1-M4 mission descriptions)
+   - Getting started hints (scan the network, look at the website first)
+   - CTFd URL and how to submit flags
+
+6. **Write the flag submission helper**
+   - Shell script that POSTs to CTFd API
+   - Usage: `flag_submit.sh FLAG{...}`
+   - Pre-configured with CTFd URL and participant API token (injected at deploy time)
+
+7. **Write the modbus_scan.py helper**
+   - Scans a subnet for Modbus devices
+   - Reads device identification from discovered hosts
+   - Dumps holding register ranges
+   - Nice output formatting
+
+8. **Configure desktop + RDP access**
+   - Install `kali-desktop-xfce`, `xrdp`, `xorgxrdp`, `dbus-x11`
+   - xrdp uses XFCE session via `/home/kali/.xsession` and `/etc/xrdp/startwm.sh`
+   - Set `kali` user password to `kali`, enable SSH password authentication
+   - Mirrors `shifter/packer/scripts/kali/base.sh`
+
+9. **Configure network access**
+   - Can reach: A0 (shared), A7 (shared), Front Office assets (A1-A4) in own namespace
+   - Cannot directly reach: A5 (SCADA), Lab zone, Bunker zone
+   - DNS configured to resolve boreas-systems.ctf and internal hostnames
+
+10. **Write Dockerfile**
+    - Start from kalilinux/kali-rolling
+    - Install `kali-linux-headless` metapackage + desktop + xrdp
+    - Use the `kali` user (default in the metapackage layout)
+    - Copy home directory content, tools, configs
+    - Entrypoint: start xrdp + sshd
+    - Expose ports 3389 (RDP), 22 (SSH)

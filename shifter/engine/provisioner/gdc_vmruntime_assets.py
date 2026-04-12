@@ -646,7 +646,6 @@ def _build_pending_vm_runtime_instance(
     request_uuid: str,
     namespace: str,
     subnet_name: str,
-    subnet_output: dict[str, Any],
     instance: dict[str, Any],
     index: int,
     asset_ip_assignments: dict[str, Any],
@@ -713,7 +712,6 @@ def _build_pending_vm_runtime_instance(
     return {
         "instance": instance,
         "subnet_name": subnet_name,
-        "subnet_output": subnet_output,
         "vm_name": vm_name,
         "disk_name": disk_name,
         "hostname": hostname,
@@ -761,6 +759,73 @@ def _build_vm_runtime_output(
     }
 
 
+def _iter_vm_runtime_instances(subnets: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
+    assets: list[tuple[str, dict[str, Any]]] = []
+    for subnet in subnets:
+        subnet_name = str(subnet.get("name", "")).strip()
+        for instance in subnet.get("instances") or []:
+            if _is_vm_runtime_asset(instance):
+                assets.append((subnet_name, instance))
+    return assets
+
+
+def _destroy_vm_runtime_vms(
+    *,
+    custom_api,
+    namespace: str,
+    range_id: int,
+    assets: list[tuple[str, dict[str, Any]]],
+    api_exception,
+) -> None:
+    for subnet_name, instance in assets:
+        vm_name = _vm_name(range_id, subnet_name, instance)
+        _delete_vm_runtime_resource(
+            custom_api,
+            namespace=namespace,
+            name=vm_name,
+            plural=_VM_PLURAL,
+            label="VM",
+            api_exception=api_exception,
+        )
+
+
+def _destroy_vm_runtime_disks_and_secrets(
+    *,
+    custom_api,
+    namespace: str,
+    range_id: int,
+    assets: list[tuple[str, dict[str, Any]]],
+    api_exception,
+) -> None:
+    for subnet_name, instance in assets:
+        disk_name = _disk_name(_vm_name(range_id, subnet_name, instance))
+        _delete_vm_runtime_resource(
+            custom_api,
+            namespace=namespace,
+            name=disk_name,
+            plural=_VM_DISK_PLURAL,
+            label="VM disk",
+            api_exception=api_exception,
+        )
+        _delete_ssh_secret(range_id, instance)
+
+
+def _delete_image_import_secret_if_needed(
+    *,
+    core_api,
+    namespace: str,
+    api_exception,
+) -> None:
+    image_gcs_secret_id = load_gdc_vmruntime_config().image_gcs_secret_id
+    if not image_gcs_secret_id:
+        return
+    try:
+        core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
+    except api_exception as exc:
+        if exc.status != 404:
+            raise
+
+
 def apply_range_assets(
     request_uuid: str,
     variables: dict[str, Any],
@@ -799,22 +864,24 @@ def apply_range_assets(
             if not _is_vm_runtime_asset(instance):
                 continue
             pending_instances.append(
-                _build_pending_vm_runtime_instance(
-                    range_id=range_id,
-                    request_uuid=request_uuid,
-                    namespace=namespace,
-                    subnet_name=subnet_name,
-                    subnet_output=subnet_output,
-                    instance=instance,
-                    index=index,
-                    asset_ip_assignments=asset_ip_assignments,
-                    subnet_cidr=subnet_cidr,
-                    network_name=network_name,
-                    vm_config=vm_config,
-                    gcs_secret_name=gcs_secret_name,
-                    custom_api=custom_api,
-                    api_exception=api_exception,
-                )
+                {
+                    **_build_pending_vm_runtime_instance(
+                        range_id=range_id,
+                        request_uuid=request_uuid,
+                        namespace=namespace,
+                        subnet_name=subnet_name,
+                        instance=instance,
+                        index=index,
+                        asset_ip_assignments=asset_ip_assignments,
+                        subnet_cidr=subnet_cidr,
+                        network_name=network_name,
+                        vm_config=vm_config,
+                        gcs_secret_name=gcs_secret_name,
+                        custom_api=custom_api,
+                        api_exception=api_exception,
+                    ),
+                    "subnet_output": subnet_output,
+                }
             )
 
     return [
@@ -853,44 +920,26 @@ def destroy_range_assets(
 
     range_id = int(variables["range_id"])
     namespace = _select_namespace(range_id, subnet_outputs or {}, access)
-
-    for subnet in subnets:
-        subnet_name = str(subnet.get("name", "")).strip()
-        for instance in subnet.get("instances") or []:
-            if not _is_vm_runtime_asset(instance):
-                continue
-            vm_name = _vm_name(range_id, subnet_name, instance)
-            _delete_vm_runtime_resource(
-                custom_api,
-                namespace=namespace,
-                name=vm_name,
-                plural=_VM_PLURAL,
-                label="VM",
-                api_exception=api_exception,
-            )
-
-    for subnet in subnets:
-        subnet_name = str(subnet.get("name", "")).strip()
-        for instance in subnet.get("instances") or []:
-            if not _is_vm_runtime_asset(instance):
-                continue
-            disk_name = _disk_name(_vm_name(range_id, subnet_name, instance))
-            _delete_vm_runtime_resource(
-                custom_api,
-                namespace=namespace,
-                name=disk_name,
-                plural=_VM_DISK_PLURAL,
-                label="VM disk",
-                api_exception=api_exception,
-            )
-            _delete_ssh_secret(range_id, instance)
-
-    if access and access.cluster_id and load_gdc_vmruntime_config().image_gcs_secret_id:
-        try:
-            core_api.delete_namespaced_secret(name=_IMAGE_IMPORT_SECRET_SUFFIX, namespace=namespace)
-        except api_exception as exc:
-            if exc.status != 404:
-                raise
+    assets = _iter_vm_runtime_instances(subnets)
+    _destroy_vm_runtime_vms(
+        custom_api=custom_api,
+        namespace=namespace,
+        range_id=range_id,
+        assets=assets,
+        api_exception=api_exception,
+    )
+    _destroy_vm_runtime_disks_and_secrets(
+        custom_api=custom_api,
+        namespace=namespace,
+        range_id=range_id,
+        assets=assets,
+        api_exception=api_exception,
+    )
+    _delete_image_import_secret_if_needed(
+        core_api=core_api,
+        namespace=namespace,
+        api_exception=api_exception,
+    )
 
 
 def run_power_operation(operation: str, state: dict[str, Any]) -> None:

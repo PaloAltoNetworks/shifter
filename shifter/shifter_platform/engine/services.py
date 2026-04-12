@@ -135,6 +135,10 @@ def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
     return "ubuntu"
 
 
+def _get_windows_rdp_fallback(role: str) -> str:
+    return "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"
+
+
 def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str | None]:
     """Resolve the RDP username/password pair for a provisioned guest."""
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
@@ -147,15 +151,15 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
                 return (
                     "Administrator",
                     os.environ.get("DC_DOMAIN_PASSWORD")
-                    or os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!"),
+                    or os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", _get_windows_rdp_fallback(role)),
                 )
             return (
                 "Administrator",
-                os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!"),
+                os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", _get_windows_rdp_fallback(role)),
             )
         return (
             "Administrator",
-            "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!",
+            _get_windows_rdp_fallback(role),
         )
 
     if os_type == "kali":

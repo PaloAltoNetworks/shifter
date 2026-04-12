@@ -155,7 +155,7 @@ class GCPTaskRunner:
         stopped_at = getattr(status, "completion_time", None)
         stopped_reason = None
 
-        for condition in list(getattr(status, "conditions", None) or []):
+        for condition in getattr(status, "conditions", None) or []:
             if getattr(condition, "type", "") in {"Failed", "Complete"}:
                 stopped_reason = getattr(condition, "message", None) or getattr(condition, "reason", None)
                 break

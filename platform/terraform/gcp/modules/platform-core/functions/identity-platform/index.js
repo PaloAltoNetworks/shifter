@@ -21,7 +21,7 @@ function allowedEmails() {
 
 function isAllowedEmail(email) {
   const normalizedEmail = normalize(email);
-  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+  if (!normalizedEmail?.includes("@")) {
     return false;
   }
 

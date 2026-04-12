@@ -306,7 +306,7 @@ def apply(
         [
             "apply",
             "-auto-approve",
-            "-input=false",
+            _TF_INPUT_FALSE,
             "-no-color",
             f"-var-file={tfvars_path}",
         ],
@@ -372,7 +372,7 @@ def destroy(
     destroy_args = [
         "destroy",
         "-auto-approve",
-        "-input=false",
+        _TF_INPUT_FALSE,
         "-no-color",
     ]
 

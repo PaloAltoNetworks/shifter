@@ -167,6 +167,20 @@ def prompt_required_value(prompt: str, *, secret: bool = False) -> str:
         print("Value is required")
 
 
+def _format_sample_env_assignment(key: str, value: str = "") -> str:
+    """Build sample env entries without embedding credential literals in source."""
+    return f"{key}={value}"
+
+
+def _sample_guest_access_defaults() -> list[str]:
+    """Return placeholder guest credential env entries without baked-in secrets."""
+    return [
+        _format_sample_env_assignment("GDC_WINDOWS_ADMIN_PASSWORD"),
+        _format_sample_env_assignment("GDC_KALI_PASSWORD"),
+        _format_sample_env_assignment("GDC_UBUNTU_PASSWORD"),
+    ]
+
+
 def run_cmd(
     cmd: list[str],
     dry_run: bool = False,
@@ -1754,9 +1768,7 @@ def render_gcp_platform_runtime_env(
         "GDC_VMSERIES_BOOTSTRAP_DISK_SIZE_GIB=1",
         "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID=",
         "# Guest access defaults for VM Runtime assets.",
-        "GDC_WINDOWS_ADMIN_PASSWORD=CortexSavesTheDay!",
-        "GDC_KALI_PASSWORD=kali",
-        "GDC_UBUNTU_PASSWORD=ubuntu",
+        *_sample_guest_access_defaults(),
         "# Set these to the VM Runtime boot images for each guest class.",
         "GDC_KALI_IMAGE_URL=",
         "GDC_KALI_VCPUS=2",

@@ -2628,6 +2628,21 @@ class TestGcpBootstrapIdentityPlatform:
         assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
         assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
 
+    def test_render_gcp_platform_runtime_env_uses_blank_guest_password_samples(self):
+        """The generated env contract must not embed sample guest passwords in source-controlled output."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        with patch("deploy.load_bootstrap_env_values", return_value={}):
+            rendered = deploy.render_gcp_platform_runtime_env(
+                config,
+                bootstrap_operator_email="bedwards@paloaltonetworks.com",
+            )
+
+        assert "GDC_WINDOWS_ADMIN_PASSWORD=\n" in rendered
+        assert "GDC_KALI_PASSWORD=\n" in rendered
+        assert "GDC_UBUNTU_PASSWORD=\n" in rendered
+        assert "CortexSavesTheDay!" not in rendered
+
 
 class TestGcpIdentityAdminApi:
     """Tests for the authenticated Identity Platform bootstrap admin requests."""

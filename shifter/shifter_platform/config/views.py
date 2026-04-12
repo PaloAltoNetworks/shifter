@@ -10,7 +10,7 @@ from django.http import HttpResponseForbidden, HttpResponseRedirect, JsonRespons
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 from config import identity_platform as identity_platform_auth
 from shared.auth import is_ctf_organizer, is_ctf_participant
@@ -64,6 +64,7 @@ def _render_identity_platform_logout(request):
 
 
 @ensure_csrf_cookie
+@require_http_methods(["GET", "HEAD"])
 def platform_login(request):
     """Route authentication to the configured provider."""
     if request.user.is_authenticated:
@@ -104,6 +105,7 @@ def identity_platform_session(request):
     return JsonResponse({"redirect_url": reverse("dashboard_router")})
 
 
+@require_http_methods(["GET", "HEAD"])
 def legacy_oidc_authenticate(request):
     """Keep the AWS login URL stable while redirecting GCP deployments to the provider router."""
     if settings.AUTH_PROVIDER == "oidc":

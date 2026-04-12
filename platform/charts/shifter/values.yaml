@@ -42,9 +42,11 @@ portal:
     requests:
       cpu: 250m
       memory: 512Mi
+      ephemeral-storage: 128Mi
     limits:
       cpu: "1"
       memory: 1Gi
+      ephemeral-storage: 256Mi
 
 workers:
   cms:
@@ -53,36 +55,44 @@ workers:
       requests:
         cpu: 100m
         memory: 256Mi
+        ephemeral-storage: 128Mi
       limits:
         cpu: 500m
         memory: 512Mi
+        ephemeral-storage: 256Mi
   engine:
     replicas: 1
     resources:
       requests:
         cpu: 100m
         memory: 256Mi
+        ephemeral-storage: 128Mi
       limits:
         cpu: 500m
         memory: 512Mi
+        ephemeral-storage: 256Mi
   mc:
     replicas: 1
     resources:
       requests:
         cpu: 100m
         memory: 256Mi
+        ephemeral-storage: 128Mi
       limits:
         cpu: 500m
         memory: 512Mi
+        ephemeral-storage: 256Mi
   ctfScheduler:
     replicas: 1
     resources:
       requests:
         cpu: 100m
         memory: 256Mi
+        ephemeral-storage: 128Mi
       limits:
         cpu: 500m
         memory: 512Mi
+        ephemeral-storage: 256Mi
 
 guacd:
   replicas: 1
@@ -90,9 +100,11 @@ guacd:
     requests:
       cpu: 100m
       memory: 256Mi
+      ephemeral-storage: 128Mi
     limits:
       cpu: 500m
       memory: 512Mi
+      ephemeral-storage: 256Mi
 
 guacamoleClient:
   replicas: 1
@@ -100,9 +112,11 @@ guacamoleClient:
     requests:
       cpu: 250m
       memory: 512Mi
+      ephemeral-storage: 128Mi
     limits:
       cpu: "1"
       memory: 1Gi
+      ephemeral-storage: 256Mi
 
 security:
   pod:
@@ -116,6 +130,9 @@ security:
   guacamole:
     runAsUser: 1001
     runAsGroup: 1001
+
+tmpVolume:
+  sizeLimit: 256Mi
 
 services:
   portal:

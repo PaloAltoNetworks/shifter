@@ -21,6 +21,7 @@ spec:
         checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
     spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

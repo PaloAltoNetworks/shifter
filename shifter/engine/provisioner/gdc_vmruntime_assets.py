@@ -184,7 +184,7 @@ def _resolve_image_source(source_url: str, gcs_secret_name: str | None) -> dict[
         if gcs_secret_name:
             gcs_source["secretRef"] = gcs_secret_name
         return {"gcs": gcs_source}
-    if source_url.startswith(("http://", "https://")):
+    if source_url.startswith("https://"):
         return {"http": {"url": source_url}}
     if source_url.startswith("docker://"):
         return {"registry": {"url": source_url}}
@@ -194,7 +194,7 @@ def _resolve_image_source(source_url: str, gcs_secret_name: str | None) -> dict[
         return {"registry": {"url": f"docker://{source_url.removeprefix('oci://')}"}}
     raise RuntimeError(
         f"Unsupported GDC VM Runtime image source {source_url!r}. "
-        "Use gs://, http(s)://, docker://, registry://, or oci://."
+        "Use gs://, https://, docker://, registry://, or oci://."
     )
 
 

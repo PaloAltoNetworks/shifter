@@ -54,9 +54,22 @@ def test_platform_login_renders_provider_driven_identity_page(client):
 
     assert response.status_code == 200
     assert b"identity_platform_auth.js" in response.content
-    assert b"firebaseui.js" in response.content
+    assert b"firebase-ui-auth.js" in response.content
     assert b'id="firebaseui-auth-container"' in response.content
     assert b'id="identity-signin-form"' not in response.content
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
+    SITE_URL="https://portal.example.test",
+    IDENTITY_PLATFORM_API_KEY="test-api-key",
+    IDENTITY_PLATFORM_PROJECT_ID="test-project",
+)
+def test_platform_login_rejects_post_requests(client):
+    response = client.post(reverse("platform_login"))
+
+    assert response.status_code == 405
 
 
 @override_settings(
@@ -178,6 +191,13 @@ def test_gcp_legacy_oidc_authenticate_redirects_to_platform_login(client):
 
     assert response.status_code == 302
     assert response.url == reverse("platform_login")
+
+
+@override_settings(AUTH_PROVIDER="identity_platform", DEBUG=False)
+def test_gcp_legacy_oidc_authenticate_rejects_post_requests(client):
+    response = client.post("/oidc/authenticate/")
+
+    assert response.status_code == 405
 
 
 @override_settings(

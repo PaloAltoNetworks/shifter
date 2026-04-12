@@ -1,0 +1,15 @@
+schema_version: 1
+project: aphelion
+github_repo: Brad-Edwards/shifter
+workflow:
+  # shifter has no single-command test suite; CI runs many parallel jobs.
+  # lint_command is the single most useful local gate.
+  lint_command: python3 scripts/adr_guard/adr_guard.py --all --level ci
+  # test_command and completion_command intentionally omitted; the
+  # implement skill will fall back to asking the agent which sub-project
+  # to test. A follow-up can add a top-level runner script.
+sonarcloud:
+  project_key: Brad-Edwards_shifter
+  organization: brad-edwards
+rules:
+  plan_rules: .gc/plan-rules.md

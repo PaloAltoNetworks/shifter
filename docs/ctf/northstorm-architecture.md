@@ -149,8 +149,8 @@ graph LR
 ## Infrastructure
 
 - Single GKE cluster on GCP
-- One namespace per participant (~110 namespaces), each containing A1-A4, A6, A8-A13, A14 (Kali) — 12 pods each
+- One namespace per participant (~110 namespaces), each containing A1, A3, A4, A6, A8-A13, A14 (Kali) — 11 pods each
 - Shared namespace for A0 (Boreas website), A5 (SCADA/Generator HMI), A7 (Source Repo Server), and CTFd scoreboard
+- A2 (Domain Controller): **Shared Windows Server 2022 VM** on GCE (not a container). Samba AD DC was tested and cannot support Impacket Kerberoasting/DCSync. Pre-baked GCE custom image (`ctf-a2-windc-base-v1`). See `temp/a2-samba-ad-spike.md` for spike details.
 - Network policies isolate participant namespaces from each other
-- A2 (Domain Controller): Samba DC in container first choice; fall back to Compute Engine Windows VMs or GDC VM runtime if AD attack paths require real Windows
-- ~110 namespaces x 12 pods = ~1320 pods + shared pods
+- ~110 namespaces x 11 pods = ~1210 pods + shared pods + 1 shared Windows VM

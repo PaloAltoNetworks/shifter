@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platform-external
+  namespace: shifter-platform
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: shifter-gcp-dev-platform-ip
+spec:
+  defaultBackend:
+    service:
+      name: portal-web
+      port:
+        number: 8000
+  rules:
+    - http:
+        paths:
+          - path: /guacamole
+            pathType: Prefix
+            backend:
+              service:
+                name: guacamole-client
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portal-web
+                port:
+                  number: 8000

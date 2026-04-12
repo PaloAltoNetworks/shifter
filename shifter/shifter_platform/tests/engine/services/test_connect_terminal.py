@@ -78,6 +78,46 @@ class TestConnectTerminal:
             assert isinstance(result, SSHConnection)
             mock_range.get_instance_by_uuid.assert_called_once_with("victim-uuid-456")
 
+    def test_returns_ssh_connection_with_gcp_provider_metadata(self):
+        """Service ignores provider metadata and still builds the SSH connection."""
+        from engine import connect_terminal
+        from engine.models import Range
+        from engine.ssh import SSHConnection
+
+        mock_user = Mock(id=1)
+        instance_data = {
+            "uuid": "gcp-instance-uuid-123",
+            "role": "victim",
+            "os_type": "ubuntu",
+            "private_ip": "10.200.0.110",
+            "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+            "cloud_provider": "gcp",
+            "provider_metadata": {
+                "gcp": {
+                    "vm_name": "vmrt-vm-1",
+                    "namespace": "range-42",
+                    "network_name": "range-42-attack",
+                }
+            },
+        }
+        mock_range = Mock(spec=Range, id=42, user=mock_user, status=Range.Status.READY)
+        mock_range.get_instance_by_uuid = Mock(return_value=instance_data)
+
+        mock_queryset = Mock()
+        mock_queryset.first = Mock(return_value=mock_range)
+
+        ssh_key = "fake-ssh-key-for-testing"
+        with (
+            patch.object(Range.objects, "filter", return_value=mock_queryset),
+            patch("engine.secrets.get_ssh_key", return_value=ssh_key),
+        ):
+            result = connect_terminal(mock_user, "gcp-instance-uuid-123")
+
+        assert isinstance(result, SSHConnection)
+        assert result.host == "10.200.0.110"
+        assert result.username == "ubuntu"
+        assert result.private_key == ssh_key
+
     def test_filters_range_by_instance_uuid_and_user(self):
         """Service queries Range by instance_uuid in provisioned_instances."""
         from engine import connect_terminal

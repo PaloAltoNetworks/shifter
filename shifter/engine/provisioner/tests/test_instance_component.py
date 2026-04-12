@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import the real functions we're testing
 from components.instance import validate_s3_path
-from utils.crypto import generate_ssh_keypair
+from utils.crypto import derive_ssh_public_key, generate_ssh_keypair
 
 
 class TestGenerateSshKeypair:
@@ -72,6 +72,12 @@ class TestGenerateSshKeypair:
         # This should succeed without a password
         private_key = load_pem_private_key(private_key_pem.encode(), password=None)
         assert private_key is not None
+
+    def test_can_derive_public_key_from_private_key(self):
+        """Derived public key should match the generated OpenSSH key."""
+        private_key_pem, public_key = generate_ssh_keypair()
+
+        assert derive_ssh_public_key(private_key_pem) == public_key
 
 
 class TestValidateS3Path:

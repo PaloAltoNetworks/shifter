@@ -7,4 +7,5 @@ different transports (SSM, SSH, AWS API).
 # SSMExecutor and SSHExecutor will be imported here after moving from components/
 # AWSExecutor will be added as a new implementation
 
+from executors.guest_ssh_executor import GuestSSHExecutor  # noqa: F401
 from executors.ngfw_executor import NGFWExecutor  # noqa: F401

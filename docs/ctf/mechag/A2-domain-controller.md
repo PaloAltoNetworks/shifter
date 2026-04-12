@@ -60,7 +60,7 @@ boreas.local/
 
 ### Flag 14 — AD enumeration — suspicious accounts
 - **Difficulty:** Medium
-- **Location:** The "Project-L" group is not directly visible via standard enumeration — it is nested inside a generic "Research-Coordination" group, which itself is a member of "Engineering-Support." Discovering "Project-L" requires either recursive group enumeration (e.g., `Get-ADGroupMember -Recursive`, BloodHound, or manual LDAP queries following `memberOf` chains) or noticing that e.vasik's account has an unexplained transitive group membership. Once found, the flag is in a custom LDAP attribute (`extensionAttribute1`) on the "Project-L" group object — not a standard attribute that basic tools display by default.
+- **Location:** The "Project-L" group is not directly visible via standard enumeration — it is nested inside a generic "Research-Coordination" group, which itself is a member of "Engineering-Support." Discovering "Project-L" requires either recursive group enumeration (e.g., `Get-ADGroupMember -Recursive`, BloodHound, or manual LDAP queries following `memberOf` chains) or noticing that e.vasik's account has an unexplained transitive group membership. Once found, the flag is in the `info` LDAP attribute on the "Project-L" group object — not a standard attribute that basic tools display by default.
 - **Flag:** `FLAG{2f8b4a6c1d9e7053}`
 - **Mission:** M2
 
@@ -72,6 +72,59 @@ boreas.local/
 
 ### Flag 17 — Privilege escalation — domain admin
 - **Difficulty:** Hard
-- **Location:** Multi-step chain required. (1) Kerberoast `svc-backup` (weak password, crackable offline). (2) `svc-backup` is NOT a Domain Admin — it has `BackupOperators` privileges, which grants `SeBackupPrivilege`. (3) Use backup privileges to extract the AD database (ntds.dit) via shadow copy or `reg save`. (4) Offline extraction of the `krbtgt` hash from the dumped ntds.dit. (5) Forge a golden ticket or crack the DA account hash. (6) Access the DA-only share `\\dc\admin$\flag.txt`. This is a realistic AD attack chain: Kerberoast → backup operator abuse → ntds.dit dump → golden ticket.
+- **Location:** Multi-step chain required. (1) Kerberoast `svc-backup` (weak password, crackable offline with John/Hashcat). (2) `svc-backup` has misconfigured DCSync rights (Replicating Directory Changes ACL) — the IT admin granted replication rights for a backup sync tool. (3) Use `secretsdump.py` with svc-backup's cracked credentials to DCSync the Administrator hash. (4) Use pass-the-hash or crack the DA password to access the DA-only share `\\dc\admin_flag\flag.txt`. Alternative: DCSync the krbtgt hash and forge a golden ticket. This is a realistic AD attack chain: Kerberoast → crack → DCSync (over-privileged service account) → DA access.
 - **Flag:** `FLAG{6c0a9d4e7f2b8135}`
 - **Mission:** M3
+
+---
+
+## Build Plan
+
+**Platform:** Windows Server 2022 Core on GCE (shared VM, not per-participant)
+**GCE Image:** `ctf-a2-windc-base-v1` (family: `ctf-a2-windc`) — pre-configured, boots ready in ~2 min
+**Spike notes:** `temp/a2-samba-ad-spike.md`
+**Content directory:** `docs/ctf/mechag/A2-domain-controller/`
+
+### Why Windows, Not Samba
+
+Samba AD DC was tested and cannot support standard AD attack tooling:
+- Impacket Kerberoasting fails (KRB_AP_ERR_INAPP_CKSUM — Samba KDC rejects Impacket TGS-REQ)
+- Impacket secretsdump/DCSync fails (DRSUAPI not compatible)
+- AS-REP roasting fails (Samba KDC ignores DONT_REQUIRE_PREAUTH)
+- Full details in `temp/a2-samba-ad-spike.md`
+
+### What's Already Built (in the custom image)
+
+1. **Domain:** `BOREAS.LOCAL` (Windows Server 2022, WinThreshold functional level)
+2. **OUs:** Consulting, Engineering, Security, Executive, ServiceAccounts, Disabled
+3. **23 user accounts** with correct OU placement, passwords per spec
+4. **Groups with nesting:** Engineering-Support > Research-Coordination > Project-L (e.vasik, m.webb)
+5. **SPNs:** svc-backup (`MSSQLSvc/fileserv.boreas.local`), svc-scada (`HTTP/scada-gw.boreas.local`)
+6. **DCSync rights** on svc-backup (misconfigured Replicating Directory Changes ACL)
+7. **Flag 14:** `info` attribute on Project-L group (not `extensionAttribute1` — Exchange schema not available)
+8. **Flag 16:** Badge log CSV in `\\dc\badgelogs\` share with Petrov anomaly entries
+9. **Flag 17:** DA-only `\\dc\admin_flag\` share containing flag file
+10. **Windows Firewall:** Disabled (all profiles)
+
+### Validated Attack Chain (flag 17)
+
+```
+GetUserSPNs.py → $krb5tgs$23$ hash for svc-backup
+John/Hashcat → Password1 (cracks in <5 min)
+secretsdump.py as svc-backup → Administrator NTLM hash
+smbclient to admin_flag share → FLAG{6c0a9d4e7f2b8135}
+```
+
+### Deployment Steps (event day)
+
+1. Launch VM from custom image: `gcloud compute instances create ... --image-family=ctf-a2-windc`
+2. Wait ~2 min for AD DS to start
+3. Set Administrator password via startup script or `gcloud compute reset-windows-password`
+4. Verify with `smbclient -L //host -U "BOREAS\Administrator%password"`
+
+### Remaining Work
+
+1. Add more realistic badge log data (more normal guard entries, longer date range)
+2. Add filler documents to SYSVOL/NETLOGON shares for realism
+3. Test from actual Kali container (not just Debian with Impacket)
+4. Verify `john --wordlist=rockyou.txt` cracks `Password1` hash in <5 min

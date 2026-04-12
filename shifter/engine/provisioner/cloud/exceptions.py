@@ -12,7 +12,7 @@ class CloudProviderNotImplementedError(CloudError):
     """Raised when a requested cloud provider has no adapter."""
 
     def __init__(self, provider: str) -> None:
-        super().__init__(f"Cloud provider '{provider}' is not implemented. Supported providers: aws")
+        super().__init__(f"Cloud provider '{provider}' is not implemented. Supported providers: aws, gcp")
         self.provider = provider
 
 
@@ -34,3 +34,7 @@ class CloudStorageError(CloudError):
 
 class CloudSecretsError(CloudError):
     """Error during secrets retrieval operations."""
+
+
+class CloudNetworkInventoryError(CloudError):
+    """Error during network inventory or subnet exhaustion alert operations."""

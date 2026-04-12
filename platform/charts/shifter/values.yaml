@@ -1,0 +1,169 @@
+releaseNamespace: shifter-system
+
+namespaces:
+  platform: shifter-platform
+  jobs: shifter-jobs
+
+serviceAccounts:
+  portal:
+    name: portal
+    annotations: {}
+  workers:
+    name: workers
+    annotations: {}
+  provisioner:
+    name: provisioner
+    annotations: {}
+
+runtimeEnv: {}
+
+guacamoleRuntimeSecret:
+  enabled: true
+  name: guacamole-runtime
+  stringData: {}
+
+images:
+  portal:
+    repository: "us-docker.pkg.dev/placeholder-project/shifter/portal"
+    tag: "0.0.0"
+    pullPolicy: Always
+  guacd:
+    repository: "us-docker.pkg.dev/placeholder-project/shifter/guacd"
+    tag: "0.0.0"
+    pullPolicy: Always
+  guacamoleClient:
+    repository: "us-docker.pkg.dev/placeholder-project/shifter/guacamole-client"
+    tag: "0.0.0"
+    pullPolicy: Always
+
+portal:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+      ephemeral-storage: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+      ephemeral-storage: 256Mi
+
+workers:
+  cms:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  engine:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  mc:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  ctfScheduler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+
+guacd:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+guacamoleClient:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+      ephemeral-storage: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+      ephemeral-storage: 256Mi
+
+security:
+  pod:
+    seccompProfile: RuntimeDefault
+  app:
+    runAsUser: 1000
+    runAsGroup: 1000
+  guacd:
+    runAsUser: 1000
+    runAsGroup: 1000
+  guacamole:
+    runAsUser: 1001
+    runAsGroup: 1001
+
+tmpVolume:
+  sizeLimit: 256Mi
+
+services:
+  portal:
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+    backendConfig:
+      enabled: true
+      name: portal-web
+      securityPolicyName: ""
+      healthCheck:
+        type: HTTP
+        requestPath: /health/
+        port: 8000
+        checkIntervalSec: 15
+        timeoutSec: 5
+        healthyThreshold: 1
+        unhealthyThreshold: 2
+  guacamoleClient:
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+    backendConfig:
+      enabled: false
+      name: guacamole-client
+      securityPolicyName: ""
+
+ingress:
+  enabled: true
+  class: gce
+  staticIpName: ""
+  host: ""
+  managedTls:
+    enabled: false
+    certificateName: platform-managed-cert
+    frontendConfigName: platform-frontend-config

@@ -75,18 +75,18 @@ STATUS_DESTROYED = "destroyed"
 
 
 def _get_sns_topic_arn() -> str:
-    """Get SNS topic ARN from environment.
+    """Get event topic identifier from environment.
 
     Returns:
-        SNS topic ARN for range events.
+        Topic identifier for range events.
 
     Raises:
-        ValueError: If SNS_RANGE_EVENTS_ARN not set in environment.
+        ValueError: If no event topic identifier is set in environment.
     """
-    arn = os.environ.get("SNS_RANGE_EVENTS_ARN")
-    if not arn:
-        raise ValueError("SNS_RANGE_EVENTS_ARN environment variable not set")
-    return arn
+    topic_id = os.environ.get("RANGE_EVENTS_TOPIC_ID") or os.environ.get("SNS_RANGE_EVENTS_ARN")
+    if not topic_id:
+        raise ValueError("RANGE_EVENTS_TOPIC_ID/SNS_RANGE_EVENTS_ARN environment variable not set")
+    return topic_id
 
 
 def _create_event(

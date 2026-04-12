@@ -1,7 +1,7 @@
 """Network component tests for Shifter Engine.
 
 Unit tests for subnet allocation logic:
-- _find_free_subnet: Finds available subnets by querying AWS
+- _find_free_subnet: Finds available subnets via the cloud network adapter
 - Handles overlapping CIDRs correctly (e.g., /22 blocks)
 - CIDR candidate generation for /24 and /28 subnets
 - SubnetAllocation table: track, release, drift reconciliation
@@ -26,8 +26,12 @@ from components.network import (
 
 
 @pytest.fixture(autouse=True)
-def mock_db_connection():
+def mock_db_connection(request):
     """Mock database connection for advisory lock."""
+    if request.node.get_closest_marker("exercise_real_db_connection"):
+        yield None
+        return
+
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -39,67 +43,54 @@ def mock_db_connection():
         yield mock_conn
 
 
+@pytest.fixture
+def mock_network_inventory():
+    """Mock the provider network inventory adapter."""
+    inventory = MagicMock()
+    inventory.list_subnet_cidrs.return_value = []
+    with patch("components.network._get_network_inventory", return_value=inventory):
+        yield inventory
+
+
 class TestPublishSubnetExhaustionAlarm:
     """Tests for subnet exhaustion alarm function."""
 
-    def test_publishes_cloudwatch_metric_with_dimensions(self):
-        """Alarm publishes CloudWatch metric with VPC and subnet size dimensions."""
-        mock_cloudwatch = MagicMock()
+    def test_delegates_to_provider_inventory(self, mock_network_inventory):
+        """Alarm publishing delegates to the active network inventory adapter."""
+        _publish_subnet_exhaustion_alarm("vpc-12345", "10.1", 24)
 
-        with patch("components.network.boto3.client", return_value=mock_cloudwatch):
-            _publish_subnet_exhaustion_alarm("vpc-12345", "10.1", 24)
-
-        mock_cloudwatch.put_metric_data.assert_called_once()
-        call_args = mock_cloudwatch.put_metric_data.call_args
-        assert call_args[1]["Namespace"] == "Shifter/RangeProvisioning"
-        assert call_args[1]["MetricData"][0]["MetricName"] == "SubnetExhaustion"
-        dimensions = call_args[1]["MetricData"][0]["Dimensions"]
-        assert {"Name": "VpcId", "Value": "vpc-12345"} in dimensions
-        assert {"Name": "SubnetSize", "Value": "24"} in dimensions
+        mock_network_inventory.publish_subnet_exhaustion_alarm.assert_called_once_with("vpc-12345", "10.1", 24)
 
 
 class TestFindFreeSubnetHappyPath:
     """Happy path tests for _find_free_subnet."""
 
-    def test_finds_first_free_subnet_no_existing(self):
+    def test_finds_first_free_subnet_no_existing(self, mock_network_inventory):
         """No existing subnets, returns first available (.2.0/24)."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1")
+        mock_network_inventory.list_subnet_cidrs.return_value = []
+        result = _find_free_subnet("vpc-12345", "10.1")
 
         assert result == "10.1.2.0/24"
 
-    def test_skips_existing_subnets(self):
+    def test_skips_existing_subnets(self, mock_network_inventory):
         """Skips existing /24 subnets and finds next free one."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {"CidrBlock": "10.1.2.0/24"},
-                {"CidrBlock": "10.1.3.0/24"},
-            ]
-        }
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1")
+        mock_network_inventory.list_subnet_cidrs.return_value = [
+            "10.1.2.0/24",
+            "10.1.3.0/24",
+        ]
+        result = _find_free_subnet("vpc-12345", "10.1")
 
         assert result == "10.1.4.0/24"
 
-    def test_finds_gap_in_middle(self):
+    def test_finds_gap_in_middle(self, mock_network_inventory):
         """Finds a free subnet in a gap between used ones."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {"CidrBlock": "10.1.2.0/24"},
-                {"CidrBlock": "10.1.3.0/24"},
-                {"CidrBlock": "10.1.5.0/24"},
-                {"CidrBlock": "10.1.6.0/24"},
-            ]
-        }
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1")
+        mock_network_inventory.list_subnet_cidrs.return_value = [
+            "10.1.2.0/24",
+            "10.1.3.0/24",
+            "10.1.5.0/24",
+            "10.1.6.0/24",
+        ]
+        result = _find_free_subnet("vpc-12345", "10.1")
 
         assert result == "10.1.4.0/24"
 
@@ -107,116 +98,76 @@ class TestFindFreeSubnetHappyPath:
 class TestFindFreeSubnetOverlappingCIDRs:
     """Tests for handling overlapping CIDRs (the main bug fix)."""
 
-    def test_slash_22_blocks_multiple_slash_24s(self):
+    def test_slash_22_blocks_multiple_slash_24s(self, mock_network_inventory):
         """A /22 subnet blocks multiple /24 candidates."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {"CidrBlock": "10.1.2.0/24"},
-                {"CidrBlock": "10.1.3.0/24"},
-                {"CidrBlock": "10.1.4.0/22"},  # Covers .4, .5, .6, .7
-            ]
-        }
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1")
+        mock_network_inventory.list_subnet_cidrs.return_value = [
+            "10.1.2.0/24",
+            "10.1.3.0/24",
+            "10.1.4.0/22",
+        ]
+        result = _find_free_subnet("vpc-12345", "10.1")
 
         assert result == "10.1.8.0/24"
 
-    def test_complex_overlapping_scenario(self):
+    def test_complex_overlapping_scenario(self, mock_network_inventory):
         """Multiple overlapping subnets of different sizes."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {"CidrBlock": "10.1.0.0/28"},
-                {"CidrBlock": "10.1.2.0/24"},
-                {"CidrBlock": "10.1.3.0/24"},
-                {"CidrBlock": "10.1.4.0/22"},  # Covers .4-.7
-                {"CidrBlock": "10.1.8.0/24"},
-            ]
-        }
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1")
+        mock_network_inventory.list_subnet_cidrs.return_value = [
+            "10.1.0.0/28",
+            "10.1.2.0/24",
+            "10.1.3.0/24",
+            "10.1.4.0/22",
+            "10.1.8.0/24",
+        ]
+        result = _find_free_subnet("vpc-12345", "10.1")
 
         assert result == "10.1.9.0/24"
 
-    def test_slash_16_blocks_all_candidates(self):
+    def test_slash_16_blocks_all_candidates(self, mock_network_inventory):
         """A /16 subnet causes no free subnet error."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": [{"CidrBlock": "10.1.0.0/16"}]}
+        mock_network_inventory.list_subnet_cidrs.return_value = ["10.1.0.0/16"]
 
-        with (
-            patch("components.network.boto3.client", return_value=mock_ec2),
-            pytest.raises(RuntimeError, match="No free /24 subnet available"),
-        ):
+        with pytest.raises(RuntimeError, match="No free /24 subnet available"):
             _find_free_subnet("vpc-12345", "10.1")
 
 
 class TestFindFreeSubnetExhaustion:
     """Tests for subnet exhaustion scenarios."""
 
-    def test_exhaustion_publishes_alarm(self):
+    def test_exhaustion_publishes_alarm(self, mock_network_inventory):
         """Subnet exhaustion triggers CloudWatch alarm metric."""
-        mock_ec2 = MagicMock()
-        mock_cloudwatch = MagicMock()
-        all_subnets = [{"CidrBlock": f"10.1.{i}.0/24"} for i in range(2, 255)]
-        mock_ec2.describe_subnets.return_value = {"Subnets": all_subnets}
+        mock_network_inventory.list_subnet_cidrs.return_value = [f"10.1.{i}.0/24" for i in range(2, 255)]
 
-        def client_factory(service, **kwargs):
-            return mock_ec2 if service == "ec2" else mock_cloudwatch
-
-        with (
-            patch("components.network.boto3.client", side_effect=client_factory),
-            pytest.raises(RuntimeError),
-        ):
+        with pytest.raises(RuntimeError):
             _find_free_subnet("vpc-exhausted", "10.1")
 
-        mock_cloudwatch.put_metric_data.assert_called_once()
+        mock_network_inventory.publish_subnet_exhaustion_alarm.assert_called_once()
 
 
 class TestFindFreeSubnetEdgeCases:
     """Edge case tests for _find_free_subnet."""
 
-    def test_different_cidr_prefix(self):
+    def test_different_cidr_prefix(self, mock_network_inventory):
         """Works with different CIDR prefixes."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "172.16")
+        mock_network_inventory.list_subnet_cidrs.return_value = []
+        result = _find_free_subnet("vpc-12345", "172.16")
 
         assert result == "172.16.2.0/24"
 
-    def test_invalid_cidr_in_aws_response_ignored(self):
-        """Invalid CIDRs from AWS are gracefully ignored."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {
-            "Subnets": [
-                {"CidrBlock": "invalid-cidr"},
-                {"CidrBlock": "10.1.2.0/24"},
-            ]
-        }
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1")
+    def test_invalid_cidr_in_cloud_response_ignored(self, mock_network_inventory):
+        """Invalid CIDRs from the cloud adapter are gracefully ignored."""
+        mock_network_inventory.list_subnet_cidrs.return_value = [
+            "invalid-cidr",
+            "10.1.2.0/24",
+        ]
+        result = _find_free_subnet("vpc-12345", "10.1")
 
         assert result == "10.1.3.0/24"
 
-    def test_vpc_not_found_error_propagates(self):
-        """AWS error for invalid VPC propagates."""
-        mock_ec2 = MagicMock()
-        from botocore.exceptions import ClientError
+    def test_inventory_error_propagates(self, mock_network_inventory):
+        """Cloud inventory errors propagate to the allocator."""
+        mock_network_inventory.list_subnet_cidrs.side_effect = RuntimeError("network lookup failed")
 
-        mock_ec2.describe_subnets.side_effect = ClientError(
-            {"Error": {"Code": "InvalidVpcID.NotFound", "Message": "VPC not found"}},
-            "DescribeSubnets",
-        )
-
-        with (
-            patch("components.network.boto3.client", return_value=mock_ec2),
-            pytest.raises(ClientError),
-        ):
+        with pytest.raises(RuntimeError, match="network lookup failed"):
             _find_free_subnet("vpc-invalid", "10.1")
 
 
@@ -251,33 +202,24 @@ class TestGenerateSlash28Candidates:
 class TestFindFreeSubnetSlash28:
     """/28 subnet allocation tests."""
 
-    def test_finds_first_free_slash28(self):
+    def test_finds_first_free_slash28(self, mock_network_inventory):
         """No existing subnets, returns first /28."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+        mock_network_inventory.list_subnet_cidrs.return_value = []
+        result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
 
         assert result == "10.1.2.0/28"
 
-    def test_skips_existing_slash28(self):
+    def test_skips_existing_slash28(self, mock_network_inventory):
         """Skips occupied /28 and finds next free."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": [{"CidrBlock": "10.1.2.0/28"}]}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+        mock_network_inventory.list_subnet_cidrs.return_value = ["10.1.2.0/28"]
+        result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
 
         assert result == "10.1.2.16/28"
 
-    def test_slash24_blocks_all_slash28s_within(self):
+    def test_slash24_blocks_all_slash28s_within(self, mock_network_inventory):
         """A /24 blocks all /28s within it."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": [{"CidrBlock": "10.1.2.0/24"}]}
-
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
+        mock_network_inventory.list_subnet_cidrs.return_value = ["10.1.2.0/24"]
+        result = _find_free_subnet("vpc-12345", "10.1", subnet_size=28)
 
         assert result == "10.1.3.0/28"
 
@@ -290,24 +232,22 @@ class TestFindFreeSubnetSlash28:
 class TestAllocateSubnetsReservation:
     """Tests for SubnetAllocation table integration in allocate_subnets."""
 
-    def test_allocate_subnets_reserves_in_table(self, mock_db_connection):
+    def test_allocate_subnets_reserves_in_table(self, mock_db_connection, mock_network_inventory):
         """After allocation, INSERT rows are executed for each CIDR."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+        mock_network_inventory.list_subnet_cidrs.return_value = []
 
         # Track SQL executed on the cursor
         mock_cursor = MagicMock()
         mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = allocate_subnets(
-                "vpc-123",
-                "10.1",
-                count=2,
-                subnet_size=28,
-                range_id=42,
-                request_id="req-abc",
-            )
+        result = allocate_subnets(
+            "vpc-123",
+            "10.1",
+            count=2,
+            subnet_size=28,
+            range_id=42,
+            request_id="req-abc",
+        )
 
         assert len(result) == 2
         assert result[0] == "10.1.2.0/28"
@@ -318,10 +258,9 @@ class TestAllocateSubnetsReservation:
         insert_calls = [s for s in all_sql if "INSERT INTO engine_subnetallocation" in s]
         assert len(insert_calls) == 2
 
-    def test_allocate_skips_tracked_cidrs(self, mock_db_connection):
+    def test_allocate_skips_tracked_cidrs(self, mock_db_connection, mock_network_inventory):
         """CIDR in allocation table is skipped even if not yet in AWS."""
-        mock_ec2 = MagicMock()
-        mock_ec2.describe_subnets.return_value = {"Subnets": []}
+        mock_network_inventory.list_subnet_cidrs.return_value = []
 
         # Simulate allocation table returning a tracked CIDR
         mock_cursor = MagicMock()
@@ -330,39 +269,35 @@ class TestAllocateSubnetsReservation:
         # The SELECT returns 10.1.2.0/28 as tracked
         mock_cursor.fetchall.return_value = [("10.1.2.0/28",)]
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = allocate_subnets(
-                "vpc-123",
-                "10.1",
-                count=1,
-                subnet_size=28,
-                range_id=42,
-                request_id="req-abc",
-            )
+        result = allocate_subnets(
+            "vpc-123",
+            "10.1",
+            count=1,
+            subnet_size=28,
+            range_id=42,
+            request_id="req-abc",
+        )
 
         # Should skip the tracked CIDR and pick the next one
         assert result == ["10.1.2.16/28"]
 
-    def test_drift_reconciliation(self, mock_db_connection):
-        """AWS subnets not in the table are inserted during allocation."""
-        mock_ec2 = MagicMock()
-        # AWS has a subnet that's not in the allocation table
-        mock_ec2.describe_subnets.return_value = {"Subnets": [{"CidrBlock": "10.1.2.0/28"}]}
+    def test_drift_reconciliation(self, mock_db_connection, mock_network_inventory):
+        """Cloud subnets not in the table are inserted during allocation."""
+        mock_network_inventory.list_subnet_cidrs.return_value = ["10.1.2.0/28"]
 
         mock_cursor = MagicMock()
         mock_db_connection.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
         # Table is empty
         mock_cursor.fetchall.return_value = []
 
-        with patch("components.network.boto3.client", return_value=mock_ec2):
-            result = allocate_subnets(
-                "vpc-123",
-                "10.1",
-                count=1,
-                subnet_size=28,
-                range_id=42,
-                request_id="req-abc",
-            )
+        result = allocate_subnets(
+            "vpc-123",
+            "10.1",
+            count=1,
+            subnet_size=28,
+            range_id=42,
+            request_id="req-abc",
+        )
 
         # Should skip the AWS subnet and pick the next one
         assert result == ["10.1.2.16/28"]
@@ -419,3 +354,39 @@ class TestDBConnectionRequired:
                 range_id=42,
                 request_id="req-abc",
             )
+
+
+class TestDBConnectionAuthMode:
+    """Tests for provider-neutral DB auth mode in _get_db_connection."""
+
+    @pytest.mark.exercise_real_db_connection
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "gcp",
+            "DB_HOST": "db.internal",
+            "DB_PORT": "5432",
+            "DB_USER": "shifter",
+            "DB_NAME": "shifter",
+        },
+        clear=True,
+    )
+    def test_cloud_db_auth_does_not_require_aws_region(self):
+        """Cloud DB auth should work without AWS_REGION when using the adapter seam."""
+        from components.network import _get_db_connection
+
+        mock_auth = MagicMock()
+        mock_auth.generate_auth_token.return_value = "gcp-auth-token"
+
+        with (
+            patch("cloud.get_db_auth", return_value=mock_auth),
+            patch("components.network.psycopg.connect", return_value=MagicMock()) as mock_connect,
+        ):
+            _get_db_connection()
+
+        mock_auth.generate_auth_token.assert_called_once_with(
+            hostname="db.internal",
+            port=5432,
+            username="shifter",
+        )
+        assert mock_connect.call_args.kwargs["sslmode"] == "require"

@@ -1,7 +1,4 @@
-"""User data template tests for Shifter Engine.
-
-Tests template rendering for EC2 instance user data scripts.
-"""
+"""User data template tests for Shifter Engine."""
 
 import sys
 from pathlib import Path
@@ -38,6 +35,7 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key=test_key,
+            kali_password="kali",
         )
         assert test_key in result
         assert "{{ public_key }}" not in result
@@ -47,6 +45,7 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key="ssh-rsa AAAA...",
+            kali_password="kali",
         )
         assert result.strip().startswith("#!/bin/bash")
         # Verify essential script components rather than arbitrary length
@@ -59,6 +58,7 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-99",
             public_key="ssh-rsa AAAA...",
+            kali_password="kali",
         )
         assert "hostnamectl set-hostname" in result
 
@@ -67,9 +67,21 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key="ssh-rsa AAAA...",
+            kali_password="kali",
         )
         assert "authorized_keys" in result
         assert "/home/kali/.ssh" in result
+
+    def test_kali_template_configures_password_and_desktop_services(self, kali_template):
+        result = kali_template.render(
+            hostname="shifter-kali-42",
+            public_key="ssh-rsa AAAA...",
+            kali_password="LabKali123!",
+        )
+        assert "LabKali123!" in result
+        assert "apt-get install -y openssh-server xrdp" in result
+        assert "PasswordAuthentication yes" in result
+        assert "enable --now xrdp" in result
 
 
 class TestVictimLinuxTemplate:
@@ -92,7 +104,11 @@ class TestVictimLinuxTemplate:
 
     def test_victim_linux_template_configures_ssh(self, linux_template):
         """Template should configure SSH access."""
-        result = linux_template.render(public_key="ssh-rsa test-key", ssh_user="ubuntu")
+        result = linux_template.render(
+            public_key="ssh-rsa test-key",
+            ssh_user="ubuntu",
+            guest_password="ubuntu",
+        )
         # Should NOT set hostname (SSM does that)
         assert "hostnamectl" not in result
         # Should configure SSH access
@@ -103,14 +119,33 @@ class TestVictimLinuxTemplate:
 
     def test_victim_linux_template_valid_bash(self, linux_template):
         """Output should be a valid bash script."""
-        result = linux_template.render(public_key="ssh-rsa test-key", ssh_user="ubuntu")
+        result = linux_template.render(
+            public_key="ssh-rsa test-key",
+            ssh_user="ubuntu",
+            guest_password="ubuntu",
+        )
         assert result.strip().startswith("#!/bin/bash")
         assert "set -euo pipefail" in result or "set -e" in result
 
     def test_victim_linux_template_explains_ssm(self, linux_template):
-        """Template should explain that SSM handles setup."""
-        result = linux_template.render(public_key="ssh-rsa test-key", ssh_user="ubuntu")
-        assert "SSM" in result
+        """Template should explain that setup plans handle the remaining steps."""
+        result = linux_template.render(
+            public_key="ssh-rsa test-key",
+            ssh_user="ubuntu",
+            guest_password="ubuntu",
+        )
+        assert "Shifter setup plans" in result
+
+    def test_victim_linux_template_configures_password_and_desktop_services(self, linux_template):
+        result = linux_template.render(
+            public_key="ssh-rsa test-key",
+            ssh_user="ubuntu",
+            guest_password="LabUbuntu123!",
+        )
+        assert "LabUbuntu123!" in result
+        assert "apt-get install -y openssh-server xrdp" in result
+        assert "PasswordAuthentication yes" in result
+        assert "enable --now xrdp" in result
 
 
 class TestVictimWindowsTemplate:
@@ -130,7 +165,10 @@ class TestVictimWindowsTemplate:
 
     def test_victim_windows_template_configures_access(self, windows_template):
         """Template should configure SSH/RDP access."""
-        result = windows_template.render(public_key="ssh-rsa test-key")
+        result = windows_template.render(
+            public_key="ssh-rsa test-key",
+            admin_password="CortexSavesTheDay!",
+        )
         # Should NOT set hostname (SSM does that)
         assert "Rename-Computer" not in result
         # Should configure SSH
@@ -141,14 +179,29 @@ class TestVictimWindowsTemplate:
 
     def test_victim_windows_template_valid_powershell(self, windows_template):
         """Output should be a valid PowerShell script."""
-        result = windows_template.render(public_key="ssh-rsa test-key")
+        result = windows_template.render(
+            public_key="ssh-rsa test-key",
+            admin_password="CortexSavesTheDay!",
+        )
         assert "<powershell>" in result
         assert "</powershell>" in result
 
     def test_victim_windows_template_explains_ssm(self, windows_template):
-        """Template should explain that SSM handles setup."""
-        result = windows_template.render(public_key="ssh-rsa test-key")
-        assert "SSM" in result
+        """Template should explain that setup plans handle the remaining steps."""
+        result = windows_template.render(
+            public_key="ssh-rsa test-key",
+            admin_password="CortexSavesTheDay!",
+        )
+        assert "Shifter setup plans" in result
+
+    def test_victim_windows_template_enables_access_services(self, windows_template):
+        result = windows_template.render(
+            public_key="ssh-rsa test-key",
+            admin_password="CortexSavesTheDay!",
+        )
+        assert "OpenSSH.Server" in result
+        assert 'Enable-NetFirewallRule -DisplayGroup "Remote Desktop"' in result
+        assert "fDenyTSConnections" in result
 
 
 class TestTemplateContentSafety:
@@ -172,14 +225,22 @@ class TestTemplateContentSafety:
         kali_result = all_templates["kali"].render(
             hostname="test",
             public_key="test",
+            kali_password="kali",
         )
-        linux_result = all_templates["linux"].render(public_key="ssh-rsa test-key", ssh_user="ubuntu")
+        linux_result = all_templates["linux"].render(
+            public_key="ssh-rsa test-key",
+            ssh_user="ubuntu",
+            guest_password="ubuntu",
+        )
         assert "set -euo pipefail" in kali_result or "set -e" in kali_result
         assert "set -euo pipefail" in linux_result or "set -e" in linux_result
 
     def test_windows_uses_error_action_stop(self, all_templates):
         """Windows template should use ErrorActionPreference Stop."""
-        result = all_templates["windows"].render(public_key="ssh-rsa test-key")
+        result = all_templates["windows"].render(
+            public_key="ssh-rsa test-key",
+            admin_password="CortexSavesTheDay!",
+        )
         assert "ErrorActionPreference" in result and "Stop" in result
 
     def test_templates_log_output(self, all_templates):
@@ -188,11 +249,19 @@ class TestTemplateContentSafety:
         kali_result = all_templates["kali"].render(
             hostname="test",
             public_key="test",
+            kali_password="kali",
         )
         assert "log" in kali_result.lower() or "echo" in kali_result.lower()
 
         # Victim templates should log output too
-        linux_result = all_templates["linux"].render(public_key="ssh-rsa test-key", ssh_user="ubuntu")
-        windows_result = all_templates["windows"].render(public_key="ssh-rsa test-key")
+        linux_result = all_templates["linux"].render(
+            public_key="ssh-rsa test-key",
+            ssh_user="ubuntu",
+            guest_password="ubuntu",
+        )
+        windows_result = all_templates["windows"].render(
+            public_key="ssh-rsa test-key",
+            admin_password="CortexSavesTheDay!",
+        )
         assert "log" in linux_result.lower() or "echo" in linux_result.lower()
         assert "log" in windows_result.lower() or "Write-Host" in windows_result

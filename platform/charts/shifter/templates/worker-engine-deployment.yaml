@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-engine
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-engine
+spec:
+  replicas: {{ .Values.workers.engine.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: worker-engine
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker-engine
+      annotations:
+        checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      containers:
+        - name: worker-engine
+          image: {{ include "shifter.portalImage" . }}
+          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          args: ["python", "manage.py", "run_worker", "--queue", "engine"]
+          envFrom:
+            - configMapRef:
+                name: platform-runtime
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "find /tmp/worker-engine-heartbeat -mmin -2 | grep -q ."]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.workers.engine.resources | nindent 12 }}
+      {{- include "shifter.tmpVolume" . | nindent 6 }}

@@ -6,14 +6,15 @@ GitHub Actions with self-hosted runners.
 
 ```
 .github/workflows/
-├── deploy.yml              # Orchestrator (change detection, dependency chain)
+├── deploy.yml              # AWS orchestrator (change detection, dependency chain)
 ├── _quality.yml            # Linting, security scanning
 ├── _core.yml               # Core infrastructure (ECR, budgets)
 ├── _range.yml              # Range VPC infrastructure
 ├── _shifter-engine.yml     # Engine container build and push
 ├── _shifter-platform.yml   # Portal infrastructure and app deployment
-├── packer.yml              # AMI builds
-└── packer-promote.yml      # AMI promotion to prod
+├── _gcp-dev.yml            # GCP validation/deploy workflow (still being reconciled with the Helm cutover)
+├── packer.yml              # AMI builds (AWS)
+└── packer-promote.yml      # AMI promotion to prod (AWS)
 ```
 
 ## Deployment Chain
@@ -48,11 +49,37 @@ Jobs run only when relevant files change. `deploy.yml` detects changes and trigg
 
 ## Authentication
 
-OIDC federation with AWS. No long-lived credentials.
+OIDC federation per cloud. No long-lived credentials.
 
 | Secret | Purpose |
 |--------|---------|
-| `AWS_ROLE_ARN` | Prod environment IAM role |
-| `AWS_ROLE_ARN_DEV` | Dev environment IAM role |
+| `AWS_ROLE_ARN` | AWS prod IAM role |
+| `AWS_ROLE_ARN_DEV` | AWS dev IAM role |
+| `GCP_SERVICE_ACCOUNT` | GCP service account email |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | GCP Workload Identity Federation provider |
 
-Roles defined in `platform/terraform/global/iam/github-oidc.tf`.
+AWS roles defined in `platform/terraform/global/iam/github-oidc.tf`. GCP WIF configured in the GCP project.
+
+## GCP Current State
+
+GCP now deploys through CI/CD on `gcp-dev`. The branch model is:
+
+- `dev`: validation-only integration branch for AWS and GCP
+- `aws-dev`: AWS dev deploy branch
+- `gcp-dev`: GCP dev deploy branch
+
+The GCP CI path:
+
+1. validates Terraform and rendered manifests
+2. applies GCP Terraform
+3. builds and pushes control-plane images
+4. renders secure Helm values from Terraform outputs and Secret Manager
+5. installs or upgrades the Shifter Helm release
+
+The bootstrap path is security-gated and fails closed unless:
+
+- `public_hostname` is set
+- `enable_managed_tls = true`
+- `gke_master_authorized_cidrs` is non-empty
+
+`gdc-bootstrap` remains available for first-time bootstrap and controlled recovery, but it is not the normal deployment entrypoint.

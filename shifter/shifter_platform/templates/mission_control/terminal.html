@@ -55,6 +55,13 @@
                 </span>
                 <span class="pane-title">{{ instance.name|default:instance.role }}</span>
                 <span class="pane-subtitle">{{ instance.os_type }}</span>
+                <button class="pane-action-btn ssh-btn" title="Open SSH Session" data-uuid="{{ instance.uuid }}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M13 16H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>SSH</span>
+                </button>
                 <button class="pane-action-btn rdp-btn" title="Open RDP Session" data-uuid="{{ instance.uuid }}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
@@ -80,6 +87,13 @@
                 <select class="pane-select" id="left-pane-select">
                     <!-- Options populated by JavaScript -->
                 </select>
+                <button class="pane-action-btn ssh-btn split-ssh-btn" title="Open SSH Session" id="left-pane-ssh-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M13 16H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>SSH</span>
+                </button>
                 <button class="pane-action-btn rdp-btn split-rdp-btn" title="Open RDP Session" id="left-pane-rdp-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
@@ -102,6 +116,13 @@
                 <select class="pane-select" id="right-pane-select">
                     <!-- Options populated by JavaScript -->
                 </select>
+                <button class="pane-action-btn ssh-btn split-ssh-btn" title="Open SSH Session" id="right-pane-ssh-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M13 16H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>SSH</span>
+                </button>
                 <button class="pane-action-btn rdp-btn split-rdp-btn" title="Open RDP Session" id="right-pane-rdp-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
@@ -187,8 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     terminalManager.init();
 
-    // Helper function to open RDP session
-    async function openRdpSession(button, instanceUuid) {
+    async function openGuacamoleSession(button, instanceUuid, endpointUrl, sessionLabel) {
         if (!instanceUuid) {
             alert('Instance not available');
             return;
@@ -199,7 +219,7 @@ document.addEventListener('DOMContentLoaded', function() {
         button.classList.add('loading');
 
         try {
-            const response = await fetch('{% url "mission_control:guacamole_rdp_url" %}', {
+            const response = await fetch(endpointUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -211,19 +231,50 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to generate RDP URL');
+                throw new Error(data.error || `Failed to generate ${sessionLabel} URL`);
             }
 
-            // Open RDP session in new tab
-            window.open(data.url, '_blank');
+            const popup = window.open(data.url, '_blank');
+            if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+                if (confirm(`Popup blocked. Click OK to open the ${sessionLabel} session in this tab.`)) {
+                    window.location.href = data.url;
+                } else {
+                    throw new Error('Popup blocked by browser');
+                }
+            }
         } catch (error) {
-            console.error('RDP button error:', error);
-            alert('Failed to open RDP session: ' + error.message);
+            console.error(`${sessionLabel} button error:`, error);
+            alert(`Failed to open ${sessionLabel} session: ` + error.message);
         } finally {
             button.disabled = false;
             button.classList.remove('loading');
         }
     }
+
+    async function openRdpSession(button, instanceUuid) {
+        return openGuacamoleSession(
+            button,
+            instanceUuid,
+            '{% url "mission_control:guacamole_rdp_url" %}',
+            'RDP',
+        );
+    }
+
+    async function openSshSession(button, instanceUuid) {
+        return openGuacamoleSession(
+            button,
+            instanceUuid,
+            '{% url "mission_control:guacamole_ssh_url" %}',
+            'SSH',
+        );
+    }
+
+    document.querySelectorAll('.ssh-btn[data-uuid]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const button = e.currentTarget;
+            openSshSession(button, button.dataset.uuid);
+        });
+    });
 
     // Setup RDP button click handlers for tabbed view (has data-uuid)
     document.querySelectorAll('.rdp-btn[data-uuid]').forEach(btn => {
@@ -233,10 +284,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    document.getElementById('left-pane-ssh-btn')?.addEventListener('click', (e) => {
+        const select = document.getElementById('left-pane-select');
+        openSshSession(e.currentTarget, select?.value);
+    });
+
     // Setup RDP button click handlers for split view (gets uuid from select)
     document.getElementById('left-pane-rdp-btn')?.addEventListener('click', (e) => {
         const select = document.getElementById('left-pane-select');
         openRdpSession(e.currentTarget, select?.value);
+    });
+
+    document.getElementById('right-pane-ssh-btn')?.addEventListener('click', (e) => {
+        const select = document.getElementById('right-pane-select');
+        openSshSession(e.currentTarget, select?.value);
     });
 
     document.getElementById('right-pane-rdp-btn')?.addEventListener('click', (e) => {

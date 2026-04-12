@@ -8,14 +8,10 @@ import stat
 
 from executors.ngfw_executor import NGFWExecutor
 
-# Test-only fixture — not a real key  # nosec B105  # NOSONAR
-FAKE_PEM_KEY = """-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBfRkB0BI5GkNx7JgveB2oUMBJn7wCfHt9gzGJI4MAN6gAAAJA0YH1WNGB9
-VgAAAAtzc2gtZWQyNTUxOQAAACBfRkB0BI5GkNx7JgveB2oUMBJn7wCfHt9gzGJI4MAN6g
-AAAECezCb96GmXJbEgjTCXlBkKzz0RJZfA5mxoJwjmm7ER6l9GQHQEjkaQ3HsmC94HahQw
-EmfvAJ8e32DMYkjgwA3qAAAACGZha2VAa2V5
------END OPENSSH PRIVATE KEY-----"""
+# Test-only fixture. The executor only writes the value to a temp file and
+# passes the path to ssh; this test suite does not require a syntactically
+# valid private key.
+FAKE_PEM_KEY = "TEST_NGFW_PRIVATE_KEY"  # nosec B105  # NOSONAR
 
 
 class TestNGFWExecutorInit:

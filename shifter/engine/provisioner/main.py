@@ -7,12 +7,12 @@ It handles:
 - Terraform-based provisioning and destruction
 """
 
-import ipaddress
 import json
 import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import psycopg
 from psycopg import sql
@@ -25,7 +25,13 @@ from catalog.instances import (
     _get_windows_instance_type,
 )
 from components.instance import sanitize_hostname
-from config import generate_presigned_url
+from config import (
+    generate_presigned_url,
+    get_range_availability_zone,
+    has_ngfw_attachment_state,
+    load_range_network_config,
+    resolve_ngfw_attachment_config,
+)
 from events import (
     STATUS_DESTROYED,
     STATUS_FAILED,
@@ -36,8 +42,8 @@ from events import (
     publish_status_update,
 )
 from executors.aws_executor import AWSExecutor
+from executors.factory import build_guest_execution_context, get_ssh_username
 from executors.ngfw_executor import NGFWExecutor
-from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
@@ -67,9 +73,9 @@ def get_agent_presigned_url(inst_config: dict) -> str | None:
     if not s3_key:
         return None
 
-    bucket = os.environ.get("AGENT_S3_BUCKET", "")
+    bucket = os.environ.get("AGENT_STORAGE_BUCKET") or os.environ.get("AGENT_S3_BUCKET", "")
     if not bucket:
-        logger.warning("AGENT_S3_BUCKET not set, cannot generate presigned URL")
+        logger.warning("AGENT_STORAGE_BUCKET/AGENT_S3_BUCKET not set, cannot generate presigned URL")
         return None
 
     try:
@@ -156,26 +162,6 @@ def get_ami_id(ami_type: str) -> str:
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500  # 25 minutes
 
 
-def get_vpc_gateway_ip(cidr: str) -> str:
-    """Compute VPC gateway IP from CIDR (first IP + 1).
-
-    AWS reserves the first IP (.0) for the network address and uses
-    the second IP (.1) as the VPC gateway/router.
-
-    Example: 10.1.4.0/22 -> 10.1.4.1
-
-    Args:
-        cidr: CIDR block string (e.g., "10.1.4.0/22")
-
-    Returns:
-        Gateway IP address string (e.g., "10.1.4.1")
-    """
-    import ipaddress
-
-    network = ipaddress.ip_network(cidr, strict=False)
-    return str(network.network_address + 1)
-
-
 def _get_working_dir() -> str:
     """Get the working directory for provisioner commands.
 
@@ -230,22 +216,22 @@ def get_db_connection() -> psycopg.Connection:
             password=db_password,
         )
 
-    # Production mode: use RDS IAM auth
-    aws_region = os.environ.get("AWS_REGION")
-    if not all([db_host, db_user, db_name, aws_region]):
+    # Production mode: use provider-native IAM auth
+    cloud_region = os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION")
+    if not all([db_host, db_user, db_name, cloud_region]):
         missing = [
             k
             for k, v in [
                 ("DB_HOST", db_host),
                 ("DB_USER", db_user),
                 ("DB_NAME", db_name),
-                ("AWS_REGION", aws_region),
+                ("CLOUD_REGION", cloud_region),
             ]
             if not v
         ]
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
-    logger.debug("get_db_connection: RDS IAM auth to %s:%s/%s", db_host, db_port, db_name)
+    logger.debug("get_db_connection: cloud IAM auth to %s:%s/%s", db_host, db_port, db_name)
     assert db_host is not None  # validated above
     assert db_user is not None  # validated above
     from cloud import get_db_auth
@@ -353,6 +339,144 @@ def _validate_provisioned_outputs(
             logger.warning("Unexpected subnets in output: %s", extra)
 
 
+def _get_cloud_provider() -> str:
+    """Return the active cloud provider for range state persistence."""
+    return os.environ.get("CLOUD_PROVIDER", "aws")
+
+
+def _get_bool_env(name: str) -> bool | None:
+    """Parse a boolean env var if set, otherwise return None."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return None
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean-like value, got: {raw_value!r}")
+
+
+def _should_promote_dc_at_runtime(provider: str | None = None) -> bool:
+    """Decide whether DC promotion should run during setup."""
+    override = _get_bool_env("DC_RUNTIME_PROMOTION")
+    if override is not None:
+        return override
+    return (provider or _get_cloud_provider()) == "gcp"
+
+
+def _should_run_dc_bootstrap_plan(provider: str | None = None) -> bool:
+    """Decide whether DC hostname/SSH bootstrap should run via setup plans."""
+    override = _get_bool_env("DC_BOOTSTRAP_VIA_SETUP_PLAN")
+    if override is not None:
+        return override
+    return (provider or _get_cloud_provider()) == "gcp"
+
+
+def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Drop empty provider metadata fields so persisted state stays readable."""
+    return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}
+
+
+def _get_provider_metadata_prefixes(provider: str) -> list[str]:
+    """Return the accepted output prefixes for provider metadata extraction."""
+    if provider == "gcp":
+        return ["gcp_", "gdc_", "vmruntime_"]
+    return [f"{provider}_"]
+
+
+def _extract_provider_metadata(resource: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Collect provider-prefixed keys into a nested metadata block."""
+    metadata: dict[str, Any] = {}
+    for prefix in _get_provider_metadata_prefixes(provider):
+        metadata.update({key.removeprefix(prefix): value for key, value in resource.items() if key.startswith(prefix)})
+    return _compact_state_fields(metadata)
+
+
+def _build_subnet_provider_metadata(subnet_data: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Build provider-specific subnet metadata for persisted state."""
+    if provider == "aws":
+        metadata = {
+            "subnet_id": subnet_data.get("subnet_id"),
+            "cidr": subnet_data.get("subnet_cidr"),
+            "security_group_id": subnet_data.get("security_group_id"),
+            "route_table_id": subnet_data.get("route_table_id"),
+        }
+    else:
+        metadata = _extract_provider_metadata(subnet_data, provider)
+
+    return {provider: metadata} if metadata else {}
+
+
+def _build_instance_provider_metadata(instance_data: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Build provider-specific instance metadata for persisted state."""
+    if provider == "aws":
+        metadata = {
+            "instance_id": instance_data.get("instance_id"),
+        }
+    else:
+        metadata = _extract_provider_metadata(instance_data, provider)
+
+    return {provider: metadata} if metadata else {}
+
+
+def _build_subnet_state(subnet_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+    """Build the persisted engine_subnet.state payload."""
+    resolved_provider = provider or _get_cloud_provider()
+    state = {
+        "cloud_provider": resolved_provider,
+        "subnet_id": subnet_data.get("subnet_id"),
+        "subnet_cidr": subnet_data.get("subnet_cidr"),
+        "security_group_id": subnet_data.get("security_group_id"),
+        "route_table_id": subnet_data.get("route_table_id"),
+        "provider_metadata": _build_subnet_provider_metadata(subnet_data, resolved_provider),
+        # Preserve the current AWS field names for existing AWS callers.
+        "aws_subnet_id": subnet_data.get("subnet_id") if resolved_provider == "aws" else None,
+        "aws_cidr": subnet_data.get("subnet_cidr") if resolved_provider == "aws" else None,
+        "aws_security_group_id": subnet_data.get("security_group_id") if resolved_provider == "aws" else None,
+        "aws_route_table_id": subnet_data.get("route_table_id") if resolved_provider == "aws" else None,
+    }
+    return state
+
+
+def _build_instance_state(instance_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+    """Build the persisted engine_instance.state payload for range guests."""
+    resolved_provider = provider or _get_cloud_provider()
+    state = {
+        "asset_type": instance_data.get("asset_type", "vm_runtime_vm"),
+        "cloud_provider": resolved_provider,
+        "instance_id": instance_data.get("instance_id"),
+        "private_ip": instance_data.get("private_ip"),
+        "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        "ssh_username": instance_data.get("ssh_username"),
+        "subnet_name": instance_data.get("subnet_name"),
+        "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
+        # Preserve the current AWS field name for existing pause/resume readers.
+        "aws_instance_id": instance_data.get("instance_id") if resolved_provider == "aws" else None,
+    }
+    return state
+
+
+def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+    """Build the legacy Range.provisioned_instances entry with provider metadata."""
+    resolved_provider = provider or _get_cloud_provider()
+    return {
+        "uuid": instance_data.get("uuid"),
+        "name": instance_data.get("name"),
+        "asset_type": instance_data.get("asset_type", "vm_runtime_vm"),
+        "role": instance_data.get("role"),
+        "os_type": instance_data.get("os"),
+        "subnet_name": instance_data.get("subnet_name"),
+        "instance_id": instance_data.get("instance_id"),
+        "private_ip": instance_data.get("private_ip"),
+        "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        "ssh_username": instance_data.get("ssh_username"),
+        "cloud_provider": resolved_provider,
+        "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
+    }
+
+
 def write_provisioned_state(
     range_id: int,
     subnets: dict[str, dict],
@@ -366,10 +490,11 @@ def write_provisioned_state(
 
     Args:
         range_id: The range ID being provisioned.
-        subnets: Dict of subnet_name -> subnet details with uuid and AWS resource IDs.
+        subnets: Dict of subnet_name -> subnet details with uuid and provider resource IDs.
         instances: List of instance dicts with uuid, instance_id, private_ip, etc.
         ngfw_instance_id: ID of the NGFW Instance this range is attached to (if any).
     """
+    provider = _get_cloud_provider()
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             # Update engine_subnet.state for each subnet
@@ -379,12 +504,7 @@ def write_provisioned_state(
                     logger.warning("Subnet %s missing UUID, skipping DB write", subnet_name)
                     continue
 
-                state = {
-                    "aws_subnet_id": subnet_data.get("subnet_id"),
-                    "aws_cidr": subnet_data.get("subnet_cidr"),
-                    "aws_security_group_id": subnet_data.get("security_group_id"),
-                    "aws_route_table_id": subnet_data.get("route_table_id"),
-                }
+                state = _build_subnet_state(subnet_data, provider=provider)
 
                 cur.execute(
                     """
@@ -409,13 +529,7 @@ def write_provisioned_state(
                     )
                     continue
 
-                # Build state dict with AWS resource details
-                instance_state = {
-                    "aws_instance_id": inst.get("instance_id"),
-                    "private_ip": inst.get("private_ip"),
-                    "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
-                    "subnet_name": inst.get("subnet_name"),
-                }
+                instance_state = _build_instance_state(inst, provider=provider)
 
                 cur.execute(
                     """
@@ -429,19 +543,7 @@ def write_provisioned_state(
                     raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
                 logger.debug("Updated engine_instance state: uuid=%s", instance_uuid)
 
-                # Also build legacy provisioned_instances for Range.provisioned_instances
-                provisioned_instances.append(
-                    {
-                        "uuid": instance_uuid,
-                        "name": inst.get("name"),
-                        "role": inst.get("role"),
-                        "os_type": inst.get("os"),
-                        "subnet_name": inst.get("subnet_name"),
-                        "instance_id": inst.get("instance_id"),
-                        "private_ip": inst.get("private_ip"),
-                        "ssh_key_secret_arn": inst.get("ssh_key_secret_arn"),
-                    }
-                )
+                provisioned_instances.append(_build_provisioned_instance_payload(inst, provider=provider))
 
             # Update Range.provisioned_instances and ngfw_instance_id
             cur.execute(
@@ -536,16 +638,16 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
 def get_user_ngfw_data(user_id: int) -> dict | None:
     """Get NGFW data for a user (if they have one provisioned).
 
-    Queries for a ready/paused NGFW Instance belonging to this user.
-    Includes 'pausing' status because range provisioner will wait for
-    pause to complete, then resume the NGFW.
+    Queries for a ready/paused NGFW Instance belonging to this user and
+    resolves provider-neutral access and attachment details from state.
 
     Args:
         user_id: Django User ID.
 
     Returns:
-        Dictionary with ec2_instance_id, management_ip, ssh_key_secret_arn,
-        data_eni_id, and ngfw_request_id. Returns None if user has no NGFW.
+        Dictionary with request correlation IDs, provider-neutral management
+        access fields, attachment/routing fields, and legacy AWS aliases.
+        Returns None if user has no NGFW.
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -571,15 +673,92 @@ def get_user_ngfw_data(user_id: int) -> dict | None:
         request_id = str(row[0])
         state = row[1] if row[1] else {}
         status = row[2]
+        attachment = resolve_ngfw_attachment_config(state)
 
         return {
             "ngfw_request_id": request_id,
+            "cloud_provider": attachment.cloud_provider,
             "ec2_instance_id": state.get("ec2_instance_id"),
-            "management_ip": state.get("management_ip"),
-            "ssh_key_secret_arn": state.get("ssh_key_secret_arn"),
-            "data_eni_id": state.get("data_eni_id"),
+            "management_ip": attachment.management_ip,
+            "ssh_key_secret_arn": attachment.ssh_key_secret_ref,
+            "ssh_key_secret_ref": attachment.ssh_key_secret_ref,
+            "dataplane_ip": attachment.dataplane_ip,
+            "route_next_hop_ip": attachment.route_next_hop_ip,
+            "data_eni_id": attachment.data_attachment_id,
+            "data_attachment_id": attachment.data_attachment_id,
+            "attachment_mode": attachment.attachment_mode,
+            "provider_metadata": attachment.provider_metadata,
+            "attached_ranges": state.get("attached_ranges", []),
             "status": status,
         }
+
+
+def _build_ngfw_range_attachment_record(
+    *,
+    range_id: int,
+    request_id: str,
+    subnets: list[dict[str, Any]],
+    ngfw_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the persisted attachment record for a range bound to an NGFW."""
+    return {
+        "range_id": range_id,
+        "request_id": request_id,
+        "cloud_provider": _get_cloud_provider(),
+        "attachment_mode": ngfw_data.get("attachment_mode", ""),
+        "route_next_hop_ip": ngfw_data.get("route_next_hop_ip", ""),
+        "data_attachment_id": ngfw_data.get("data_attachment_id", ""),
+        "subnets": [
+            {
+                "name": subnet.get("name", ""),
+                "cidr": subnet.get("cidr", ""),
+                "connected_to": list(subnet.get("connected_to", [])),
+                "provider_metadata": subnet.get("provider_metadata", {}),
+            }
+            for subnet in subnets
+        ],
+    }
+
+
+def _record_ngfw_range_attachment(
+    *,
+    ngfw_request_id: str,
+    ngfw_status: str,
+    attachment_record: dict[str, Any],
+) -> None:
+    """Merge the current range attachment into the NGFW instance state."""
+    ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
+    current_state = ngfw_data.get("state") or {}
+    current_attachments = list(current_state.get("attached_ranges") or [])
+    current_attachments = [
+        attachment
+        for attachment in current_attachments
+        if attachment.get("range_id") != attachment_record.get("range_id")
+    ]
+    current_attachments.append(attachment_record)
+    update_instance_state(
+        ngfw_request_id,
+        ngfw_status,
+        attached_ranges=current_attachments,
+    )
+
+
+def _remove_ngfw_range_attachment(
+    *,
+    ngfw_request_id: str,
+    ngfw_status: str,
+    range_id: int,
+) -> None:
+    """Remove a range attachment from the NGFW instance state."""
+    ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
+    current_state = ngfw_data.get("state") or {}
+    current_attachments = list(current_state.get("attached_ranges") or [])
+    remaining_attachments = [attachment for attachment in current_attachments if attachment.get("range_id") != range_id]
+    update_instance_state(
+        ngfw_request_id,
+        ngfw_status,
+        attached_ranges=remaining_attachments,
+    )
 
 
 def remove_ngfw_subnets(user_id: int, subnets: list[dict], range_id: int) -> None:
@@ -813,20 +992,19 @@ def get_range_data_by_request_id(request_id: str) -> dict:
         if range_config.get("ngfw", False):
             cur.execute(
                 """
-                SELECT ei.id
+                SELECT ei.id, ei.state
                 FROM engine_instance ei
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
                   AND ei.status IN ('ready', 'paused', 'pausing', 'resuming')
-                  AND ei.state->>'data_eni_id' IS NOT NULL
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
                 (user_id,),
             )
             ngfw_row = cur.fetchone()
-            if ngfw_row:
+            if ngfw_row and has_ngfw_attachment_state(ngfw_row[1]):
                 ngfw_instance_id = ngfw_row[0]
 
         return {
@@ -1382,12 +1560,12 @@ def configure_ngfw_subnets(
     range_id: int,
     management_ip: str,
     ssh_key_secret_arn: str,
-    ngfw_subnet_cidr: str,
+    route_next_hop_ip: str,
     ssm_endpoints_subnet_cidr: str = "",
 ) -> None:
     """Configure NGFW with routes for range subnets.
 
-    This runs AFTER pulumi up (subnets exist) and BEFORE instance setup.
+    This runs after range infrastructure exists and before instance setup.
     Configures static routes on the NGFW so traffic can flow between subnets.
     When ssm_endpoints_subnet_cidr is provided, also configures routing for
     Bedrock/SSM endpoint traffic through the NGFW.
@@ -1397,16 +1575,13 @@ def configure_ngfw_subnets(
         range_id: Range ID for unique naming.
         management_ip: NGFW management IP for SSH.
         ssh_key_secret_arn: Secrets Manager ARN for SSH private key.
-        ngfw_subnet_cidr: NGFW subnet CIDR for computing gateway IP.
+        route_next_hop_ip: Next-hop IP address for range subnet routes.
         ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
     """
-    # Compute VPC gateway IP (first IP + 1 in the subnet)
-    network = ipaddress.ip_network(ngfw_subnet_cidr, strict=False)
-    vpc_gateway_ip = str(network.network_address + 1)
     logger.info(
-        "Configuring NGFW: %d subnets, gateway=%s",
+        "Configuring NGFW: %d subnets, next_hop=%s",
         len(subnets),
-        vpc_gateway_ip,
+        route_next_hop_ip,
     )
 
     # Get SSH private key from Secrets Manager
@@ -1462,7 +1637,11 @@ def configure_ngfw_subnets(
     # Build dynamic steps and wrap in DynamicPlan for SetupOrchestrator
     # This ensures consistent execution flow with proven retry/commit handling
     steps = NGFWConfigureSubnetsPlan().get_steps(
-        subnets, range_id, vpc_gateway_ip, stale_routes, ssm_endpoints_subnet_cidr
+        subnets,
+        range_id,
+        route_next_hop_ip,
+        stale_routes,
+        ssm_endpoints_subnet_cidr,
     )
     plan = DynamicPlan(name="ngfw_configure_subnets", steps=steps)
 
@@ -1485,6 +1664,7 @@ def configure_ngfw_subnets(
 
 
 def _run_single_instance_setup(
+    instance_data: dict[str, Any],
     instance_id: str,
     role: str,
     os_type: str,
@@ -1500,7 +1680,7 @@ def _run_single_instance_setup(
     """Run setup for a single non-DC instance.
 
     Args:
-        instance_id: EC2 instance ID.
+        instance_id: Provider-specific instance identifier (or name).
         role: Instance role ('attacker' or 'victim').
         os_type: OS type ('kali', 'ubuntu', 'windows').
         public_key: SSH public key for terminal access.
@@ -1520,17 +1700,14 @@ def _run_single_instance_setup(
     """
     logger.info("Starting setup for %s instance %s...", role, instance_id)
 
-    # Create executor and orchestrator
-    executor = SSMExecutor()
+    execution = build_guest_execution_context(instance_data, os_type=os_type, role=role)
+    executor = execution.executor
     orchestrator = SetupOrchestrator(executor=executor)
+    document_name = execution.document_name
 
-    # Select SSM document based on OS type
-    document_name = "AWS-RunShellScript" if os_type in ("kali", "ubuntu", "amazon-linux") else "AWS-RunPowerShellScript"
-
-    # Wait for SSM agent to come online
-    logger.info("Waiting for SSM agent on %s...", instance_id)
-    executor.wait_for_agent(instance_id, timeout_seconds=300)
-    logger.info("Instance %s is ready (SSM agent online)", instance_id)
+    logger.info("Waiting for %s connectivity on %s...", execution.transport_name, execution.target)
+    execution.wait_for_ready(timeout_seconds=300)
+    logger.info("Target %s is ready via %s", execution.target, execution.transport_name)
 
     # Create context object for plan get_context()
     # Use the scenario template name directly as the hostname (e.g., "webdev01", "kali")
@@ -1542,97 +1719,109 @@ def _run_single_instance_setup(
             self.hostname = hostname
             self.public_key = public_key
             self.agent_presigned_url = agent_presigned_url
-            self.ssh_user = "kali" if os_type == "kali" else "ubuntu"
+            self.ssh_user = get_ssh_username(os_type, role)
 
     ctx = InstanceContext()
 
-    # Select and run plans based on role and OS type
-    if role == "attacker":
-        # Kali: hostname + SSH setup
-        plan = LinuxBootstrapPlan()
-        context = plan.get_context(ctx)
-        result = orchestrator.orchestrate(instance_id, plan, context, document_name=document_name)
-        if not result.success:
-            raise SetupError(f"Kali setup failed: {result.error}")
-        logger.info("Kali setup complete for %s", instance_id)
-
-    elif role == "victim":
-        if os_type in ("kali", "ubuntu", "amazon-linux"):
-            # Linux victim: Bootstrap + XDR
-            bootstrap_plan = LinuxBootstrapPlan()
-            bootstrap_ctx = bootstrap_plan.get_context(ctx)
-            result = orchestrator.orchestrate(instance_id, bootstrap_plan, bootstrap_ctx, document_name=document_name)
+    try:
+        # Select and run plans based on role and OS type
+        if role == "attacker":
+            plan = LinuxBootstrapPlan()
+            context = plan.get_context(ctx)
+            result = orchestrator.orchestrate(execution.target, plan, context, document_name=document_name)
             if not result.success:
-                raise SetupError(f"Linux bootstrap failed: {result.error}")
-            logger.info("Linux bootstrap complete for %s", instance_id)
+                raise SetupError(f"Kali setup failed: {result.error}")
+            logger.info("Kali setup complete for %s", instance_id)
 
-            # Install XDR agent
-            if agent_presigned_url:
-                xdr_plan = LinuxXDRAgentInstallPlan()
-                xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-                result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_ctx, document_name=document_name)
+        elif role == "victim":
+            if os_type in ("kali", "ubuntu", "amazon-linux"):
+                bootstrap_plan = LinuxBootstrapPlan()
+                bootstrap_ctx = bootstrap_plan.get_context(ctx)
+                result = orchestrator.orchestrate(
+                    execution.target,
+                    bootstrap_plan,
+                    bootstrap_ctx,
+                    document_name=document_name,
+                )
                 if not result.success:
-                    raise SetupError(f"Linux XDR install failed: {result.error}")
-                logger.info("Linux XDR agent installed on %s", instance_id)
-            elif xdr_required:
-                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
+                    raise SetupError(f"Linux bootstrap failed: {result.error}")
+                logger.info("Linux bootstrap complete for %s", instance_id)
+
+                if agent_presigned_url:
+                    xdr_plan = LinuxXDRAgentInstallPlan()
+                    xdr_ctx = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+                    result = orchestrator.orchestrate(execution.target, xdr_plan, xdr_ctx, document_name=document_name)
+                    if not result.success:
+                        raise SetupError(f"Linux XDR install failed: {result.error}")
+                    logger.info("Linux XDR agent installed on %s", instance_id)
+                elif xdr_required:
+                    raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
+                else:
+                    logger.info("No XDR agent URL provided for %s (not required)", instance_id)
+
             else:
-                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
-
-        else:
-            # Windows victim: Bootstrap + XDR + Domain join
-            win_bootstrap_plan = BootstrapPlan()
-            win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
-            result = orchestrator.orchestrate(
-                instance_id, win_bootstrap_plan, win_bootstrap_ctx, document_name=document_name
-            )
-            if not result.success:
-                raise SetupError(f"Windows bootstrap failed: {result.error}")
-            logger.info("Windows bootstrap complete for %s", instance_id)
-
-            # Install XDR agent
-            if agent_presigned_url:
-                win_xdr_plan = XDRAgentInstallPlan()
-                win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-                result = orchestrator.orchestrate(instance_id, win_xdr_plan, win_xdr_ctx, document_name=document_name)
+                win_bootstrap_plan = BootstrapPlan()
+                win_bootstrap_ctx = win_bootstrap_plan.get_context(ctx)
+                result = orchestrator.orchestrate(
+                    execution.target,
+                    win_bootstrap_plan,
+                    win_bootstrap_ctx,
+                    document_name=document_name,
+                )
                 if not result.success:
-                    raise SetupError(f"Windows XDR install failed: {result.error}")
-                logger.info("Windows XDR agent installed on %s", instance_id)
-            elif xdr_required:
-                raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
-            else:
-                logger.info("No XDR agent URL provided for %s (not required)", instance_id)
+                    raise SetupError(f"Windows bootstrap failed: {result.error}")
+                logger.info("Windows bootstrap complete for %s", instance_id)
 
-            # Domain join (only for Windows victims with join_domain=True)
-            if join_domain and dc_ip and domain_name:
-                domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
-                if domain_password:
-                    logger.info("Joining domain %s for %s...", domain_name, instance_id)
-                    domain_join_plan = DomainJoinPlan()
-                    dj_context = domain_join_plan.get_context(
-                        {
-                            "dc_ip": dc_ip,
-                            "domain_name": domain_name,
-                            "domain_admin_password": domain_password,
-                        }
-                    )
+                if agent_presigned_url:
+                    win_xdr_plan = XDRAgentInstallPlan()
+                    win_xdr_ctx = win_xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
                     result = orchestrator.orchestrate(
-                        instance_id, domain_join_plan, dj_context, document_name=document_name
+                        execution.target,
+                        win_xdr_plan,
+                        win_xdr_ctx,
+                        document_name=document_name,
                     )
                     if not result.success:
-                        raise SetupError(f"Domain join failed for {instance_id}")
-                    logger.info("Domain join complete for %s", instance_id)
+                        raise SetupError(f"Windows XDR install failed: {result.error}")
+                    logger.info("Windows XDR agent installed on %s", instance_id)
+                elif xdr_required:
+                    raise SetupError(f"XDR agent required but no URL provided for {instance_id}")
                 else:
-                    # join_domain=True means domain join is required
-                    raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
-            elif join_domain:
-                # join_domain=True means domain join is required
-                raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
+                    logger.info("No XDR agent URL provided for %s (not required)", instance_id)
 
-    return True
+                if join_domain and dc_ip and domain_name:
+                    domain_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+                    if domain_password:
+                        logger.info("Joining domain %s for %s...", domain_name, instance_id)
+                        domain_join_plan = DomainJoinPlan()
+                        dj_context = domain_join_plan.get_context(
+                            {
+                                "dc_ip": dc_ip,
+                                "domain_name": domain_name,
+                                "domain_admin_password": domain_password,
+                            }
+                        )
+                        result = orchestrator.orchestrate(
+                            execution.target,
+                            domain_join_plan,
+                            dj_context,
+                            document_name=document_name,
+                        )
+                        if not result.success:
+                            raise SetupError(f"Domain join failed for {instance_id}")
+                        logger.info("Domain join complete for %s", instance_id)
+                    else:
+                        raise SetupError(f"Domain join required but DC_DOMAIN_PASSWORD not set for {instance_id}")
+                elif join_domain:
+                    raise SetupError(f"Domain join required but dc_ip or domain_name not provided for {instance_id}")
+
+        return True
+    finally:
+        execution.close()
 
 
 def _run_dc_setup(
+    instance_data: dict[str, Any],
     instance_id: str,
     dc_config: dict,
     agent_presigned_url: str,
@@ -1642,7 +1831,7 @@ def _run_dc_setup(
     """Run setup for a DC instance.
 
     Args:
-        instance_id: EC2 instance ID.
+        instance_id: Provider-specific instance identifier (or name).
         dc_config: DC configuration dict with domain_name, netbios_name, etc.
         agent_presigned_url: Pre-signed URL for XDR agent download.
         public_key: SSH public key for terminal access.
@@ -1659,94 +1848,47 @@ def _run_dc_setup(
     netbios_name = dc_config.get("netbios_name", "")
     logger.info("Domain: %s, NetBIOS: %s", domain_name, netbios_name)
 
-    # Create executor and orchestrator
-    executor = SSMExecutor()
+    provider = _get_cloud_provider()
+    execution = build_guest_execution_context(instance_data, os_type="windows", role="dc")
+    executor = execution.executor
     orchestrator = SetupOrchestrator(executor=executor)
 
-    # Wait for SSM agent to come online
-    logger.info("Waiting for SSM agent on DC %s...", instance_id)
-    executor.wait_for_agent(instance_id, timeout_seconds=600)
-    logger.info("DC %s SSM agent online", instance_id)
+    logger.info("Waiting for %s connectivity on DC %s...", execution.transport_name, execution.target)
+    execution.wait_for_ready(timeout_seconds=600)
+    logger.info("DC %s ready via %s", instance_id, execution.transport_name)
 
-    # Prebaked DC: Skip hostname change - DC already has correct hostname from AMI
-    logger.info("Using prebaked DC AMI - skipping hostname change")
-
-    # Configure SSH key for terminal access (before DC verification)
-    if public_key:
-        logger.info("Configuring SSH key on DC %s...", instance_id)
-        ssh_key_script = f'''
-$ErrorActionPreference = "Stop"
-$publicKey = "{public_key}"
-
-Write-Host "Configuring SSH key for Administrator..."
-
-$sshDir = "C:\\ProgramData\\ssh"
-if (!(Test-Path $sshDir)) {{
-    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
-}}
-
-$publicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
-
-# Set proper permissions
-icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
-    /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
-
-# Restart sshd to pick up new key
-Restart-Service sshd -Force -ErrorAction SilentlyContinue
-
-Write-Host "SSH key configured successfully"
-'''
-        ssh_result = executor.run_command(
+    try:
+        _run_dc_bootstrap_plan(
+            provider=provider,
+            instance_data=instance_data,
             instance_id=instance_id,
-            script=ssh_key_script,
-            document_name="AWS-RunPowerShellScript",
-            timeout_seconds=60,
+            public_key=public_key,
+            orchestrator=orchestrator,
+            execution=execution,
         )
-        if not ssh_result.success:
-            logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
-        else:
-            logger.info("SSH key configured on DC %s", instance_id)
-    else:
-        logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
-
-    # Verify Domain Controller via DCSetupPlan
-    logger.info("Verifying Domain Controller (%s)...", domain_name)
-    dc_plan = DCSetupPlan()
-
-    # Create config object for DCSetupPlan context
-    class DCPromoteConfig:
-        def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
-            self.domain_name = domain_name
-            self.netbios_name = netbios_name
-            self.dsrm_password = dsrm_password
-            self.domain_admin_password = domain_admin_password
-
-    # Passwords come from env var, not from spec (same as InstanceComponent)
-    domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
-    dsrm_password = domain_admin_password  # Reuse for DSRM (same as InstanceComponent)
-
-    config_obj = DCPromoteConfig(domain_name, netbios_name, dsrm_password, domain_admin_password)
-    dc_context = dc_plan.get_context(config_obj)
-    dc_result = orchestrator.orchestrate(instance_id, dc_plan, dc_context)
-    if not dc_result.success:
-        raise SetupError(f"DC verification failed: {dc_result.error}")
-    logger.info("DC verification complete")
-
-    # Install XDR agent on DC
-    if agent_presigned_url:
-        logger.info("Installing XDR agent on DC %s...", instance_id)
-        xdr_plan = XDRAgentInstallPlan()
-        xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
-        xdr_result = orchestrator.orchestrate(instance_id, xdr_plan, xdr_context)
-        if not xdr_result.success:
-            raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
-        logger.info("XDR agent installed successfully on DC")
-    elif xdr_required:
-        raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
-    else:
-        logger.info("No XDR agent URL provided for DC (not required)")
-
-    return True
+        _configure_dc_ssh_access(
+            executor=executor,
+            execution=execution,
+            instance_id=instance_id,
+            public_key=public_key,
+        )
+        _verify_dc_setup(
+            provider=provider,
+            domain_name=domain_name,
+            netbios_name=netbios_name,
+            orchestrator=orchestrator,
+            execution=execution,
+        )
+        _install_dc_xdr(
+            orchestrator=orchestrator,
+            execution=execution,
+            instance_id=instance_id,
+            agent_presigned_url=agent_presigned_url,
+            xdr_required=xdr_required,
+        )
+        return True
+    finally:
+        execution.close()
 
 
 def run_instance_setup(
@@ -1773,10 +1915,23 @@ def run_instance_setup(
         for inst in subnet.get("instances", []):
             uuid_to_config[inst.get("uuid", "")] = inst
 
-    # Separate DCs from other instances
+    # Separate Pod-backed assets from VM-backed assets. Slice 12 only composes
+    # them onto the same subnet; guest bootstrap/tooling for Pods is a later slice.
+    pod_instances = []
+    vm_instances = []
+    for inst in instances_output:
+        if inst.get("asset_type", "vm_runtime_vm") == "scenario_pod":
+            pod_instances.append(inst)
+        else:
+            vm_instances.append(inst)
+
+    if pod_instances:
+        logger.info("Skipping VM setup for %d pod-backed scenario assets", len(pod_instances))
+
+    # Separate DCs from other VM-backed instances
     dc_instances = []
     other_instances = []
-    for inst in instances_output:
+    for inst in vm_instances:
         if inst.get("role") == "dc":
             dc_instances.append(inst)
         else:
@@ -1791,9 +1946,10 @@ def run_instance_setup(
         xdr_required = bool(inst_config.get("agent"))  # XDR required if agent data present
         public_key = dc_inst.get("public_key", "")
         _run_dc_setup(
-            dc_inst["instance_id"],
-            dc_config,
-            agent_url or "",
+            instance_data=dc_inst,
+            instance_id=dc_inst["instance_id"],
+            dc_config=dc_config,
+            agent_presigned_url=agent_url or "",
             public_key=public_key,
             xdr_required=xdr_required,
         )
@@ -1819,6 +1975,7 @@ def run_instance_setup(
             inst_config = uuid_to_config.get(inst_uuid, {})
             try:
                 _run_single_instance_setup(
+                    instance_data=inst,
                     instance_id=inst_id,
                     role=inst.get("role", "victim"),
                     os_type=inst.get("os", "ubuntu"),
@@ -1871,8 +2028,9 @@ def run_range_terraform(operation: str, request_id: str) -> None:
         if ngfw_data and ngfw_data.get("management_ip"):
             logger.info("NGFW enabled for range %s", range_id)
             ngfw_status = ngfw_data.get("status")
+            ngfw_provider = ngfw_data.get("cloud_provider", "aws")
             ec2_instance_id = ngfw_data.get("ec2_instance_id")
-            if ngfw_status in ("paused", "pausing", "resuming"):
+            if ngfw_provider == "aws" and ngfw_status in ("paused", "pausing", "resuming"):
                 if ngfw_status == "pausing" and ec2_instance_id:
                     logger.info("NGFW is pausing, waiting for pause to complete...")
                     aws_executor = AWSExecutor()
@@ -1900,6 +2058,11 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                 else:
                     logger.info("Resuming paused NGFW for range provisioning...")
                     run_ngfw_operation("start", ngfw_data["ngfw_request_id"])
+            elif ngfw_provider != "aws" and ngfw_status != "ready":
+                raise RuntimeError(
+                    "GDC-attached NGFW ranges require the NGFW to already be in ready state. "
+                    f"Current status={ngfw_status!r} for request_id={ngfw_data['ngfw_request_id']}"
+                )
 
     try:
         if operation == "up":
@@ -1926,17 +2089,13 @@ def run_range_terraform(operation: str, request_id: str) -> None:
                     user_id,
                     range_spec,
                 )
-                range_terraform_runner.destroy_range(
-                    request_id,
-                    range_terraform_runner.RANGE_MODULE_PATH,
-                    variables=tf_variables,
-                )
+                range_terraform_runner.destroy_range(request_id, variables=tf_variables)
                 range_terraform_runner.cleanup_range_state(request_id)
                 logger.info("Auto-cleanup succeeded for range_id=%s", range_id)
             except Exception as cleanup_error:
                 logger.error(
                     "Auto-cleanup FAILED for range_id=%s request_id=%s: %s. "
-                    "Orphaned AWS resources may exist and require manual cleanup.",
+                    "Orphaned cloud resources may exist and require manual cleanup.",
                     range_id,
                     request_id,
                     cleanup_error,
@@ -1984,95 +2143,34 @@ def _run_terraform_provision(
 
     logger.info("Running terraform apply for range...")
 
-    # Allocate CIDRs for subnets before Terraform
-    spec_subnets = range_spec.get("subnets", [])
-    if spec_subnets:
-        from components.network import allocate_subnets
-
-        vpc_id = os.environ.get("RANGE_VPC_ID", "")
-        vpc_cidr = os.environ.get("RANGE_VPC_CIDR", "10.1.0.0/16")
-        # Extract CIDR prefix (e.g., "10.1" from "10.1.0.0/16")
-        cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
-
-        subnet_count = len(spec_subnets)
-        logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
-
-        allocated_cidrs = allocate_subnets(
-            vpc_id,
-            cidr_prefix,
-            subnet_count,
-            subnet_size=28,
-            range_id=range_id,
-            request_id=request_id,
-        )
-        logger.info("Allocated CIDRs: %s", allocated_cidrs)
-
-        # Add CIDRs to range_spec subnets
-        for i, subnet in enumerate(spec_subnets):
-            subnet["cidr"] = allocated_cidrs[i]
-
-        # Persist allocated CIDRs back to range_config so destroy can read them
-        _update_range_config(range_id, range_spec)
+    spec_subnets = _allocate_range_subnet_cidrs(request_id, range_id, range_spec)
 
     # Build Terraform variables from range spec (now with CIDRs)
     tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
 
     # Run Terraform apply
-    output_data = range_terraform_runner.apply_range(
-        request_id,
-        tf_variables,
-        range_terraform_runner.RANGE_MODULE_PATH,
-    )
+    output_data = range_terraform_runner.apply_range(request_id, tf_variables)
     logger.info("Terraform outputs: %s", json.dumps(output_data, indent=2))
 
     subnets_output = output_data.get("subnets", {})
     instances_output = output_data.get("instances", [])
 
-    expected_subnet_names = {s.get("name") for s in spec_subnets}
+    expected_subnet_names = {str(subnet_name) for subnet in spec_subnets if (subnet_name := subnet.get("name"))}
     _validate_provisioned_outputs(
         subnets=subnets_output,
         instances=instances_output,
         expected_subnet_names=expected_subnet_names,
     )
 
-    # Validate NGFW routes were created if range requires NGFW
-    if range_spec.get("ngfw", False):
-        ngfw_data = get_user_ngfw_data(user_id)
-        if not ngfw_data or not ngfw_data.get("data_eni_id"):
-            raise RuntimeError(
-                "NGFW routing validation failed: Range requires NGFW but data_eni_id is missing. "
-                "This should have been caught earlier - investigation required."
-            )
-        logger.info(
-            "NGFW-enabled range validated: inter-subnet routes created via data_eni_id=%s",
-            ngfw_data["data_eni_id"],
-        )
-
-    # Configure NGFW with routes for range subnets (only if range requires NGFW)
-    if range_spec.get("ngfw", False):
-        ngfw_data = get_user_ngfw_data(user_id)
-        ngfw_subnet_cidr = os.environ.get("NGFW_SUBNET_CIDR")
-        if ngfw_data and ngfw_data.get("management_ip") and ngfw_subnet_cidr:
-            logger.info("Configuring NGFW with subnet routes...")
-            subnets_for_ngfw = []
-            for spec_subnet in spec_subnets:
-                subnet_name = spec_subnet.get("name", "")
-                subnet_output = subnets_output.get(subnet_name, {})
-                subnets_for_ngfw.append(
-                    {
-                        "name": subnet_name,
-                        "cidr": subnet_output.get("subnet_cidr", ""),
-                        "connected_to": spec_subnet.get("connected_to", []),
-                    }
-                )
-            configure_ngfw_subnets(
-                subnets=subnets_for_ngfw,
-                range_id=range_id,
-                management_ip=ngfw_data["management_ip"],
-                ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
-                ngfw_subnet_cidr=ngfw_subnet_cidr,
-                ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
-            )
+    _validate_ngfw_range_attachment(range_spec, user_id)
+    _configure_ngfw_for_range(
+        request_id=request_id,
+        range_id=range_id,
+        user_id=user_id,
+        range_spec=range_spec,
+        spec_subnets=spec_subnets,
+        subnets_output=subnets_output,
+    )
 
     # Run instance setup (DC first, then others in parallel)
     logger.info("Running instance setup...")
@@ -2091,6 +2189,261 @@ def _run_terraform_provision(
     )
 
     publish_ready(request_id=request_id, range_id=range_id, user_id=user_id)
+
+
+def _allocate_range_subnet_cidrs(request_id: str, range_id: int, range_spec: dict) -> list[dict]:
+    spec_subnets = range_spec.get("subnets", [])
+    if not spec_subnets:
+        return spec_subnets
+
+    from components.network import allocate_subnets
+
+    range_network = load_range_network_config()
+    vpc_id = range_network.network_id
+    vpc_cidr = range_network.network_cidr or "10.1.0.0/16"
+    cidr_prefix = ".".join(vpc_cidr.split("/")[0].split(".")[:2])
+    subnet_count = len(spec_subnets)
+    logger.info("Allocating %d subnet CIDRs in VPC %s", subnet_count, vpc_id)
+    allocated_cidrs = allocate_subnets(
+        vpc_id,
+        cidr_prefix,
+        subnet_count,
+        subnet_size=28,
+        range_id=range_id,
+        request_id=request_id,
+    )
+    logger.info("Allocated CIDRs: %s", allocated_cidrs)
+    for i, subnet in enumerate(spec_subnets):
+        subnet["cidr"] = allocated_cidrs[i]
+    _update_range_config(range_id, range_spec)
+    return spec_subnets
+
+
+def _validate_ngfw_range_attachment(range_spec: dict, user_id: int) -> None:
+    if not range_spec.get("ngfw", False):
+        return
+    ngfw_data = get_user_ngfw_data(user_id)
+    if not ngfw_data or not resolve_ngfw_attachment_config(ngfw_data).is_attachable:
+        raise RuntimeError(
+            "NGFW routing validation failed: range requires NGFW but the active NGFW "
+            "is missing attachable routing state."
+        )
+    logger.info("NGFW-enabled range validated: attachment_mode=%s", ngfw_data.get("attachment_mode", ""))
+
+
+def _build_ngfw_subnet_payloads(
+    spec_subnets: list[dict[str, Any]],
+    subnets_output: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    provider = _get_cloud_provider()
+    subnets_for_ngfw = []
+    for spec_subnet in spec_subnets:
+        subnet_name = spec_subnet.get("name", "")
+        subnet_output = subnets_output.get(subnet_name, {})
+        subnets_for_ngfw.append(
+            {
+                "name": subnet_name,
+                "cidr": subnet_output.get("subnet_cidr", ""),
+                "connected_to": spec_subnet.get("connected_to", []),
+                "provider_metadata": {
+                    "gcp": {
+                        "namespace": subnet_output.get("gdc_namespace", ""),
+                        "network_name": subnet_output.get("gdc_network_name", ""),
+                        "gateway_ip": subnet_output.get("gdc_gateway_ip", ""),
+                    }
+                }
+                if provider == "gcp"
+                else {},
+            }
+        )
+    return subnets_for_ngfw
+
+
+def _configure_ngfw_for_range(
+    *,
+    request_id: str,
+    range_id: int,
+    user_id: int,
+    range_spec: dict,
+    spec_subnets: list[dict[str, Any]],
+    subnets_output: dict[str, dict[str, Any]],
+) -> None:
+    if not range_spec.get("ngfw", False):
+        return
+
+    ngfw_data = get_user_ngfw_data(user_id)
+    route_next_hop_ip = ngfw_data.get("route_next_hop_ip") if ngfw_data else ""
+    if not (ngfw_data and ngfw_data.get("management_ip") and route_next_hop_ip):
+        return
+
+    logger.info("Configuring NGFW with subnet routes...")
+    subnets_for_ngfw = _build_ngfw_subnet_payloads(spec_subnets, subnets_output)
+    configure_ngfw_subnets(
+        subnets=subnets_for_ngfw,
+        range_id=range_id,
+        management_ip=ngfw_data["management_ip"],
+        ssh_key_secret_arn=ngfw_data["ssh_key_secret_arn"],
+        route_next_hop_ip=route_next_hop_ip,
+        ssm_endpoints_subnet_cidr=os.environ.get("SSM_ENDPOINTS_SUBNET_CIDR", ""),
+    )
+    _record_ngfw_range_attachment(
+        ngfw_request_id=ngfw_data["ngfw_request_id"],
+        ngfw_status=ngfw_data["status"],
+        attachment_record=_build_ngfw_range_attachment_record(
+            range_id=range_id,
+            request_id=request_id,
+            subnets=subnets_for_ngfw,
+            ngfw_data=ngfw_data,
+        ),
+    )
+
+
+class _DCBootstrapContext:
+    def __init__(self, hostname: str, public_key: str):
+        self.hostname = hostname
+        self.public_key = public_key
+
+
+class _DCPromoteConfig:
+    def __init__(self, domain_name: str, netbios_name: str, dsrm_password: str, domain_admin_password: str):
+        self.domain_name = domain_name
+        self.netbios_name = netbios_name
+        self.dsrm_password = dsrm_password
+        self.domain_admin_password = domain_admin_password
+
+
+def _run_dc_bootstrap_plan(
+    *,
+    provider: str,
+    instance_data: dict[str, Any],
+    instance_id: str,
+    public_key: str,
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+) -> None:
+    if not _should_run_dc_bootstrap_plan(provider):
+        return
+
+    logger.info("Running DC bootstrap plan via %s setup path", provider)
+    bootstrap_plan = BootstrapPlan()
+    bootstrap_source = instance_data.get("hostname", "") or instance_data.get("name", "")
+    bootstrap_hostname = sanitize_hostname(bootstrap_source) or f"dc-{instance_id[-8:]}"
+    bootstrap_context = bootstrap_plan.get_context(
+        _DCBootstrapContext(hostname=bootstrap_hostname, public_key=public_key)
+    )
+    bootstrap_result = orchestrator.orchestrate(
+        execution.target,
+        bootstrap_plan,
+        bootstrap_context,
+        document_name=execution.document_name,
+    )
+    if not bootstrap_result.success:
+        raise SetupError(f"DC bootstrap failed: {bootstrap_result.error}")
+    logger.info("DC bootstrap complete for %s", instance_id)
+
+
+def _configure_dc_ssh_access(
+    *,
+    executor: Any,
+    execution: Any,
+    instance_id: str,
+    public_key: str,
+) -> None:
+    if not public_key:
+        logger.warning("No public key provided for DC %s, SSH key auth will not work", instance_id)
+        return
+
+    logger.info("Configuring SSH key on DC %s...", instance_id)
+    ssh_key_script = f'''
+$ErrorActionPreference = "Stop"
+$publicKey = "{public_key}"
+
+Write-Host "Configuring SSH key for Administrator..."
+
+$sshDir = "C:\\ProgramData\\ssh"
+if (!(Test-Path $sshDir)) {{
+    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+}}
+
+$publicKey | Out-File -Encoding ascii "$sshDir\\administrators_authorized_keys"
+
+# Set proper permissions
+icacls "$sshDir\\administrators_authorized_keys" /inheritance:r `
+    /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
+
+# Restart sshd to pick up new key
+Restart-Service sshd -Force -ErrorAction SilentlyContinue
+
+Write-Host "SSH key configured successfully"
+'''
+    ssh_result = executor.run_command(
+        instance_id=execution.target,
+        script=ssh_key_script,
+        document_name=execution.document_name,
+        timeout_seconds=60,
+    )
+    if not ssh_result.success:
+        logger.warning("SSH key configuration failed: %s (continuing with setup)", ssh_result.stderr)
+        return
+    logger.info("SSH key configured on DC %s", instance_id)
+
+
+def _verify_dc_setup(
+    *,
+    provider: str,
+    domain_name: str,
+    netbios_name: str,
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+) -> None:
+    logger.info("Verifying Domain Controller (%s)...", domain_name)
+    runtime_promotion = _should_promote_dc_at_runtime(provider)
+    logger.info(
+        "Using %s DC verification path for provider=%s",
+        "runtime" if runtime_promotion else "prebaked",
+        provider,
+    )
+    dc_plan = DCSetupPlan(runtime_promotion=runtime_promotion)
+    domain_admin_password = os.environ.get("DC_DOMAIN_PASSWORD", "")
+    config_obj = _DCPromoteConfig(domain_name, netbios_name, domain_admin_password, domain_admin_password)
+    dc_context = dc_plan.get_context(config_obj)
+    dc_result = orchestrator.orchestrate(
+        execution.target,
+        dc_plan,
+        dc_context,
+        document_name=execution.document_name,
+    )
+    if not dc_result.success:
+        raise SetupError(f"DC verification failed: {dc_result.error}")
+    logger.info("DC verification complete")
+
+
+def _install_dc_xdr(
+    *,
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+    instance_id: str,
+    agent_presigned_url: str,
+    xdr_required: bool,
+) -> None:
+    if agent_presigned_url:
+        logger.info("Installing XDR agent on DC %s...", instance_id)
+        xdr_plan = XDRAgentInstallPlan()
+        xdr_context = xdr_plan.get_context({"agent_presigned_url": agent_presigned_url})
+        xdr_result = orchestrator.orchestrate(
+            execution.target,
+            xdr_plan,
+            xdr_context,
+            document_name=execution.document_name,
+        )
+        if not xdr_result.success:
+            raise SetupError(f"XDR agent install failed on DC: {xdr_result.error}")
+        logger.info("XDR agent installed successfully on DC")
+        return
+
+    if xdr_required:
+        raise SetupError(f"XDR agent required but no URL provided for DC {instance_id}")
+    logger.info("No XDR agent URL provided for DC (not required)")
 
 
 def _run_terraform_destroy(
@@ -2116,7 +2469,14 @@ def _run_terraform_destroy(
     spec_subnets = range_spec.get("subnets", [])
     if spec_subnets:
         try:
+            ngfw_data = get_user_ngfw_data(user_id) if range_spec.get("ngfw", False) else None
             remove_ngfw_subnets(user_id, spec_subnets, range_id)
+            if ngfw_data:
+                _remove_ngfw_range_attachment(
+                    ngfw_request_id=ngfw_data["ngfw_request_id"],
+                    ngfw_status=ngfw_data["status"],
+                    range_id=range_id,
+                )
         except Exception as e:
             logger.warning("NGFW subnet removal failed (continuing): %s", e)
 
@@ -2135,11 +2495,7 @@ def _run_terraform_destroy(
     terraform_succeeded = False
     try:
         tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
-        range_terraform_runner.destroy_range(
-            request_id,
-            range_terraform_runner.RANGE_MODULE_PATH,
-            variables=tf_variables,
-        )
+        range_terraform_runner.destroy_range(request_id, variables=tf_variables)
         terraform_succeeded = True
 
         logger.info("Cleaning up Terraform state...")
@@ -2164,7 +2520,7 @@ def _run_terraform_destroy(
         try:
             if not user_has_active_ranges(user_id, range_id):
                 ngfw_data = get_user_ngfw_data(user_id)
-                if ngfw_data and ngfw_data["status"] == "ready":
+                if ngfw_data and ngfw_data["status"] == "ready" and ngfw_data.get("cloud_provider") == "aws":
                     logger.info("No other active ranges, pausing NGFW")
                     run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
         except Exception as e:
@@ -2228,7 +2584,7 @@ def _build_range_terraform_variables(
             agent_presigned_url = ""
             if agent_s3_key:
                 agent_presigned_url = generate_presigned_url(
-                    bucket=os.environ.get("AGENT_S3_BUCKET", ""),
+                    bucket=os.environ.get("AGENT_STORAGE_BUCKET") or os.environ.get("AGENT_S3_BUCKET", ""),
                     key=agent_s3_key,
                 )
 
@@ -2240,6 +2596,7 @@ def _build_range_terraform_variables(
                 {
                     "uuid": inst.get("uuid", ""),
                     "name": inst.get("name", ""),
+                    "asset_type": inst.get("asset_type", "vm_runtime_vm"),
                     "role": role,
                     "os_type": tf_os_type,
                     "instance_type": instance_type,
@@ -2259,8 +2616,9 @@ def _build_range_terraform_variables(
             }
         )
 
-    # Get NGFW data ENI ID from database for inter-subnet routing
+    # Resolve NGFW attachment data for inter-subnet routing
     ngfw_data_eni_id = ""
+    ngfw_attachment: dict[str, Any] | None = None
     if range_spec.get("ngfw", False):
         ngfw_data = get_user_ngfw_data(user_id)
         if not ngfw_data:
@@ -2268,41 +2626,168 @@ def _build_range_terraform_variables(
                 f"Range requires NGFW (ngfw: true in spec) but user {user_id} has no provisioned NGFW. "
                 "User must provision an NGFW before creating NGFW-enabled ranges."
             )
-        ngfw_data_eni_id = ngfw_data.get("data_eni_id", "")
-        if not ngfw_data_eni_id:
+        attachment = resolve_ngfw_attachment_config(ngfw_data)
+        if not attachment.is_attachable:
             raise ValueError(
-                f"Range requires NGFW but user {user_id}'s NGFW is missing data_eni_id in state. "
-                "NGFW may have failed provisioning or is from an old version. "
+                f"Range requires NGFW but user {user_id}'s NGFW is missing attachable routing state. "
                 f"NGFW request_id: {ngfw_data.get('ngfw_request_id')}"
             )
-        logger.info("Using NGFW data_eni_id=%s for range %s inter-subnet routing", ngfw_data_eni_id, range_id)
+        ngfw_data_eni_id = attachment.data_attachment_id
+        ngfw_attachment = {
+            "cloud_provider": attachment.cloud_provider,
+            "management_ip": attachment.management_ip,
+            "ssh_key_secret_ref": attachment.ssh_key_secret_ref,
+            "dataplane_ip": attachment.dataplane_ip,
+            "route_next_hop_ip": attachment.route_next_hop_ip,
+            "data_attachment_id": attachment.data_attachment_id,
+            "attachment_mode": attachment.attachment_mode,
+            "provider_metadata": attachment.provider_metadata,
+        }
+        logger.info(
+            "Using NGFW attachment_mode=%s for range %s",
+            attachment.attachment_mode or "unknown",
+            range_id,
+        )
 
-    return {
+    range_network = load_range_network_config()
+
+    provider = _get_cloud_provider()
+    variables = {
         # Core identifiers
         "range_id": range_id,
         "user_id": user_id,
         "request_uuid": request_id,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
         # VPC configuration
-        "vpc_id": os.environ.get("RANGE_VPC_ID", ""),
-        "vpc_cidr": os.environ.get("RANGE_VPC_CIDR", ""),
-        "availability_zone": os.environ.get("AVAILABILITY_ZONE", "us-east-2b"),
+        "vpc_id": range_network.network_id,
+        "vpc_cidr": range_network.network_cidr,
+        "availability_zone": get_range_availability_zone(),
         # Network integration
         "s3_endpoint_id": os.environ.get("S3_ENDPOINT_ID", ""),
         "firewall_endpoint_id": os.environ.get("FIREWALL_ENDPOINT_ID", ""),
-        "portal_vpc_cidr": os.environ.get("PORTAL_VPC_CIDR", ""),
+        "portal_vpc_cidr": range_network.primary_portal_cidr,
         "portal_vpc_peering_id": os.environ.get("PORTAL_VPC_PEERING_ID", ""),
         "ngfw_data_eni_id": ngfw_data_eni_id,
-        # AMI IDs
-        "kali_ami_id": get_ami_id("kali"),
-        "victim_ami_id": get_ami_id("victim"),
-        "windows_ami_id": get_ami_id("windows"),
-        "dc_ami_id": get_ami_id("dc"),
-        # IAM
-        "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
         # Subnets specification
         "subnets": tf_subnets,
     }
+
+    if provider == "gcp":
+        if ngfw_attachment:
+            variables["ngfw_attachment"] = ngfw_attachment
+        return variables
+
+    variables.update(
+        {
+            # AMI IDs
+            "kali_ami_id": get_ami_id("kali"),
+            "victim_ami_id": get_ami_id("victim"),
+            "windows_ami_id": get_ami_id("windows"),
+            "dc_ami_id": get_ami_id("dc"),
+            # IAM
+            "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
+        }
+    )
+    return variables
+
+
+def _validate_ngfw_operation(operation: str) -> tuple[str, str]:
+    status_map = {
+        "start": ("resuming", "ready"),
+        "stop": ("pausing", "paused"),
+    }
+    if operation not in status_map:
+        raise ValueError(f"Unknown operation: {operation}")
+    return status_map[operation]
+
+
+def _publish_ngfw_runtime_status(request_id: str, instance_uuid: str, app_id: str, status: str) -> None:
+    update_instance_state(request_id, status)
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_uuid,
+        app_id=app_id,
+        status=status,
+    )
+
+
+def _run_gcp_ngfw_operation(
+    operation: str,
+    request_id: str,
+    instance_uuid: str,
+    app_id: str,
+    state: dict[str, Any],
+) -> None:
+    import gdc_vmseries_ngfw
+
+    in_progress_status, success_status = _validate_ngfw_operation(operation)
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
+    try:
+        gdc_vmseries_ngfw.run_power_operation(operation, state)
+    except Exception as e:
+        logger.error("GDC VM-Series NGFW operation failed: %s", e)
+        update_instance_state(request_id, STATUS_FAILED, error_message=str(e))
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
+        raise
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
+
+
+def _load_ngfw_ops_plan(operation: str):
+    import importlib
+
+    plan_map = {
+        "start": "plans.ngfw_start.NGFWStartPlan",
+        "stop": "plans.ngfw_stop.NGFWStopPlan",
+    }
+    module_path, class_name = plan_map[operation].rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)()
+
+
+def _run_aws_ngfw_operation(
+    operation: str,
+    request_id: str,
+    instance_uuid: str,
+    app_id: str,
+    ec2_instance_id: str,
+    **kwargs: str,
+) -> None:
+    in_progress_status, success_status = _validate_ngfw_operation(operation)
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, in_progress_status)
+
+    try:
+        executor = AWSExecutor()
+        orchestrator = OpsOrchestrator(executor)
+        plan = _load_ngfw_ops_plan(operation)
+        context = {"instance_id": ec2_instance_id, **kwargs}
+        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
+        if not result.success:
+            for step_result in result.step_results:
+                if not step_result.success:
+                    logger.error(
+                        "NGFW %s step %s failed: %s",
+                        operation,
+                        step_result.step_name,
+                        step_result.stderr,
+                    )
+            raise RuntimeError(f"Operation {operation} failed")
+    except Exception as e:
+        error_msg = str(e)[:1000]
+        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
+        publish_ngfw_event(
+            request_id=request_id,
+            instance_id=instance_uuid,
+            app_id=app_id,
+            status=STATUS_FAILED,
+        )
+        raise
+
+    _publish_ngfw_runtime_status(request_id, instance_uuid, app_id, success_status)
 
 
 def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
@@ -2325,100 +2810,28 @@ def run_ngfw_operation(operation: str, request_id: str, **kwargs: str) -> None:
     if kwargs:
         logger.debug("run_ngfw_operation: kwargs=%s", list(kwargs.keys()))
 
-    # Status transitions for each operation
-    status_map = {
-        "start": ("resuming", "ready"),
-        "stop": ("pausing", "paused"),
-    }
-
-    if operation not in status_map:
-        raise ValueError(f"Unknown operation: {operation}")
+    _validate_ngfw_operation(operation)
 
     # Get NGFW data from database including state with EC2 instance ID
     ngfw_data = get_ngfw_data_by_request_id(request_id)
     instance_uuid = ngfw_data["instance_id"]  # Our UUID, not AWS instance ID
     app_id = ngfw_data["app_id"]
     state = ngfw_data.get("state", {})
+    provider = resolve_ngfw_attachment_config(state).cloud_provider
 
-    # EC2 instance ID is stored in state after Pulumi provisioning
+    if provider != "aws":
+        if provider != "gcp":
+            raise RuntimeError(
+                f"NGFW runtime operation {operation!r} is not implemented for cloud_provider={provider!r}"
+            )
+        _run_gcp_ngfw_operation(operation, request_id, instance_uuid, app_id, state)
+        return
+
+    # EC2 instance ID is stored in state after Terraform provisioning
     ec2_instance_id = state.get("ec2_instance_id")
     if not ec2_instance_id:
         raise ValueError(f"EC2 instance ID not found in state for request: {request_id}")
-
-    in_progress_status, success_status = status_map[operation]
-
-    # Update DB and publish event for in-progress status
-    update_instance_state(request_id, in_progress_status)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_uuid,
-        app_id=app_id,
-        status=in_progress_status,
-    )
-
-    try:
-        # Create executor and orchestrator
-        executor = AWSExecutor()
-        orchestrator = OpsOrchestrator(executor)
-
-        # Load the appropriate plan
-        plan_map = {
-            "start": "plans.ngfw_start.NGFWStartPlan",
-            "stop": "plans.ngfw_stop.NGFWStopPlan",
-        }
-
-        plan_path = plan_map[operation]
-        module_path, class_name = plan_path.rsplit(".", 1)
-
-        import importlib
-
-        module = importlib.import_module(module_path)
-        plan_class = getattr(module, class_name)
-        plan = plan_class()
-
-        # Build context dict with EC2 instance ID and any additional kwargs
-        # NOTE ON NAMING: Plans use "instance_id" key for the AWS EC2 Instance ID
-        # (e.g., "i-099ee928142d5f092"), NOT the Django Instance UUID.
-        # This is a legacy naming convention that should eventually be renamed.
-        context = {
-            "instance_id": ec2_instance_id,  # AWS EC2 Instance ID (e.g., "i-...")
-            **kwargs,
-        }
-
-        # Execute the plan - orchestrate(target_id, plan, context)
-        result = orchestrator.orchestrate(ec2_instance_id, plan, context)
-
-        if not result.success:
-            # Log step errors for debugging
-            for step_result in result.step_results:
-                if not step_result.success:
-                    logger.error(
-                        "NGFW %s step %s failed: %s",
-                        operation,
-                        step_result.step_name,
-                        step_result.stderr,
-                    )
-            raise RuntimeError(f"Operation {operation} failed")
-
-        # Update DB and publish event for success status
-        update_instance_state(request_id, success_status)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=success_status,
-        )
-
-    except Exception as e:
-        error_msg = str(e)[:1000]
-        update_instance_state(request_id, STATUS_FAILED, error_message=error_msg)
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_uuid,
-            app_id=app_id,
-            status=STATUS_FAILED,
-        )
-        raise
+    _run_aws_ngfw_operation(operation, request_id, instance_uuid, app_id, ec2_instance_id, **kwargs)
 
 
 if __name__ == "__main__":

@@ -378,6 +378,7 @@ Thumbs.db
 
 # Notes, scratchpad, etc
 temp/
+.tmp/
 
 risks/
 
@@ -400,3 +401,5 @@ CLAUDE.local.md
 
 # OpenAI Codex CLI
 .codex
+
+.claude/scheduled_tasks.lock

@@ -4,6 +4,7 @@ WARNING: This module provides authentication bypass for development environments
 All views check settings.DEBUG or settings.ENVIRONMENT and return 403 Forbidden in production.
 """
 
+import ipaddress
 import logging
 
 from django.conf import settings
@@ -44,6 +45,32 @@ def _is_dev_environment():
     return settings.DEBUG or getattr(settings, "ENVIRONMENT", "production") == "development"
 
 
+def _request_host_or_ip_allowed(request) -> bool:
+    """Allow dev auth only over explicitly local/admin access paths."""
+    host = request.get_host().split(":", 1)[0].strip().lower()
+    if host in {item.lower() for item in getattr(settings, "DEV_LOGIN_ALLOWED_HOSTS", [])}:
+        return True
+
+    remote_addr = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get(
+        "REMOTE_ADDR", ""
+    )
+    if not remote_addr:
+        return False
+
+    try:
+        client_ip = ipaddress.ip_address(remote_addr)
+    except ValueError:
+        return False
+
+    for cidr in getattr(settings, "DEV_LOGIN_ALLOWED_CIDRS", []):
+        try:
+            if client_ip in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            logger.warning("Ignoring invalid DEV_LOGIN_ALLOWED_CIDRS entry: %s", cidr)
+    return False
+
+
 def dev_login(request):
     """Quick login for development - creates/logs in a test user.
 
@@ -62,6 +89,8 @@ def dev_login(request):
     """
     if not _is_dev_environment():
         return HttpResponseForbidden("Development auth disabled in production")
+    if not settings.DEBUG and not _request_host_or_ip_allowed(request):
+        return HttpResponseForbidden("Development auth is only available through local or admin access paths")
 
     if request.method == "POST":
         email = request.POST.get("email", "dev@example.com")
@@ -109,6 +138,8 @@ def dev_logout(request):
     """
     if not _is_dev_environment():
         return HttpResponseForbidden("Development auth disabled in production")
+    if not settings.DEBUG and not _request_host_or_ip_allowed(request):
+        return HttpResponseForbidden("Development auth is only available through local or admin access paths")
 
     from django.contrib.auth import logout
 

@@ -9,6 +9,7 @@
 /.importlinter @Brad-Edwards
 /.tflint.hcl @Brad-Edwards
 /.gitleaks.toml @Brad-Edwards
+/.kube-linter.yaml @Brad-Edwards
 /.claude/settings.json @Brad-Edwards
 /.claude/hooks/** @Brad-Edwards
 /AGENTS.md @Brad-Edwards

@@ -33,12 +33,16 @@ class TestDevLoginSecurity:
         # Should not get 403 - should render the login form
         assert response.status_code == 200
 
-    @override_settings(DEBUG=False, ENVIRONMENT="development")
-    def test_allows_access_when_environment_development(self, client):
-        """dev_login should allow access when ENVIRONMENT='development' (deployed dev via SSM)."""
-        response = client.get("/dev-login/")
-        # Should not get 403 - should render the login form
-        assert response.status_code == 200
+    @override_settings(
+        DEBUG=False,
+        ENVIRONMENT="development",
+        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+    )
+    def test_blocks_public_access_even_in_development(self, client):
+        """Deployed dev auth must not be reachable from the public ingress host."""
+        response = client.get("/dev-login/", HTTP_HOST="shifter.keplerops.com")
+        assert response.status_code == 403
+        assert b"local or admin access paths" in response.content
 
     @override_settings(DEBUG=True, ENVIRONMENT="development")
     def test_allows_access_when_both_true(self, client):
@@ -69,6 +73,16 @@ class TestDevLoginSecurity:
         # Should return 403 when ENVIRONMENT is production
         assert response.status_code == 403
 
+    @override_settings(
+        DEBUG=False,
+        ENVIRONMENT="development",
+        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+    )
+    def test_allows_access_over_localhost_in_development(self, client):
+        """Deployed dev auth stays available through loopback/admin tunnels."""
+        response = client.get("/dev-login/", HTTP_HOST="localhost:8000")
+        assert response.status_code == 200
+
 
 class TestDevLogoutSecurity:
     """Test security checks for dev_logout endpoint."""
@@ -81,13 +95,27 @@ class TestDevLogoutSecurity:
         # Should not get 403
         assert response.status_code == 302  # Redirect
 
-    @override_settings(DEBUG=False, ENVIRONMENT="development")
+    @override_settings(
+        DEBUG=False,
+        ENVIRONMENT="development",
+        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+    )
     def test_allows_access_when_environment_development(self, client, user):
-        """dev_logout should allow access when ENVIRONMENT='development'."""
+        """dev_logout stays available through localhost/admin paths only."""
         client.force_login(user)
-        response = client.get("/dev-logout/")
-        # Should not get 403
-        assert response.status_code == 302  # Redirect
+        response = client.get("/dev-logout/", HTTP_HOST="localhost:8000")
+        assert response.status_code == 302
+
+    @override_settings(
+        DEBUG=False,
+        ENVIRONMENT="development",
+        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+    )
+    def test_blocks_public_access_in_development(self, client, user):
+        client.force_login(user)
+        response = client.get("/dev-logout/", HTTP_HOST="shifter.keplerops.com")
+        assert response.status_code == 403
+        assert b"local or admin access paths" in response.content
 
     @override_settings(DEBUG=False, ENVIRONMENT="production")
     def test_blocks_access_in_production(self, client, user):

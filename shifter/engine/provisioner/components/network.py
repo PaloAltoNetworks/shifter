@@ -9,8 +9,9 @@ import ipaddress
 import logging
 import os
 
-import boto3
 import psycopg
+
+from cloud.exceptions import CloudNetworkInventoryError
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ def _get_db_connection() -> psycopg.Connection:
 
     Supports two authentication modes:
     - If DB_PASSWORD is set: Uses standard password authentication (local dev)
-    - Otherwise: Uses RDS IAM authentication (ECS/production)
+    - Otherwise: Uses the active cloud DB auth adapter (IAM-based in deployed environments)
 
     Returns:
         psycopg.Connection: Active database connection.
@@ -47,11 +48,6 @@ def _get_db_connection() -> psycopg.Connection:
             password=db_password,
         )
 
-    # Production mode: use RDS IAM auth
-    aws_region = os.environ.get("AWS_REGION")
-    if not aws_region:
-        raise RuntimeError("Missing AWS_REGION environment variable for RDS IAM auth")
-
     assert db_host is not None  # validated above
     assert db_user is not None  # validated above
     from cloud import get_db_auth
@@ -72,71 +68,57 @@ def _get_db_connection() -> psycopg.Connection:
     )
 
 
+def _get_network_inventory():
+    """Resolve the active provider's network inventory adapter lazily."""
+    from cloud import get_network_inventory
+
+    return get_network_inventory()
+
+
 def _publish_subnet_exhaustion_alarm(vpc_id: str, cidr_prefix: str, subnet_size: int) -> None:
-    """Publish a CloudWatch metric and log for subnet exhaustion.
+    """Publish a provider-aware exhaustion alarm and log for subnet exhaustion.
 
     This is a critical infrastructure alert - if we run out of subnets,
-    users cannot launch ranges. The metric triggers a CloudWatch alarm
-    that sends an email notification.
+    users cannot launch ranges.
 
     Args:
-        vpc_id: The VPC that has no free subnets.
+        vpc_id: The provider network that has no free subnets.
         cidr_prefix: The CIDR prefix that was searched.
         subnet_size: The subnet size that was requested (e.g., 24 or 28).
     """
-    region = os.environ.get("AWS_REGION", "us-east-2")
-    cloudwatch = boto3.client("cloudwatch", region_name=region)
-
-    # Publish metric for CloudWatch alarm
-    cloudwatch.put_metric_data(
-        Namespace="Shifter/RangeProvisioning",
-        MetricData=[
-            {
-                "MetricName": "SubnetExhaustion",
-                "Value": 1,
-                "Unit": "Count",
-                "Dimensions": [
-                    {"Name": "VpcId", "Value": vpc_id},
-                    {"Name": "SubnetSize", "Value": str(subnet_size)},
-                ],
-            }
-        ],
-    )
-
-    # Log with distinctive pattern for metric filter
-    logger.error(
-        "CRITICAL: Subnet exhaustion in VPC %s. "
-        "No free /%d subnet available in prefix %s. "
-        "This is user-impacting - investigate immediately.",
-        vpc_id,
-        subnet_size,
-        cidr_prefix,
-    )
+    try:
+        inventory = _get_network_inventory()
+        inventory.publish_subnet_exhaustion_alarm(vpc_id, cidr_prefix, subnet_size)
+    except CloudNetworkInventoryError as e:
+        logger.warning(
+            "Failed to publish subnet exhaustion alarm for network %s: %s",
+            vpc_id,
+            e,
+        )
 
 
 def _get_existing_subnets(vpc_id: str) -> list[ipaddress.IPv4Network]:
-    """Query AWS for all existing subnets in a VPC.
+    """Query the active cloud provider for all existing subnets in a network.
 
     Args:
-        vpc_id: The VPC ID to check.
+        vpc_id: Provider network identifier to check.
 
     Returns:
         List of existing subnet networks.
     """
-    ec2 = boto3.client("ec2")
-    response = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
-
+    inventory = _get_network_inventory()
+    existing_cidrs = inventory.list_subnet_cidrs(vpc_id)
     existing_networks: list[ipaddress.IPv4Network] = []
-    for subnet in response.get("Subnets", []):
+    for cidr in existing_cidrs:
         try:
-            network = ipaddress.ip_network(subnet["CidrBlock"])
+            network = ipaddress.ip_network(cidr)
             if isinstance(network, ipaddress.IPv4Network):
                 existing_networks.append(network)
         except ValueError:
-            logger.warning("Invalid CIDR in AWS response: %s", subnet.get("CidrBlock"))
+            logger.warning("Invalid CIDR in cloud network inventory response: %s", cidr)
             continue
 
-    logger.debug("Found %d existing subnets in VPC %s", len(existing_networks), vpc_id)
+    logger.debug("Found %d existing subnets in network %s", len(existing_networks), vpc_id)
     return existing_networks
 
 

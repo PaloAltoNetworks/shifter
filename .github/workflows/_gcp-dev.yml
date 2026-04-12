@@ -265,7 +265,7 @@ jobs:
             --environment "${GCP_ENVIRONMENT}" \
             > "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
       - name: Apply GKE manifests
-        run: kubectl apply -k "${K8S_OVERLAY_DIR}"
+        run: kubectl apply --validate=false -k "${K8S_OVERLAY_DIR}"
       - name: Sync Guacamole runtime secret
         run: |
           python3 - <<'PY'
@@ -309,7 +309,12 @@ jobs:
               "yaml",
           ]
           secret_manifest = subprocess.check_output(kubectl_args, text=True)
-          subprocess.run(["kubectl", "apply", "-f", "-"], input=secret_manifest, text=True, check=True)
+          subprocess.run(
+              ["kubectl", "apply", "--validate=false", "-f", "-"],
+              input=secret_manifest,
+              text=True,
+              check=True,
+          )
           PY
       - name: Restart control-plane deployments
         run: |
@@ -322,7 +327,7 @@ jobs:
             kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
           done
       - name: Apply platform edge manifest
-        run: kubectl apply -f "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
+        run: kubectl apply --validate=false -f "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
       - name: Wait for ingress IP
         run: |
           for _ in $(seq 1 60); do

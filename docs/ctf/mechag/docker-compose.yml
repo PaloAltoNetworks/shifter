@@ -94,7 +94,9 @@ services:
   # ============================================
 
   a1-mail:
-    build: ./a1
+    build:
+      context: .
+      dockerfile: ./a1/Dockerfile
     container_name: a1-mail
     hostname: mail.boreas.local
     networks:
@@ -104,7 +106,9 @@ services:
     restart: unless-stopped
 
   a3-intranet:
-    build: ./a3
+    build:
+      context: .
+      dockerfile: ./a3/Dockerfile
     container_name: a3-intranet
     hostname: intranet.boreas.local
     # A3 is multi-homed: corporate + scada + lab (pivot point)
@@ -119,7 +123,9 @@ services:
     restart: unless-stopped
 
   a4-fileshare:
-    build: ./a4
+    build:
+      context: .
+      dockerfile: ./a4/Dockerfile
     container_name: a4-fileshare
     hostname: fileserv.boreas.local
     networks:
@@ -135,7 +141,9 @@ services:
   # ============================================
 
   a5-scada:
-    build: ./a5
+    build:
+      context: .
+      dockerfile: ./a5/Dockerfile
     container_name: a5-scada
     hostname: scada-gw.boreas.local
     networks:

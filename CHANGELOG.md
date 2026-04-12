@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.82.0] - 2026-04-12
+
+### Fixed
+
+- Close out remaining repo path drift for a1, a3, a4, a5. These
+  four Dockerfiles still used the old single-context build
+  pattern (`COPY server.py`, `COPY build_mail.py`, etc) with
+  files that only existed on the range VM via duplication, not
+  in the repo. Migrated all four to parent-context builds to
+  match a0/a6/a7/a8/a9/a10/a11/a12/a13/a14:
+  - `a1/Dockerfile`: COPYs from `A1-mail-server/build_mail.py`
+    and `a1/{postfix-main.cf,dovecot-local.conf,entrypoint.sh}`.
+  - `a3/Dockerfile`: COPYs from `A3-web-app/server.py`.
+  - `a4/Dockerfile`: COPYs from `A4-file-share/build_documents.py`
+    and `a4/{smb.conf,entrypoint.sh}`.
+  - `a5/Dockerfile`: COPYs from `A5-scada-generator/server.py`.
+  - `docker-compose.yml`: a1-mail, a3-intranet, a4-fileshare,
+    a5-scada all switched to `context: .` with `dockerfile:
+    ./aN/Dockerfile`. All 14 docker-managed services in
+    docker-compose.yml now use the parent-context convention
+    (dns is self-contained and stays `build: ./dns`).
+
+  Golden rebuild verification: full teardown,
+  `docker compose build` from clean, `docker compose up -d`,
+  `run-all-smoketests.sh` → 16/16 PASS, final `reset.sh` for
+  clean participant state. Range is now reproducible from a
+  fresh repo clone for every service.
+
 ## [3.81.0] - 2026-04-12
 
 ### Added

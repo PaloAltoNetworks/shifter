@@ -54,9 +54,11 @@ fi
 
 echo "Starting Guacamole..."
 
-# Ensure the configured Guacamole home exists before the upstream startup
-# script copies bundled config and extensions into place.
-mkdir -p "${GUACAMOLE_HOME:-/home/guacamole/.guacamole}"
+# Only create a custom Guacamole home. The base image already ships the default
+# home path, and recreating it fails under readOnlyRootFilesystem.
+if [[ -n "${GUACAMOLE_HOME:-}" ]] && [[ "${GUACAMOLE_HOME}" != "/home/guacamole/.guacamole" ]]; then
+    mkdir -p "${GUACAMOLE_HOME}"
+fi
 
 # Execute the original CMD from base image (passed as arguments when ENTRYPOINT is set)
 exec "$@"

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.67.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/A1-mail-server/smoketest.py`: A1 end-to-end
+  smoketest (27 checks). Exercises IMAP auth for all 6 mailboxes,
+  Roundcube webmail login flow, flag 10 retrieval from Kowalski's
+  welcome email, flag 8 extraction from Vasik's PDF attachment via
+  `pdf2txt.py`, the A4 cred pivot breadcrumb (svc-fileshare /
+  F1l3Sh@r3Svc! in Kowalski's "creds backup" email), and every
+  narrative thread the design specifies (MIDNIGHT-7, PO-2847,
+  Petrov anomaly, Kursk shipment, Novikov reactor). Runnable from
+  the a14-kali container.
+- `docs/ctf/mechag/A2-domain-controller/smoketest.sh`: A2 Windows
+  DC end-to-end smoketest (22 checks). Sweeps AD ports on
+  `dc01.boreas.local`, verifies `e.vasik` (A1 password reuse)
+  authenticates, Kerberoasts svc-backup via `GetUserSPNs.py`,
+  cracks the hash offline with john to `Password1`, DCSyncs the
+  Administrator NTLM hash via `secretsdump.py`, pass-the-hashes
+  into `\\dc01\admin_flag\` for flag 17, retrieves flag 16 from
+  `\\dc01\badgelogs\access_log_march_2026.csv` (Petrov Underground
+  Hatch entries), and confirms flag 14 via LDAP `(cn=Project-L)`
+  info attribute. Also verifies the Engineering-Support >
+  Research-Coordination > Project-L group nesting.
+
 ## [3.66.0] - 2026-04-11
 
 ### Changed

@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Sample RSA private key for testing (not a real key - just valid format)
-VALID_PRIVATE_KEY = """TEST_SSH_PRIVATE_KEY"""
+# Tests mock key import before opening a connection, so a literal private-key
+# block is unnecessary and trips secret scanners.
+VALID_PRIVATE_KEY = "TEST_SSH_PRIVATE_KEY"  # nosec B105  # NOSONAR
 
 
 @pytest.fixture

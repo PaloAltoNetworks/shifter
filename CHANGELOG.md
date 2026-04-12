@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.66.0] - 2026-04-11
+
+### Changed
+
+- A0 Boreas Systems website rebuilt to match `A0-boreas-website.md`
+  design spec. Replaces the Flask prototype with `nginx:alpine` serving
+  static HTML + reportlab-generated PDFs via a multi-stage build:
+  - `a0/Dockerfile` now multi-stage (`python:3.12-slim` content-builder
+    feeding `nginx:alpine`), `a0/nginx.conf` added.
+  - `docker-compose.yml` a0-website build context moved to `.` with
+    `dockerfile: ./a0/Dockerfile` so the image can COPY from both
+    `a0/` and `A0-boreas-website/`.
+  - `A0-boreas-website/site/`: 14 static HTML pages + CSS (home,
+    about, leadership with CSS-gradient avatars, careers,
+    careers_apply, contact, news, status, robots.txt, admin/, portal/,
+    old/index, old/clients, internal/index).
+  - `A0-boreas-website/build_pdfs.py`: reportlab generator for
+    org_chart.pdf (flag 2 in Author metadata), boreas-Q1-2025.pdf,
+    boreas-Q2-2025.pdf, and boreas-annual-2025.pdf with the Kursk
+    Heavy Industries $12,000,000 line buried in 40 expense items.
+  - `/internal/` uses a hand-written `index.html` so the annual
+    report PDF lives on disk but is not listed — participants must
+    fuzz the filename pattern to find it.
+  - `A0-boreas-website/smoketest.sh` added — 22-check end-to-end
+    attacker-perspective test runnable from the a14-kali container.
+
+### Removed
+
+- `A0-boreas-website/server.py` — obsolete Flask prototype.
+
 ## [3.65.0] - 2026-04-11
 
 ### Added

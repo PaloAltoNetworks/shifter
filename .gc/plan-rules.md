@@ -1,8 +1,9 @@
-# shifter-k8s plan rules
+# shifter plan rules
 
 Mandatory constraints the `/implement` skill applies during plan phase.
-These encode the ADR-guard checks, guardrail-file discipline, and
-Kubernetes-specific validators previously in `AGENTS.md` prose.
+These encode the ADR-guard checks, guardrail-file discipline,
+architectural defaults, and Kubernetes-specific validators previously in
+`AGENTS.md` prose.
 
 - Plans MUST pass `python3 scripts/adr_guard/adr_guard.py --all --level ci`
   before declaring completion.
@@ -24,6 +25,8 @@ Kubernetes-specific validators previously in `AGENTS.md` prose.
 - Plans MUST NOT weaken CI or local enforcement silently. Rule
   exceptions require an entry in `docs/adr/exceptions.yaml` with an
   owner and expiry.
+- Plans MUST keep cross-layer access going through service boundaries;
+  shared contracts live under `shared/`.
 - Changes to guardrail files (`.github/workflows/**`, `.github/CODEOWNERS`,
   `.github/pull_request_template.md`, `.github/copilot-instructions.md`,
   `.pre-commit-config.yaml`, `.importlinter`, `.tflint.hcl`,

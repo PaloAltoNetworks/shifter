@@ -29,7 +29,7 @@ Current mechanisms:
 - `.pre-commit-config.yaml`: local fast checks
 - `.github/workflows/_quality.yml`: CI architecture gate
 - `.claude/hooks/adr_guard_hook.py`: Claude post-edit validation
-- `AGENTS.md`: Codex repo-local policy
+- `AGENTS.md`: Codex repo-local policy. Points at `.ground-control.yaml` and `.gc/plan-rules.md` for Ground Control workflow context (requirements and plan rules); enforcement of ADR rules still lives here.
 - `.importlinter`: Python package-level architecture contracts
 - `.tflint.hcl`: Terraform lint configuration with `tflint-ruleset-google`
   plugin. The initial rule set is intentionally conservative so it can

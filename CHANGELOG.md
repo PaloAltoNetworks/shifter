@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.76.0] - 2026-04-12
+
+### Fixed
+
+- A11 leg controller Modbus server was silently dropping
+  response PDUs for any read that spanned the ankle position
+  registers. Root cause: `LEFT_JOINTS` and `RIGHT_JOINTS`
+  initialised ankle position/target to `-5` (degrees). Modbus
+  holding registers are uint16; pymodbus 3.12 refuses to pack
+  negative Python ints and fails silently with no response,
+  no log entry. Changed init to `[0, 0, 15, 15, 5, 5]`
+  (leg straight, ankles neutral). Confirmed A9's earlier
+  probes happened to use reads that didn't cross the negative
+  offset, which is why this only surfaced under the A11
+  smoketest's exhaustive register reads.
+- A11 repo path drift: `a11/Dockerfile` COPYs `server.py` from
+  context root. Moved `a11-leg` compose build context to
+  parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A11-leg-controller/smoketest.py`: A11 leg
+  controller end-to-end smoketest (19 checks). Runs from
+  inside a9-splice. Verifies default register reads (joints,
+  hydraulic pressures, gait mode 0=stationary, step length
+  4200mm, cycle 85s, per-leg mass 24000t, max force 200t
+  matching PO-2847), flag registers zero pre-unlock, wrong
+  sequence rejection, correct gait sequence 0->1->2->0 to
+  reg 30 releasing calibration code 4783 on input reg 60,
+  challenge write to reg 99 with calibration code, and
+  ASCII decode of reg 100-121 matching `FLAG{c7a1e3f9d0b52864}`.
+
 ## [3.75.0] - 2026-04-12
 
 ### Fixed

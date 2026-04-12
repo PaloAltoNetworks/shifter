@@ -200,7 +200,9 @@ services:
     restart: unless-stopped
 
   a11-leg:
-    build: ./a11
+    build:
+      context: .
+      dockerfile: ./a11/Dockerfile
     container_name: a11-leg
     hostname: leg-ctrl
     networks:

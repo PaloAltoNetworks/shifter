@@ -260,7 +260,6 @@ jobs:
       - name: Render generated edge manifest
         run: |
           python3 scripts/gcp/render_edge_manifest.py \
-            --terraform-output-json /tmp/gcp-terraform-outputs.json \
             --environment "${GCP_ENVIRONMENT}"
       - name: Apply GKE manifests
         run: kubectl apply -k "${K8S_OVERLAY_DIR}"

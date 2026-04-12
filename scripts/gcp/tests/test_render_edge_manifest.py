@@ -83,13 +83,12 @@ def test_main_writes_to_repo_managed_output_path(tmp_path, monkeypatch):
     output_path = tmp_path / "platform-edge.generated.yaml"
 
     monkeypatch.setattr(module, "_output_path_for_environment", lambda environment: output_path)
+    monkeypatch.setattr(module, "_TERRAFORM_OUTPUT_PATH", tf_output)
 
     monkeypatch.setattr(
         "sys.argv",
         [
             "render_edge_manifest.py",
-            "--terraform-output-json",
-            str(tf_output),
             "--environment",
             "gcp-dev",
         ],

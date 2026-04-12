@@ -12,6 +12,7 @@ _MANAGED_CERTIFICATE_OUTPUT_KEY = "managed_tls_enabled"
 _PUBLIC_HOSTNAME_OUTPUT_KEY = "public_hostname"
 _PUBLIC_INGRESS_IP_NAME_OUTPUT_KEY = "public_ingress_ip_name"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_TERRAFORM_OUTPUT_PATH = Path("/tmp/gcp-terraform-outputs.json")
 _EDGE_MANIFEST_RELATIVE_PATHS = {
     "gcp-dev": Path("platform/k8s/gcp/overlays/gcp-dev/platform-edge.generated.yaml"),
     "gcp-prod": Path("platform/k8s/gcp/overlays/gcp-prod/platform-edge.generated.yaml"),
@@ -136,11 +137,10 @@ def render_manifest(outputs: dict[str, object]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--terraform-output-json", required=True, type=Path)
     parser.add_argument("--environment", required=True, choices=sorted(_EDGE_MANIFEST_RELATIVE_PATHS))
     args = parser.parse_args()
 
-    outputs = json.loads(args.terraform_output_json.read_text())
+    outputs = json.loads(_TERRAFORM_OUTPUT_PATH.read_text())
     rendered = render_manifest(outputs)
     output_path = _output_path_for_environment(args.environment)
     output_path.write_text(rendered)

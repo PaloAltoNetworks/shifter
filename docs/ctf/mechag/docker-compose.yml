@@ -189,7 +189,9 @@ services:
     restart: unless-stopped
 
   a10-tail:
-    build: ./a10
+    build:
+      context: .
+      dockerfile: ./a10/Dockerfile
     container_name: a10-tail
     hostname: tail-ctrl
     networks:

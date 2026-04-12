@@ -75,7 +75,9 @@ services:
     restart: unless-stopped
 
   a7-gitea:
-    build: ./a7
+    build:
+      context: .
+      dockerfile: ./a7/Dockerfile
     container_name: a7-gitea
     hostname: git.boreas.local
     networks:

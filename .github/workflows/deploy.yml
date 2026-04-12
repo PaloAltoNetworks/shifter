@@ -31,6 +31,7 @@ jobs:
       run_gcp: ${{ steps.env.outputs.run_gcp }}
       apply_aws: ${{ steps.env.outputs.apply_aws }}
       deploy_gcp: ${{ steps.env.outputs.deploy_gcp }}
+      fast_gcp_deploy: ${{ steps.env.outputs.fast_gcp_deploy }}
       skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +95,7 @@ jobs:
           RUN_GCP="false"
           APPLY_AWS="false"
           DEPLOY_GCP="false"
+          FAST_GCP_DEPLOY="false"
 
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             if [ "${{ github.base_ref }}" == "main" ]; then
@@ -124,6 +126,7 @@ jobs:
               gcp-dev)
                 RUN_GCP="true"
                 DEPLOY_GCP="true"
+                FAST_GCP_DEPLOY="true"
                 ;;
               dev)
                 RUN_AWS="true"
@@ -139,6 +142,7 @@ jobs:
             echo "run_gcp=$RUN_GCP"
             echo "apply_aws=$APPLY_AWS"
             echo "deploy_gcp=$DEPLOY_GCP"
+            echo "fast_gcp_deploy=$FAST_GCP_DEPLOY"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check for skip flags
@@ -180,6 +184,7 @@ jobs:
     name: Quality
     needs: changes
     if: |
+      needs.changes.outputs.fast_gcp_deploy != 'true' &&
       (needs.changes.outputs.core == 'true' ||
        needs.changes.outputs.range == 'true' ||
        needs.changes.outputs.shifter_engine == 'true' ||

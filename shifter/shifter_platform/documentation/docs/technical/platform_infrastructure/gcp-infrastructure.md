@@ -101,7 +101,7 @@ The normal GCP deployment path is CI/CD:
 
 - push to `dev`: validate AWS and GCP paths, but do not deploy
 - push to `aws-dev`: deploy the AWS dev environment
-- push to `gcp-dev`: deploy the GCP dev environment
+- push to `gcp-dev`: fast-validate and deploy the GCP dev environment
 
 The GCP deploy flow executed by CI:
 
@@ -112,6 +112,8 @@ The GCP deploy flow executed by CI:
 5. renders generated Helm values
 6. installs or upgrades the Shifter chart
 7. waits for rollout and managed-certificate convergence
+
+`gcp-dev` intentionally skips the repo-wide quality workflow on branch pushes so GCP break/fix work can iterate quickly. The provider-local validation in `_gcp-dev.yml` remains mandatory before deploy, while the full lint/test/security matrix still runs on `dev`, on PRs, and on production.
 
 `gdc-bootstrap` remains the operator bootstrap and recovery harness for first-time setup and controlled break-glass work, but it is no longer the normal deploy contract.
 

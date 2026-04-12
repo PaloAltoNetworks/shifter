@@ -301,6 +301,14 @@ jobs:
           python3 scripts/gcp/render_edge_manifest.py \
             --environment "${GCP_ENVIRONMENT}" \
             > "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
+      - name: Render generated image overrides
+        run: |
+          python3 scripts/gcp/render_kustomize_images.py \
+            --kustomization "${K8S_OVERLAY_DIR}/kustomization.yaml" \
+            --portal-image "${PORTAL_IMAGE_ROOT}" \
+            --guacd-image "${GUACD_IMAGE_ROOT}" \
+            --guacamole-client-image "${GUACAMOLE_CLIENT_IMAGE_ROOT}" \
+            --tag "${SHORT_SHA}"
       - name: Apply GKE manifests
         run: |
           kubectl kustomize "${K8S_OVERLAY_DIR}" > /tmp/gcp-platform-apply.yaml

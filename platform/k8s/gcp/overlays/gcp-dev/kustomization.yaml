@@ -14,15 +14,15 @@ configMapGenerator:
       - platform-runtime.generated.env
 
 images:
-  - name: placeholder-portal
-    newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-portal/portal
-    newTag: latest
-  - name: placeholder-guacd
-    newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-guacd/guacd
-    newTag: latest
-  - name: placeholder-guacamole-client
-    newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-guacamole-client/guacamole-client
-    newTag: latest
+  - name: us-docker.pkg.dev/placeholder-project/shifter/portal
+    newName: us-docker.pkg.dev/placeholder-project/shifter/portal
+    newTag: 0.0.0
+  - name: us-docker.pkg.dev/placeholder-project/shifter/guacd
+    newName: us-docker.pkg.dev/placeholder-project/shifter/guacd
+    newTag: 0.0.0
+  - name: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client
+    newName: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client
+    newTag: 0.0.0
 
 patches:
   - path: patch-serviceaccounts.yaml

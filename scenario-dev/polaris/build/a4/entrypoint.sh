@@ -1,14 +1,31 @@
 #!/bin/bash
 set -e
 
-# Create Samba users
-USERS="v.harlan:Boreas2025! m.webb:Welcome1 d.kowalski:P@ssw0rd123 svc-fileshare:F1l3Sh@r3Svc!"
-for entry in $USERS; do
-    user=$(echo $entry | cut -d: -f1)
-    pass=$(echo $entry | cut -d: -f2)
-    useradd -M -s /sbin/nologin "$user" 2>/dev/null || true
+# Groups drive share ACLs per A4 design (A4-file-share.md §2):
+#   HR — HR group + Executives
+#   Procurement — Procurement group + Executives
+#   IT — IT group (service account has access via IT membership)
+#   Executive — Executives only
+for g in executives hr procurement it; do
+    groupadd -f "$g"
+done
+
+# user:password:primary_groups
+USERS=(
+    "v.harlan:Boreas2025!:executives"
+    "m.webb:Welcome1:executives"
+    "d.kowalski:P@ssw0rd123:it"
+    "svc-fileshare:F1l3Sh@r3Svc!:it"
+)
+
+for entry in "${USERS[@]}"; do
+    IFS=':' read -r user pass groups <<< "$entry"
+    useradd -M -s /sbin/nologin -G "$groups" "$user" 2>/dev/null || usermod -aG "$groups" "$user"
     (echo "$pass"; echo "$pass") | smbpasswd -a -s "$user" 2>/dev/null
 done
 
-# Start Samba
-smbd --foreground --no-process-group
+# Share directories world-traversable so samba ACL is the only gate
+find /srv/shares -type d -exec chmod 755 {} +
+find /srv/shares -type f -exec chmod 644 {} +
+
+exec smbd --foreground --no-process-group

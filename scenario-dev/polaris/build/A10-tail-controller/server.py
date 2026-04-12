@@ -47,7 +47,7 @@ VENDOR = "AURORA HEAVY SYSTEMS"
 MODEL = "AHS-TAIL-7741"
 SERIAL = "AHS-T-00482"
 PRODUCT_CODE = "TAIL-10SEG-MK2"
-APP_NAME = "Tail Articulation Controller v2.4 -- maintenance mode: write reg 20=3"
+APP_NAME = f"Tail Articulation Controller v2.4 -- SN: {SERIAL} -- maintenance mode: write reg 20=3"
 
 SERIAL_CHALLENGE = 482
 FLAG = "FLAG{9b3e7c1d0f5a2846}"

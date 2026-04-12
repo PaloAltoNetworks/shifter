@@ -28,10 +28,12 @@ hostname via docker DNS or by IP):
    python3 /usr/local/bin/modbus_client.py 172.20.50.11 devid
    python3 /usr/local/bin/modbus_client.py 172.20.50.12 devid
    ```
-   Each returns a model number:
-   - 172.20.50.10: `AHS-TAIL-7741`
-   - 172.20.50.11: `AHS-LEG-MN07`
-   - 172.20.50.12: `AHS-ARM-AL42`
+   Each returns a model number (in `ProductName`/`ModelName`) plus a user-application-name string that embeds the serial:
+   - 172.20.50.10: model `AHS-TAIL-7741`, app name `Tail Articulation Controller v2.4 -- SN: AHS-T-00482 -- maintenance mode: write reg 20=3`
+   - 172.20.50.11: model `AHS-LEG-MN07`, app name `Leg Locomotion Controller v2.4 -- SN: AHS-L-00483 -- calibration: gait sequence 0->1->2->0`
+   - 172.20.50.12: model `AHS-ARM-AL42`, app name `Arms Weapons Controller v2.4 -- SN: AHS-A-00484 -- diagnostics: coil 50`
+
+   Keep both the **models** and the **serials** — flag 31 wants the models, flag 32 and flag 35 want the serials.
 
 3. Concatenate the three model numbers in network order: `AHS-TAIL-7741AHS-LEG-MN07AHS-ARM-AL42`
 
@@ -46,7 +48,7 @@ hostname via docker DNS or by IP):
 1. Read the manufacturing-orchestrator Ansible playbooks from A7 (Gitea). In `deploy_combat_ai.yml`, the tail controller section says:
    > Diagnostic mode (register 20 = 3) enables full register access. Access diagnostic registers by writing mode 3, then providing the controller serial number to register 99.
 
-2. Query the tail controller's device ID to get the serial number: `AHS-T-00482`. The challenge value is the last 3 digits: `482`.
+2. Pull the tail controller's serial from its devid response (flag 31 step 2 — it's in the `UserApplicationName` field as `SN: AHS-T-00482`). The challenge value is the last 3 digits: `482`.
 
 3. Execute the unlock sequence via Modbus:
    ```python
@@ -154,7 +156,7 @@ hostname via docker DNS or by IP):
 2. Find the protocol documentation in A7: clone `aurora/weapons-integration` and read `src/brain_client.py`. It documents:
    - Server sends 8-byte challenge
    - Client XORs each byte with a key: `SHA256(tail_serial + leg_serial + arms_serial)[:8]`
-   - The serial numbers come from device ID queries (flag 31)
+   - Serials come from the Modbus device identification query on A10/A11/A12 (flag 31 step 2 — the `UserApplicationName` field carries `SN: AHS-T-00482`, `SN: AHS-L-00483`, `SN: AHS-A-00484` alongside the model number).
 
 3. Get the auth token from A7: clone `aurora/navigation-controller` and read `config.yaml`:
    ```yaml

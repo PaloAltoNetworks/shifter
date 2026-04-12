@@ -98,6 +98,12 @@ resource "google_project_service" "required" {
   disable_on_destroy = false
 }
 
+resource "time_sleep" "required_services_propagated" {
+  create_duration = "60s"
+
+  depends_on = [google_project_service.required]
+}
+
 data "google_project" "project" {
   project_id = var.project_id
 }
@@ -309,7 +315,7 @@ resource "google_cloudfunctions_function" "identity_platform_before_create" {
     ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
   }
 
-  depends_on = [google_project_service.required]
+  depends_on = [time_sleep.required_services_propagated]
 }
 
 resource "google_cloudfunctions_function_iam_member" "identity_platform_before_create_invoker" {

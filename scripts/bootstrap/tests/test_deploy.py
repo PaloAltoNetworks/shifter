@@ -2312,6 +2312,23 @@ class TestGcpPlatformCoreContracts:
         assert '"cloudfunctions.googleapis.com"' in required_services_section
         assert '"cloudbuild.googleapis.com"' in required_services_section
 
+    def test_identity_platform_blocking_function_waits_for_service_propagation(self):
+        """Cloud Function creation must wait for required API enablement to propagate on fresh bootstrap."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        assert 'resource "time_sleep" "required_services_propagated"' in module_main
+        assert 'create_duration = "60s"' in module_main
+        assert "depends_on = [time_sleep.required_services_propagated]" in module_main
+
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""
         module_path = (

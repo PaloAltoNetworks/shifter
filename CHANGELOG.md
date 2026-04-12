@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.80.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/isolation-smoketest.sh`: cross-cutting
+  network isolation smoketest (70 checks) that validates the
+  full NORTHSTORM topology boundary enforcement. Runs from
+  the range host. For every (source, target) pair the design
+  specifies, tests TCP reachability via `docker exec` +
+  python3 sockets. Every designed pivot path proven to work,
+  every forbidden path proven to fail. Covers a14-kali
+  (shared+corporate), a3-intranet (THE PIVOT: corporate+
+  scada+lab), a7-gitea (shared+lab), a1-mail/a4-fileshare
+  (corporate only), a6-workstation (lab only), a5-scada
+  (scada only), and a9-splice/a13-brain (bunker-ot only).
+  Result: 70/70 PASS. The docker bridge topology enforces
+  the design boundaries purely by network attachment,
+  without iptables ACLs.
+
 ## [3.79.0] - 2026-04-12
 
 ### Fixed

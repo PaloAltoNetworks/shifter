@@ -2356,6 +2356,11 @@ class TestGcpPlatformCoreContracts:
         assert 'role    = "roles/run.builder"' in module_main
         assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
         assert 'role     = "roles/run.invoker"' in module_main
+        assert (
+            'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_invoker"'
+            in module_main
+        )
+        assert 'role           = "roles/cloudfunctions.invoker"' in module_main
         assert "member   = google_project_service_identity.identity_platform.member" in module_main
         assert "depends_on = [time_sleep.identity_platform_service_agent_propagated]" in module_main
 

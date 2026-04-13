@@ -370,6 +370,16 @@ resource "google_cloud_run_service_iam_member" "identity_platform_before_create_
   depends_on = [time_sleep.identity_platform_service_agent_propagated]
 }
 
+resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_invoker" {
+  project        = var.project_id
+  location       = var.region
+  cloud_function = google_cloudfunctions2_function.identity_platform_before_create.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = google_project_service_identity.identity_platform.member
+
+  depends_on = [time_sleep.identity_platform_service_agent_propagated]
+}
+
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${local.name_prefix}-platform-ip"
   project = var.project_id

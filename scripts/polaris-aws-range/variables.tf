@@ -70,6 +70,12 @@ variable "ssh_public_key_ssm_name" {
   default     = ""
 }
 
+variable "kali_authorized_key" {
+  description = "OpenSSH public key the Shifter portal's Terminal UI uses as kali — injected into a14-kali's /home/kali/.ssh/authorized_keys by user_data. Must match the private key stored in the Secrets Manager entry register_range.py references. Plain pubkey is fine here (not secret)."
+  type        = string
+  default     = ""
+}
+
 variable "a2_dc_ami_id" {
   description = "Windows Server 2022 Full Base from Amazon. The shifter-dc-prebaked AMI is sysprep'd in a way that raced with first-boot SSM + user_data in testing — stock base AMI boots cleanly, then we install AD-Domain-Services via SSM RunCommand after the agent reports online."
   type        = string

@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.90.0] - 2026-04-13
+
+### Added
+
+- **`scripts/polaris-aws-range/a2_cold_bootstrap.sh`** — end-to-end
+  automation for promoting a fresh Windows Server 2022 EC2 to
+  `BOREAS.LOCAL`. Waits for SSM agent, installs AD-Domain-Services +
+  DNS via a wrapper that also queues the dc01 rename and registers a
+  SYSTEM scheduled task for `a2_setup.ps1`, reboots, retries
+  `Install-ADDSForest` on the renamed box, waits for the promotion
+  reboot, then re-runs `a2_setup.ps1` idempotently against the live
+  DC. Replaces the ad-hoc manual SSM steps that were required after
+  `terraform apply` in 3.88.0. The run_powershell_file helper builds
+  SSM `send-command` parameters via a python3 heredoc +
+  `--cli-input-json file://...`; the previous printf-based
+  PowerShell escape dance mangled `$`/`\` and failed at
+  Install-ADDSForest with "Unexpected token '\$b'".
+- **`scripts/polaris-aws-range/reset.sh`** — force-clean helper that
+  bypasses `docker compose down --remove-orphans` (which leaks the
+  `a15-ops-eng` container on re-up in compose v2.29) by directly
+  `docker rm -f`-ing any `build_*` containers + pruning the
+  `build_*` networks before `docker compose up -d`. Idempotent
+  against a warm polaris VM.
+- **`scripts/polaris-aws-range/user_data.sh.tpl`** now masks the
+  shifter-ubuntu base-AMI services that collide with Kali's
+  published ports: `ssh`, `xrdp`, `xrdp-sesman`, `apache2`, `smbd`,
+  `nmbd`, `mysql`, `vsftpd`. Without this the host sshd holds port
+  22 before docker-compose can publish `a14-kali` on the same port,
+  so the portal Terminal UI landed on the Ubuntu host instead of
+  Kali. Operator access to the VM is SSM Session Manager; host sshd
+  is unused.
+- **`kali_authorized_key` terraform variable** (`variables.tf`,
+  `main.tf`, `user_data.sh.tpl`) — the portal Terminal UI key-auths
+  into `a14-kali` as `kali` using a private key stored in Secrets
+  Manager. `user_data` now injects the matching public key into
+  `/home/kali/.ssh/authorized_keys` after `docker compose up -d`, so
+  a cold `terraform destroy` + `apply` cycle no longer needs a
+  manual SSM follow-up to re-wire portal terminal access.
+- **`register_range.py` accepts `POLARIS_*` environment variables**
+  for every per-run parameter (instance id, subnet id, subnet cidr,
+  kali private ip, ssh secret ARN, etc.), so the cold-rebuild
+  operator path is `docker exec -e POLARIS_KALI_INSTANCE_ID=... -i
+  portal python - < register_range.py` — no source edit per cycle.
+
 ## [3.89.0] - 2026-04-13
 
 ### Fixed

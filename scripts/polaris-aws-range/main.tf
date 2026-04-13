@@ -170,7 +170,8 @@ resource "aws_instance" "polaris" {
   }
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    tarball_s3_uri = var.build_tarball_s3_uri
+    tarball_s3_uri      = var.build_tarball_s3_uri
+    kali_authorized_key = var.kali_authorized_key
   })
 
   user_data_replace_on_change = true

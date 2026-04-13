@@ -38,12 +38,17 @@ curl -fsSL \
     -o /usr/libexec/docker/cli-plugins/docker-compose
 chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
-# The host sshd on :22 would conflict with the Kali container's published
-# port 22. Disable the host sshd and use SSM Session Manager for operator
-# access instead. Port 22 on the host is now free for docker to forward to
-# Kali.
-systemctl disable --now ssh || true
-systemctl mask ssh || true
+# The shifter-ubuntu base AMI ships with a bunch of pre-installed and
+# pre-started services (ssh on 22, xrdp on 3389, apache2 on 80, smbd/nmbd
+# on 139/445, vsftpd on 21, mysql on 3306). Those compete with the polaris
+# containers for host ports — particularly Kali's sshd (22) and xrdp (3389)
+# that we publish to the host for portal Terminal UI + Guacamole RDP.
+# Disable + mask all of them before docker compose up so first boot is
+# clean. Operator access to the VM is via SSM Session Manager, not host ssh.
+for svc in ssh xrdp xrdp-sesman apache2 smbd nmbd mysql vsftpd; do
+    systemctl disable --now "$svc" 2>/dev/null || true
+    systemctl mask "$svc" 2>/dev/null || true
+done
 
 # Pull the polaris build tarball via the instance profile.
 mkdir -p /opt/polaris
@@ -79,5 +84,23 @@ for i in $(seq 1 60); do
 done
 
 docker compose ps | tee /var/log/polaris-compose-ps.log
+
+# Inject the operator SSH pubkey into a14-kali so the Shifter portal's
+# Terminal UI (which key-auths as kali via the matching private key in
+# Secrets Manager) can SSH in. Value templated from the
+# `kali_authorized_key` terraform variable so it survives a cold rebuild
+# without a manual SSM follow-up step. Blank value = skip (useful if the
+# operator rotates keys out-of-band).
+KALI_AUTHORIZED_KEY='${kali_authorized_key}'
+if [[ -n "$KALI_AUTHORIZED_KEY" ]]; then
+    docker exec -u root a14-kali bash -c "
+        mkdir -p /home/kali/.ssh &&
+        echo '$KALI_AUTHORIZED_KEY' > /home/kali/.ssh/authorized_keys &&
+        chown -R kali:kali /home/kali/.ssh &&
+        chmod 700 /home/kali/.ssh &&
+        chmod 600 /home/kali/.ssh/authorized_keys
+    "
+    echo "=== kali authorized_keys injected ==="
+fi
 
 echo "=== polaris bootstrap complete $(date -u +%FT%TZ) ==="

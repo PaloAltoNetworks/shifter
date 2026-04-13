@@ -16,6 +16,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         john wordlists ldap-utils smbclient \
     && rm -rf /var/lib/apt/lists/*
 
+# xfce4-screensaver + xfce4-power-manager are hard Depends of
+# kali-desktop-xfce so we can't apt-purge them without losing the desktop.
+# Instead, delete their XDG autostart entries so neither daemon ever spawns
+# inside the xrdp session. That's what triggers the screen lock + display
+# blanking we need to prevent for a 4-hour idle CTF session, and removing
+# the .desktop file is enough — xfce's autostart loader reads the directory
+# at session start and anything missing simply doesn't run. Belt-and-
+# suspenders: dpkg-divert so any accidental `apt-get upgrade` in the image
+# won't reinstate the files.
+RUN dpkg-divert --local --rename --add /etc/xdg/autostart/xfce4-screensaver.desktop && \
+    dpkg-divert --local --rename --add /etc/xdg/autostart/xfce4-power-manager.desktop && \
+    rm -f /etc/xdg/autostart/xfce4-screensaver.desktop \
+          /etc/xdg/autostart/xfce4-power-manager.desktop
+
 # Pre-decompress rockyou.txt so flag 17's Kerberoast → `john --wordlist=...`
 # / `hashcat -m 13100` chain works against the documented path without an
 # extra `gunzip -k` step. Kali ships rockyou gzipped by default (saves

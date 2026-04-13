@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.92.0] - 2026-04-13
+
+### Fixed
+
+- **a14-kali xfce4-screensaver auto-lock during idle RDP sessions** —
+  `xfce4-screensaver` (and `xfce4-power-manager`) are hard `Depends:` of
+  `kali-desktop-xfce`, so `apt purge` is off the table. Instead, the
+  Dockerfile now `dpkg-divert`s the two `/etc/xdg/autostart/*.desktop`
+  entries and removes the originals, so the screen-locker daemon never
+  spawns inside the xrdp session. `xset s off / s noblank / -dpms` is
+  baked into both `xsession` and `startwm.sh` as belt-and-suspenders.
+  Proven end-to-end on the live polaris VM: dpkg-divert list shows both
+  `.desktop -> .distrib` diversions, `ps auxw` shows no
+  `xfce4-screensaver` / `xfce4-power-manager` processes, `xset q -display
+  :10` reports `timeout: 0`, and a fresh Playwright RDP click lands on a
+  fully-rendered Xfce desktop with no unlock prompt.
+
+### Changed
+
+- **`a14-kali` operator SSH key injection moved from a one-shot
+  `user_data` `docker exec` into the container entrypoint**, driven by a
+  `KALI_AUTHORIZED_KEY` environment variable passed through
+  `docker-compose.override.yml`. The old path ran once at first boot and
+  silently left the container without an authorized_keys file after any
+  `docker compose up -d --force-recreate a14-kali`, which broke the
+  portal Terminal UI's SSH path. Now every container start re-asserts
+  the key at correct ownership + perms (kali:kali 600).
+- **`scripts/polaris-aws-range/` terraform module split into
+  `main.tf` + `shared.tf` + `ranges.tf`**. Shared SG + IAM role + instance
+  profile live in `shared.tf` as single global resources (one SG name
+  per VPC, one IAM role name per account — same permissions every
+  range would use anyway). Per-range resources (subnet, route table,
+  routes, route-table association, polaris VM, A2 DC) live in
+  `ranges.tf` behind `for_each = local.range_subnets`, which derives
+  each range's /28 + pinned `.10` / `.11` private IPs from
+  `cidrsubnet(var.polaris_cidr_block, 4, tonumber(idx))` and
+  `cidrhost(...)`. `var.range_indices` defaults to `["0"]` so the
+  single-range smoke still applies unchanged, and N-range deploys are
+  just `terraform apply -var 'range_indices=["0","1","2"]'`. Outputs
+  reformatted into maps keyed by range index.
+
+### Added
+
+- **`scripts/polaris-aws-range/a2_cold_bootstrap_parallel.sh`** — fan-out
+  wrapper that runs one `a2_cold_bootstrap.sh` per A2 instance id in
+  parallel, writes a per-instance log under `POLARIS_BOOTSTRAP_LOG_DIR`,
+  and emits a success/failure summary + non-zero exit if any child
+  fails. Reads targets from the command line OR from
+  `terraform output -json range_a2_instance_ids` when called with no
+  args. Safe to run N-wide because `a2_cold_bootstrap.sh` is per-instance
+  idempotent and every SSM command is scoped to its target id.
+
 ## [3.91.0] - 2026-04-13
 
 ### Added

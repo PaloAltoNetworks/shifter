@@ -2,7 +2,7 @@
 set -e
 
 # Create mail users
-USERS="v.harlan:Boreas2025! e.vasik:Reactor#Core9 m.webb:Welcome1 j.chen:Summer2024 d.kowalski:P@ssw0rd123 s.morrison:Br3ach!ng"
+USERS="v.harlan:Boreas2025! e.vasik:Reactor#Core9 m.webb:Welcome1 j.chen:Summer2024 d.kowalski:P@ssw0rd123 s.morrison:Br3ach!ng s.ivanov:Welcome1"
 
 > /etc/dovecot/users
 for entry in $USERS; do

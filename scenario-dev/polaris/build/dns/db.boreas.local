@@ -9,5 +9,5 @@ intranet        IN      A       172.20.10.30
 fileserv        IN      A       172.20.10.40
 scada-gw        IN      A       172.20.40.10
 eng-ws01        IN      A       172.20.30.10
-git             IN      A       172.20.0.70
+git             IN      A       172.20.30.20
 researchdb      IN      A       172.20.30.30

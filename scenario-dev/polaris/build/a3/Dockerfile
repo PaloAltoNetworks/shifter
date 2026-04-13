@@ -2,7 +2,7 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
         openssh-client sshpass ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir flask
+RUN pip install --no-cache-dir flask pymodbus
 # server.py lives in A3-web-app/ per convention; build context is the
 # parent mechag/ dir.
 COPY A3-web-app/server.py /app/server.py

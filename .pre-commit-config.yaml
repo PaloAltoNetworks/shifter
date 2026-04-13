@@ -20,7 +20,10 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
         # Exclude: tests (check key format strings) + crypto.py (key generation module, not leaked secrets)
-        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py)
+        # Plus POLARIS CTF range lab material (intentional training-range
+        # keypairs that live inside the disposable docker-compose range
+        # — not real credentials, useless outside the range):
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py|scenario-dev/polaris/build/_shared/)
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.11

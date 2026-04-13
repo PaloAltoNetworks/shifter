@@ -5,6 +5,173 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.86.0] - 2026-04-12
+
+### Fixed
+
+- **Flag 37 walkthrough payload** — the documented sudo-arg-injection
+  example `--host "x; cat /root/.scada/hmi.json"` did not actually
+  work because `scada_diag.sh` `eval`s `curl -sS http://$HOST:8080/ping`
+  — so without a trailing comment the injection expands into
+  `cat /root/.scada/hmi.json:8080/ping` and `cat` errors on the
+  concatenated filename. Walkthrough now shows the working form with
+  the trailing `#` that comments out the `:8080/ping` suffix.
+- **A9 nmap service-detection** — `nmap -sV -p 502,9100 172.20.50.0/24`
+  in flag 31 step 1 failed with `could not locate nse_main.lua`
+  because the alpine `nmap` package doesn't ship the NSE data files
+  as a dependency. A9 Dockerfile now adds `nmap-scripts` alongside
+  `nmap`, so `-sV` runs cleanly. Pre-populated `/root/scan_results.txt`
+  remains as the sanctioned alternative.
+- **Flag 30 step 2 (`gpg-agent.conf` read)** — walkthrough previously
+  said `cat /home/e.vasik/.gnupg/gpg-agent.conf` without naming an
+  account. `~e.vasik/.gnupg/` is mode 700, so the A16 `research-analyst`
+  key cannot read it. Walkthrough now explicitly pivots to A6 as
+  `e.vasik` (`Reactor#Core9`, discoverable from the A1 mailbox trail)
+  for that hop.
+- **Flag 26 openpyxl host** — walkthrough previously said "in Python:
+  openpyxl → check sheet_state" without specifying where Python runs.
+  A16 does not ship openpyxl; A6 does. Walkthrough now explicitly says
+  run the Python snippet from inside the SSH session on A6 as
+  `p.nielsen` (where `python3-openpyxl` is preinstalled), with a note
+  that `scp`-ing the xlsx back to Kali is the fallback if the tester
+  prefers to parse locally.
+
+### Changed
+
+- **A7 Gitea stripped from the `shared` network — lab-only.** Previously
+  A7 was multi-homed on `shared` + `lab`, letting Kali reach Gitea
+  directly and bypass the Lab pivot for flags 24 and 29. A7 now only
+  lives on `lab` (172.20.30.20); every Gitea interaction must go
+  through the A16 research-analyst pivot, matching every other Lab
+  asset. `docker-compose.yml`, DNS zone files
+  (`dns/db.boreas.local`, `dns/db.boreas-systems.ctf` both now resolve
+  `git.boreas.local` → 172.20.30.20), walkthrough flag 24/29/30 steps,
+  bunker walkthrough prerequisites (bunker flags now explicitly
+  require A7 content to have been cloned earlier during the Lab
+  phase, since A9 and Kali cannot reach A7), `00-range-access-docker.md`
+  reachability table, and `isolation-smoketest.sh` all updated.
+- **A16 Dockerfile** gains `git`, `curl`, and `gnupg` so it can run the
+  full A7 cloning + flag 30 GPG decrypt chain as the on-ramp container.
+  `run-all-smoketests.sh` now routes the A7 smoketest through
+  `a16-research-analyst` instead of `a14-kali`.
+- **A14 smoketest** no longer asserts A7 Gitea is directly reachable
+  from Kali (that's a design-forbidden path now); it asserts A15,
+  A16, and the splice-link to A9 instead.
+- **Fixed the Gitea anonymous-clone false-negative** in
+  `A7-smoketest.sh`: the previous "anonymous clone of private repo
+  should fail" assertion was being evaluated from `a14-kali` which had
+  cached credentials in its filesystem — moving the runner to the
+  freshly-built `a16-research-analyst` container makes the anonymous
+  clone actually anonymous, so the hygiene check passes correctly.
+
+### Proofs
+
+- **Full smoketest sweep**: 18 / 18 asset sweeps PASS (including A7
+  now), isolation smoketest 90 / 90 boundary assertions PASS.
+- **Lab full E2E via A16**: all 12 Lab flags (38 + 20–30) recovered
+  end-to-end from inside a14-kali, pivoting only via the real
+  participant chain `SSH p.shah@analyst01 → {ssh, psql, git, gpg}`.
+  No docker-exec into any Lab target. Flag 30's full A6 → A8 → A7 →
+  gpg-decrypt chain works through A16 including pulling the encrypted
+  file from research-analyst on A6, psql as `vasik` (Reactor#Core9)
+  for the compartment_b key blob, `.netrc`-authed git clone of
+  `aurora/weapons-integration` for the passphrase, and gpg
+  `--import` + `--decrypt` all inside Shah's shell on A16.
+- **SCADA chain via A15**: flag 37 / 18 / 19 recovered end-to-end via
+  `SSH s.ivanov@ops-eng01` → sudo-arg-injection → `hmi.json` loot →
+  inline Modbus writes from the A15 shell → critical-failure page.
+
+## [3.85.0] - 2026-04-12
+
+### Added
+
+- **POLARIS CTF range: A15 Ops Engineer Workstation** and **A16 Research
+  Data Analyst Workstation** introduced as dedicated Front Office pivot
+  hosts, with two new flags (37, 38) that gate the SCADA and Lab chains
+  respectively. Total flag count: 36 → 38.
+  - A15 (`ops-eng01.boreas.local`, 172.20.10.50 + 172.20.40.20) — Sergei
+    Ivanov's workstation. Multi-homed on `corporate` + `scada`. Attack
+    chain: OSINT (A0 leadership + A4 HR org_chart) → `Welcome1` default
+    password → SSH as `s.ivanov` → `sudo -l` reveals
+    `/opt/ops/scada_diag.sh` NOPASSWD → sudo arg-injection exploits the
+    unquoted `curl` sink → read root-owned `/root/.scada/hmi.json` which
+    contains both `svc-scada / Sc@da#2025!` and **flag 37**
+    (`FLAG{5c3e7a9f1b8d4602}`, Hard, 200pts, M3). A15 has `pymodbus`
+    preinstalled so flags 18 and 19 execute from inside the A15 shell.
+  - A16 (`analyst01.boreas.local`, 172.20.10.60 + 172.20.30.60) — Priya
+    Shah's research data analyst workstation. Multi-homed on `corporate`
+    + `lab`. Deliberately simpler chain than A15 (no privesc): OSINT
+    (A4 HR only, NOT A0) → `Welcome1` default → SSH as `p.shah` → read
+    `~/.reports/ANALYST_TOKEN` for **flag 38**
+    (`FLAG{8b2d4f1a0c5e7396}`, Medium, 100pts, M2). Home dir also
+    carries `~/.pgpass` (lab_general), a passphrase-less SSH key +
+    `~/.ssh/config` alias for `research-analyst@eng-ws01.boreas.local`
+    on A6, and an example `daily_integration_report.py`.
+  - New `research-analyst` read-only posix account on A6 (key-only
+    auth; public key pre-generated at `_shared/research-analyst-key/`
+    and COPY'd into A6 during image build). Can read `/opt/builds/`,
+    `/home/r.tanaka/simulations/standard/`, and `/tmp/.deleted/`.
+    **Cannot** read `/home/r.tanaka/simulations/midnight/`,
+    `/home/p.nielsen/designs/`, or `/home/jenkins/.credentials` (now
+    chmod 600). Flags 25, 26, 28 still require independent
+    nielsen/tanaka cred discovery; flag 20 still requires jenkins.
+- **New smoketests**: `tests/smoketests/A15-smoketest.sh` walks the
+  flag 37 compromise chain from inside `a14-kali`, validates the
+  sudo-arg-injection root path, extracts the hmi.json loot, and
+  proves A15 → `scada-gw` HMI + Modbus reachability.
+  `tests/smoketests/A16-smoketest.sh` walks the flag 38 chain, then
+  validates A16 → A8 psql and A16 → A6 `research-analyst` SSH pivots
+  plus the read/no-read scope of the `research-analyst` account.
+
+### Changed
+
+- **A3 intranet reduced to `corporate`-only.** Legacy multi-home onto
+  `scada` and `lab` (used as a one-box pivot shortcut) has been
+  removed from `docker-compose.yml`. A3 is once again what its
+  hostname says: a corporate wiki server. SCADA reach is now A15,
+  Lab reach is now A16.
+- **`svc-scada` credential single-sourced through A15.** The
+  `service_account_vault.pdf` on A4 no longer lists the `svc-scada`
+  password in plaintext — the row now points at "held by ops, see
+  ivanov" as a breadcrumb. The only participant path to
+  `Sc@da#2025!` is the flag 37 privesc chain.
+- **A4 org chart updated** to include Sergei Ivanov (Ops Engineer —
+  Plant Systems) and Priya Shah (Senior Research Data Analyst). These
+  are the HR-share breadcrumbs for A15 + A16 discovery.
+- **A1 mail server seeded** with Sergei Ivanov's inbox (HR
+  welcome-back reset confirmation + Dariusz thread about the SCADA
+  cred cache). `s.ivanov / Welcome1` added to the A1 user list and
+  Dovecot passdb.
+- **A0 leadership page** adds Sergei Ivanov under a new "Department
+  Leads" section; contact page adds a Plant Operations mailto.
+- **A6 entrypoint** creates the `research-analyst` user, drops the
+  pre-generated public key into its `authorized_keys`, enforces
+  `jenkins/.credentials` at mode 600, and makes `/tmp/.deleted/`
+  world-traversable for the flag 30 chain.
+- **Flags 18 + 19 walkthrough** rewritten to run from inside the A15
+  SSH session after flag 37 rather than hand-waving a pivot. All
+  Modbus writes, HMI fetches, and maintenance-manual lookups are
+  routed through A15 or Kali as appropriate.
+- **Flags 20–30 walkthrough** rewritten to use A16 as the Lab
+  on-ramp. Each flag section now names its specific SSH/psql target
+  and which account is required. Flag 38 section added at the top
+  as the Lab entry point.
+- **Isolation smoketest** updated for the new topology: A3 no longer
+  reaches scada/lab; A15 reaches corporate+scada only; A16 reaches
+  corporate+lab only; A14 has permitted reach to A15 + A16 on
+  corporate and to A9 via the pre-wired `splice-link`.
+- **`run-all-smoketests.sh`** updated to route the A5 smoketest
+  through `a15-ops-eng`, and A6/A8 smoketests through
+  `a16-research-analyst`, instead of `a3-intranet`. A15 and A16
+  smoketests added.
+- **Design docs**: new `design/assets/A15-ops-workstation.md` and
+  `design/assets/A16-research-analyst.md`. `design/architecture.md`,
+  `design/assets/A3-web-app.md`, `design/assets/A5-scada-generator.md`,
+  `design/assets/A6-engineering-workstation.md`, and
+  `design/shared-constants.md` updated to reflect the new topology,
+  flag table (38 total), pivot ownership, and employee credential
+  index.
+
 ## [3.84.0] - 2026-04-12
 
 ### Fixed

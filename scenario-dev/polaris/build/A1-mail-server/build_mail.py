@@ -40,7 +40,7 @@ DOMAIN = "boreas.local"
 
 
 def make_dirs():
-    for d in ["v.harlan", "e.vasik", "m.webb", "j.chen", "d.kowalski", "s.morrison", "attachments"]:
+    for d in ["v.harlan", "e.vasik", "m.webb", "j.chen", "d.kowalski", "s.morrison", "s.ivanov", "attachments"]:
         os.makedirs(os.path.join(BASE, d), exist_ok=True)
 
 
@@ -429,6 +429,60 @@ def webb_inbox():
 
 
 # ============================================
+# s.ivanov INBOX (Ops engineer — A15 cred chain)
+# ============================================
+
+def ivanov_inbox():
+    """HR welcome-back reset thread priming Ivanov's password (Welcome1)."""
+    # 01 — HR-driven password reset confirmation. Lands in Ivanov's inbox
+    # on his return from medical leave.
+    save_eml("s.ivanov", "01_welcome_back.eml", make_msg(
+        f"hr@{DOMAIN}", f"s.ivanov@{DOMAIN}",
+        "Welcome back — account reset complete",
+        "Sergei,\n\n"
+        "Welcome back from leave! Per policy, your domain and mail account "
+        "password has been reset to the corporate default. Please log in "
+        "and rotate on first login. The default is Welcome1 (case-sensitive, "
+        "capital W). If you forget to rotate, the next cred audit will flag "
+        "your account.\n\n"
+        "Your badge access and the ops engineering tooling on "
+        "ops-eng01.boreas.local are already re-enabled under your existing "
+        "s.ivanov account. Reach out to Dariusz in IT if SSH doesn't work.\n\n"
+        "— HR",
+        "Mon, 23 Mar 2026 09:12:00 +0000",
+        msg_id="<hr-ivanov-reset-001@boreas.local>"))
+
+    # 02 — Ivanov asks Dariusz about the SCADA cred cache. Reinforces the
+    # loot location on A15 without naming it explicitly.
+    save_eml("s.ivanov", "02_scada_creds_ping.eml", make_msg(
+        f"s.ivanov@{DOMAIN}", f"d.kowalski@{DOMAIN}",
+        "SCADA session cache after reset",
+        "Dariusz,\n\n"
+        "Coming back from leave and my SCADA session cache is empty on the "
+        "ops box. Can you confirm the svc-scada password file under "
+        "/root/.scada/ was preserved through the reset or do I need you to "
+        "re-drop it? I don't want to ping the plant during an unplanned "
+        "window if I can avoid it.\n\n"
+        "— Sergei",
+        "Tue, 24 Mar 2026 08:47:00 +0000",
+        msg_id="<ivanov-scada-001@boreas.local>"))
+
+    # 03 — Dariusz reply. Confirms the cache is where Ivanov expects.
+    save_eml("s.ivanov", "03_scada_creds_reply.eml", make_msg(
+        f"d.kowalski@{DOMAIN}", f"s.ivanov@{DOMAIN}",
+        "Re: SCADA session cache after reset",
+        "Sergei,\n\n"
+        "All good — /root/.scada/hmi.json is untouched. Your sudo rule for "
+        "scada_diag.sh survived too. Keep in mind that if you forget the "
+        "password again we're going to have to rotate the whole vendor "
+        "maintenance key so try not to.\n\n"
+        "— D.",
+        "Tue, 24 Mar 2026 10:15:00 +0000",
+        msg_id="<kowalski-scada-reply-001@boreas.local>",
+        in_reply_to="<ivanov-scada-001@boreas.local>"))
+
+
+# ============================================
 # MAIN
 # ============================================
 
@@ -458,6 +512,9 @@ def main():
 
     print("\n--- m.webb inbox ---")
     webb_inbox()
+
+    print("\n--- s.ivanov inbox ---")
+    ivanov_inbox()
 
     print("\n" + "=" * 50)
     total = sum(len(files) for _, _, files in os.walk(BASE))

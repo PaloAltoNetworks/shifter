@@ -66,8 +66,24 @@ Used by: Decrypting A6 `/tmp/.deleted/full_integration_sim.mp4.gpg` after import
 | Account | Password | Source | Used At |
 |---------|----------|-------|---------|
 | svc-backup | `Password1` | A2 (Kerberoast) | A2 DCSync for flag 17 |
-| svc-scada | `Sc@da#2025!` | A2 (Kerberoast) or A4 IT share | A5 HMI control panel auth |
-| d.kowalski | `P@ssw0rd123` | A0 employee info + guessing, or A3 config | A1 webmail (flag 10), creds in sent mail → A4 (flag 15) |
+| svc-scada | `Sc@da#2025!` | **A15 `/root/.scada/hmi.json`** (requires flag 37 sudo-arg-injection privesc) | A5 HMI control panel auth |
+| svc-fileshare | `F1l3Sh@r3Svc!` | A1 Kowalski "creds backup" self-email (flag 15 chain) | A4 IT share |
+
+## Employee Credentials (Front Office SSH / SMB / intranet)
+
+| Account | Password | Source | Used At |
+|---------|----------|-------|---------|
+| d.kowalski | `P@ssw0rd123` | A0 employee info + guessing, or A3 `/.env` config | A1 webmail (flag 10), creds in sent mail → A4 (flag 15) |
+| m.webb | `Welcome1` | A3 intranet HR wiki names `Welcome1` as the corporate default; Webb is listed on A0 `/leadership` | A4 `/HR` and `/Procurement` shares (flags 9, 13) — Executives group |
+| v.harlan | `Boreas2025!` | A3 SQL injection on `/search` dumping the users table; also hardcoded in Flask source | A3 intranet admin, A4 shares as Executive |
+| e.vasik | `Reactor#Core9` | A1 employee directory / intranet | A1 mail (flag 8 source), A2 AD, A6 SSH, A8 `vasik` role |
+| r.tanaka | `SimEngine#42` | Hints in A6 environment | A6 SSH, A8 `tanaka` role, A7 Gitea `r_tanaka` |
+| p.nielsen | `Hydraulics1` | A6 `.pgpass` or A8 | A6 SSH, A8 `nielsen` role, A7 Gitea `p_nielsen` |
+| s.ivanov | `Welcome1` | A4 HR org chart + `Welcome1` default (same corporate-default pattern as m.webb) + A1 HR welcome-back reset thread | **A15 SSH (flag 37 chain)** |
+| p.shah | `Welcome1` | A4 HR org chart (NOT on A0 — HR-share gated) + `Welcome1` default | **A16 SSH (Lab pivot on-ramp, no dedicated flag)** |
+| jenkins | `build2025` | A6 `/home/jenkins/.credentials` (flag 20) | A6 SSH as CI service account |
+
+The `Welcome1` corporate default is documented on the A3 intranet HR wiki ("New employee default password: `Welcome1` — must change on first login") with the accompanying note *"Several employees have not changed their default passwords."* That single leak powers cred discovery for `m.webb`, `s.ivanov`, and `p.shah` via username-guessing against names harvested from A0 leadership / A4 HR content.
 
 ## PO Number (A12 cross-zone intel)
 

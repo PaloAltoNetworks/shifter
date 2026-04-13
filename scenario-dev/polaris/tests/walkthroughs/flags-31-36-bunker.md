@@ -2,15 +2,25 @@
 
 > **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range.
 
-These flags require the collective gate (flag 19) to have been triggered first in production. **Bunker network (172.20.50.x) is NOT reachable from Kali.** Access is via the splice landing box (A9 at 172.20.50.5).
+These flags live behind the splice landing box (A9), which is the gateway into the Bunker OT network (172.20.50.0/24). In production, Kali gets a link to A9 after flag 19 (the generator explosion) fires. In this range the link (`splice-link`, 172.20.60.0/24) is pre-wired — A9 is reachable from Kali out of the box as `splice-relay` / `172.20.60.5`.
 
-For testing, exec into A9: `sudo docker exec -it a9-splice /bin/sh`
-From A9, the controllers are at their production ports (reachable by
-hostname via docker DNS or by IP):
-- A10 tail: **tail-ctrl** / **172.20.50.10:502**
-- A11 leg: **leg-ctrl** / **172.20.50.11:502**
-- A12 arms: **arms-ctrl** / **172.20.50.12:502**
-- A13 brain: **brain-main** / **172.20.50.50:9100**
+**Prerequisite — A7 playbooks and source:** several bunker flags reference content from the A7 Gitea repos (`aurora/manufacturing-orchestrator` for the PLC diag procedures, `aurora/weapons-integration` for `brain_client.py`, `aurora/navigation-controller` for the brain auth token). A7 lives on the lab network and is **not** reachable from A9 or Kali. You must have cloned those repos during the Lab phase from inside the A16 SSH session (flag 24's `.netrc` chain works for every one of them). Keep the A16 shell open alongside the A9 shell so you can cross-reference the already-cloned repos while working bunker flags.
+
+From Kali, SSH into A9:
+
+```
+ssh root@splice-relay
+# password: splice2025
+```
+
+A14 is **not** on the Bunker OT network itself. A9 is the only host with a route to the four controllers, so all work for flags 31–36 runs from inside the A9 shell:
+
+- A10 tail: 172.20.50.10:502 (Modbus/TCP) — hostname `tail-ctrl`
+- A11 leg: 172.20.50.11:502 (Modbus/TCP) — hostname `leg-ctrl`
+- A12 arms: 172.20.50.12:502 (Modbus/TCP) — hostname `arms-ctrl`
+- A13 brain: 172.20.50.50:9100 (custom binary TCP) — hostname `brain-main`
+
+A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper script `/usr/local/bin/modbus_client.py`.
 
 ---
 

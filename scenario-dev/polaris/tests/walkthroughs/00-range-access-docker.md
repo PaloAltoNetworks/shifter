@@ -4,17 +4,7 @@ Everything runs as containers on `ctf-range-builder` (10.100.0.5) in GCP project
 
 ## How to Connect
 
-SSH to the builder VM:
-```
-gcloud compute ssh ctf-range-builder --zone=us-east4-a --ssh-key-file=~/.ssh/id_rsa
-```
-
-Get a shell inside the Kali container (this is the participant perspective):
-```
-sudo docker exec -it a14-kali /bin/bash
-```
-
-All commands in the smoketest walkthroughs should be run FROM INSIDE the Kali container unless stated otherwise.
+All commands in the walkthroughs run from the participant perspective: a shell on the Kali attack workstation (A14) sitting on the shared + corporate networks.
 
 ## Network Topology
 
@@ -29,17 +19,19 @@ The Kali container is on two networks: `shared` (172.20.0.x) and `corporate` (17
 | A1 Mail | mail.boreas.local | 172.20.10.20 | 25,143,80 | SMTP, IMAP, Roundcube |
 | A3 Intranet | intranet.boreas.local | 172.20.10.30 | 80 | `curl http://172.20.10.30/` |
 | A4 File Share | fileserv.boreas.local | 172.20.10.40 | 445 | `smbclient //172.20.10.40/Public` |
-| A7 Gitea | git.boreas.local | 172.20.0.70 | 3000 | On shared network. `curl http://172.20.0.70:3000/` |
+| A16 Ops Eng | ops-eng01.boreas.local | 172.20.10.50 | 22, 80 | Pivot host for SCADA (flag 37 gate) |
+| A16 Research Analyst | analyst01.boreas.local | 172.20.10.60 | 22, 8080 | Pivot host for Lab + Gitea (flag 38) |
 | A2 Windows DC | dc01.boreas.local | 10.100.0.4 | 88,389,445 | External VM, reachable from corporate net |
 
 ### What Kali CANNOT reach (requires pivot)
 
 | Service | IP | Network | How to reach |
 |---------|-----|---------|-------------|
-| A5 SCADA HMI | 172.20.40.10 | scada (VLAN 40) | Pivot through A3 (which is on both corporate and scada nets) |
-| A6 Workstation | 172.20.30.10 | lab (VLAN 30) | Pivot through A3 (which is on both corporate and lab nets) |
-| A8 Database | 172.20.30.30 | lab (VLAN 30) | Pivot through A3 → A6, or access from A6 directly |
-| A9 Splice | 172.20.50.5 | bunker-ot (VLAN 50) | Collective gate must fire first |
+| A5 SCADA HMI | 172.20.40.10 | scada (VLAN 40) | Pivot through **A15** (the ops engineer workstation) after flag 37 |
+| A6 Workstation | 172.20.30.10 | lab (VLAN 30) | Pivot through **A16** (the research analyst workstation) after flag 38 |
+| A7 Gitea | 172.20.30.20 | lab (VLAN 30) | Pivot through **A16**; has `git` preinstalled |
+| A8 Database | 172.20.30.30 | lab (VLAN 30) | Pivot through **A16** via cached `.pgpass` |
+| A9 Splice | 172.20.60.5 | splice-link | Pre-wired link to Kali (`splice-relay`, SSH `root / splice2025`) — represents the post-collective-gate splice install |
 | A10 Tail | 172.20.50.10 | bunker-ot | Via A9 after gate |
 | A11 Leg | 172.20.50.11 | bunker-ot | Via A9 after gate |
 | A12 Arms | 172.20.50.12 | bunker-ot | Via A9 after gate |
@@ -49,24 +41,16 @@ The Kali container is on two networks: `shared` (172.20.0.x) and `corporate` (17
 
 The Kali container uses 172.20.0.2 as its DNS server. Hostnames like `boreas-systems.ctf` and `mail.boreas.local` should resolve. If not, use IPs directly.
 
-### For testing Lab/Bunker flags without pivot
-
-To test flags in isolated networks during development, you can exec into those containers directly:
-```
-sudo docker exec -it a6-workstation /bin/bash     # Lab
-sudo docker exec -it a9-splice /bin/sh             # Bunker gateway
-sudo docker exec -it a8-database psql -U postgres  # Database
-```
-
-This bypasses network isolation. In production, participants must pivot.
-
 ## Credentials Quick Reference
 
 | Account | Password | Where |
 |---------|----------|-------|
 | d.kowalski | P@ssw0rd123 | A3 intranet, A1 webmail, A2 SMB |
 | admin | admin | A3 admin panel |
-| svc-scada | Sc@da#2025! | A5 SCADA control panel |
+| m.webb | Welcome1 | A4 HR + Procurement shares (Executive), A3 intranet |
+| s.ivanov | Welcome1 | A15 Ops workstation SSH (flag 37) |
+| p.shah | Welcome1 | A16 Research analyst workstation SSH (flag 38) |
+| svc-scada | Sc@da#2025! | A5 SCADA control panel — cached in `/root/.scada/hmi.json` on A15, reachable only via flag 37 privesc |
 | svc-backup | Password1 | A2 Kerberoast target + DCSync (cracked from krb5tgs) |
 | Administrator | (use PTH) | A2 admin_flag share — Administrator's cleartext is random; use `smbclient.py -hashes :<nt>` with the NT hash from `secretsdump.py` |
 | jenkins | build2025 | A6 SSH |

@@ -1,0 +1,6 @@
+post-it board:
+- hmi creds on root's side, ask Dariusz (d.kowalski) if I forget again
+- vendor key is in the maintenance manual on the IT share
+- dashboard is read-only, control panel needs svc-scada auth
+- do NOT run diag against hosts I don't recognise -- last time it
+  pinged the internal wiki and confused the NOC for 20 minutes

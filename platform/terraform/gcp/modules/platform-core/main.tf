@@ -380,6 +380,25 @@ resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_
   depends_on = [time_sleep.identity_platform_service_agent_propagated]
 }
 
+# Identity Platform invokes blocking hooks through the public HTTPS function URL
+# without attaching a caller credential, so the hook itself must allow
+# unauthenticated invocation.
+resource "google_cloud_run_service_iam_member" "identity_platform_before_create_public_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.identity_platform_before_create.service_config[0].service
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_public_invoker" {
+  project        = var.project_id
+  location       = var.region
+  cloud_function = google_cloudfunctions2_function.identity_platform_before_create.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = "allUsers"
+}
+
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${local.name_prefix}-platform-ip"
   project = var.project_id

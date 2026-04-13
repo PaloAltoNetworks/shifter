@@ -2363,6 +2363,15 @@ class TestGcpPlatformCoreContracts:
         assert 'role           = "roles/cloudfunctions.invoker"' in module_main
         assert "member   = google_project_service_identity.identity_platform.member" in module_main
         assert "depends_on = [time_sleep.identity_platform_service_agent_propagated]" in module_main
+        assert (
+            'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_public_invoker"'
+            in module_main
+        )
+        assert (
+            'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_public_invoker"'
+            in module_main
+        )
+        assert 'member   = "allUsers"' in module_main
 
     def test_gcp_dev_environment_wires_google_beta_for_identity_service_agent(self):
         """The gcp-dev root module must provide google-beta for the Identity Platform service agent."""

@@ -208,7 +208,7 @@ phases:
           - screenshot
           - browser_network_log
         adjacent_checks:
-          - identity blocking function status
+          - identity platform configuration
           - portal logs around session exchange
 
       - id: corporate.login_requires_verified_email_and_mfa

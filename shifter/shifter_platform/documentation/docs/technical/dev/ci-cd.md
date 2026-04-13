@@ -204,5 +204,5 @@ Terraform plans are also posted as PR comments for easy review.
 - Review `terraform output -json` and the generated `platform-runtime.generated.env` values in the workflow logs
 - Review the generated Helm values, ingress resources, and `BackendConfig` resources if hostname, DNS, certificate, or Cloud Armor behavior is wrong
 - Review the `guacamole-runtime` Secret sync step if the Guacamole client pods stay in `CreateContainerConfigError`
-- If the portal auth path is wrong, verify the Terraform outputs expose `public_hostname`, `managed_tls_enabled=true`, that Identity Platform was provisioned successfully, that the blocking function and MFA configuration are present, that the bootstrap operator credentials were supplied, and that the managed certificate reaches `Active`
+- If the portal auth path is wrong, verify the Terraform outputs expose `public_hostname`, `managed_tls_enabled=true`, that Identity Platform was provisioned successfully, that Django session exchange is enforcing allowed-email / verified-email / MFA checks, that the bootstrap operator credentials were supplied, and that the managed certificate reaches `Active`
 - Check `kubectl rollout status` output for the specific control-plane deployment that stalled

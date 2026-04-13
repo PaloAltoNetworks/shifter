@@ -2291,8 +2291,8 @@ class TestGcpPlatformCoreContracts:
         assert "disabled_user_signup   = false" in identity_platform_section
         assert "blocking_functions {" not in identity_platform_section
 
-    def test_identity_platform_blocking_function_required_apis_are_enabled(self):
-        """The platform-core module must enable the APIs needed to create the blocking function."""
+    def test_identity_platform_required_services_do_not_include_cloud_functions(self):
+        """The live GCP auth path must not depend on Cloud Functions in this org."""
         module_path = (
             Path(__file__).resolve().parents[3]
             / "platform"
@@ -2305,12 +2305,13 @@ class TestGcpPlatformCoreContracts:
         module_main = module_path.read_text()
 
         required_services_section = module_main.split("required_services = toset([", 1)[1].split("])", 1)[0]
-        assert '"cloudfunctions.googleapis.com"' in required_services_section
         assert '"cloudbuild.googleapis.com"' in required_services_section
         assert '"logging.googleapis.com"' in required_services_section
+        assert '"monitoring.googleapis.com"' in required_services_section
+        assert '"cloudfunctions.googleapis.com"' not in required_services_section
 
-    def test_identity_platform_blocking_function_waits_for_service_propagation(self):
-        """Cloud Run function creation must wait for required API enablement to propagate on fresh bootstrap."""
+    def test_identity_platform_does_not_ship_blocking_hook_resources(self):
+        """The live GCP auth path must not leave dormant blocking-hook resources behind."""
         module_path = (
             Path(__file__).resolve().parents[3]
             / "platform"
@@ -2322,59 +2323,34 @@ class TestGcpPlatformCoreContracts:
         )
         module_main = module_path.read_text()
 
-        assert 'resource "time_sleep" "required_services_propagated"' in module_main
-        assert 'create_duration = "60s"' in module_main
-        assert 'resource "time_sleep" "cloud_run_builder_propagated"' in module_main
-        assert 'create_duration = "90s"' in module_main
-        assert "depends_on = [google_project_iam_member.cloud_run_builder]" in module_main
-        assert "time_sleep.required_services_propagated" in module_main
-        assert "time_sleep.cloud_run_builder_propagated" in module_main
-
-    def test_identity_platform_uses_cloud_run_functions_not_legacy_first_gen(self):
-        """Identity Platform blocking hooks must use the supported Cloud Run functions runtime."""
-        module_path = (
-            Path(__file__).resolve().parents[3]
-            / "platform"
-            / "terraform"
-            / "gcp"
-            / "modules"
-            / "platform-core"
-            / "main.tf"
-        )
-        module_main = module_path.read_text()
-
-        assert 'resource "google_cloudfunctions2_function" "identity_platform_before_create"' in module_main
+        assert 'resource "google_cloudfunctions2_function" "identity_platform_before_create"' not in module_main
         assert 'resource "google_cloudfunctions_function" "identity_platform_before_create"' not in module_main
-        assert 'runtime     = "nodejs22"' in module_main
-        assert 'available_memory               = "128Mi"' in module_main
-        assert 'resource "google_project_service_identity" "identity_platform"' in module_main
-        assert "provider = google-beta" in module_main
-        assert 'resource "time_sleep" "identity_platform_service_agent_propagated"' in module_main
-        assert "depends_on = [google_project_service_identity.identity_platform]" in module_main
-        assert 'resource "google_project_iam_member" "cloud_run_builder"' in module_main
-        assert 'role    = "roles/run.builder"' in module_main
-        assert 'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"' in module_main
-        assert 'role     = "roles/run.invoker"' in module_main
+        assert 'resource "google_cloudfunctions2_function" "identity_platform_before_sign_in"' not in module_main
+        assert 'resource "google_project_service_identity" "identity_platform"' not in module_main
+        assert 'resource "time_sleep" "identity_platform_service_agent_propagated"' not in module_main
+        assert 'resource "google_project_iam_member" "cloud_run_builder"' not in module_main
+        assert 'resource "time_sleep" "cloud_run_builder_propagated"' not in module_main
         assert (
-            'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_invoker"'
-            in module_main
-        )
-        assert 'role           = "roles/cloudfunctions.invoker"' in module_main
-        assert "member   = google_project_service_identity.identity_platform.member" in module_main
-        assert "depends_on = [time_sleep.identity_platform_service_agent_propagated]" in module_main
-        assert (
-            'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_public_invoker"'
+            'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker"'
             not in module_main
         )
         assert (
-            'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_public_invoker"'
+            'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_invoker"'
+            not in module_main
+        )
+        assert (
+            'resource "google_cloud_run_service_iam_member" "identity_platform_before_sign_in_invoker"'
+            not in module_main
+        )
+        assert (
+            'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_sign_in_invoker"'
             not in module_main
         )
         assert 'member   = "allUsers"' not in module_main
         assert "blocking_functions {" not in module_main
 
-    def test_gcp_dev_environment_wires_google_beta_for_identity_service_agent(self):
-        """The gcp-dev root module must provide google-beta for the Identity Platform service agent."""
+    def test_gcp_dev_environment_does_not_require_google_beta_or_archive_for_identity_hooks(self):
+        """The gcp-dev root module should not keep dead providers around for removed identity hooks."""
         env_main_path = (
             Path(__file__).resolve().parents[3]
             / "platform"
@@ -2386,9 +2362,31 @@ class TestGcpPlatformCoreContracts:
         )
         env_main = env_main_path.read_text()
 
-        assert "google-beta = {" in env_main
-        assert 'provider "google-beta" {' in env_main
-        assert "google-beta = google-beta" in env_main
+        assert "google-beta = {" not in env_main
+        assert 'provider "google-beta" {' not in env_main
+        assert "google-beta = google-beta" not in env_main
+        assert "archive = {" not in env_main
+
+    def test_identity_platform_user_creation_alerting_is_present(self):
+        """The live auth path must emit and alert on unexpected user-creation spikes."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        assert 'resource "google_logging_metric" "identity_platform_user_created_count"' in module_main
+        assert "security.auth.user_created provider=identity_platform" in module_main
+        assert 'resource "google_monitoring_alert_policy" "identity_platform_user_created_rate"' in module_main
+        assert (
+            "logging.googleapis.com/user/${google_logging_metric.identity_platform_user_created_count.name}"
+            in module_main
+        )
 
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""

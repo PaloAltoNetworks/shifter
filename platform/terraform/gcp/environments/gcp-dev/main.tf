@@ -2,16 +2,8 @@ terraform {
   required_version = ">= 1.0"
 
   required_providers {
-    archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.0"
-    }
     google = {
       source  = "hashicorp/google"
-      version = "~> 6.0"
-    }
-    google-beta = {
-      source  = "hashicorp/google-beta"
       version = "~> 6.0"
     }
     random = {
@@ -30,11 +22,6 @@ provider "google" {
   region  = var.region
 }
 
-provider "google-beta" {
-  project = var.project_id
-  region  = var.region
-}
-
 locals {
   labels = {
     environment = var.environment
@@ -45,11 +32,6 @@ locals {
 
 module "platform_core" {
   source = "../../modules/platform-core"
-
-  providers = {
-    google      = google
-    google-beta = google-beta
-  }
 
   project_id                     = var.project_id
   environment                    = var.environment

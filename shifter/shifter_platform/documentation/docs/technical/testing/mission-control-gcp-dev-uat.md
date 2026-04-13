@@ -112,7 +112,7 @@ Verify:
 
 Adjacent checks:
 
-- Identity Platform config and blocking-function status
+- Identity Platform config
 - portal logs around token exchange and session creation
 
 This is a human-UAT gate. Agent-run UAT should record failures here, then

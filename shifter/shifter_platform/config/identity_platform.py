@@ -130,6 +130,13 @@ def _allowed_emails() -> set[str]:
     return {email.strip().lower() for email in getattr(settings, "IDENTITY_ALLOWED_EMAILS", []) if email.strip()}
 
 
+def _email_domain(email: str) -> str:
+    normalized = email.strip().lower()
+    if "@" not in normalized:
+        return ""
+    return normalized.rsplit("@", 1)[1]
+
+
 def is_allowed_identity_email(email: str) -> bool:
     """Return True when the email belongs to the configured corporate allow-list."""
     normalized = email.strip().lower()
@@ -244,6 +251,13 @@ class IdentityPlatformBackend(BaseBackend):
         _apply_bootstrap_admin_flags(user, claims.email)
         update_cognito_sub(user, claims.sub)
         _sync_user_type_from_claims(user, identity_claims)
+
+        if created:
+            logger.warning(
+                "security.auth.user_created provider=identity_platform user_id=%s email_domain=%s",
+                user.id,
+                _email_domain(claims.email),
+            )
 
         audit_auth_event(
             action=AuditLog.Action.CREATE if created else AuditLog.Action.LOGIN,

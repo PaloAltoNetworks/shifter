@@ -77,11 +77,11 @@ locals {
   required_services = toset([
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
-    "cloudfunctions.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "identitytoolkit.googleapis.com",
     "logging.googleapis.com",
+    "monitoring.googleapis.com",
     "pubsub.googleapis.com",
     "redis.googleapis.com",
     "run.googleapis.com",
@@ -108,30 +108,6 @@ resource "time_sleep" "required_services_propagated" {
 
 data "google_project" "project" {
   project_id = var.project_id
-}
-
-resource "google_project_service_identity" "identity_platform" {
-  provider = google-beta
-  project  = var.project_id
-  service  = "identitytoolkit.googleapis.com"
-}
-
-resource "time_sleep" "identity_platform_service_agent_propagated" {
-  create_duration = "60s"
-
-  depends_on = [google_project_service_identity.identity_platform]
-}
-
-resource "google_project_iam_member" "cloud_run_builder" {
-  project = var.project_id
-  role    = "roles/run.builder"
-  member  = "serviceAccount:${local.compute_default_service_account}"
-}
-
-resource "time_sleep" "cloud_run_builder_propagated" {
-  create_duration = "90s"
-
-  depends_on = [google_project_iam_member.cloud_run_builder]
 }
 
 resource "google_compute_network" "platform" {
@@ -312,146 +288,6 @@ resource "google_storage_bucket" "audit_logs" {
   depends_on = [google_project_service.required]
 }
 
-data "archive_file" "identity_platform_hooks" {
-  type        = "zip"
-  source_dir  = "${path.module}/functions/identity-platform"
-  output_path = "${path.root}/.terraform/${local.name_prefix}-identity-platform-hooks.zip"
-  # Local `node --test` runs and CI lint steps drop a node_modules/ tree into
-  # source_dir; Cloud Functions Gen2 re-runs npm install from package.json at
-  # build time, so excluding local artifacts keeps the deploy zip deterministic
-  # and small and prevents an accidentally stale local node_modules from
-  # shadowing the pinned runtime dependency tree on GCP.
-  excludes = [
-    "node_modules",
-    "node_modules/**",
-    "package-lock.json",
-  ]
-}
-
-resource "google_storage_bucket_object" "identity_platform_hooks" {
-  name   = "identity-platform/identity-platform-hooks-${data.archive_file.identity_platform_hooks.output_md5}.zip"
-  bucket = google_storage_bucket.assets.name
-  source = data.archive_file.identity_platform_hooks.output_path
-}
-
-resource "google_cloudfunctions2_function" "identity_platform_before_create" {
-  name        = "${local.name_prefix}-identity-before-create"
-  project     = var.project_id
-  location    = var.region
-  description = "Identity Platform beforeCreate blocking function — enforces @${var.identity_allowed_email_domain} registrations."
-
-  build_config {
-    runtime     = "nodejs22"
-    entry_point = "beforeCreate"
-
-    source {
-      storage_source {
-        bucket = google_storage_bucket.assets.name
-        object = google_storage_bucket_object.identity_platform_hooks.name
-      }
-    }
-  }
-
-  service_config {
-    available_memory               = "128Mi"
-    timeout_seconds                = 10
-    ingress_settings               = "ALLOW_ALL"
-    all_traffic_on_latest_revision = true
-
-    environment_variables = {
-      ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
-      ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
-    }
-  }
-
-  depends_on = [
-    time_sleep.required_services_propagated,
-    time_sleep.cloud_run_builder_propagated,
-  ]
-}
-
-# beforeSignIn is the second server-side gate. beforeCreate only fires on
-# self-registration through the portal; a user seeded via the Firebase Console,
-# Admin SDK, or bootstrap tooling bypasses that hook entirely. beforeSignIn
-# re-evaluates the corporate allow-list on every authentication attempt so a
-# stale or accidentally created non-PAN account cannot establish a session.
-# The Django IdentityPlatformBackend is the third and authoritative layer.
-resource "google_cloudfunctions2_function" "identity_platform_before_sign_in" {
-  name        = "${local.name_prefix}-identity-before-sign-in"
-  project     = var.project_id
-  location    = var.region
-  description = "Identity Platform beforeSignIn blocking function — re-enforces the corporate allow-list on every sign-in."
-
-  build_config {
-    runtime     = "nodejs22"
-    entry_point = "beforeSignIn"
-
-    source {
-      storage_source {
-        bucket = google_storage_bucket.assets.name
-        object = google_storage_bucket_object.identity_platform_hooks.name
-      }
-    }
-  }
-
-  service_config {
-    available_memory               = "128Mi"
-    timeout_seconds                = 10
-    ingress_settings               = "ALLOW_ALL"
-    all_traffic_on_latest_revision = true
-
-    environment_variables = {
-      ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
-      ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
-    }
-  }
-
-  depends_on = [
-    time_sleep.required_services_propagated,
-    time_sleep.cloud_run_builder_propagated,
-  ]
-}
-
-resource "google_cloud_run_service_iam_member" "identity_platform_before_create_invoker" {
-  project  = var.project_id
-  location = var.region
-  service  = google_cloudfunctions2_function.identity_platform_before_create.service_config[0].service
-  role     = "roles/run.invoker"
-  member   = google_project_service_identity.identity_platform.member
-
-  depends_on = [time_sleep.identity_platform_service_agent_propagated]
-}
-
-resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_invoker" {
-  project        = var.project_id
-  location       = var.region
-  cloud_function = google_cloudfunctions2_function.identity_platform_before_create.name
-  role           = "roles/cloudfunctions.invoker"
-  member         = google_project_service_identity.identity_platform.member
-
-  depends_on = [time_sleep.identity_platform_service_agent_propagated]
-}
-
-resource "google_cloud_run_service_iam_member" "identity_platform_before_sign_in_invoker" {
-  project  = var.project_id
-  location = var.region
-  service  = google_cloudfunctions2_function.identity_platform_before_sign_in.service_config[0].service
-  role     = "roles/run.invoker"
-  member   = google_project_service_identity.identity_platform.member
-
-  depends_on = [time_sleep.identity_platform_service_agent_propagated]
-}
-
-resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_sign_in_invoker" {
-  project        = var.project_id
-  location       = var.region
-  cloud_function = google_cloudfunctions2_function.identity_platform_before_sign_in.name
-  role           = "roles/cloudfunctions.invoker"
-  member         = google_project_service_identity.identity_platform.member
-
-  depends_on = [time_sleep.identity_platform_service_agent_propagated]
-}
-
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${local.name_prefix}-platform-ip"
   project = var.project_id
@@ -587,12 +423,11 @@ resource "google_identity_platform_config" "platform" {
     }
   }
 
-  # Identity Platform blocking hooks require public unauthenticated invocation.
-  # This org forbids `allUsers` bindings on Cloud Run / Cloud Functions, so the
-  # live GCP deployment cannot rely on blocking functions for the corporate
-  # allow-list. The Django IdentityPlatformBackend remains the authoritative
-  # gate for allowed email, verified email, and enrolled MFA during session
-  # exchange.
+  # This org forbids the public unauthenticated invocation that Identity
+  # Platform blocking hooks require. The live deployment therefore enforces the
+  # corporate allow-list, verified-email requirement, and enrolled-MFA
+  # requirement during Django session exchange in
+  # config/identity_platform.py::_assert_account_can_create_app_session.
 
   # MFA stays at state=ENABLED rather than MANDATORY. MANDATORY would force
   # every authentication to include a second factor, and Google's schema
@@ -619,6 +454,62 @@ resource "google_identity_platform_config" "platform" {
       enabled = true
     }
   }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_logging_metric" "identity_platform_user_created_count" {
+  name        = "${local.name_prefix}_identity_platform_user_created_count"
+  project     = var.project_id
+  description = "Count of Identity Platform users first created in Django session exchange."
+  filter = join(
+    "\n",
+    [
+      "resource.type=\"k8s_container\"",
+      "resource.labels.namespace_name=\"shifter-platform\"",
+      "severity>=WARNING",
+      "(textPayload:\"security.auth.user_created provider=identity_platform\" OR jsonPayload.message:\"security.auth.user_created provider=identity_platform\")",
+    ],
+  )
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_monitoring_alert_policy" "identity_platform_user_created_rate" {
+  project               = var.project_id
+  display_name          = "Identity Platform user creation rate spike"
+  combiner              = "OR"
+  enabled               = true
+  notification_channels = var.monitoring_notification_channels
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "Triggers when the rate of newly created Identity Platform-backed Django users exceeds the expected threshold. Review Shifter auth logs and audit entries for unexpected self-registration volume."
+  }
+
+  conditions {
+    display_name = "Identity Platform user creation rate > threshold"
+
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.identity_platform_user_created_count.name}\" AND resource.type=\"k8s_container\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = var.identity_user_creation_rate_threshold
+      duration        = "0s"
+
+      aggregations {
+        alignment_period     = var.identity_user_creation_rate_window
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = []
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  user_labels = local.common_labels
 
   depends_on = [google_project_service.required]
 }

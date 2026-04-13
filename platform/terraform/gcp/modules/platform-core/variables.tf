@@ -210,3 +210,21 @@ variable "identity_allowed_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "identity_user_creation_rate_threshold" {
+  description = "Threshold for newly created Identity Platform-backed Django users within the alert window."
+  type        = number
+  default     = 5
+}
+
+variable "identity_user_creation_rate_window" {
+  description = "Alignment window for the Identity Platform user-creation-rate alert."
+  type        = string
+  default     = "300s"
+}
+
+variable "monitoring_notification_channels" {
+  description = "Monitoring notification channel IDs for GCP alert policies."
+  type        = list(string)
+  default     = []
+}

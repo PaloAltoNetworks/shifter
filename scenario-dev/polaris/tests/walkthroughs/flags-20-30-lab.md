@@ -212,9 +212,9 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
    psql -h researchdb.boreas.local -U lab_mfg -d postgres
    SELECT subsystem, status, metadata FROM compartment_c.assembly_log WHERE subsystem = 'FINAL ASSEMBLY';
    ```
-4. The `metadata` column is JSONB. The flag is nested three levels deep:
+4. The `metadata` column is JSONB. The flag is nested three levels deep. Use `->>` (not `->`) on the final hop so postgres returns the value as plain text instead of a JSON-quoted string — otherwise you'll submit `"FLAG{...}"` (with literal double-quotes around it) and CTFd will reject it:
    ```sql
-   SELECT metadata->'integration'->'flag' FROM compartment_c.assembly_log WHERE subsystem = 'FINAL ASSEMBLY';
+   SELECT metadata->'integration'->>'flag' FROM compartment_c.assembly_log WHERE subsystem = 'FINAL ASSEMBLY';
    ```
 
 **Expected flag:** `FLAG{a3f7d9e1c0b52846}`

@@ -66,18 +66,20 @@ from cms.models import Request as CMSRequest  # noqa: E402
 from engine.models import Range  # noqa: E402
 from engine.models import Request as EngineRequest  # noqa: E402
 
-# ---- Parameters (edit these if the underlying infra moves) ------------------
-USER_EMAIL = "dev@example.com"
-SCENARIO_ID = "polaris_manual_test"
-RANGE_NAME = "polaris-test-range"
-SUBNET_ID = "subnet-028b195e8d6f4f8a6"
-SUBNET_CIDR = "10.1.100.0/28"
-SUBNET_INDEX = 4000  # Well outside the normal allocator range (1-4048)
-KALI_INSTANCE_ID = "i-0ca464adb68caf8c5"  # EC2 host running docker-compose
-KALI_PRIVATE_IP = "10.1.100.10"
-KALI_SSH_KEY_SECRET_ARN = (
+# ---- Parameters (env-var overridable so cold-rebuild cycles don't need ------
+# ---- a source edit to pick up new EC2 instance ids) -------------------------
+USER_EMAIL = os.environ.get("POLARIS_USER_EMAIL", "dev@example.com")
+SCENARIO_ID = os.environ.get("POLARIS_SCENARIO_ID", "polaris_manual_test")
+RANGE_NAME = os.environ.get("POLARIS_RANGE_NAME", "polaris-test-range")
+SUBNET_ID = os.environ.get("POLARIS_SUBNET_ID", "subnet-028b195e8d6f4f8a6")
+SUBNET_CIDR = os.environ.get("POLARIS_SUBNET_CIDR", "10.1.100.0/28")
+SUBNET_INDEX = int(os.environ.get("POLARIS_SUBNET_INDEX", "4000"))
+KALI_INSTANCE_ID = os.environ.get("POLARIS_KALI_INSTANCE_ID", "i-0ca464adb68caf8c5")
+KALI_PRIVATE_IP = os.environ.get("POLARIS_KALI_PRIVATE_IP", "10.1.100.10")
+KALI_SSH_KEY_SECRET_ARN = os.environ.get(
+    "POLARIS_KALI_SSH_KEY_SECRET_ARN",
     "arn:aws:secretsmanager:us-east-2:158151907940:"
-    "secret:shifter/development/range/polaris-test-kali-58eP7L"
+    "secret:shifter/development/range/polaris-test-kali-58eP7L",
 )
 # -----------------------------------------------------------------------------
 

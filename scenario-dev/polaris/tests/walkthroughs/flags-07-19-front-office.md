@@ -21,9 +21,9 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ## Flag 8 — Employee Email with Project Hints (Easy, 50pts)
 
-1. Log into the webmail (Roundcube) at `http://mail.boreas.local` as one of the employees. Try `d.kowalski` / `P@ssw0rd123` (found from the config leak on A3 or from A0's employee directory + password guessing).
-2. Look through Dr. Vasik's mailbox (you may need her credentials: `e.vasik` / `Reactor#Core9`).
-3. Find the email with subject "Re: Locomotion milestone? [with attachment]" (there is a second, plain reply with subject "Re: Locomotion milestone?" — the one you want carries the PDF `project_status_report_oct2025.pdf`).
+1. Log into the webmail (Roundcube) at `http://mail.boreas.local` as an employee to prove the webmail is reachable. Try `d.kowalski` / `P@ssw0rd123` (found from the config leak on A3 or from A0's employee directory + password guessing).
+2. The flag-carrying email lives in **Dr. Vasik's** inbox, not Kowalski's. Roundcube is per-user login, so log out of Kowalski and log back in as `e.vasik` / `Reactor#Core9` (her password is discoverable from the A3 `/search` SQL-injection user-table dump, or via the Project-L hints in Kowalski's own mail). Alternatively, use IMAP directly: `curl --url "imap://mail.boreas.local/INBOX" --user "e.vasik:Reactor#Core9"`.
+3. In Vasik's inbox find the email with subject "Re: Locomotion milestone? [with attachment]" (there is a second, plain reply with subject "Re: Locomotion milestone?" — the one you want carries the PDF `project_status_report_oct2025.pdf`).
 4. Open the PDF. At the bottom it has a Report ID containing the flag.
 
 **Expected flag:** `FLAG{3b7e9a2d1c8f4063}`
@@ -70,7 +70,7 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 ## Flag 12 — Internal Wiki / "The Project" (Easy, 50pts)
 
 1. Log into the intranet at `http://intranet.boreas.local/login`. Use any valid credentials (e.g., `d.kowalski` / `P@ssw0rd123`).
-2. Browse the wiki. Go to **"Project Coordination"** page.
+2. Browse the wiki. Fetch the **Project Coordination** page at `http://intranet.boreas.local/wiki/project-coordination` (the slug is lowercase and hyphenated — the navigation label reads "Project Coordination" but the URL is `project-coordination`).
 3. **View the page source.** The flag is in an HTML comment at the top of the content:
    ```html
    <!-- FLAG{d8a3c5e9f1b07264} -->

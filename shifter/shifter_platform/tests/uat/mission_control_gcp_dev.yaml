@@ -11,37 +11,18 @@ suite:
   source_of_truth_doc: shifter/shifter_platform/documentation/docs/technical/testing/mission-control-gcp-dev-uat.md
 
 actors:
+  - id: platform_operator
+    description: Operator using gh, gcloud, kubectl, and localhost-only access for evidence collection.
   - id: public_user
     description: Unauthenticated internet user.
   - id: corporate_user
-    description: Palo Alto Networks user with a valid Identity Platform account and MFA.
-  - id: bootstrap_admin
-    description: Seeded staff and superuser account for the environment.
+    description: Palo Alto Networks user with a valid Identity Platform account and MFA. Human-only UAT actor.
+  - id: private_admin
+    description: Localhost-only admin session acquired through the private dev-login path.
   - id: ctf_participant
     description: Participant entering through a valid invite magic link.
 
 required_inputs:
-  - name: corporate_user_email
-    required: false
-    discovery: use bootstrap_admin_email if no separate corporate fixture is supplied
-  - name: corporate_user_password
-    required: false
-    discovery: use bootstrap_admin_password if no separate corporate fixture is supplied
-  - name: corporate_user_totp_seed
-    required: false
-    discovery: use bootstrap_admin_totp_seed if no separate corporate fixture is supplied
-  - name: bootstrap_admin_email
-    required: true
-    discoverable_from:
-      - temp/k8s/gcp-smoketest-access.md
-      - /home/atomik/src/shifter/.env
-  - name: bootstrap_admin_password
-    required: true
-    discoverable_from:
-      - /home/atomik/src/shifter/.env
-  - name: bootstrap_admin_totp_seed
-    required: true
-    discovery: may be supplied externally or sourced from an existing authenticated browser profile if available
   - name: participant_invite_token
     required: false
     discovery: if absent, run only the negative magic-link cases and mark the positive case blocked
@@ -67,6 +48,18 @@ tooling:
       - kubectl
       - gh
 
+private_auth_path:
+  localhost_admin:
+    base_url: http://localhost:18080
+    steps:
+      - gcloud container clusters get-credentials shifter-gcp-dev-gke --location us-central1 --project prod-rwctxzl6shxk
+      - kubectl port-forward -n shifter-platform svc/portal-web 18080:8000
+      - open /dev-login/ on the localhost base URL
+      - create a session with email uat-admin@example.com and user_type admin
+    notes:
+      - this path is valid only for non-prod localhost/admin access
+      - it does not satisfy the public corporate-auth cases
+
 global_evidence:
   - type: screenshot
     name: final_state
@@ -83,7 +76,7 @@ phases:
     cases:
       - id: preflight.latest_deploy_green
         title: Latest gcp-dev deploy concluded successfully
-        actor: bootstrap_admin
+        actor: platform_operator
         surface: control_plane
         preconditions: []
         steps:
@@ -98,7 +91,7 @@ phases:
 
       - id: preflight.platform_workloads_ready
         title: Shifter platform workloads are ready
-        actor: bootstrap_admin
+        actor: platform_operator
         surface: control_plane
         preconditions: []
         steps:
@@ -222,10 +215,10 @@ phases:
         title: Corporate sign-in requires verified email and MFA
         actor: corporate_user
         surface: auth
+        automation: manual_human
         preconditions:
-          - corporate fixture account exists
-          - fixture account is email-verified
-          - fixture account has TOTP enrolled
+          - human operator fixture account exists
+          - human operator can complete MFA
         steps:
           - open /login/
           - complete provider-backed sign-in
@@ -241,14 +234,14 @@ phases:
           - portal logs around identity token exchange
           - browser storage/session inspection
 
-      - id: corporate.bootstrap_admin_has_admin_access
-        title: Bootstrap admin can reach Django admin and Mission Control
-        actor: bootstrap_admin
+      - id: corporate.private_admin_access_has_admin_access
+        title: Private localhost admin access can reach Django admin and Mission Control
+        actor: private_admin
         surface: auth
         preconditions:
-          - bootstrap admin fixture exists
+          - localhost admin session exists
         steps:
-          - sign in as bootstrap admin
+          - sign in through localhost /dev-login/ as user_type admin
           - open /mission-control/
           - open /admin/
         assertions:
@@ -265,10 +258,10 @@ phases:
     cases:
       - id: mc.dashboard_loads
         title: Dashboard loads and exposes launch controls
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/
         assertions:
@@ -284,10 +277,10 @@ phases:
 
       - id: mc.agents_page_loads
         title: Agents page loads
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/agents/
         assertions:
@@ -300,10 +293,10 @@ phases:
 
       - id: mc.files_page_loads
         title: Files page loads
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/files/
         assertions:
@@ -316,10 +309,10 @@ phases:
 
       - id: mc.credentials_page_loads
         title: Credentials page loads
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap_admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/credentials/
         assertions:
@@ -331,10 +324,10 @@ phases:
 
       - id: mc.settings_page_loads
         title: Settings page loads
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/settings/
         assertions:
@@ -346,10 +339,10 @@ phases:
 
       - id: mc.help_page_loads
         title: Help page loads
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/help/
         assertions:
@@ -360,10 +353,10 @@ phases:
 
       - id: mc.walkthrough_page_loads
         title: Walkthrough page loads
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - open /mission-control/walkthrough/
         assertions:
@@ -377,10 +370,10 @@ phases:
     cases:
       - id: api.agents_list
         title: Agents API returns authenticated response
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_api
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - GET /mission-control/api/agents/
         assertions:
@@ -393,10 +386,10 @@ phases:
 
       - id: api.scenarios_list
         title: Scenarios API returns authenticated response
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_api
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - GET /mission-control/api/scenarios/
         assertions:
@@ -409,10 +402,10 @@ phases:
 
       - id: api.range_status
         title: Range status API returns authenticated response
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_api
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
         steps:
           - GET /mission-control/api/range/
         assertions:
@@ -443,10 +436,10 @@ phases:
     cases:
       - id: range.launch_and_destroy
         title: Launch and destroy a range from Mission Control
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_ui
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
           - known-good agent exists
           - known-good scenario exists
         steps:
@@ -472,10 +465,10 @@ phases:
 
       - id: range.pause_resume_fail_closed
         title: Unsupported pause and resume behavior is explicit on GCP
-        actor: bootstrap_admin
+        actor: private_admin
         surface: mission_control_api
         preconditions:
-          - authenticated bootstrap admin session
+          - authenticated private admin session
           - range exists if the UI exposes pause or resume controls
         steps:
           - invoke pause or resume only if the feature is exposed

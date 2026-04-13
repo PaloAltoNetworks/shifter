@@ -12,7 +12,8 @@ Included:
 
 - public edge reachability and routing
 - Google Identity Platform login surface as exposed through Shifter
-- corporate operator login and MFA completion
+- human verification of corporate operator login and MFA completion
+- private localhost/admin coverage for authenticated Mission Control testing
 - Mission Control navigation and read/write surfaces currently exposed in the UI
 - range launch and destroy from Mission Control
 - terminal and Guacamole access handoff
@@ -29,17 +30,20 @@ Explicitly excluded from pass criteria unless the product contract changes:
 ## Actors
 
 - `public_user`: unauthenticated internet user
-- `corporate_user`: allowed `@paloaltonetworks.com` user with MFA
-- `bootstrap_admin`: seeded staff and superuser account
+- `corporate_user`: allowed `@paloaltonetworks.com` user with MFA, for human-only UAT
+- `private_admin`: localhost-only admin session acquired through `dev-login`
 - `ctf_participant`: participant entering through a magic link
 
 ## Required Inputs
 
 - base URL for the environment
-- one valid corporate test account
-- one bootstrap admin account
+- one valid corporate test account for human-only public auth verification
 - one valid CTF invite token for a participant fixture
 - one known-good scenario and agent combination for range launch
+- private operator access path:
+  - `gcloud container clusters get-credentials ...`
+  - `kubectl port-forward -n shifter-platform svc/portal-web 18080:8000`
+  - `http://localhost:18080/dev-login/`
 - access to evidence tooling:
   - browser automation with screenshots and network capture
   - `curl`
@@ -111,12 +115,32 @@ Adjacent checks:
 - Identity Platform config and blocking-function status
 - portal logs around token exchange and session creation
 
-### 4. Bootstrap Admin Access
+This is a human-UAT gate. Agent-run UAT should record failures here, then
+continue the authenticated Mission Control/API/range phases through the private
+localhost/admin path.
 
-Verify with the seeded operator:
+### 4. Private Admin Access
 
-- authenticated `/mission-control/` returns `200`
-- authenticated `/admin/` returns `200`
+Verify through the localhost-only admin path:
+
+```bash
+gcloud container clusters get-credentials shifter-gcp-dev-gke \
+  --location us-central1 \
+  --project prod-rwctxzl6shxk
+
+kubectl port-forward -n shifter-platform svc/portal-web 18080:8000
+```
+
+Then use:
+
+- `http://localhost:18080/dev-login/`
+- email `uat-admin@example.com`
+- `user_type=admin`
+
+Verify:
+
+- authenticated `http://localhost:18080/mission-control/` returns `200`
+- authenticated `http://localhost:18080/admin/` returns `200`
 - the user can reach Mission Control pages without role errors
 
 Adjacent checks:
@@ -233,7 +257,8 @@ Adjacent checks:
 The environment is ready for broader UAT only when:
 
 - all control-plane preflight checks pass
-- corporate operator login, MFA, and admin access pass
+- corporate operator login and MFA are verified by a human
+- private admin access passes for agent-run Mission Control coverage
 - Mission Control pages and core APIs pass
 - one full launch-to-destroy range cycle passes
 - participant magic-link entry is confirmed

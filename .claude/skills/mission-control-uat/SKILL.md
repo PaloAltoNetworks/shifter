@@ -25,8 +25,7 @@ operator guidance and pass/fail framing.
 
 - control-plane preflight
 - public edge and auth routing
-- corporate Identity Platform login and MFA
-- bootstrap admin access
+- private authenticated Mission Control access over a localhost/admin path
 - Mission Control page audit
 - Mission Control API audit
 - one launch-to-destroy range lifecycle
@@ -50,18 +49,13 @@ Read and mine these sources:
 
 Use those sources to discover:
 
-- `bootstrap_admin_email`
-- `bootstrap_admin_password`
 - default environment URL and project details
+- private operator access details
 
 Input policy:
 
-- `bootstrap_admin_email`: discover locally before asking
-- `bootstrap_admin_password`: discover locally before asking
-- `bootstrap_admin_totp_seed`: required only if the browser flow needs an
-  automated MFA completion and no existing authenticated session is available
-- `corporate_user_*`: if separate corporate-user fixtures are not supplied, use
-  the bootstrap admin account to execute the corporate auth-path checks
+- `corporate_user_*`: do not require these for agent-run UAT. Real public
+  corporate login and MFA are a human-UAT concern.
 - `launch_scenario_name`: discover from the live Mission Control scenario list
   after login; prefer `Basic Range`, then `AD Attack Lab`, then the first
   clearly supported non-NGFW scenario
@@ -71,6 +65,12 @@ Input policy:
 - `participant_invite_token`: this is the only positive-flow fixture that should
   normally remain externally supplied; if absent, run the negative magic-link
   cases and mark only the positive magic-link case blocked
+- `private operator access`: use this for all agent-run authenticated coverage:
+  1. `gcloud container clusters get-credentials ...`
+  2. `kubectl port-forward -n shifter-platform svc/portal-web 18080:8000`
+  3. `http://localhost:18080/dev-login/`
+  4. email `uat-admin@example.com`, `user_type=admin`
+  5. continue authenticated phases on `http://localhost:18080`
 
 Do not invent credentials or tokens. Do discover what is already present.
 
@@ -95,6 +95,8 @@ Prefer:
 - Do **not** stop before doing discovery and the maximum unblocked subset of the suite.
 - Do **not** create issues for blocked cases or unconfirmed suspicions.
 - Do **not** wait until the end of the run to record confirmed failures.
+- Do **not** let public corporate-auth failures block Mission Control/API/range
+  testing when the localhost admin path is available.
 
 ## Execution Pattern
 
@@ -104,6 +106,10 @@ Prefer:
    - full suite for all cases whose prerequisites can be satisfied
    - blocked-only list for cases that truly cannot run
 4. Execute the phases in order.
+   - Treat public corporate login as a human-UAT finding, not an agent-run
+     prerequisite.
+   - Use the localhost admin path for authenticated Mission Control/API/range
+     testing.
 5. For each case, capture:
    - final URL
    - HTTP status
@@ -115,6 +121,23 @@ Prefer:
 8. Only stop early if a hard prerequisite for an entire phase cannot be discovered
    or supplied. In that case, execute all still-unblocked phases first and then
    report the remaining blocked cases.
+
+## Private Authenticated Access Path
+
+For agent-run authenticated coverage on `gcp-dev`:
+
+1. Get GKE credentials for the live cluster.
+2. Port-forward the portal service locally:
+   - `kubectl port-forward -n shifter-platform svc/portal-web 18080:8000`
+3. Open `http://localhost:18080/dev-login/`
+4. Create a local admin session with:
+   - email `uat-admin@example.com`
+   - `user_type=admin`
+5. Continue Mission Control, API, and range tests against
+   `http://localhost:18080`.
+
+This is the primary authenticated path for agent-run UAT. It does not count as
+a pass for the separate human-UAT public corporate-auth surface.
 
 ## Issue Handling
 
@@ -186,4 +209,5 @@ Report in this order:
    - whether the prerequisite was attempted via local discovery
 5. Compact pass summary for successful cases
 
-If all cases pass, say that the remaining work is UAT expansion or deeper scenario-content validation, not deploy-plumbing remediation.
+If all agent-run cases pass, say that the remaining work is human UAT for the
+public corporate login/MFA surface plus deeper scenario-content validation.

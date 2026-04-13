@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 # Valid user types for dev login
-VALID_DEV_USER_TYPES = {"standard", "ctf_organizer", "ctf_participant"}
+VALID_DEV_USER_TYPES = {"standard", "admin", "ctf_organizer", "ctf_participant"}
 
 # Redirect URLs by user type
 USER_TYPE_REDIRECTS = {
     "standard": "mission_control:dashboard",
+    "admin": "mission_control:dashboard",
     "ctf_organizer": "ctf:admin_dashboard",
     "ctf_participant": "mission_control:dashboard",
 }
@@ -37,12 +38,14 @@ def _is_dev_environment():
 
     Returns True if either:
     - DEBUG is True (local development), OR
-    - ENVIRONMENT is 'development' (deployed dev environment via SSM tunnel)
+    - ENVIRONMENT is a non-production dev environment such as `development`,
+      `aws-dev`, or `gcp-dev`
 
     This allows dev_login to work both locally and in deployed dev when accessed via SSM tunnel.
     """
     # NOSONAR - intentional dev bypass, guarded by ENVIRONMENT; prod uses OIDC
-    return settings.DEBUG or getattr(settings, "ENVIRONMENT", "production") == "development"
+    environment = str(getattr(settings, "ENVIRONMENT", "production")).strip().lower()
+    return settings.DEBUG or environment in {"development", "dev"} or environment.endswith("-dev")
 
 
 def _request_host_or_ip_allowed(request) -> bool:
@@ -82,8 +85,9 @@ def dev_login(request):
     - Dev (via SSM tunnel): Works when ENVIRONMENT='development'
     - Prod: Always blocked (ENVIRONMENT='production')
 
-    Supports user_type POST parameter for CTF user types:
+    Supports user_type POST parameter for non-production bypass roles:
     - standard (default): redirects to mission control
+    - admin: redirects to mission control with staff/superuser flags
     - ctf_organizer: redirects to CTF admin dashboard
     - ctf_participant: redirects to Mission Control dashboard
     """
@@ -100,6 +104,11 @@ def dev_login(request):
             user_type = "standard"
 
         user, _created = User.objects.get_or_create(username=email, defaults={"email": email, "is_active": True})
+        user.email = email
+        user.is_active = True
+        user.is_staff = user_type == "admin"
+        user.is_superuser = user_type == "admin"
+        user.save(update_fields=["email", "is_active", "is_staff", "is_superuser"])
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
 
         # Set group membership based on user_type

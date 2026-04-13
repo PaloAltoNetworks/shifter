@@ -15,24 +15,39 @@ Last updated: 2026-04-11
 - Corporate email restriction: `@paloaltonetworks.com`
 - MFA: `TOTP` is required
 
-## Bootstrap Operator
+## Human Public Auth UAT
 
-- Email: `bedwards@paloaltonetworks.com`
-- Password source:
-  - `GCP_BOOTSTRAP_ADMIN_PASSWORD` in `/home/atomik/src/shifter/.env`
-  - same value is mirrored into the repo-root `.env` symlink
-- Django privileges:
-  - `is_staff=True`
-  - `is_superuser=True`
+- Public corporate auth is a human-UAT check.
+- The expected flow is:
+  1. Open `/login/`
+  2. Use the browser auth shell with a `@paloaltonetworks.com` identity
+  3. Complete email verification and TOTP enrollment if prompted
+  4. Complete the TOTP challenge
+  5. Land on `/mission-control/`
 
-Expected login flow:
+## Agent Authenticated UAT Path
 
-1. Open `/login/`
-2. Use the browser auth shell to submit the corporate email and bootstrap password
-3. If this is the first login, verify the email and enroll TOTP when prompted
-4. Complete the TOTP challenge
-5. You should land on `/mission-control/`
-6. `/admin/` should also be accessible after login
+Use the localhost-only admin path for agent-run Mission Control, API, and range
+coverage:
+
+```bash
+gcloud container clusters get-credentials shifter-gcp-dev-gke \
+  --location us-central1 \
+  --project prod-rwctxzl6shxk
+
+kubectl port-forward -n shifter-platform svc/portal-web 18080:8000
+```
+
+Then use:
+
+- URL: `http://localhost:18080/dev-login/`
+- Email: `uat-admin@example.com`
+- User type: `admin`
+
+Expected result:
+
+- `http://localhost:18080/mission-control/` returns `200`
+- `http://localhost:18080/admin/` returns `200`
 
 ## Live Deployment Facts
 
@@ -90,7 +105,6 @@ shifter-gdc-kubeconfig
 - Public landing page returns `200`
 - Login shell loads and hands off auth to Identity Platform in the browser
 - Corporate self-registration rejects non-`@paloaltonetworks.com` emails
-- Verified email + enrolled TOTP are required before the Django session is created
-- Authenticated Mission Control loads
-- Django admin loads for the bootstrap operator
+- Human public auth reaches Mission Control after verification and TOTP
+- Localhost admin path reaches Mission Control and Django admin
 - `portal-web`, `worker-cms`, `worker-engine`, `worker-mc`, `ctf-scheduler`, `guacd`, and `guacamole-client` are all `Running`

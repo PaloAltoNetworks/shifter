@@ -44,6 +44,17 @@ class TestDevLoginSecurity:
         assert response.status_code == 403
         assert b"local or admin access paths" in response.content
 
+    @override_settings(
+        DEBUG=False,
+        ENVIRONMENT="gcp-dev",
+        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+    )
+    def test_blocks_public_access_even_in_gcp_dev(self, client):
+        """gcp-dev auth must not be reachable from the public ingress host."""
+        response = client.get("/dev-login/", HTTP_HOST="shifter.keplerops.com")
+        assert response.status_code == 403
+        assert b"local or admin access paths" in response.content
+
     @override_settings(DEBUG=True, ENVIRONMENT="development")
     def test_allows_access_when_both_true(self, client):
         """dev_login should allow access when both DEBUG and ENVIRONMENT are dev."""
@@ -80,6 +91,16 @@ class TestDevLoginSecurity:
     )
     def test_allows_access_over_localhost_in_development(self, client):
         """Deployed dev auth stays available through loopback/admin tunnels."""
+        response = client.get("/dev-login/", HTTP_HOST="localhost:8000")
+        assert response.status_code == 200
+
+    @override_settings(
+        DEBUG=False,
+        ENVIRONMENT="gcp-dev",
+        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+    )
+    def test_allows_access_over_localhost_in_gcp_dev(self, client):
+        """gcp-dev auth stays available through loopback/admin tunnels."""
         response = client.get("/dev-login/", HTTP_HOST="localhost:8000")
         assert response.status_code == 200
 
@@ -173,3 +194,15 @@ class TestDevLoginFunctionality:
         # Should create user with default email
         assert User.objects.filter(username="dev@example.com").exists()
         assert response.status_code == 302
+
+    @override_settings(DEBUG=True)
+    def test_post_admin_user_type_sets_staff_and_superuser(self, client, db):
+        """Private admin bypass should create a local Django admin session."""
+        email = "uat-admin@example.com"
+        response = client.post("/dev-login/", {"email": email, "user_type": "admin"})
+
+        user = User.objects.get(username=email)
+        assert user.is_staff is True
+        assert user.is_superuser is True
+        assert response.status_code == 302
+        assert response.url == reverse("mission_control:dashboard")

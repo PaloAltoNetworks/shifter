@@ -5,6 +5,128 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.89.0] - 2026-04-13
+
+### Fixed
+
+- **rockyou.txt was gzipped on Kali by default.** The flag-17 Kerberoast
+  chain in `flags-07-19-front-office.md` runs `john --wordlist=/usr/share/
+  wordlists/rockyou.txt --format=krb5tgs` — Kali's default install ships
+  only `/usr/share/wordlists/rockyou.txt.gz` (~50 MB compressed vs ~140
+  MB decompressed), so the walkthrough command 404s out of the box and
+  the participant has to `gunzip -k` first. `a14/Dockerfile` now
+  explicitly adds `john`, `wordlists`, `ldap-utils`, `smbclient` to the
+  apt install list and runs `gunzip -k /usr/share/wordlists/rockyou.txt.gz`
+  at image-build time so the documented path works on first try.
+- **A16 missing `strings` / `file` / `xxd`.** Flag 30's GPG chain
+  walkthrough says "`strings full_integration_sim.mp4` reveals the
+  Simulation ID header" and other lab flags use `strings` for binary
+  triage on A16. `a16/Dockerfile` now installs `binutils file xxd` so
+  those commands exist on the box.
+
+## [3.88.0] - 2026-04-13
+
+### Added
+
+- **A2 Windows Server 2022 AD DC now deployed in-range.** New terraform
+  `aws_instance.a2_dc` launches a stock
+  `Windows_Server-2022-English-Full-Base` AMI into the same `10.1.100.0/28`
+  polaris subnet at `10.1.100.11`, using the shared instance profile +
+  security group. Minimal user-data (`a2_user_data.ps1.tpl`) sets the
+  Administrator password, disables Windows Firewall on all profiles, and
+  enables RDP; everything AD-specific then runs through SSM RunCommand so
+  failures are observable/re-runnable.
+- **`scripts/polaris-aws-range/a2_setup.ps1`** — idempotent post-promotion
+  PowerShell that creates the POLARIS OUs, 17 domain users (with passwords
+  matching the A1 mail / A3 wiki reuse chain), Lab-Access / Project-L /
+  Research-Coordination / Engineering-Support / SCADA-Admins /
+  Security-Staff groups, nests Project-L under
+  `Research-Coordination -> Engineering-Support` for flag 14, pins
+  `msDS-SupportedEncryptionTypes=4` (RC4-only) on svc-backup + svc-scada so
+  GetUserSPNs returns `$krb5tgs$23$` hashes that `hashcat -m 13100` /
+  john's `krb5tgs` format can crack, assigns Replicating Directory Changes
+  + Replicating Directory Changes All on svc-backup (flag 17 DCSync chain),
+  creates the `\\dc\badgelogs` share (Petrov anomaly CSV with flag 16) and
+  the DA-only `\\dc\admin_flag` share (flag 17 pass-the-hash target), and
+  sets the Project-L `info` attribute to `FLAG{2f8b4a6c1d9e7053}`.
+- **`shifter/development/range/polaris-test-kali`** Secrets Manager entry
+  (Windows side) — just a note: the Administrator password
+  (`CortexSavesTheDay!`) is hard-coded in the terraform variable
+  `a2_administrator_password` because the range is dev-only and the CTF
+  narrative depends on participants reading that cleartext from
+  walkthrough/shifter portal metadata.
+
+### Fixed
+
+- **POLARIS compose DNS now has recursion + forwarders** (named.conf in
+  `scenario-dev/polaris/build/dns/`). Previously `recursion no`, so every
+  non-`boreas.local` / non-`boreas-systems.ctf` lookup from inside the
+  compose containers returned SERVFAIL — which meant `apt update` inside
+  a14-kali (and any other container) could not resolve external archives.
+  Recursion is scoped to `172.20.0.0/16 + 127.0.0.1` via `allow-recursion`
+  so this server cannot be used as an open resolver from outside the range.
+- **`dc01.boreas.local` DNS record.** Zone files in `build/dns/` now point
+  at `10.1.100.11` (the new in-range A2 EC2) instead of the legacy
+  `10.100.0.4` external-GCP-VM placeholder. `00-range-access-docker.md`,
+  `flags-07-19-front-office.md`, `isolation-smoketest.sh`, and
+  `A2-smoketest.sh` all updated to match.
+- **a14-kali PDF extraction tools.** `a14/Dockerfile` now installs
+  `poppler-utils` + `python3-pdfminer` at image-build time AND drops a
+  `/etc/profile.d/polaris-tools.sh` that puts `/opt/tools/bin` on PATH for
+  interactive SSH / `docker exec` login shells. Previous a14 image had
+  `pdfminer.six` installed inside `/opt/tools/` but `pdf2txt.py` was not on
+  PATH in login shells (the `ENV PATH=` line in the Dockerfile only
+  affects the PID 1 environment), so the flags 1/8/9/13/19 PDF-extraction
+  steps documented in the walkthroughs silently fell back to a hand-rolled
+  ASCII85+Flate decoder. Symlinks `/usr/local/bin/pdf2txt.py` and
+  `/usr/local/bin/impacket-smbclient.py` added for stability.
+- **Flag 15 walkthrough wording** (`flags-07-19-front-office.md`) — now
+  explicitly says Kowalski's "creds backup" email is in **INBOX** (he sent
+  to his own address; Dovecot has no Sent folder for that user). Previous
+  "(Kowalski sent it to himself)" parenthetical was ambiguous and led at
+  least one walkthrough-runner to check a non-existent Sent folder first.
+- **Flag 31 walkthrough path** (`flags-31-36-bunker.md`) — the
+  pre-populated `/root/scan_results.txt` short-circuit is now the primary
+  step; the live `nmap -sV -p 502,9100 172.20.50.0/24` is documented as
+  the fallback because the service-version probe is slow over the splice
+  pivot and can time out under automation.
+
+## [3.87.0] - 2026-04-13
+
+### Added
+
+- **`scripts/polaris-aws-range/`** — terraform + bootstrap for a one-VM
+  manual POLARIS range inside the existing dev range VPC. Creates a new
+  `/28` subnet (`10.1.100.0/28`) with a dedicated route table that
+  bypasses the domain-filtered Network Firewall (so `docker build` and
+  `apt install` can reach the internet during bake), one `m5.2xlarge`
+  Ubuntu instance, a permissive SG allowing VPC-internal + portal-peering
+  ingress on 22/3389, and an instance profile that can read the polaris
+  build tarball + SSM session manager.
+- **`scripts/polaris-aws-range/user_data.sh.tpl`** — cloud-init bootstrap
+  that installs Docker + the v2 compose plugin binary, masks host `ssh`
+  / `apache2` / `smbd` / `vsftpd` / `xrdp` / `mysql` services (the
+  `shifter-ubuntu-*` base AMI ships them pre-installed and they compete
+  for the ports we need to publish from the Kali container), pulls the
+  polaris build tarball from S3, writes a `docker-compose.override.yml`
+  that publishes a14-kali's 22 + 3389 to the host, runs
+  `docker compose up -d`, and starts everything under a systemd unit.
+- **`scripts/polaris-aws-range/register_range.py`** — idempotent manual
+  range registration script: fetches DB + Django + Cognito secrets from
+  Secrets Manager, soft-destroys any stale ready-range rows for the dev
+  user, and creates engine `Range` + cms `RangeInstance` rows pointing at
+  the polaris VM with an attacker (kali) instance spec. Runs inside the
+  portal docker container via SSM Run Command so no portal code change
+  is needed to turn a hand-built range into a portal-visible one.
+- **S3 bucket** `shifter-polaris-bake-158151907940` — byte-stable
+  `polaris/build-v1.tar.gz` of the `scenario-dev/polaris/build/` tree
+  (includes `_shared/` GPG chain and research-analyst keypair so flag 30
+  stays deterministic across rebuilds).
+- **Secrets Manager entry** `shifter/development/range/polaris-test-kali`
+  holds the RSA private key the portal SSHes with. Secret ARN matches
+  the `shifter/*/range/*` wildcard the `dev-portal-ec2-role` already
+  allowlists — no IAM policy change required.
+
 ## [3.86.0] - 2026-04-12
 
 ### Fixed

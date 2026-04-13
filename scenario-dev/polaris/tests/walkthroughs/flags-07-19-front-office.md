@@ -2,7 +2,7 @@
 
 > **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range. All commands run FROM INSIDE the Kali container (`sudo docker exec -it a14-kali /bin/bash`).
 
-These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at **172.20.10.20**), file share (A4 at **172.20.10.40**), domain controller (A2 at **10.100.0.4**, external VM), and SCADA system (A5 at **172.20.40.10** web:8080 / **172.20.40.10:502** Modbus, scada network VLAN 40). All are live services — connect to them over the network, not via files on disk.
+These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at **172.20.10.20**), file share (A4 at **172.20.10.40**), domain controller (A2 at **10.1.100.11**, dc01.boreas.local — live Windows Server 2022 AD DC in the range VPC), and SCADA system (A5 at **172.20.40.10** web:8080 / **172.20.40.10:502** Modbus, scada network VLAN 40). All are live services — connect to them over the network, not via files on disk.
 
 ---
 
@@ -154,7 +154,9 @@ PY
 ## Flag 15 — Lateral Movement to Second Host (Medium, 100pts)
 
 1. Log into the webmail as `d.kowalski` / `P@ssw0rd123`.
-2. Find the email with subject **"creds backup"** (Kowalski sent it to himself).
+2. Find the email with subject **"creds backup"** in Kowalski's **INBOX** — he
+   sent it to his own address, so it lands there (the Dovecot setup has no
+   dedicated Sent folder for this user).
 3. It contains credentials for the file share service account:
    ```
    Server: fileserv.boreas.local

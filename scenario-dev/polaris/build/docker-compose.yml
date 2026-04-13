@@ -14,8 +14,10 @@
 #   A7:  shared + lab (reachable from both Kali and Lab)
 #   DNS: shared + corporate + lab (name resolution everywhere)
 #
-# A2 (Windows DC) is an external VM at 10.100.0.4, not a container.
-# Reachable from corporate network.
+# A2 (Windows Server 2022 AD DC for boreas.local) is an EC2 instance
+# adjacent to the docker-compose host, at 10.1.100.11 in the range VPC.
+# Reachable from the compose corporate network via the host's iptables
+# MASQUERADE path (docker bridge -> host eth0 -> VPC).
 
 networks:
   shared:

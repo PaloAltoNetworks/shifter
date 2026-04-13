@@ -12,16 +12,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         sshpass build-essential git tmux \
         python3 python3-pip python3-venv \
         ca-certificates curl wget \
+        poppler-utils python3-pdfminer \
+        john wordlists ldap-utils smbclient \
     && rm -rf /var/lib/apt/lists/*
+
+# Pre-decompress rockyou.txt so flag 17's Kerberoast → `john --wordlist=...`
+# / `hashcat -m 13100` chain works against the documented path without an
+# extra `gunzip -k` step. Kali ships rockyou gzipped by default (saves
+# ~130 MB installed) but the walkthrough commands reference the plain
+# .txt path, so the participant experience should match.
+RUN if [ -f /usr/share/wordlists/rockyou.txt.gz ]; then \
+        gunzip -k /usr/share/wordlists/rockyou.txt.gz; \
+    fi
 
 # Ensure kali user exists with home directory (the kalilinux/kali-rolling base image
 # does not create one and the metapackages don't add it either).
 RUN id kali >/dev/null 2>&1 || useradd -m -s /bin/bash kali
 
-# Python helper libs needed by participants for OT + analysis tasks
+# Python helper libs needed by participants for OT + analysis tasks.
+# /opt/tools/bin goes in /etc/profile.d so interactive SSH + `docker exec`
+# login shells pick it up (a plain `ENV PATH=` line only affects the PID 1
+# process environment, not new shell sessions).
 RUN python3 -m venv /opt/tools && \
     /opt/tools/bin/pip install --no-cache-dir \
-        impacket pymodbus pdfminer.six openpyxl reportlab certipy-ad
+        impacket pymodbus pdfminer.six openpyxl reportlab certipy-ad && \
+    printf 'export PATH="/opt/tools/bin:$PATH"\n' > /etc/profile.d/polaris-tools.sh && \
+    chmod 0644 /etc/profile.d/polaris-tools.sh && \
+    ln -sf /opt/tools/bin/pdf2txt.py /usr/local/bin/pdf2txt.py && \
+    ln -sf /opt/tools/bin/smbclient.py /usr/local/bin/impacket-smbclient.py
 ENV PATH="/opt/tools/bin:${PATH}"
 
 # Claude Code CLI (runtime API key/model config injected by Shifter at deploy time)

@@ -71,7 +71,7 @@ must_reach a14-kali 172.20.0.2   53   "DNS"
 must_reach a14-kali 172.20.10.20 143  "A1 mail IMAP"
 must_reach a14-kali 172.20.10.30 80   "A3 intranet"
 must_reach a14-kali 172.20.10.40 445  "A4 SMB"
-must_reach a14-kali 10.100.0.4   389  "A2 LDAP (external GCP VM)"
+must_reach a14-kali 10.1.100.11  389  "A2 LDAP (Windows DC in range VPC)"
 
 echo
 echo "--- permitted: A15 (new) and A16 (new) pivot hosts reachable from corporate ---"

@@ -1,29 +1,40 @@
+variable "range_indices" {
+  description = "String indices of the POLARIS ranges to provision. Each index gets its own /28 subnet + polaris VM + A2 DC. Default is a single range so a plain `terraform apply` still produces one working range."
+  type        = list(string)
+  default     = ["0"]
+
+  validation {
+    condition     = length(var.range_indices) == length(toset(var.range_indices))
+    error_message = "range_indices must be unique."
+  }
+}
+
+variable "polaris_cidr_block" {
+  description = "Base CIDR allocated to POLARIS. Carved into /28 subnets via cidrsubnet(block, 4, i), so a /24 yields 16 ranges, a /22 yields 64, a /21 yields 128. Default /24 holds the single-range smoke case + room to grow up to 16 without re-planning the VPC."
+  type        = string
+  default     = "10.1.100.0/24"
+}
+
 variable "range_vpc_id" {
-  description = "Dev range VPC to attach the POLARIS test subnet to."
+  description = "Dev range VPC to attach POLARIS subnets to."
   type        = string
   default     = "vpc-094a142a8c363541c"
 }
 
-variable "polaris_subnet_cidr" {
-  description = "/28 block inside the range VPC for the POLARIS test subnet. Keep well clear of the /28 allocator range (starts from 10.1.2.0/28)."
-  type        = string
-  default     = "10.1.100.0/28"
-}
-
 variable "availability_zone" {
-  description = "AZ for the POLARIS test subnet (matches existing range infrastructure)."
+  description = "AZ for the POLARIS subnets (matches existing range infrastructure)."
   type        = string
   default     = "us-east-2a"
 }
 
 variable "nat_gateway_id" {
-  description = "Existing dev range NAT gateway. Used to give the POLARIS bake subnet direct NAT egress (bypass the domain-filtered Network Firewall so docker hub / apt repos work during bake)."
+  description = "Existing dev range NAT gateway. Used to give every POLARIS subnet direct NAT egress (bypass the domain-filtered Network Firewall so docker hub / apt repos work during bake)."
   type        = string
   default     = "nat-0728570128ae96bfc"
 }
 
 variable "portal_vpc_cidr" {
-  description = "Portal VPC CIDR reachable via VPC peering (so the Shifter portal terminal UI + Guacamole can reach the POLARIS kali box)."
+  description = "Portal VPC CIDR reachable via VPC peering (so the Shifter portal terminal UI + Guacamole can reach every POLARIS kali box)."
   type        = string
   default     = "10.0.0.0/16"
 }
@@ -44,12 +55,6 @@ variable "instance_type" {
   description = "EC2 instance type. Kali GUI + 17 compose containers need plenty of headroom."
   type        = string
   default     = "m5.2xlarge"
-}
-
-variable "polaris_instance_private_ip" {
-  description = "Pinned private IP inside the POLARIS subnet."
-  type        = string
-  default     = "10.1.100.10"
 }
 
 variable "build_tarball_s3_uri" {
@@ -77,21 +82,15 @@ variable "kali_authorized_key" {
 }
 
 variable "a2_dc_ami_id" {
-  description = "Windows Server 2022 Full Base from Amazon. The shifter-dc-prebaked AMI is sysprep'd in a way that raced with first-boot SSM + user_data in testing — stock base AMI boots cleanly, then we install AD-Domain-Services via SSM RunCommand after the agent reports online."
+  description = "Windows Server 2022 Full Base from Amazon. Stock base AMI boots cleanly, then we install AD-Domain-Services via SSM RunCommand after the agent reports online."
   type        = string
   default     = "ami-08c41c6041bf318eb" # Windows_Server-2022-English-Full-Base-2026.03.11
 }
 
 variable "a2_instance_type" {
-  description = "EC2 instance type for the A2 Windows DC. t3.large (2 vCPU, 8 GB RAM) is the smallest that keeps AD DS + DNS responsive under Kerberoast + secretsdump load."
+  description = "EC2 instance type for the A2 Windows DCs. t3.large (2 vCPU, 8 GB RAM) is the smallest that keeps AD DS + DNS responsive under Kerberoast + secretsdump load."
   type        = string
   default     = "t3.large"
-}
-
-variable "a2_private_ip" {
-  description = "Pinned private IP for the A2 Windows DC inside the polaris /28 subnet. Matches the dns zone file for dc01.boreas.local."
-  type        = string
-  default     = "10.1.100.11"
 }
 
 variable "a2_administrator_password" {

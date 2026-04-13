@@ -53,7 +53,7 @@ patches:
         "newName: us-central1-docker.pkg.dev/prod/shifter-guacamole-client/guacamole-client"
         in rendered
     )
-    assert rendered.count("newTag: abc1234") == 3
+    assert rendered.count('newTag: "abc1234"') == 3
     assert "patches:\n  - path: patch-serviceaccounts.yaml\n" in rendered
 
 

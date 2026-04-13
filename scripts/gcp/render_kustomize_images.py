@@ -8,17 +8,18 @@ from pathlib import Path
 
 
 def render_images_block(*, portal_image: str, guacd_image: str, guacamole_client_image: str, tag: str) -> str:
+    quoted_tag = f'"{tag}"'
     return (
         "images:\n"
         "  - name: us-docker.pkg.dev/placeholder-project/shifter/portal\n"
         f"    newName: {portal_image}\n"
-        f"    newTag: {tag}\n"
+        f"    newTag: {quoted_tag}\n"
         "  - name: us-docker.pkg.dev/placeholder-project/shifter/guacd\n"
         f"    newName: {guacd_image}\n"
-        f"    newTag: {tag}\n"
+        f"    newTag: {quoted_tag}\n"
         "  - name: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client\n"
         f"    newName: {guacamole_client_image}\n"
-        f"    newTag: {tag}\n"
+        f"    newTag: {quoted_tag}\n"
     )
 
 

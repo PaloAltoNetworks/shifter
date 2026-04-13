@@ -221,16 +221,6 @@
     </main>
 
     {{ identity_platform_config_json|json_script:"identity-platform-config" }}
-    <script
-        src="https://www.gstatic.com/firebasejs/12.12.0/firebase-app-compat.js"
-        integrity="sha384-BWLdxLZH5wCOzUfOIXVAUxPbSf0ufGVklbRP7rYw1K8t6xJkrTV6mRq3bD5IdSs2"
-        crossorigin="anonymous"
-    ></script>
-    <script
-        src="https://www.gstatic.com/firebasejs/12.12.0/firebase-auth-compat.js"
-        integrity="sha384-CYdpfP3gOKgSLevsNvb4KfaGRzR6mjdBfJIYh7t7wgL3ytSv0uqWzDpLcupTgQNf"
-        crossorigin="anonymous"
-    ></script>
     <script src="{% static 'js/identity_platform_auth.js' %}"></script>
 </body>
 </html>

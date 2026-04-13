@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `identity_platform_auth.js::exchangeSession` now signs the Firebase user out before throwing on any non-retryable server error. Previously a 403 (domain rejection, revoked token, backend outage) would leave the Firebase session installed; `onAuthStateChanged` would re-fire on the next tick and trap the user in an infinite retry loop, indistinguishable from a broken CDN.
 - `identity_platform_auth.js` no longer re-enters `handleAuthenticatedUser` twice per successful sign-in. The previous code called the handler directly from `signInWithPassword`/`createAccount`/`completeTotpSignIn` *and* registered it on `onAuthStateChanged`, allowing a second entry after the guard released. `completeTotpEnrollment` keeps its direct call because Firebase `multiFactor.enroll()` does not reliably refire the auth-state listener.
+- GCP corporate login now uses the modular Firebase Web Auth SDK for TOTP MFA instead of the compat SDK path that left `TotpMultiFactorGenerator.generateSecret()` undefined at runtime. Unexpected browser-side auth exceptions are now logged to the console and collapsed to generic user-safe banner messages instead of leaking raw JavaScript errors into the page.
 
 ## [3.64.0] - 2026-04-11
 

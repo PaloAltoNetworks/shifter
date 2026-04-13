@@ -1,5 +1,3 @@
-/* global firebase */
-
 (function () {
     const configScript = document.getElementById("identity-platform-config");
     const banner = document.getElementById("auth-banner");
@@ -30,33 +28,63 @@
         });
     }
 
+    function genericClientError(fallbackMessage) {
+        return fallbackMessage || "Authentication is temporarily unavailable. Try again later.";
+    }
+
     if (!configScript) {
         return;
     }
 
-    // Firebase load failures used to silently bail out, which left the sign-in
-    // form alive but completely dead on click. Surface the failure explicitly so
-    // a blocked CDN or bad SRI hash is not indistinguishable from a real bug.
-    if (typeof firebase === "undefined") {
-        console.error("Firebase SDK failed to load; sign-in is unavailable.");
-        fatalBanner(
-            "Authentication services could not load. Reload the page, and if the problem persists contact the Shifter operators."
-        );
-        disableForm();
-        return;
-    }
-
     (async function initializeIdentityPlatform() {
+        let firebaseAppSdk;
+        let firebaseAuthSdk;
+
+        try {
+            // Firebase TOTP MFA is only supported on the modular Web SDK, not
+            // the compat bundle. Dynamic module imports from gstatic mirror the
+            // existing logout path's trust model: TLS to Google's CDN rather than
+            // per-dependency SRI on each imported module. If that tradeoff ever
+            // becomes unacceptable, vendor the modular SDK under /static instead.
+            [firebaseAppSdk, firebaseAuthSdk] = await Promise.all([
+                import("https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js"),
+                import("https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js"),
+            ]);
+        } catch (error) {
+            console.error("Firebase SDK failed to load; sign-in is unavailable.", error);
+            fatalBanner(
+                "Authentication services could not load. Reload the page, and if the problem persists contact the Shifter operators."
+            );
+            disableForm();
+            return;
+        }
+
+        const { getApps, initializeApp } = firebaseAppSdk;
+        const {
+            TotpMultiFactorGenerator,
+            browserSessionPersistence,
+            createUserWithEmailAndPassword,
+            getAuth,
+            getMultiFactorResolver,
+            multiFactor,
+            onAuthStateChanged,
+            sendEmailVerification,
+            sendPasswordResetEmail,
+            setPersistence,
+            signInWithEmailAndPassword,
+            signOut,
+        } = firebaseAuthSdk;
+
         const config = JSON.parse(configScript.textContent);
-        const existingApp = firebase.apps.find((candidate) => candidate.name === "[DEFAULT]");
+        const existingApp = getApps().find((candidate) => candidate.name === "[DEFAULT]");
         const app =
             existingApp ||
-            firebase.initializeApp({
+            initializeApp({
                 apiKey: config.apiKey,
                 authDomain: config.authDomain,
                 projectId: config.projectId,
             });
-        const auth = app.auth();
+        const auth = getAuth(app);
         const authForm = document.getElementById("identity-auth-form");
         const emailInput = document.getElementById("identity-email");
         const passwordInput = document.getElementById("identity-password");
@@ -68,9 +96,6 @@
         let pendingTotpSecret = null;
         let pendingResolver = null;
         let pendingVerificationEmail = "";
-        // Tracks whether the next onAuthStateChanged firing is the result of a
-        // self-service account creation, so handleAuthenticatedUser can show the
-        // "check your inbox" banner exactly once. Cleared as soon as it is read.
         let pendingIsNewUser = false;
 
         const sections = {
@@ -136,12 +161,6 @@
                 ?.split("=")[1];
         }
 
-        // Optimistic domain-only check for the Create Account button. The Django
-        // IdentityPlatformBackend enforces the real allow-list (domain + external
-        // whitelist) during session exchange, so this only exists to give PAN
-        // users a faster error when they mistype. Whitelisted external users exist
-        // server-side but are not exposed here; they must sign in with an existing
-        // account rather than self-register.
         function isAllowedRegistrationEmail(email) {
             const normalized = String(email || "").trim().toLowerCase();
             if (!normalized) {
@@ -170,9 +189,19 @@
                     return "Too many attempts. Wait a moment and try again.";
                 case "auth/admin-restricted-operation":
                     return "Account creation is not available for this email.";
+                case "auth/internal-error":
+                    return genericClientError("Unable to continue authentication. Contact the Shifter operators.");
                 default:
-                    return (error && error.message) || "Unable to complete authentication.";
+                    return null;
             }
+        }
+
+        function friendlyClientMessage(error, fallbackMessage) {
+            const authMessage = friendlyAuthError(error);
+            if (authMessage) {
+                return authMessage;
+            }
+            return genericClientError(fallbackMessage);
         }
 
         async function exchangeSession(user) {
@@ -196,13 +225,8 @@
                     await startTotpEnrollment(user, body.message);
                     return;
                 }
-                // Any other 4xx/5xx is non-retryable from the client's perspective
-                // (domain rejection, revoked token, backend outage). Clear the Firebase
-                // session before surfacing the error so onAuthStateChanged doesn't
-                // immediately re-enter exchangeSession on the next tick and trap the
-                // user in an infinite retry loop.
                 try {
-                    await auth.signOut();
+                    await signOut(auth);
                 } catch (signOutError) {
                     console.error("Failed to clear Firebase session after exchange error", signOutError);
                 }
@@ -212,12 +236,12 @@
         }
 
         async function sendVerification(user) {
-            await user.sendEmailVerification({
+            await sendEmailVerification(user, {
                 url: config.verificationContinueUrl,
                 handleCodeInApp: false,
             });
             pendingVerificationEmail = user.email || "";
-            await auth.signOut();
+            await signOut(auth);
             passwordInput.value = "";
             document.getElementById("identity-verify-email-copy").textContent =
                 `A verification email has been sent to ${pendingVerificationEmail}. Open the link in that email, then return here to sign in again.`;
@@ -247,7 +271,7 @@
                     return;
                 }
 
-                const factors = user.multiFactor.enrolledFactors;
+                const factors = multiFactor(user).enrolledFactors;
                 if (!factors.length) {
                     await startTotpEnrollment(user, "");
                     return;
@@ -256,7 +280,13 @@
                 await exchangeSession(user);
             } catch (error) {
                 console.error(error);
-                showBanner("error", error.message || "Unable to complete sign-in.");
+                showBanner(
+                    "error",
+                    friendlyClientMessage(
+                        error,
+                        "Unable to complete sign-in. Try again or contact the Shifter operators."
+                    )
+                );
                 setVisibleSection("auth");
                 setAuthBusy(false);
             } finally {
@@ -265,8 +295,8 @@
         }
 
         async function startTotpEnrollment(user, message) {
-            const multiFactorSession = await user.multiFactor.getSession();
-            pendingTotpSecret = await firebase.auth.TotpMultiFactorGenerator.generateSecret(multiFactorSession);
+            const multiFactorSession = await multiFactor(user).getSession();
+            pendingTotpSecret = await TotpMultiFactorGenerator.generateSecret(multiFactorSession);
 
             document.getElementById("identity-totp-qr-url").textContent = pendingTotpSecret.generateQrCodeUrl(
                 user.email,
@@ -294,17 +324,19 @@
             }
 
             try {
-                const assertion = firebase.auth.TotpMultiFactorGenerator.assertionForEnrollment(pendingTotpSecret, code);
-                await auth.currentUser.multiFactor.enroll(assertion, config.totpDisplayName);
+                const assertion = TotpMultiFactorGenerator.assertionForEnrollment(pendingTotpSecret, code);
+                await multiFactor(auth.currentUser).enroll(assertion, config.totpDisplayName);
                 pendingTotpSecret = null;
-                // Firebase's multiFactor.enroll refreshes the ID token but does not
-                // re-fire onAuthStateChanged (the user identity did not change), so
-                // we have to drive the follow-on exchange directly rather than
-                // relying on the state-change listener.
                 await exchangeSession(auth.currentUser);
             } catch (error) {
                 console.error(error);
-                showBanner("error", error.message || "Unable to finish TOTP enrollment.");
+                showBanner(
+                    "error",
+                    friendlyClientMessage(
+                        error,
+                        "Unable to finish MFA setup. Try again or contact the Shifter operators."
+                    )
+                );
             }
         }
 
@@ -321,21 +353,24 @@
 
             try {
                 const hint = pendingResolver.hints.find(
-                    (candidate) => candidate.factorId === firebase.auth.TotpMultiFactorGenerator.FACTOR_ID
+                    (candidate) => candidate.factorId === TotpMultiFactorGenerator.FACTOR_ID
                 );
                 if (!hint) {
                     throw new Error("No enrolled TOTP factor is available for sign-in.");
                 }
 
-                const assertion = firebase.auth.TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code);
-                // resolveSignIn installs the authenticated user on the default
-                // Firebase app, which triggers onAuthStateChanged; the listener
-                // below picks up the flow from there.
+                const assertion = TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code);
                 await pendingResolver.resolveSignIn(assertion);
                 pendingResolver = null;
             } catch (error) {
                 console.error(error);
-                showBanner("error", error.message || "Unable to complete MFA sign-in.");
+                showBanner(
+                    "error",
+                    friendlyClientMessage(
+                        error,
+                        "Unable to complete MFA sign-in. Try again or contact the Shifter operators."
+                    )
+                );
             }
         }
 
@@ -355,20 +390,20 @@
             setAuthBusy(true);
             setVisibleSection("auth");
             try {
-                // signInWithEmailAndPassword fires onAuthStateChanged on success;
-                // handleAuthenticatedUser is driven from the state listener so we
-                // don't race against a second firing on the same credential.
-                await auth.signInWithEmailAndPassword(email, password);
+                await signInWithEmailAndPassword(auth, email, password);
             } catch (error) {
-                if (error && error.code === "auth/multi-factor-auth-required" && error.resolver) {
-                    pendingResolver = error.resolver;
+                if (error && error.code === "auth/multi-factor-auth-required") {
+                    pendingResolver = getMultiFactorResolver(auth, error);
                     document.getElementById("identity-totp-signin-code").value = "";
                     clearBanner();
                     setVisibleSection("signinTotp");
                     return;
                 }
                 console.error(error);
-                showBanner("error", friendlyAuthError(error));
+                showBanner(
+                    "error",
+                    friendlyClientMessage(error, "Unable to continue sign-in. Check your credentials and try again.")
+                );
                 setVisibleSection("auth");
             } finally {
                 setAuthBusy(false);
@@ -396,12 +431,14 @@
             setVisibleSection("auth");
             pendingIsNewUser = true;
             try {
-                // createUserWithEmailAndPassword fires onAuthStateChanged on success.
-                await auth.createUserWithEmailAndPassword(email, password);
+                await createUserWithEmailAndPassword(auth, email, password);
             } catch (error) {
                 pendingIsNewUser = false;
                 console.error(error);
-                showBanner("error", friendlyAuthError(error));
+                showBanner(
+                    "error",
+                    friendlyClientMessage(error, "Unable to create the account. Try again or contact the Shifter operators.")
+                );
                 setVisibleSection("auth");
             } finally {
                 setAuthBusy(false);
@@ -418,7 +455,7 @@
             clearBanner();
             setAuthBusy(true);
             try {
-                await auth.sendPasswordResetEmail(email, {
+                await sendPasswordResetEmail(auth, email, {
                     url: config.verificationContinueUrl,
                     handleCodeInApp: false,
                 });
@@ -428,19 +465,21 @@
                 );
             } catch (error) {
                 console.error(error);
-                showBanner("error", friendlyAuthError(error));
+                showBanner(
+                    "error",
+                    friendlyClientMessage(
+                        error,
+                        "Unable to request a password reset right now. Try again later."
+                    )
+                );
             } finally {
                 setAuthBusy(false);
             }
         }
 
-        // Persist the Firebase session only for the duration of the tab and
-        // wait for that guarantee to install before wiring the state-change
-        // listener. Otherwise a cached user from a prior page load can fire
-        // handleAuthenticatedUser under an undefined persistence policy.
-        await auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+        await setPersistence(auth, browserSessionPersistence);
 
-        auth.onAuthStateChanged((user) => {
+        onAuthStateChanged(auth, (user) => {
             if (user) {
                 void handleAuthenticatedUser(user);
             }
@@ -466,5 +505,11 @@
             clearBanner();
             setVisibleSection("auth");
         });
-    })();
+    })().catch((error) => {
+        console.error("Identity Platform initialization failed", error);
+        fatalBanner(
+            "Authentication services could not load. Reload the page, and if the problem persists contact the Shifter operators."
+        );
+        disableForm();
+    });
 })();

@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y curl openssh-client unzip && \
     rm pulumi.tar.gz && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin appuser
+
 # Install Python dependencies
 WORKDIR /app
 COPY requirements.txt requirements-gcp.txt ./
@@ -25,6 +28,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 # Copy Pulumi program
 COPY . .
+RUN chown -R appuser:appuser /app /home/appuser
+
+ENV HOME=/home/appuser
 
 # Entrypoint receives operation as argument
+USER appuser
 ENTRYPOINT ["python", "main.py"]

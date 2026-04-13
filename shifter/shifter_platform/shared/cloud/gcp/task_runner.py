@@ -69,6 +69,13 @@ class GCPTaskRunner:
             args=command,
             env=env,
             image_pull_policy=getattr(settings, "ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent"),
+            security_context=client.V1SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=client.V1Capabilities(drop=["ALL"]),
+                run_as_non_root=True,
+                run_as_user=1000,
+                run_as_group=1000,
+            ),
         )
 
     def _build_job(
@@ -82,6 +89,12 @@ class GCPTaskRunner:
         pod_spec = client.V1PodSpec(
             containers=[self._build_container(client, container_name, image, command, env)],
             restart_policy="Never",
+            security_context=client.V1PodSecurityContext(
+                run_as_non_root=True,
+                run_as_user=1000,
+                run_as_group=1000,
+                seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
+            ),
         )
 
         service_account_name = getattr(settings, "ENGINE_TASK_SERVICE_ACCOUNT_NAME", "")

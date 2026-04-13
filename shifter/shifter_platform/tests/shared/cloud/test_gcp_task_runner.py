@@ -34,6 +34,10 @@ class TestGCPTaskRunnerRunTask:
 
         client = SimpleNamespace(
             V1EnvVar=lambda **kwargs: SimpleNamespace(**kwargs),
+            V1Capabilities=lambda **kwargs: SimpleNamespace(**kwargs),
+            V1SecurityContext=lambda **kwargs: SimpleNamespace(**kwargs),
+            V1SeccompProfile=lambda **kwargs: SimpleNamespace(**kwargs),
+            V1PodSecurityContext=lambda **kwargs: SimpleNamespace(**kwargs),
             V1Container=lambda **kwargs: SimpleNamespace(**kwargs),
             V1PodSpec=lambda **kwargs: SimpleNamespace(**kwargs),
             V1ObjectMeta=lambda **kwargs: SimpleNamespace(**kwargs),
@@ -62,6 +66,15 @@ class TestGCPTaskRunnerRunTask:
         assert job.spec.template.spec.containers[0].image == "us-central1-docker.pkg.dev/test/provisioner:latest"
         assert job.spec.template.spec.containers[0].args == ["range", "provision", "--range-id", "42"]
         assert job.spec.template.spec.containers[0].image_pull_policy == "Always"
+        assert job.spec.template.spec.containers[0].security_context.allow_privilege_escalation is False
+        assert job.spec.template.spec.containers[0].security_context.capabilities.drop == ["ALL"]
+        assert job.spec.template.spec.containers[0].security_context.run_as_non_root is True
+        assert job.spec.template.spec.containers[0].security_context.run_as_user == 1000
+        assert job.spec.template.spec.containers[0].security_context.run_as_group == 1000
+        assert job.spec.template.spec.security_context.run_as_non_root is True
+        assert job.spec.template.spec.security_context.run_as_user == 1000
+        assert job.spec.template.spec.security_context.run_as_group == 1000
+        assert job.spec.template.spec.security_context.seccomp_profile.type == "RuntimeDefault"
         assert job.spec.backoff_limit == 1
         assert job.spec.ttl_seconds_after_finished == 900
 

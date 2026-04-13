@@ -37,7 +37,7 @@ graph TB
 | **Messaging** | SNS (fanout) → SQS (per-domain queues) | Pub/Sub (topic → per-domain subscriptions) |
 | **Container Registry** | ECR | Artifact Registry |
 | **Secrets** | Secrets Manager + SSM Parameter Store | Secret Manager |
-| **Identity** | Cognito hosted UI via OIDC | Identity Platform browser-side auth via FirebaseUI/Google SDKs + TOTP |
+| **Identity** | Cognito hosted UI via OIDC | Identity Platform browser-side auth via Google SDKs + TOTP |
 | **Range Guests** | EC2 instances in isolated VPC subnets | GDC VM Runtime (KubeVirt) with optional lower-fidelity pod execution on GDC cluster |
 | **Egress Filtering** | AWS Network Firewall (domain-based rules) | Per-range namespace and L2 network isolation |
 
@@ -46,7 +46,7 @@ graph TB
 AWS and GCP keep provider-specific identity stacks behind a shared auth seam:
 
 - AWS uses Cognito through `mozilla-django-oidc`
-- GCP uses Identity Platform through FirebaseUI/browser-side Google auth flows. Django only exchanges verified identity tokens for Shifter sessions.
+- GCP uses Identity Platform through browser-side Google auth flows. Django only exchanges verified identity tokens for Shifter sessions.
 
 Common operator requirements:
 - Email as username
@@ -132,5 +132,5 @@ See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
 | UI separation | Mission Control is presentation only | Clean separation of presentation from domain logic. Views handle HTTP; services own business rules. |
 | API style | REST via Django REST Framework | Proven, simple, mature Django ecosystem support. |
 | Cloud abstraction | Protocol-based adapters per provider | Same Django app runs on AWS or GCP. Cloud-specific code isolated behind interfaces. |
-| Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform with FirebaseUI/browser auth. Both require MFA, email-based usernames, and keep provider-specific auth details behind the app auth seam. |
+| Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform with browser-side auth SDK flows. Both require MFA, email-based usernames, and keep provider-specific auth details behind the app auth seam. |
 | Domains | keplerops.com | Operator-owned domain. DNS may be hosted externally or in cloud-managed DNS. Current `gcp-dev` hostname is `shifter.keplerops.com`. |

@@ -6,12 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shifter Access</title>
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
-    <link
-        rel="stylesheet"
-        href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css"
-        integrity="sha384-0Wcwu737HAMd4dc+eWTBlwaXSABrcAJUjPk7K58aPdKIR9y7gexKB+CGg/2C8U35"
-        crossorigin="anonymous"
-    >
     <style>
         :root {
             --bg: #0f172a;
@@ -95,7 +89,9 @@
             font-weight: 600;
         }
 
-        input[type="text"] {
+        input[type="text"],
+        input[type="email"],
+        input[type="password"] {
             width: 100%;
             border-radius: 10px;
             border: 1px solid var(--panel-border);
@@ -142,46 +138,10 @@
             word-break: break-word;
         }
 
-        #firebaseui-auth-container {
-            min-height: 12rem;
-        }
-
-        .firebaseui-container {
-            background: transparent;
-            color: var(--text);
-            box-shadow: none;
-            max-width: 100%;
-        }
-
-        .firebaseui-card-content,
-        .firebaseui-card-header,
-        .firebaseui-card-footer {
-            background: transparent;
-        }
-
-        .firebaseui-title,
-        .firebaseui-subtitle,
-        .firebaseui-text,
-        .firebaseui-label,
-        .firebaseui-input,
-        .firebaseui-link {
-            color: var(--text);
-        }
-
-        .firebaseui-textfield.mdl-textfield .mdl-textfield__label,
-        .firebaseui-textfield.mdl-textfield .firebaseui-label {
-            color: var(--muted);
-        }
-
-        .firebaseui-button {
-            border-radius: 10px;
-            text-transform: none;
-            font-weight: 600;
-        }
-
-        #identity-auth-loader {
-            color: var(--muted);
-            margin-bottom: 1rem;
+        .button-row {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
         }
 
         .help {
@@ -198,12 +158,26 @@
         <section id="identity-auth-section" class="section visible">
             <h1>Access Shifter</h1>
             <p>
-                Corporate access is restricted to <code>@{{ allowed_email_domain }}</code>. Sign-in and registration use
-                Google Identity Platform's prebuilt web UI. Shifter only creates an application session after the
-                provider confirms the identity token, verified email, and enrolled MFA state.
+                Corporate access is restricted to <code>@{{ allowed_email_domain }}</code>. Sign-in, registration,
+                password reset, email verification, and MFA are handled through Google Identity Platform. Shifter only
+                creates an application session after the provider confirms the identity token, verified email, and
+                enrolled MFA state.
             </p>
-            <div id="identity-auth-loader">Loading authentication…</div>
-            <div id="firebaseui-auth-container"></div>
+            <form id="identity-auth-form" novalidate>
+                <div class="field">
+                    <label for="identity-email">Corporate email</label>
+                    <input id="identity-email" type="email" autocomplete="username email" inputmode="email">
+                </div>
+                <div class="field">
+                    <label for="identity-password">Password</label>
+                    <input id="identity-password" type="password" autocomplete="current-password">
+                </div>
+                <div class="button-row">
+                    <button id="identity-signin-submit" type="submit">Sign in</button>
+                    <button id="identity-signup-submit" class="secondary-button" type="button">Create account</button>
+                    <button id="identity-reset-password" class="secondary-button" type="button">Reset password</button>
+                </div>
+            </form>
             <p class="help">
                 CTF participant access still uses range invitation magic links and does not go through this page.
             </p>
@@ -255,11 +229,6 @@
     <script
         src="https://www.gstatic.com/firebasejs/12.12.0/firebase-auth-compat.js"
         integrity="sha384-CYdpfP3gOKgSLevsNvb4KfaGRzR6mjdBfJIYh7t7wgL3ytSv0uqWzDpLcupTgQNf"
-        crossorigin="anonymous"
-    ></script>
-    <script
-        src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"
-        integrity="sha384-O425GKlvfdVtWnpoZspwu5pNL0Jkn34NVeyhT7t+rBULDlHAqjf/na9J0fSkwo6J"
         crossorigin="anonymous"
     ></script>
     <script src="{% static 'js/identity_platform_auth.js' %}"></script>

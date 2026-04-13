@@ -97,8 +97,9 @@ Adjacent checks:
 
 Verify:
 
-- the login page loads the provider-backed auth shell, not a Django credential
-  form
+- the login page loads the provider-backed browser auth shell
+- the page exposes corporate email and password entry without posting credentials
+  directly to Django
 - non-`@paloaltonetworks.com` registration is rejected
 - allowed-domain registration path requires email verification before a Shifter
   session is created

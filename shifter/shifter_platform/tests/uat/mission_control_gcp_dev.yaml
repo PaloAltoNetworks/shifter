@@ -142,8 +142,9 @@ phases:
           - open /login/
         assertions:
           - status is 200
-          - page contains element #firebaseui-auth-container
-          - page does not contain a Django username/password form
+          - page contains element #identity-auth-form
+          - page contains corporate email and password inputs
+          - page does not submit credentials directly to Django
         evidence:
           - screenshot
           - dom_snapshot
@@ -207,7 +208,7 @@ phases:
         preconditions: []
         steps:
           - open /login/
-          - attempt registration with a non-allowed domain through the provider UI
+          - attempt registration with a non-allowed domain through the provider-backed browser auth shell
         assertions:
           - registration is rejected before a Shifter session is created
         evidence:

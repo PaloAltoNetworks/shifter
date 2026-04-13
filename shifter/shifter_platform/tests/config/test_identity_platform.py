@@ -62,9 +62,10 @@ def test_platform_login_renders_provider_driven_identity_page(client):
 
     assert response.status_code == 200
     assert b"identity_platform_auth.js" in response.content
-    assert b"firebase-ui-auth.js" in response.content
-    assert b'id="firebaseui-auth-container"' in response.content
-    assert b'id="identity-signin-form"' not in response.content
+    assert b'id="identity-auth-form"' in response.content
+    assert b'id="identity-email"' in response.content
+    assert b'id="identity-password"' in response.content
+    assert b"firebase-ui-auth.js" not in response.content
 
 
 @override_settings(

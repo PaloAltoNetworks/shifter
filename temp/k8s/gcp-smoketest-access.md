@@ -11,7 +11,7 @@ Last updated: 2026-04-11
 
 ## Auth Model
 
-- Provider: `Identity Platform` with `FirebaseUI`
+- Provider: `Identity Platform` with browser-side auth SDK flow
 - Corporate email restriction: `@paloaltonetworks.com`
 - MFA: `TOTP` is required
 
@@ -28,7 +28,7 @@ Last updated: 2026-04-11
 Expected login flow:
 
 1. Open `/login/`
-2. Use the FirebaseUI widget to submit the corporate email and bootstrap password
+2. Use the browser auth shell to submit the corporate email and bootstrap password
 3. If this is the first login, verify the email and enroll TOTP when prompted
 4. Complete the TOTP challenge
 5. You should land on `/mission-control/`
@@ -88,7 +88,7 @@ shifter-gdc-kubeconfig
 ## Suggested Smoke Test Targets
 
 - Public landing page returns `200`
-- Login shell loads the FirebaseUI widget and hands off auth to Identity Platform in the browser
+- Login shell loads and hands off auth to Identity Platform in the browser
 - Corporate self-registration rejects non-`@paloaltonetworks.com` emails
 - Verified email + enrolled TOTP are required before the Django session is created
 - Authenticated Mission Control loads

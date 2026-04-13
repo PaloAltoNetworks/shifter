@@ -12,7 +12,7 @@ Use this against the live GCP rollout at `https://shifter.keplerops.com`.
 1. Open `https://shifter.keplerops.com/`
 2. Confirm landing page loads over HTTPS
 3. Open `https://shifter.keplerops.com/login/`
-4. Confirm the page is the Identity Platform FirebaseUI login widget rather than a Django credential post target
+4. Confirm the page is the Identity Platform browser auth shell rather than a Django credential post target
 5. Log in with the bootstrap operator
 6. If prompted, complete email verification and TOTP enrollment
 7. Complete the TOTP challenge

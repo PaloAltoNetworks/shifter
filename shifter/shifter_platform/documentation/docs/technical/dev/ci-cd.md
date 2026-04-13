@@ -152,7 +152,7 @@ Push to main      → AWS prod deploy
 - `main` remains the AWS production deploy branch.
 - Shared Shifter application changes trigger both the AWS validation chain and the GCP validation chain on `dev`, so provider overlaps are caught before promotion to either deploy branch.
 - The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults.
-- The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
+- The GCP portal auth contract is browser-side Identity Platform SDK auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
 - New multi-cloud work should enter through the shared cloud adapter layers rather than adding provider-specific calls directly in domain services.
 
 ## Self-Hosted Runner

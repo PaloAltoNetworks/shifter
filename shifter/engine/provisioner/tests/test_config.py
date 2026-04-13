@@ -27,6 +27,7 @@ from config import (
     get_range_from_db,
     load_gdc_network_access_config,
     load_gdc_palo_alto_vmseries_config,
+    load_gdc_scenario_pod_config,
     load_gdc_vmruntime_config,
     load_range_network_config,
 )
@@ -480,6 +481,46 @@ class TestRangeNetworkEnv:
 
         with pytest.raises(RuntimeError, match="GDC_VMSERIES_BOOTSTRAP_BUCKET"):
             load_gdc_palo_alto_vmseries_config()
+
+    def test_load_gdc_scenario_pod_config_reads_explicit_image_contract(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_SCENARIO_POD_IMAGE_PULL_POLICY": "Always",
+                "GDC_SCENARIO_POD_KALI_IMAGE": (
+                    "us-central1-docker.pkg.dev/test/shifter-gcp-dev-scenario-kali/scenario-kali:20260413"
+                ),
+                "GDC_SCENARIO_POD_UBUNTU_IMAGE": (
+                    "us-central1-docker.pkg.dev/test/shifter-gcp-dev-scenario-ubuntu/scenario-ubuntu:20260413"
+                ),
+            },
+            clear=True,
+        )
+
+        config = load_gdc_scenario_pod_config()
+
+        assert config.image_pull_policy == "Always"
+        assert (
+            config.get_profile(os_type="kali").image
+            == "us-central1-docker.pkg.dev/test/shifter-gcp-dev-scenario-kali/scenario-kali:20260413"
+        )
+        assert (
+            config.get_profile(os_type="ubuntu").image
+            == "us-central1-docker.pkg.dev/test/shifter-gcp-dev-scenario-ubuntu/scenario-ubuntu:20260413"
+        )
+
+    def test_load_gdc_scenario_pod_config_requires_explicit_images(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {"CLOUD_PROVIDER": "gcp"},
+            clear=True,
+        )
+
+        config = load_gdc_scenario_pod_config()
+
+        with pytest.raises(RuntimeError, match="Missing GDC scenario pod image"):
+            config.get_profile(os_type="kali")
 
 
 class TestDecryptField:

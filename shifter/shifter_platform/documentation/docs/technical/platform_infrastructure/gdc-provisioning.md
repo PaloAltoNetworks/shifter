@@ -36,19 +36,22 @@ Guest isolation comes from per-range namespaces and dedicated L2 networks rather
 
 Module: `gdc_vmruntime_assets.py`
 
-1. Create `VirtualMachineDisk` from GCS-hosted OS image
-2. Wait for disk import to complete
-3. Create `VirtualMachine` with disk, network interfaces, and cloud-init/userdata
-4. Wait for VM to reach running state
-5. Return IP assignments and connection details
+1. Resolve the guest image URL from Secret Manager (`shifter-<env>-range-image-<type>`)
+2. Create `VirtualMachineDisk` from the GCS-hosted OS image
+3. Wait for disk import to complete
+4. Create `VirtualMachine` with disk, network interfaces, and cloud-init/userdata
+5. Wait for VM to reach running state
+6. Return IP assignments and connection details
 
-Per-profile configuration (vCPU, memory, disk size, image URL) is defined in `GDCVMRuntimeConfig`. SSH keypairs are generated per-range.
+Per-profile configuration (vCPU, memory, disk size) is defined in `GDCVMRuntimeConfig`. Image URLs are fetched live from Secret Manager so image rotations do not require a portal redeploy. SSH keypairs are generated per-range.
 
 ## Scenario Pods
 
 Module: `gdc_scenario_pods.py`
 
 Lighter-weight alternative to full VMs. Pods attach to range L2 networks via CNI network attachment annotations. Lower resource overhead, but they are not the parity baseline for features that require full guest semantics.
+
+Scenario Pod images must be explicitly configured curated images, typically from Artifact Registry. The provisioner intentionally ships no Docker Hub defaults because scenario pod assets are part of scenario content, not a generic OS fallback.
 
 ## VM-Series NGFW on GDC
 
@@ -67,8 +70,9 @@ All GDC config is loaded from environment variables and Secret Manager at runtim
 | Config | Purpose |
 |--------|---------|
 | `GDCNetworkAccessConfig` | GDC cluster kubeconfig, VXLAN CIDR, namespace prefix, DNS |
-| `GDCVMRuntimeConfig` | Storage class, image URLs and sizing per OS profile |
-| `GDCPaloAltoVMSeriesConfig` | VM-Series image, bootstrap bucket, resource sizing |
+| `GDCVMRuntimeConfig` | Storage class and sizing per OS profile; image URLs come from Secret Manager at range-create time |
+| `GDCScenarioPodConfig` | Explicit scenario pod image refs plus image pull policy |
+| `GDCPaloAltoVMSeriesConfig` | VM-Series bootstrap bucket and resource sizing; image URL comes from Secret Manager |
 
 GDC access credentials are stored in Secret Manager and loaded via `GDC_ACCESS_SECRET_ID`.
 

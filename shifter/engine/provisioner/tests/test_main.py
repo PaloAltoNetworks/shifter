@@ -530,6 +530,57 @@ class TestGdcProvisioning:
         assert variables["ngfw_attachment"]["cloud_provider"] == "gcp"
         assert variables["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
 
+    def test_build_range_terraform_variables_skips_aws_catalog_on_gcp(self, mocker):
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "ENVIRONMENT": "gcp-dev",
+                "RANGE_NETWORK_ID": "cluster1",
+                "RANGE_NETWORK_CIDR": "10.200.0.0/24",
+                "RANGE_NETWORK_REGION": "us-central1",
+            },
+            clear=True,
+        )
+        mocker.patch("main.generate_presigned_url", return_value="")
+        mocker.patch("main.get_range_availability_zone", return_value="us-central1-a")
+        instance_type_error = AssertionError("GCP must not read AWS instance types")
+        mocker.patch("main._get_kali_instance_type", side_effect=instance_type_error)
+        mocker.patch("main._get_victim_instance_type", side_effect=instance_type_error)
+        mocker.patch("main._get_windows_instance_type", side_effect=instance_type_error)
+        mocker.patch("main._get_dc_instance_type", side_effect=instance_type_error)
+        mocker.patch("main.get_ami_id", side_effect=AssertionError("GCP must not read AWS AMIs"))
+
+        variables = _build_range_terraform_variables(
+            request_id="req-123",
+            range_id=42,
+            user_id=7,
+            range_spec={
+                "subnets": [
+                    {
+                        "name": "attack",
+                        "uuid": "subnet-1",
+                        "connected_to": [],
+                        "instances": [
+                            {
+                                "uuid": "inst-1",
+                                "name": "attacker",
+                                "role": "attacker",
+                                "os_type": "kali",
+                                "ami_key": "ctf-webshell",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        instance = variables["subnets"][0]["instances"][0]
+        assert instance["instance_type"] == ""
+        assert instance["ami_id"] == ""
+
     def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, mocker):
         from main import run_range_terraform
 

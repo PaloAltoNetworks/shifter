@@ -282,12 +282,8 @@ class GDCScenarioPodConfig:
     """Container image contract for pod-backed scenario assets on GDC."""
 
     image_pull_policy: str = "IfNotPresent"
-    kali: GDCScenarioPodProfile = field(
-        default_factory=lambda: GDCScenarioPodProfile("docker.io/kalilinux/kali-rolling:latest")
-    )
-    ubuntu: GDCScenarioPodProfile = field(
-        default_factory=lambda: GDCScenarioPodProfile("docker.io/library/ubuntu:24.04")
-    )
+    kali: GDCScenarioPodProfile = field(default_factory=lambda: GDCScenarioPodProfile(""))
+    ubuntu: GDCScenarioPodProfile = field(default_factory=lambda: GDCScenarioPodProfile(""))
 
     def get_profile(self, *, os_type: str) -> GDCScenarioPodProfile:
         """Return the matching container image profile for a scenario pod."""
@@ -459,11 +455,14 @@ def _load_gdc_vm_profile(
     )
 
 
-def _load_gdc_scenario_pod_profile(prefix: str, *, default_image: str) -> GDCScenarioPodProfile:
-    """Load a role-specific scenario Pod profile from env vars."""
-    return GDCScenarioPodProfile(
-        image=os.environ.get(f"{prefix}_IMAGE", default_image).strip() or default_image,
-    )
+def _load_gdc_scenario_pod_profile(prefix: str) -> GDCScenarioPodProfile:
+    """Load an explicit scenario Pod image ref from env vars.
+
+    Scenario Pods are not a generic distro fallback. They must be pointed at a
+    curated image for the intended lower-fidelity asset, typically an
+    Artifact Registry image built and versioned for this environment.
+    """
+    return GDCScenarioPodProfile(image=os.environ.get(f"{prefix}_IMAGE", "").strip())
 
 
 def _decode_gdc_access_secret(raw_secret: str) -> tuple[dict[str, Any], str]:
@@ -607,14 +606,8 @@ def load_gdc_scenario_pod_config() -> GDCScenarioPodConfig:
     return GDCScenarioPodConfig(
         image_pull_policy=os.environ.get("GDC_SCENARIO_POD_IMAGE_PULL_POLICY", "IfNotPresent").strip()
         or "IfNotPresent",
-        kali=_load_gdc_scenario_pod_profile(
-            "GDC_SCENARIO_POD_KALI",
-            default_image="docker.io/kalilinux/kali-rolling:latest",
-        ),
-        ubuntu=_load_gdc_scenario_pod_profile(
-            "GDC_SCENARIO_POD_UBUNTU",
-            default_image="docker.io/library/ubuntu:24.04",
-        ),
+        kali=_load_gdc_scenario_pod_profile("GDC_SCENARIO_POD_KALI"),
+        ubuntu=_load_gdc_scenario_pod_profile("GDC_SCENARIO_POD_UBUNTU"),
     )
 
 

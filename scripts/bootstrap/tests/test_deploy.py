@@ -2843,6 +2843,25 @@ class TestGcpBootstrapIdentityPlatform:
         assert "GDC_UBUNTU_PASSWORD=\n" in rendered
         assert "CortexSavesTheDay!" not in rendered
 
+    def test_render_gcp_platform_runtime_env_uses_secret_manager_vm_images_and_blank_scenario_pod_images(self):
+        """Bootstrap should not ship baked-in GDC guest image defaults."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        with patch("deploy.load_bootstrap_env_values", return_value={}):
+            rendered = deploy.render_gcp_platform_runtime_env(
+                config,
+                bootstrap_operator_email="bedwards@paloaltonetworks.com",
+            )
+
+        assert "GDC_KALI_IMAGE_URL=" not in rendered
+        assert "GDC_UBUNTU_IMAGE_URL=" not in rendered
+        assert "GDC_WINDOWS_IMAGE_URL=" not in rendered
+        assert "GDC_DC_IMAGE_URL=" not in rendered
+        assert "GDC_SCENARIO_POD_KALI_IMAGE=\n" in rendered
+        assert "GDC_SCENARIO_POD_UBUNTU_IMAGE=\n" in rendered
+        assert "docker.io/kalilinux/kali-rolling:latest" not in rendered
+        assert "docker.io/library/ubuntu:24.04" not in rendered
+
 
 class TestGcpIdentityAdminApi:
     """Tests for the authenticated Identity Platform bootstrap admin requests."""

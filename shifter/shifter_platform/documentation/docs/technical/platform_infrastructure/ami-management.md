@@ -107,8 +107,8 @@ To create a new DC AMI:
 
 GCP does not use AMIs or Packer. Guest images are managed differently per asset type:
 
-- **GDC VM Runtime** - OS images stored in GCS, imported as `VirtualMachineDisk` CRDs. Image URLs configured in `GDCVMRuntimeConfig`.
-- **Scenario Pods** - Standard container images from Artifact Registry.
-- **VM-Series NGFW** - OVA image stored in GCS, bootstrapped via GCS bucket.
+- **GDC VM Runtime** - OS image URLs are stored in Secret Manager (`shifter-<env>-range-image-<kali|ubuntu|windows|dc>`) and imported as `VirtualMachineDisk` CRDs. The provisioner reads the latest secret version at range-create time; only sizing stays in `GDCVMRuntimeConfig`.
+- **Scenario Pods** - Explicitly configured Artifact Registry image refs (`GDC_SCENARIO_POD_KALI_IMAGE`, `GDC_SCENARIO_POD_UBUNTU_IMAGE`). There are no shipped Docker Hub defaults because pod-backed assets are scenario content, not generic distro fallbacks.
+- **VM-Series NGFW** - OVA image URL stored in Secret Manager (`shifter-<env>-range-image-vmseries`), bootstrapped via the configured GCS bucket.
 
 See [GDC Provisioning](gdc-provisioning) for details.

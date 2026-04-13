@@ -2611,6 +2611,7 @@ def _build_range_terraform_variables(
         Dict of Terraform variables matching modules/range/variables.tf.
     """
     spec_subnets = range_spec.get("subnets", [])
+    provider = _get_cloud_provider()
 
     # Build subnets with nested instances (Terraform expected format)
     tf_subnets = []
@@ -2632,8 +2633,13 @@ def _build_range_terraform_variables(
             else:
                 tf_os_type = "ubuntu"
 
-            # Get instance_type from role/os-based defaults (not in spec)
-            if role == "attacker":
+            # GCP range runners ignore the AWS instance catalog entirely. Keep
+            # the legacy field in the variables shape for cross-provider
+            # compatibility, but leave it blank so GCP launches do not depend
+            # on AWS-only env vars such as KALI_INSTANCE_TYPE.
+            if provider == "gcp":
+                instance_type = ""
+            elif role == "attacker":
                 instance_type = _get_kali_instance_type()
             elif role == "dc":
                 instance_type = _get_dc_instance_type()
@@ -2652,9 +2658,21 @@ def _build_range_terraform_variables(
                     key=agent_s3_key,
                 )
 
-            # Resolve custom AMI if ami_key is set
+            # GCP range runners do not consume AMI IDs. Ignore any AWS-style
+            # ami_key override on the GCP path instead of attempting an SSM
+            # lookup that can never affect the GDC runtime.
             ami_key = inst.get("ami_key")
-            resolved_ami_id = get_ami_id(ami_key) if ami_key else ""
+            if provider == "gcp":
+                if ami_key:
+                    logger.info(
+                        "Ignoring ami_key=%s for GCP range asset %s; "
+                        "GCP guest images resolve via Secret Manager/runtime config",
+                        ami_key,
+                        inst.get("uuid", ""),
+                    )
+                resolved_ami_id = ""
+            else:
+                resolved_ami_id = get_ami_id(ami_key) if ami_key else ""
 
             subnet_instances.append(
                 {
@@ -2715,7 +2733,6 @@ def _build_range_terraform_variables(
 
     range_network = load_range_network_config()
 
-    provider = _get_cloud_provider()
     variables = {
         # Core identifiers
         "range_id": range_id,

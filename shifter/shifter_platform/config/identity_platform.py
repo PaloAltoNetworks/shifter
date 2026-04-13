@@ -145,9 +145,9 @@ def identity_platform_client_config() -> dict[str, Any]:
 
     Never includes the ``IDENTITY_ALLOWED_EMAILS`` whitelist: that list would be
     visible to every unauthenticated visitor via page source, and the server-side
-    ``IdentityPlatformBackend`` plus the ``beforeCreate`` Cloud Function already
-    enforce it. The client only receives the allowed domain (which we display in
-    the copy anyway) for optimistic pre-submit UX.
+    ``IdentityPlatformBackend`` is the authoritative gate for it. The client
+    only receives the allowed domain (which we display in the copy anyway) for
+    optimistic pre-submit UX.
     """
     project_id = getattr(settings, "IDENTITY_PLATFORM_PROJECT_ID", "")
     auth_domain = getattr(settings, "IDENTITY_PLATFORM_AUTH_DOMAIN", "").strip()

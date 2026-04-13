@@ -136,11 +136,11 @@
                 ?.split("=")[1];
         }
 
-        // Optimistic domain-only check for the Create Account button. The server-side
-        // beforeCreate Cloud Function and IdentityPlatformBackend enforce the real
-        // allow-list (domain + external whitelist), so this only exists to give PAN
+        // Optimistic domain-only check for the Create Account button. The Django
+        // IdentityPlatformBackend enforces the real allow-list (domain + external
+        // whitelist) during session exchange, so this only exists to give PAN
         // users a faster error when they mistype. Whitelisted external users exist
-        // server-side but are not exposed here — they must sign in with an existing
+        // server-side but are not exposed here; they must sign in with an existing
         // account rather than self-register.
         function isAllowedRegistrationEmail(email) {
             const normalized = String(email || "").trim().toLowerCase();

@@ -452,42 +452,6 @@ resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_
   depends_on = [time_sleep.identity_platform_service_agent_propagated]
 }
 
-# Identity Platform invokes blocking hooks through the public HTTPS function URL
-# without attaching a caller credential, so the hooks themselves must allow
-# unauthenticated invocation. The hook bodies reject non-corporate requests —
-# the public allow is only a transport layer.
-resource "google_cloud_run_service_iam_member" "identity_platform_before_create_public_invoker" {
-  project  = var.project_id
-  location = var.region
-  service  = google_cloudfunctions2_function.identity_platform_before_create.service_config[0].service
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_public_invoker" {
-  project        = var.project_id
-  location       = var.region
-  cloud_function = google_cloudfunctions2_function.identity_platform_before_create.name
-  role           = "roles/cloudfunctions.invoker"
-  member         = "allUsers"
-}
-
-resource "google_cloud_run_service_iam_member" "identity_platform_before_sign_in_public_invoker" {
-  project  = var.project_id
-  location = var.region
-  service  = google_cloudfunctions2_function.identity_platform_before_sign_in.service_config[0].service
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_sign_in_public_invoker" {
-  project        = var.project_id
-  location       = var.region
-  cloud_function = google_cloudfunctions2_function.identity_platform_before_sign_in.name
-  role           = "roles/cloudfunctions.invoker"
-  member         = "allUsers"
-}
-
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${local.name_prefix}-platform-ip"
   project = var.project_id
@@ -623,29 +587,12 @@ resource "google_identity_platform_config" "platform" {
     }
   }
 
-  # Blocking functions run on the Identity Platform request path. beforeCreate
-  # gates registration and beforeSignIn re-gates every authentication, so a
-  # user seeded outside the portal (Admin SDK, Firebase Console, bootstrap
-  # tooling) still gets evaluated against the corporate allow-list.
-  #
-  # The Terraform google_identity_platform_config schema does not currently
-  # expose a "fail-closed on blocking function error" toggle (Identity Platform
-  # defaults to fail-open for availability). The Django IdentityPlatformBackend
-  # in config/identity_platform.py enforces the same allow-list at session
-  # exchange time and is the authoritative gate; a blocking function outage
-  # would at worst let a disallowed user reach Firebase but could not produce a
-  # usable portal session.
-  blocking_functions {
-    triggers {
-      event_type   = "beforeCreate"
-      function_uri = google_cloudfunctions2_function.identity_platform_before_create.url
-    }
-
-    triggers {
-      event_type   = "beforeSignIn"
-      function_uri = google_cloudfunctions2_function.identity_platform_before_sign_in.url
-    }
-  }
+  # Identity Platform blocking hooks require public unauthenticated invocation.
+  # This org forbids `allUsers` bindings on Cloud Run / Cloud Functions, so the
+  # live GCP deployment cannot rely on blocking functions for the corporate
+  # allow-list. The Django IdentityPlatformBackend remains the authoritative
+  # gate for allowed email, verified email, and enrolled MFA during session
+  # exchange.
 
   # MFA stays at state=ENABLED rather than MANDATORY. MANDATORY would force
   # every authentication to include a second factor, and Google's schema

@@ -1994,7 +1994,7 @@ def render_gcp_helm_values(
         **parse_env_contract(
             render_gcp_platform_runtime_env(config, bootstrap_operator_email=bootstrap_operator_email)
         ),
-        **parse_env_contract(runtime_renderer.render_env(outputs, secure_portal_mode=True)),
+        **parse_env_contract(runtime_renderer.render_env(outputs)),
     }
     edge_policy_name = str(_get_output_value(outputs, "cloud_armor_security_policy_name")).strip()
 

@@ -2274,8 +2274,8 @@ class TestGcpPlatformCoreContracts:
         portal_section = module_main.split("portal = toset([", 1)[1].split("])", 1)[0]
         assert '"roles/firebaseauth.viewer"' in portal_section
 
-    def test_identity_platform_self_signup_is_allowed_and_guarded_by_before_create_trigger(self):
-        """GCP corporate registration must stay open to eligible users and be gated by a blocking function."""
+    def test_identity_platform_self_signup_is_allowed_and_django_enforces_the_session_gate(self):
+        """GCP corporate registration stays open, with the Django session exchange as the authoritative gate."""
         module_path = (
             Path(__file__).resolve().parents[3]
             / "platform"
@@ -2289,8 +2289,7 @@ class TestGcpPlatformCoreContracts:
 
         identity_platform_section = module_main.split('resource "google_identity_platform_config" "platform" {', 1)[1]
         assert "disabled_user_signup   = false" in identity_platform_section
-        assert 'event_type   = "beforeCreate"' in identity_platform_section
-        assert "google_cloudfunctions2_function.identity_platform_before_create.url" in identity_platform_section
+        assert "blocking_functions {" not in identity_platform_section
 
     def test_identity_platform_blocking_function_required_apis_are_enabled(self):
         """The platform-core module must enable the APIs needed to create the blocking function."""
@@ -2365,13 +2364,14 @@ class TestGcpPlatformCoreContracts:
         assert "depends_on = [time_sleep.identity_platform_service_agent_propagated]" in module_main
         assert (
             'resource "google_cloud_run_service_iam_member" "identity_platform_before_create_public_invoker"'
-            in module_main
+            not in module_main
         )
         assert (
             'resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_create_public_invoker"'
-            in module_main
+            not in module_main
         )
-        assert 'member   = "allUsers"' in module_main
+        assert 'member   = "allUsers"' not in module_main
+        assert "blocking_functions {" not in module_main
 
     def test_gcp_dev_environment_wires_google_beta_for_identity_service_agent(self):
         """The gcp-dev root module must provide google-beta for the Identity Platform service agent."""

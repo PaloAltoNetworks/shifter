@@ -128,10 +128,10 @@ def test_platform_login_json_script_contains_object_config(client):
 def test_platform_login_never_leaks_external_email_allowlist_to_client(client):
     """The IDENTITY_ALLOWED_EMAILS whitelist must stay server-side only.
 
-    It is enforced by the backend (IdentityPlatformBackend.is_allowed_identity_email)
-    and by the beforeCreate Cloud Function. Embedding it in the client payload
-    would expose the complete list of whitelisted external collaborators to any
-    unauthenticated visitor via page source.
+    It is enforced by the backend (IdentityPlatformBackend.is_allowed_identity_email).
+    Embedding it in the client payload would expose the complete list of
+    whitelisted external collaborators to any unauthenticated visitor via page
+    source.
     """
     response = client.get(reverse("platform_login"))
 

@@ -1,6 +1,6 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache nmap nmap-ncat tcpdump python3 py3-pip openssh bash && \
+RUN apk add --no-cache nmap nmap-scripts nmap-ncat tcpdump python3 py3-pip openssh bash && \
     pip3 install --break-system-packages pymodbus==3.12.1 && \
     ssh-keygen -A && mkdir /run/sshd
 

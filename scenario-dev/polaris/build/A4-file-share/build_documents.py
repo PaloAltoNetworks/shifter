@@ -270,10 +270,12 @@ def org_chart_xlsx():
         ("Dr. Elena Vasik", "CTO", "Engineering", "V. Harlan", ""),
         ("Marcus Webb", "COO", "Executive", "V. Harlan", ""),
         ("", "Director, Underground Operations", "Engineering", "E. Vasik", "CLASSIFIED"),
+        ("Sergei Ivanov", "Ops Engineer - Plant Systems", "Engineering", "M. Webb", "Generator + SCADA on-call"),
         ("Ryo Tanaka", "Simulation Engineer", "Engineering", "E. Vasik", ""),
         ("Per Nielsen", "Mechanical Engineer", "Engineering", "E. Vasik", ""),
         ("Kenji Yamamoto", "Sensor Systems", "Engineering", "E. Vasik", ""),
         ("Folake Okoye", "AI/ML Engineer", "Engineering", "E. Vasik", ""),
+        ("Priya Shah", "Senior Research Data Analyst", "Research Ops", "E. Vasik", "Compartment A + C curation"),
         ("", "Engineering Lead", "Engineering", "E. Vasik", "POSITION VACANT"),
         ("Dariusz Kowalski", "IT Administrator", "IT", "V. Harlan", ""),
         ("Sarah Morrison", "Security Lead", "Security", "V. Harlan", ""),
@@ -548,16 +550,17 @@ def backup_log():
 
 def service_account_vault():
     """Service account password vault — the 'do not email' spreadsheet that
-    lives in the IT share anyway. Discovers svc-scada (flag 19a) for the
-    participant who has IT share access via svc-fileshare (flag 15 chain)."""
+    lives in the IT share anyway. svc-scada is deliberately NOT listed
+    here — that cred is single-sourced through A15 (ops engineer
+    workstation) and only reachable via the flag 37 privesc chain."""
     path = os.path.join(BASE, "IT", "service_account_vault.pdf")
     svc_table = [
         ["Service Account", "System", "Password", "Last Rotated", "Notes"],
         ["svc-backup", "Domain / backups", "(stored in vault)", "2025-10-01", "Kerberoast target — rotate priority"],
         ["svc-fileshare", "Samba / fileserv", "F1l3Sh@r3Svc!", "2025-07-14", "Legacy auth — scheduled for MFA migration"],
-        ["svc-scada", "SCADA HMI (scada-gw)", "Sc@da#2025!", "2025-08-22", "Plant operations, do NOT disable"],
         ["svc-sql", "researchdb PostgreSQL", "Pg$4dm!n2025", "2025-09-03", "Read-only replication"],
         ["svc-monitor", "Nagios / Zabbix", "M0nit0r!2025", "2025-06-18", "Infrastructure monitoring"],
+        ["svc-scada", "SCADA HMI (scada-gw)", "*held by ops, see ivanov*", "2025-08-22", "Moved to ops engineer local cache per 2025-08-22 cred audit; contact s.ivanov for current value"],
     ]
     t = Table(svc_table, colWidths=[1.2*inch, 1.4*inch, 1.4*inch, 1*inch, 2.2*inch])
     t.setStyle(TableStyle([

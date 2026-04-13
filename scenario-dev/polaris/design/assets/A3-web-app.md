@@ -1,19 +1,22 @@
 # A3: Web App / Intranet
 
 **Zone:** Front Office (per participant)
-**Type:** Web application (Django, Flask, or similar)
+**Type:** Web application (Flask)
 
 ## Purpose
 
 Boreas Systems internal intranet and wiki. This is the first thing most participants will attack after the OSINT phase — it's web-facing within the Front Office network, has common web vulnerabilities, and contains internal documentation that references "the project" in ways that don't add up for a consultancy.
 
+**A3 is a corporate-network-only asset.** It is NOT a pivot host into SCADA or Lab. Earlier iterations of the range multi-homed A3 onto VLAN 40 (scada) and VLAN 30 (lab) to use it as a cheap one-box pivot, which was topologically indefensible — a Flask wiki has no business sitting next to the Modbus PLC or the research database. SCADA reachback is now owned by **A15 (Ops Engineer Workstation)** and Lab reachback is owned by **A16 (Research Data Analyst Workstation)**. A3's attack surface (SQLi, SSTI, admin panel, exposed config) remains and continues to serve flags 7 and 12 — it is just not a network bridge to anything beyond corporate.
+
 ## Configuration
 
-- Web application on port 80/443
-- Login page with employee authentication (ties to AD on A2 or local accounts)
+- Web application on port 80 (Flask)
+- Login page with employee authentication (local SQLite account table)
 - Wiki/CMS with internal documentation pages
-- Admin panel with default or weak credentials
-- Deliberately vulnerable: SQLi, directory traversal, or exposed config files
+- Admin panel with default credentials (`admin / admin`)
+- Deliberately vulnerable: SQLi on `/search`, SSTI via `render_template_string` on wiki pages, exposed `.env` config file
+- Network: **`corporate` only** — explicitly not `scada`, not `lab`
 
 ## Content
 

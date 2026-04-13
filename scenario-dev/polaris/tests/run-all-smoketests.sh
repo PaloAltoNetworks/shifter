@@ -21,16 +21,21 @@ cd "$RANGE_DIR"
 # pivot through a3-intranet for scada/lab assets, then a9-splice for
 # bunker-ot assets, then a14 self-test, then isolation.
 SMOKETESTS_DIR="${SMOKETESTS_DIR:-$RANGE_DIR/tests/smoketests}"
+# Runner assignments reflect the post-A15/A16 refactor: scada + lab asset
+# smoketests now run through the NEW pivot hosts (A15 for scada, A16 for
+# lab), not through A3.
 TESTS=(
     "a0|a14-kali|A0-smoketest.sh|bash"
     "a1|a14-kali|A1-smoketest.py|python3"
     "a2|a14-kali|A2-smoketest.sh|bash"
     "a3|a14-kali|A3-smoketest.sh|bash"
     "a4|a14-kali|A4-smoketest.sh|bash"
-    "a7|a14-kali|A7-smoketest.sh|bash"
-    "a5|a3-intranet|A5-smoketest.py|python3"
-    "a6|a3-intranet|A6-smoketest.sh|bash"
-    "a8|a3-intranet|A8-smoketest.sh|bash"
+    "a15|a14-kali|A15-smoketest.sh|bash"
+    "a16|a14-kali|A16-smoketest.sh|bash"
+    "a5|a15-ops-eng|A5-smoketest.py|python3"
+    "a7|a16-research-analyst|A7-smoketest.sh|bash"
+    "a6|a16-research-analyst|A6-smoketest.sh|bash"
+    "a8|a16-research-analyst|A8-smoketest.sh|bash"
     "a9|a9-splice|A9-smoketest.sh|sh"
     "a10|a9-splice|A10-smoketest.py|python3"
     "a11|a9-splice|A11-smoketest.py|python3"

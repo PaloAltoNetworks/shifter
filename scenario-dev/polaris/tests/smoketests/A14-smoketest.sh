@@ -79,14 +79,19 @@ fi
 
 echo
 echo "--- Network reach: permitted targets ---"
-# A14 is on shared (172.20.0.0/24) and corporate (172.20.10.0/24).
-# Should reach A0 (shared), A1/A3/A4 (corporate), A7 (shared), DNS (shared), A2 (GCP VM via host route).
+# A14 is on shared (172.20.0.0/24), corporate (172.20.10.0/24), and the
+# pre-wired splice-link to A9. Should reach A0 (shared), A1/A3/A4/A15/A16
+# (corporate), DNS (shared), A2 (GCP VM via host route), A9 (splice-link).
+# A7 Gitea is lab-only and NOT directly reachable from A14 — participants
+# must pivot through A16 to clone from Gitea.
 for label_host_port in \
         "A0:boreas-systems.ctf:80" \
         "A1:mail.boreas.local:143" \
         "A3:intranet.boreas.local:80" \
         "A4:fileserv.boreas.local:445" \
-        "A7:git.boreas.local:3000" \
+        "A15:ops-eng01.boreas.local:22" \
+        "A16:analyst01.boreas.local:22" \
+        "A9:splice-relay:22" \
         "A2:dc01.boreas.local:389" \
         "DNS:172.20.0.2:53"; do
     label="${label_host_port%%:*}"

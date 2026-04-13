@@ -43,6 +43,17 @@ networks:
     ipam:
       config:
         - subnet: 172.20.50.0/24
+  # splice-link: post-collective-gate link from the attacker box (A14) to
+  # the splice landing box (A9). In production this link is established
+  # dynamically after flag 19 fires; in this dev range it is pre-wired so
+  # participants / testers can reach A9 directly from Kali. Only A14 and A9
+  # join this network — A14 does NOT touch bunker-ot, so A9 remains the
+  # gateway the participant has to pivot through to reach A10–A13.
+  splice-link:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.60.0/24
 
 services:
 
@@ -80,12 +91,14 @@ services:
       dockerfile: ./a7/Dockerfile
     container_name: a7-gitea
     hostname: git.boreas.local
+    # A7 is lab-only. The previous shared-network interface let Kali
+    # reach Gitea directly, bypassing the A16 Lab pivot. Stripping it
+    # forces flags 24 and 29 (and the bunker-phase A7 playbook lookups)
+    # to go through the A16 cred chain like every other Lab flag.
     networks:
-      shared:
-        ipv4_address: 172.20.0.70
       lab:
         ipv4_address: 172.20.30.20
-    dns: 172.20.0.2
+    dns: 172.20.30.2
     restart: unless-stopped
 
   # ============================================
@@ -111,14 +124,45 @@ services:
       dockerfile: ./a3/Dockerfile
     container_name: a3-intranet
     hostname: intranet.boreas.local
-    # A3 is multi-homed: corporate + scada + lab (pivot point)
+    # A3 is corporate-only. The legacy multi-home onto scada/lab was the
+    # old one-box pivot hack; SCADA reach is now A15, Lab reach is now A16.
     networks:
       corporate:
         ipv4_address: 172.20.10.30
+    dns: 172.20.10.2
+    restart: unless-stopped
+
+  a15-ops-eng:
+    build:
+      context: .
+      dockerfile: ./a15/Dockerfile
+    container_name: a15-ops-eng
+    hostname: ops-eng01.boreas.local
+    # A15 is the ONLY Front Office asset multi-homed onto scada. It
+    # replaces the old A3 scada-pivot role with a narratively defensible
+    # "SCADA operations engineer's workstation". Flag 37 gates flags 18+19.
+    networks:
+      corporate:
+        ipv4_address: 172.20.10.50
       scada:
-        ipv4_address: 172.20.40.30
+        ipv4_address: 172.20.40.20
+    dns: 172.20.10.2
+    restart: unless-stopped
+
+  a16-research-analyst:
+    build:
+      context: .
+      dockerfile: ./a16/Dockerfile
+    container_name: a16-research-analyst
+    hostname: analyst01.boreas.local
+    # A16 is the ONLY Front Office asset multi-homed onto lab. It replaces
+    # the old A3 lab-pivot role with a narratively defensible "research
+    # data analyst's workstation". Flag 38 rewards compromise.
+    networks:
+      corporate:
+        ipv4_address: 172.20.10.60
       lab:
-        ipv4_address: 172.20.30.100
+        ipv4_address: 172.20.30.60
     dns: 172.20.10.2
     restart: unless-stopped
 
@@ -194,6 +238,8 @@ services:
     networks:
       bunker-ot:
         ipv4_address: 172.20.50.5
+      splice-link:
+        ipv4_address: 172.20.60.5
     restart: unless-stopped
 
   a10-tail:
@@ -257,6 +303,8 @@ services:
         ipv4_address: 172.20.0.140
       corporate:
         ipv4_address: 172.20.10.140
+      splice-link:
+        ipv4_address: 172.20.60.140
     dns: 172.20.0.2
     stdin_open: true
     tty: true

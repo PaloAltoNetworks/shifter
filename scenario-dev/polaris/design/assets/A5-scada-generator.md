@@ -9,10 +9,10 @@ The generator control system for Site BOREAS. This is the compound's dedicated p
 
 ## Configuration
 
-- Web-based HMI interface on a non-standard port (8080 or similar)
+- Web-based HMI interface on TCP 8080
 - NOT directly reachable from the Kali box (A14) — sits on VLAN 40, isolated from the attacker network
-- Reachable only by pivoting through a compromised Front Office host (A2, A3, or A4)
-- Credentials required for control functions: discoverable from A2 (svc-scada SPN / Kerberoast) or A4 (IT share)
+- Reachable only by pivoting through **A15 (Ops Engineer Workstation)** — the only Front Office asset multi-homed onto the SCADA VLAN. Previous design had A3 filling this role; that was topologically indefensible and is corrected by A15.
+- Credentials required for control functions: discovered from `/root/.scada/hmi.json` on A15 (readable only after achieving root via the A15 sudo-arg-injection chain — see A15 spec and flag 37). The legacy A4 `service_account_vault.pdf` source is removed as part of the A15 change so `svc-scada` is single-sourced through A15.
 - Read-only monitoring available without auth; control functions require auth
 - Modbus/TCP backend simulating generator systems with hardware interlock PLC on port 502
 
@@ -54,15 +54,17 @@ This only needs to happen once. First person to complete the sequence triggers i
 
 ### Flag 18 — SCADA interface discovered on network
 - **Difficulty:** Hard
-- **Location:** A5 is NOT directly reachable from the Kali box (A14). It sits on VLAN 40, isolated from the attacker network. Reaching it requires: (a) compromising a Front Office host first (A2 or A3), (b) discovering the SCADA VLAN from the network diagram on A4's IT share or the svc-scada SPN on A2, and (c) pivoting through the compromised host to reach the SCADA network. Only then is the HMI visible. The flag is displayed on the monitoring dashboard footer as a "system serial number."
+- **Location:** A5 is NOT directly reachable from the Kali box (A14). It sits on VLAN 40, isolated from the attacker network. Reaching it requires **prior compromise of A15 (flag 37)** — A15 is the only Front Office host multi-homed onto the scada VLAN. The flag 18 chain is: earn A15 root via the chain in A15's spec → discover the SCADA VLAN from the network diagram on A4's IT share or from A15's own Flask Ops Telemetry dashboard → fetch the HMI from inside the A15 shell. The flag is displayed on the monitoring dashboard footer as a "system serial number."
 - **Flag:** `FLAG{1d4e7b0a3c9f8265}`
 - **Mission:** M3
+- **Prerequisite flag:** 37 (A15 privesc)
 
 ### Flag 19 — Generator SCADA override — collective gate
 - **Difficulty:** Expert
-- **Location:** The thermal runaway sequence requires bypassing multiple interlocks, not just toggling three controls. (1) The HMI requires authentication — use `svc-scada` credentials from A2 or cracked from the SPN. (2) Thermal safeties cannot be disabled directly from the HMI — there is a hardware interlock PLC behind the HMI that must be addressed via raw Modbus commands on a separate port (502). Discover this from the HMI's "System Architecture" diagnostic page. (3) Write to the interlock PLC to disable the thermal cutoff (requires correct register sequence — documented in a maintenance manual PDF on A4's IT share, or reverse-engineerable from the Modbus register map). (4) Only after the interlock is bypassed can the HMI controls push fuel injection and cooling past their safety limits. (5) The sequence must be completed within 60 seconds or the interlock auto-resets. The flag is displayed on the final "CRITICAL FAILURE" screen and pushed to CTFd globally.
+- **Location:** The thermal runaway sequence requires bypassing multiple interlocks, not just toggling three controls. (1) The HMI requires authentication — `svc-scada` credentials come from `/root/.scada/hmi.json` on A15 (requires flag 37 privesc). (2) Thermal safeties cannot be disabled directly from the HMI — there is a hardware interlock PLC behind the HMI that must be addressed via raw Modbus commands on a separate port (502). Discover this from the HMI's "System Architecture" diagnostic page. (3) Write to the interlock PLC to disable the thermal cutoff (requires the vendor maintenance key `7734`, documented in `generator_maintenance_manual.pdf` on A4's IT share). (4) Only after the interlock is bypassed can the HMI controls push fuel injection and cooling past their safety limits. (5) The sequence must be completed within the interlock timeout window or the interlock auto-resets. The flag is displayed on the final "CRITICAL FAILURE" screen and (in production) pushed to CTFd globally. Executed from inside the A15 shell using the preinstalled `pymodbus`.
 - **Flag:** `FLAG{a7f2c8d0e5b34169}`
 - **Mission:** M3
+- **Prerequisite flag:** 37 (A15 privesc)
 
 ---
 

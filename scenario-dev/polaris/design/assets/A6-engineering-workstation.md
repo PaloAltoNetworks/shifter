@@ -10,7 +10,7 @@ The primary R&D workstation used by AURORA's engineering team. Contains design d
 ## Configuration
 
 - Linux server with SSH access
-- Reachable via pivot from Front Office (A3 or A2 — Lab-Access group credentials)
+- Reachable via pivot from **A16 (Research Data Analyst Workstation)** — the only Front Office asset multi-homed onto the Lab VLAN. Previous design had A3 filling this role; that was topologically indefensible and is corrected by A16.
 - Multiple user accounts with different access levels
 - Engineering tools installed: simulation software, CAD viewers, data analysis tools
 - Local git repositories
@@ -24,6 +24,7 @@ The primary R&D workstation used by AURORA's engineering team. Contains design d
 | r.tanaka | `SimEngine#42` | Simulation engineer, ran MIDNIGHT tests |
 | p.nielsen | `Hydraulics1` | Mechanical engineer, leg/arm subsystem lead |
 | jenkins | `build2025` | CI service account, has access to build artifacts |
+| research-analyst | (SSH key only, no password) | **Added for A16 pivot.** Read-only posix account used by Priya Shah's scheduled reports. Key-only auth; the public key comes from `build/_shared/research-analyst-key/research-analyst.pub` which A16 generates at build time. Can read `/opt/builds/`, `/home/r.tanaka/simulations/standard/`, and `/tmp/.deleted/`. **Cannot** read `/home/r.tanaka/simulations/midnight/` (mode 700 tanaka), `/home/p.nielsen/designs/` (mode 700 nielsen), `/home/jenkins/.credentials`, or `/home/p.nielsen/.pgpass`. No sudo rights, no write access outside its own home. This account is the Lab on-ramp; it does not shortcut any of A6's restricted-permission flags. |
 
 ## Directory Structure
 

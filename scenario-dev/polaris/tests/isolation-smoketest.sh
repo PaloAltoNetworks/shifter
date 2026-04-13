@@ -68,60 +68,107 @@ echo "=== a14-kali (shared+corporate) ==="
 echo "--- permitted: shared + corporate + A2 external VM ---"
 must_reach a14-kali 172.20.0.10  80   "A0 website"
 must_reach a14-kali 172.20.0.2   53   "DNS"
-must_reach a14-kali 172.20.0.70  3000 "A7 Gitea"
 must_reach a14-kali 172.20.10.20 143  "A1 mail IMAP"
 must_reach a14-kali 172.20.10.30 80   "A3 intranet"
 must_reach a14-kali 172.20.10.40 445  "A4 SMB"
 must_reach a14-kali 10.100.0.4   389  "A2 LDAP (external GCP VM)"
 
 echo
-echo "--- forbidden: scada / lab / bunker-ot ---"
+echo "--- permitted: A15 (new) and A16 (new) pivot hosts reachable from corporate ---"
+must_reach a14-kali 172.20.10.50 22  "A15 ops-eng SSH (corporate face)"
+must_reach a14-kali 172.20.10.50 80  "A15 Ops Telemetry dashboard"
+must_reach a14-kali 172.20.10.60 22  "A16 research-analyst SSH (corporate face)"
+must_reach a14-kali 172.20.10.60 8080 "A16 Research Dashboard"
+# splice-link: A14 has a direct link to A9-splice (pre-wired in dev range
+# to represent the post-collective-gate splice installation).
+must_reach a14-kali 172.20.60.5  22  "A9 splice via splice-link (post-gate, dev-pre-wired)"
+
+echo
+echo "--- forbidden: scada / lab / bunker-ot (direct) ---"
 must_not_reach a14-kali 172.20.40.10 502  "A5 SCADA Modbus"
 must_not_reach a14-kali 172.20.40.10 8080 "A5 SCADA HMI"
 must_not_reach a14-kali 172.20.30.10 22   "A6 engineering SSH"
 must_not_reach a14-kali 172.20.30.30 5432 "A8 research DB"
-must_not_reach a14-kali 172.20.50.5  22   "A9 splice SSH"
+must_not_reach a14-kali 172.20.30.20 3000 "A7 Gitea (lab) — must go through A16"
 must_not_reach a14-kali 172.20.50.10 502  "A10 tail Modbus"
 must_not_reach a14-kali 172.20.50.11 502  "A11 leg Modbus"
 must_not_reach a14-kali 172.20.50.12 502  "A12 arms Modbus"
 must_not_reach a14-kali 172.20.50.50 9100 "A13 brain"
 
 # =============================================================================
-# A3 Intranet (corporate + scada + lab) — the designed pivot
+# A3 Intranet (corporate ONLY after A15/A16 refactor)
+# A3 used to be the scada+lab pivot; that role is now split between A15
+# and A16. A3 is a plain corporate-facing wiki.
 # =============================================================================
 echo
-echo "=== a3-intranet (corporate+scada+lab) - THE PIVOT ==="
-echo "--- permitted: corporate + scada + lab ---"
+echo "=== a3-intranet (corporate only) ==="
+echo "--- permitted: corporate ---"
 must_reach a3-intranet 172.20.10.20 143  "A1 mail IMAP (corporate)"
 must_reach a3-intranet 172.20.10.40 445  "A4 SMB (corporate)"
-must_reach a3-intranet 172.20.40.10 502  "A5 SCADA Modbus (scada pivot)"
-must_reach a3-intranet 172.20.40.10 8080 "A5 SCADA HMI (scada pivot)"
-must_reach a3-intranet 172.20.30.10 22   "A6 engineering SSH (lab pivot)"
-must_reach a3-intranet 172.20.30.30 5432 "A8 research DB (lab pivot)"
-must_reach a3-intranet 172.20.30.20 3000 "A7 Gitea via lab interface"
 
 echo
-echo "--- forbidden: shared + bunker-ot ---"
-# A3 is NOT on the shared network
+echo "--- forbidden: shared + scada + lab + bunker-ot ---"
 must_not_reach a3-intranet 172.20.0.10  80   "A0 website (shared)"
-must_not_reach a3-intranet 172.20.0.140 22   "A14 kali (shared interface)"
+must_not_reach a3-intranet 172.20.40.10 502  "A5 SCADA Modbus (scada) — was pivot, now A15"
+must_not_reach a3-intranet 172.20.40.10 8080 "A5 SCADA HMI (scada) — was pivot, now A15"
+must_not_reach a3-intranet 172.20.30.10 22   "A6 engineering SSH (lab) — was pivot, now A16"
+must_not_reach a3-intranet 172.20.30.30 5432 "A8 research DB (lab) — was pivot, now A16"
 must_not_reach a3-intranet 172.20.50.5  22   "A9 splice (bunker-ot)"
 must_not_reach a3-intranet 172.20.50.10 502  "A10 tail (bunker-ot)"
 must_not_reach a3-intranet 172.20.50.50 9100 "A13 brain (bunker-ot)"
 
 # =============================================================================
-# A7 Gitea (shared + lab)
+# A15 Ops Engineer Workstation (corporate + scada) — the NEW scada pivot
 # =============================================================================
 echo
-echo "=== a7-gitea (shared+lab) ==="
-echo "--- permitted: shared + lab ---"
-must_reach a7-gitea 172.20.0.10  80   "A0 website (shared)"
-must_reach a7-gitea 172.20.0.2   53   "DNS (shared)"
-must_reach a7-gitea 172.20.30.10 22   "A6 engineering SSH (lab)"
-must_reach a7-gitea 172.20.30.30 5432 "A8 research DB (lab)"
+echo "=== a15-ops-eng (corporate+scada) - SCADA PIVOT ==="
+echo "--- permitted: corporate + scada ---"
+must_reach a15-ops-eng 172.20.10.20 143  "A1 mail IMAP (corporate)"
+must_reach a15-ops-eng 172.20.10.40 445  "A4 SMB (corporate)"
+must_reach a15-ops-eng 172.20.40.10 502  "A5 SCADA Modbus"
+must_reach a15-ops-eng 172.20.40.10 8080 "A5 SCADA HMI"
 
 echo
-echo "--- forbidden: corporate + scada + bunker-ot ---"
+echo "--- forbidden: shared + lab + bunker-ot ---"
+must_not_reach a15-ops-eng 172.20.0.10  80   "A0 website (shared)"
+must_not_reach a15-ops-eng 172.20.30.10 22   "A6 engineering SSH (lab)"
+must_not_reach a15-ops-eng 172.20.30.30 5432 "A8 research DB (lab)"
+must_not_reach a15-ops-eng 172.20.50.5  22   "A9 splice (bunker-ot)"
+must_not_reach a15-ops-eng 172.20.50.50 9100 "A13 brain (bunker-ot)"
+
+# =============================================================================
+# A16 Research Analyst Workstation (corporate + lab) — the NEW lab pivot
+# =============================================================================
+echo
+echo "=== a16-research-analyst (corporate+lab) - LAB PIVOT ==="
+echo "--- permitted: corporate + lab ---"
+must_reach a16-research-analyst 172.20.10.20 143  "A1 mail IMAP (corporate)"
+must_reach a16-research-analyst 172.20.10.40 445  "A4 SMB (corporate)"
+must_reach a16-research-analyst 172.20.30.10 22   "A6 engineering SSH (lab)"
+must_reach a16-research-analyst 172.20.30.30 5432 "A8 research DB (lab)"
+must_reach a16-research-analyst 172.20.30.20 3000 "A7 Gitea (lab) — A16 is the on-ramp"
+
+echo
+echo "--- forbidden: shared + scada + bunker-ot ---"
+must_not_reach a16-research-analyst 172.20.0.10  80   "A0 website (shared)"
+must_not_reach a16-research-analyst 172.20.40.10 502  "A5 SCADA Modbus (scada)"
+must_not_reach a16-research-analyst 172.20.40.10 8080 "A5 SCADA HMI (scada)"
+must_not_reach a16-research-analyst 172.20.50.5  22   "A9 splice (bunker-ot)"
+must_not_reach a16-research-analyst 172.20.50.50 9100 "A13 brain (bunker-ot)"
+
+# =============================================================================
+# A7 Gitea (lab only — was shared+lab, shared stripped so Kali must pivot)
+# =============================================================================
+echo
+echo "=== a7-gitea (lab only) ==="
+echo "--- permitted: lab ---"
+must_reach a7-gitea 172.20.30.10 22   "A6 engineering SSH (lab)"
+must_reach a7-gitea 172.20.30.30 5432 "A8 research DB (lab)"
+must_reach a7-gitea 172.20.30.2  53   "DNS (lab)"
+
+echo
+echo "--- forbidden: shared + corporate + scada + bunker-ot ---"
+must_not_reach a7-gitea 172.20.0.10  80   "A0 website (shared) — shared interface stripped"
 must_not_reach a7-gitea 172.20.10.20 143  "A1 mail (corporate)"
 must_not_reach a7-gitea 172.20.10.40 445  "A4 SMB (corporate)"
 must_not_reach a7-gitea 172.20.40.10 502  "A5 SCADA (scada)"

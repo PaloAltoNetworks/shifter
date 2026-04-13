@@ -27,6 +27,12 @@ COPY _shared/gpg-chain/full_integration_sim.mp4.gpg /build/gpg-chain/full_integr
 RUN mkdir -p /tmp/a6-content/tmp/.deleted /tmp/a6-content/home/e.vasik/.gnupg && \
     cp /build/gpg-chain/full_integration_sim.mp4.gpg /tmp/a6-content/tmp/.deleted/ && \
     cp /build/gpg-chain/vasik_public.asc /tmp/a6-content/home/e.vasik/.gnupg/
+
+# research-analyst account authorizes A16's p.shah via a pre-generated
+# SSH key stored under _shared/. Copy to /etc/ so it survives the
+# /build cleanup in the next RUN layer — entrypoint.sh reads from
+# /etc/research-analyst.pub.
+COPY _shared/research-analyst-key/id_rsa.pub /etc/research-analyst.pub
 RUN rm -rf /tmp/a6-content/home/p.nielsen/designs/cog_analysis && \
     mkdir -p /tmp/a6-content/home/p.nielsen && \
     echo "researchdb.boreas.local:5432:*:lab_mfg:Mfg2025!" > /tmp/a6-content/home/p.nielsen/.pgpass

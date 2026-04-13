@@ -4,9 +4,10 @@
 
 ```mermaid
 graph LR
-    W[Boreas Systems Website - E:5 M:1 shared] --> A[Front Office - E:6 M:4 H:2 X:1]
-    A -->|pivot| B[Lab - E:3 M:5 H:2 X:1]
-    A -->|collective gate| C[Bunker - M:1 H:3 X:2]
+    W[Boreas Systems Website - E:5 M:1 shared] --> A[Front Office - E:6 M:5 H:3 X:1]
+    A -->|A15 pivot| S[SCADA - H:1 X:1]
+    A -->|A16 pivot| B[Lab - E:3 M:5 H:2 X:1]
+    S -->|collective gate| C[Bunker - M:1 H:3 X:2]
     B --> C
 ```
 
@@ -15,10 +16,12 @@ graph LR
 | Zone | Easy | Medium | Hard | Expert | Total |
 |------|------|--------|------|--------|-------|
 | Shared OSINT | 5 | 1 | - | - | 6 |
-| Front Office | 6 | 4 | 2 | 1 | 13 |
+| Front Office | 6 | 5 | 3 | 1 | 15 |
 | Lab | 3 | 5 | 2 | 1 | 11 |
 | Bunker | - | 1 | 3 | 2 | 6 |
-| **Total** | **14** | **11** | **7** | **4** | **36** |
+| **Total** | **14** | **12** | **8** | **4** | **38** |
+
+> **Note (SCADA sub-zone):** Flags 18 and 19 are listed under Front Office totals because they belong to the Lights Out mission chain that begins in the corporate network. Physically they live on A5, which sits on VLAN 40 and is only reachable after compromising A15 (flag 37). The zone layout diagram calls out SCADA as its own sub-zone for clarity.
 
 ## Missions
 
@@ -50,6 +53,8 @@ graph LR
 | 17 | Privilege escalation — domain admin | FO | H | | | x | |
 | 18 | SCADA interface discovered on network | FO | H | | | x | |
 | 19 | Generator SCADA override — collective gate | FO | X | | | x | |
+| 37 | Ops engineer workstation privilege escalation | FO | H | | | x | |
+| 38 | Research analyst workstation credential harvest | FO | M | | x | | |
 | 20 | Default creds on dev tooling | Lab | E | | x | | |
 | 21 | Research file share — compartment A | Lab | E | | x | | |
 | 22 | Shipping manifest — reactor delivery | Lab | E | | x | | |
@@ -88,6 +93,10 @@ graph LR
         A2[A2: Domain Controller]
         A3[A3: Web App / Intranet]
         A4[A4: File Share]
+        A15[A15: Ops Workstation]
+        A16[A16: Research Analyst Workstation]
+    end
+    subgraph SCADA
         A5[A5: SCADA / Generator HMI]
     end
     subgraph Lab
@@ -108,15 +117,19 @@ graph LR
     A0 --> A3
     A14 --> A0
     A14 --> A1
+    A14 --> A3
+    A14 --> A4
     A14 --> A7
+    A14 --> A15
+    A14 --> A16
     A3 --> A2
     A2 --> A4
-    A2 --> A5
-    A3 -->|pivot| A6
+    A15 -->|pivot| A5
+    A16 -->|pivot| A6
     A6 --> A7
     A6 --> A8
     A5 -->|collective gate| A9
-    A8 --> A9
+    A14 -.->|splice-link post-gate| A9
     A9 --> A10
     A9 --> A11
     A9 --> A12
@@ -143,8 +156,10 @@ graph LR
 | A11: Leg Controller | 33 |
 | A12: Arms Controller | 34 |
 | A13: Mecha-Godzilla Brain | 35, 36 |
+| A15: Ops Workstation | 37 |
+| A16: Research Analyst Workstation | 38 |
 
-*36 total flags*
+*38 total flags*
 
 ## Infrastructure
 

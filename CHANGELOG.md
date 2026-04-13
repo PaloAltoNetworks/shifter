@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.91.0] - 2026-04-13
+
+### Added
+
+- **`scripts/polaris-aws-range/polaris_ctf_setup.py`** — creates an
+  ACTIVE `CTFEvent` for `scenario_id=polaris_manual_test` and invites
+  one participant through the real
+  `ctf.services.participant.invite_participant`, which in turn
+  auto-creates the Django User (with `username=email`), adds the user
+  to `CTF_PARTICIPANT_GROUP`, and generates the
+  `secrets.token_urlsafe(32)` invite token. Emits JSON on stdout with
+  event_id, participant_id, and invite_token so the caller can wire
+  the range + build the magic-link URL.
+- **`scripts/polaris-aws-range/polaris_ctf_attach.py`** — reads
+  `POLARIS_CTF_PARTICIPANT_ID` and `POLARIS_CMS_RANGE_INSTANCE_ID` from
+  the environment and patches `CTFParticipant.range_instance_id`,
+  `range_status="ready"`, and `status=ParticipantStatus.ACTIVE`. Lets
+  us hand a participant a range that was registered manually (via
+  `register_range.py`) instead of the normal
+  `cms.services.create_range` pipeline.
+- **`scripts/polaris-aws-range/polaris_ctf_cleanup.py`** —
+  hard-deletes the CTFParticipant + CTFEvent + Django User created by
+  the smoke test, after soft-destroying the participant's engine
+  Range and cms RangeInstance rows so the dashboard doesn't keep a
+  stale entry if the email is reused. Matches the explicit
+  expectation that smoke-test rows leave no trace behind.
+- Proved the full CTF magic-link flow end-to-end in the dev portal:
+  `/ctf/register/?token=<t>` → Django login → redirect to
+  `mission-control:dashboard` → participant-only nav (CTFd instead of
+  Assets/Docs, no Launch-a-Range panel) → Terminal connects to the
+  participant's Range 7 Kali → `whoami && hostname && dig +short
+  dc01.boreas.local` returns `kali / operator / 10.1.100.11` → RDP
+  button opens Guacamole to the same Kali Xfce desktop. Uses the live
+  polaris range (`i-00474db099dd5344c` / 10.1.100.10) and the A2 DC
+  (`i-0dc2a5a473c5058c6` / 10.1.100.11) from 3.90.0's cold rebuild.
+
 ## [3.90.0] - 2026-04-13
 
 ### Added

@@ -2408,6 +2408,37 @@ class TestGcpPlatformCoreContracts:
         assert 'resource "google_service_account_iam_member" "portal_self_token_creator"' in module_main
         assert "roles/iam.serviceAccountTokenCreator" in module_main
 
+    def test_gcp_assets_bucket_cors_supports_public_and_localhost_uat_origins(self):
+        """Browser direct uploads need bucket CORS for both public ingress and localhost UAT."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        env_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "environments"
+            / "gcp-dev"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+        env_main = env_path.read_text()
+
+        assert 'dynamic "cors"' in module_main
+        assert 'method = ["GET", "HEAD", "PUT"]' in module_main
+        assert '"Content-Type"' in module_main
+        assert '"https://${local.normalized_public_hostname}"' in module_main
+        assert "asset_bucket_cors_allowed_origins = local.asset_bucket_cors_allowed_origins" in env_main
+        assert '"http://localhost:18080"' in env_main
+        assert '"http://127.0.0.1:18080"' in env_main
+
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""
         module_path = (

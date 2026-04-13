@@ -13,6 +13,10 @@ locals {
     managed_by  = "terraform"
     project     = "shifter"
   })
+  assets_bucket_cors_allowed_origins = distinct(compact(concat(
+    local.normalized_public_hostname != "" ? ["https://${local.normalized_public_hostname}"] : [],
+    var.asset_bucket_cors_allowed_origins,
+  )))
 
   artifact_repositories = toset([
     "portal",
@@ -260,6 +264,23 @@ resource "google_storage_bucket" "assets" {
     log_object_prefix = "assets/"
   }
 
+  dynamic "cors" {
+    for_each = length(local.assets_bucket_cors_allowed_origins) > 0 ? [1] : []
+    content {
+      origin = local.assets_bucket_cors_allowed_origins
+      method = ["GET", "HEAD", "PUT"]
+      response_header = [
+        "Content-Disposition",
+        "Content-Length",
+        "Content-Type",
+        "ETag",
+        "x-goog-generation",
+        "x-goog-hash",
+      ]
+      max_age_seconds = 3600
+    }
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -307,6 +328,26 @@ resource "google_compute_security_policy" "platform_edge" {
   name        = "${local.name_prefix}-edge"
   project     = var.project_id
   description = "Baseline Cloud Armor policy for the public Shifter ingress"
+
+  # Identity Platform ID tokens are base64 + '.'-separated JWTs. The OWASP CRS
+  # SQLi preconfigured ruleset at sensitivity 4 flags those characters as
+  # quoted-string terminators (rule 942260 and adjacent) and denies the POST
+  # to /auth/identity/session/ before it ever reaches Django. The session
+  # exchange view accepts only a strict JSON body, parses it with json.loads,
+  # and cryptographically verifies the token via firebase_admin — there is no
+  # SQL interpolation anywhere on that code path, so the WAF rules add no real
+  # protection and must be bypassed for this endpoint only.
+  rule {
+    action      = "allow"
+    priority    = 900
+    description = "Bypass WAF for Identity Platform session exchange (JWT body trips SQLi rules; the view verifies the token cryptographically)."
+
+    match {
+      expr {
+        expression = "request.path == \"/auth/identity/session/\""
+      }
+    }
+  }
 
   rule {
     action      = "deny(403)"

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `identity_platform_auth.js` no longer re-enters `handleAuthenticatedUser` twice per successful sign-in. The previous code called the handler directly from `signInWithPassword`/`createAccount`/`completeTotpSignIn` *and* registered it on `onAuthStateChanged`, allowing a second entry after the guard released. `completeTotpEnrollment` keeps its direct call because Firebase `multiFactor.enroll()` does not reliably refire the auth-state listener.
 - GCP corporate login now uses the modular Firebase Web Auth SDK for TOTP MFA instead of the compat SDK path that left `TotpMultiFactorGenerator.generateSecret()` undefined at runtime. Unexpected browser-side auth exceptions are now logged to the console and collapsed to generic user-safe banner messages instead of leaking raw JavaScript errors into the page.
 - GCP agent/file uploads now generate GCS signed URLs through IAM-backed V4 signing under GKE Workload Identity instead of assuming a local private key. The portal GSA now has the minimal `roles/iam.serviceAccountTokenCreator` self-binding and `iamcredentials.googleapis.com` is enabled so direct uploads work on GKE without changing the AWS upload path.
+- GCP assets bucket now publishes explicit CORS rules for the public hostname and localhost port-forward UAT origins so browser direct uploads can complete against signed GCS URLs.
 
 ## [3.64.0] - 2026-04-11
 

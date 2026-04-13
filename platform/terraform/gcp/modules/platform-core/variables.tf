@@ -211,6 +211,12 @@ variable "identity_allowed_emails" {
   default     = []
 }
 
+variable "asset_bucket_cors_allowed_origins" {
+  description = "Additional browser origins allowed to PUT/GET signed URLs against the assets bucket."
+  type        = list(string)
+  default     = []
+}
+
 variable "identity_user_creation_rate_threshold" {
   description = "Threshold for newly created Identity Platform-backed Django users within the alert window."
   type        = number

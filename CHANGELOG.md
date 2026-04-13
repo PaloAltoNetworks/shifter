@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.66.0] - 2026-04-13
+
+### Added
+- `.github/workflows/packer.yml` now runs three parallel jobs on every dispatch. `build-aws` is the existing AMI lane, unchanged in behaviour. `build-gcp-vm` runs on kali/ubuntu only, runs the same provisioning scripts via a new `source "googlecompute"` block in `kali.pkr.hcl`/`ubuntu.pkr.hcl`, lands a GCE custom image in the gcp-dev project, and publishes the image self-link as a new Secret Manager version on `shifter-gcp-dev-range-image-{kali,ubuntu}` so the live-lookup path in `main.get_gdc_image_url` picks it up on the next range create without a portal redeploy. `build-gcp-pod` runs on kali/ubuntu only, builds a Dockerfile under `shifter/packer/containers/<os>/` that reuses the same scripts, and pushes to `us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-scenario-{kali,ubuntu}` with `<yyyymmdd>-<shortsha>` + `latest` tags. Pod images are landed but not yet consumed by the provisioner — the pod-vs-vm selection wiring is a separate follow-up.
+- `shifter/packer/scripts/lib/systemd.sh` exporting `systemctl_enable()` that no-ops when `/run/systemd/system` is absent, so the same provisioning scripts run unchanged on systemd-backed Packer VM builds (amazon-ebs + googlecompute) and systemd-less Docker buildx pod builds where supervisord launches services instead.
+- `shifter/packer/scripts/kali/aws-ssm.sh` and `shifter/packer/scripts/ubuntu/aws-ssm.sh` — extracted from the respective `base.sh`. Wired into the amazon-ebs sources only via `only = ["amazon-ebs.<os>"]` provisioners; GCP builds skip them because GCP ranges reach VM Runtime assets over VXLAN+SSH, not AWS Systems Manager.
+- `shifter/packer/containers/{kali,ubuntu}/` directories with a Dockerfile, supervisord.conf, and entrypoint.sh each. Kali base is `debian:12-slim` (kali-linux-headless is installed in the shared tools.sh; no GCP Kali marketplace image exists). Ubuntu base is `ubuntu:22.04`. Entrypoints regenerate SSH host keys per pod before handing off to supervisord.
+- `scenario-kali` and `scenario-ubuntu` entries in `local.artifact_repositories` in `platform-core` so Terraform manages the Artifact Registry targets the pod build lane pushes to.
+- `google_compute_subnetwork.packer_builder` (`10.43.0.0/28`) and `google_compute_firewall.packer_builder_iap_ssh` (IAP source range → tcp:22 to `packer-builder` tag) in the platform VPC so the `build-gcp-vm` job can launch short-lived builder instances with no external IP and reach them via IAP tunnel, matching the existing CTFd IAP pattern.
+
+### Changed
+- `shifter/packer/scripts/kali/base.sh`: drops the inlined `amazon-ssm-agent` download (moved to `aws-ssm.sh`), adds an idempotent `useradd kali` fallback for Debian 12 / container builds that don't ship the `kali` user, and sources the new systemd helper. The XFCE + xrdp + polkit + SSH password config remains byte-identical in behaviour.
+- `shifter/packer/scripts/ubuntu/base.sh`: drops the inlined snap + amazon-ssm-agent install (moved to `aws-ssm.sh`) and gates the snapd CVE-2024-24790 patch on `command -v snap` so the same script runs unchanged on the ubuntu:24.04 container base where snap is absent.
+- `shifter/packer/scripts/ubuntu/services.sh` and `shifter/packer/scripts/ubuntu/desktop.sh`: every `systemctl enable <unit>` call now goes through the `systemctl_enable` helper so the call no-ops inside container builds.
+- `shifter/packer/variables.pkr.hcl` gains GCP variables (`gcp_project_id`, `gcp_zone`, `gcp_network`, `gcp_subnetwork`, `gcp_machine_type`, `gcp_service_account_email`) with placeholder defaults so `packer validate` still succeeds for AWS-only invocations that do not pass `dev-gcp.pkrvars.hcl`.
+- New `shifter/packer/dev-gcp.pkrvars.hcl` with the real GCP values for the dev environment; the GCP workflow jobs pass both `dev.pkrvars.hcl` and `dev-gcp.pkrvars.hcl` on every `packer validate` / `packer build` call.
+- `shifter/packer/kali.pkr.hcl` and `shifter/packer/ubuntu.pkr.hcl` declare a second `source "googlecompute"` alongside the existing `amazon-ebs` source and attach an AWS-only `aws-ssm.sh` provisioner via `only = ["amazon-ebs.<os>"]`; the cloud-neutral provisioner list runs on both sources.
+- `shifter/packer/tests/test_packer.py::test_services_enabled` asserts `systemctl_enable` (the new cloud-neutral helper) instead of the literal `systemctl enable` strings.
+
 ## [3.65.0] - 2026-04-12
 
 ### Changed

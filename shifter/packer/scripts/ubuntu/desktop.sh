@@ -1,7 +1,14 @@
 #!/bin/bash
-# XFCE desktop and xrdp for Ubuntu RDP access via Guacamole
-# Follows patterns established in kali/base.sh
+# XFCE desktop and xrdp for Ubuntu RDP access via Guacamole.
+#
+# Cloud-neutral: runs on AWS amazon-ebs, GCP googlecompute, and Docker
+# buildx pod builds. `systemctl_enable` no-ops inside containers; supervisord
+# launches xrdp in that context instead.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../lib/systemd.sh"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -10,8 +17,8 @@ echo "=== Installing XFCE desktop and xrdp for RDP access ==="
 # dbus-x11 is required for xrdp session communication
 apt-get install -y xfce4 xfce4-goodies xrdp xorgxrdp dbus-x11
 
-# Enable xrdp service
-systemctl enable xrdp
+# Enable xrdp service (no-op in container builds)
+systemctl_enable xrdp
 
 # Create xrdp log files with correct permissions (fixes "log not initialized" error)
 touch /var/log/xrdp.log /var/log/xrdp-sesman.log

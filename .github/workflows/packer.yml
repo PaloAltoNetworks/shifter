@@ -1,10 +1,10 @@
-name: Packer AMI Build (Dev)
+name: Packer Image Build (Dev)
 
 on:
   workflow_dispatch:
     inputs:
       ami_type:
-        description: 'AMI to build'
+        description: 'Image to build (kali/ubuntu build cross-cloud, others AWS-only)'
         required: true
         type: choice
         options:
@@ -29,8 +29,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build ${{ inputs.ami_type }} AMI in dev
+  build-aws:
+    name: Build ${{ inputs.ami_type }} AMI in dev (AWS)
     runs-on: self-hosted
     defaults:
       run:
@@ -68,11 +68,11 @@ jobs:
         run: packer init .
 
       - name: Validate template
-        run: packer validate -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
+        run: packer validate -var-file=dev.pkrvars.hcl -only="amazon-ebs.${{ inputs.ami_type }}" .
 
       - name: Build AMI
         run: |
-          packer build -color=false -var-file=dev.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
+          packer build -color=false -var-file=dev.pkrvars.hcl -only="amazon-ebs.${{ inputs.ami_type }}" .
 
           # Extract AMI ID from manifest
           AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' "${{ inputs.ami_type }}-manifest.json")
@@ -122,3 +122,156 @@ jobs:
           else
             echo "No orphaned instances found"
           fi
+
+  build-gcp-vm:
+    name: Build ${{ inputs.ami_type }} GCE image in dev (GCP)
+    runs-on: self-hosted
+    if: ${{ inputs.ami_type == 'kali' || inputs.ami_type == 'ubuntu' }}
+    defaults:
+      run:
+        working-directory: shifter/packer
+    env:
+      WORKFLOW_AMI_TYPE: ${{ inputs.ami_type }}
+      WORKFLOW_RUN_ID: ${{ github.run_id }}
+      GCP_PROJECT_ID: prod-rwctxzl6shxk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Ensure GCP build auth is configured
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          if [ -z "$GCP_SERVICE_ACCOUNT" ] || [ -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]; then
+            echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for GCP Packer builds"
+            exit 1
+          fi
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: '>= 416.0.0'
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Initialize Packer
+        run: packer init .
+
+      - name: Validate template
+        run: packer validate -var-file=dev.pkrvars.hcl -var-file=dev-gcp.pkrvars.hcl -only="googlecompute.$WORKFLOW_AMI_TYPE" .
+
+      - name: Build GCE image
+        run: |
+          packer build -color=false \
+            -var-file=dev.pkrvars.hcl \
+            -var-file=dev-gcp.pkrvars.hcl \
+            -only="googlecompute.$WORKFLOW_AMI_TYPE" .
+
+          IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' "${WORKFLOW_AMI_TYPE}-manifest.json")
+          IMAGE_URL="projects/${GCP_PROJECT_ID}/global/images/${IMAGE_NAME}"
+          echo "GCE_IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
+          echo "GCE_IMAGE_URL=$IMAGE_URL" >> "$GITHUB_ENV"
+          {
+            echo "## Dev GCE image build complete"
+            echo "- **Type:** $WORKFLOW_AMI_TYPE"
+            echo "- **Image:** \`$IMAGE_NAME\`"
+            echo "- **Self link:** \`$IMAGE_URL\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish new Secret Manager version
+        run: |
+          SECRET_ID="shifter-gcp-dev-range-image-${WORKFLOW_AMI_TYPE}"
+          printf '%s' "$GCE_IMAGE_URL" | gcloud secrets versions add "$SECRET_ID" \
+            --data-file=- \
+            --project="$GCP_PROJECT_ID"
+          {
+            echo "- **Secret Manager:** \`${SECRET_ID}\` advanced to new version"
+            echo ""
+            echo "Next range create picks this up via main.get_gdc_image_url without a portal redeploy."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.ami_type }}-manifest-gcp-vm
+          path: shifter/packer/${{ inputs.ami_type }}-manifest.json
+
+  build-gcp-pod:
+    name: Build ${{ inputs.ami_type }} scenario pod image in dev (GCP)
+    runs-on: self-hosted
+    if: ${{ inputs.ami_type == 'kali' || inputs.ami_type == 'ubuntu' }}
+    env:
+      WORKFLOW_AMI_TYPE: ${{ inputs.ami_type }}
+      WORKFLOW_SHA: ${{ github.sha }}
+      GCP_PROJECT_ID: prod-rwctxzl6shxk
+      AR_HOST: us-central1-docker.pkg.dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Ensure GCP build auth is configured
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          if [ -z "$GCP_SERVICE_ACCOUNT" ] || [ -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]; then
+            echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for GCP Packer builds"
+            exit 1
+          fi
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: '>= 416.0.0'
+
+      - name: Configure Docker auth for Artifact Registry
+        run: gcloud auth configure-docker "$AR_HOST" --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push scenario pod image
+        run: |
+          SHORT_SHA=$(echo "$WORKFLOW_SHA" | cut -c1-7)
+          TS=$(date -u +%Y%m%d)
+          REPO="${AR_HOST}/${GCP_PROJECT_ID}/shifter-gcp-dev-scenario-${WORKFLOW_AMI_TYPE}/scenario-${WORKFLOW_AMI_TYPE}"
+          TAG_DATED="${REPO}:${TS}-${SHORT_SHA}"
+          TAG_LATEST="${REPO}:latest"
+
+          docker buildx build \
+            --platform=linux/amd64 \
+            --file "shifter/packer/containers/${WORKFLOW_AMI_TYPE}/Dockerfile" \
+            --tag "$TAG_DATED" \
+            --tag "$TAG_LATEST" \
+            --push \
+            shifter/packer
+
+          {
+            echo "## Dev scenario pod image build complete"
+            echo "- **Type:** ${WORKFLOW_AMI_TYPE}"
+            echo "- **Dated tag:** \`${TAG_DATED}\`"
+            echo "- **Latest tag:** \`${TAG_LATEST}\`"
+            echo ""
+            echo "Pod images are not yet consumed by the provisioner; this lane lands the artefact for when pod-vs-vm selection is wired in."
+          } >> "$GITHUB_STEP_SUMMARY"

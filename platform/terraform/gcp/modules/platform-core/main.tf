@@ -23,6 +23,11 @@ locals {
     "guacd",
     "guacamole-client",
     "pulumi-provisioner",
+    # Scenario pod images produced by the Packer GCP build lane. Each repo
+    # is populated by the shifter/packer containers/<os>/Dockerfile build
+    # pushed from .github/workflows/packer.yml.
+    "scenario-kali",
+    "scenario-ubuntu",
   ])
 
   platform_event_subscriptions = toset([
@@ -1231,6 +1236,47 @@ resource "google_compute_firewall" "ctfd_iap_ssh" {
   # https://cloud.google.com/iap/docs/using-tcp-forwarding.
   source_ranges = ["35.235.240.0/20"]
   target_tags   = ["ctfd-public"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Packer builder network
+#
+# The Packer GCP build jobs (build-gcp-vm in .github/workflows/packer.yml)
+# launch short-lived builder instances inside the platform VPC. They have no
+# external IP — Packer reaches them over Identity-Aware Proxy for SSH and
+# the instances reach the public internet for apt package downloads via the
+# existing platform Cloud NAT.
+# ---------------------------------------------------------------------------
+
+resource "google_compute_subnetwork" "packer_builder" {
+  name                     = "${local.name_prefix}-packer-builder"
+  project                  = var.project_id
+  region                   = var.region
+  network                  = google_compute_network.platform.id
+  ip_cidr_range            = "10.43.0.0/28"
+  private_ip_google_access = true
+
+  log_config {
+    aggregation_interval = "INTERVAL_5_SEC"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
+}
+
+resource "google_compute_firewall" "packer_builder_iap_ssh" {
+  name        = "${local.name_prefix}-packer-builder-iap-ssh"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "Allow Identity-Aware Proxy to reach Packer builder VMs on TCP/22."
+  direction   = "INGRESS"
+
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["packer-builder"]
 
   allow {
     protocol = "tcp"

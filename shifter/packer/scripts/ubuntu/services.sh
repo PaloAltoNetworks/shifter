@@ -1,6 +1,14 @@
 #!/bin/bash
-# Install and configure services for Ubuntu victim AMI
+# Install and configure services for the Ubuntu range image.
+#
+# Cloud-neutral: every `systemctl enable` goes through systemctl_enable so
+# the call no-ops inside containerised builds where systemd is absent and
+# supervisord launches services instead.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../lib/systemd.sh"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -38,11 +46,11 @@ echo "=== Installing Samba (not enabled) ==="
 apt-get install -y samba
 
 echo "=== Enabling services ==="
-systemctl enable apache2
-systemctl enable mysql
-systemctl enable docker
-systemctl enable ssh
-systemctl enable vsftpd
+systemctl_enable apache2
+systemctl_enable mysql
+systemctl_enable docker
+systemctl_enable ssh
+systemctl_enable vsftpd
 # Samba intentionally NOT enabled per requirements
 
 echo "=== Services setup complete ==="

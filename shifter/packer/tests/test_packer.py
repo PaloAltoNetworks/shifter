@@ -268,12 +268,17 @@ class TestUbuntuServices:
         assert "samba" in services_content
 
     def test_services_enabled(self, services_content):
-        """Required services should be enabled."""
-        assert "systemctl enable apache2" in services_content
-        assert "systemctl enable mysql" in services_content
-        assert "systemctl enable docker" in services_content
-        assert "systemctl enable ssh" in services_content
-        assert "systemctl enable vsftpd" in services_content
+        """Required services should be enabled via the cloud-neutral helper.
+
+        `systemctl_enable` comes from scripts/lib/systemd.sh and no-ops inside
+        container image builds where systemd is absent; supervisord launches
+        the same services in that context.
+        """
+        assert "systemctl_enable apache2" in services_content
+        assert "systemctl_enable mysql" in services_content
+        assert "systemctl_enable docker" in services_content
+        assert "systemctl_enable ssh" in services_content
+        assert "systemctl_enable vsftpd" in services_content
 
 
 class TestUbuntuTools:

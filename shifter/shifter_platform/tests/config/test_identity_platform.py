@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -14,6 +15,13 @@ from django.urls import reverse
 from config.views import logout_view
 
 User = get_user_model()
+
+
+def _json_script_payload(response_content: bytes, script_id: str):
+    pattern = rf'<script id="{re.escape(script_id)}" type="application/json">(.*?)</script>'
+    match = re.search(pattern, response_content.decode("utf-8"), re.DOTALL)
+    assert match is not None, f"json_script payload {script_id} not found"
+    return json.loads(match.group(1))
 
 
 @pytest.fixture
@@ -85,6 +93,26 @@ def test_platform_login_includes_session_exchange_config(client):
     assert response.status_code == 200
     assert reverse("identity_platform_session").encode() in response.content
     assert b"https://portal.example.test/login/" in response.content
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
+    SITE_URL="https://portal.example.test",
+    IDENTITY_PLATFORM_API_KEY="test-api-key",
+    IDENTITY_PLATFORM_PROJECT_ID="test-project",
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
+)
+def test_platform_login_json_script_contains_object_config(client):
+    response = client.get(reverse("platform_login"))
+
+    payload = _json_script_payload(response.content, "identity-platform-config")
+
+    assert isinstance(payload, dict)
+    assert payload["apiKey"] == "test-api-key"
+    assert payload["projectId"] == "test-project"
+    assert payload["allowedEmailDomain"] == "paloaltonetworks.com"
+    assert payload["sessionExchangeUrl"] == reverse("identity_platform_session")
 
 
 @override_settings(
@@ -316,3 +344,8 @@ def test_identity_platform_logout_is_plain_session_logout(rf, identity_user):
     mock_logout.assert_called_once_with(request)
     assert response.status_code == 200
     assert b"identity_platform_logout.js" in response.content
+    payload = _json_script_payload(response.content, "identity-platform-logout-config")
+    assert isinstance(payload, dict)
+    assert payload["apiKey"] == "test-api-key"
+    assert payload["projectId"] == "test-project"
+    assert payload["redirectUrl"] == "/"

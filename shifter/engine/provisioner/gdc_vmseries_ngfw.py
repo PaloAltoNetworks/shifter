@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess  # nosec B404 - used for kubectl virt runtime operations
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -31,6 +30,7 @@ from gdc_vmruntime_assets import (
     _read_secret_payload,
     _resolve_image_source,
     _sanitize_name,
+    _set_vm_running_state,
     _wait_for_deleted,
     _wait_for_disk_ready,
     _wait_for_vm_ready,
@@ -488,11 +488,17 @@ def apply_ngfw(
         public_key=public_key,
     )
 
+    # VM-Series image URL is fetched live from Secret Manager so a Packer
+    # pipeline rotating shifter-<env>-range-image-vmseries takes effect on the
+    # next NGFW provision without a portal redeploy.
+    from main import get_gdc_image_url
+
+    vmseries_source_url = get_gdc_image_url("vmseries")
     boot_disk_manifest = _build_disk_manifest(
         namespace=namespace,
         disk_name=boot_disk_name,
-        source_url=config.image_url,
-        gcs_secret_name=gcs_secret_name if config.image_url.startswith("gs://") else None,
+        source_url=vmseries_source_url,
+        gcs_secret_name=gcs_secret_name if vmseries_source_url.startswith("gs://") else None,
         disk_size_gib=config.disk_size_gib,
         storage_class_name=config.storage_class_name,
         labels=labels,
@@ -673,7 +679,7 @@ def destroy_ngfw(state: dict[str, Any]) -> None:
 
 
 def run_power_operation(operation: str, state: dict[str, Any]) -> None:
-    """Run a VM-Series start/stop operation through kubectl virt."""
+    """Run a VM-Series start/stop operation through the VM Runtime API."""
     if operation not in {"start", "stop"}:
         raise ValueError(f"Unknown GDC VM-Series operation: {operation}")
 
@@ -681,25 +687,21 @@ def run_power_operation(operation: str, state: dict[str, Any]) -> None:
     if access is None:
         raise RuntimeError("GDC VM-Series runtime operations require GDC_ACCESS_SECRET_ID")
 
+    _, client_module, _, api_exception = _import_kubernetes_modules()
+    api_client = _build_kube_api_client(access.kubeconfig)
+    custom_api = client_module.CustomObjectsApi(api_client)
     metadata = dict(state.get("provider_metadata", {}).get("gcp") or {})
     namespace = str(metadata.get("namespace") or state.get("gdc_namespace", "")).strip()
     vm_name = str(metadata.get("vm_name") or state.get("gdc_vm_name", "")).strip()
     if not namespace or not vm_name:
         raise RuntimeError("GDC VM-Series state is missing namespace or VM name")
-
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as kubeconfig_file:
-        kubeconfig_file.write(access.kubeconfig)
-        kubeconfig_path = kubeconfig_file.name
-    try:
-        command = ["kubectl", "--kubeconfig", kubeconfig_path, "virt", operation, vm_name, "--namespace", namespace]
-        subprocess.run(command, check=True, capture_output=True)  # noqa: S603
-    except FileNotFoundError as exc:
-        raise RuntimeError("GDC VM-Series runtime operations require kubectl with the virt plugin") from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else str(exc)
-        raise RuntimeError(f"kubectl virt {operation} failed for {namespace}/{vm_name}: {stderr}") from exc
-    finally:
-        Path(kubeconfig_path).unlink(missing_ok=True)
+    _set_vm_running_state(
+        custom_api,
+        namespace=namespace,
+        vm_name=vm_name,
+        running_state="Running" if operation == "start" else "Stopped",
+        api_exception=api_exception,
+    )
 
 
 def contextlib_suppress(*exceptions):

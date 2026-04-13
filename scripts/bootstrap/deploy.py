@@ -39,6 +39,8 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+import yaml
+
 # Import runner setup module
 try:
     from runner import get_runner_config, walkthrough_runner_setup
@@ -911,8 +913,47 @@ def render_gdc_install_helper_script(config: GDCBootstrapConfig) -> str:
     )
 
 
+def rewrite_gdc_access_kubeconfig_for_platform(config: GDCBootstrapConfig, kubeconfig: str) -> str:
+    """Rewrite the GDC kubeconfig so provisioners can reach the API from GKE.
+
+    The workstation-generated kubeconfig targets the VXLAN-facing control-plane
+    VIP, which is not reachable from the platform VPC. The provisioner instead
+    talks to the first control-plane node on the primary VPC and pins TLS
+    verification to the original server name exposed in the kubeconfig.
+    """
+    try:
+        kubeconfig_dict = yaml.safe_load(kubeconfig)
+    except yaml.YAMLError:
+        return kubeconfig
+    if not isinstance(kubeconfig_dict, dict):
+        return kubeconfig
+
+    clusters = kubeconfig_dict.get("clusters")
+    if not isinstance(clusters, list) or not clusters:
+        return kubeconfig
+
+    cluster_entry = clusters[0]
+    if not isinstance(cluster_entry, dict):
+        return kubeconfig
+    cluster = cluster_entry.get("cluster")
+    if not isinstance(cluster, dict):
+        return kubeconfig
+
+    original_server = str(cluster.get("server", "")).strip()
+    if not original_server:
+        return kubeconfig
+
+    original_hostname = urllib_parse.urlparse(original_server).hostname
+    cluster["server"] = f"https://{config.control_plane_hosts[0].primary_ip}:6444"
+    if original_hostname:
+        cluster["tls-server-name"] = original_hostname
+
+    return yaml.safe_dump(kubeconfig_dict, sort_keys=False)
+
+
 def build_gdc_access_secret_payload(config: GDCBootstrapConfig, kubeconfig: str) -> str:
     """Build the provisioner-facing GDC access bundle stored in Secret Manager."""
+    kubeconfig = rewrite_gdc_access_kubeconfig_for_platform(config, kubeconfig)
     payload = {
         "cluster_id": config.cluster_id,
         "region": config.region,

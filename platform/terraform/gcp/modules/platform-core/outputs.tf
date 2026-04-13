@@ -177,3 +177,23 @@ output "guacamole_database" {
     port          = 5432
   }
 }
+
+output "ctfd_public_ip_address" {
+  description = "Reserved external IPv4 address of the public CTFd VM, or null when ctfd_enabled = false."
+  value       = var.ctfd_enabled ? google_compute_address.ctfd_public[0].address : null
+}
+
+output "ctfd_instance_name" {
+  description = "Compute Engine instance name of the public CTFd VM, or null when ctfd_enabled = false."
+  value       = var.ctfd_enabled ? google_compute_instance.ctfd[0].name : null
+}
+
+output "ctfd_instance_zone" {
+  description = "Zone the CTFd VM is provisioned into, or null when ctfd_enabled = false."
+  value       = var.ctfd_enabled ? google_compute_instance.ctfd[0].zone : null
+}
+
+output "ctfd_subnet_cidr" {
+  description = "Primary IPv4 CIDR of the CTFd subnet, or null when ctfd_enabled = false."
+  value       = var.ctfd_enabled ? google_compute_subnetwork.ctfd[0].ip_cidr_range : null
+}

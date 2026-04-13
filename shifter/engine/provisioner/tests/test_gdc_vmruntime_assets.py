@@ -93,7 +93,6 @@ class TestApplyRangeAssets:
             storage_class_name="local-shared",
             image_gcs_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
             windows=GDCVMRuntimeProfile(
-                source_url="gs://images/windows.qcow2",
                 vcpus=2,
                 memory="8Gi",
                 disk_size_gib=64,
@@ -112,6 +111,7 @@ class TestApplyRangeAssets:
             ),
             patch("gdc_vmruntime_assets._render_user_data", return_value="<powershell>userdata</powershell>"),
             patch("gdc_vmruntime_assets._wait_for_disk_ready"),
+            patch("main.get_gdc_image_url", return_value="gs://images/windows.qcow2"),
             patch(
                 "gdc_vmruntime_assets._wait_for_vm_ready",
                 return_value={
@@ -287,7 +287,7 @@ class TestDestroyRangeAssets:
         mock_vm_config.return_value = GDCVMRuntimeConfig(
             storage_class_name="local-shared",
             image_gcs_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
-            ubuntu=GDCVMRuntimeProfile(source_url="gs://images/ubuntu.qcow2"),
+            ubuntu=GDCVMRuntimeProfile(),
         )
 
         with (
@@ -331,10 +331,9 @@ class TestDestroyRangeAssets:
         custom_api.create_namespaced_custom_object.assert_not_called()
 
 
-@patch("gdc_vmruntime_assets.subprocess.run")
 @patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())
 @patch("gdc_vmruntime_assets.load_gdc_network_access_config")
-def test_run_power_operation_starts_vm_and_waits_for_ready(mock_access, mock_client_builder, mock_run):
+def test_run_power_operation_starts_vm_and_waits_for_ready(mock_access, mock_client_builder):
     custom_api = MagicMock()
     fake_client_module = SimpleNamespace(CustomObjectsApi=MagicMock(return_value=custom_api))
     fake_api_exception = type("ApiException", (Exception,), {"status": 500})
@@ -365,19 +364,20 @@ def test_run_power_operation_starts_vm_and_waits_for_ready(mock_access, mock_cli
             },
         )
 
-    command = mock_run.call_args.args[0]
-    assert command[0] == "kubectl"
-    assert "virt" in command
-    assert "start" in command
-    assert "range-42-victims-victim-1234" in command
-    assert "range-42" in command
+    custom_api.patch_namespaced_custom_object.assert_called_once_with(
+        group="vm.cluster.gke.io",
+        version="v1",
+        plural="virtualmachines",
+        namespace="range-42",
+        name="range-42-victims-victim-1234",
+        body={"spec": {"runningState": "Running"}},
+    )
     mock_wait_ready.assert_called_once_with(custom_api, "range-42", "range-42-victims-victim-1234", fake_api_exception)
 
 
-@patch("gdc_vmruntime_assets.subprocess.run")
 @patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())
 @patch("gdc_vmruntime_assets.load_gdc_network_access_config")
-def test_run_power_operation_stops_vm_and_waits_for_stopped(mock_access, mock_client_builder, mock_run):
+def test_run_power_operation_stops_vm_and_waits_for_stopped(mock_access, mock_client_builder):
     custom_api = MagicMock()
     fake_client_module = SimpleNamespace(CustomObjectsApi=MagicMock(return_value=custom_api))
     fake_api_exception = type("ApiException", (Exception,), {"status": 500})
@@ -404,12 +404,14 @@ def test_run_power_operation_stops_vm_and_waits_for_stopped(mock_access, mock_cl
             },
         )
 
-    command = mock_run.call_args.args[0]
-    assert command[0] == "kubectl"
-    assert "virt" in command
-    assert "stop" in command
-    assert "range-42-victims-victim-1234" in command
-    assert "range-42" in command
+    custom_api.patch_namespaced_custom_object.assert_called_once_with(
+        group="vm.cluster.gke.io",
+        version="v1",
+        plural="virtualmachines",
+        namespace="range-42",
+        name="range-42-victims-victim-1234",
+        body={"spec": {"runningState": "Stopped"}},
+    )
     mock_wait_stopped.assert_called_once_with(
         custom_api,
         "range-42",

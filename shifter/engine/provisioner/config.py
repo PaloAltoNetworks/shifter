@@ -209,9 +209,15 @@ class GDCNetworkAccessConfig:
 
 @dataclass(frozen=True)
 class GDCVMRuntimeProfile:
-    """Per-guest VM Runtime image and sizing configuration."""
+    """Per-guest VM Runtime sizing configuration.
 
-    source_url: str = ""
+    The image URL is no longer stored on the profile. It is fetched at
+    range-create time from Secret Manager via
+    :func:`main.get_gdc_image_url`, mirroring the AWS SSM-backed
+    :func:`main.get_ami_id` contract so image rotations do not require a
+    portal redeploy.
+    """
+
     vcpus: int = 1
     memory: str = "2Gi"
     disk_size_gib: int = 20
@@ -219,7 +225,7 @@ class GDCVMRuntimeProfile:
 
 @dataclass(frozen=True)
 class GDCVMRuntimeConfig:
-    """VM Runtime image and sizing contract for the active GCP range plane."""
+    """VM Runtime sizing contract for the active GCP range plane."""
 
     storage_class_name: str = "local-shared"
     image_gcs_secret_id: str = ""
@@ -229,29 +235,25 @@ class GDCVMRuntimeConfig:
     dc: GDCVMRuntimeProfile = field(default_factory=GDCVMRuntimeProfile)
 
     def get_profile(self, *, role: str, os_type: str) -> GDCVMRuntimeProfile:
-        """Return the matching VM Runtime profile for a scenario instance."""
+        """Return the matching VM Runtime sizing profile for a scenario instance."""
         if role == "dc":
-            profile = self.dc
-        elif os_type == "kali":
-            profile = self.kali
-        elif os_type == "windows":
-            profile = self.windows
-        else:
-            profile = self.ubuntu
-
-        if not profile.source_url:
-            raise RuntimeError(
-                f"Missing GDC VM Runtime image URL for role={role!r} os_type={os_type!r}. "
-                "Set the corresponding GDC_*_IMAGE_URL environment variable."
-            )
-        return profile
+            return self.dc
+        if os_type == "kali":
+            return self.kali
+        if os_type == "windows":
+            return self.windows
+        return self.ubuntu
 
 
 @dataclass(frozen=True)
 class GDCPaloAltoVMSeriesConfig:
-    """Palo Alto VM-Series VM Runtime contract for the active GCP NGFW path."""
+    """Palo Alto VM-Series VM Runtime contract for the active GCP NGFW path.
 
-    image_url: str
+    The VM-Series image URL is not stored here. It is fetched at NGFW
+    provisioning time via ``main.get_gdc_image_url("vmseries")`` so image
+    rotations track the same Secret Manager contract as the range VM images.
+    """
+
     bootstrap_bucket: str
     storage_class_name: str = "local-shared"
     image_gcs_secret_id: str = ""
@@ -445,9 +447,12 @@ def _load_gdc_vm_profile(
     default_memory: str,
     default_disk_size_gib: int,
 ) -> GDCVMRuntimeProfile:
-    """Load a role-specific VM Runtime profile from env vars."""
+    """Load a role-specific VM Runtime sizing profile from env vars.
+
+    The image URL is not read here; it is fetched at range-create time via
+    ``main.get_gdc_image_url`` from Secret Manager.
+    """
     return GDCVMRuntimeProfile(
-        source_url=os.environ.get(f"{prefix}_IMAGE_URL", "").strip(),
         vcpus=_get_int_env(f"{prefix}_VCPUS", default_vcpus),
         memory=os.environ.get(f"{prefix}_MEMORY", default_memory).strip(),
         disk_size_gib=_get_int_env(f"{prefix}_DISK_SIZE_GIB", default_disk_size_gib),
@@ -556,7 +561,6 @@ def load_gdc_palo_alto_vmseries_config() -> GDCPaloAltoVMSeriesConfig:
     if not _is_active_gdc_range_plane():
         raise RuntimeError("GDC Palo Alto VM-Series config is only valid when CLOUD_PROVIDER=gcp")
 
-    image_url = os.environ.get("GDC_VMSERIES_IMAGE_URL", "").strip()
     bootstrap_bucket = os.environ.get("GDC_VMSERIES_BOOTSTRAP_BUCKET", "").strip()
     data_network_name = os.environ.get("GDC_VMSERIES_DATA_NETWORK_NAME", "").strip()
     route_next_hop_ip = os.environ.get("GDC_VMSERIES_ROUTE_NEXT_HOP_IP", "").strip()
@@ -564,7 +568,6 @@ def load_gdc_palo_alto_vmseries_config() -> GDCPaloAltoVMSeriesConfig:
     missing = [
         name
         for name, value in (
-            ("GDC_VMSERIES_IMAGE_URL", image_url),
             ("GDC_VMSERIES_BOOTSTRAP_BUCKET", bootstrap_bucket),
             ("GDC_VMSERIES_DATA_NETWORK_NAME", data_network_name),
             ("GDC_VMSERIES_ROUTE_NEXT_HOP_IP", route_next_hop_ip),
@@ -575,7 +578,6 @@ def load_gdc_palo_alto_vmseries_config() -> GDCPaloAltoVMSeriesConfig:
         raise RuntimeError("Missing required GDC Palo Alto VM-Series configuration: " + ", ".join(missing))
 
     return GDCPaloAltoVMSeriesConfig(
-        image_url=image_url,
         bootstrap_bucket=bootstrap_bucket,
         storage_class_name=os.environ.get("GDC_VMSERIES_STORAGE_CLASS", "").strip()
         or os.environ.get("GDC_VM_STORAGE_CLASS", "local-shared").strip()

@@ -28,7 +28,6 @@ def _access_config() -> GDCNetworkAccessConfig:
 
 def _vmseries_config() -> GDCPaloAltoVMSeriesConfig:
     return GDCPaloAltoVMSeriesConfig(
-        image_url="gs://images/panos-vmseries.qcow2",
         bootstrap_bucket="shifter-gcp-dev-vmseries-bootstrap",
         image_gcs_secret_id="projects/test/secrets/gcs-import",
         management_network_name="pod-network",
@@ -108,6 +107,7 @@ def test_build_vmseries_vm_manifest_uses_management_and_data_interfaces():
 @patch("gdc_vmseries_ngfw._wait_for_vm_ready")
 @patch("gdc_vmseries_ngfw._wait_for_disk_ready")
 @patch("gdc_vmseries_ngfw._apply_namespaced_custom_object")
+@patch("main.get_gdc_image_url", return_value="gs://images/panos-vmseries.qcow2")
 @patch("gdc_vmseries_ngfw._create_bootstrap_iso", return_value="gs://bootstrap/ngfw/bootstrap.iso")
 @patch("gdc_vmseries_ngfw._ensure_ssh_secret", return_value=("projects/test/secrets/ngfw-ssh", "ssh-rsa test"))
 @patch("gdc_vmseries_ngfw._ensure_gcs_image_secret", return_value="gcs-import")
@@ -123,6 +123,7 @@ def test_apply_ngfw_creates_palo_alto_vmseries_gdc_state(
     _mock_gcs_secret,
     _mock_ssh_secret,
     _mock_bootstrap_iso,
+    _mock_image_url,
     mock_apply,
     _mock_disk_ready,
     mock_vm_ready,
@@ -158,9 +159,16 @@ def test_apply_ngfw_creates_palo_alto_vmseries_gdc_state(
     assert output["provider_metadata"]["gcp"]["data_attachment_id"].endswith(":eth1")
 
 
-@patch("gdc_vmseries_ngfw.subprocess.run")
+@patch("gdc_vmseries_ngfw._build_kube_api_client", return_value=object())
+@patch("gdc_vmseries_ngfw._import_kubernetes_modules")
 @patch("gdc_vmseries_ngfw.load_gdc_network_access_config", return_value=_access_config())
-def test_run_power_operation_uses_kubectl_virt(mock_access, mock_run):
+def test_run_power_operation_updates_running_state(mock_access, mock_import, _mock_api_client):
+    custom_api = MagicMock()
+    fake_client_module = MagicMock()
+    fake_client_module.CustomObjectsApi.return_value = custom_api
+    fake_api_exception = type("ApiException", (Exception,), {"status": 500})
+    mock_import.return_value = (None, fake_client_module, None, fake_api_exception)
+
     state = {
         "provider_metadata": {
             "gcp": {
@@ -172,10 +180,12 @@ def test_run_power_operation_uses_kubectl_virt(mock_access, mock_run):
 
     run_power_operation("stop", state)
 
-    command = mock_run.call_args.args[0]
-    assert command[0] == "kubectl"
-    assert "virt" in command
-    assert "stop" in command
-    assert "ngfw-user-42-abcdef" in command
-    assert "ngfw-user-42" in command
+    custom_api.patch_namespaced_custom_object.assert_called_once_with(
+        group="vm.cluster.gke.io",
+        version="v1",
+        plural="virtualmachines",
+        namespace="ngfw-user-42",
+        name="ngfw-user-42-abcdef",
+        body={"spec": {"runningState": "Stopped"}},
+    )
     assert mock_access.called

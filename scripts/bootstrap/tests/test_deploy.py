@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 import deploy
 
@@ -2454,6 +2455,32 @@ class TestGcpPlatformCoreContracts:
 
         assert "evaluatePreconfiguredWaf('sqli-v33-stable'" in module_main
         assert "owasp-crs-v030301-id942421-sqli" in module_main
+        assert "/auth/identity/session/" in module_main
+        assert "/mission-control/api/upload/initiate/" in module_main
+        assert "/mission-control/api/upload/complete/" in module_main
+        assert "/mission-control/api/upload/cancel/" in module_main
+        assert "/mission-control/api/range/launch/" in module_main
+        assert "/mission-control/api/range/cancel/" in module_main
+        assert "/mission-control/api/range/destroy/" in module_main
+        assert "/mission-control/api/range/pause/" in module_main
+        assert "/mission-control/api/range/resume/" in module_main
+        assert 'request.method == \\"POST\\" && request.path.startsWith(\\"/scenario-editor/\\")' in module_main
+        assert (
+            'request.method == \\"POST\\" && request.path.startsWith(\\"/mission-control/experiments/\\")'
+            in module_main
+        )
+        assert (
+            'request.method == \\"POST\\" && request.path.startsWith(\\"/mission-control/api/ngfw/\\")' in module_main
+        )
+        assert (
+            'request.method == \\"POST\\" && request.path.startsWith(\\"/mission-control/api/credentials/\\")'
+            in module_main
+        )
+        assert (
+            'request.method == \\"POST\\" && request.path.startsWith(\\"/mission-control/api/guacamole/\\")'
+            in module_main
+        )
+        assert 'request.method == \\"POST\\" && request.path.startsWith(\\"/mission-control/files/\\")' in module_main
 
 
 class TestGdcBootstrapAssetUpload:
@@ -2606,6 +2633,35 @@ class TestGdcRerunSafety:
             deploy.sync_gdc_access_secret(config)
 
         mock_run_cmd.assert_not_called()
+
+    def test_build_gdc_access_secret_payload_rewrites_kubeconfig_for_platform_access(self):
+        """Provisioners should receive a primary-network kubeconfig plus pinned TLS server name."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        kubeconfig = """\
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: test-ca
+    server: https://10.200.0.49:443
+  name: cluster1
+contexts:
+- context:
+    cluster: cluster1
+    user: cluster1-admin
+  name: cluster1-admin@cluster1
+current-context: cluster1-admin@cluster1
+users:
+- name: cluster1-admin
+  user:
+    client-certificate-data: test-cert
+    client-key-data: test-key
+"""
+
+        payload = json.loads(deploy.build_gdc_access_secret_payload(config, kubeconfig))
+        rendered = yaml.safe_load(payload["kubeconfig"])
+
+        assert rendered["clusters"][0]["cluster"]["server"] == "https://10.240.0.3:6444"
+        assert rendered["clusters"][0]["cluster"]["tls-server-name"] == "10.200.0.49"
 
     def test_sync_gdc_vm_image_secret_skips_unchanged_payload(self, tmp_path):
         """Bootstrap should not add a new VM image secret version when the key payload is unchanged."""

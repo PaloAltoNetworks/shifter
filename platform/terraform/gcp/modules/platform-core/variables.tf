@@ -234,3 +234,39 @@ variable "monitoring_alert_email" {
   type        = string
   default     = ""
 }
+
+variable "ctfd_enabled" {
+  description = "Whether to provision the public CTFd VM inside the portal VPC."
+  type        = bool
+  default     = true
+}
+
+variable "ctfd_machine_type" {
+  description = "Compute Engine machine type for the CTFd VM. Default is sized generously for the official CTFd docker-compose stack (ctfd gunicorn workers, mariadb 10.11, redis, nginx) under a multi-hundred-user CTF load."
+  type        = string
+  default     = "e2-standard-8"
+}
+
+variable "ctfd_disk_size_gb" {
+  description = "Boot + data disk size in GiB for the CTFd VM. Sized to comfortably hold the MariaDB data directory, CTFd upload folder, and logs for a multi-day event."
+  type        = number
+  default     = 100
+}
+
+variable "ctfd_subnet_cidr" {
+  description = "Primary IPv4 CIDR for the CTFd subnet inside the portal VPC. Must not overlap with the GKE subnet, GKE pods/services secondary ranges, or the range VPC CIDR."
+  type        = string
+  default     = "10.42.0.0/28"
+}
+
+variable "ctfd_ssh_source_cidrs" {
+  description = "Source CIDRs allowed to reach the CTFd VM on TCP/22. Leave empty to disable inbound SSH; operator access then goes through Identity-Aware Proxy / gcloud ssh --tunnel-through-iap."
+  type        = list(string)
+  default     = []
+}
+
+variable "ctfd_vm_image" {
+  description = "Boot image for the CTFd VM. Defaults to Ubuntu 22.04 LTS, a supported docker host for the official CTFd images."
+  type        = string
+  default     = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+}

@@ -36,6 +36,16 @@ locals {
   ]
 }
 
+data "google_compute_network" "platform" {
+  name    = module.platform_core.network_name
+  project = var.project_id
+}
+
+data "google_compute_network" "gdc_control_plane" {
+  name    = var.gdc_control_plane_network_name
+  project = var.project_id
+}
+
 module "platform_core" {
   source = "../../modules/platform-core"
 
@@ -74,5 +84,42 @@ module "platform_core" {
   identity_allowed_email_domain     = var.identity_allowed_email_domain
   identity_allowed_emails           = var.identity_allowed_emails
   monitoring_alert_email            = var.monitoring_alert_email
+  ctfd_enabled                      = var.ctfd_enabled
+  ctfd_machine_type                 = var.ctfd_machine_type
+  ctfd_disk_size_gb                 = var.ctfd_disk_size_gb
+  ctfd_subnet_cidr                  = var.ctfd_subnet_cidr
+  ctfd_ssh_source_cidrs             = var.ctfd_ssh_source_cidrs
   labels                            = local.labels
+}
+
+resource "google_compute_network_peering" "platform_to_gdc_control_plane" {
+  name         = "${module.platform_core.network_name}-to-${var.gdc_control_plane_network_name}"
+  network      = data.google_compute_network.platform.id
+  peer_network = data.google_compute_network.gdc_control_plane.id
+}
+
+resource "google_compute_network_peering" "gdc_control_plane_to_platform" {
+  name         = "${var.gdc_control_plane_network_name}-to-${module.platform_core.network_name}"
+  network      = data.google_compute_network.gdc_control_plane.id
+  peer_network = data.google_compute_network.platform.id
+
+  depends_on = [google_compute_network_peering.platform_to_gdc_control_plane]
+}
+
+resource "google_compute_firewall" "gdc_control_plane_api_from_platform" {
+  name    = "${var.gdc_control_plane_network_name}-allow-platform-k8s-api"
+  project = var.project_id
+  network = data.google_compute_network.gdc_control_plane.name
+
+  description = "Allow the Shifter platform VPC to reach the GDC Kubernetes API for range provisioning."
+  direction   = "INGRESS"
+  priority    = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443", "6444"]
+  }
+
+  source_ranges = module.platform_core.portal_network_cidrs
+  target_tags   = [var.gdc_control_plane_network_name]
 }

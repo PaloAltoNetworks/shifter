@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import subprocess  # nosec B404 - used for kubectl virt runtime operations
-import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -444,6 +442,31 @@ def _wait_for_vm_stopped(custom_api, namespace: str, vm_name: str, api_exception
     raise RuntimeError(f"Timed out waiting for VirtualMachine {namespace}/{vm_name} to stop")
 
 
+def _set_vm_running_state(
+    custom_api,
+    *,
+    namespace: str,
+    vm_name: str,
+    running_state: str,
+    api_exception,
+) -> None:
+    """Request a VM Runtime power-state change through the VM Runtime API."""
+    try:
+        custom_api.patch_namespaced_custom_object(
+            group=_VM_GROUP,
+            version=_VM_VERSION,
+            plural=_VM_PLURAL,
+            namespace=namespace,
+            name=vm_name,
+            body={"spec": {"runningState": running_state}},
+        )
+        logger.info("Set GDC VM Runtime runningState=%s for %s/%s", running_state, namespace, vm_name)
+    except api_exception as exc:
+        if exc.status == 404:
+            raise RuntimeError(f"GDC VM Runtime {namespace}/{vm_name} was not found") from exc
+        raise
+
+
 def _wait_for_deleted(
     custom_api,
     namespace: str,
@@ -665,13 +688,21 @@ def _build_pending_vm_runtime_instance(
     ssh_secret_ref, public_key = _ensure_ssh_secret(range_id, instance)
     user_data = _render_user_data(instance, hostname, public_key)
     os_type = str(instance.get("os_type", "ubuntu"))
-    profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
+    role = str(instance.get("role", "victim"))
+    profile = vm_config.get_profile(role=role, os_type=os_type)
+    # Image URL is fetched live from Secret Manager on every range create, so
+    # a Packer pipeline rotating `shifter-<env>-range-image-<type>` takes
+    # effect on the next range without a portal redeploy. Mirrors the AWS
+    # SSM-backed get_ami_id contract.
+    from main import _gdc_image_type_for, get_gdc_image_url
+
+    source_url = get_gdc_image_url(_gdc_image_type_for(role=role, os_type=os_type))
     labels = _asset_labels(range_id, request_uuid, subnet_name, str(instance.get("uuid", "")))
     disk_manifest = _build_disk_manifest(
         namespace=namespace,
         disk_name=disk_name,
-        source_url=profile.source_url,
-        gcs_secret_name=gcs_secret_name if profile.source_url.startswith("gs://") else None,
+        source_url=source_url,
+        gcs_secret_name=gcs_secret_name if source_url.startswith("gs://") else None,
         disk_size_gib=profile.disk_size_gib,
         storage_class_name=vm_config.storage_class_name,
         labels=labels,
@@ -943,7 +974,7 @@ def destroy_range_assets(
 
 
 def run_power_operation(operation: str, state: dict[str, Any]) -> None:
-    """Run a VM Runtime start/stop operation through kubectl virt and wait for completion."""
+    """Run a VM Runtime start/stop operation through the VM Runtime API."""
     if operation not in {"start", "stop"}:
         raise ValueError(f"Unknown GDC VM Runtime operation: {operation}")
 
@@ -953,24 +984,16 @@ def run_power_operation(operation: str, state: dict[str, Any]) -> None:
 
     namespace, vm_name = _resolve_power_target(state)
 
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as kubeconfig_file:
-        kubeconfig_file.write(access.kubeconfig)
-        kubeconfig_path = kubeconfig_file.name
-
-    try:
-        command = ["kubectl", "--kubeconfig", kubeconfig_path, "virt", operation, vm_name, "--namespace", namespace]
-        subprocess.run(command, check=True, capture_output=True)  # noqa: S603
-    except FileNotFoundError as exc:
-        raise RuntimeError("GDC VM Runtime power operations require kubectl with the virt plugin") from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else str(exc)
-        raise RuntimeError(f"kubectl virt {operation} failed for {namespace}/{vm_name}: {stderr}") from exc
-    finally:
-        Path(kubeconfig_path).unlink(missing_ok=True)
-
     _, client_module, _, api_exception = _import_kubernetes_modules()
     api_client = _build_kube_api_client(access.kubeconfig)
     custom_api = client_module.CustomObjectsApi(api_client)
+    _set_vm_running_state(
+        custom_api,
+        namespace=namespace,
+        vm_name=vm_name,
+        running_state="Running" if operation == "start" else "Stopped",
+        api_exception=api_exception,
+    )
     if operation == "start":
         _wait_for_vm_ready(custom_api, namespace, vm_name, api_exception)
     else:

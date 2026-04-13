@@ -157,6 +157,70 @@ def get_ami_id(ami_type: str) -> str:
         raise ValueError(f"Failed to get {ami_type} AMI ID from SSM parameter {param_path}: {e}") from e
 
 
+# Cache for GCP Secret Manager range-image lookups (cleared per invocation).
+_gdc_image_cache: dict[str, str] = {}
+
+
+def _gdc_image_type_for(*, role: str, os_type: str) -> str:
+    """Return the canonical GCP range-image key for a scenario instance.
+
+    Mirrors the role/os_type branching that lives in
+    ``config.GDCVMRuntimeConfig.get_profile`` so the image lookup and the
+    sizing lookup both key off the same string.
+    """
+    if role == "dc":
+        return "dc"
+    if os_type == "kali":
+        return "kali"
+    if os_type == "windows":
+        return "windows"
+    return "ubuntu"
+
+
+def get_gdc_image_url(image_type: str) -> str:
+    """Fetch a GCP range-asset image URL from Secret Manager at runtime.
+
+    The GCP equivalent of :func:`get_ami_id`. The provisioner reads the image
+    URL on every range create so a Packer pipeline can publish a new version
+    of ``shifter-<environment>-range-image-<image_type>`` without a portal
+    redeploy. This matches the AWS SSM-backed contract and removes the need
+    for ``GDC_*_IMAGE_URL`` environment variables on the portal pod.
+
+    Args:
+        image_type: Canonical image key -- one of "kali", "ubuntu", "windows",
+            "dc", "vmseries".
+
+    Returns:
+        The image URL string (e.g. ``gs://.../kali-20260412.qcow2``).
+
+    Raises:
+        ValueError: If ``ENVIRONMENT`` is unset or Secret Manager cannot
+            resolve the secret (missing, no version, or IAM denied).
+    """
+    if image_type in _gdc_image_cache:
+        return _gdc_image_cache[image_type]
+
+    environment = os.environ.get("ENVIRONMENT", "").strip()
+    if not environment:
+        raise ValueError("ENVIRONMENT must be set to resolve a GCP range image secret (e.g. 'gcp-dev')")
+    secret_id = f"shifter-{environment}-range-image-{image_type}"
+
+    try:
+        from cloud import get_secrets_store
+
+        store = get_secrets_store()
+        image_url = store.get_secret(secret_id).strip()
+        if not image_url:
+            raise ValueError(f"GCP range image secret {secret_id!r} has an empty payload")
+        logger.info("Fetched %s range image URL from Secret Manager %s", image_type, secret_id)
+        _gdc_image_cache[image_type] = image_url
+        return image_url
+    except Exception as e:
+        raise ValueError(
+            f"Failed to get {image_type} range image URL from Secret Manager secret {secret_id}: {e}"
+        ) from e
+
+
 # Default timeout for waiting for NGFW SSH to become available (seconds)
 # PAN-OS boot time is typically 15-25 minutes, but can take longer on first boot
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500  # 25 minutes

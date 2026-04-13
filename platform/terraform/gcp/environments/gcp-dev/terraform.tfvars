@@ -42,3 +42,12 @@ dns_record_ttl          = 300
 identity_allowed_email_domain = "paloaltonetworks.com"
 identity_allowed_emails       = []
 monitoring_alert_email        = "bedwards@paloaltonetworks.com"
+
+ctfd_enabled      = true
+ctfd_machine_type = "e2-standard-8"
+ctfd_disk_size_gb = 100
+ctfd_subnet_cidr  = "10.42.0.0/28"
+ctfd_ssh_source_cidrs = [
+  # Operator egress for direct SSH; leave empty to force the IAP tunnel path.
+  "173.181.31.170/32",
+]

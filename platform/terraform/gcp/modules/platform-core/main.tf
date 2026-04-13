@@ -37,6 +37,20 @@ locals {
     "db"                  = "Database connection secret bundle for the platform control plane."
     "guacamole-db"        = "Database connection secret bundle for the Guacamole client."
     "guacamole-json-auth" = "Guacamole JSON auth signing key."
+    "ctfd"                = "CTFd VM runtime secret bundle (MariaDB passwords + CTFd SECRET_KEY)."
+  }
+
+  # Range image URLs are declared here but populated out-of-band by the
+  # Packer build/promote pipeline (a new secret_version per image rotation),
+  # not by Terraform. The provisioner reads these at range-create time via
+  # main.get_gdc_image_url, mirroring the AWS SSM-backed get_ami_id contract
+  # so an image rotation does not require a portal redeploy.
+  range_image_secrets = {
+    "range-image-kali"     = "Range VM Runtime image URL for Kali assets."
+    "range-image-ubuntu"   = "Range VM Runtime image URL for Ubuntu victim assets."
+    "range-image-windows"  = "Range VM Runtime image URL for Windows victim assets."
+    "range-image-dc"       = "Range VM Runtime image URL for Windows domain controller assets."
+    "range-image-vmseries" = "Range VM Runtime image URL for Palo Alto VM-Series NGFW assets."
   }
 
   workload_service_accounts = toset([
@@ -349,6 +363,181 @@ resource "google_compute_security_policy" "platform_edge" {
     }
   }
 
+  # Authenticated Shifter write surfaces POST JSON/YAML/form bodies with
+  # user-authored filenames, scenario definitions, experiment metadata, and
+  # similar content. At CRS sensitivity 4, the SQLi ruleset has already denied
+  # legitimate requests on rule 942200 before they reached Django. These
+  # endpoints still sit behind Django session auth, CSRF, strict request
+  # parsing, and subsystem-specific validation, so the WAF adds noise rather
+  # than protection on these narrow authenticated write paths.
+  rule {
+    action      = "allow"
+    priority    = 905
+    description = "Bypass WAF for authenticated Mission Control upload initiate (false-positive on SQLi rule 942200; Django enforces session, CSRF, and upload validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/upload/initiate/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 906
+    description = "Bypass WAF for authenticated Mission Control upload completion (false-positive on SQLi rule 942200; Django enforces session, CSRF, and upload validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/upload/complete/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 907
+    description = "Bypass WAF for authenticated Mission Control upload cancel (false-positive on SQLi rule 942200; Django enforces session, token validation, and cleanup)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/upload/cancel/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 910
+    description = "Bypass WAF for authenticated Mission Control range launch (false-positive on SQLi rule 942200; Django enforces session, CSRF, and range validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/range/launch/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 911
+    description = "Bypass WAF for authenticated Mission Control range cancel (false-positive on SQLi rule 942200; Django enforces session, CSRF, and range validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/range/cancel/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 912
+    description = "Bypass WAF for authenticated Mission Control range destroy (false-positive on SQLi rule 942200; Django enforces session, CSRF, and range validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/range/destroy/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 913
+    description = "Bypass WAF for authenticated Mission Control range pause (false-positive on SQLi rule 942200; Django enforces session, CSRF, and range validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/range/pause/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 914
+    description = "Bypass WAF for authenticated Mission Control range resume (false-positive on SQLi rule 942200; Django enforces session, CSRF, and range validation)."
+
+    match {
+      expr {
+        expression = "request.path == \"/mission-control/api/range/resume/\""
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 915
+    description = "Bypass WAF for authenticated Scenario Editor POST surfaces (false-positive on SQLi rule 942200; Django enforces session, CSRF, and scenario validation)."
+
+    match {
+      expr {
+        expression = "request.method == \"POST\" && request.path.startsWith(\"/scenario-editor/\")"
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 916
+    description = "Bypass WAF for authenticated Experiments POST surfaces (false-positive on SQLi rule 942200; Django enforces session, CSRF, and experiment validation)."
+
+    match {
+      expr {
+        expression = "request.method == \"POST\" && request.path.startsWith(\"/mission-control/experiments/\")"
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 917
+    description = "Bypass WAF for authenticated NGFW API POST surfaces (false-positive on SQLi rule 942200; Django enforces session, CSRF, and request validation)."
+
+    match {
+      expr {
+        expression = "request.method == \"POST\" && request.path.startsWith(\"/mission-control/api/ngfw/\")"
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 918
+    description = "Bypass WAF for authenticated credentials API POST surfaces (false-positive on SQLi rule 942200; Django enforces session, CSRF, and credential validation)."
+
+    match {
+      expr {
+        expression = "request.method == \"POST\" && request.path.startsWith(\"/mission-control/api/credentials/\")"
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 919
+    description = "Bypass WAF for authenticated Guacamole API POST surfaces (false-positive on SQLi rule 942200; Django enforces session and request validation)."
+
+    match {
+      expr {
+        expression = "request.method == \"POST\" && request.path.startsWith(\"/mission-control/api/guacamole/\")"
+      }
+    }
+  }
+
+  rule {
+    action      = "allow"
+    priority    = 920
+    description = "Bypass WAF for authenticated files POST surfaces (false-positive on SQLi rule 942200; Django enforces session, CSRF, and file validation)."
+
+    match {
+      expr {
+        expression = "request.method == \"POST\" && request.path.startsWith(\"/mission-control/files/\")"
+      }
+    }
+  }
+
   rule {
     action      = "deny(403)"
     priority    = 1000
@@ -594,6 +783,26 @@ resource "google_secret_manager_secret" "runtime" {
   depends_on = [google_project_service.required]
 }
 
+# Range image URL secrets. Declared empty; the Packer build/promote pipeline
+# publishes new secret_versions as it rotates images. The provisioner reads
+# the latest version on every range create via main.get_gdc_image_url, so no
+# portal redeploy is needed when an image rotates. Access is granted via the
+# existing project-level roles/secretmanager.secretAccessor on the
+# provisioner workload identity service account.
+resource "google_secret_manager_secret" "range_image" {
+  for_each = local.range_image_secrets
+
+  project   = var.project_id
+  secret_id = "${local.name_prefix}-${each.key}"
+  labels    = local.common_labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.required]
+}
+
 resource "random_password" "db_password" {
   length  = 32
   special = false
@@ -615,6 +824,21 @@ resource "random_password" "guacamole_db_password" {
 
 resource "random_id" "guacamole_json_auth_secret" {
   byte_length = 16
+}
+
+resource "random_password" "ctfd_mariadb_root_password" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "ctfd_mariadb_user_password" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "ctfd_secret_key" {
+  length  = 64
+  special = false
 }
 
 resource "google_sql_database_instance" "platform" {
@@ -718,6 +942,11 @@ resource "google_secret_manager_secret_version" "runtime_seeded" {
       password = random_password.guacamole_db_password.result
     })
     "guacamole-json-auth" = random_id.guacamole_json_auth_secret.hex
+    "ctfd" = jsonencode({
+      mariadb_root_password = random_password.ctfd_mariadb_root_password.result
+      mariadb_user_password = random_password.ctfd_mariadb_user_password.result
+      secret_key            = random_password.ctfd_secret_key.result
+    })
   }
 
   secret      = google_secret_manager_secret.runtime[each.key].id
@@ -904,4 +1133,300 @@ resource "google_container_node_pool" "provisioner" {
       enable_integrity_monitoring = true
     }
   }
+}
+
+# ---------------------------------------------------------------------------
+# CTFd VM
+#
+# Standalone Compute Engine host inside the portal VPC, sized to run the
+# official CTFd docker-compose stack (ctfd gunicorn app, mariadb 10.11, redis,
+# nginx). CTFd's official docs list 4 vCPU / 2 GiB RAM as the "recommended"
+# minimum; we default to e2-standard-8 (8 vCPU, 32 GiB) and 100 GiB pd-ssd so
+# MariaDB warm-cache + uploads + logs never become the bottleneck during a
+# multi-hundred-user event.
+#
+# The VM terminates public HTTP/S directly on its ephemeral-but-reserved IP.
+# Operator SSH is only open when ctfd_ssh_source_cidrs is set; otherwise the
+# expected admin path is `gcloud compute ssh --tunnel-through-iap`.
+# ---------------------------------------------------------------------------
+
+resource "google_compute_subnetwork" "ctfd" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  name                     = "${local.name_prefix}-ctfd"
+  project                  = var.project_id
+  region                   = var.region
+  network                  = google_compute_network.platform.id
+  ip_cidr_range            = var.ctfd_subnet_cidr
+  private_ip_google_access = true
+
+  log_config {
+    aggregation_interval = "INTERVAL_5_SEC"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
+}
+
+resource "google_compute_address" "ctfd_public" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  name         = "${local.name_prefix}-ctfd-ip"
+  project      = var.project_id
+  region       = var.region
+  address_type = "EXTERNAL"
+  network_tier = "PREMIUM"
+
+  # Static IP anchors any DNS the operator may point at the CTFd host.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_compute_firewall" "ctfd_public_http_https" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  name        = "${local.name_prefix}-ctfd-public-http-https"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "Allow public inbound HTTP/S to the CTFd VM."
+  direction   = "INGRESS"
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["ctfd-public"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80", "443"]
+  }
+}
+
+resource "google_compute_firewall" "ctfd_admin_ssh" {
+  count = var.ctfd_enabled && length(var.ctfd_ssh_source_cidrs) > 0 ? 1 : 0
+
+  name        = "${local.name_prefix}-ctfd-admin-ssh"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "Allow operator SSH to the CTFd VM from the configured admin CIDRs."
+  direction   = "INGRESS"
+
+  source_ranges = var.ctfd_ssh_source_cidrs
+  target_tags   = ["ctfd-public"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+resource "google_compute_firewall" "ctfd_iap_ssh" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  name        = "${local.name_prefix}-ctfd-iap-ssh"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "Allow Identity-Aware Proxy to reach the CTFd VM on TCP/22 for `gcloud ssh --tunnel-through-iap`."
+  direction   = "INGRESS"
+
+  # Google IAP tunnel source range, documented at
+  # https://cloud.google.com/iap/docs/using-tcp-forwarding.
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["ctfd-public"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+resource "google_service_account" "ctfd" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  project      = var.project_id
+  account_id   = "${replace(local.name_prefix, "-", "")}-ctfd"
+  display_name = "Shifter ${var.environment} CTFd VM"
+}
+
+resource "google_project_iam_member" "ctfd_logging" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.ctfd[0].email}"
+}
+
+resource "google_project_iam_member" "ctfd_monitoring" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.ctfd[0].email}"
+}
+
+resource "google_project_iam_member" "ctfd_artifact_registry_reader" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.ctfd[0].email}"
+}
+
+# Scoped Secret Manager access: the CTFd VM can read only its own runtime
+# secret bundle, not the broader Django / Guacamole / Cloud SQL bundles that
+# live under the same runtime_secrets collection.
+resource "google_secret_manager_secret_iam_member" "ctfd_secret_accessor" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.runtime["ctfd"].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.ctfd[0].email}"
+}
+
+resource "google_compute_instance" "ctfd" {
+  count = var.ctfd_enabled ? 1 : 0
+
+  name         = "${local.name_prefix}-ctfd"
+  project      = var.project_id
+  zone         = "${var.region}-a"
+  machine_type = var.ctfd_machine_type
+  tags         = ["ctfd-public"]
+  labels       = merge(local.common_labels, { role = "ctfd" })
+
+  allow_stopping_for_update = true
+
+  boot_disk {
+    auto_delete = true
+    initialize_params {
+      image = var.ctfd_vm_image
+      size  = var.ctfd_disk_size_gb
+      type  = "pd-ssd"
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.platform.id
+    subnetwork = google_compute_subnetwork.ctfd[0].id
+
+    access_config {
+      nat_ip       = google_compute_address.ctfd_public[0].address
+      network_tier = "PREMIUM"
+    }
+  }
+
+  service_account {
+    email  = google_service_account.ctfd[0].email
+    scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+  }
+
+  shielded_instance_config {
+    enable_secure_boot          = true
+    enable_integrity_monitoring = true
+    enable_vtpm                 = true
+  }
+
+  metadata = {
+    enable-oslogin           = "TRUE"
+    block-project-ssh-keys   = "TRUE"
+    disable-legacy-endpoints = "TRUE"
+  }
+
+  # Bootstrap: install docker + compose v2, clone the official CTFd repo at
+  # main, pull the Secret Manager runtime bundle to replace the stock compose's
+  # hardcoded MariaDB credentials + SECRET_KEY, and bring the stack up so nginx
+  # is serving on :80 by first boot. The override is written to
+  # /opt/CTFd/docker-compose.override.yml so the base compose file stays
+  # unmodified and `git pull && docker compose up -d` keeps working for future
+  # CTFd upgrades. The startup script is idempotent via a marker file so a
+  # reboot or instance resume does not double-clone or rotate secrets in place.
+  metadata_startup_script = <<-EOT
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    export DEBIAN_FRONTEND=noninteractive
+    MARKER=/var/lib/ctfd-bootstrap.done
+    CTFD_SECRET_ID="${google_secret_manager_secret.runtime["ctfd"].secret_id}"
+    PROJECT_ID="${var.project_id}"
+
+    if [ -f "$${MARKER}" ]; then
+      echo "ctfd bootstrap already completed"
+      exit 0
+    fi
+
+    apt-get update
+    apt-get install -y ca-certificates curl gnupg git jq
+
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+    . /etc/os-release
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $${VERSION_CODENAME} stable" \
+      > /etc/apt/sources.list.d/docker.list
+
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    # google-cloud-sdk is pre-installed on the google-provided Ubuntu LTS image
+    # family under /snap/bin; fall back to the official apt package if gcloud
+    # is not on PATH.
+    if ! command -v gcloud >/dev/null 2>&1; then
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+        > /etc/apt/sources.list.d/google-cloud-sdk.list
+      curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/keyrings/cloud.google.gpg
+      apt-get update
+      apt-get install -y google-cloud-cli
+    fi
+
+    systemctl enable --now docker
+
+    install -d -m 0755 /opt
+    if [ ! -d /opt/CTFd/.git ]; then
+      git clone --depth=1 https://github.com/CTFd/CTFd.git /opt/CTFd
+    fi
+
+    # Fetch the CTFd runtime bundle from Secret Manager and write a
+    # docker-compose override that replaces the stock hardcoded credentials.
+    SECRET_JSON=$(gcloud secrets versions access latest \
+      --secret="$${CTFD_SECRET_ID}" \
+      --project="$${PROJECT_ID}")
+    MARIADB_ROOT_PASSWORD=$(echo "$${SECRET_JSON}" | jq -r .mariadb_root_password)
+    MARIADB_USER_PASSWORD=$(echo "$${SECRET_JSON}" | jq -r .mariadb_user_password)
+    CTFD_SECRET_KEY=$(echo "$${SECRET_JSON}" | jq -r .secret_key)
+
+    umask 077
+    cat > /opt/CTFd/docker-compose.override.yml <<YAML
+    services:
+      ctfd:
+        environment:
+          - UPLOAD_FOLDER=/var/uploads
+          - DATABASE_URL=mysql+pymysql://ctfd:$${MARIADB_USER_PASSWORD}@db/ctfd
+          - REDIS_URL=redis://cache:6379
+          - WORKERS=1
+          - LOG_FOLDER=/var/log/CTFd
+          - ACCESS_LOG=-
+          - ERROR_LOG=-
+          - REVERSE_PROXY=true
+          - SECRET_KEY=$${CTFD_SECRET_KEY}
+      db:
+        environment:
+          - MARIADB_ROOT_PASSWORD=$${MARIADB_ROOT_PASSWORD}
+          - MARIADB_USER=ctfd
+          - MARIADB_PASSWORD=$${MARIADB_USER_PASSWORD}
+          - MARIADB_DATABASE=ctfd
+          - MARIADB_AUTO_UPGRADE=1
+    YAML
+    chmod 600 /opt/CTFd/docker-compose.override.yml
+    umask 022
+
+    cd /opt/CTFd
+    docker compose up -d --wait
+
+    touch "$${MARKER}"
+  EOT
+
+  depends_on = [
+    google_project_service.required,
+    google_secret_manager_secret_version.runtime_seeded,
+    google_secret_manager_secret_iam_member.ctfd_secret_accessor,
+  ]
 }

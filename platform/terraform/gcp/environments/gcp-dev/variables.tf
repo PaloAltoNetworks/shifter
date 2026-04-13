@@ -193,3 +193,39 @@ variable "monitoring_alert_email" {
   type        = string
   default     = ""
 }
+
+variable "gdc_control_plane_network_name" {
+  description = "Name of the external GDC control-plane VPC that the GKE platform must reach for range provisioning."
+  type        = string
+  default     = "cluster1-gdc"
+}
+
+variable "ctfd_enabled" {
+  description = "Whether to provision the public CTFd VM inside the portal VPC."
+  type        = bool
+  default     = true
+}
+
+variable "ctfd_machine_type" {
+  description = "Compute Engine machine type for the CTFd VM."
+  type        = string
+  default     = "e2-standard-8"
+}
+
+variable "ctfd_disk_size_gb" {
+  description = "Boot + data disk size in GiB for the CTFd VM."
+  type        = number
+  default     = 100
+}
+
+variable "ctfd_subnet_cidr" {
+  description = "Primary IPv4 CIDR for the CTFd subnet inside the portal VPC."
+  type        = string
+  default     = "10.42.0.0/28"
+}
+
+variable "ctfd_ssh_source_cidrs" {
+  description = "Source CIDRs allowed to reach the CTFd VM on TCP/22 outside the Identity-Aware Proxy path."
+  type        = list(string)
+  default     = []
+}

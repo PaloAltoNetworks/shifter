@@ -378,20 +378,18 @@ class TestRangeNetworkEnv:
         assert config.network_region == "us-central1"
         assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
 
-    def test_load_gdc_vmruntime_config_reads_image_contract(self, mocker):
+    def test_load_gdc_vmruntime_config_reads_sizing_contract(self, mocker):
+        """VM Runtime config carries only sizing. Image URLs are fetched live at
+        range-create time from Secret Manager via main.get_gdc_image_url."""
         mocker.patch.dict(
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
                 "GDC_VM_STORAGE_CLASS": "local-shared",
                 "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
-                "GDC_KALI_IMAGE_URL": "gs://images/kali.qcow2",
                 "GDC_KALI_VCPUS": "4",
                 "GDC_KALI_MEMORY": "8Gi",
                 "GDC_KALI_DISK_SIZE_GIB": "40",
-                "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
-                "GDC_WINDOWS_IMAGE_URL": "gs://images/windows.qcow2",
-                "GDC_DC_IMAGE_URL": "docker://registry.example.com/dc-image:latest",
             },
             clear=True,
         )
@@ -401,49 +399,39 @@ class TestRangeNetworkEnv:
         assert config == GDCVMRuntimeConfig(
             storage_class_name="local-shared",
             image_gcs_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
-            kali=GDCVMRuntimeProfile(source_url="gs://images/kali.qcow2", vcpus=4, memory="8Gi", disk_size_gib=40),
-            ubuntu=GDCVMRuntimeProfile(
-                source_url="https://example.com/ubuntu.img",
-                vcpus=1,
-                memory="2Gi",
-                disk_size_gib=20,
-            ),
-            windows=GDCVMRuntimeProfile(
-                source_url="gs://images/windows.qcow2",
-                vcpus=2,
-                memory="8Gi",
-                disk_size_gib=64,
-            ),
-            dc=GDCVMRuntimeProfile(
-                source_url="docker://registry.example.com/dc-image:latest",
-                vcpus=2,
-                memory="8Gi",
-                disk_size_gib=64,
-            ),
+            kali=GDCVMRuntimeProfile(vcpus=4, memory="8Gi", disk_size_gib=40),
+            ubuntu=GDCVMRuntimeProfile(vcpus=1, memory="2Gi", disk_size_gib=20),
+            windows=GDCVMRuntimeProfile(vcpus=2, memory="8Gi", disk_size_gib=64),
+            dc=GDCVMRuntimeProfile(vcpus=2, memory="8Gi", disk_size_gib=64),
         )
 
-    def test_gdc_vmruntime_config_requires_matching_profile_when_selected(self, mocker):
+    def test_gdc_vmruntime_config_get_profile_returns_sizing_by_role_and_os(self, mocker):
+        """get_profile branches on role+os_type and returns sizing only.
+
+        The image URL lookup is a separate call in the range-create path.
+        Sizing is loaded at startup; URLs are looked up live.
+        """
         mocker.patch.dict(
             os.environ,
-            {
-                "CLOUD_PROVIDER": "gcp",
-                "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
-            },
+            {"CLOUD_PROVIDER": "gcp"},
             clear=True,
         )
 
         config = load_gdc_vmruntime_config()
 
-        assert config.get_profile(role="victim", os_type="ubuntu").source_url == "https://example.com/ubuntu.img"
-        with pytest.raises(RuntimeError, match="Missing GDC VM Runtime image URL"):
-            config.get_profile(role="dc", os_type="windows")
+        assert config.get_profile(role="victim", os_type="ubuntu").disk_size_gib == 20
+        assert config.get_profile(role="victim", os_type="kali").memory == "4Gi"
+        assert config.get_profile(role="victim", os_type="windows").disk_size_gib == 64
+        assert config.get_profile(role="dc", os_type="windows").vcpus == 2
 
     def test_load_gdc_palo_alto_vmseries_config_reads_required_contract(self, mocker):
+        """VM-Series config carries bootstrap + sizing only. The image URL is
+        fetched at NGFW provisioning time from Secret Manager via
+        main.get_gdc_image_url('vmseries')."""
         mocker.patch.dict(
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
-                "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
                 "GDC_VMSERIES_BOOTSTRAP_BUCKET": "shifter-gcp-dev-vmseries-bootstrap",
                 "GDC_VMSERIES_STORAGE_CLASS": "local-shared",
                 "GDC_VMSERIES_IMAGE_GCS_SECRET_ID": "projects/test/secrets/gcs-import",
@@ -465,7 +453,6 @@ class TestRangeNetworkEnv:
         config = load_gdc_palo_alto_vmseries_config()
 
         assert config == GDCPaloAltoVMSeriesConfig(
-            image_url="gs://images/panos-vmseries.qcow2",
             bootstrap_bucket="shifter-gcp-dev-vmseries-bootstrap",
             storage_class_name="local-shared",
             image_gcs_secret_id="projects/test/secrets/gcs-import",
@@ -487,7 +474,6 @@ class TestRangeNetworkEnv:
             os.environ,
             {
                 "CLOUD_PROVIDER": "gcp",
-                "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
             },
             clear=True,
         )

@@ -82,6 +82,7 @@ Prefer:
 - `curl` for direct HTTP checks
 - `gh` for deploy/workflow evidence
 - `kubectl` and `gcloud` for **read-only** adjacent checks and evidence
+- GitHub issue creation for confirmed failures in the current repo
 
 ## Rules
 
@@ -92,6 +93,8 @@ Prefer:
 - Do **not** widen scope beyond the suite.
 - Do **not** stop at the first failure; run the case’s `adjacent_checks` and collect evidence.
 - Do **not** stop before doing discovery and the maximum unblocked subset of the suite.
+- Do **not** create issues for blocked cases or unconfirmed suspicions.
+- Do **not** wait until the end of the run to record confirmed failures.
 
 ## Execution Pattern
 
@@ -112,6 +115,52 @@ Prefer:
 8. Only stop early if a hard prerequisite for an entire phase cannot be discovered
    or supplied. In that case, execute all still-unblocked phases first and then
    report the remaining blocked cases.
+
+## Issue Handling
+
+Record confirmed failures immediately while context is fresh.
+
+For each confirmed distinct failing surface:
+
+1. Search existing open GitHub issues in the current repo for the same surface,
+   case ID, URL, or symptom.
+2. If a matching open issue exists, add the new evidence there instead of
+   creating a duplicate.
+3. If no matching issue exists, create a new GitHub issue immediately after the
+   failure is confirmed and adjacent checks are complete.
+
+Create issues only for:
+
+- confirmed failing cases
+- user-visible regressions
+- control-plane failures that directly explain a user-visible failing case
+
+Do not create issues for:
+
+- blocked cases caused by missing fixtures
+- unsupported features that are already expected to fail and are behaving as specified
+- duplicate symptoms already covered by an open issue from the same run
+
+Each created or updated issue must include:
+
+- case ID
+- environment (`gcp-dev`)
+- actor
+- exact URL or API
+- user-visible symptom
+- expected behavior
+- evidence captured
+- adjacent checks and what they showed
+- likely failing surface
+
+Suggested labels when available:
+
+- `bug`
+- `uat`
+- `gcp-dev`
+
+The final report must include the issue number for each confirmed failing case
+that resulted in a created or updated issue.
 
 ## Default Environment
 

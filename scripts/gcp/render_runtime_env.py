@@ -37,7 +37,20 @@ def _csv_env(name: str) -> list[str]:
     return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 
-def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) -> str:
+def render_env(outputs: dict[str, object]) -> str:
+    """Render the portal runtime env file.
+
+    GCP is a single-mode environment: Identity Platform is the only auth provider,
+    Django runs with DEBUG=false, session/CSRF cookies are always marked Secure, and
+    SITE_URL is the HTTPS public hostname. The ENVIRONMENT label (e.g. ``gcp-dev``)
+    is the only "dev" marker — it enables ``/dev-login/`` reachability over the
+    localhost allow-list for private admin UAT, nothing else.
+
+    A managed TLS hostname is required. The renderer fails fast if Terraform has not
+    produced ``public_hostname`` and ``managed_tls_enabled``, so the operator catches
+    a missing DNS/cert contract at render time instead of at deploy time.
+    """
+
     assets_bucket = _value(outputs, "assets_bucket_name")
     terraform_state_bucket = _value(outputs, "terraform_state_bucket_name")
     topic_id = _value(outputs, "platform_events_topic_id")
@@ -57,19 +70,15 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     range_network_region = _value(outputs, "range_network_region")
     portal_network_cidrs = _value(outputs, "portal_network_cidrs")
 
-    if secure_portal_mode and (not public_hostname or not managed_tls_enabled):
+    if not public_hostname or not managed_tls_enabled:
         raise ValueError(
-            "secure portal mode requires public_hostname and managed_tls_enabled to be configured"
+            "public_hostname and managed_tls_enabled must be set before rendering the "
+            "runtime env file; GCP is production-mode only and requires an HTTPS hostname"
         )
 
-    use_hostname = secure_portal_mode and public_hostname and managed_tls_enabled
-    public_origin_host = public_hostname if use_hostname else public_ingress_ip
-    public_scheme = "https" if use_hostname else "http"
-    site_url = f"{public_scheme}://{public_origin_host}"
+    site_url = f"https://{public_hostname}"
     allowed_hosts = ",".join(_unique([public_hostname, public_ingress_ip, "localhost", "127.0.0.1"]))
-    csrf_origins = [site_url]
-    if not secure_portal_mode and public_hostname:
-        csrf_origins.append(f"http://{public_hostname}")
+    csrf_origins = _unique([site_url])
 
     bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))
     bootstrap_superuser_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"))
@@ -92,15 +101,15 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "APP_SECRET_ID": secret_ids["app"],
         "GUACAMOLE_SECRET_ID": secret_ids["guacamole-json-auth"],
         "GDC_ACCESS_SECRET_ID": _derive_sibling_secret_id(secret_ids["app"], "app", "gdc-access"),
-        "DJANGO_DEBUG": "false" if secure_portal_mode else "true",
-        "SESSION_COOKIE_SECURE": "true" if secure_portal_mode else "false",
-        "CSRF_COOKIE_SECURE": "true" if secure_portal_mode else "false",
+        "DJANGO_DEBUG": "false",
+        "SESSION_COOKIE_SECURE": "true",
+        "CSRF_COOKIE_SECURE": "true",
         "DB_HOST": database["private_ip"],
         "DB_PORT": str(database["port"]),
         "REDIS_HOST": cache["host"],
         "REDIS_PORT": str(cache["port"]),
         "DJANGO_ALLOWED_HOSTS": allowed_hosts,
-        "DJANGO_CSRF_TRUSTED_ORIGINS": ",".join(_unique(csrf_origins)),
+        "DJANGO_CSRF_TRUSTED_ORIGINS": ",".join(csrf_origins),
         "SITE_URL": site_url,
         "GUACAMOLE_BASE_URL": "/guacamole",
         "GUACAMOLE_API_BASE_URL": "http://guacamole-client.shifter-platform.svc.cluster.local:8080/guacamole",
@@ -108,7 +117,7 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "GUACAMOLE_POSTGRESQL_PORT": str(guacamole_database["port"]),
         "GUACAMOLE_POSTGRESQL_DATABASE": guacamole_database["database_name"],
         "ENGINE_TASK_IMAGE": f"{image_roots['pulumi-provisioner']}:latest",
-        "AUTH_PROVIDER": "identity_platform" if secure_portal_mode else "oidc",
+        "AUTH_PROVIDER": "identity_platform",
         "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
         "IDENTITY_PLATFORM_PROJECT_ID": identity_platform_project_id,
         "IDENTITY_PLATFORM_AUTH_DOMAIN": f"{identity_platform_project_id}.firebaseapp.com",
@@ -141,15 +150,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--terraform-output-json", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument(
-        "--secure-portal-mode",
-        action="store_true",
-        help="Render the portal runtime contract for the non-debug OIDC path.",
-    )
     args = parser.parse_args()
 
     outputs = json.loads(args.terraform_output_json.read_text())
-    rendered = render_env(outputs, secure_portal_mode=args.secure_portal_mode)
+    rendered = render_env(outputs)
     args.output.write_text(rendered)
     return 0
 

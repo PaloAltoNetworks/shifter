@@ -220,13 +220,15 @@ jobs:
               env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
               env_file.write(f"MANAGED_TLS_ENABLED={'true' if value('managed_tls_enabled') else 'false'}\n")
           PY
-      - name: Resolve requested portal auth mode
+      - name: Assert production portal contract
+        env:
+          WORKFLOW_PUBLIC_HOSTNAME: ${{ env.PUBLIC_HOSTNAME }}
+          WORKFLOW_MANAGED_TLS_ENABLED: ${{ env.MANAGED_TLS_ENABLED }}
         run: |
-          SECURE_PORTAL_MODE_REQUESTED=false
-          if [ -n "${PUBLIC_HOSTNAME}" ] && [ "${MANAGED_TLS_ENABLED}" = "true" ]; then
-            SECURE_PORTAL_MODE_REQUESTED=true
+          if [ -z "$WORKFLOW_PUBLIC_HOSTNAME" ] || [ "$WORKFLOW_MANAGED_TLS_ENABLED" != "true" ]; then
+            echo "::error::gcp-dev is production-mode only. Set public_hostname and enable_managed_tls=true in terraform.tfvars before deploying; see scripts/gcp/render_runtime_env.py for the contract."
+            exit 1
           fi
-          echo "SECURE_PORTAL_MODE_REQUESTED=${SECURE_PORTAL_MODE_REQUESTED}" >> "$GITHUB_ENV"
       - name: Login to Artifact Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
@@ -278,26 +280,13 @@ jobs:
           cluster_name: ${{ env.GKE_CLUSTER_NAME }}
           location: ${{ env.GKE_CLUSTER_LOCATION }}
           project_id: ${{ env.PROJECT_ID }}
-      - name: Resolve active secure portal state
-        run: |
-          SECURE_PORTAL_MODE=false
-          if [ "${SECURE_PORTAL_MODE_REQUESTED}" = "true" ]; then
-            CERT_STATUS=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
-            if [ "${CERT_STATUS}" = "Active" ]; then
-              SECURE_PORTAL_MODE=true
-            fi
-          fi
-          echo "SECURE_PORTAL_MODE=${SECURE_PORTAL_MODE}" >> "$GITHUB_ENV"
       - name: Render generated runtime env
+        env:
+          WORKFLOW_OVERLAY_DIR: ${{ env.K8S_OVERLAY_DIR }}
         run: |
-          RENDER_ARGS=(
-            --terraform-output-json /tmp/gcp-terraform-outputs.json
-            --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env"
-          )
-          if [ "${SECURE_PORTAL_MODE}" = "true" ]; then
-            RENDER_ARGS+=(--secure-portal-mode)
-          fi
-          python3 scripts/gcp/render_runtime_env.py "${RENDER_ARGS[@]}"
+          python3 scripts/gcp/render_runtime_env.py \
+            --terraform-output-json /tmp/gcp-terraform-outputs.json \
+            --output "$WORKFLOW_OVERLAY_DIR/platform-runtime.generated.env"
       - name: Render generated service account annotations
         run: |
           python3 scripts/gcp/render_serviceaccount_patch.py \
@@ -426,28 +415,13 @@ jobs:
             sleep 10
           done
           echo "::warning::Ingress IP was not assigned within 10 minutes"
-      - name: Promote portal to secure mode
+      - name: Report ManagedCertificate status
+        env:
+          WORKFLOW_CERT_NAME: ${{ env.EDGE_CERT_NAME }}
         run: |
-          if [ "${SECURE_PORTAL_MODE_REQUESTED}" != "true" ] || [ "${SECURE_PORTAL_MODE}" = "true" ]; then
+          CERT_STATUS=$(kubectl get managedcertificate "$WORKFLOW_CERT_NAME" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
+          if [ "$CERT_STATUS" = "Active" ]; then
+            echo "ManagedCertificate $WORKFLOW_CERT_NAME is Active; HTTPS path is live."
             exit 0
           fi
-          for _ in $(seq 1 120); do
-            CERT_STATUS=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
-            if [ "${CERT_STATUS}" = "Active" ]; then
-              python3 scripts/gcp/render_runtime_env.py \
-                --terraform-output-json /tmp/gcp-terraform-outputs.json \
-                --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env" \
-                --secure-portal-mode
-              kubectl apply -k "${K8S_OVERLAY_DIR}"
-              for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
-                kubectl rollout restart "deployment/${deployment}" -n shifter-platform
-              done
-              for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
-                kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
-              done
-              exit 0
-            fi
-            echo "Waiting for ManagedCertificate ${EDGE_CERT_NAME}: status='${CERT_STATUS:-pending}'"
-            sleep 30
-          done
-          echo "::warning::ManagedCertificate ${EDGE_CERT_NAME} did not become Active within 60 minutes. The portal remains in the debug-auth fallback until a later deploy promotes it."
+          echo "::warning::ManagedCertificate $WORKFLOW_CERT_NAME status is '${CERT_STATUS:-pending}'. HTTPS will not be reachable until Google Cloud finishes provisioning the cert (confirm shifter.keplerops.com resolves to the ingress IP). UAT can continue via 'kubectl port-forward -n shifter-platform svc/portal-web 18080:8000' to http://localhost:18080/dev-login/."

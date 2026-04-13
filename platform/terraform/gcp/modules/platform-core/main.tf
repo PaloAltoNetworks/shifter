@@ -312,23 +312,33 @@ resource "google_storage_bucket" "audit_logs" {
   depends_on = [google_project_service.required]
 }
 
-data "archive_file" "identity_platform_before_create" {
+data "archive_file" "identity_platform_hooks" {
   type        = "zip"
   source_dir  = "${path.module}/functions/identity-platform"
-  output_path = "${path.root}/.terraform/${local.name_prefix}-identity-platform-before-create.zip"
+  output_path = "${path.root}/.terraform/${local.name_prefix}-identity-platform-hooks.zip"
+  # Local `node --test` runs and CI lint steps drop a node_modules/ tree into
+  # source_dir; Cloud Functions Gen2 re-runs npm install from package.json at
+  # build time, so excluding local artifacts keeps the deploy zip deterministic
+  # and small and prevents an accidentally stale local node_modules from
+  # shadowing the pinned runtime dependency tree on GCP.
+  excludes = [
+    "node_modules",
+    "node_modules/**",
+    "package-lock.json",
+  ]
 }
 
-resource "google_storage_bucket_object" "identity_platform_before_create" {
-  name   = "identity-platform/identity-platform-before-create-${data.archive_file.identity_platform_before_create.output_md5}.zip"
+resource "google_storage_bucket_object" "identity_platform_hooks" {
+  name   = "identity-platform/identity-platform-hooks-${data.archive_file.identity_platform_hooks.output_md5}.zip"
   bucket = google_storage_bucket.assets.name
-  source = data.archive_file.identity_platform_before_create.output_path
+  source = data.archive_file.identity_platform_hooks.output_path
 }
 
 resource "google_cloudfunctions2_function" "identity_platform_before_create" {
   name        = "${local.name_prefix}-identity-before-create"
   project     = var.project_id
   location    = var.region
-  description = "Identity Platform beforeCreate blocking function"
+  description = "Identity Platform beforeCreate blocking function — enforces @${var.identity_allowed_email_domain} registrations."
 
   build_config {
     runtime     = "nodejs22"
@@ -337,7 +347,49 @@ resource "google_cloudfunctions2_function" "identity_platform_before_create" {
     source {
       storage_source {
         bucket = google_storage_bucket.assets.name
-        object = google_storage_bucket_object.identity_platform_before_create.name
+        object = google_storage_bucket_object.identity_platform_hooks.name
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "128Mi"
+    timeout_seconds                = 10
+    ingress_settings               = "ALLOW_ALL"
+    all_traffic_on_latest_revision = true
+
+    environment_variables = {
+      ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
+      ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
+    }
+  }
+
+  depends_on = [
+    time_sleep.required_services_propagated,
+    time_sleep.cloud_run_builder_propagated,
+  ]
+}
+
+# beforeSignIn is the second server-side gate. beforeCreate only fires on
+# self-registration through the portal; a user seeded via the Firebase Console,
+# Admin SDK, or bootstrap tooling bypasses that hook entirely. beforeSignIn
+# re-evaluates the corporate allow-list on every authentication attempt so a
+# stale or accidentally created non-PAN account cannot establish a session.
+# The Django IdentityPlatformBackend is the third and authoritative layer.
+resource "google_cloudfunctions2_function" "identity_platform_before_sign_in" {
+  name        = "${local.name_prefix}-identity-before-sign-in"
+  project     = var.project_id
+  location    = var.region
+  description = "Identity Platform beforeSignIn blocking function — re-enforces the corporate allow-list on every sign-in."
+
+  build_config {
+    runtime     = "nodejs22"
+    entry_point = "beforeSignIn"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.assets.name
+        object = google_storage_bucket_object.identity_platform_hooks.name
       }
     }
   }
@@ -380,9 +432,30 @@ resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_
   depends_on = [time_sleep.identity_platform_service_agent_propagated]
 }
 
+resource "google_cloud_run_service_iam_member" "identity_platform_before_sign_in_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.identity_platform_before_sign_in.service_config[0].service
+  role     = "roles/run.invoker"
+  member   = google_project_service_identity.identity_platform.member
+
+  depends_on = [time_sleep.identity_platform_service_agent_propagated]
+}
+
+resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_sign_in_invoker" {
+  project        = var.project_id
+  location       = var.region
+  cloud_function = google_cloudfunctions2_function.identity_platform_before_sign_in.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = google_project_service_identity.identity_platform.member
+
+  depends_on = [time_sleep.identity_platform_service_agent_propagated]
+}
+
 # Identity Platform invokes blocking hooks through the public HTTPS function URL
-# without attaching a caller credential, so the hook itself must allow
-# unauthenticated invocation.
+# without attaching a caller credential, so the hooks themselves must allow
+# unauthenticated invocation. The hook bodies reject non-corporate requests —
+# the public allow is only a transport layer.
 resource "google_cloud_run_service_iam_member" "identity_platform_before_create_public_invoker" {
   project  = var.project_id
   location = var.region
@@ -399,9 +472,34 @@ resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_
   member         = "allUsers"
 }
 
+resource "google_cloud_run_service_iam_member" "identity_platform_before_sign_in_public_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.identity_platform_before_sign_in.service_config[0].service
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloudfunctions2_function_iam_member" "identity_platform_before_sign_in_public_invoker" {
+  project        = var.project_id
+  location       = var.region
+  cloud_function = google_cloudfunctions2_function.identity_platform_before_sign_in.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = "allUsers"
+}
+
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${local.name_prefix}-platform-ip"
   project = var.project_id
+
+  # External DNS (shifter.keplerops.com) is pinned to this IP. Releasing it
+  # would force a new allocation, stranding DNS until someone re-points the
+  # record and the ManagedCertificate re-provisions. Use
+  # `terraform state rm` + targeted rebuild if an intentional replacement is
+  # ever needed.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_security_policy" "platform_edge" {
@@ -525,13 +623,38 @@ resource "google_identity_platform_config" "platform" {
     }
   }
 
+  # Blocking functions run on the Identity Platform request path. beforeCreate
+  # gates registration and beforeSignIn re-gates every authentication, so a
+  # user seeded outside the portal (Admin SDK, Firebase Console, bootstrap
+  # tooling) still gets evaluated against the corporate allow-list.
+  #
+  # The Terraform google_identity_platform_config schema does not currently
+  # expose a "fail-closed on blocking function error" toggle (Identity Platform
+  # defaults to fail-open for availability). The Django IdentityPlatformBackend
+  # in config/identity_platform.py enforces the same allow-list at session
+  # exchange time and is the authoritative gate; a blocking function outage
+  # would at worst let a disallowed user reach Firebase but could not produce a
+  # usable portal session.
   blocking_functions {
     triggers {
       event_type   = "beforeCreate"
       function_uri = google_cloudfunctions2_function.identity_platform_before_create.url
     }
+
+    triggers {
+      event_type   = "beforeSignIn"
+      function_uri = google_cloudfunctions2_function.identity_platform_before_sign_in.url
+    }
   }
 
+  # MFA stays at state=ENABLED rather than MANDATORY. MANDATORY would force
+  # every authentication to include a second factor, and Google's schema
+  # description does not guarantee first-time-enrollment semantics for users
+  # that still need to scan the TOTP QR. The portal's
+  # _assert_account_can_create_app_session in config/identity_platform.py
+  # enforces "no session without an enrolled factor" on the server, so MFA is
+  # effectively required to reach any authenticated page even though Firebase
+  # is only in ENABLED mode.
   mfa {
     state = "ENABLED"
 

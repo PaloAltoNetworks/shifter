@@ -43,5 +43,23 @@ async function beforeCreateImpl(user) {
   return {};
 }
 
+// beforeSignIn runs on every authentication attempt, including for users that
+// were provisioned outside the self-registration path (Firebase Console, Admin
+// SDK seeds, bootstrap scripts). It is the second layer that catches a non-PAN
+// account which somehow skipped beforeCreate. The Django IdentityPlatformBackend
+// is the third and authoritative layer on session exchange.
+async function beforeSignInImpl(user) {
+  if (!isAllowedEmail(user?.email)) {
+    throw new gcipCloudFunctions.https.HttpsError(
+      "permission-denied",
+      `Only @${allowedDomain()} users may access the corporate portal.`
+    );
+  }
+
+  return {};
+}
+
 exports.beforeCreateImpl = beforeCreateImpl;
 exports.beforeCreate = authClient.functions().beforeCreateHandler(beforeCreateImpl);
+exports.beforeSignInImpl = beforeSignInImpl;
+exports.beforeSignIn = authClient.functions().beforeSignInHandler(beforeSignInImpl);

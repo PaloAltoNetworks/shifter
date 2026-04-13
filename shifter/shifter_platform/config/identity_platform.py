@@ -66,7 +66,16 @@ class IdentityUserClaims:
 
 
 def _ensure_firebase_app() -> firebase_admin.App:
-    """Return a singleton Firebase Admin app using ADC/Workload Identity."""
+    """Return a singleton Firebase Admin app using ADC/Workload Identity.
+
+    The Firebase Admin SDK caches the default app process-wide; once this
+    function has initialized the app, subsequent ``@override_settings`` changes
+    to ``IDENTITY_PLATFORM_PROJECT_ID`` will NOT rebind the cached app to the
+    new project. Tests that exercise anything beyond the verify/lookup helpers
+    must monkeypatch ``verify_identity_token`` / ``_lookup_identity_account``
+    rather than swapping settings, or they will quietly talk to whichever
+    project was first seen during the test session.
+    """
     try:
         return firebase_admin.get_app()
     except ValueError:
@@ -132,7 +141,14 @@ def is_allowed_identity_email(email: str) -> bool:
 
 
 def identity_platform_client_config() -> dict[str, Any]:
-    """Return the browser-side Identity Platform configuration."""
+    """Return the browser-side Identity Platform configuration.
+
+    Never includes the ``IDENTITY_ALLOWED_EMAILS`` whitelist: that list would be
+    visible to every unauthenticated visitor via page source, and the server-side
+    ``IdentityPlatformBackend`` plus the ``beforeCreate`` Cloud Function already
+    enforce it. The client only receives the allowed domain (which we display in
+    the copy anyway) for optimistic pre-submit UX.
+    """
     project_id = getattr(settings, "IDENTITY_PLATFORM_PROJECT_ID", "")
     auth_domain = getattr(settings, "IDENTITY_PLATFORM_AUTH_DOMAIN", "").strip()
     if not auth_domain and project_id:
@@ -143,7 +159,6 @@ def identity_platform_client_config() -> dict[str, Any]:
         "authDomain": auth_domain,
         "projectId": project_id,
         "allowedEmailDomain": _allowed_email_domain(),
-        "allowedEmails": sorted(_allowed_emails()),
         "issuer": getattr(settings, "IDENTITY_PLATFORM_ISSUER", "Shifter"),
         "totpDisplayName": getattr(settings, "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME", "Shifter Authenticator"),
     }

@@ -119,6 +119,32 @@ def test_platform_login_json_script_contains_object_config(client):
 @override_settings(
     AUTH_PROVIDER="identity_platform",
     DEBUG=False,
+    SITE_URL="https://portal.example.test",
+    IDENTITY_PLATFORM_API_KEY="test-api-key",
+    IDENTITY_PLATFORM_PROJECT_ID="test-project",
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
+    IDENTITY_ALLOWED_EMAILS=["external@example.com", "contractor@partner.test"],
+)
+def test_platform_login_never_leaks_external_email_allowlist_to_client(client):
+    """The IDENTITY_ALLOWED_EMAILS whitelist must stay server-side only.
+
+    It is enforced by the backend (IdentityPlatformBackend.is_allowed_identity_email)
+    and by the beforeCreate Cloud Function. Embedding it in the client payload
+    would expose the complete list of whitelisted external collaborators to any
+    unauthenticated visitor via page source.
+    """
+    response = client.get(reverse("platform_login"))
+
+    payload = _json_script_payload(response.content, "identity-platform-config")
+
+    assert "allowedEmails" not in payload
+    assert b"external@example.com" not in response.content
+    assert b"contractor@partner.test" not in response.content
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
     IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
 )
 def test_identity_platform_session_rejects_non_json(client):
@@ -156,6 +182,61 @@ def test_identity_platform_session_creates_django_session(client, monkeypatch, i
     assert response.json()["redirect_url"] == reverse("dashboard_router")
     assert "_auth_user_id" in client.session
     assert BACKEND_SESSION_KEY in client.session
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
+)
+def test_identity_platform_session_audit_logs_rejected_exchange(client, monkeypatch):
+    """Rejected exchanges must emit a LOGIN_FAILED audit event (parity with OIDC)."""
+    from config import views
+    from risk_register.models import AuditLog
+
+    def raise_disallowed(_request, _token):
+        raise views.identity_platform_auth.IdentityPlatformAuthError(
+            "Only corporate users from @paloaltonetworks.com may log in through the portal"
+        )
+
+    monkeypatch.setattr(views.identity_platform_auth, "login_with_identity_token", raise_disallowed)
+
+    response = client.post(
+        reverse("identity_platform_session"),
+        data=json.dumps({"idToken": "rejected"}),
+        content_type="application/json",
+        HTTP_USER_AGENT="pytest-client/1.0",
+    )
+
+    assert response.status_code == 403
+    entries = AuditLog.objects.filter(action=AuditLog.Action.LOGIN_FAILED).order_by("-timestamp")
+    assert entries.exists()
+    latest = entries.first()
+    assert "Identity Platform" in latest.context
+    assert "identity_platform_auth_failed" in latest.context
+    assert latest.user_agent == "pytest-client/1.0"
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
+)
+def test_identity_platform_session_audit_logs_invalid_body(client):
+    """Non-JSON bodies must audit as a failed login attempt."""
+    from risk_register.models import AuditLog
+
+    response = client.post(
+        reverse("identity_platform_session"),
+        data="not-json",
+        content_type="application/json",
+        HTTP_USER_AGENT="pytest-client/1.0",
+    )
+
+    assert response.status_code == 400
+    entries = AuditLog.objects.filter(action=AuditLog.Action.LOGIN_FAILED).order_by("-timestamp")
+    assert entries.exists()
+    assert "non-JSON body" in entries.first().context
 
 
 @override_settings(

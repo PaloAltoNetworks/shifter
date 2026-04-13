@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.65.0] - 2026-04-12
+
+### Changed
+- GCP is now production-mode only. `scripts/gcp/render_runtime_env.py` always emits `AUTH_PROVIDER=identity_platform`, `DJANGO_DEBUG=false`, `SESSION_COOKIE_SECURE=true`, `CSRF_COOKIE_SECURE=true`, and an `https://` `SITE_URL`, and fails fast if `public_hostname`/`managed_tls_enabled` are not present in the Terraform outputs. The runtime `ENVIRONMENT=gcp-dev` label is the only dev flag — it gates `/dev-login/` availability over the localhost allow-list for private admin UAT and nothing else.
+- `.github/workflows/_gcp-dev.yml` simplified to a single render + apply. Removed the cert-status-gated "secure portal promotion" dance that was silently leaving the deploy in an unusable OIDC fallback until a ManagedCertificate flipped Active. The workflow now asserts the TLS contract up front and logs a warning if the cert is still provisioning after apply.
+- Identity Platform client-side configuration no longer contains the `allowedEmails` external-user whitelist. It is now enforced only server-side (`IdentityPlatformBackend.is_allowed_identity_email` + the `beforeCreate`/`beforeSignIn` Cloud Functions).
+- `identity_platform_auth.js` is now a single-entry flow: `onAuthStateChanged` is the sole driver for post-sign-in handling, `setPersistence(SESSION)` is awaited before the listener registers, and a Firebase SDK load failure now surfaces an explicit banner and disables the form instead of silently bailing out.
+
+### Added
+- `beforeSignIn` Identity Platform blocking Cloud Function, deployed alongside `beforeCreate` from the same `functions/identity-platform` source. It re-enforces the corporate allow-list on every sign-in so a user seeded via Firebase Console / Admin SDK / bootstrap tooling (which bypasses `beforeCreate`) still cannot establish a session.
+- `lifecycle { prevent_destroy = true }` on `google_compute_global_address.platform_ingress`. External DNS (shifter.keplerops.com) is pinned to that static IP; accidental destroy/replace would strand DNS and force full ManagedCertificate re-provisioning.
+- `LOGIN_FAILED` audit events emitted from `config/views.identity_platform_session` for every rejected exchange (non-JSON body, missing token, domain rejection, verification/MFA gating failures), matching the OIDC `ShifterOIDCBackend` audit trail.
+- Regression tests: `tests/config/test_identity_platform.py::test_platform_login_never_leaks_external_email_allowlist_to_client`, `::test_identity_platform_session_audit_logs_rejected_exchange`, `::test_identity_platform_session_audit_logs_invalid_body`, plus `beforeSignIn` node tests in `functions/identity-platform/index.test.js`.
+
+### Fixed
+- `identity_platform_auth.js::exchangeSession` now signs the Firebase user out before throwing on any non-retryable server error. Previously a 403 (domain rejection, revoked token, backend outage) would leave the Firebase session installed; `onAuthStateChanged` would re-fire on the next tick and trap the user in an infinite retry loop, indistinguishable from a broken CDN.
+- `identity_platform_auth.js` no longer re-enters `handleAuthenticatedUser` twice per successful sign-in. The previous code called the handler directly from `signInWithPassword`/`createAccount`/`completeTotpSignIn` *and* registered it on `onAuthStateChanged`, allowing a second entry after the guard released. `completeTotpEnrollment` keeps its direct call because Firebase `multiFactor.enroll()` does not reliably refire the auth-state listener.
+- `render_runtime_env.py` archive for the identity-platform Cloud Functions now excludes `node_modules`/`package-lock.json`, keeping the Cloud Functions Gen2 deploy zip deterministic even when an operator ran `node --test` locally before deploying.
+
 ## [3.64.0] - 2026-04-11
 
 ### Changed

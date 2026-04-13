@@ -403,3 +403,5 @@ CLAUDE.local.md
 .codex
 
 .claude/scheduled_tasks.lock
+
+.playwright-mcp/

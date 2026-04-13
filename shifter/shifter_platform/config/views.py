@@ -13,9 +13,22 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from config import identity_platform as identity_platform_auth
+from risk_register.models import AuditLog
+from risk_register.services import audit_auth_event
 from shared.auth import is_ctf_organizer, is_ctf_participant
 
 logger = logging.getLogger(__name__)
+
+
+def _request_source_ip(request) -> str | None:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if xff:
+        return xff.split(",")[0].strip() or None
+    return request.META.get("REMOTE_ADDR") or None
+
+
+def _request_user_agent(request) -> str:
+    return request.META.get("HTTP_USER_AGENT", "")[:500]
 
 
 def home(request):
@@ -80,18 +93,39 @@ def identity_platform_session(request):
     if settings.AUTH_PROVIDER != "identity_platform":
         return JsonResponse({"error": "unsupported_auth_provider"}, status=403)
 
+    source_ip = _request_source_ip(request)
+    user_agent = _request_user_agent(request)
+
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except json.JSONDecodeError:
+        audit_auth_event(
+            action=AuditLog.Action.LOGIN_FAILED,
+            source_ip=source_ip,
+            user_agent=user_agent,
+            context="Identity Platform session exchange received non-JSON body",
+        )
         return JsonResponse({"error": "invalid_request", "message": "Request body must be valid JSON."}, status=400)
 
     id_token = str(payload.get("idToken", "")).strip()
     if not id_token:
+        audit_auth_event(
+            action=AuditLog.Action.LOGIN_FAILED,
+            source_ip=source_ip,
+            user_agent=user_agent,
+            context="Identity Platform session exchange missing idToken",
+        )
         return JsonResponse({"error": "invalid_request", "message": "An ID token is required."}, status=400)
 
     try:
         user = identity_platform_auth.login_with_identity_token(request, id_token)
     except identity_platform_auth.IdentityPlatformAuthError as exc:
+        audit_auth_event(
+            action=AuditLog.Action.LOGIN_FAILED,
+            source_ip=source_ip,
+            user_agent=user_agent,
+            context=f"Identity Platform session exchange rejected ({exc.code}): {exc}",
+        )
         return JsonResponse(
             {"error": exc.code, "message": str(exc)},
             status=403,

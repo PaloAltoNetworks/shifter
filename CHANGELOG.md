@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.93.0] - 2026-04-13
+
+### Fixed
+
+- **polaris user_data IMDS credential race during cold first boot.**
+  When the instance profile attaches but IMDS hasn't finished propagating
+  credentials, the first `aws s3 cp` fails with
+  `fatal error: Unable to locate credentials` and cloud-init's final
+  stage exits non-zero — exactly what we hit on range 1 of the 3-range
+  smoke bring-up. `user_data.sh.tpl` now polls `aws sts get-caller-identity`
+  up to 30 times (4s spacing = 120s ceiling) before the S3 download, so
+  the instance waits out the propagation window instead of failing hard.
+- **polaris `dns` container zone file was hard-coded to
+  `dc01 → 10.1.100.11`**, which is correct for range 0 but wrong for
+  every subsequent range — range 1's kali resolved the AD DC name to
+  range 0's DC and would have attacked the wrong forest. BIND zone file
+  now has a `__DC01_IP__` placeholder, and the container has a new
+  `entrypoint.sh` that `sed`-substitutes `$DC01_IP` (passed from
+  `docker-compose.override.yml` via user_data) before exec'ing `named`.
+  `user_data.sh.tpl` writes the override with `DC01_IP` set to the
+  range's a2 private IP, plumbed through from the `aws_instance.polaris`
+  `templatefile()` call via a new `a2_private_ip` per-range input
+  (`each.value.a2_ip` in `ranges.tf`).
+
+### Added
+
+- **`scripts/polaris-aws-range/register_ranges_parallel.sh`** — batch
+  registers every range in `terraform output range_indices` by pulling
+  the per-index polaris instance id + subnet id + subnet cidr + private
+  IP from `terraform output -json`, staging `register_range.py` once on
+  the portal EC2, and running it per-range with the matching `POLARIS_*`
+  env vars. Emits one JSON object per range on stdout
+  (`{"attacker_uuid","range_id","range_index","participant_email"}`)
+  so follow-up tooling (playwright harness, CTF invite) can consume
+  the mapping without re-querying terraform.
+
 ## [3.92.0] - 2026-04-13
 
 ### Fixed

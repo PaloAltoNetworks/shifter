@@ -65,6 +65,7 @@ def test_platform_login_renders_provider_driven_identity_page(client):
     assert b'id="identity-auth-form"' in response.content
     assert b'id="identity-email"' in response.content
     assert b'id="identity-password"' in response.content
+    assert b'id="identity-totp-qr-canvas"' in response.content
     assert b"firebase-ui-auth.js" not in response.content
     assert b"firebase-app-compat.js" not in response.content
     assert b"firebase-auth-compat.js" not in response.content

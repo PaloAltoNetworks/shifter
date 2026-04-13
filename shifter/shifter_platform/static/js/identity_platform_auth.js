@@ -39,6 +39,7 @@
     (async function initializeIdentityPlatform() {
         let firebaseAppSdk;
         let firebaseAuthSdk;
+        let qrcodeSdk;
 
         try {
             // Firebase TOTP MFA is only supported on the modular Web SDK, not
@@ -46,12 +47,19 @@
             // existing logout path's trust model: TLS to Google's CDN rather than
             // per-dependency SRI on each imported module. If that tradeoff ever
             // becomes unacceptable, vendor the modular SDK under /static instead.
-            [firebaseAppSdk, firebaseAuthSdk] = await Promise.all([
+            //
+            // node-qrcode renders the TOTP enrollment QR client-side. jsdelivr's
+            // `+esm` bundler serves the browser entry as an ES module; SRI is
+            // intentionally not set on this dynamically-bundled file (see the
+            // banner comment in the bundle itself). Same CDN trust model as the
+            // Firebase imports above.
+            [firebaseAppSdk, firebaseAuthSdk, qrcodeSdk] = await Promise.all([
                 import("https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js"),
                 import("https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js"),
+                import("https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm"),
             ]);
         } catch (error) {
-            console.error("Firebase SDK failed to load; sign-in is unavailable.", error);
+            console.error("Authentication SDK failed to load; sign-in is unavailable.", error);
             fatalBanner(
                 "Authentication services could not load. Reload the page, and if the problem persists contact the Shifter operators."
             );
@@ -74,6 +82,7 @@
             signInWithEmailAndPassword,
             signOut,
         } = firebaseAuthSdk;
+        const { toCanvas: renderQrToCanvas } = qrcodeSdk;
 
         const config = JSON.parse(configScript.textContent);
         const existingApp = getApps().find((candidate) => candidate.name === "[DEFAULT]");
@@ -298,10 +307,18 @@
             const multiFactorSession = await multiFactor(user).getSession();
             pendingTotpSecret = await TotpMultiFactorGenerator.generateSecret(multiFactorSession);
 
-            document.getElementById("identity-totp-qr-url").textContent = pendingTotpSecret.generateQrCodeUrl(
-                user.email,
-                config.issuer
-            );
+            const otpauthUri = pendingTotpSecret.generateQrCodeUrl(user.email, config.issuer);
+            const qrCanvas = document.getElementById("identity-totp-qr-canvas");
+            await renderQrToCanvas(qrCanvas, otpauthUri, {
+                width: 240,
+                margin: 1,
+                errorCorrectionLevel: "M",
+                color: {
+                    dark: "#0f172a",
+                    light: "#ffffff",
+                },
+            });
+
             document.getElementById("identity-totp-secret").textContent = pendingTotpSecret.secretKey;
             document.getElementById("identity-totp-enrollment-code").value = "";
             if (message) {

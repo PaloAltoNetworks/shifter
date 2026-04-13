@@ -149,6 +149,46 @@
             font-size: 0.92rem;
             color: var(--muted);
         }
+
+        .qr-wrap {
+            display: flex;
+            justify-content: center;
+            margin: 1rem 0 1.25rem;
+        }
+
+        #identity-totp-qr-canvas {
+            background: #ffffff;
+            padding: 12px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.4);
+        }
+
+        details.meta {
+            margin-top: 1rem;
+        }
+
+        details.meta summary {
+            cursor: pointer;
+            padding: 0.35rem 0;
+            font-weight: 600;
+            color: var(--muted);
+            list-style: none;
+        }
+
+        details.meta summary::-webkit-details-marker {
+            display: none;
+        }
+
+        details.meta summary::before {
+            content: "▸";
+            display: inline-block;
+            margin-right: 0.4rem;
+            transition: transform 0.15s ease;
+        }
+
+        details.meta[open] summary::before {
+            transform: rotate(90deg);
+        }
     </style>
 </head>
 <body>
@@ -192,16 +232,16 @@
         <section id="identity-totp-enrollment-section" class="section">
             <h1>Set up multi-factor authentication</h1>
             <p>
-                Add the secret below to your authenticator app, then enter the current six-digit code to finish sign-in.
+                Scan this QR code with your authenticator app (1Password, Authy, Google Authenticator, …),
+                then enter the six-digit code it generates to finish sign-in.
             </p>
-            <div class="meta">
-                <strong>Authenticator URI</strong>
-                <div id="identity-totp-qr-url" class="secret-block"></div>
+            <div class="qr-wrap">
+                <canvas id="identity-totp-qr-canvas" width="240" height="240" aria-label="TOTP setup QR code"></canvas>
             </div>
-            <div class="meta">
-                <strong>Secret key</strong>
+            <details class="meta">
+                <summary>Can't scan? Enter the secret manually.</summary>
                 <div id="identity-totp-secret" class="secret-block"></div>
-            </div>
+            </details>
             <div class="field">
                 <label for="identity-totp-enrollment-code">Verification code</label>
                 <input id="identity-totp-enrollment-code" type="text" inputmode="numeric" autocomplete="one-time-code">

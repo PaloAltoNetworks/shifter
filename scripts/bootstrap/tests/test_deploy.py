@@ -2391,6 +2391,23 @@ class TestGcpPlatformCoreContracts:
             in module_main
         )
 
+    def test_gcp_storage_signed_url_support_is_enabled_for_workload_identity(self):
+        """GKE Workload Identity needs IAM signBlob support for GCS signed URLs."""
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "platform"
+            / "terraform"
+            / "gcp"
+            / "modules"
+            / "platform-core"
+            / "main.tf"
+        )
+        module_main = module_path.read_text()
+
+        assert '"iamcredentials.googleapis.com"' in module_main
+        assert 'resource "google_service_account_iam_member" "portal_self_token_creator"' in module_main
+        assert "roles/iam.serviceAccountTokenCreator" in module_main
+
     def test_cloud_armor_sqli_rule_opts_out_known_false_positive_signature(self):
         """The edge WAF should not block the portal landing/login flow on the known false-positive rule."""
         module_path = (

@@ -79,6 +79,7 @@ locals {
     "cloudbuild.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
+    "iamcredentials.googleapis.com",
     "identitytoolkit.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
@@ -806,6 +807,12 @@ resource "google_service_account_iam_member" "workload_identity" {
   service_account_id = google_service_account.workload[each.key].name
   role               = "roles/iam.workloadIdentityUser"
   member             = each.value
+}
+
+resource "google_service_account_iam_member" "portal_self_token_creator" {
+  service_account_id = google_service_account.workload["portal"].name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.workload["portal"].email}"
 }
 
 resource "google_container_node_pool" "workers" {

@@ -22,6 +22,36 @@ class GCPObjectStorage:
         except ImportError as e:
             raise CloudStorageError("GCP storage support requires google-cloud-storage") from e
 
+    def _signed_url_kwargs(self, client: Any) -> dict[str, Any]:
+        """Build signed-URL kwargs that work with Workload Identity credentials.
+
+        GKE Workload Identity and other metadata-backed credentials expose a
+        service account email plus an OAuth access token, but not a local
+        private key. google-cloud-storage can still generate V4 signed URLs via
+        IAM signBlob when both values are supplied explicitly.
+        """
+        credentials = getattr(client, "_credentials", None)
+        if credentials is None:
+            return {}
+
+        service_account_email = getattr(credentials, "service_account_email", None)
+        if not service_account_email:
+            return {}
+
+        if getattr(credentials, "token", None) is None or getattr(credentials, "expired", False):
+            transport_requests = import_google_module("google.auth.transport.requests")
+            credentials.refresh(transport_requests.Request())
+
+        access_token = getattr(credentials, "token", None)
+        if not access_token:
+            raise CloudStorageError("Failed to refresh GCP access token for signed URL generation")
+
+        return {
+            "version": "v4",
+            "service_account_email": service_account_email,
+            "access_token": access_token,
+        }
+
     def upload_file(
         self,
         file_obj: Any,
@@ -77,11 +107,12 @@ class GCPObjectStorage:
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
+            signed_url_kwargs = self._signed_url_kwargs(client)
             return blob.generate_signed_url(
-                version="v4",
                 expiration=timedelta(seconds=expires_in),
                 method="PUT",
                 content_type=content_type,
+                **signed_url_kwargs,
             )
         except Exception as e:
             logger.error("generate_presigned_upload_url: failed bucket=%s key=%s error=%s", bucket, key, e)
@@ -97,10 +128,11 @@ class GCPObjectStorage:
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
+            signed_url_kwargs = self._signed_url_kwargs(client)
             return blob.generate_signed_url(
-                version="v4",
                 expiration=timedelta(seconds=expires_in),
                 method="GET",
+                **signed_url_kwargs,
             )
         except Exception as e:
             logger.error("generate_presigned_download_url: failed bucket=%s key=%s error=%s", bucket, key, e)

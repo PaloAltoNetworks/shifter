@@ -78,7 +78,22 @@ def render_env(outputs: dict[str, object]) -> str:
 
     site_url = f"https://{public_hostname}"
     allowed_hosts = ",".join(_unique([public_hostname, public_ingress_ip, "localhost", "127.0.0.1"]))
-    csrf_origins = _unique([site_url])
+    # The public HTTPS origin is the primary CSRF-trusted origin. The localhost
+    # port-forward origins are added so operators running
+    # `kubectl port-forward svc/portal-web <local>:8000` can POST to
+    # /auth/identity/session/ and /dev-login/ without tripping Django's CSRF
+    # middleware — same UAT path that ENVIRONMENT=gcp-dev gates /dev-login/ on.
+    # These entries are host+scheme only; they do not grant any cross-origin
+    # cookie delivery because SameSite rules still apply.
+    csrf_origins = _unique(
+        [
+            site_url,
+            "http://localhost:18080",
+            "http://127.0.0.1:18080",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+    )
 
     bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))
     bootstrap_superuser_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"))

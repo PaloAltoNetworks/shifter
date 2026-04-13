@@ -38,13 +38,21 @@ class GCPObjectStorage:
         if not service_account_email:
             return {}
 
-        if getattr(credentials, "token", None) is None or getattr(credentials, "expired", False):
+        if (
+            service_account_email == "default"
+            or getattr(credentials, "token", None) is None
+            or getattr(credentials, "expired", False)
+        ):
             transport_requests = import_google_module("google.auth.transport.requests")
             credentials.refresh(transport_requests.Request())
+            service_account_email = getattr(credentials, "service_account_email", None)
 
         access_token = getattr(credentials, "token", None)
         if not access_token:
             raise CloudStorageError("Failed to refresh GCP access token for signed URL generation")
+
+        if not service_account_email or service_account_email == "default":
+            raise CloudStorageError("Failed to resolve GCP service account email for signed URL generation")
 
         return {
             "version": "v4",

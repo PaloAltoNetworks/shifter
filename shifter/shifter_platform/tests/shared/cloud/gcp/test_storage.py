@@ -59,6 +59,36 @@ class TestSignedUrlKwargs:
         credentials.refresh.assert_not_called()
         import_google_module.assert_not_called()
 
+    def test_refreshes_when_metadata_credentials_still_report_default_email(self, monkeypatch):
+        storage = GCPObjectStorage()
+        credentials = SimpleNamespace(
+            service_account_email="default",
+            token="cached-token",
+            expired=False,
+        )
+
+        def _refresh(_request):
+            credentials.service_account_email = "portal@test-project.iam.gserviceaccount.com"
+
+        credentials.refresh = Mock(side_effect=_refresh)
+        client = SimpleNamespace(_credentials=credentials)
+
+        request_factory = Mock(return_value="request-sentinel")
+        transport_requests = SimpleNamespace(Request=request_factory)
+        import_google_module = Mock(return_value=transport_requests)
+        monkeypatch.setattr("shared.cloud.gcp.storage.import_google_module", import_google_module)
+
+        result = storage._signed_url_kwargs(client)
+
+        assert result == {
+            "version": "v4",
+            "service_account_email": "portal@test-project.iam.gserviceaccount.com",
+            "access_token": "cached-token",
+        }
+        import_google_module.assert_called_once_with("google.auth.transport.requests")
+        request_factory.assert_called_once_with()
+        credentials.refresh.assert_called_once_with("request-sentinel")
+
     def test_returns_empty_kwargs_when_credentials_have_no_service_account_email(self):
         storage = GCPObjectStorage()
         client = SimpleNamespace(_credentials=SimpleNamespace(token="token"))

@@ -99,7 +99,13 @@ def test_render_env_always_emits_identity_platform_with_secure_cookies():
     assert "AUTH_PROVIDER=identity_platform\n" in rendered
     assert "SITE_URL=https://shifter.keplerops.com\n" in rendered
     assert "DJANGO_ALLOWED_HOSTS=shifter.keplerops.com,10.0.0.30,localhost,127.0.0.1\n" in rendered
-    assert "DJANGO_CSRF_TRUSTED_ORIGINS=https://shifter.keplerops.com\n" in rendered
+    assert (
+        "DJANGO_CSRF_TRUSTED_ORIGINS=https://shifter.keplerops.com,"
+        "http://localhost:18080,"
+        "http://127.0.0.1:18080,"
+        "http://localhost:8000,"
+        "http://127.0.0.1:8000\n"
+    ) in rendered
     assert "IDENTITY_PLATFORM_API_KEY=identity-platform-api-key\n" in rendered
     assert "IDENTITY_PLATFORM_PROJECT_ID=shifter-gcp-dev\n" in rendered
     assert "IDENTITY_PLATFORM_AUTH_DOMAIN=shifter-gcp-dev.firebaseapp.com\n" in rendered

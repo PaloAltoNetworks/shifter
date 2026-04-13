@@ -46,9 +46,9 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
    sshpass -p build2025 ssh -o StrictHostKeyChecking=no jenkins@eng-ws01.boreas.local
    ```
    (`jenkins / build2025` is a classic weak-default CI cred — your A16 `research-analyst` key does NOT grant jenkins access; you need to guess or discover the jenkins password. It shows up in several public CI image defaults.)
-2. In the jenkins home directory, read `.credentials`:
+2. Read jenkins's credentials file (use the absolute path — `~` only resolves to `/home/jenkins` once you're actually sitting in jenkins's interactive shell, so the absolute path is safe no matter how you invoke the command):
    ```
-   cat ~/.credentials
+   cat /home/jenkins/.credentials
    ```
 3. The flag is stored as a "deploy token" value.
 

@@ -22,9 +22,29 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 ## Flag 8 — Employee Email with Project Hints (Easy, 50pts)
 
 1. Log into the webmail (Roundcube) at `http://mail.boreas.local` as an employee to prove the webmail is reachable. Try `d.kowalski` / `P@ssw0rd123` (found from the config leak on A3 or from A0's employee directory + password guessing).
-2. The flag-carrying email lives in **Dr. Vasik's** inbox, not Kowalski's. Roundcube is per-user login, so log out of Kowalski and log back in as `e.vasik` / `Reactor#Core9` (her password is discoverable from the A3 `/search` SQL-injection user-table dump, or via the Project-L hints in Kowalski's own mail). Alternatively, use IMAP directly: `curl --url "imap://mail.boreas.local/INBOX" --user "e.vasik:Reactor#Core9"`.
+2. The flag-carrying email lives in **Dr. Vasik's** inbox, not Kowalski's. Roundcube is per-user login, so log out of Kowalski and log back in as `e.vasik` / `Reactor#Core9` (her password is discoverable from the A3 `/search` SQL-injection user-table dump, or via the Project-L hints in Kowalski's own mail).
 3. In Vasik's inbox find the email with subject "Re: Locomotion milestone? [with attachment]" (there is a second, plain reply with subject "Re: Locomotion milestone?" — the one you want carries the PDF `project_status_report_oct2025.pdf`).
-4. Open the PDF. At the bottom it has a Report ID containing the flag.
+4. Open the PDF in Roundcube and scroll to the bottom — it has a Report ID containing the flag.
+
+**CLI alternative** (if you're driving this from a Kali terminal instead of the browser): Roundcube does MIME decoding for you; from the command line you need to do it yourself. This one-liner fetches Vasik's inbox over IMAP, walks the message tree, and writes the PDF attachment to `/tmp/report.pdf` for `pdf2txt.py`:
+
+```bash
+python3 <<'PY'
+import imaplib, email
+M = imaplib.IMAP4('mail.boreas.local')
+M.login('e.vasik', 'Reactor#Core9')
+M.select('INBOX')
+_, data = M.search(None, 'SUBJECT "with attachment"')
+_, msg_data = M.fetch(data[0].split()[-1], '(RFC822)')
+msg = email.message_from_bytes(msg_data[0][1])
+for part in msg.walk():
+    if part.get_filename() == 'project_status_report_oct2025.pdf':
+        open('/tmp/report.pdf', 'wb').write(part.get_payload(decode=True))
+        break
+print('saved /tmp/report.pdf')
+PY
+pdf2txt.py /tmp/report.pdf | grep -oE 'FLAG\{[a-f0-9]+\}'
+```
 
 **Expected flag:** `FLAG{3b7e9a2d1c8f4063}`
 
@@ -51,6 +71,24 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
    - This password is discoverable from the A0 employee directory (Kowalski is listed) + common password guessing, or from the `.env` config on A3.
 2. In Kowalski's inbox, find the first email: "Welcome to your Boreas Systems mailbox" from `postmaster@boreas.local`.
 3. The email contains an "Account activation token" which is the flag.
+
+**CLI alternative** (from a Kali terminal — the body is base64-encoded over IMAP, so you need to decode it, which Roundcube does for you automatically):
+
+```bash
+python3 <<'PY'
+import imaplib, email
+M = imaplib.IMAP4('mail.boreas.local')
+M.login('d.kowalski', 'P@ssw0rd123')
+M.select('INBOX')
+_, data = M.search(None, 'FROM "postmaster"')
+_, msg_data = M.fetch(data[0].split()[0], '(RFC822)')
+msg = email.message_from_bytes(msg_data[0][1])
+for part in msg.walk():
+    if part.get_content_type() == 'text/plain':
+        print(part.get_payload(decode=True).decode())
+        break
+PY
+```
 
 **Expected flag:** `FLAG{e5d1f8c2a7b03946}`
 

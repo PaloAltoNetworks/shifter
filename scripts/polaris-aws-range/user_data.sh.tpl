@@ -50,6 +50,21 @@ for svc in ssh xrdp xrdp-sesman apache2 smbd nmbd mysql vsftpd; do
     systemctl mask "$svc" 2>/dev/null || true
 done
 
+# Wait for IMDS to return the instance-profile credentials before we
+# call any aws cli command. First-boot user_data can race ahead of the
+# attachment propagation and hit "Unable to locate credentials" (seen
+# on polaris range 1 during the 3-range bring-up test). `aws sts
+# get-caller-identity` is the canonical probe and takes ~1s once the
+# role is ready.
+for attempt in $(seq 1 30); do
+  if aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "IMDS credentials available (attempt $attempt)"
+    break
+  fi
+  echo "waiting for IMDS instance-profile credentials... (attempt $attempt/30)"
+  sleep 4
+done
+
 # Pull the polaris build tarball via the instance profile.
 mkdir -p /opt/polaris
 cd /opt/polaris
@@ -60,11 +75,13 @@ tar xzf polaris-build.tar.gz
 cd /opt/polaris/scenario-dev/polaris/build
 
 # Publish the Kali container's sshd (22) and xrdp (3389) on the EC2 host
-# so the Shifter portal (terminal UI + Guacamole RDP) can reach them, and
+# so the Shifter portal (terminal UI + Guacamole RDP) can reach them,
 # pass the operator SSH pubkey as a KALI_AUTHORIZED_KEY env var so the
 # a14 entrypoint can inject it into /home/kali/.ssh/authorized_keys on
-# every container start. We use a placeholder + python replace pass so
-# the pubkey can contain any shell-meaningful characters without
+# every container start, and pass the range-specific A2 DC IP into the
+# dns container so its boreas.local zone resolves dc01 to the DC inside
+# this range's /28 (not range 0's). We use a placeholder + python replace
+# pass so the pubkey can contain any shell-meaningful characters without
 # breaking the YAML (terraform already rendered ${kali_authorized_key}
 # inline at plan time).
 cat > docker-compose.override.yml <<'COMPOSE_EOF'
@@ -75,13 +92,18 @@ services:
       - "3389:3389"
     environment:
       KALI_AUTHORIZED_KEY: "__KALI_AUTHORIZED_KEY_PLACEHOLDER__"
+  dns:
+    environment:
+      DC01_IP: "__DC01_IP_PLACEHOLDER__"
 COMPOSE_EOF
 
 python3 - <<'PY'
 key = """${kali_authorized_key}"""
+dc01_ip = """${a2_private_ip}"""
 with open("docker-compose.override.yml") as f:
     content = f.read()
 content = content.replace("__KALI_AUTHORIZED_KEY_PLACEHOLDER__", key)
+content = content.replace("__DC01_IP_PLACEHOLDER__", dc01_ip)
 with open("docker-compose.override.yml", "w") as f:
     f.write(content)
 PY

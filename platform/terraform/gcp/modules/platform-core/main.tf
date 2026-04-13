@@ -475,12 +475,33 @@ resource "google_logging_metric" "identity_platform_user_created_count" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_monitoring_notification_channel" "identity_platform_user_created_email" {
+  count        = var.monitoring_alert_email != "" ? 1 : 0
+  project      = var.project_id
+  display_name = "Identity Platform user creation alerts (${var.environment})"
+  type         = "email"
+
+  labels = {
+    email_address = var.monitoring_alert_email
+  }
+
+  user_labels = local.common_labels
+
+  depends_on = [google_project_service.required]
+}
+
+resource "time_sleep" "identity_platform_user_created_metric_propagated" {
+  create_duration = "600s"
+
+  depends_on = [google_logging_metric.identity_platform_user_created_count]
+}
+
 resource "google_monitoring_alert_policy" "identity_platform_user_created_rate" {
   project               = var.project_id
   display_name          = "Identity Platform user creation rate spike"
   combiner              = "OR"
   enabled               = true
-  notification_channels = var.monitoring_notification_channels
+  notification_channels = google_monitoring_notification_channel.identity_platform_user_created_email[*].name
 
   documentation {
     mime_type = "text/markdown"
@@ -511,7 +532,10 @@ resource "google_monitoring_alert_policy" "identity_platform_user_created_rate" 
 
   user_labels = local.common_labels
 
-  depends_on = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    time_sleep.identity_platform_user_created_metric_propagated,
+  ]
 }
 
 resource "google_secret_manager_secret" "runtime" {

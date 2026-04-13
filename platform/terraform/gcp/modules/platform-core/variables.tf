@@ -223,8 +223,8 @@ variable "identity_user_creation_rate_window" {
   default     = "300s"
 }
 
-variable "monitoring_notification_channels" {
-  description = "Monitoring notification channel IDs for GCP alert policies."
-  type        = list(string)
-  default     = []
+variable "monitoring_alert_email" {
+  description = "Email address that receives GCP auth security alerts."
+  type        = string
+  default     = ""
 }

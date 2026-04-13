@@ -41,3 +41,4 @@ dns_record_ttl          = 300
 
 identity_allowed_email_domain = "paloaltonetworks.com"
 identity_allowed_emails       = []
+monitoring_alert_email        = "bedwards@paloaltonetworks.com"

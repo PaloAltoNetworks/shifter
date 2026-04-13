@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `lifecycle { prevent_destroy = true }` on `google_compute_global_address.platform_ingress`. External DNS (shifter.keplerops.com) is pinned to that static IP; accidental destroy/replace would strand DNS and force full ManagedCertificate re-provisioning.
 - `LOGIN_FAILED` audit events emitted from `config/views.identity_platform_session` for every rejected exchange (non-JSON body, missing token, domain rejection, verification/MFA gating failures), matching the OIDC `ShifterOIDCBackend` audit trail.
-- GCP log-based metric + alert policy for unexpected Identity Platform-backed user creation spikes, driven from the application security log event `security.auth.user_created provider=identity_platform`.
+- GCP log-based metric + alert policy for unexpected Identity Platform-backed user creation spikes, driven from the application security log event `security.auth.user_created provider=identity_platform` and routed to the configured `monitoring_alert_email`.
 - Regression tests: `tests/config/test_identity_platform.py::test_platform_login_never_leaks_external_email_allowlist_to_client`, `::test_identity_platform_session_audit_logs_rejected_exchange`, and `::test_identity_platform_session_audit_logs_invalid_body`.
 
 ### Fixed

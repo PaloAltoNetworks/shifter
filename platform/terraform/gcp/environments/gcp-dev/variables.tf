@@ -187,3 +187,9 @@ variable "identity_allowed_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "monitoring_alert_email" {
+  description = "Email address that receives GCP auth security alerts."
+  type        = string
+  default     = ""
+}

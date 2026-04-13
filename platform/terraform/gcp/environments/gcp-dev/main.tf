@@ -66,5 +66,6 @@ module "platform_core" {
   dns_record_ttl                 = var.dns_record_ttl
   identity_allowed_email_domain  = var.identity_allowed_email_domain
   identity_allowed_emails        = var.identity_allowed_emails
+  monitoring_alert_email         = var.monitoring_alert_email
   labels                         = local.labels
 }

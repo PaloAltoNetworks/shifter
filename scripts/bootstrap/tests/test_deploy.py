@@ -2366,6 +2366,7 @@ class TestGcpPlatformCoreContracts:
         assert 'provider "google-beta" {' not in env_main
         assert "google-beta = google-beta" not in env_main
         assert "archive = {" not in env_main
+        assert "monitoring_alert_email" in env_main
 
     def test_identity_platform_user_creation_alerting_is_present(self):
         """The live auth path must emit and alert on unexpected user-creation spikes."""
@@ -2382,6 +2383,8 @@ class TestGcpPlatformCoreContracts:
 
         assert 'resource "google_logging_metric" "identity_platform_user_created_count"' in module_main
         assert "security.auth.user_created provider=identity_platform" in module_main
+        assert 'resource "google_monitoring_notification_channel" "identity_platform_user_created_email"' in module_main
+        assert 'resource "time_sleep" "identity_platform_user_created_metric_propagated"' in module_main
         assert 'resource "google_monitoring_alert_policy" "identity_platform_user_created_rate"' in module_main
         assert (
             "logging.googleapis.com/user/${google_logging_metric.identity_platform_user_created_count.name}"

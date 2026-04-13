@@ -2,7 +2,7 @@
 # A2 Windows Domain Controller smoketest.
 #
 # Runs every flag path from an attacker's perspective against the live
-# boreas.local DC (GCE VM at 10.100.0.4 / dc01.boreas.local). Intended to
+# boreas.local DC (Windows Server 2022 at 10.1.100.11 / dc01.boreas.local). Intended to
 # be executed from inside the a14-kali container. Every assertion mirrors
 # what a participant would do in a walkthrough.
 #
@@ -17,7 +17,7 @@
 
 set -u
 
-DC_IP="${A2_DC_IP:-10.100.0.4}"
+DC_IP="${A2_DC_IP:-10.1.100.11}"
 DC_HOST="${A2_DC_HOST:-dc01.boreas.local}"
 DOMAIN="${A2_DOMAIN:-BOREAS.LOCAL}"
 PROBE_USER="${A2_PROBE_USER:-e.vasik}"

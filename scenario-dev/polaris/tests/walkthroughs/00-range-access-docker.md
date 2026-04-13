@@ -21,7 +21,7 @@ The Kali container is on two networks: `shared` (172.20.0.x) and `corporate` (17
 | A4 File Share | fileserv.boreas.local | 172.20.10.40 | 445 | `smbclient //172.20.10.40/Public` |
 | A16 Ops Eng | ops-eng01.boreas.local | 172.20.10.50 | 22, 80 | Pivot host for SCADA (flag 37 gate) |
 | A16 Research Analyst | analyst01.boreas.local | 172.20.10.60 | 22, 8080 | Pivot host for Lab + Gitea (flag 38) |
-| A2 Windows DC | dc01.boreas.local | 10.100.0.4 | 88,389,445 | External VM, reachable from corporate net |
+| A2 Windows DC | dc01.boreas.local | 10.1.100.11 | 53, 88, 135, 389, 445, 464, 636, 3268, 3269, 49152-65535 | Windows Server 2022 AD DC in the range VPC (adjacent to the docker host) — reachable from Kali via `dc01.boreas.local` through the compose DNS forwarder |
 
 ### What Kali CANNOT reach (requires pivot)
 

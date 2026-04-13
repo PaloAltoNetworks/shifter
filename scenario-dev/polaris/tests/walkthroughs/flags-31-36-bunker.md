@@ -26,10 +26,16 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ## Flag 31 — OT Network Enumeration (Medium, 100pts)
 
-1. From the splice landing box (A9), scan the OT network. Pre-populated scan results are at `/root/scan_results.txt`, or run:
+1. From the splice landing box (A9), read the pre-populated OT network scan
+   results — this is the fastest path and is what every walkthrough run
+   should use by default:
    ```
-   nmap -sV -p 502,9100 172.20.50.0/24
+   cat /root/scan_results.txt
    ```
+   (An `nmap -sV -p 502,9100 172.20.50.0/24` run also works, but the live
+   service-version probe can take several minutes from inside the A9 shell
+   because Modbus servers respond slowly to `-sV` banner grabs. Prefer the
+   pre-populated file.)
    You'll find four hosts: 172.20.50.10, .11, .12 (Modbus/TCP 502) and 172.20.50.50 (TCP 9100).
 
 2. Query each controller's device identification using Modbus function code 43. Use the helper script:

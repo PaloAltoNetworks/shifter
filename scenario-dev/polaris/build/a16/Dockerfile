@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client rsync git curl gnupg \
     python3 python3-flask python3-psycopg2 \
     ca-certificates coreutils \
+    binutils file xxd \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd
 

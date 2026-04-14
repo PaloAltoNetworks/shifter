@@ -34,6 +34,13 @@ class InstanceConfig(BaseModel):
         domain_controller: Whether this instance is a domain controller.
         join_domain: Whether this instance should join the domain.
         dc_config: Domain controller configuration (if domain_controller=True).
+        ami_key: Custom AMI override resolved via SSM `/shifter/ami/<key>`.
+        instance_type: Per-instance EC2 instance type override. When unset,
+            the provisioner falls back to the role/os-based default
+            (`KALI_INSTANCE_TYPE`, `VICTIM_INSTANCE_TYPE`, etc.). Use this
+            when one specific instance in a scenario needs a larger box
+            than the global default — e.g. POLARIS's polaris-vm runs 17
+            docker containers including a Kali GUI and needs m5.2xlarge.
     """
 
     name: str
@@ -44,6 +51,7 @@ class InstanceConfig(BaseModel):
     join_domain: bool = False
     dc_config: DCConfig | None = None
     ami_key: str | None = None
+    instance_type: str | None = None
 
     @model_validator(mode="after")
     def validate_dc_config(self) -> InstanceConfig:

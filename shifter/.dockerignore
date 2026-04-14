@@ -1,0 +1,38 @@
+# Generic Python cruft
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.egg-info/
+
+# Local dev artifacts — NEVER bake into a production image.
+# shifter_platform/.env carries AWS_ENDPOINT_URL=http://localhost:4566 for
+# local LocalStack dev; copying it into the image poisons boto3 for every
+# service running in the container, pointing SQS/S3/SNS/Secrets at a
+# nonexistent localhost LocalStack.
+**/.env
+**/.env.*
+!.env.example
+
+# Virtualenvs and build caches
+**/.venv/
+**/venv/
+**/node_modules/
+
+# VCS / tooling
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# IDE noise
+.vscode/
+.idea/
+*.swp
+
+# Test and coverage artifacts
+**/.coverage
+**/htmlcov/
+**/coverage.xml

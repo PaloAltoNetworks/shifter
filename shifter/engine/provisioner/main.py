@@ -44,6 +44,7 @@ from events import (
 from executors.aws_executor import AWSExecutor
 from executors.factory import build_guest_execution_context, get_ssh_username
 from executors.ngfw_executor import NGFWExecutor
+from executors.ssm_executor import SSMExecutor
 from ngfw_terraform import run_ngfw_terraform
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
@@ -54,6 +55,7 @@ from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSubnetsPlan
+from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
 
 logger = logging.getLogger(__name__)
@@ -1820,6 +1822,70 @@ def _run_single_instance_setup(
         execution.close()
 
 
+def _run_polaris_range_bootstrap(
+    instance_id: str,
+    dc_ip: str,
+    public_key: str,
+) -> None:
+    """Run PolarisRangeBootstrapPlan against a polaris VM instance.
+
+    Called from setup_instance after the generic LinuxBootstrapPlan
+    finishes, when the instance's ami_key is "polaris-vm". Rewrites
+    /opt/polaris/scenario-dev/polaris/build/docker-compose.override.yml
+    on the host with this range's actual DC IP and per-instance kali
+    pubkey, then force-recreates the dns + a14-kali containers so their
+    entrypoints pick up the new env vars.
+
+    Args:
+        instance_id: EC2 instance ID of the polaris VM.
+        dc_ip: Private IP of this range's A2 DC. Must be non-empty.
+        public_key: Per-instance SSH public key from
+            tls_private_key.instance. Must be non-empty.
+
+    Raises:
+        SetupError: If the rewrite or container recreation fails, or
+            if dc_ip / public_key are empty.
+    """
+    if not dc_ip:
+        raise SetupError(
+            f"polaris range bootstrap for {instance_id}: dc_ip is empty "
+            "(scenario must include a role=dc instance so the DC's "
+            "private IP can be discovered)"
+        )
+    if not public_key:
+        raise SetupError(
+            f"polaris range bootstrap for {instance_id}: public_key is empty "
+            "(per-instance ssh key from tls_private_key.instance was not propagated)"
+        )
+
+    logger.info(
+        "Running polaris range bootstrap on %s (dc_ip=%s, key length=%d)",
+        instance_id,
+        dc_ip,
+        len(public_key),
+    )
+
+    executor = SSMExecutor()
+    orchestrator = SetupOrchestrator(executor=executor)
+    plan = PolarisRangeBootstrapPlan()
+
+    class _PolarisCtx:
+        def __init__(self) -> None:
+            self.dc_ip = dc_ip
+            self.public_key = public_key
+
+    context = plan.get_context(_PolarisCtx())
+    result = orchestrator.orchestrate(
+        instance_id,
+        plan,
+        context,
+        document_name="AWS-RunShellScript",
+    )
+    if not result.success:
+        raise SetupError(f"polaris range bootstrap failed on {instance_id}: {result.error}")
+    logger.info("polaris range bootstrap complete for %s", instance_id)
+
+
 def _run_dc_setup(
     instance_data: dict[str, Any],
     instance_id: str,
@@ -1988,6 +2054,20 @@ def run_instance_setup(
                     instance_name=inst.get("hostname", "") or inst.get("name", ""),
                     range_id=range_id,
                 )
+                # Per-scenario post-bootstrap: the polaris VM AMI is
+                # pre-baked with a docker compose stack hardcoded to
+                # range 0's DC IP and the bake-time kali pubkey. After
+                # the generic LinuxBootstrapPlan finishes, rewrite the
+                # compose override + force-recreate the dns and
+                # a14-kali containers with this range's actual DC IP
+                # and per-instance pubkey. Gate on ami_key so this
+                # only fires for polaris instances.
+                if inst_config.get("ami_key") == "polaris-vm":
+                    _run_polaris_range_bootstrap(
+                        instance_id=inst_id,
+                        dc_ip=actual_dc_ip or "",
+                        public_key=inst.get("public_key", ""),
+                    )
                 return (inst_id, True, None)
             except Exception as e:
                 return (inst_id, False, str(e))
@@ -2568,8 +2648,17 @@ def _build_range_terraform_variables(
             else:
                 tf_os_type = "ubuntu"
 
-            # Get instance_type from role/os-based defaults (not in spec)
-            if role == "attacker":
+            # Honour per-instance override from the scenario spec when
+            # set, otherwise fall back to role/os-based defaults from
+            # the provisioner's *_INSTANCE_TYPE env vars. Per-instance
+            # override exists for cases like POLARIS where one specific
+            # instance (the polaris VM hosting 17 docker containers
+            # including a Kali GUI) needs a much bigger box than the
+            # global KALI_INSTANCE_TYPE default would give it.
+            instance_type_override = inst.get("instance_type")
+            if instance_type_override:
+                instance_type = instance_type_override
+            elif role == "attacker":
                 instance_type = _get_kali_instance_type()
             elif role == "dc":
                 instance_type = _get_dc_instance_type()

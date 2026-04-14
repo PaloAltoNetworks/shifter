@@ -226,3 +226,14 @@ resource "aws_ssm_parameter" "ctf_from_email" {
 
   tags = local.common_tags
 }
+
+resource "aws_ssm_parameter" "ctfd_platform_url" {
+  count = var.ctfd_platform_url != "" ? 1 : 0
+
+  name        = "${local.ps_prefix}/ctfd-platform-url"
+  description = "Public URL for the standalone CTFd platform"
+  type        = "String"
+  value       = var.ctfd_platform_url
+
+  tags = local.common_tags
+}

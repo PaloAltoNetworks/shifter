@@ -5,6 +5,1187 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.94.0] - 2026-04-14
+
+### Added
+
+- **`polaris` cyberscript scenario** (`shifter_platform/cms/scenarios/templates/polaris.yaml`).
+  Two-instance POLARIS range (polaris-vm host + Windows DC) that drives
+  the full 38-flag BOREAS.LOCAL CTF through the production
+  `cms.services.create_range` → `engine.services.create_range` → ECS
+  Fargate provisioner path, replacing the one-shot
+  `scripts/polaris-aws-range/` terraform. Pins `instance_type: m5.2xlarge`
+  on the polaris-vm kali instance so the 17-container docker compose
+  stack (Kali XFCE + xrdp + BIND + AD tools) gets the headroom it needs
+  instead of falling back to the provisioner's `KALI_INSTANCE_TYPE=t3.large`
+  global default.
+- **Per-instance `instance_type` scenario override.** Additive field on
+  `cms.scenarios.schema.InstanceConfig` and `cyberscript.schemas.range.InstanceSpec`;
+  the provisioner's `build_tf_vars` (`shifter/engine/provisioner/main.py`)
+  now honours a per-instance `instance_type` when set, falling back to
+  the existing role/os-based env-var defaults otherwise. Every existing
+  scenario yaml is unaffected (field is optional, default `None`).
+- **`PolarisRangeBootstrapPlan`** (`shifter/engine/provisioner/plans/polaris_range_bootstrap.py`).
+  Runs after LinuxBootstrapPlan on the polaris-vm host via SSM:
+  rewrites `docker-compose.override.yml` with the range's actual DC IP
+  and the per-instance kali SSH public key, force-recreates the `dns`
+  and `a14-kali` containers so their entrypoints pick up the new env
+  vars, then fetches the latest `scenario-dev/polaris/tests/` tree from
+  `shifter-dev-user-storage-e3462f0c` so the organizer smoketest harness
+  is materialised at `/opt/polaris/scenario-dev/polaris/tests/` on every
+  freshly provisioned range without requiring an AMI rebake. Verify step
+  proves the dns container resolves `dc01.boreas.local` to the range's
+  real DC (not the bake-time range-0 IP) and that the a14-kali
+  `authorized_keys` is present.
+- **`shifter/.dockerignore`.** Excludes local dev cruft (`**/.env`,
+  `__pycache__`, `.venv`, `.git`, IDE folders) from the portal image
+  build context. Without this the local `shifter_platform/.env` —
+  which sets `AWS_ENDPOINT_URL=http://localhost:4566` for LocalStack —
+  was getting copied into `/app/.env`, and `settings.py`'s `load_dotenv()`
+  poisoned the deployed portal's boto3 clients so every SQS/S3/SNS call
+  tried to hit `localhost:4566` and failed.
+
+### Fixed
+
+- **POLARIS A0 smoketest flag 6 Kursk line extraction regression.**
+  Commit `0ca1a18c0` added `poppler-utils` to the `a14-kali` Dockerfile,
+  which made `pdftotext` available in the container. The A0 smoketest's
+  `command -v pdftotext >/dev/null` branch fires first, and pdftotext's
+  paragraph-based layout splits "Kursk Heavy Industries - actuator
+  assemblies" onto a separate output line from "$12,000,000", so
+  `grep -i kursk | head -1` only caught the company name and the check
+  failed even though the PDF content is correct. Smoketest now prefers
+  `pdf2txt.py` (pdfminer — what the walkthrough tells participants to
+  use, and what produces a single-line output), falls back to pdftotext
+  with ±3-line grep context so the split layout still correlates. Range
+  content unchanged — participants following the walkthrough were never
+  affected; only the organizer smoketest harness was.
+- **`kali.sh.tpl` and `linux_bootstrap.py CONFIGURE_SSH_SCRIPT` assume
+  a `kali` user exists on the host.** On the polaris-vm AMI (Ubuntu with
+  the a14-kali docker container publishing SSH, not a real Kali host)
+  there is no `kali` system user, so `chown -R kali:kali /home/kali/.ssh`
+  and `systemctl start xrdp` would abort the bootstrap. Both templates
+  now guard with `id $user` / `systemctl list-unit-files xrdp.service`
+  presence checks and continue cleanly when the host isn't a real Kali
+  box.
+
+## [3.93.0] - 2026-04-13
+
+### Fixed
+
+- **polaris user_data IMDS credential race during cold first boot.**
+  When the instance profile attaches but IMDS hasn't finished propagating
+  credentials, the first `aws s3 cp` fails with
+  `fatal error: Unable to locate credentials` and cloud-init's final
+  stage exits non-zero — exactly what we hit on range 1 of the 3-range
+  smoke bring-up. `user_data.sh.tpl` now polls `aws sts get-caller-identity`
+  up to 30 times (4s spacing = 120s ceiling) before the S3 download, so
+  the instance waits out the propagation window instead of failing hard.
+- **polaris `dns` container zone file was hard-coded to
+  `dc01 → 10.1.100.11`**, which is correct for range 0 but wrong for
+  every subsequent range — range 1's kali resolved the AD DC name to
+  range 0's DC and would have attacked the wrong forest. BIND zone file
+  now has a `__DC01_IP__` placeholder, and the container has a new
+  `entrypoint.sh` that `sed`-substitutes `$DC01_IP` (passed from
+  `docker-compose.override.yml` via user_data) before exec'ing `named`.
+  `user_data.sh.tpl` writes the override with `DC01_IP` set to the
+  range's a2 private IP, plumbed through from the `aws_instance.polaris`
+  `templatefile()` call via a new `a2_private_ip` per-range input
+  (`each.value.a2_ip` in `ranges.tf`).
+
+### Added
+
+- **`scripts/polaris-aws-range/register_ranges_parallel.sh`** — batch
+  registers every range in `terraform output range_indices` by pulling
+  the per-index polaris instance id + subnet id + subnet cidr + private
+  IP from `terraform output -json`, staging `register_range.py` once on
+  the portal EC2, and running it per-range with the matching `POLARIS_*`
+  env vars. Emits one JSON object per range on stdout
+  (`{"attacker_uuid","range_id","range_index","participant_email"}`)
+  so follow-up tooling (playwright harness, CTF invite) can consume
+  the mapping without re-querying terraform.
+
+## [3.92.0] - 2026-04-13
+
+### Fixed
+
+- **a14-kali xfce4-screensaver auto-lock during idle RDP sessions** —
+  `xfce4-screensaver` (and `xfce4-power-manager`) are hard `Depends:` of
+  `kali-desktop-xfce`, so `apt purge` is off the table. Instead, the
+  Dockerfile now `dpkg-divert`s the two `/etc/xdg/autostart/*.desktop`
+  entries and removes the originals, so the screen-locker daemon never
+  spawns inside the xrdp session. `xset s off / s noblank / -dpms` is
+  baked into both `xsession` and `startwm.sh` as belt-and-suspenders.
+  Proven end-to-end on the live polaris VM: dpkg-divert list shows both
+  `.desktop -> .distrib` diversions, `ps auxw` shows no
+  `xfce4-screensaver` / `xfce4-power-manager` processes, `xset q -display
+  :10` reports `timeout: 0`, and a fresh Playwright RDP click lands on a
+  fully-rendered Xfce desktop with no unlock prompt.
+
+### Changed
+
+- **`a14-kali` operator SSH key injection moved from a one-shot
+  `user_data` `docker exec` into the container entrypoint**, driven by a
+  `KALI_AUTHORIZED_KEY` environment variable passed through
+  `docker-compose.override.yml`. The old path ran once at first boot and
+  silently left the container without an authorized_keys file after any
+  `docker compose up -d --force-recreate a14-kali`, which broke the
+  portal Terminal UI's SSH path. Now every container start re-asserts
+  the key at correct ownership + perms (kali:kali 600).
+- **`scripts/polaris-aws-range/` terraform module split into
+  `main.tf` + `shared.tf` + `ranges.tf`**. Shared SG + IAM role + instance
+  profile live in `shared.tf` as single global resources (one SG name
+  per VPC, one IAM role name per account — same permissions every
+  range would use anyway). Per-range resources (subnet, route table,
+  routes, route-table association, polaris VM, A2 DC) live in
+  `ranges.tf` behind `for_each = local.range_subnets`, which derives
+  each range's /28 + pinned `.10` / `.11` private IPs from
+  `cidrsubnet(var.polaris_cidr_block, 4, tonumber(idx))` and
+  `cidrhost(...)`. `var.range_indices` defaults to `["0"]` so the
+  single-range smoke still applies unchanged, and N-range deploys are
+  just `terraform apply -var 'range_indices=["0","1","2"]'`. Outputs
+  reformatted into maps keyed by range index.
+
+### Added
+
+- **`scripts/polaris-aws-range/a2_cold_bootstrap_parallel.sh`** — fan-out
+  wrapper that runs one `a2_cold_bootstrap.sh` per A2 instance id in
+  parallel, writes a per-instance log under `POLARIS_BOOTSTRAP_LOG_DIR`,
+  and emits a success/failure summary + non-zero exit if any child
+  fails. Reads targets from the command line OR from
+  `terraform output -json range_a2_instance_ids` when called with no
+  args. Safe to run N-wide because `a2_cold_bootstrap.sh` is per-instance
+  idempotent and every SSM command is scoped to its target id.
+
+## [3.91.0] - 2026-04-13
+
+### Added
+
+- **`scripts/polaris-aws-range/polaris_ctf_setup.py`** — creates an
+  ACTIVE `CTFEvent` for `scenario_id=polaris_manual_test` and invites
+  one participant through the real
+  `ctf.services.participant.invite_participant`, which in turn
+  auto-creates the Django User (with `username=email`), adds the user
+  to `CTF_PARTICIPANT_GROUP`, and generates the
+  `secrets.token_urlsafe(32)` invite token. Emits JSON on stdout with
+  event_id, participant_id, and invite_token so the caller can wire
+  the range + build the magic-link URL.
+- **`scripts/polaris-aws-range/polaris_ctf_attach.py`** — reads
+  `POLARIS_CTF_PARTICIPANT_ID` and `POLARIS_CMS_RANGE_INSTANCE_ID` from
+  the environment and patches `CTFParticipant.range_instance_id`,
+  `range_status="ready"`, and `status=ParticipantStatus.ACTIVE`. Lets
+  us hand a participant a range that was registered manually (via
+  `register_range.py`) instead of the normal
+  `cms.services.create_range` pipeline.
+- **`scripts/polaris-aws-range/polaris_ctf_cleanup.py`** —
+  hard-deletes the CTFParticipant + CTFEvent + Django User created by
+  the smoke test, after soft-destroying the participant's engine
+  Range and cms RangeInstance rows so the dashboard doesn't keep a
+  stale entry if the email is reused. Matches the explicit
+  expectation that smoke-test rows leave no trace behind.
+- Proved the full CTF magic-link flow end-to-end in the dev portal:
+  `/ctf/register/?token=<t>` → Django login → redirect to
+  `mission-control:dashboard` → participant-only nav (CTFd instead of
+  Assets/Docs, no Launch-a-Range panel) → Terminal connects to the
+  participant's Range 7 Kali → `whoami && hostname && dig +short
+  dc01.boreas.local` returns `kali / operator / 10.1.100.11` → RDP
+  button opens Guacamole to the same Kali Xfce desktop. Uses the live
+  polaris range (`i-00474db099dd5344c` / 10.1.100.10) and the A2 DC
+  (`i-0dc2a5a473c5058c6` / 10.1.100.11) from 3.90.0's cold rebuild.
+
+## [3.90.0] - 2026-04-13
+
+### Added
+
+- **`scripts/polaris-aws-range/a2_cold_bootstrap.sh`** — end-to-end
+  automation for promoting a fresh Windows Server 2022 EC2 to
+  `BOREAS.LOCAL`. Waits for SSM agent, installs AD-Domain-Services +
+  DNS via a wrapper that also queues the dc01 rename and registers a
+  SYSTEM scheduled task for `a2_setup.ps1`, reboots, retries
+  `Install-ADDSForest` on the renamed box, waits for the promotion
+  reboot, then re-runs `a2_setup.ps1` idempotently against the live
+  DC. Replaces the ad-hoc manual SSM steps that were required after
+  `terraform apply` in 3.88.0. The run_powershell_file helper builds
+  SSM `send-command` parameters via a python3 heredoc +
+  `--cli-input-json file://...`; the previous printf-based
+  PowerShell escape dance mangled `$`/`\` and failed at
+  Install-ADDSForest with "Unexpected token '\$b'".
+- **`scripts/polaris-aws-range/reset.sh`** — force-clean helper that
+  bypasses `docker compose down --remove-orphans` (which leaks the
+  `a15-ops-eng` container on re-up in compose v2.29) by directly
+  `docker rm -f`-ing any `build_*` containers + pruning the
+  `build_*` networks before `docker compose up -d`. Idempotent
+  against a warm polaris VM.
+- **`scripts/polaris-aws-range/user_data.sh.tpl`** now masks the
+  shifter-ubuntu base-AMI services that collide with Kali's
+  published ports: `ssh`, `xrdp`, `xrdp-sesman`, `apache2`, `smbd`,
+  `nmbd`, `mysql`, `vsftpd`. Without this the host sshd holds port
+  22 before docker-compose can publish `a14-kali` on the same port,
+  so the portal Terminal UI landed on the Ubuntu host instead of
+  Kali. Operator access to the VM is SSM Session Manager; host sshd
+  is unused.
+- **`kali_authorized_key` terraform variable** (`variables.tf`,
+  `main.tf`, `user_data.sh.tpl`) — the portal Terminal UI key-auths
+  into `a14-kali` as `kali` using a private key stored in Secrets
+  Manager. `user_data` now injects the matching public key into
+  `/home/kali/.ssh/authorized_keys` after `docker compose up -d`, so
+  a cold `terraform destroy` + `apply` cycle no longer needs a
+  manual SSM follow-up to re-wire portal terminal access.
+- **`register_range.py` accepts `POLARIS_*` environment variables**
+  for every per-run parameter (instance id, subnet id, subnet cidr,
+  kali private ip, ssh secret ARN, etc.), so the cold-rebuild
+  operator path is `docker exec -e POLARIS_KALI_INSTANCE_ID=... -i
+  portal python - < register_range.py` — no source edit per cycle.
+
+## [3.89.0] - 2026-04-13
+
+### Fixed
+
+- **rockyou.txt was gzipped on Kali by default.** The flag-17 Kerberoast
+  chain in `flags-07-19-front-office.md` runs `john --wordlist=/usr/share/
+  wordlists/rockyou.txt --format=krb5tgs` — Kali's default install ships
+  only `/usr/share/wordlists/rockyou.txt.gz` (~50 MB compressed vs ~140
+  MB decompressed), so the walkthrough command 404s out of the box and
+  the participant has to `gunzip -k` first. `a14/Dockerfile` now
+  explicitly adds `john`, `wordlists`, `ldap-utils`, `smbclient` to the
+  apt install list and runs `gunzip -k /usr/share/wordlists/rockyou.txt.gz`
+  at image-build time so the documented path works on first try.
+- **A16 missing `strings` / `file` / `xxd`.** Flag 30's GPG chain
+  walkthrough says "`strings full_integration_sim.mp4` reveals the
+  Simulation ID header" and other lab flags use `strings` for binary
+  triage on A16. `a16/Dockerfile` now installs `binutils file xxd` so
+  those commands exist on the box.
+
+## [3.88.0] - 2026-04-13
+
+### Added
+
+- **A2 Windows Server 2022 AD DC now deployed in-range.** New terraform
+  `aws_instance.a2_dc` launches a stock
+  `Windows_Server-2022-English-Full-Base` AMI into the same `10.1.100.0/28`
+  polaris subnet at `10.1.100.11`, using the shared instance profile +
+  security group. Minimal user-data (`a2_user_data.ps1.tpl`) sets the
+  Administrator password, disables Windows Firewall on all profiles, and
+  enables RDP; everything AD-specific then runs through SSM RunCommand so
+  failures are observable/re-runnable.
+- **`scripts/polaris-aws-range/a2_setup.ps1`** — idempotent post-promotion
+  PowerShell that creates the POLARIS OUs, 17 domain users (with passwords
+  matching the A1 mail / A3 wiki reuse chain), Lab-Access / Project-L /
+  Research-Coordination / Engineering-Support / SCADA-Admins /
+  Security-Staff groups, nests Project-L under
+  `Research-Coordination -> Engineering-Support` for flag 14, pins
+  `msDS-SupportedEncryptionTypes=4` (RC4-only) on svc-backup + svc-scada so
+  GetUserSPNs returns `$krb5tgs$23$` hashes that `hashcat -m 13100` /
+  john's `krb5tgs` format can crack, assigns Replicating Directory Changes
+  + Replicating Directory Changes All on svc-backup (flag 17 DCSync chain),
+  creates the `\\dc\badgelogs` share (Petrov anomaly CSV with flag 16) and
+  the DA-only `\\dc\admin_flag` share (flag 17 pass-the-hash target), and
+  sets the Project-L `info` attribute to `FLAG{2f8b4a6c1d9e7053}`.
+- **`shifter/development/range/polaris-test-kali`** Secrets Manager entry
+  (Windows side) — just a note: the Administrator password
+  (`CortexSavesTheDay!`) is hard-coded in the terraform variable
+  `a2_administrator_password` because the range is dev-only and the CTF
+  narrative depends on participants reading that cleartext from
+  walkthrough/shifter portal metadata.
+
+### Fixed
+
+- **POLARIS compose DNS now has recursion + forwarders** (named.conf in
+  `scenario-dev/polaris/build/dns/`). Previously `recursion no`, so every
+  non-`boreas.local` / non-`boreas-systems.ctf` lookup from inside the
+  compose containers returned SERVFAIL — which meant `apt update` inside
+  a14-kali (and any other container) could not resolve external archives.
+  Recursion is scoped to `172.20.0.0/16 + 127.0.0.1` via `allow-recursion`
+  so this server cannot be used as an open resolver from outside the range.
+- **`dc01.boreas.local` DNS record.** Zone files in `build/dns/` now point
+  at `10.1.100.11` (the new in-range A2 EC2) instead of the legacy
+  `10.100.0.4` external-GCP-VM placeholder. `00-range-access-docker.md`,
+  `flags-07-19-front-office.md`, `isolation-smoketest.sh`, and
+  `A2-smoketest.sh` all updated to match.
+- **a14-kali PDF extraction tools.** `a14/Dockerfile` now installs
+  `poppler-utils` + `python3-pdfminer` at image-build time AND drops a
+  `/etc/profile.d/polaris-tools.sh` that puts `/opt/tools/bin` on PATH for
+  interactive SSH / `docker exec` login shells. Previous a14 image had
+  `pdfminer.six` installed inside `/opt/tools/` but `pdf2txt.py` was not on
+  PATH in login shells (the `ENV PATH=` line in the Dockerfile only
+  affects the PID 1 environment), so the flags 1/8/9/13/19 PDF-extraction
+  steps documented in the walkthroughs silently fell back to a hand-rolled
+  ASCII85+Flate decoder. Symlinks `/usr/local/bin/pdf2txt.py` and
+  `/usr/local/bin/impacket-smbclient.py` added for stability.
+- **Flag 15 walkthrough wording** (`flags-07-19-front-office.md`) — now
+  explicitly says Kowalski's "creds backup" email is in **INBOX** (he sent
+  to his own address; Dovecot has no Sent folder for that user). Previous
+  "(Kowalski sent it to himself)" parenthetical was ambiguous and led at
+  least one walkthrough-runner to check a non-existent Sent folder first.
+- **Flag 31 walkthrough path** (`flags-31-36-bunker.md`) — the
+  pre-populated `/root/scan_results.txt` short-circuit is now the primary
+  step; the live `nmap -sV -p 502,9100 172.20.50.0/24` is documented as
+  the fallback because the service-version probe is slow over the splice
+  pivot and can time out under automation.
+
+## [3.87.0] - 2026-04-13
+
+### Added
+
+- **`scripts/polaris-aws-range/`** — terraform + bootstrap for a one-VM
+  manual POLARIS range inside the existing dev range VPC. Creates a new
+  `/28` subnet (`10.1.100.0/28`) with a dedicated route table that
+  bypasses the domain-filtered Network Firewall (so `docker build` and
+  `apt install` can reach the internet during bake), one `m5.2xlarge`
+  Ubuntu instance, a permissive SG allowing VPC-internal + portal-peering
+  ingress on 22/3389, and an instance profile that can read the polaris
+  build tarball + SSM session manager.
+- **`scripts/polaris-aws-range/user_data.sh.tpl`** — cloud-init bootstrap
+  that installs Docker + the v2 compose plugin binary, masks host `ssh`
+  / `apache2` / `smbd` / `vsftpd` / `xrdp` / `mysql` services (the
+  `shifter-ubuntu-*` base AMI ships them pre-installed and they compete
+  for the ports we need to publish from the Kali container), pulls the
+  polaris build tarball from S3, writes a `docker-compose.override.yml`
+  that publishes a14-kali's 22 + 3389 to the host, runs
+  `docker compose up -d`, and starts everything under a systemd unit.
+- **`scripts/polaris-aws-range/register_range.py`** — idempotent manual
+  range registration script: fetches DB + Django + Cognito secrets from
+  Secrets Manager, soft-destroys any stale ready-range rows for the dev
+  user, and creates engine `Range` + cms `RangeInstance` rows pointing at
+  the polaris VM with an attacker (kali) instance spec. Runs inside the
+  portal docker container via SSM Run Command so no portal code change
+  is needed to turn a hand-built range into a portal-visible one.
+- **S3 bucket** `shifter-polaris-bake-158151907940` — byte-stable
+  `polaris/build-v1.tar.gz` of the `scenario-dev/polaris/build/` tree
+  (includes `_shared/` GPG chain and research-analyst keypair so flag 30
+  stays deterministic across rebuilds).
+- **Secrets Manager entry** `shifter/development/range/polaris-test-kali`
+  holds the RSA private key the portal SSHes with. Secret ARN matches
+  the `shifter/*/range/*` wildcard the `dev-portal-ec2-role` already
+  allowlists — no IAM policy change required.
+
+## [3.86.0] - 2026-04-12
+
+### Fixed
+
+- **Flag 37 walkthrough payload** — the documented sudo-arg-injection
+  example `--host "x; cat /root/.scada/hmi.json"` did not actually
+  work because `scada_diag.sh` `eval`s `curl -sS http://$HOST:8080/ping`
+  — so without a trailing comment the injection expands into
+  `cat /root/.scada/hmi.json:8080/ping` and `cat` errors on the
+  concatenated filename. Walkthrough now shows the working form with
+  the trailing `#` that comments out the `:8080/ping` suffix.
+- **A9 nmap service-detection** — `nmap -sV -p 502,9100 172.20.50.0/24`
+  in flag 31 step 1 failed with `could not locate nse_main.lua`
+  because the alpine `nmap` package doesn't ship the NSE data files
+  as a dependency. A9 Dockerfile now adds `nmap-scripts` alongside
+  `nmap`, so `-sV` runs cleanly. Pre-populated `/root/scan_results.txt`
+  remains as the sanctioned alternative.
+- **Flag 30 step 2 (`gpg-agent.conf` read)** — walkthrough previously
+  said `cat /home/e.vasik/.gnupg/gpg-agent.conf` without naming an
+  account. `~e.vasik/.gnupg/` is mode 700, so the A16 `research-analyst`
+  key cannot read it. Walkthrough now explicitly pivots to A6 as
+  `e.vasik` (`Reactor#Core9`, discoverable from the A1 mailbox trail)
+  for that hop.
+- **Flag 26 openpyxl host** — walkthrough previously said "in Python:
+  openpyxl → check sheet_state" without specifying where Python runs.
+  A16 does not ship openpyxl; A6 does. Walkthrough now explicitly says
+  run the Python snippet from inside the SSH session on A6 as
+  `p.nielsen` (where `python3-openpyxl` is preinstalled), with a note
+  that `scp`-ing the xlsx back to Kali is the fallback if the tester
+  prefers to parse locally.
+
+### Changed
+
+- **A7 Gitea stripped from the `shared` network — lab-only.** Previously
+  A7 was multi-homed on `shared` + `lab`, letting Kali reach Gitea
+  directly and bypass the Lab pivot for flags 24 and 29. A7 now only
+  lives on `lab` (172.20.30.20); every Gitea interaction must go
+  through the A16 research-analyst pivot, matching every other Lab
+  asset. `docker-compose.yml`, DNS zone files
+  (`dns/db.boreas.local`, `dns/db.boreas-systems.ctf` both now resolve
+  `git.boreas.local` → 172.20.30.20), walkthrough flag 24/29/30 steps,
+  bunker walkthrough prerequisites (bunker flags now explicitly
+  require A7 content to have been cloned earlier during the Lab
+  phase, since A9 and Kali cannot reach A7), `00-range-access-docker.md`
+  reachability table, and `isolation-smoketest.sh` all updated.
+- **A16 Dockerfile** gains `git`, `curl`, and `gnupg` so it can run the
+  full A7 cloning + flag 30 GPG decrypt chain as the on-ramp container.
+  `run-all-smoketests.sh` now routes the A7 smoketest through
+  `a16-research-analyst` instead of `a14-kali`.
+- **A14 smoketest** no longer asserts A7 Gitea is directly reachable
+  from Kali (that's a design-forbidden path now); it asserts A15,
+  A16, and the splice-link to A9 instead.
+- **Fixed the Gitea anonymous-clone false-negative** in
+  `A7-smoketest.sh`: the previous "anonymous clone of private repo
+  should fail" assertion was being evaluated from `a14-kali` which had
+  cached credentials in its filesystem — moving the runner to the
+  freshly-built `a16-research-analyst` container makes the anonymous
+  clone actually anonymous, so the hygiene check passes correctly.
+
+### Proofs
+
+- **Full smoketest sweep**: 18 / 18 asset sweeps PASS (including A7
+  now), isolation smoketest 90 / 90 boundary assertions PASS.
+- **Lab full E2E via A16**: all 12 Lab flags (38 + 20–30) recovered
+  end-to-end from inside a14-kali, pivoting only via the real
+  participant chain `SSH p.shah@analyst01 → {ssh, psql, git, gpg}`.
+  No docker-exec into any Lab target. Flag 30's full A6 → A8 → A7 →
+  gpg-decrypt chain works through A16 including pulling the encrypted
+  file from research-analyst on A6, psql as `vasik` (Reactor#Core9)
+  for the compartment_b key blob, `.netrc`-authed git clone of
+  `aurora/weapons-integration` for the passphrase, and gpg
+  `--import` + `--decrypt` all inside Shah's shell on A16.
+- **SCADA chain via A15**: flag 37 / 18 / 19 recovered end-to-end via
+  `SSH s.ivanov@ops-eng01` → sudo-arg-injection → `hmi.json` loot →
+  inline Modbus writes from the A15 shell → critical-failure page.
+
+## [3.85.0] - 2026-04-12
+
+### Added
+
+- **POLARIS CTF range: A15 Ops Engineer Workstation** and **A16 Research
+  Data Analyst Workstation** introduced as dedicated Front Office pivot
+  hosts, with two new flags (37, 38) that gate the SCADA and Lab chains
+  respectively. Total flag count: 36 → 38.
+  - A15 (`ops-eng01.boreas.local`, 172.20.10.50 + 172.20.40.20) — Sergei
+    Ivanov's workstation. Multi-homed on `corporate` + `scada`. Attack
+    chain: OSINT (A0 leadership + A4 HR org_chart) → `Welcome1` default
+    password → SSH as `s.ivanov` → `sudo -l` reveals
+    `/opt/ops/scada_diag.sh` NOPASSWD → sudo arg-injection exploits the
+    unquoted `curl` sink → read root-owned `/root/.scada/hmi.json` which
+    contains both `svc-scada / Sc@da#2025!` and **flag 37**
+    (`FLAG{5c3e7a9f1b8d4602}`, Hard, 200pts, M3). A15 has `pymodbus`
+    preinstalled so flags 18 and 19 execute from inside the A15 shell.
+  - A16 (`analyst01.boreas.local`, 172.20.10.60 + 172.20.30.60) — Priya
+    Shah's research data analyst workstation. Multi-homed on `corporate`
+    + `lab`. Deliberately simpler chain than A15 (no privesc): OSINT
+    (A4 HR only, NOT A0) → `Welcome1` default → SSH as `p.shah` → read
+    `~/.reports/ANALYST_TOKEN` for **flag 38**
+    (`FLAG{8b2d4f1a0c5e7396}`, Medium, 100pts, M2). Home dir also
+    carries `~/.pgpass` (lab_general), a passphrase-less SSH key +
+    `~/.ssh/config` alias for `research-analyst@eng-ws01.boreas.local`
+    on A6, and an example `daily_integration_report.py`.
+  - New `research-analyst` read-only posix account on A6 (key-only
+    auth; public key pre-generated at `_shared/research-analyst-key/`
+    and COPY'd into A6 during image build). Can read `/opt/builds/`,
+    `/home/r.tanaka/simulations/standard/`, and `/tmp/.deleted/`.
+    **Cannot** read `/home/r.tanaka/simulations/midnight/`,
+    `/home/p.nielsen/designs/`, or `/home/jenkins/.credentials` (now
+    chmod 600). Flags 25, 26, 28 still require independent
+    nielsen/tanaka cred discovery; flag 20 still requires jenkins.
+- **New smoketests**: `tests/smoketests/A15-smoketest.sh` walks the
+  flag 37 compromise chain from inside `a14-kali`, validates the
+  sudo-arg-injection root path, extracts the hmi.json loot, and
+  proves A15 → `scada-gw` HMI + Modbus reachability.
+  `tests/smoketests/A16-smoketest.sh` walks the flag 38 chain, then
+  validates A16 → A8 psql and A16 → A6 `research-analyst` SSH pivots
+  plus the read/no-read scope of the `research-analyst` account.
+
+### Changed
+
+- **A3 intranet reduced to `corporate`-only.** Legacy multi-home onto
+  `scada` and `lab` (used as a one-box pivot shortcut) has been
+  removed from `docker-compose.yml`. A3 is once again what its
+  hostname says: a corporate wiki server. SCADA reach is now A15,
+  Lab reach is now A16.
+- **`svc-scada` credential single-sourced through A15.** The
+  `service_account_vault.pdf` on A4 no longer lists the `svc-scada`
+  password in plaintext — the row now points at "held by ops, see
+  ivanov" as a breadcrumb. The only participant path to
+  `Sc@da#2025!` is the flag 37 privesc chain.
+- **A4 org chart updated** to include Sergei Ivanov (Ops Engineer —
+  Plant Systems) and Priya Shah (Senior Research Data Analyst). These
+  are the HR-share breadcrumbs for A15 + A16 discovery.
+- **A1 mail server seeded** with Sergei Ivanov's inbox (HR
+  welcome-back reset confirmation + Dariusz thread about the SCADA
+  cred cache). `s.ivanov / Welcome1` added to the A1 user list and
+  Dovecot passdb.
+- **A0 leadership page** adds Sergei Ivanov under a new "Department
+  Leads" section; contact page adds a Plant Operations mailto.
+- **A6 entrypoint** creates the `research-analyst` user, drops the
+  pre-generated public key into its `authorized_keys`, enforces
+  `jenkins/.credentials` at mode 600, and makes `/tmp/.deleted/`
+  world-traversable for the flag 30 chain.
+- **Flags 18 + 19 walkthrough** rewritten to run from inside the A15
+  SSH session after flag 37 rather than hand-waving a pivot. All
+  Modbus writes, HMI fetches, and maintenance-manual lookups are
+  routed through A15 or Kali as appropriate.
+- **Flags 20–30 walkthrough** rewritten to use A16 as the Lab
+  on-ramp. Each flag section now names its specific SSH/psql target
+  and which account is required. Flag 38 section added at the top
+  as the Lab entry point.
+- **Isolation smoketest** updated for the new topology: A3 no longer
+  reaches scada/lab; A15 reaches corporate+scada only; A16 reaches
+  corporate+lab only; A14 has permitted reach to A15 + A16 on
+  corporate and to A9 via the pre-wired `splice-link`.
+- **`run-all-smoketests.sh`** updated to route the A5 smoketest
+  through `a15-ops-eng`, and A6/A8 smoketests through
+  `a16-research-analyst`, instead of `a3-intranet`. A15 and A16
+  smoketests added.
+- **Design docs**: new `design/assets/A15-ops-workstation.md` and
+  `design/assets/A16-research-analyst.md`. `design/architecture.md`,
+  `design/assets/A3-web-app.md`, `design/assets/A5-scada-generator.md`,
+  `design/assets/A6-engineering-workstation.md`, and
+  `design/shared-constants.md` updated to reflect the new topology,
+  flag table (38 total), pivot ownership, and employee credential
+  index.
+
+## [3.84.0] - 2026-04-12
+
+### Fixed
+
+- **Walkthroughs brought current to live range state.** The four
+  flag-group walkthroughs and the range-access doc came over from
+  `shifter-k8s/temp/tests/smoketests/` in the last consolidation
+  and had drift from multiple old test environments baked in.
+  All corrections:
+  - `00-range-access.md` deleted — fully stale, documented the old
+    VM-based test environment (localhost ports, loose Python
+    processes, `/tmp/*-content/` file paths).
+  - `00-range-access-docker.md` — Administrator row updated to say
+    "use PTH" with pointer to `smbclient.py -hashes`; Gitea
+    `e_vasik` password `TestPass123!` → `Reactor#Core9`;
+    credentials table reconciled with actual AD password reuse;
+    "Managing the Range" section rewritten to use the new
+    `tests/setup.sh` / `tests/reset.sh` / `tests/run-all-smoketests.sh`
+    orchestration + `-p range` project naming against the compose
+    file at `build/docker-compose.yml`.
+  - `flags-01-06-osint.md` flag 2: `org_chart.txt` → `org_chart.pdf`
+    with `exiftool`/`pdfinfo` Author extraction; flag 6: quarterly
+    and annual reports `.txt` → `.pdf` with `pdftotext`/`pdf2txt.py`
+    extraction path.
+  - `flags-07-19-front-office.md` flag 16: removed
+    `/tmp/badge.csv` parenthetical leftover from the VM env;
+    flag 17: rewritten around pass-the-hash (`smbclient.py -hashes`)
+    since Administrator's cleartext is random.
+  - `flags-20-30-lab.md` flags 24, 29, 30: Gitea password
+    `TestPass123!` → AD-pattern passwords (`e_vasik:Reactor#Core9`,
+    `d_kowalski:P@ssw0rd123`) with `.netrc` guidance to dodge
+    URL-encoding `#`/`@`.
+  - `flags-31-36-bunker.md` — every IP reference corrected.
+    Bunker network was documented as `172.20.40.x` (wrong,
+    that's actually the SCADA network) and controllers as
+    `10.10.40.x` (wrong, that's from the VM env). All fixed to
+    `172.20.50.x` / hostnames (`tail-ctrl`, `leg-ctrl`,
+    `arms-ctrl`, `brain-main`) with `splice-relay` at 172.20.50.5.
+    Scan range `10.10.40.0/24` → `172.20.50.0/24`.
+
+- **Build-content IP drift** in parallel with the walkthroughs:
+  - `A4-file-share/build_documents.py`: network_diagram.pdf VLAN
+    subnets and server_inventory.xlsx per-host IPs switched from
+    `10.10.x.x` VM-era IPs to `172.20.x.x` docker network IPs so
+    the OSINT content participants find matches what they'll
+    actually route to.
+  - `A1-mail-server/build_mail.py`: Kowalski's SCADA VLAN ticket
+    email `scada-gw.internal (10.10.40.10)` → `(172.20.40.10)`.
+  - `A13-brain/server.py`: `subsystems` command output — the
+    controller/brain table showing connected hosts — switched
+    from `10.10.40.x` to `172.20.50.x`.
+  - `A9-splice-landing/modbus_client.py` help text examples and
+    `README.txt` relay description: `10.10.40.x` → `172.20.50.x`.
+  - `A9-splice-landing/scan_results.txt` (the pre-populated JTF-2
+    nmap output participants find on A9): full IP rewrite.
+
+- **a1-mail Roundcube serving at web root.** The Debian roundcube
+  package's `/etc/apache2/conf-enabled/roundcube.conf` ships the
+  `Alias /roundcube` line commented out, so a fresh install
+  serves the Apache default page at `/` with Roundcube
+  effectively unreachable. `a1/Dockerfile` now changes the
+  default site DocumentRoot to `/var/lib/roundcube/public_html`
+  and adds a roundcube-root conf via `a2enconf` so
+  `http://mail.boreas.local/` lands directly on the Roundcube
+  login page (required by the A1 smoketest and the walkthrough).
+
+### Changed
+
+- **Design doc content-directory paths updated** (approved by
+  user). 15 design docs under `design/assets/A*.md` had
+  "Content directory: `docs/ctf/mechag/A*-*/`" lines left over
+  from before the consolidation. All 15 rewritten to point at
+  `scenario-dev/polaris/build/A*-*/`. `benchmark-report.md`
+  similarly rewritten (design doc filenames are now at
+  `scenario-dev/polaris/design/assets/A*.md` instead of
+  `docs/ctf/mechag/A*.md`).
+
+- **`tests/setup.sh` + `tests/reset.sh`** taught about the new
+  nested layout: `COMPOSE_FILE` env override with default
+  `$RANGE_DIR/build/docker-compose.yml` and legacy flat-layout
+  fallback to `$RANGE_DIR/docker-compose.yml`. Project name
+  explicitly pinned to `range` via `-p range` so network and
+  container names stay stable across layout moves.
+
+### Verified
+
+- Golden rebuild + full sweep against the new nested layout on
+  `ctf-range-builder`: **16/16 PASS**, `NORTHSTORM full range: PASS`.
+- Final `reset.sh` run leaves a5/a10/a11/a12/a13 in clean
+  pre-unlock state for participant use.
+
+## [3.83.0] - 2026-04-12
+
+### Changed
+
+- Consolidated all POLARIS / NORTHSTORM scenario work into
+  `scenario-dev/polaris/`. Prior to this, scenario artifacts
+  were scattered across `docs/ctf/`, `docs/ctf/mechag/`, and
+  a sibling `shifter-k8s/temp/` worktree. New layout:
+  - `scenario-dev/polaris/design/` — authoritative spec (source
+    of truth): `architecture.md`, `range-diagram.md`,
+    `benchmark-report.md`, `shared-constants.md`, plus per-asset
+    design docs under `design/assets/`.
+  - `scenario-dev/polaris/build/` — `docker-compose.yml`,
+    `ctfd-challenges.json`, `dns/`, `a0/`-`a14/` (Dockerfiles +
+    runtime configs), and `A0-boreas-website/`-`A14-kali/`
+    content dirs (intact to avoid touching Dockerfile COPY paths).
+  - `scenario-dev/polaris/tests/` — `setup.sh`, `reset.sh`,
+    `run-all-smoketests.sh`, `isolation-smoketest.sh`,
+    flattened `smoketests/` (A0-smoketest.sh … A14-smoketest.py),
+    and `walkthroughs/` (copied from `shifter-k8s/temp/tests/smoketests/`
+    — the four flag-group happy-path guides plus range-access
+    prereqs).
+  - `scenario-dev/polaris/notes/` — spike notes and
+    HANDOFF/BUILD-TODO (copied from `shifter-k8s/temp/`).
+  - `scenario-dev/polaris/README.md` — entry point with layout
+    map and "getting started" deploy/test commands.
+- Moves were `git mv` wherever possible to preserve history.
+  Files from `shifter-k8s/` are copies (different repo, no
+  shared git history).
+- `run-all-smoketests.sh` updated: new variables `SMOKETESTS_DIR`,
+  `RESET_SCRIPT`, `ISOLATION_SCRIPT` with sane defaults for the
+  new layout and fallback to the old flat layout if detected.
+  Per-test paths switched from `<Content-Dir>/smoketest.ext`
+  to `A<N>-smoketest.ext` reflecting the flattened tests/smoketests/.
+- `docs/ctf/` and `docs/ctf/mechag/` are now empty and removed.
+
+### Known drift (deferred, needs approval per design-is-source-
+of-truth rule)
+
+- 15 design docs under `design/assets/A*.md` still reference
+  `docs/ctf/mechag/A*-*/` as the "Content directory". Those
+  references are now stale — the content dirs moved to
+  `scenario-dev/polaris/build/A*-*/`. Paths are semantic per
+  feedback_design_is_source_of_truth.md so they need user
+  approval before editing the design to match the new layout.
+
+## [3.82.0] - 2026-04-12
+
+### Fixed
+
+- Close out remaining repo path drift for a1, a3, a4, a5. These
+  four Dockerfiles still used the old single-context build
+  pattern (`COPY server.py`, `COPY build_mail.py`, etc) with
+  files that only existed on the range VM via duplication, not
+  in the repo. Migrated all four to parent-context builds to
+  match a0/a6/a7/a8/a9/a10/a11/a12/a13/a14:
+  - `a1/Dockerfile`: COPYs from `A1-mail-server/build_mail.py`
+    and `a1/{postfix-main.cf,dovecot-local.conf,entrypoint.sh}`.
+  - `a3/Dockerfile`: COPYs from `A3-web-app/server.py`.
+  - `a4/Dockerfile`: COPYs from `A4-file-share/build_documents.py`
+    and `a4/{smb.conf,entrypoint.sh}`.
+  - `a5/Dockerfile`: COPYs from `A5-scada-generator/server.py`.
+  - `docker-compose.yml`: a1-mail, a3-intranet, a4-fileshare,
+    a5-scada all switched to `context: .` with `dockerfile:
+    ./aN/Dockerfile`. All 14 docker-managed services in
+    docker-compose.yml now use the parent-context convention
+    (dns is self-contained and stays `build: ./dns`).
+
+  Golden rebuild verification: full teardown,
+  `docker compose build` from clean, `docker compose up -d`,
+  `run-all-smoketests.sh` → 16/16 PASS, final `reset.sh` for
+  clean participant state. Range is now reproducible from a
+  fresh repo clone for every service.
+
+## [3.81.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/setup.sh`: NORTHSTORM range setup orchestrator.
+  Runs `docker compose build` + `up -d`, waits for all 15 services
+  to report Running, then polls key readiness ports (a7 gitea
+  3000, a1 IMAP 143, a3 80, a4 445, a0 80) via a14-kali before
+  returning. Single entry point to take a freshly-synced
+  `/home/atomik/range/` to a live range.
+- `docs/ctf/mechag/reset.sh`: sticky-state reset. Force-recreates
+  the five services with one-shot unlock state (a5-scada thermal
+  runaway, a10/a11/a12 flag-register unlocks, a13-brain for
+  parity), then polls each one's primary port on its own
+  container's localhost until the embedded server is actually
+  accepting connections. localhost polling avoids the
+  cross-network unreachability problem where a single probe
+  container couldn't see every docker bridge.
+- `docs/ctf/mechag/run-all-smoketests.sh`: full-range test
+  sweep orchestrator. Calls reset.sh pre-flight, then copies
+  each per-asset smoketest into its designated runner container
+  (a14-kali / a3-intranet / a9-splice) in the correct pivot
+  order, executes with the correct interpreter (bash / python3 /
+  sh), captures per-asset PASS/FAIL, then runs the host-side
+  isolation smoketest, and aggregates a final summary. Proven
+  deterministic with three consecutive 16/16 PASS runs against
+  the live range (15 asset smoketests + isolation sweep = 475
+  underlying checks).
+
+### Changed
+
+- VM cleanup pass on `/home/atomik/range/`: removed stale
+  file duplicates left over from before the parent-context
+  Dockerfile migration. Top-level copies of build-a6-content.sh
+  and build-gpg-chain.sh, plus per-asset copies of build
+  scripts / server.py / 01-init.sql / bare-repos.tar.gz /
+  bootstrap.sh / content files that now live in the A*-
+  content directories. `/home/atomik/range/a*/` now contains
+  only the Dockerfile and runtime configs.
+
+## [3.80.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/isolation-smoketest.sh`: cross-cutting
+  network isolation smoketest (70 checks) that validates the
+  full NORTHSTORM topology boundary enforcement. Runs from
+  the range host. For every (source, target) pair the design
+  specifies, tests TCP reachability via `docker exec` +
+  python3 sockets. Every designed pivot path proven to work,
+  every forbidden path proven to fail. Covers a14-kali
+  (shared+corporate), a3-intranet (THE PIVOT: corporate+
+  scada+lab), a7-gitea (shared+lab), a1-mail/a4-fileshare
+  (corporate only), a6-workstation (lab only), a5-scada
+  (scada only), and a9-splice/a13-brain (bunker-ot only).
+  Result: 70/70 PASS. The docker bridge topology enforces
+  the design boundaries purely by network attachment,
+  without iptables ACLs.
+
+## [3.79.0] - 2026-04-12
+
+### Fixed
+
+- A14 Kali repo path drift (last of the A* assets):
+  `a14/Dockerfile` COPYs content files from context root but
+  they live in `A14-kali/`, and it referenced `modbus_client.py`
+  which only exists in `A9-splice-landing/`. Moved `a14-kali`
+  compose build context to `.` with `dockerfile: ./a14/Dockerfile`
+  and updated all Dockerfile COPY paths. Now builds from a
+  fresh repo checkout.
+
+### Added
+
+- `docs/ctf/mechag/A14-kali/smoketest.sh`: A14 attack platform
+  readiness smoketest (47 checks). A14 has no flags (it's the
+  participant's attack box, not a target) so the smoketest
+  verifies the platform is ready for use: home directory
+  content (README, mission_brief.pdf/.txt, flag_submit.sh,
+  modbus_scan.py, Claude system prompt), kali user and
+  sshd/xrdp services running, standard Kali offensive tools
+  (nmap, msfconsole, sqlmap, john, hashcat, gobuster, ffuf,
+  nc, curl, wget, python3, smbclient), full Impacket suite
+  at /opt/tools/bin (GetUserSPNs, secretsdump, psexec,
+  smbclient.py, lookupsid), Python libraries (pymodbus,
+  impacket, pdfminer.six, openpyxl, pdf2txt.py), Claude Code
+  CLI, TCP reachability of all 7 permitted targets (A0, A1,
+  A3, A4, A7, A2 via GCP, DNS), internal DNS resolution, and
+  AXFR zone transfer returning the _flag TXT record (flag 5
+  discovery path).
+
+## [3.78.0] - 2026-04-12
+
+### Fixed
+
+- A13 repo path drift: `a13/Dockerfile` COPYs `server.py`
+  from context root. Moved `a13-brain` compose build context
+  to parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A13-brain/smoketest.py`: A13 Mecha-Godzilla
+  brain end-to-end smoketest (17 checks). Runs from a9-splice.
+  Executes the full boss chain: TCP connect on port 9100,
+  receive 8-byte binary challenge, derive XOR key via
+  `SHA256("AHS-T-00482" + "AHS-L-00483" + "AHS-A-00484")[:8]`
+  (from A10/A11/A12 serials), send handshake response,
+  authenticate as `vasik` with `BRAIN_AUTH_TOKEN` from A7
+  navigation-controller config (not vasik's AD password),
+  run `status` and extract flag 35 from the SYSTEM
+  AUTHORIZATION TOKEN line, run `schematic` verifying
+  LEVIATHAN ASCII art, run `ai status` verifying DORMANT
+  state awaiting primary power, reject wrong override code,
+  and submit the full override code `7741-MN07-AL42`
+  (assembled from A0 registration / A6 MIDNIGHT-7 sim ID /
+  A8 assembly log metadata) to extract flag 36 with the
+  OPERATION NORTHSTORM COMPLETE seizure message.
+
+## [3.77.0] - 2026-04-12
+
+### Fixed
+
+- A12 repo path drift: `a12/Dockerfile` COPYs `server.py`
+  from context root. Moved `a12-arms` compose build context
+  to parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A12-arms-controller/smoketest.py`: A12
+  arms controller end-to-end smoketest (17 checks). Runs
+  from a9-splice. Verifies default register reads (joints,
+  actuator force, mode 0=stowed, primary effector status=0
+  offline / max=2400 MW / draw=1800 MW, kinetic caliber
+  500mm, 12 rounds/mag), flag zero pre-unlock, wrong
+  challenge write rejected before diagnostics, diagnostics
+  enable via coil 50, rolling nonce appears on input reg 60
+  (4-digit), XOR nonce with PO-2847 (cross-zone intel from
+  A4), confirmation readback reg 201 = 1, and ASCII decode
+  of reg 100-121 matching `FLAG{f0d8b2e6a4c71935}`.
+
+## [3.76.0] - 2026-04-12
+
+### Fixed
+
+- A11 leg controller Modbus server was silently dropping
+  response PDUs for any read that spanned the ankle position
+  registers. Root cause: `LEFT_JOINTS` and `RIGHT_JOINTS`
+  initialised ankle position/target to `-5` (degrees). Modbus
+  holding registers are uint16; pymodbus 3.12 refuses to pack
+  negative Python ints and fails silently with no response,
+  no log entry. Changed init to `[0, 0, 15, 15, 5, 5]`
+  (leg straight, ankles neutral). Confirmed A9's earlier
+  probes happened to use reads that didn't cross the negative
+  offset, which is why this only surfaced under the A11
+  smoketest's exhaustive register reads.
+- A11 repo path drift: `a11/Dockerfile` COPYs `server.py` from
+  context root. Moved `a11-leg` compose build context to
+  parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A11-leg-controller/smoketest.py`: A11 leg
+  controller end-to-end smoketest (19 checks). Runs from
+  inside a9-splice. Verifies default register reads (joints,
+  hydraulic pressures, gait mode 0=stationary, step length
+  4200mm, cycle 85s, per-leg mass 24000t, max force 200t
+  matching PO-2847), flag registers zero pre-unlock, wrong
+  sequence rejection, correct gait sequence 0->1->2->0 to
+  reg 30 releasing calibration code 4783 on input reg 60,
+  challenge write to reg 99 with calibration code, and
+  ASCII decode of reg 100-121 matching `FLAG{c7a1e3f9d0b52864}`.
+
+## [3.75.0] - 2026-04-12
+
+### Fixed
+
+- A10 repo path drift: `a10/Dockerfile` COPYs `server.py` from
+  context root but the file lives in `A10-tail-controller/`.
+  Moved `a10-tail` compose build context to parent dir.
+
+### Added
+
+- `docs/ctf/mechag/A10-tail-controller/smoketest.py`: A10 tail
+  controller end-to-end smoketest (13 checks). Runs from inside
+  a9-splice (bunker OT entry point). Verifies default register
+  reads (motor positions, torque, mode=1 balance, length=120m,
+  mass=8500t), flag registers zero pre-unlock, the flag 32
+  unlock sequence (write reg 20=3 diagnostic mode, then write
+  reg 99=482 serial-derived challenge), ASCII decode of
+  registers 100-121 matching `FLAG{9b3e7c1d0f5a2846}`, mode
+  reset on wrong challenge, and all 10 motor enable coils ON.
+  Device identification test deferred to A9 smoketest which
+  already covers A10/A11/A12 via modbus_client.py devid.
+
+## [3.74.0] - 2026-04-12
+
+### Fixed
+
+- A9 repo path drift (same pattern as A6/A7/A8):
+  `a9/Dockerfile` COPYs README, scan_results, modbus_client.py
+  from context root but they live in `A9-splice-landing/`.
+  Moved `a9-splice` docker-compose build context to `.` with
+  `dockerfile: ./a9/Dockerfile` so the build works from a
+  fresh repo checkout.
+
+### Added
+
+- `docs/ctf/mechag/A9-splice-landing/smoketest.sh`: A9 splice
+  landing box end-to-end smoketest (17 checks). Runs from
+  inside a9-splice (the only container on bunker-ot so no
+  pivot available). Verifies the JTF-2 field relay artifacts
+  (README POLARIS FIELD RELAY text, scan_results nmap dump,
+  modbus_client.py), the field tool set (python3, nmap,
+  ncat, tcpdump, ssh, pymodbus), TCP reachability of all 4
+  bunker hosts (A10-A13), Modbus FC 43 device identification
+  queries against A10/A11/A12 returning the expected
+  ProductName values (AHS-TAIL-7741, AHS-LEG-MN07,
+  AHS-ARM-AL42), and the flag 31 concatenation answer string
+  `AHS-TAIL-7741AHS-LEG-MN07AHS-ARM-AL42` that CTFd accepts.
+
+## [3.73.0] - 2026-04-12
+
+### Fixed
+
+- A8 repo path drift (same pattern as A6/A7): `a8/Dockerfile`
+  COPYs `01-init.sql` from context root but the file lives in
+  `A8-research-database/`. Moved `a8-database` docker-compose
+  build context to `.` with `dockerfile: ./a8/Dockerfile` so
+  the build works from a fresh repo checkout.
+
+### Changed
+
+- `a3/Dockerfile`: added `postgresql-client` so a3-intranet can
+  run `psql` against A8 as the designed pivot host (A8 is on
+  lab VLAN 30, not reachable from a14-kali directly).
+
+### Added
+
+- `docs/ctf/mechag/A8-research-database/smoketest.sh`: A8
+  research database end-to-end smoketest (16 checks). Runs
+  from a3-intranet via psql. Verifies lab_general auth via
+  A3 /.env discovery path, compartment isolation
+  (lab_general denied on compartment_b/c, lab_mfg denied on
+  compartment_b), flag 21 in compartment_a.structural_specs
+  frame_dorsal_plate row, both flag 27 paths (vasik direct
+  via AD password reuse + SECURITY DEFINER SQL injection in
+  research_public.search_research as lab_general) with
+  verification that the function actually has SECURITY
+  DEFINER, flag 28 via JSONB path
+  `metadata->'integration'->>'flag'` in compartment_c.assembly_log
+  as lab_mfg (A6 .pgpass pivot), A13 override-code piece
+  AL42 via `metadata->'integration'->>'code'`, and A6 flag 30
+  chain prerequisite (Vasik GPG private key base64 blob in
+  compartment_b.key_storage).
+
+## [3.72.0] - 2026-04-12
+
+### Fixed
+
+- A7 Gitea bootstrap drift (design vs build mismatch):
+  - `bootstrap.sh` user creation was missing `login_name` in the
+    POST payload, so Gitea stored users with empty login_name
+    and basic-auth failed ("user's password is invalid"). Added
+    `login_name` + `source_id` to the POST, plus a PATCH fallback
+    that corrects existing users on re-runs.
+  - Gitea user passwords were all hardcoded to `TestPass123!`
+    with no discovery path. Updated to match the A1/A2/A6 AD
+    credentials (e_vasik/Reactor#Core9, r_tanaka/SimEngine#42,
+    p_nielsen/Hydraulics1, m_webb/Welcome1, d_kowalski/P@ssw0rd123)
+    so the password-reuse pattern participants discover in the
+    Front Office also unlocks Gitea. k_yamamoto and f_okoye
+    (Lab-Access members without prior AD mapping) get
+    Sensor2025 / AIModel2025 respectively.
+- A7 repo path drift: `a7/Dockerfile` COPYs `bootstrap.sh` and
+  `bare-repos.tar.gz` but they live in `A7-source-repo/`. Moved
+  `a7-gitea` docker-compose build context to `.` with
+  `dockerfile: ./a7/Dockerfile` and updated COPY paths so the
+  image can be built from a fresh repo checkout.
+
+### Added
+
+- `docs/ctf/mechag/A7-source-repo/smoketest.sh`: A7 end-to-end
+  smoketest (20 checks) runnable from a14-kali (A7 is
+  multi-homed on shared+lab so a14-kali reaches it directly via
+  shared). Verifies Gitea API, public org/repo discovery,
+  visibility boundaries (anonymous cannot see `aurora` org or
+  its repos; anonymous cannot clone private repos), authenticated
+  clone of all 4 aurora repos, flag 24 via `git log -p` on
+  navigation-controller removed CI token, flag 29 via
+  `git show <parent>:schematic.svg` recovery on leviathan-assembly,
+  LEGACY_PASSPHRASE cross-asset breadcrumb for A6 flag 30 in
+  weapons-integration/src/crypto_config.py, deploy_combat_ai.yml
+  playbook in manufacturing-orchestrator, and password-reuse
+  validation for r_tanaka and p_nielsen.
+
+## [3.71.0] - 2026-04-12
+
+### Fixed
+
+- A6 repo drift: `build-a6-content.sh` and `build-gpg-chain.sh`
+  existed on the range VM but were never committed to the repo,
+  so `a6/Dockerfile` could not build from a fresh clone. Added
+  both scripts to `A6-engineering-workstation/` alongside
+  `build_cog_xlsx.py`, moved `a6-workstation` docker-compose
+  build context to `.` with `dockerfile: ./a6/Dockerfile`, and
+  updated the Dockerfile COPY paths so it can reach both the
+  build dir (`a6/`) and the content dir
+  (`A6-engineering-workstation/`) at build time. Rebuilt and
+  recreated a6-workstation on the range successfully.
+
+### Changed
+
+- `a3/Dockerfile`: added `openssh-client`, `sshpass`, and
+  `ca-certificates` so a3-intranet functions as a realistic
+  post-compromise pivot host. This is the only practical path
+  for a14-kali to reach the Lab VLAN (30) and SCADA VLAN (40)
+  per the design (A3 is the only asset multi-homed to all
+  three). Rebuilt and recreated a3-intranet.
+
+### Added
+
+- `docs/ctf/mechag/A6-engineering-workstation/smoketest.sh`:
+  A6 engineering workstation end-to-end smoketest (22 checks).
+  Runs from inside a3-intranet and uses SSH pivot to reach
+  eng-ws01.boreas.local on lab VLAN 30. Verifies jenkins /
+  r.tanaka / p.nielsen logins, flag 20 in jenkins .credentials,
+  flag 22 in /opt/builds/latest/reactor_interface_spec, flag 23
+  as string in stress_test_44.dat binary (with bipedal
+  cross-references in logs 28/31/44), flag 25 in
+  MIDNIGHT-7_results.dat plus MN07-INTEG-20251028 simulation
+  ID (A13 override code piece), flag 26 in the hidden
+  Integration sheet of center_of_gravity_analysis.xlsx
+  extracted via stdlib `zipfile`, restricted perms on
+  r.tanaka/simulations/midnight and p.nielsen/designs,
+  p.nielsen .pgpass A8 cred breadcrumb, flag 30 prerequisites
+  (encrypted file + public key + gpg-agent.conf hint), and
+  simulation.log narrative content. Flag 30's full decryption
+  chain requires A7 passphrase + A8 private key blob so it's
+  deferred to the cross-asset verification task.
+
+## [3.70.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/A5-scada-generator/smoketest.py`: A5 SCADA
+  generator HMI + Modbus PLC end-to-end smoketest (19 checks).
+  Runs from inside a3-intranet (the multi-homed corporate+scada
+  pivot — A14 cannot reach A5 directly per design). Uses only
+  stdlib (socket + urllib) so it needs no pymodbus install in
+  the container. Verifies: flag 18 in dashboard footer;
+  architecture page reveals Modbus port 502 / HR 100 interlock
+  / HR 200 maintenance key; system logs contain D. Kowalski
+  sensor drift incident; `svc-scada` / `Sc@da#2025!` auth gated
+  on /control with wrong-password rejection; raw Modbus TCP
+  reads the register map; wrong maintenance key to HR 200 is
+  rejected; correct key 7734 bypasses HR 100 interlock and
+  disables thermal safety; fuel=100 + cooling=0 triggers
+  thermal runaway; flag 19 on the destroyed CRITICAL page.
+  Test is idempotent for destroyed containers (extracts flags
+  from the final page) but requires a fresh a5-scada container
+  to re-prove the attack chain.
+
+## [3.69.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/A4-file-share/smoketest.sh`: A4 file share
+  end-to-end smoketest (33 checks). Exercises every share ACL and
+  every flag path from the a14-kali container: anonymous read of
+  Public share and flag 11 from `cafeteria_menu_april.pdf` PDF
+  Author metadata; authenticated read of HR as `v.harlan` with
+  flag 9 on page 2 of `chen_james_termination.pdf` Case Reference
+  Number field; Procurement read with PO-2847 "Special
+  Instructions" cross-reference followed into
+  `specs/actuator_requirements_v4.pdf` for flag 13; IT share
+  anonymous-deny plus `svc-fileshare` (A1 Kowalski creds pivot)
+  authenticated read of `backup_verification.log` for flag 15;
+  Executive share read. Verifies design-specified share contents
+  (network_diagram, server_inventory, PO-3102/3455, reactor
+  invoice, org chart, Chen NDA, board minutes, budget summary).
+
+## [3.68.0] - 2026-04-12
+
+### Fixed
+
+- `docs/ctf/mechag/a3/Dockerfile`: create `/var/www/docs` base
+  directory with two placeholder files. Without this, both the
+  legit `/download?file=*` feature and the design-specified path
+  traversal attack (`/download?file=../../../etc/passwd`) failed
+  because Python's `os.path.realpath` lexically normalizes `..`
+  components on non-existent paths (resolving `/var/www/docs/..`
+  to `/var/www` then `/var` etc), so the traversal target
+  resolved to `/var/etc/passwd` instead of `/etc/passwd`. Fix
+  makes both legit downloads and the intended attack path work.
+
+### Added
+
+- `docs/ctf/mechag/A3-web-app/smoketest.sh`: A3 intranet/wiki
+  end-to-end smoketest (24 checks). Verifies public pages,
+  username enumeration via `/forgot`, flag 7 in `/.env` and
+  `/config.bak` (plus A8 research DB cred breadcrumb),
+  admin/admin login, flag 12 in `/wiki/project-coordination`
+  HTML comment, all 4 wiki pages, IT KB internal hostnames
+  (dc01, scada-gw), LEVIATHAN Assembly Schedule draft visible
+  in admin panel with `[MOVED TO SECURE SYSTEM]` body, SQL
+  injection via `/search` dumping the users table, and path
+  traversal in `/download` reading `/etc/passwd`. Runnable from
+  the a14-kali container.
+
+## [3.67.0] - 2026-04-12
+
+### Added
+
+- `docs/ctf/mechag/A1-mail-server/smoketest.py`: A1 end-to-end
+  smoketest (27 checks). Exercises IMAP auth for all 6 mailboxes,
+  Roundcube webmail login flow, flag 10 retrieval from Kowalski's
+  welcome email, flag 8 extraction from Vasik's PDF attachment via
+  `pdf2txt.py`, the A4 cred pivot breadcrumb (svc-fileshare /
+  F1l3Sh@r3Svc! in Kowalski's "creds backup" email), and every
+  narrative thread the design specifies (MIDNIGHT-7, PO-2847,
+  Petrov anomaly, Kursk shipment, Novikov reactor). Runnable from
+  the a14-kali container.
+- `docs/ctf/mechag/A2-domain-controller/smoketest.sh`: A2 Windows
+  DC end-to-end smoketest (22 checks). Sweeps AD ports on
+  `dc01.boreas.local`, verifies `e.vasik` (A1 password reuse)
+  authenticates, Kerberoasts svc-backup via `GetUserSPNs.py`,
+  cracks the hash offline with john to `Password1`, DCSyncs the
+  Administrator NTLM hash via `secretsdump.py`, pass-the-hashes
+  into `\\dc01\admin_flag\` for flag 17, retrieves flag 16 from
+  `\\dc01\badgelogs\access_log_march_2026.csv` (Petrov Underground
+  Hatch entries), and confirms flag 14 via LDAP `(cn=Project-L)`
+  info attribute. Also verifies the Engineering-Support >
+  Research-Coordination > Project-L group nesting.
+
+## [3.66.0] - 2026-04-11
+
+### Changed
+
+- A0 Boreas Systems website rebuilt to match `A0-boreas-website.md`
+  design spec. Replaces the Flask prototype with `nginx:alpine` serving
+  static HTML + reportlab-generated PDFs via a multi-stage build:
+  - `a0/Dockerfile` now multi-stage (`python:3.12-slim` content-builder
+    feeding `nginx:alpine`), `a0/nginx.conf` added.
+  - `docker-compose.yml` a0-website build context moved to `.` with
+    `dockerfile: ./a0/Dockerfile` so the image can COPY from both
+    `a0/` and `A0-boreas-website/`.
+  - `A0-boreas-website/site/`: 14 static HTML pages + CSS (home,
+    about, leadership with CSS-gradient avatars, careers,
+    careers_apply, contact, news, status, robots.txt, admin/, portal/,
+    old/index, old/clients, internal/index).
+  - `A0-boreas-website/build_pdfs.py`: reportlab generator for
+    org_chart.pdf (flag 2 in Author metadata), boreas-Q1-2025.pdf,
+    boreas-Q2-2025.pdf, and boreas-annual-2025.pdf with the Kursk
+    Heavy Industries $12,000,000 line buried in 40 expense items.
+  - `/internal/` uses a hand-written `index.html` so the annual
+    report PDF lives on disk but is not listed — participants must
+    fuzz the filename pattern to find it.
+  - `A0-boreas-website/smoketest.sh` added — 22-check end-to-end
+    attacker-perspective test runnable from the a14-kali container.
+
+### Removed
+
+- `A0-boreas-website/server.py` — obsolete Flask prototype.
+
+## [3.65.0] - 2026-04-11
+
+### Added
+
+- NORTHSTORM CTF range carry-over from the `shifter-k8s` branch onto
+  the new `polaris-ctf` branch. Brings in:
+  - All 16 mecha-asset build directories under
+    `docs/ctf/mechag/{a0..a14,dns}/` (Dockerfiles, entrypoints,
+    content, Modbus servers, scenario assets).
+  - All 14 design content folders under
+    `docs/ctf/mechag/A0-boreas-website/` … `A9-splice-landing/`
+    (mission briefs, prepared scripts, fixture data).
+  - `docs/ctf/mechag/docker-compose.yml`,
+    `ctfd-challenges.json`, `shared-constants.md`.
+- A14 Kali container rebuilt against the AWS packer scripts in
+  `shifter/packer/scripts/kali/`: `kali-linux-headless` metapackage,
+  XFCE + xrdp on 3389, sshd on 22, Claude Code CLI via npm, kali user,
+  CTF content overlay under `/home/kali/`. Mission brief generated as
+  PDF (`docs/ctf/mechag/A14-kali/mission_brief.pdf`).
+- Project DNS sidecar verified end-to-end: AXFR-enabled BIND with
+  `boreas-systems.ctf` and `boreas.local` zones, multi-homed onto
+  shared/corporate/lab networks.
+
+### Changed
+
+- All 15 mecha asset design docs (`docs/ctf/mechag/A0-…A9-…md`) and
+  `docs/ctf/northstorm-architecture.md` updated to match the
+  shifter-k8s branch state. A14-kali design no longer specifies
+  per-participant rate limiting (false constraint), uses the `kali`
+  user (matching the AWS AMI), and documents RDP access in place of
+  the ttyd/Guacamole sidecar approach.
+
 ## [3.64.0] - 2026-04-11
 
 ### Changed

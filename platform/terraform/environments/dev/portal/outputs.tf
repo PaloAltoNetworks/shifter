@@ -92,6 +92,51 @@ output "launch_template_id" {
   value       = module.ec2.launch_template_id
 }
 
+output "ctfd_instance_id" {
+  description = "ID of the CTFd instance (empty if disabled)"
+  value       = var.enable_ctfd ? module.ctfd[0].instance_id : ""
+}
+
+output "ctfd_private_ip" {
+  description = "Private IP of the CTFd instance (empty if disabled)"
+  value       = var.enable_ctfd ? module.ctfd[0].private_ip : ""
+}
+
+output "ctfd_elastic_ip" {
+  description = "Elastic IP of the CTFd instance (empty if disabled)"
+  value       = var.enable_ctfd ? module.ctfd[0].elastic_ip : ""
+}
+
+output "ctfd_url" {
+  description = "Public URL for the CTFd instance (empty if disabled)"
+  value       = var.enable_ctfd ? module.ctfd[0].url : ""
+}
+
+output "ctfd_certbot_command" {
+  description = "Certbot command to run on the CTFd instance after DNS resolves"
+  value       = var.enable_ctfd ? module.ctfd[0].certbot_command : ""
+}
+
+output "ctfd_ssm_connect_command" {
+  description = "SSM command for shell access to the CTFd instance"
+  value       = var.enable_ctfd ? module.ctfd[0].ssm_connect_command : ""
+}
+
+output "ctfd_ssh_command" {
+  description = "Direct SSH command for the CTFd instance"
+  value       = var.enable_ctfd ? module.ctfd[0].ssh_command : ""
+}
+
+output "ctfd_ssh_key_name" {
+  description = "EC2 key pair name configured for the CTFd instance"
+  value       = var.enable_ctfd ? module.ctfd[0].ssh_key_name : ""
+}
+
+output "ctfd_security_group_id" {
+  description = "Security group ID of the CTFd instance (empty if disabled)"
+  value       = var.enable_ctfd ? module.ctfd[0].security_group_id : ""
+}
+
 # ------------------------------------------------------------------------------
 # ALB
 # ------------------------------------------------------------------------------

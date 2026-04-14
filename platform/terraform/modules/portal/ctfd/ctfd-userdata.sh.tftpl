@@ -1,0 +1,97 @@
+#!/bin/bash
+set -euo pipefail
+
+dnf install -y docker git nginx certbot python3-certbot-nginx openssh-server
+systemctl enable --now sshd
+systemctl enable --now docker
+
+curl -fsSL \
+  "https://github.com/docker/compose/releases/download/${docker_compose_version}/docker-compose-$(uname -s)-$(uname -m)" \
+  -o /usr/local/bin/docker-compose
+chmod 0755 /usr/local/bin/docker-compose
+
+install -d -m 0755 /usr/local/lib/docker/cli-plugins
+curl -fsSL \
+  "https://github.com/docker/buildx/releases/download/${docker_buildx_version}/buildx-${docker_buildx_version}.linux-amd64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod 0755 /usr/local/lib/docker/cli-plugins/docker-buildx
+
+install -d -m 0755 /opt/ctfd
+git clone "${ctfd_repo_url}" /opt/ctfd
+cd /opt/ctfd
+git checkout "${ctfd_git_ref}"
+
+secret_key="$(openssl rand -hex 32)"
+
+cat > /opt/ctfd/docker-compose.override.yml <<YAML
+services:
+  ctfd:
+    environment:
+      - SECRET_KEY=$${secret_key}
+      - WORKERS=4
+      - REVERSE_PROXY=true
+    restart: always
+  db:
+    restart: always
+  cache:
+    restart: always
+  nginx:
+    # Keep upstream's nginx service available for debugging, but disable it by
+    # default so the host nginx/certbot flow can own ports 80/443.
+    profiles:
+      - container-nginx
+YAML
+
+/usr/local/bin/docker-compose up -d
+
+cat > /etc/nginx/conf.d/ctfd.conf <<NGINX
+server {
+    listen 80;
+    server_name ${domain};
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGINX
+
+rm -f /etc/nginx/conf.d/default.conf
+systemctl enable --now nginx
+
+cat > /etc/systemd/system/ctfd.service <<'SYSTEMD'
+[Unit]
+Description=CTFd Platform
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/ctfd
+ExecStart=/usr/local/bin/docker-compose up -d
+ExecStop=/usr/local/bin/docker-compose down
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD
+
+systemctl daemon-reload
+systemctl enable ctfd
+
+cat > /root/ctfd-workshop-next-steps.txt <<NEXT
+CTFd workshop instance bootstrap completed.
+
+Manual next steps:
+1. Point ${domain} at the Elastic IP for this instance.
+2. Run: sudo certbot --nginx -d ${domain}
+3. Finish the CTFd setup wizard in the browser.
+4. Generate an admin API token.
+5. From your workstation checkout, seed challenges and flags:
+   python3 scripts/ctfd-workshop/seed_ctfd.py --base-url https://${domain} --token <token>
+NEXT

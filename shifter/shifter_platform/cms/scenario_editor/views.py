@@ -31,6 +31,7 @@ from cms.scenarios.registry import (
     list_all_scenarios,
 )
 from shared.auth import threat_research_required
+from shared.log_sanitize import safe_log
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,9 @@ def scenario_create_form(request):
                 },
             )
 
-        logger.info("scenario_create_form: created scenario_id=%s by user_id=%s", scenario_id, request.user.id)
+        logger.info(
+            "scenario_create_form: created scenario_id=%s by user_id=%s", safe_log(scenario_id), request.user.id
+        )
         messages.success(request, f"Scenario '{name}' created successfully.")
         return redirect("scenario_editor:detail", scenario_id=scenario_id)
     except Exception:
@@ -786,8 +789,8 @@ def scenario_clone_view(request, scenario_id):
 
         logger.info(
             "scenario_clone_view: cloned scenario_id=%s to new_scenario_id=%s by user_id=%s",
-            scenario_id,
-            new_scenario_id,
+            safe_log(scenario_id),
+            safe_log(new_scenario_id),
             request.user.id,
         )
         messages.success(request, f"Scenario cloned as '{new_name or new_scenario_id}' successfully.")

@@ -136,6 +136,7 @@ GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" 2>/dev/nu
 DB_HOST_OVERRIDE=$(get_param "$PS_PREFIX/db-host-override" 2>/dev/null || echo "")
 EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend")
 CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email")
+CTFD_PLATFORM_URL=$(get_param "$PS_PREFIX/ctfd-platform-url" 2>/dev/null || echo "")
 
 IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 echo "Deploying image: $IMAGE"
@@ -183,6 +184,10 @@ fi
 # Email configuration
 COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
 COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
+
+if [ -n "$CTFD_PLATFORM_URL" ]; then
+  COMMON_ENV="$COMMON_ENV -e CTFD_PLATFORM_URL=$CTFD_PLATFORM_URL"
+fi
 
 # ------------------------------------------------------------------------------
 # Deploy containers

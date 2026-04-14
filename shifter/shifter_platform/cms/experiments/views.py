@@ -27,6 +27,7 @@ from cms.experiments.exceptions import (
 from cms.experiments.schemas import ExperimentCreateInput
 from shared.auth import threat_research_required
 from shared.exceptions import CMSError
+from shared.log_sanitize import safe_log
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -371,7 +372,7 @@ def artifact_download(
 @threat_research_required
 def scenario_instances(request: HttpRequest, scenario_id: str) -> JsonResponse:
     """Return instance list for a scenario (AJAX)."""
-    logger.info("scenario_instances: user_id=%s scenario_id=%s", request.user.id, scenario_id)
+    logger.info("scenario_instances: user_id=%s scenario_id=%s", request.user.id, safe_log(scenario_id))
     try:
         instances = services.get_scenario_instances(scenario_id, user=cast("User", request.user))
         return JsonResponse({"instances": instances})

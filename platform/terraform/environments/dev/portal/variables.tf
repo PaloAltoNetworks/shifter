@@ -116,6 +116,78 @@ variable "ec2_root_volume_size" {
   type        = number
 }
 
+variable "enable_ctfd" {
+  description = "Enable a standalone CTFd host in the portal VPC"
+  type        = bool
+}
+
+variable "ctfd_ami_id" {
+  description = "AMI ID for the CTFd instance"
+  type        = string
+}
+
+variable "ctfd_instance_type" {
+  description = "EC2 instance type for CTFd"
+  type        = string
+}
+
+variable "ctfd_root_volume_size" {
+  description = "Root volume size for the CTFd instance in GB"
+  type        = number
+}
+
+variable "ctfd_root_volume_type" {
+  description = "Root volume type for the CTFd instance"
+  type        = string
+}
+
+variable "ctfd_root_volume_iops" {
+  description = "Root volume IOPS for the CTFd instance"
+  type        = number
+}
+
+variable "ctfd_root_volume_throughput" {
+  description = "Root volume throughput in MiB/s for the CTFd instance"
+  type        = number
+}
+
+variable "ctfd_domain" {
+  description = "Public DNS name for the dev CTFd host"
+  type        = string
+}
+
+variable "ctfd_repo_url" {
+  description = "CTFd git repository URL"
+  type        = string
+}
+
+variable "ctfd_git_ref" {
+  description = "Pinned CTFd git ref to deploy"
+  type        = string
+}
+
+variable "ctfd_docker_compose_version" {
+  description = "Pinned Docker Compose release tag for CTFd"
+  type        = string
+}
+
+variable "ctfd_docker_buildx_version" {
+  description = "Pinned Docker Buildx release tag for CTFd"
+  type        = string
+}
+
+variable "ctfd_ssh_public_key" {
+  description = "SSH public key material for direct SSH access to the CTFd host"
+  type        = string
+  default     = ""
+}
+
+variable "ctfd_ssh_allowed_cidrs" {
+  description = "Map of allowed SSH source CIDRs for the CTFd host"
+  type        = map(string)
+  default     = {}
+}
+
 # ECR values come from terraform_remote_state.foundation
 
 # ------------------------------------------------------------------------------

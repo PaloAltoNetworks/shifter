@@ -44,6 +44,24 @@ ec2_ami_id           = "ami-00e428798e77d38d9"
 ec2_instance_type    = "t3.large"
 ec2_root_volume_size = 30
 
+# Standalone CTFd host in the portal VPC
+enable_ctfd                 = true
+ctfd_ami_id                 = "ami-0b0b78dcacbab728f"
+ctfd_instance_type          = "t3.xlarge"
+ctfd_root_volume_size       = 50
+ctfd_root_volume_type       = "gp3"
+ctfd_root_volume_iops       = 3000
+ctfd_root_volume_throughput = 125
+ctfd_domain                 = "polaris.keplerops.com"
+ctfd_repo_url               = "https://github.com/CTFd/CTFd.git"
+ctfd_git_ref                = "b5f0cf2b7f0e29f72c9227ea9bc08024230b4f06"
+ctfd_docker_compose_version = "v5.1.0"
+ctfd_docker_buildx_version  = "v0.21.2"
+ctfd_ssh_public_key         = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC3byh0s9saNGhlaIscoH+sD0Zg2dEtSDOdh8BaCEOjGCF5mm2SHPYV7ipEz2cf5Wwx/LxMWGfOiSF2h6CGBf8KCi1syDyOYVmG41AQqubVFPES0Vf6rVDTgLVqQx7IowupLmfa4MZE75kFjvRqK12jrCkFE1W9zIUAVUTnVZ9bZnVONyTsPs2GvjqJMKo6gYVdB9Dlt67uYlYiIgjYgyOmPUhY4DPg6o/pjLABLwVMDogHFZ6GLhy/EnGyks+PnpfnmLzNE/RSM65fR2FTk7h9rpjEZASf89cw6kF8NsFjkcx9jsBra4KFsRQY8AGsH7I1nyBKBncx6pqvFvycaeo5lxE3BGZRVvvnMbo/vwuwPVLtBHpQJWVhOqk75u5ACIlbjD7TYysLOuhY2/dp9F5yC00CBjlCJ/X1Qv2MOhenj2ljDQO6eBpSKvk9U0prDTWcIysn9eT9kNh6bj4dFqGiZRG+DxpolqgVgGRxJLOfJPH0WW7z0R+F/efrpaaBVcB5xqBOJ3fP6ur+JforJEtvdjIG7Dmk0TKTMU4DS4ftwFIZVnL7nJn7DcFG8K51Bf4EyZOL2kqfB+4K+9dN5IaVO6EOyP4KeJYPoOhSnxHEJyMdAQwrCmS9NwPOeEwrYoOETWaZ8/yrkTbqMdGHi5vMpajmfNTQMtzWVvaIbihf3w== j.bradley.edwards@gmail.com"
+ctfd_ssh_allowed_cidrs = {
+  workstation = "173.181.31.170/32"
+}
+
 # ------------------------------------------------------------------------------
 # ALB
 # ------------------------------------------------------------------------------

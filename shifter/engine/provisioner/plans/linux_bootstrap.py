@@ -40,6 +40,19 @@ public_key="{{ public_key }}"
 
 echo "Configuring SSH access for $ssh_user user..."
 
+# Skip cleanly if the requested ssh user does not exist on this host.
+# Kali AMIs that ship with a real kali user resolve fine; the polaris VM
+# is an Ubuntu host running Kali under docker, has no host-level kali
+# user, and lands its real authorized_keys inside the container via a
+# separate post-boot plan. Without this guard the script would fall
+# over on `eval echo ~$ssh_user` returning the literal "~kali" string
+# and downstream `chown -R kali:kali` failing under set -e.
+if ! id "$ssh_user" >/dev/null 2>&1; then
+    echo "ssh_user '$ssh_user' not present on this host; skipping host-level SSH key write"
+    echo "SSH configuration complete (skipped)"
+    exit 0
+fi
+
 # Get home directory for user
 user_home=$(eval echo ~$ssh_user)
 

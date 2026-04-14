@@ -1188,26 +1188,41 @@ of-truth rule)
 
 ## [3.64.0] - 2026-04-11
 
-### Added
-
-- `.ground-control.yaml` declaring the `aphelion` Ground Control
-  project, shifter's local lint command (ADR guard), sonarcloud key
-  (`Brad-Edwards_shifter`), and plan rules reference.
-- `.gc/plan-rules.md` containing ADR guard, guardrail discipline, and
-  stack-native checker requirements as "plans MUST..." bullets for
-  the `/implement` skill plan phase.
-
 ### Changed
+- GCP control-plane deployment cut over to a Helm-based release under `platform/charts/shifter/` with layered values (`values.yaml`, `values-gcp-dev.yaml`, `values-gcp-prod.yaml`) plus bootstrap-generated runtime overrides
+- `gdc-bootstrap` now deploys the GCP control plane through the Helm chart instead of the previous raw-manifest path
+- `AGENTS.md` has a new "Ground Control Context" section pointing to `.ground-control.yaml`
+- `.mcp.json` `ground-control` block now sets `GH_REPO=Brad-Edwards/shifter`
 
-- `AGENTS.md` has a new "Ground Control Context" section pointing to
-  `.ground-control.yaml`.
-- `.mcp.json` `ground-control` block now sets
-  `GH_REPO=Brad-Edwards/shifter`.
+### Added
+- `.ground-control.yaml` declaring the `aphelion` Ground Control project, shifter's local lint command (ADR guard), SonarCloud key (`Brad-Edwards_shifter`), and plan rules reference
+- `.gc/plan-rules.md` containing ADR guard, guardrail discipline, architectural defaults, and stack-native checker requirements as "plans MUST..." bullets for the `/implement` skill plan phase
+- Chart-managed GKE `BackendConfig` for the portal Service so Google Cloud ingress health checks are explicitly pinned to `/health/`
+- Environment-scoped Helm values files for `gcp-dev` and `gcp-prod`
+- Live bootstrap proof notes for the Helm-based GCP control-plane path in `temp/k8s/gcp-feature-audit.md`
+- Terraform-managed GCP Identity Platform auth for `gcp-dev`, including bootstrap-owned first-operator creation and runtime-configured bootstrap admin elevation
 
-## [3.63.0] - 2026-04-08
-
-## Fixed
+### Fixed
 - Fixed agentic workshop scenario configs
+- GCP bootstrap rerun safety for substrate stages: bootstrap key reuse, secret-version churn avoidance, SSH metadata drift checks, and staged bundle replacement
+- Engine migration consistency for `SubnetAllocation` so GCP bootstrap can run the platform database migrations cleanly on a fresh control plane
+- GCP bootstrap now leaves a usable externally reachable Shifter platform after control-plane bring-up, including healthy portal ingress and expected Mission Control login redirect behavior
+- AWS auth continuity while adding GCP identity support: AWS keeps the existing Cognito/OIDC path and GCP uses a provider-seamed first-party Identity Platform login flow
+
+## [3.63.0] - 2026-04-09
+
+### Added
+- Kubernetes manifest validation: kubeconform schema checks and kube-linter security/best-practice enforcement in pre-commit and CI
+- Checkov Kubernetes framework scanning for CIS benchmark checks on `platform/k8s/` manifests (soft-fail)
+- Cloud factory parity check (`cloud-factory-seam`) enforcing ADR-005-R1: every cloud adapter in `cloud/aws/` must have a counterpart in `cloud/gcp/`
+- TFLint `tflint-ruleset-google` plugin for GCP-specific Terraform linting
+- Image registry check ensuring Kustomize overlay images reference Artifact Registry (`pkg.dev`)
+- Pod Security Standards labels (`restricted` profile) on Kubernetes namespace manifests
+- PSS namespace labels architecture check in pre-commit Stage 4 (ADR-006-R1)
+- ADR-006: Kubernetes workloads must meet Pod Security Standards
+- ADR-004-R5 (kubeconform + kube-linter) and ADR-004-R6 (tflint-ruleset-google) rules
+- CI jobs: `k8s-lint`, `k8s-schema`, `security-k8s` in quality workflow
+- Time-bounded exceptions for known K8s manifest gaps (securityContext, NetworkPolicies) expiring 2026-07-08
 
 ## [3.62.1] - 2026-04-06
 

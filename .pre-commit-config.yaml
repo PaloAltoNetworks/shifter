@@ -14,6 +14,7 @@ repos:
         exclude: ^assets/styles/
       - id: check-yaml
         args: [--unsafe] # Allow custom YAML constructors (mkdocs plugins)
+        exclude: ^platform/charts/.*/templates/.*\.ya?ml$
       - id: check-json
       - id: check-added-large-files
         args: [--maxkb=500]
@@ -151,6 +152,25 @@ repos:
         language: system
         files: ^(scripts/polaris-aws-range/|shifter/engine/provisioner/terraform/modules/range/).*\.tf$
 
+  # Kubernetes schema validation
+  - repo: local
+    hooks:
+      - id: helm-lint-shifter-chart
+        name: helm lint (shifter chart)
+        entry: >-
+          bash -c 'helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-dev.yaml &&
+          helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-prod.yaml'
+        language: system
+        files: ^platform/charts/shifter/
+        pass_filenames: false
+      - id: kubeconform
+        name: kubeconform (k8s schemas)
+        entry: kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+        language: system
+        files: ^platform/k8s/.*\.yaml$
+        exclude: kustomization\.yaml$
+        types: [yaml]
+
   # =============================================================================
   # STAGE 2: Security (SAST/DAST)
   # =============================================================================
@@ -194,9 +214,36 @@ repos:
     rev: 3.2.346
     hooks:
       - id: checkov
+        name: checkov (terraform)
         files: ^platform/terraform/
         args:
           [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
+      - id: checkov
+        name: checkov (k8s)
+        files: ^platform/k8s/
+        args:
+          [--quiet, --compact, --framework, kubernetes, --directory, platform/k8s/, --soft-fail]
+
+  # Kubernetes security and best practices
+  - repo: local
+    hooks:
+      - id: kube-linter
+        name: kube-linter (k8s security)
+        entry: kube-linter lint --config .kube-linter.yaml platform/k8s/
+        language: system
+        files: ^platform/k8s/
+        pass_filenames: false
+        types: [yaml]
+
+      - id: k8s-image-registry
+        name: k8s image registry check
+        entry: >-
+          bash -c 'for f in platform/k8s/gcp/overlays/*/kustomization.yaml; do
+          if grep -E "newName:" "$f" | grep -qv "pkg\.dev/"; then
+          echo "ERROR: Images must use Artifact Registry (pkg.dev) in $f" && exit 1; fi; done'
+        language: system
+        files: ^platform/k8s/gcp/overlays/.*/kustomization\.yaml$
+        pass_filenames: false
 
   # =============================================================================
   # STAGE 3: Type Checking
@@ -206,7 +253,10 @@ repos:
     hooks:
       - id: mypy-shifter-platform
         name: mypy (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && PYTHONPATH="..:$PYTHONPATH" mypy .'
+        entry: >-
+          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
+          DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing
+          PYTHONPATH="..:$PYTHONPATH" mypy .'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false
@@ -230,7 +280,7 @@ repos:
         name: architecture (adr guard fast)
         entry: python3 scripts/adr_guard/adr_guard.py --changed --level fast
         language: system
-        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$)
+        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$)
         pass_filenames: false
         verbose: true
 
@@ -247,6 +297,17 @@ repos:
         entry: bash -c 'cd scripts/check_layer_imports && uv run python check_layer_imports.py -q'
         language: system
         files: ^shifter/shifter_platform/
+        pass_filenames: false
+        verbose: true
+
+      - id: k8s-pss-labels
+        name: architecture (k8s PSS labels)
+        entry: >-
+          bash -c 'for f in platform/k8s/gcp/base/namespaces.yaml; do if ! grep
+          -q "pod-security.kubernetes.io/enforce" "$f"; then echo "ERROR: $f
+          must include Pod Security Standards labels" && exit 1; fi; done'
+        language: system
+        files: ^platform/k8s/gcp/base/namespaces\.yaml$
         pass_filenames: false
         verbose: true
 
@@ -267,7 +328,11 @@ repos:
     hooks:
       - id: pytest-packer
         name: pytest (packer)
-        entry: bash -c 'cd shifter/packer && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/packer --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd shifter/packer && uv run pytest tests/ -q --cov=.
+          --cov-report=html:../../coverage/packer
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/packer/
         pass_filenames: false
@@ -277,7 +342,12 @@ repos:
     hooks:
       - id: pytest-provisioner
         name: pytest (provisioner)
-        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && TESTING=1 python -m pytest tests/ -q --cov=. --cov-report=html:../../../coverage/provisioner --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate &&
+          TESTING=1 python -m pytest tests/ -q --cov=.
+          --cov-report=html:../../../coverage/provisioner
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/engine/provisioner/
         pass_filenames: false
@@ -287,7 +357,11 @@ repos:
     hooks:
       - id: pytest-bootstrap
         name: pytest (bootstrap)
-        entry: bash -c 'cd scripts/bootstrap && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/bootstrap --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd scripts/bootstrap && uv run pytest tests/ -q --cov=.
+          --cov-report=html:../../coverage/bootstrap
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/bootstrap/
         pass_filenames: false
@@ -297,7 +371,11 @@ repos:
     hooks:
       - id: pytest-check-layer-imports
         name: pytest (check_layer_imports)
-        entry: bash -c 'cd scripts/check_layer_imports && uv run pytest tests/ -q --cov=. --cov-report=html:../../coverage/check_layer_imports --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd scripts/check_layer_imports && uv run pytest tests/ -q
+          --cov=. --cov-report=html:../../coverage/check_layer_imports
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/check_layer_imports/
         pass_filenames: false
@@ -341,7 +419,14 @@ repos:
     hooks:
       - id: pytest-shifter
         name: pytest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python -m pytest tests/ --ignore=tests/documentation --ignore=tests/risk_register -q --cov=. --cov-report=html:../../coverage/shifter_platform --cov-report=xml:coverage.xml --cov-report=term-missing:skip-covered'
+        entry: >-
+          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
+          TESTING=1 DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python
+          -m pytest tests/ --ignore=tests/documentation
+          --ignore=tests/risk_register -q --cov=.
+          --cov-report=html:../../coverage/shifter_platform
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
         language: system
         files: ^shifter/shifter_platform/
         pass_filenames: false

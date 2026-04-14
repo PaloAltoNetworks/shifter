@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: platform-runtime
+    envs:
+      - platform-runtime.env
+      - platform-runtime.generated.env
+
+images:
+  - name: placeholder-portal
+    newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-portal/portal
+    newTag: latest
+  - name: placeholder-guacd
+    newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-guacd/guacd
+    newTag: latest
+  - name: placeholder-guacamole-client
+    newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-guacamole-client/guacamole-client
+    newTag: latest
+
+patches:
+  - path: patch-serviceaccounts.yaml
+  - target:
+      kind: ConfigMap
+      name: platform-runtime
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: shifter-platform

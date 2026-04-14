@@ -16,7 +16,7 @@ ngfw: false
 instances:
   - name: Attacker
     role: attacker
-    os_type: kali        # Fixed Kali Linux AMI
+    os_type: kali        # Fixed Kali Linux image
     xdr_agent: false     # No agent on the attacker
 
   - name: Workstation

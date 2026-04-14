@@ -5,6 +5,18 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting Kali headless setup..."
 
+# Configure stable desktop credentials for Guacamole/RDP access
+echo "Setting Kali desktop password..."
+echo "kali:{{ kali_password }}" | chpasswd
+echo "Kali password configured"
+
+# Ensure the packages needed for SSH/RDP access exist on the VM Runtime image
+if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y openssh-server xrdp xorgxrdp || apt-get install -y openssh-server xrdp
+fi
+
 # Set hostname for XDR console visibility
 echo "Setting hostname to {{ hostname }}..."
 hostnamectl set-hostname {{ hostname }}
@@ -20,10 +32,27 @@ chmod 600 /home/kali/.ssh/authorized_keys
 chown -R kali:kali /home/kali/.ssh
 echo "SSH access configured"
 
+# Ensure SSH password auth is enabled for tooling that expects local login
+if [ -f /etc/ssh/sshd_config ]; then
+    sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+    if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
+        echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+    fi
+fi
+
+# Ensure SSH service is running
+if systemctl list-unit-files | grep -q "^ssh.service"; then
+    systemctl enable --now ssh || true
+elif systemctl list-unit-files | grep -q "^sshd.service"; then
+    systemctl enable --now sshd || true
+fi
+
 # Ensure xrdp is running for RDP access via Guacamole
-echo "Starting xrdp service..."
-systemctl start xrdp
-systemctl status xrdp --no-pager || true
-echo "xrdp service started"
+if systemctl list-unit-files | grep -q "^xrdp.service"; then
+    echo "Starting xrdp service..."
+    systemctl enable --now xrdp || true
+    systemctl status xrdp --no-pager || true
+    echo "xrdp service started"
+fi
 
 echo "Kali setup complete"

@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespaces.yaml
+  - serviceaccounts.yaml
+  - rbac-job-launcher.yaml
+  - web-service.yaml
+  - web-deployment.yaml
+  - guacd-service.yaml
+  - guacd-deployment.yaml
+  - guacamole-client-service.yaml
+  - guacamole-client-deployment.yaml
+  - worker-cms-deployment.yaml
+  - worker-engine-deployment.yaml
+  - worker-mc-deployment.yaml
+  - ctf-scheduler-deployment.yaml

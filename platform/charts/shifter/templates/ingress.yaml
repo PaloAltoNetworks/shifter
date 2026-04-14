@@ -1,0 +1,67 @@
+{{- if .Values.ingress.enabled }}
+{{- if and .Values.ingress.host .Values.ingress.managedTls.enabled }}
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: {{ .Values.ingress.managedTls.frontendConfigName }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: TEMPORARY_REDIRECT
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ .Values.ingress.managedTls.certificateName }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  domains:
+    - {{ .Values.ingress.host | quote }}
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platform-external
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.class | quote }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName | quote }}
+    {{- if and .Values.ingress.host .Values.ingress.managedTls.enabled }}
+    networking.gke.io/managed-certificates: {{ .Values.ingress.managedTls.certificateName | quote }}
+    networking.gke.io/v1beta1.FrontendConfig: {{ .Values.ingress.managedTls.frontendConfigName | quote }}
+    {{- end }}
+spec:
+  defaultBackend:
+    service:
+      name: portal-web
+      port:
+        number: 8000
+  rules:
+    - {{- if .Values.ingress.host }}
+      host: {{ .Values.ingress.host | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /guacamole
+            pathType: Prefix
+            backend:
+              service:
+                name: guacamole-client
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portal-web
+                port:
+                  number: 8000
+{{- end }}

@@ -4,54 +4,68 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    """Reconcile Django migration state with the raw SQL applied in 0019."""
 
     dependencies = [
-        ('engine', '0019_simplify_subnet_allocation'),
+        ("engine", "0019_simplify_subnet_allocation"),
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='subnetallocation',
-            name='unique_active_cidr_per_vpc',
-        ),
-        migrations.RemoveIndex(
-            model_name='subnetallocation',
-            name='engine_subn_vpc_id_d1c5a7_idx',
-        ),
-        migrations.RenameField(
-            model_name='subnetallocation',
-            old_name='reserved_at',
-            new_name='created_at',
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.RemoveConstraint(
+                    model_name="subnetallocation",
+                    name="unique_active_cidr_per_vpc",
+                ),
+                migrations.RemoveIndex(
+                    model_name="subnetallocation",
+                    name="engine_subn_vpc_id_d1c5a7_idx",
+                ),
+                migrations.RenameField(
+                    model_name="subnetallocation",
+                    old_name="reserved_at",
+                    new_name="created_at",
+                ),
+                migrations.AlterField(
+                    model_name="subnetallocation",
+                    name="range_id",
+                    field=models.IntegerField(default=0),
+                ),
+                migrations.AlterField(
+                    model_name="subnetallocation",
+                    name="request_id",
+                    field=models.CharField(default="", max_length=64),
+                ),
+                migrations.AddConstraint(
+                    model_name="subnetallocation",
+                    constraint=models.UniqueConstraint(
+                        fields=("vpc_id", "cidr"),
+                        name="unique_cidr_per_vpc",
+                    ),
+                ),
+                migrations.RemoveField(
+                    model_name="subnetallocation",
+                    name="confirmed_at",
+                ),
+                migrations.RemoveField(
+                    model_name="subnetallocation",
+                    name="released_at",
+                ),
+                migrations.RemoveField(
+                    model_name="subnetallocation",
+                    name="status",
+                ),
+            ],
         ),
         migrations.AlterField(
-            model_name='subnetallocation',
-            name='id',
-            field=models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID'),
-        ),
-        migrations.AlterField(
-            model_name='subnetallocation',
-            name='range_id',
-            field=models.IntegerField(default=0),
-        ),
-        migrations.AlterField(
-            model_name='subnetallocation',
-            name='request_id',
-            field=models.CharField(default='', max_length=64),
-        ),
-        migrations.AddConstraint(
-            model_name='subnetallocation',
-            constraint=models.UniqueConstraint(fields=('vpc_id', 'cidr'), name='unique_cidr_per_vpc'),
-        ),
-        migrations.RemoveField(
-            model_name='subnetallocation',
-            name='confirmed_at',
-        ),
-        migrations.RemoveField(
-            model_name='subnetallocation',
-            name='released_at',
-        ),
-        migrations.RemoveField(
-            model_name='subnetallocation',
-            name='status',
+            model_name="subnetallocation",
+            name="id",
+            field=models.BigAutoField(
+                auto_created=True,
+                primary_key=True,
+                serialize=False,
+                verbose_name="ID",
+            ),
         ),
     ]

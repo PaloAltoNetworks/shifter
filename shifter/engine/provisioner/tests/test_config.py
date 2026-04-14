@@ -13,12 +13,22 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
+    GDCNetworkAccessConfig,
+    GDCPaloAltoVMSeriesConfig,
+    GDCVMRuntimeConfig,
+    GDCVMRuntimeProfile,
     InstanceConfig,
     RangeConfig,
+    RangeNetworkConfig,
     SubnetConfig,
     decrypt_field,
     generate_presigned_url,
+    get_range_availability_zone,
     get_range_from_db,
+    load_gdc_network_access_config,
+    load_gdc_palo_alto_vmseries_config,
+    load_gdc_vmruntime_config,
+    load_range_network_config,
 )
 
 
@@ -96,7 +106,14 @@ class TestGetRangeFromDb:
             # First call returns range row, second call returns NGFW data ENI ID
             mock_cursor.fetchone.side_effect = [
                 sample_db_range_row_with_ngfw,
-                ("eni-test123", 123),  # NGFW lookup: (data_eni_id, instance_id)
+                (
+                    {
+                        "management_ip": "10.1.5.10",
+                        "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+                        "data_eni_id": "eni-test123",
+                    },
+                    123,
+                ),
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
@@ -109,6 +126,46 @@ class TestGetRangeFromDb:
 
             assert result["ngfw_enabled"] is True
             assert result["ngfw_data_eni_id"] == "eni-test123"
+            assert result["ngfw_attachment"]["attachment_mode"] == "aws-route-table-eni"
+            assert result["ngfw_attachment"]["ssh_key_secret_ref"].endswith(":secret:key")
+
+    def test_gcp_ngfw_attachment_uses_route_next_hop_state(
+        self, mock_boto3_clients, mock_env_vars_minimal, sample_db_range_row_with_ngfw
+    ):
+        """GCP/GDC NGFWs should resolve attachable state without AWS ENI fields."""
+        with patch("psycopg.connect") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.side_effect = [
+                sample_db_range_row_with_ngfw,
+                (
+                    {
+                        "cloud_provider": "gcp",
+                        "management_ip": "10.200.0.10",
+                        "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+                        "route_next_hop_ip": "10.200.0.2",
+                        "provider_metadata": {
+                            "gcp": {
+                                "attachment_mode": "gdc-static-route",
+                            }
+                        },
+                    },
+                    123,
+                ),
+            ]
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+            mock_conn.__exit__ = MagicMock(return_value=False)
+            mock_connect.return_value = mock_conn
+
+            result = get_range_from_db(42)
+
+            assert result["ngfw_enabled"] is True
+            assert result["ngfw_data_eni_id"] == ""
+            assert result["ngfw_instance_id"] == 123
+            assert result["ngfw_attachment"]["cloud_provider"] == "gcp"
+            assert result["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
 
 
 class TestDataclassDefaults:
@@ -178,10 +235,265 @@ class TestDataclassDefaults:
             portal_vpc_cidr="10.0.0.0/16",
         )
         assert config.ngfw_data_eni_id == ""
+        assert config.ngfw_attachment_mode == ""
+        assert config.ngfw_route_next_hop_ip == ""
         assert config.ngfw_enabled is False
         assert config.dc_ami_id == ""
         assert config.portal_vpc_cidr == "10.0.0.0/16"
         assert config.portal_vpc_peering_id == ""
+
+    def test_range_network_config_primary_portal_cidr(self):
+        """RangeNetworkConfig should expose the first portal CIDR for legacy callers."""
+        config = RangeNetworkConfig(
+            network_id="projects/test/global/networks/range",
+            network_cidr="10.50.0.0/16",
+            network_region="us-central1",
+            portal_network_cidrs=("10.40.0.0/20", "10.44.0.0/16"),
+        )
+
+        assert config.primary_portal_cidr == "10.40.0.0/20"
+
+
+class TestRangeNetworkEnv:
+    """Tests for provider-neutral range network env parsing."""
+
+    def test_load_range_network_config_prefers_generic_env_names(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "RANGE_NETWORK_ID": "projects/test/global/networks/gcp-range",
+                "RANGE_NETWORK_CIDR": "10.50.0.0/16",
+                "RANGE_NETWORK_REGION": "us-central1",
+                "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
+                "RANGE_VPC_ID": "vpc-legacy",
+                "RANGE_VPC_CIDR": "10.1.0.0/16",
+            },
+            clear=True,
+        )
+
+        config = load_range_network_config()
+
+        assert config.network_id == "projects/test/global/networks/gcp-range"
+        assert config.network_cidr == "10.50.0.0/16"
+        assert config.network_region == "us-central1"
+        assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
+
+    def test_load_range_network_config_falls_back_to_legacy_env_names(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "RANGE_VPC_ID": "vpc-legacy",
+                "RANGE_VPC_CIDR": "10.1.0.0/16",
+                "PORTAL_VPC_CIDR": "10.0.0.0/16",
+                "AWS_REGION": "us-east-2",
+            },
+            clear=True,
+        )
+
+        config = load_range_network_config()
+
+        assert config.network_id == "vpc-legacy"
+        assert config.network_cidr == "10.1.0.0/16"
+        assert config.network_region == "us-east-2"
+        assert config.portal_network_cidrs == ("10.0.0.0/16",)
+
+    def test_get_range_availability_zone_supports_legacy_and_generic_env_names(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "RANGE_NETWORK_ZONE": "us-central1-b",
+                "RANGE_AVAILABILITY_ZONE": "us-east-2a",
+                "AVAILABILITY_ZONE": "us-east-2b",
+            },
+            clear=True,
+        )
+
+        assert get_range_availability_zone() == "us-central1-b"
+
+    def test_load_gdc_network_access_config_reads_secret_bundle(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_ACCESS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-access",
+            },
+            clear=True,
+        )
+        mock_secrets = mocker.Mock()
+        mock_secrets.get_secret.return_value = """
+        {
+          "cluster_id": "cluster1",
+          "region": "us-central1",
+          "vxlan_cidr": "10.200.0.0/24",
+          "network_interface": "vxlan0",
+          "range_namespace_prefix": "range",
+          "dns_nameservers": ["8.8.8.8", "1.1.1.1"],
+          "static_ip_reservation_count": 6,
+          "kubeconfig": "apiVersion: v1\\nclusters: []\\ncontexts: []\\ncurrent-context: ''\\nusers: []\\n"
+        }
+        """
+        mocker.patch("cloud.get_secrets_store", return_value=mock_secrets)
+
+        config = load_gdc_network_access_config()
+
+        assert config == GDCNetworkAccessConfig(
+            access_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-access",
+            cluster_id="cluster1",
+            region="us-central1",
+            vxlan_cidr="10.200.0.0/24",
+            network_interface="vxlan0",
+            namespace_prefix="range",
+            dns_nameservers=("8.8.8.8", "1.1.1.1"),
+            static_ip_reservation_count=6,
+            kubeconfig="apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nusers: []",
+        )
+
+    def test_load_range_network_config_uses_gdc_access_bundle_when_active(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_ACCESS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-access",
+                "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
+                "RANGE_NETWORK_ID": "projects/test/global/networks/legacy-range",
+                "RANGE_NETWORK_CIDR": "10.50.0.0/16",
+            },
+            clear=True,
+        )
+        mock_secrets = mocker.Mock()
+        mock_secrets.get_secret.return_value = """
+        {
+          "cluster_id": "cluster1",
+          "region": "us-central1",
+          "vxlan_cidr": "10.200.0.0/24",
+          "kubeconfig": "apiVersion: v1\\nclusters: []\\ncontexts: []\\ncurrent-context: ''\\nusers: []\\n"
+        }
+        """
+        mocker.patch("cloud.get_secrets_store", return_value=mock_secrets)
+
+        config = load_range_network_config()
+
+        assert config.network_id == "cluster1"
+        assert config.network_cidr == "10.200.0.0/24"
+        assert config.network_region == "us-central1"
+        assert config.portal_network_cidrs == ("10.40.0.0/20", "10.44.0.0/16")
+
+    def test_load_gdc_vmruntime_config_reads_image_contract(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_VM_STORAGE_CLASS": "local-shared",
+                "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
+                "GDC_KALI_IMAGE_URL": "gs://images/kali.qcow2",
+                "GDC_KALI_VCPUS": "4",
+                "GDC_KALI_MEMORY": "8Gi",
+                "GDC_KALI_DISK_SIZE_GIB": "40",
+                "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
+                "GDC_WINDOWS_IMAGE_URL": "gs://images/windows.qcow2",
+                "GDC_DC_IMAGE_URL": "docker://registry.example.com/dc-image:latest",
+            },
+            clear=True,
+        )
+
+        config = load_gdc_vmruntime_config()
+
+        assert config == GDCVMRuntimeConfig(
+            storage_class_name="local-shared",
+            image_gcs_secret_id="projects/test/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
+            kali=GDCVMRuntimeProfile(source_url="gs://images/kali.qcow2", vcpus=4, memory="8Gi", disk_size_gib=40),
+            ubuntu=GDCVMRuntimeProfile(
+                source_url="https://example.com/ubuntu.img",
+                vcpus=1,
+                memory="2Gi",
+                disk_size_gib=20,
+            ),
+            windows=GDCVMRuntimeProfile(
+                source_url="gs://images/windows.qcow2",
+                vcpus=2,
+                memory="8Gi",
+                disk_size_gib=64,
+            ),
+            dc=GDCVMRuntimeProfile(
+                source_url="docker://registry.example.com/dc-image:latest",
+                vcpus=2,
+                memory="8Gi",
+                disk_size_gib=64,
+            ),
+        )
+
+    def test_gdc_vmruntime_config_requires_matching_profile_when_selected(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
+            },
+            clear=True,
+        )
+
+        config = load_gdc_vmruntime_config()
+
+        assert config.get_profile(role="victim", os_type="ubuntu").source_url == "https://example.com/ubuntu.img"
+        with pytest.raises(RuntimeError, match="Missing GDC VM Runtime image URL"):
+            config.get_profile(role="dc", os_type="windows")
+
+    def test_load_gdc_palo_alto_vmseries_config_reads_required_contract(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
+                "GDC_VMSERIES_BOOTSTRAP_BUCKET": "shifter-gcp-dev-vmseries-bootstrap",
+                "GDC_VMSERIES_STORAGE_CLASS": "local-shared",
+                "GDC_VMSERIES_IMAGE_GCS_SECRET_ID": "projects/test/secrets/gcs-import",
+                "GDC_VMSERIES_NAMESPACE_PREFIX": "ngfw",
+                "GDC_VMSERIES_MGMT_NETWORK_NAME": "pod-network",
+                "GDC_VMSERIES_MGMT_IP_CIDR": "10.200.0.20/24",
+                "GDC_VMSERIES_DATA_NETWORK_NAME": "ngfw-data",
+                "GDC_VMSERIES_DATA_IP_CIDR": "10.200.1.10/24",
+                "GDC_VMSERIES_ROUTE_NEXT_HOP_IP": "10.200.1.1",
+                "GDC_VMSERIES_VCPUS": "8",
+                "GDC_VMSERIES_MEMORY": "16Gi",
+                "GDC_VMSERIES_DISK_SIZE_GIB": "100",
+                "GDC_VMSERIES_BOOTSTRAP_DISK_SIZE_GIB": "2",
+                "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID": "projects/test/secrets/bootstrap-xml",
+            },
+            clear=True,
+        )
+
+        config = load_gdc_palo_alto_vmseries_config()
+
+        assert config == GDCPaloAltoVMSeriesConfig(
+            image_url="gs://images/panos-vmseries.qcow2",
+            bootstrap_bucket="shifter-gcp-dev-vmseries-bootstrap",
+            storage_class_name="local-shared",
+            image_gcs_secret_id="projects/test/secrets/gcs-import",
+            namespace_prefix="ngfw",
+            management_network_name="pod-network",
+            management_ip_cidr="10.200.0.20/24",
+            data_network_name="ngfw-data",
+            data_ip_cidr="10.200.1.10/24",
+            route_next_hop_ip="10.200.1.1",
+            vcpus=8,
+            memory="16Gi",
+            disk_size_gib=100,
+            bootstrap_disk_size_gib=2,
+            bootstrap_xml_template_secret_id="projects/test/secrets/bootstrap-xml",
+        )
+
+    def test_gdc_palo_alto_vmseries_config_requires_palo_alto_runtime_fields(self, mocker):
+        mocker.patch.dict(
+            os.environ,
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "GDC_VMSERIES_IMAGE_URL": "gs://images/panos-vmseries.qcow2",
+            },
+            clear=True,
+        )
+
+        with pytest.raises(RuntimeError, match="GDC_VMSERIES_BOOTSTRAP_BUCKET"):
+            load_gdc_palo_alto_vmseries_config()
 
 
 class TestDecryptField:

@@ -1,14 +1,15 @@
 # Setup
 
-Deploying Shifter from a bare AWS account to full production.
+Deploying Shifter from a bare cloud account to a running environment.
 
 ## Prerequisites
 
 - Python 3.12+
 - Terraform 1.7+
-- AWS CLI v2 configured with SSO or IAM credentials
 - GitHub CLI (`gh`) authenticated
 - Docker
+- **AWS**: AWS CLI v2 configured with SSO or IAM credentials
+- **GCP**: `gcloud` CLI authenticated with appropriate project
 
 ## Cold-Start Deployment (New AWS Account)
 
@@ -283,3 +284,65 @@ aws ecr describe-images --repository-name shifter-prod-portal
 ```
 
 If empty, push a container first.
+
+## GCP Cold-Start Deployment
+
+GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus a Helm-packaged control plane (`platform/charts/shifter/`).
+
+### 1. GCP Project Setup
+
+Create a GCP project and enable required APIs. The bootstrap script handles this:
+
+```bash
+# See scripts/gcp/ for bootstrap tooling
+```
+
+### 2. Configure Workload Identity Federation
+
+Set up OIDC federation for GitHub Actions:
+
+1. Create a Workload Identity Pool and Provider
+2. Create a service account with required roles
+3. Add GitHub secrets:
+
+| Secret | Value |
+|--------|-------|
+| `GCP_SERVICE_ACCOUNT` | Service account email |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name |
+
+### 3. Configure terraform.tfvars
+
+```bash
+cd platform/terraform/gcp/environments/gcp-dev
+```
+
+Edit `terraform.tfvars` with the real project/environment values. At minimum the secure bootstrap requires:
+
+```hcl
+project_id                 = "prod-rwctxzl6shxk"
+public_hostname            = "shifter.keplerops.com"
+enable_managed_tls         = true
+gke_master_authorized_cidrs = ["173.181.31.170/32"]
+```
+
+Update `gke_master_authorized_cidrs` if the operator egress IP changes.
+
+### 4. Deploy
+
+Normal GCP deployments happen through CI/CD on `gcp-dev`. The bootstrap entrypoint remains available for first-time setup and controlled recovery:
+
+```bash
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+```
+
+That flow:
+
+1. builds or reconciles the GDC substrate
+2. applies GCP Terraform (GKE, Cloud SQL, Memorystore, Pub/Sub, etc.)
+3. builds and pushes control-plane images
+4. renders secure Helm values from Terraform outputs and Secret Manager
+5. installs or upgrades the Shifter Helm release
+
+### 5. DNS and TLS
+
+The secure bootstrap path expects a real hostname and managed TLS from the start. Point `shifter.keplerops.com` to the reserved global ingress IP so the Google-managed certificate can become active. The GCP path no longer uses the old debug-auth fallback as an acceptable first-boot mode.

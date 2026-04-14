@@ -1,9 +1,4 @@
-"""Tests for get_range_data_by_request_id NGFW instance lookup.
-
-The NGFW lookup query must find the user's active NGFW instance
-and return its ID so the range can be linked to the NGFW for
-pause/resume/destroy cascade operations.
-"""
+"""Tests for get_range_data_by_request_id NGFW instance lookup."""
 
 import sys
 from pathlib import Path
@@ -54,17 +49,16 @@ _RANGE_ROW_NO_NGFW = (
 class TestGetRangeDataNGFWLookup:
     """NGFW instance ID lookup in get_range_data_by_request_id."""
 
-    def test_finds_ngfw_without_service_name(self):
-        """NGFW with data_eni_id but no service_name should be found.
-
-        This is the bug: the query filtered on service_name IS NOT NULL,
-        but service_name is never populated. The lookup should not require
-        service_name.
-        """
+    def test_finds_ngfw_using_provider_neutral_attachment_state(self):
+        """NGFW with attachable routing state should be linked to the range."""
         from main import get_range_data_by_request_id
 
-        # NGFW lookup returns instance id=597
-        mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597,))
+        ngfw_state = {
+            "management_ip": "10.1.5.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+            "data_eni_id": "eni-123",
+        }
+        mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
         with patch("main.get_db_connection", return_value=mock_conn):
             result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -79,7 +73,12 @@ class TestGetRangeDataNGFWLookup:
         """
         from main import get_range_data_by_request_id
 
-        mock_conn, mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597,))
+        ngfw_state = {
+            "management_ip": "10.1.5.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+            "data_eni_id": "eni-123",
+        }
+        mock_conn, mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
         with patch("main.get_db_connection", return_value=mock_conn):
             result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -89,15 +88,17 @@ class TestGetRangeDataNGFWLookup:
         assert "paused" in sql_executed.lower()
         assert result["ngfw_instance_id"] == 597
 
-    def test_ngfw_query_checks_data_eni_not_service_name(self):
-        """NGFW lookup should filter on data_eni_id, not service_name.
-
-        data_eni_id is populated during NGFW provisioning and confirms
-        the NGFW has real infrastructure. service_name is never set.
-        """
+    def test_ngfw_query_does_not_require_aws_only_fields(self):
+        """NGFW lookup should not hardcode data_eni_id or service_name in SQL."""
         from main import get_range_data_by_request_id
 
-        mock_conn, mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597,))
+        ngfw_state = {
+            "cloud_provider": "gcp",
+            "management_ip": "10.200.0.10",
+            "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+            "route_next_hop_ip": "10.200.0.2",
+        }
+        mock_conn, mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
         with patch("main.get_db_connection", return_value=mock_conn):
             get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -105,7 +106,29 @@ class TestGetRangeDataNGFWLookup:
         # The second execute call is the NGFW lookup
         sql_executed = mock_cursor.execute.call_args_list[1][0][0]
         assert "service_name" not in sql_executed
-        assert "data_eni_id" in sql_executed
+        assert "data_eni_id" not in sql_executed
+
+    def test_gcp_ngfw_route_next_hop_state_is_attachable(self):
+        """GCP/GDC NGFW route-next-hop state should count as attachable."""
+        from main import get_range_data_by_request_id
+
+        ngfw_state = {
+            "cloud_provider": "gcp",
+            "management_ip": "10.200.0.10",
+            "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+            "route_next_hop_ip": "10.200.0.2",
+            "provider_metadata": {
+                "gcp": {
+                    "attachment_mode": "gdc-static-route",
+                }
+            },
+        }
+        mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (812, ngfw_state))
+
+        with patch("main.get_db_connection", return_value=mock_conn):
+            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+        assert result["ngfw_instance_id"] == 812
 
     def test_no_ngfw_when_config_disabled(self):
         """ngfw_instance_id should be None when ngfw not in range_config."""
@@ -132,6 +155,21 @@ class TestGetRangeDataNGFWLookup:
 
         # NGFW lookup returns None (no match)
         mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, None)
+
+        with patch("main.get_db_connection", return_value=mock_conn):
+            result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+        assert result["ngfw_instance_id"] is None
+
+    def test_ngfw_without_attachment_state_returns_none(self):
+        """NGFW without routable attachment state should not be linked."""
+        from main import get_range_data_by_request_id
+
+        ngfw_state = {
+            "management_ip": "10.1.5.10",
+            "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+        }
+        mock_conn, _mock_cursor = _make_mock_cursor(_RANGE_ROW_WITH_NGFW, (597, ngfw_state))
 
         with patch("main.get_db_connection", return_value=mock_conn):
             result = get_range_data_by_request_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")

@@ -47,6 +47,7 @@ GUARDRAIL_FILES = {
     ".importlinter",
     ".tflint.hcl",
     ".gitleaks.toml",
+    ".kube-linter.yaml",
 }
 DOC_PATHS = (
     "docs/adr/",
@@ -437,15 +438,66 @@ def check_guardrail_docs(repo_root: Path, files: list[str] | None) -> list[Viola
     ]
 
 
+CLOUD_ROOTS = (
+    "shifter/shifter_platform/shared/cloud",
+    "shifter/engine/provisioner/cloud",
+)
+CLOUD_SKIP_FILES = {"__init__.py", "base.py"}
+
+
+def check_cloud_factory_seam(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Ensure cloud adapter parity between AWS and GCP (ADR-005-R1).
+
+    Every adapter module in cloud/aws/ must have a counterpart in cloud/gcp/
+    and vice versa.  Modules named __init__.py and base.py are excluded since
+    they serve structural rather than adapter roles.
+    """
+    if files is not None:
+        cloud_touched = any(
+            any(f.startswith(root + "/") for root in CLOUD_ROOTS) for f in files
+        )
+        if not cloud_touched:
+            return []
+
+    violations: list[Violation] = []
+    for root in CLOUD_ROOTS:
+        aws_dir = repo_root / root / "aws"
+        gcp_dir = repo_root / root / "gcp"
+        if not aws_dir.exists() or not gcp_dir.exists():
+            continue
+        aws_modules = {f.name for f in aws_dir.glob("*.py")} - CLOUD_SKIP_FILES
+        gcp_modules = {f.name for f in gcp_dir.glob("*.py")} - CLOUD_SKIP_FILES
+        for missing in sorted(aws_modules - gcp_modules):
+            violations.append(
+                Violation(
+                    "cloud-factory-seam",
+                    "ADR-005-R1",
+                    f"{root}/gcp/{missing}",
+                    f"AWS adapter {missing} has no GCP counterpart",
+                )
+            )
+        for missing in sorted(gcp_modules - aws_modules):
+            violations.append(
+                Violation(
+                    "cloud-factory-seam",
+                    "ADR-005-R1",
+                    f"{root}/aws/{missing}",
+                    f"GCP adapter {missing} has no AWS counterpart",
+                )
+            )
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
     "cross-layer-model-imports": check_cross_layer_model_imports,
     "guardrail-docs": check_guardrail_docs,
+    "cloud-factory-seam": check_cloud_factory_seam,
 }
 CHECK_LEVELS = {
-    "fast": ["adr-registry", "layer-imports", "cross-layer-model-imports", "guardrail-docs"],
-    "ci": ["adr-registry", "layer-imports", "cross-layer-model-imports"],
+    "fast": ["adr-registry", "layer-imports", "cross-layer-model-imports", "guardrail-docs", "cloud-factory-seam"],
+    "ci": ["adr-registry", "layer-imports", "cross-layer-model-imports", "cloud-factory-seam"],
     "all": list(CHECKS),
 }
 

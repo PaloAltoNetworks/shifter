@@ -1,7 +1,8 @@
 """DC (Domain Controller) setup plan.
 
-Defines the steps to promote a Windows Server (with AD DS feature prebaked)
-to an Active Directory Domain Controller.
+Supports two operating modes:
+- prebaked: DC image already has AD DS promoted
+- runtime promotion: install/promote AD DS during setup
 """
 
 from typing import Any, ClassVar
@@ -148,6 +149,17 @@ Write-Host "NetBIOS name: {{ netbios_name }}"
 Write-Host ""
 
 try {
+    Write-Host "[Step 0] Detecting existing Domain Controller state..."
+    try {
+        Import-Module ActiveDirectory -ErrorAction Stop
+        $existingDc = Get-ADDomainController -ErrorAction Stop
+        Write-Host "  Domain Controller already configured: $($existingDc.HostName)"
+        Write-Host "  Skipping runtime promotion"
+        exit 0
+    } catch {
+        Write-Host "  No existing Domain Controller detected, continuing with promotion"
+    }
+
     Write-Host "[Step 1] Converting passwords to SecureString..."
     $DsrmPassword = ConvertTo-SecureString "{{ dsrm_password }}" -AsPlainText -Force
     $DomainAdminPassword = ConvertTo-SecureString "{{ domain_admin_password }}" -AsPlainText -Force
@@ -160,9 +172,9 @@ try {
     Write-Host "  Install state: $($addsFeature.InstallState)"
 
     if (-not $addsFeature.Installed) {
-        Write-Host "  ERROR: AD-Domain-Services feature not installed!"
-        Write-Host "  This AMI should have AD DS prebaked - check AMI configuration"
-        exit 1
+        Write-Host "  Installing AD-Domain-Services feature..."
+        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop | Out-Null
+        Write-Host "  AD-Domain-Services feature installed"
     }
 
     Write-Host ""
@@ -401,30 +413,10 @@ if ($verified) {
 class DCSetupPlan:
     """Setup plan for Windows Domain Controller.
 
-    DC instances use a prebaked AMI with domain already promoted.
-    This plan configures runtime settings and verifies the DC is running.
-
-    Steps:
-    1. Set Administrator password (prebaked AMI may have unknown password)
-    2. Enable SSH password authentication (for Guacamole SSH access)
-
-    Verification:
-    - Check NTDS service is running
-    - Query AD Domain Controller
+    In prebaked mode, this plan configures runtime settings and verifies AD.
+    In runtime-promotion mode, it promotes the instance first, then applies the
+    same runtime settings and verification.
     """
-
-    steps: ClassVar[list[SetupStep]] = [
-        SetupStep(
-            name="set_admin_password",
-            script=SET_ADMIN_CREDENTIAL_SCRIPT,
-            timeout_seconds=60,
-        ),
-        SetupStep(
-            name="enable_ssh_password_auth",
-            script=ENABLE_SSH_AUTH_SCRIPT,
-            timeout_seconds=60,
-        ),
-    ]
 
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_ad_running",
@@ -432,6 +424,38 @@ class DCSetupPlan:
         timeout_seconds=900,  # 15 min - allows 15 retries x 20s delays + verification time
         is_verification=True,
     )
+
+    def __init__(self, runtime_promotion: bool = False):
+        self.runtime_promotion = runtime_promotion
+
+    @property
+    def steps(self) -> list[SetupStep]:
+        steps: list[SetupStep] = []
+        if self.runtime_promotion:
+            steps.append(
+                SetupStep(
+                    name="promote_domain_controller",
+                    script=PROMOTE_DC_SCRIPT,
+                    timeout_seconds=1800,
+                    requires_reboot=True,
+                )
+            )
+
+        steps.extend(
+            [
+                SetupStep(
+                    name="set_admin_password",
+                    script=SET_ADMIN_CREDENTIAL_SCRIPT,
+                    timeout_seconds=60,
+                ),
+                SetupStep(
+                    name="enable_ssh_password_auth",
+                    script=ENABLE_SSH_AUTH_SCRIPT,
+                    timeout_seconds=60,
+                ),
+            ]
+        )
+        return steps
 
     def get_context(self, instance: Any) -> dict[str, Any]:
         """Get template variables for DC setup scripts.

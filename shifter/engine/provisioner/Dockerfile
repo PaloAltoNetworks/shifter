@@ -19,8 +19,9 @@ RUN apt-get update && apt-get install -y curl openssh-client unzip && \
 
 # Install Python dependencies
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-gcp.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements-gcp.txt
 
 # Copy Pulumi program
 COPY . .

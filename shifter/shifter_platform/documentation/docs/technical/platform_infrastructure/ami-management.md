@@ -1,4 +1,6 @@
-# AMI Management
+# Machine Image Management
+
+## AWS (AMIs)
 
 AMI IDs stored in SSM Parameter Store, built via Packer workflows.
 
@@ -92,7 +94,7 @@ To create a new DC AMI:
 
 **Important:** The Administrator password set during promotion must match the `dc_domain_password` value in `platform/terraform/environments/{env}/portal/terraform.tfvars` for domain join to work.
 
-## Related Files
+## Related Files (AWS)
 
 | File | Purpose |
 |------|---------|
@@ -100,3 +102,13 @@ To create a new DC AMI:
 | `shifter/engine/provisioner/main.py` | `get_ami_from_ssm()` function |
 | `shifter/engine/provisioner/catalog/instances.py` | Instance type definitions |
 | `shifter/engine/provisioner/plans/dc_setup.py` | DC verification (no promotion step) |
+
+## GCP/GDC
+
+GCP does not use AMIs or Packer. Guest images are managed differently per asset type:
+
+- **GDC VM Runtime** - OS images stored in GCS, imported as `VirtualMachineDisk` CRDs. Image URLs configured in `GDCVMRuntimeConfig`.
+- **Scenario Pods** - Standard container images from Artifact Registry.
+- **VM-Series NGFW** - OVA image stored in GCS, bootstrapped via GCS bucket.
+
+See [GDC Provisioning](gdc-provisioning) for details.

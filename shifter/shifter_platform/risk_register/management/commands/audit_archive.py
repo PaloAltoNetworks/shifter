@@ -111,6 +111,26 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR("boto3 not installed. Install with: pip install boto3"))
             return
 
+        # Resolve the AWS account ID so every put_object call can pass
+        # ExpectedBucketOwner. Defence-in-depth against a bucket-name
+        # collision where an attacker pre-creates a bucket with the same
+        # name in a different account: without this, audit logs could be
+        # silently written to the attacker's bucket.
+        # Strategy: explicit env var wins (simple to pin for tests), STS
+        # fallback discovers the caller's account at runtime. If both
+        # fail we log a warning and skip the ExpectedBucketOwner check —
+        # we never hard-fail the archive on this defence-in-depth knob.
+        expected_bucket_owner = os.environ.get("AWS_ACCOUNT_ID", "")
+        if not expected_bucket_owner:
+            try:
+                sts_client = boto3.client("sts")
+                expected_bucket_owner = sts_client.get_caller_identity()["Account"]
+            except Exception as e:
+                self.stdout.write(
+                    self.style.WARNING(f"  ExpectedBucketOwner check disabled (STS GetCallerIdentity failed: {e})")
+                )
+                expected_bucket_owner = ""
+
         # Process in batches
         archived_count = 0
         deleted_count = 0
@@ -163,13 +183,16 @@ class Command(BaseCommand):
             compressed = gzip.compress(content)
 
             try:
-                s3_client.put_object(
-                    Bucket=bucket_name,
-                    Key=s3_key,
-                    Body=compressed,
-                    ContentType="application/x-ndjson",
-                    ContentEncoding="gzip",
-                )
+                put_kwargs = {
+                    "Bucket": bucket_name,
+                    "Key": s3_key,
+                    "Body": compressed,
+                    "ContentType": "application/x-ndjson",
+                    "ContentEncoding": "gzip",
+                }
+                if expected_bucket_owner:
+                    put_kwargs["ExpectedBucketOwner"] = expected_bucket_owner
+                s3_client.put_object(**put_kwargs)
                 archived_count += len(batch)
                 self.stdout.write(f"  Batch {batch_num}: Uploaded {len(batch)} records to s3://{bucket_name}/{s3_key}")
             except ClientError as e:

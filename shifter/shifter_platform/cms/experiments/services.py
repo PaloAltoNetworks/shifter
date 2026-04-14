@@ -48,6 +48,7 @@ from cms.scenarios.registry import check_scenario_access, load_scenario_template
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
+from shared.log_sanitize import safe_log
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -188,14 +189,14 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         try:
             actual_size, etag = verify_s3_object(s3_key)
         except S3Error as e:
-            logger.error("complete_script_upload: S3 verify failed s3_key=%s: %s", s3_key, e)
+            logger.error("complete_script_upload: S3 verify failed s3_key=%s: %s", safe_log(s3_key), safe_log(str(e)))
             raise ScriptUploadError(f"Upload verification failed: {e}") from e
 
         max_size = settings.SCRIPT_MAX_FILE_SIZE_BYTES
         if actual_size > max_size:
             logger.warning(
                 "complete_script_upload: file too large s3_key=%s size=%d max=%d",
-                s3_key,
+                safe_log(s3_key),
                 actual_size,
                 max_size,
             )
@@ -228,7 +229,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             "complete_script_upload: created script_id=%s user_id=%s s3_key=%s",
             script.pk,
             user.pk,
-            s3_key,
+            safe_log(s3_key),
         )
         return script
     except (TypeError, ValueError, ExperimentError):
@@ -701,5 +702,5 @@ def get_scenario_instances(scenario_id: str, user: User | None = None) -> list[d
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:
-        logger.exception("Error in get_scenario_instances for scenario_id=%s", scenario_id)
+        logger.exception("Error in get_scenario_instances for scenario_id=%s", safe_log(scenario_id))
         raise

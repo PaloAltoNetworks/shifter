@@ -17,8 +17,21 @@
 
 set -u
 
-DC_IP="${A2_DC_IP:-10.1.100.11}"
+# DC_HOST is the per-range boreas.local dc01 — the polaris-vm host's `dns`
+# docker container resolves it to the *current* range's DC private IP,
+# rewritten at range bootstrap time by PolarisRangeBootstrapPlan. Resolve
+# DC_HOST once and use that IP for anywhere a raw IP is required (port
+# sweeps, KDC -dc-ip flag). Falls back to the old baked-in range-0 IP
+# only if resolution fails so the script still executes and reports the
+# failure cleanly instead of dying on `set -u`.
 DC_HOST="${A2_DC_HOST:-dc01.boreas.local}"
+if [[ -n "${A2_DC_IP:-}" ]]; then
+    DC_IP="$A2_DC_IP"
+elif _resolved=$(getent hosts "$DC_HOST" 2>/dev/null | awk '{print $1}' | head -1) && [[ -n "$_resolved" ]]; then
+    DC_IP="$_resolved"
+else
+    DC_IP="10.1.100.11"
+fi
 DOMAIN="${A2_DOMAIN:-BOREAS.LOCAL}"
 PROBE_USER="${A2_PROBE_USER:-e.vasik}"
 PROBE_PASS="${A2_PROBE_PASS:-Reactor#Core9}"

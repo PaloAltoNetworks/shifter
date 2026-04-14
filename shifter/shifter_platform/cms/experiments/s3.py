@@ -18,6 +18,7 @@ from django.conf import settings
 from cms.assets.s3 import S3Error, sanitize_s3_filename
 from shared.cloud import get_object_storage
 from shared.cloud.exceptions import CloudStorageError
+from shared.log_sanitize import safe_log
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +58,10 @@ def generate_script_upload_url(user_id: int, filename: str) -> tuple[str, str]:
             expires_in=settings.SCRIPT_UPLOAD_URL_EXPIRES,
         )
     except CloudStorageError as e:
-        logger.error("generate_script_upload_url: failed user_id=%s error=%s", user_id, e)
+        logger.error("generate_script_upload_url: failed user_id=%s error=%s", user_id, safe_log(str(e)))
         raise S3Error(str(e)) from e
 
-    logger.debug("generate_script_upload_url: success user_id=%s s3_key=%s", user_id, s3_key)
+    logger.debug("generate_script_upload_url: success user_id=%s s3_key=%s", user_id, safe_log(s3_key))
     return presigned_url, s3_key
 
 
@@ -89,10 +90,10 @@ def generate_presigned_download_url(s3_key: str, expires_in: int = 3600) -> str:
             expires_in=expires_in,
         )
     except CloudStorageError as e:
-        logger.error("generate_presigned_download_url: failed s3_key=%s error=%s", s3_key, e)
+        logger.error("generate_presigned_download_url: failed s3_key=%s error=%s", safe_log(s3_key), safe_log(str(e)))
         raise S3Error(str(e)) from e
 
-    logger.debug("generate_presigned_download_url: success s3_key=%s", s3_key)
+    logger.debug("generate_presigned_download_url: success s3_key=%s", safe_log(s3_key))
     return url
 
 
@@ -113,10 +114,10 @@ def delete_s3_object(s3_key: str) -> None:
         storage = get_object_storage()
         storage.delete_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
     except CloudStorageError as e:
-        logger.error("delete_s3_object: failed s3_key=%s error=%s", s3_key, e)
+        logger.error("delete_s3_object: failed s3_key=%s error=%s", safe_log(s3_key), safe_log(str(e)))
         raise S3Error(str(e)) from e
 
-    logger.info("delete_s3_object: success s3_key=%s", s3_key)
+    logger.info("delete_s3_object: success s3_key=%s", safe_log(s3_key))
 
 
 def verify_s3_object(s3_key: str) -> tuple[int, str]:
@@ -140,13 +141,13 @@ def verify_s3_object(s3_key: str) -> tuple[int, str]:
         metadata = storage.head_object(bucket=settings.AWS_S3_BUCKET_NAME, key=s3_key)
         size = metadata["content_length"]
         etag = metadata["etag"]
-        logger.debug("verify_s3_object: success s3_key=%s size=%d", s3_key, size)
+        logger.debug("verify_s3_object: success s3_key=%s size=%d", safe_log(s3_key), size)
         return size, etag
     except CloudStorageError as e:
         if "not found" in str(e).lower() or "404" in str(e):
-            logger.warning("verify_s3_object: not found s3_key=%s", s3_key)
+            logger.warning("verify_s3_object: not found s3_key=%s", safe_log(s3_key))
             raise S3Error(f"Object not found: {s3_key}") from e
-        logger.error("verify_s3_object: failed s3_key=%s error=%s", s3_key, e)
+        logger.error("verify_s3_object: failed s3_key=%s error=%s", safe_log(s3_key), safe_log(str(e)))
         raise S3Error(str(e)) from e
 
 

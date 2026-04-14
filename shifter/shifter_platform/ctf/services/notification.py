@@ -12,6 +12,7 @@ from uuid import UUID
 from ctf.enums import NotificationStatus, NotificationType, ScheduledTaskType
 from ctf.exceptions import CTFNotFoundError
 from ctf.models import CTFEvent, CTFNotification, CTFParticipant
+from shared.log_sanitize import safe_log
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -76,7 +77,7 @@ def send_invitations(event_id: UUID) -> dict[str, Any]:
             else:
                 failed += 1
         except Exception:
-            logger.exception("Failed to send invitation to %s", participant.email)
+            logger.exception("Failed to send invitation to %s", safe_log(participant.email))
             failed += 1
 
     # Create notification record
@@ -161,7 +162,7 @@ def send_credentials(event_id: UUID) -> dict[str, Any]:
             else:
                 failed += 1
         except Exception:
-            logger.exception("Failed to send credentials to %s", participant.email)
+            logger.exception("Failed to send credentials to %s", safe_log(participant.email))
             failed += 1
 
     if sent > 0:
@@ -258,7 +259,7 @@ def send_reminder(event_id: UUID, hours_before: int = 24) -> dict[str, Any]:
             else:
                 failed += 1
         except Exception:
-            logger.exception("Failed to send reminder to %s", participant.email)
+            logger.exception("Failed to send reminder to %s", safe_log(participant.email))
             failed += 1
 
     if sent > 0:
@@ -346,7 +347,7 @@ def send_announcement(
             if success:
                 sent += 1
         except Exception:
-            logger.exception("Failed to send announcement to %s", participant.email)
+            logger.exception("Failed to send announcement to %s", safe_log(participant.email))
 
     from django.utils import timezone
 

@@ -94,6 +94,12 @@ variable "s3_bucket_name" {
   type        = string
 }
 
+variable "ctfd_platform_url" {
+  description = "Public URL for the standalone CTFd platform"
+  type        = string
+  default     = ""
+}
+
 # ------------------------------------------------------------------------------
 # Engine Provisioner Configuration
 # ------------------------------------------------------------------------------

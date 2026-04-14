@@ -1,61 +1,18 @@
 #------------------------------------------------------------------------------
-# Shared per-account / per-VPC resources. One copy drives every POLARIS
-# range produced by ranges.tf, because:
+# Shared per-account IAM resources. IAM role + instance profile names are
+# unique per account, so this layer holds the single copies that every
+# POLARIS range instance reuses — every polaris VM + A2 DC wants the same
+# permissions (SSM-managed-core + S3 read on the build tarball bucket),
+# so one role / one profile is architecturally correct.
 #
-# - AWS security group names are unique per VPC, so we can't have
-#   "polaris-bake-sg" three times in the same range VPC — but one SG can
-#   attach to 220 ENIs (110 ranges × 2 instances) just fine, and its rules
-#   (allow anything from 10.1.0.0/16 + portal VPC peering CIDR) are
-#   identical for every range.
-# - AWS IAM role + instance profile names are unique per account, so we
-#   can't have "polaris-bake-instance-role" three times in this account —
-#   but every POLARIS instance wants the exact same permissions (SSM core
-#   + S3 read on the build tarball bucket), so one role/profile is what
-#   we actually want architecturally.
+# Security groups do NOT live here. SG rules are per-range and live in
+# ranges.tf alongside the subnet they protect — matching the shifter
+# provisioner module (shifter/engine/provisioner/terraform/modules/range/
+# main.tf:82-165), which scopes every ingress rule to a single subnet
+# CIDR and routes inter-subnet traffic through an NGFW. A "shared SG
+# allowing 10.1.0.0/16" would let range 1's kali reach range 0's DC at
+# layer 3, which is exactly the cross-range leak we're preventing.
 #------------------------------------------------------------------------------
-
-resource "aws_security_group" "polaris" {
-  name        = "${local.name_prefix}-sg"
-  description = "POLARIS range - allow intra-VPC and portal-peering ingress"
-  vpc_id      = var.range_vpc_id
-
-  ingress {
-    description = "All intra-range-VPC traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["10.1.0.0/16"]
-  }
-
-  ingress {
-    description = "SSH from portal VPC (terminal UI)"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.portal_vpc_cidr]
-  }
-
-  ingress {
-    description = "RDP from portal VPC (Guacamole)"
-    from_port   = 3389
-    to_port     = 3389
-    protocol    = "tcp"
-    cidr_blocks = [var.portal_vpc_cidr]
-  }
-
-  egress {
-    description = "All outbound (bake-time apt/docker/S3)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name    = "${local.name_prefix}-sg"
-    Project = "polaris"
-  }
-}
 
 resource "aws_iam_role" "polaris" {
   name = "${local.name_prefix}-instance-role"

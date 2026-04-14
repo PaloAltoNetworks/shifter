@@ -67,6 +67,71 @@ resource "aws_route_table_association" "polaris" {
 }
 
 #------------------------------------------------------------------------------
+# Per-range security group. Matches the shifter provisioner pattern at
+# shifter/engine/provisioner/terraform/modules/range/main.tf:82-165:
+#
+# - intra-subnet rule scoped to `each.value.cidr` (the /28), NOT the whole
+#   range VPC CIDR — so range 1's kali cannot reach range 0's DC at L3
+#   even though both sit inside 10.1.0.0/16
+# - portal ssh (22) + rdp (3389) ingress from var.portal_vpc_cidr, so the
+#   Shifter portal terminal + Guacamole can still key-auth + RDP in
+# - egress all — cold docker build needs apt.kali.org, docker hub, pypi
+#
+# Name suffix `-${each.key}` keeps SG names unique per VPC so all N ranges
+# can coexist. Running this for 110 ranges creates 110 SGs, well inside
+# the default AWS SG-per-VPC quota (typically 2500).
+#------------------------------------------------------------------------------
+resource "aws_security_group" "polaris" {
+  for_each = local.range_subnets
+
+  vpc_id      = var.range_vpc_id
+  name        = "${local.name_prefix}-sg-${each.key}"
+  description = "POLARIS range ${each.key} - intra-${each.value.cidr} + portal-peering only"
+
+  ingress {
+    description = "Intra-range /28 traffic (polaris VM to A2 DC and docker host-network Kali)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [each.value.cidr]
+  }
+
+  ingress {
+    description = "SSH from portal VPC (terminal UI key-auth)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.portal_vpc_cidr]
+  }
+
+  ingress {
+    description = "RDP from portal VPC (Guacamole)"
+    from_port   = 3389
+    to_port     = 3389
+    protocol    = "tcp"
+    cidr_blocks = [var.portal_vpc_cidr]
+  }
+
+  egress {
+    description = "All outbound (bake-time apt/docker/S3)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "${local.name_prefix}-sg-${each.key}"
+    Project = "polaris"
+    Range   = each.key
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+#------------------------------------------------------------------------------
 # Polaris VM — Ubuntu running the polaris docker-compose stack.
 #------------------------------------------------------------------------------
 resource "aws_instance" "polaris" {
@@ -76,7 +141,7 @@ resource "aws_instance" "polaris" {
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.polaris[each.key].id
   private_ip             = each.value.polaris_ip
-  vpc_security_group_ids = [aws_security_group.polaris.id]
+  vpc_security_group_ids = [aws_security_group.polaris[each.key].id]
   iam_instance_profile   = aws_iam_instance_profile.polaris.name
 
   associate_public_ip_address = false
@@ -129,7 +194,7 @@ resource "aws_instance" "a2_dc" {
   instance_type          = var.a2_instance_type
   subnet_id              = aws_subnet.polaris[each.key].id
   private_ip             = each.value.a2_ip
-  vpc_security_group_ids = [aws_security_group.polaris.id]
+  vpc_security_group_ids = [aws_security_group.polaris[each.key].id]
   iam_instance_profile   = aws_iam_instance_profile.polaris.name
 
   associate_public_ip_address = false

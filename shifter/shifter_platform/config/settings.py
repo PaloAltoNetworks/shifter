@@ -404,6 +404,7 @@ SQS_QUEUE_CONFIG = {
 CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", "ctf@keplerops.com")
 CTF_DEFAULT_RANGE_SPINUP_MINUTES = int(os.environ.get("CTF_DEFAULT_RANGE_SPINUP_MINUTES", "30"))
 CTF_DEFAULT_CLEANUP_DELAY_HOURS = int(os.environ.get("CTF_DEFAULT_CLEANUP_DELAY_HOURS", "24"))
+CTFD_PLATFORM_URL = os.environ.get("CTFD_PLATFORM_URL", "https://ctf.shifter.keplerops.com/login")
 
 # Email - SES
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")

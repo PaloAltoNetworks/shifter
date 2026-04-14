@@ -40,9 +40,9 @@ output "range_a2_private_ips" {
   value       = { for k, i in aws_instance.a2_dc : k => i.private_ip }
 }
 
-output "security_group_id" {
-  description = "Shared security group id attached to every polaris + A2 instance."
-  value       = aws_security_group.polaris.id
+output "range_security_group_ids" {
+  description = "Per-range security group id (scoped to each range's /28)."
+  value       = { for k, sg in aws_security_group.polaris : k => sg.id }
 }
 
 output "iam_instance_profile_name" {

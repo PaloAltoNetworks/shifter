@@ -260,8 +260,9 @@ module "ssm" {
   guacamole_api_base_url = module.guacamole.guacamole_client_internal_url
 
   # Application configuration
-  domain_name    = var.domain_name
-  s3_bucket_name = var.user_storage_bucket
+  domain_name       = var.domain_name
+  s3_bucket_name    = var.user_storage_bucket
+  ctfd_platform_url = var.enable_ctfd ? "${module.ctfd[0].url}/login" : ""
 
   # Engine provisioner configuration
   engine_ecs_cluster_arn        = module.engine_provisioner.ecs_cluster_arn
@@ -342,6 +343,38 @@ module "ec2" {
   # SES
   ses_domain_identity_arn = module.ses.domain_identity_arn
   enable_ses              = true
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------------------
+# CTFd
+# ------------------------------------------------------------------------------
+
+module "ctfd" {
+  count = var.enable_ctfd ? 1 : 0
+
+  source = "../../../modules/portal/ctfd"
+
+  aws_region  = var.aws_region
+  name_prefix = local.name_prefix
+  vpc_id      = module.vpc.vpc_id
+  subnet_id   = module.vpc.public_subnet_ids[0]
+
+  ami_id                 = var.ctfd_ami_id
+  instance_type          = var.ctfd_instance_type
+  root_volume_size       = var.ctfd_root_volume_size
+  root_volume_type       = var.ctfd_root_volume_type
+  root_volume_iops       = var.ctfd_root_volume_iops
+  root_volume_throughput = var.ctfd_root_volume_throughput
+
+  domain                 = var.ctfd_domain
+  ctfd_repo_url          = var.ctfd_repo_url
+  ctfd_git_ref           = var.ctfd_git_ref
+  docker_compose_version = var.ctfd_docker_compose_version
+  docker_buildx_version  = var.ctfd_docker_buildx_version
+  ssh_public_key         = var.ctfd_ssh_public_key
+  ssh_allowed_cidrs      = var.ctfd_ssh_allowed_cidrs
 
   tags = var.tags
 }

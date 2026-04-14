@@ -120,7 +120,7 @@
 - Accurate
 - URLs: [https://sn0xsharma.medium.com/thm-industrial-intrusion-ctf-ot-challenge-writeup-5527906c560d](https://sn0xsharma.medium.com/thm-industrial-intrusion-ctf-ot-challenge-writeup-5527906c560d), [https://medium.com/%40saqibparisa/industrial-intrusion-tryhackme-ctf-walkthrough-93b53872c50f](https://medium.com/%40saqibparisa/industrial-intrusion-tryhackme-ctf-walkthrough-93b53872c50f)
 
-### Flag 19 — Generator SCADA override — collective gate
+### Flag 19 — Generator SCADA override — splice trigger
 
 - Accurate
 - URLs: [https://sn0xsharma.medium.com/thm-industrial-intrusion-ctf-ot-challenge-writeup-5527906c560d](https://sn0xsharma.medium.com/thm-industrial-intrusion-ctf-ot-challenge-writeup-5527906c560d), [https://mustafaalshawwa.com/posts/stealthy-ics-data-tampering-attack/](https://mustafaalshawwa.com/posts/stealthy-ics-data-tampering-attack/)

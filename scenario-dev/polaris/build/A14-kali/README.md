@@ -31,7 +31,7 @@ You can reach:
 You CANNOT directly reach:
 - SCADA/Generator systems (VLAN 40 — requires pivoting)
 - Lab systems (requires Front Office credentials)
-- Bunker (requires collective gate event)
+- Bunker (opens only after the blackout in your range)
 
 ## Tools
 
@@ -45,9 +45,9 @@ Standard Kali toolkit plus:
 | Mission | Objective | Zones |
 |---------|-----------|-------|
 | M1 | Who are they? Identify the organization and its people | OSINT + Front Office |
-| M2 | What are they building? Piece together LEVIATHAN | Front Office + Lab |
-| M3 | Lights out. Disrupt operations, kill the generator | Front Office (collective gate) |
-| M4 | Seize the brain. Take control of the master AI | Lab + Bunker |
+| M2 | What are they building? Piece together the project | Front Office + Lab |
+| M3 | Lights out. Disrupt operations, kill the generator | Front Office (blackout path) |
+| M4 | Go deep. Find the buried control path and take it over | Lab + Bunker |
 
 Good hunting, Operator.
 

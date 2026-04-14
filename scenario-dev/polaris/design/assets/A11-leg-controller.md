@@ -40,7 +40,7 @@ Reading the registers reveals:
 
 ## Flags
 
-### Flag 33 — Leg joint actuator data
+### Flag 33 — Walking Pattern
 - **Difficulty:** Hard
 - **Location:** Different unlock mechanism from A10. The leg controller uses a timed sequence: (1) write the gait mode register (30) through a specific sequence of values (0→1→2→0) within 10 seconds — simulating a calibration walk cycle. This sequence is documented in the `deploy_combat_ai.yml` Ansible playbook on A7, under a "pre-flight leg calibration" task. (2) After the correct sequence, input register 60 changes from 0 to a 4-digit code. (3) Write that code to holding register 99. (4) Registers 100-115 unlock with the flag. Requires reading OT process logic, performing timed Modbus writes, and reading back a dynamic value — a materially different skill from A10's static challenge-response.
 - **Flag:** `FLAG{c7a1e3f9d0b52864}`

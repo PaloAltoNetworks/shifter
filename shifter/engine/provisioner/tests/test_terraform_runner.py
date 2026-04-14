@@ -126,3 +126,55 @@ class TestBuildTfVariables:
         assert result["subnet_id"] == ""
         assert result["instance_type"] == "m5.xlarge"
         assert result["instance_profile_name"] is None
+
+
+class TestBuildProviderState:
+    """Test provider-neutral NGFW state payload generation."""
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=False)
+    def test_builds_provider_neutral_state_for_aws_ngfw(self):
+        """AWS NGFW outputs should expose attachment metadata for later range binding."""
+        from ngfw_terraform import _build_provider_state
+
+        state = _build_provider_state(
+            {
+                "management_ip": "10.1.5.10",
+                "dataplane_ip": "10.1.4.10",
+                "data_eni_id": "eni-123",
+                "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+            }
+        )
+
+        assert state["cloud_provider"] == "aws"
+        assert state["route_next_hop_ip"] == "10.1.4.10"
+        assert state["data_attachment_id"] == "eni-123"
+        assert state["attached_ranges"] == []
+        assert state["provider_metadata"]["aws"]["attachment_mode"] == "aws-route-table-eni"
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=False)
+    def test_builds_provider_neutral_state_for_gdc_vmseries_ngfw(self):
+        """GDC Palo Alto VM-Series outputs should expose the VM Runtime attachment contract."""
+        from ngfw_terraform import _build_provider_state
+
+        state = _build_provider_state(
+            {
+                "cloud_provider": "gcp",
+                "route_next_hop_ip": "10.200.1.1",
+                "attachment_mode": "gdc-vmruntime-palo-alto-vmseries",
+                "data_attachment_id": "ngfw-user-42/vmseries:eth1",
+                "provider_metadata": {
+                    "gcp": {
+                        "product": "palo-alto-vm-series",
+                        "namespace": "ngfw-user-42",
+                        "vm_name": "vmseries",
+                    }
+                },
+            }
+        )
+
+        assert state["cloud_provider"] == "gcp"
+        assert state["route_next_hop_ip"] == "10.200.1.1"
+        assert state["attachment_mode"] == "gdc-vmruntime-palo-alto-vmseries"
+        assert state["data_attachment_id"] == "ngfw-user-42/vmseries:eth1"
+        assert state["attached_ranges"] == []
+        assert state["provider_metadata"]["gcp"]["product"] == "palo-alto-vm-series"

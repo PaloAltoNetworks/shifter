@@ -28,6 +28,8 @@ When the change touches the relevant subsystem, run the stack-native checker too
 cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter
 cd platform/terraform && tflint --recursive --config ../../.tflint.hcl
 actionlint
+kube-linter lint --config .kube-linter.yaml platform/k8s/
+kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 platform/k8s/gcp/base/*.yaml
 ```
 
 For local edits or targeted validation:
@@ -57,6 +59,7 @@ Changes to these files are architecture work and must stay documented:
 - `.importlinter`
 - `.tflint.hcl`
 - `.gitleaks.toml`
+- `.kube-linter.yaml`
 - `.claude/settings.json`
 - `.claude/hooks/**`
 - `scripts/adr_guard/**`

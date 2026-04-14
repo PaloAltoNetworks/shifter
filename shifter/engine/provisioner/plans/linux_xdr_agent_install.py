@@ -1,7 +1,7 @@
 """Linux XDR Agent installation plan.
 
 Defines the steps to download and install Cortex XDR agent on Linux
-victim instances via SSM Run Command.
+victim instances via the active remote execution backend.
 
 Supports multiple installer formats:
 - .sh (shell script)
@@ -9,32 +9,54 @@ Supports multiple installer formats:
 - .rpm (RHEL/Amazon Linux)
 - .tar.gz / .zip (archived installers)
 
-Based on logic from victim_linux.sh.j2 template.
+The download step is URL-agnostic and works with signed S3 or GCS object URLs.
 """
 
 from typing import Any, ClassVar
 
 from .base import SetupStep
 
-# Bash script to download XDR agent from presigned URL
+# Bash script to download XDR agent from a signed object URL
 DOWNLOAD_XDR_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
 presigned_url="{{ agent_presigned_url }}"
 installer_path="$(mktemp /tmp/agent-installer.XXXXXX)"
+max_retries=5
+retry_delay_seconds=10
 
 echo "Downloading XDR agent installer..."
 
-# Download using curl with proper options for S3 presigned URLs
-curl -sSf -o "$installer_path" "$presigned_url"
+last_error=""
+for attempt in $(seq 1 "$max_retries"); do
+    echo "Download attempt $attempt of $max_retries..."
+    if curl -sSfL --connect-timeout 30 --max-time 300 -o "$installer_path" "$presigned_url"; then
+        break
+    fi
+
+    last_error="curl failed on attempt $attempt"
+    if [ "$attempt" -lt "$max_retries" ]; then
+        delay=$((retry_delay_seconds * (2 ** (attempt - 1))))
+        echo "Download failed, retrying in ${delay}s..."
+        rm -f "$installer_path"
+        installer_path="$(mktemp /tmp/agent-installer.XXXXXX)"
+        sleep "$delay"
+    fi
+done
 
 if [ -f "$installer_path" ]; then
     file_size=$(stat -c%s "$installer_path" 2>/dev/null || stat -f%z "$installer_path")
-    echo "Download complete: $installer_path ($file_size bytes)"
-    # Store path for install step
-    echo "$installer_path" > /tmp/.xdr_installer_path
+    if [ "$file_size" -gt 0 ]; then
+        echo "Download complete: $installer_path ($file_size bytes)"
+        # Store path for install step
+        echo "$installer_path" > /tmp/.xdr_installer_path
+    else
+        echo "ERROR: Downloaded installer is empty"
+        exit 1
+    fi
 else
     echo "ERROR: Failed to download installer"
+    echo "Last error: $last_error"
     exit 1
 fi
 

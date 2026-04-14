@@ -3,9 +3,10 @@
 Only tests for pure logic - no mock-heavy integration tests.
 """
 
+import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -94,6 +95,496 @@ class TestParseDeviceCertificateStatus:
         assert parse_device_certificate_status("") is None
 
 
+class TestRangeStatePayloads:
+    """Tests for provider-aware range state serialization helpers."""
+
+    def test_build_subnet_state_preserves_aws_fields(self):
+        from main import _build_subnet_state
+
+        subnet_state = _build_subnet_state(
+            {
+                "subnet_id": "subnet-123",
+                "subnet_cidr": "10.1.1.0/28",
+                "security_group_id": "sg-123",
+                "route_table_id": "rtb-123",
+            },
+            provider="aws",
+        )
+
+        assert subnet_state["cloud_provider"] == "aws"
+        assert subnet_state["subnet_id"] == "subnet-123"
+        assert subnet_state["aws_subnet_id"] == "subnet-123"
+        assert subnet_state["aws_cidr"] == "10.1.1.0/28"
+        assert subnet_state["provider_metadata"] == {
+            "aws": {
+                "subnet_id": "subnet-123",
+                "cidr": "10.1.1.0/28",
+                "security_group_id": "sg-123",
+                "route_table_id": "rtb-123",
+            }
+        }
+
+    def test_build_subnet_state_persists_gdc_metadata_without_aws_aliases(self):
+        from main import _build_subnet_state
+
+        subnet_state = _build_subnet_state(
+            {
+                "subnet_id": "range-42-attack",
+                "subnet_cidr": "10.200.0.96/28",
+                "security_group_id": "",
+                "route_table_id": "",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_nad_name": "range-42-attack",
+                "gdc_gateway_ip": "10.200.0.97",
+                "gdc_ipam_range": "10.200.0.96/28",
+            },
+            provider="gcp",
+        )
+
+        assert subnet_state["cloud_provider"] == "gcp"
+        assert subnet_state["subnet_id"] == "range-42-attack"
+        assert subnet_state["aws_subnet_id"] is None
+        assert subnet_state["provider_metadata"] == {
+            "gcp": {
+                "namespace": "range-42",
+                "network_name": "range-42-attack",
+                "nad_name": "range-42-attack",
+                "gateway_ip": "10.200.0.97",
+                "ipam_range": "10.200.0.96/28",
+            }
+        }
+
+    def test_build_instance_state_preserves_aws_instance_alias(self):
+        from main import _build_instance_state
+
+        instance_state = _build_instance_state(
+            {
+                "instance_id": "i-abc123",
+                "private_ip": "10.1.1.10",
+                "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+                "subnet_name": "attack",
+            },
+            provider="aws",
+        )
+
+        assert instance_state["cloud_provider"] == "aws"
+        assert instance_state["instance_id"] == "i-abc123"
+        assert instance_state["aws_instance_id"] == "i-abc123"
+        assert instance_state["provider_metadata"] == {"aws": {"instance_id": "i-abc123"}}
+
+    def test_build_instance_state_collects_gdc_metadata(self):
+        from main import _build_instance_state
+
+        instance_state = _build_instance_state(
+            {
+                "asset_type": "vm_runtime_vm",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "ssh_username": "ubuntu",
+                "subnet_name": "attack",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_ip": "10.200.0.110",
+                "gdc_ssh_secret_id": "projects/test/secrets/vmrt-ssh-key",
+                "gdc_username": "ubuntu",
+                "vmruntime_disk_name": "vmrt-vm-1-disk",
+            },
+            provider="gcp",
+        )
+
+        assert instance_state["cloud_provider"] == "gcp"
+        assert instance_state["asset_type"] == "vm_runtime_vm"
+        assert instance_state["aws_instance_id"] is None
+        assert instance_state["ssh_username"] == "ubuntu"
+        assert instance_state["provider_metadata"] == {
+            "gcp": {
+                "vm_name": "vmrt-vm-1",
+                "namespace": "range-42",
+                "network_name": "range-42-attack",
+                "ip": "10.200.0.110",
+                "ssh_secret_id": "projects/test/secrets/vmrt-ssh-key",
+                "username": "ubuntu",
+                "disk_name": "vmrt-vm-1-disk",
+            }
+        }
+
+    def test_build_instance_state_collects_gdc_alias_metadata_under_gcp_provider(self):
+        from main import _build_instance_state
+
+        instance_state = _build_instance_state(
+            {
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "ssh_username": "Administrator",
+                "subnet_name": "scenario-a",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "scenario-a-net",
+                "gdc_ip": "10.200.0.110",
+                "vmruntime_disk_name": "vmrt-vm-1-disk",
+            },
+            provider="gcp",
+        )
+
+        assert instance_state["provider_metadata"] == {
+            "gcp": {
+                "vm_name": "vmrt-vm-1",
+                "namespace": "range-42",
+                "network_name": "scenario-a-net",
+                "ip": "10.200.0.110",
+                "disk_name": "vmrt-vm-1-disk",
+            }
+        }
+
+    def test_build_provisioned_instance_payload_keeps_legacy_fields_and_adds_provider_metadata(self):
+        from main import _build_provisioned_instance_payload
+
+        payload = _build_provisioned_instance_payload(
+            {
+                "uuid": "inst-123",
+                "name": "workstation-1",
+                "asset_type": "vm_runtime_vm",
+                "role": "victim",
+                "os": "windows",
+                "subnet_name": "victims",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "ssh_username": "Administrator",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+            },
+            provider="gcp",
+        )
+
+        assert payload["uuid"] == "inst-123"
+        assert payload["asset_type"] == "vm_runtime_vm"
+        assert payload["os_type"] == "windows"
+        assert payload["instance_id"] == "vmrt-vm-1"
+        assert payload["ssh_key_secret_arn"] == "projects/test/secrets/vmrt-ssh-key"
+        assert payload["ssh_username"] == "Administrator"
+        assert payload["cloud_provider"] == "gcp"
+        assert payload["provider_metadata"] == {"gcp": {"vm_name": "vmrt-vm-1", "namespace": "range-42"}}
+
+    def test_get_cloud_provider_defaults_to_aws(self):
+        from main import _get_cloud_provider
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("CLOUD_PROVIDER", raising=False)
+            assert _get_cloud_provider() == "aws"
+
+    def test_get_cloud_provider_reads_env(self):
+        from main import _get_cloud_provider
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("CLOUD_PROVIDER", "gcp")
+            assert _get_cloud_provider() == "gcp"
+
+    def test_write_provisioned_state_persists_gcp_metadata_blocks(self):
+        from main import write_provisioned_state
+
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        subnets = {
+            "attack": {
+                "uuid": "subnet-123",
+                "subnet_id": "range-42-attack",
+                "subnet_cidr": "10.200.0.96/28",
+                "security_group_id": "",
+                "route_table_id": "",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_nad_name": "range-42-attack",
+                "gdc_gateway_ip": "10.200.0.97",
+            }
+        }
+        instances = [
+            {
+                "uuid": "inst-123",
+                "name": "workstation-1",
+                "asset_type": "vm_runtime_vm",
+                "role": "victim",
+                "os": "windows",
+                "subnet_name": "attack",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_network_name": "range-42-attack",
+                "gdc_ip": "10.200.0.110",
+                "vmruntime_disk_name": "vmrt-vm-1-disk",
+            }
+        ]
+
+        with (
+            patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True),
+            patch("main.get_db_connection", return_value=mock_conn),
+        ):
+            write_provisioned_state(range_id=42, subnets=subnets, instances=instances, ngfw_instance_id=None)
+
+        subnet_state = json.loads(mock_cursor.execute.call_args_list[0].args[1][0])
+        instance_state = json.loads(mock_cursor.execute.call_args_list[1].args[1][0])
+        provisioned_instances = json.loads(mock_cursor.execute.call_args_list[2].args[1][0])
+
+        assert subnet_state["cloud_provider"] == "gcp"
+        assert subnet_state["aws_subnet_id"] is None
+        assert subnet_state["provider_metadata"]["gcp"]["network_name"] == "range-42-attack"
+        assert instance_state["cloud_provider"] == "gcp"
+        assert instance_state["aws_instance_id"] is None
+        assert instance_state["provider_metadata"]["gcp"]["namespace"] == "range-42"
+        assert provisioned_instances[0]["cloud_provider"] == "gcp"
+        assert provisioned_instances[0]["asset_type"] == "vm_runtime_vm"
+        assert provisioned_instances[0]["instance_id"] == "vmrt-vm-1"
+        assert provisioned_instances[0]["provider_metadata"]["gcp"]["vm_name"] == "vmrt-vm-1"
+
+
+class TestGdcProvisioning:
+    """Tests for the active GDC VM Runtime range path."""
+
+    def test_run_terraform_provision_runs_setup_and_writes_state_for_gdc_ranges(self):
+        from config import RangeNetworkConfig
+        from main import _run_terraform_provision
+
+        range_spec = {
+            "subnets": [
+                {
+                    "name": "attack",
+                    "uuid": "subnet-123",
+                    "instances": [
+                        {
+                            "uuid": "inst-123",
+                            "name": "attacker",
+                            "asset_type": "vm_runtime_vm",
+                            "role": "attacker",
+                            "os_type": "kali",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        with (
+            patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp"}, clear=True),
+            patch("main.publish_status_update"),
+            patch("components.network.allocate_subnets", return_value=["10.200.0.96/28"]),
+            patch(
+                "main.load_range_network_config",
+                return_value=RangeNetworkConfig("cluster1", "10.200.0.0/24", "us-central1"),
+            ),
+            patch("main._update_range_config"),
+            patch(
+                "main._build_range_terraform_variables",
+                return_value={"range_id": 42, "subnets": range_spec["subnets"]},
+            ),
+            patch(
+                "main.range_terraform_runner.apply_range",
+                return_value={
+                    "subnets": {
+                        "attack": {
+                            "uuid": "subnet-123",
+                            "subnet_id": "range-42-attack",
+                            "subnet_cidr": "10.200.0.96/28",
+                            "gdc_namespace": "range-42",
+                            "gdc_network_name": "range-42-attack",
+                        }
+                    },
+                    "instances": [
+                        {
+                            "uuid": "inst-123",
+                            "name": "attacker",
+                            "asset_type": "vm_runtime_vm",
+                            "role": "attacker",
+                            "os": "kali",
+                            "subnet_name": "attack",
+                            "instance_id": "range-42-attack-attacker-1234",
+                            "private_ip": "10.200.0.104",
+                            "public_key": "ssh-rsa AAAA",
+                            "ssh_key_secret_arn": "projects/test/secrets/range-42-attacker-ssh",
+                            "ssh_username": "kali",
+                            "gdc_vm_name": "range-42-attack-attacker-1234",
+                            "gdc_namespace": "range-42",
+                            "gdc_network_name": "range-42-attack",
+                            "gdc_ip": "10.200.0.104",
+                            "vmruntime_disk_name": "range-42-attack-attacker-1234-boot",
+                        }
+                    ],
+                },
+            ),
+            patch("main.run_instance_setup") as mock_setup,
+            patch("main.write_provisioned_state") as mock_write_state,
+            patch("main.get_range_data_by_request_id", return_value={"ngfw_instance_id": None}),
+            patch("main.publish_ready"),
+        ):
+            _run_terraform_provision("req-123", 42, 7, range_spec)
+
+        mock_setup.assert_called_once()
+        mock_write_state.assert_called_once()
+
+    def test_run_instance_setup_skips_pod_backed_assets(self):
+        from main import run_instance_setup
+
+        with (
+            patch("main._run_dc_setup") as mock_dc_setup,
+            patch("main._run_single_instance_setup") as mock_single_setup,
+        ):
+            run_instance_setup(
+                instances_output=[
+                    {
+                        "uuid": "pod-uuid-1",
+                        "asset_type": "scenario_pod",
+                        "role": "victim",
+                        "os": "ubuntu",
+                        "instance_id": "range-42-mixed-victim-pod-uuid-1-pod",
+                        "private_ip": "10.200.0.107",
+                    }
+                ],
+                range_spec={
+                    "subnets": [
+                        {
+                            "instances": [
+                                {
+                                    "uuid": "pod-uuid-1",
+                                    "name": "lower-fidelity-target",
+                                    "asset_type": "scenario_pod",
+                                    "role": "victim",
+                                    "os_type": "ubuntu",
+                                }
+                            ]
+                        }
+                    ]
+                },
+            )
+
+        mock_dc_setup.assert_not_called()
+        mock_single_setup.assert_not_called()
+
+    def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self, mocker):
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "gcp",
+                "ENVIRONMENT": "gcp-dev",
+                "RANGE_NETWORK_ID": "cluster1",
+                "RANGE_NETWORK_CIDR": "10.200.0.0/24",
+                "RANGE_NETWORK_REGION": "us-central1",
+            },
+            clear=True,
+        )
+        mocker.patch(
+            "main.get_user_ngfw_data",
+            return_value={
+                "cloud_provider": "gcp",
+                "ngfw_request_id": "ngfw-req-1",
+                "management_ip": "10.200.0.10",
+                "ssh_key_secret_arn": "projects/test/secrets/ngfw-admin",
+                "route_next_hop_ip": "10.200.0.2",
+                "attachment_mode": "gdc-static-route",
+                "provider_metadata": {"gcp": {"namespace": "ngfw-user-1"}},
+            },
+        )
+        mocker.patch("main.generate_presigned_url", return_value="")
+        mocker.patch("main.get_range_availability_zone", return_value="us-central1-a")
+        mocker.patch("main._get_kali_instance_type", return_value="n2-standard-2")
+        mocker.patch("main._get_victim_instance_type", return_value="n2-standard-2")
+        mocker.patch("main._get_windows_instance_type", return_value="n2-standard-4")
+        mocker.patch("main._get_dc_instance_type", return_value="n2-standard-4")
+
+        variables = _build_range_terraform_variables(
+            request_id="req-123",
+            range_id=42,
+            user_id=7,
+            range_spec={
+                "ngfw": True,
+                "subnets": [
+                    {
+                        "name": "attack",
+                        "uuid": "subnet-1",
+                        "connected_to": [],
+                        "instances": [
+                            {
+                                "uuid": "inst-1",
+                                "name": "attacker",
+                                "role": "attacker",
+                                "os_type": "kali",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        assert variables["ngfw_data_eni_id"] == ""
+        assert variables["ngfw_attachment"]["cloud_provider"] == "gcp"
+        assert variables["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
+
+    def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, mocker):
+        from main import run_range_terraform
+
+        mocker.patch(
+            "main.get_range_data_by_request_id",
+            return_value={"range_id": 42, "user_id": 7, "spec": {"ngfw": True}},
+        )
+        mocker.patch(
+            "main.get_user_ngfw_data",
+            return_value={
+                "cloud_provider": "gcp",
+                "management_ip": "10.200.0.10",
+                "status": "paused",
+                "ngfw_request_id": "ngfw-req-1",
+            },
+        )
+
+        with pytest.raises(RuntimeError, match="already be in ready state"):
+            run_range_terraform("up", "req-123")
+
+    def test_record_and_remove_ngfw_range_attachment_updates_state(self, mocker):
+        from main import _record_ngfw_range_attachment, _remove_ngfw_range_attachment
+
+        mocker.patch(
+            "main.get_ngfw_data_by_request_id",
+            side_effect=[
+                {"state": {"attached_ranges": [{"range_id": 10}]}},
+                {"state": {"attached_ranges": [{"range_id": 10}, {"range_id": 42}]}},
+            ],
+        )
+        mock_update = mocker.patch("main.update_instance_state")
+
+        attachment_record = {
+            "range_id": 42,
+            "request_id": "req-123",
+            "cloud_provider": "gcp",
+            "subnets": [{"name": "attack", "cidr": "10.200.0.96/28", "connected_to": []}],
+        }
+
+        _record_ngfw_range_attachment(
+            ngfw_request_id="ngfw-req-1",
+            ngfw_status="ready",
+            attachment_record=attachment_record,
+        )
+        _remove_ngfw_range_attachment(
+            ngfw_request_id="ngfw-req-1",
+            ngfw_status="ready",
+            range_id=42,
+        )
+
+        assert mock_update.call_args_list[0].args[:2] == ("ngfw-req-1", "ready")
+        assert mock_update.call_args_list[0].kwargs["attached_ranges"] == [{"range_id": 10}, attachment_record]
+        assert mock_update.call_args_list[1].kwargs["attached_ranges"] == [{"range_id": 10}]
+
+
 class TestPollForSerialAndCert:
     """Tests for poll_for_serial_and_cert function."""
 
@@ -149,3 +640,151 @@ class TestPollForSerialAndCert:
                 timeout_seconds=0,
                 poll_interval=30,
             )
+
+
+class TestDcSetupRouting:
+    """Tests for provider-aware DC setup behavior."""
+
+    def test_should_promote_dc_at_runtime_defaults_by_provider(self):
+        from main import _should_promote_dc_at_runtime
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("DC_RUNTIME_PROMOTION", raising=False)
+            assert _should_promote_dc_at_runtime("aws") is False
+            assert _should_promote_dc_at_runtime("gcp") is True
+
+    def test_should_promote_dc_at_runtime_honors_override(self):
+        from main import _should_promote_dc_at_runtime
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DC_RUNTIME_PROMOTION", "false")
+            assert _should_promote_dc_at_runtime("gcp") is False
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DC_RUNTIME_PROMOTION", "true")
+            assert _should_promote_dc_at_runtime("aws") is True
+
+    def test_run_dc_setup_bootstraps_and_promotes_for_gcp(self, mocker):
+        from main import _run_dc_setup
+
+        mock_execution = MagicMock()
+        mock_execution.target = "10.50.1.10"
+        mock_execution.document_name = "AWS-RunPowerShellScript"
+        mock_execution.transport_name = "ssh"
+        mock_execution.executor = MagicMock()
+        mock_execution.executor.run_command.return_value = MagicMock(success=True, stderr="")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, error=None)
+
+        mock_bootstrap_plan = MagicMock()
+        mock_bootstrap_plan.get_context.return_value = {"hostname": "dc-01", "public_key": "ssh-rsa AAAA"}
+        mock_dc_plan = MagicMock()
+        mock_dc_plan.get_context.return_value = {
+            "domain_name": "range.local",
+            "netbios_name": "RANGE",
+            "dsrm_password": "Secret123!",
+            "domain_admin_password": "Secret123!",
+        }
+
+        build_context = mocker.patch("main.build_guest_execution_context", return_value=mock_execution)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        bootstrap_plan_cls = mocker.patch("main.BootstrapPlan", return_value=mock_bootstrap_plan)
+        dc_plan_cls = mocker.patch("main.DCSetupPlan", return_value=mock_dc_plan)
+        mocker.patch("main._should_run_dc_bootstrap_plan", return_value=True)
+        mocker.patch("main._should_promote_dc_at_runtime", return_value=True)
+        mocker.patch.dict("os.environ", {"DC_DOMAIN_PASSWORD": "Secret123!"}, clear=False)
+
+        _run_dc_setup(
+            instance_data={"hostname": "dc-01", "name": "dc-01", "public_key": "ssh-rsa AAAA"},
+            instance_id="gcp-dc-01",
+            dc_config={"domain_name": "range.local", "netbios_name": "RANGE"},
+            agent_presigned_url="",
+            public_key="ssh-rsa AAAA",
+        )
+
+        build_context.assert_called_once()
+        bootstrap_plan_cls.assert_called_once_with()
+        dc_plan_cls.assert_called_once_with(runtime_promotion=True)
+        assert mock_orchestrator.orchestrate.call_count == 2
+        mock_execution.close.assert_called_once_with()
+
+    def test_run_dc_setup_keeps_prebaked_mode_for_aws(self, mocker):
+        from main import _run_dc_setup
+
+        mock_execution = MagicMock()
+        mock_execution.target = "i-1234567890"
+        mock_execution.document_name = "AWS-RunPowerShellScript"
+        mock_execution.transport_name = "ssm"
+        mock_execution.executor = MagicMock()
+        mock_execution.executor.run_command.return_value = MagicMock(success=True, stderr="")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.orchestrate.return_value = MagicMock(success=True, error=None)
+
+        mock_dc_plan = MagicMock()
+        mock_dc_plan.get_context.return_value = {
+            "domain_name": "range.local",
+            "netbios_name": "RANGE",
+            "dsrm_password": "Secret123!",
+            "domain_admin_password": "Secret123!",
+        }
+
+        mocker.patch("main.build_guest_execution_context", return_value=mock_execution)
+        mocker.patch("main.SetupOrchestrator", return_value=mock_orchestrator)
+        bootstrap_plan_cls = mocker.patch("main.BootstrapPlan")
+        dc_plan_cls = mocker.patch("main.DCSetupPlan", return_value=mock_dc_plan)
+        mocker.patch("main._should_run_dc_bootstrap_plan", return_value=False)
+        mocker.patch("main._should_promote_dc_at_runtime", return_value=False)
+        mocker.patch.dict("os.environ", {"DC_DOMAIN_PASSWORD": "Secret123!"}, clear=False)
+
+        _run_dc_setup(
+            instance_data={"hostname": "dc-01", "name": "dc-01", "public_key": "ssh-rsa AAAA"},
+            instance_id="i-1234567890",
+            dc_config={"domain_name": "range.local", "netbios_name": "RANGE"},
+            agent_presigned_url="",
+            public_key="ssh-rsa AAAA",
+        )
+
+        bootstrap_plan_cls.assert_not_called()
+        dc_plan_cls.assert_called_once_with(runtime_promotion=False)
+        assert mock_orchestrator.orchestrate.call_count == 1
+        mock_execution.close.assert_called_once_with()
+
+
+class TestNgfwRuntimeOperations:
+    """Tests for provider-aware NGFW runtime ops."""
+
+    def test_run_ngfw_operation_runs_gdc_vmseries_power_operation(self, mocker):
+        from main import run_ngfw_operation
+
+        state = {
+            "cloud_provider": "gcp",
+            "management_ip": "10.200.0.10",
+            "ssh_key_secret_id": "projects/test/secrets/ngfw-admin",
+            "route_next_hop_ip": "10.200.0.2",
+            "provider_metadata": {
+                "gcp": {
+                    "namespace": "ngfw-user-42",
+                    "vm_name": "ngfw-user-42-abcdef",
+                }
+            },
+        }
+        mocker.patch(
+            "main.get_ngfw_data_by_request_id",
+            return_value={
+                "instance_id": "ngfw-inst-1",
+                "app_id": "ngfw-app-1",
+                "state": state,
+            },
+        )
+        mock_update = mocker.patch("main.update_instance_state")
+        mock_publish = mocker.patch("main.publish_ngfw_event")
+        mock_power = mocker.patch("gdc_vmseries_ngfw.run_power_operation")
+
+        run_ngfw_operation("start", "ngfw-req-1")
+
+        mock_power.assert_called_once_with("start", state)
+        assert mock_update.call_args_list[0].args[:2] == ("ngfw-req-1", "resuming")
+        assert mock_update.call_args_list[1].args[:2] == ("ngfw-req-1", "ready")
+        assert [call.kwargs["status"] for call in mock_publish.call_args_list] == ["resuming", "ready"]

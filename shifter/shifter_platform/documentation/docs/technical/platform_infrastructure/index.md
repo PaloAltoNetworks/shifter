@@ -1,66 +1,86 @@
 # Platform Infrastructure
 
-AWS infrastructure and CI/CD for Shifter.
+Cloud infrastructure and CI/CD for Shifter. Deploys to AWS or GCP.
 
-## Directory Structure
+## AWS
+
+### Directory Structure
 
 ```
-platform/
-├── terraform/
-│   ├── global/
-│   │   ├── iam/              # GitHub OIDC, CI/CD IAM roles
-│   │   ├── github-runner/    # Self-hosted runner infrastructure
-│   │   └── dev-box/          # Developer workstation
-│   ├── modules/
-│   │   ├── ecr/              # Container registries
-│   │   ├── portal/           # Shifter app infrastructure
-│   │   ├── range/            # Range VPC and networking
-│   │   ├── pulumi-provisioner/   # ECS Fargate for Engine
-│   │   ├── pulumi-state/         # Pulumi backend (S3 + DynamoDB)
-│   │   ├── guacamole/            # Browser-based RDP (Guacamole)
-│   │   └── log-aggregation/      # Centralized logging
-│   └── environments/
-│       ├── dev/              # Dev environment configs
-│       └── prod/             # Prod environment configs
-└── cloudformation/
-    ├── dev/                  # Cortex XDR connector templates (dev)
-    └── prod/                 # Cortex XDR connector templates (prod)
+platform/terraform/
+├── global/
+│   ├── iam/              # GitHub OIDC, CI/CD IAM roles
+│   ├── github-runner/    # Self-hosted runner infrastructure
+│   └── dev-box/          # Developer workstation
+├── modules/
+│   ├── ecr/              # Container registries
+│   ├── portal/           # Shifter app infrastructure
+│   ├── range/            # Range VPC and networking
+│   ├── pulumi-provisioner/   # ECS Fargate for Engine
+│   ├── pulumi-state/         # Pulumi backend (S3 + DynamoDB)
+│   ├── guacamole/            # Browser-based RDP (Guacamole)
+│   └── log-aggregation/      # Centralized logging
+├── environments/
+│   ├── dev/              # Dev environment configs
+│   └── prod/             # Prod environment configs
+└── cloudformation/           # Cortex XDR connector templates
 ```
 
-## Components
+### Components
 
 | Component | Module | Purpose |
 |-----------|--------|---------|
-| **Global** | `platform/terraform/global/iam/` | GitHub OIDC provider, CI/CD IAM roles, github-runner, dev-box |
-| **Core** | `platform/terraform/environments/{env}/` | ECR repositories, budget alerts |
-| **Range** | `platform/terraform/modules/range/` | Range VPC, security groups, Network Firewall |
-| **Portal*** | `platform/terraform/modules/portal/` | ALB, EC2/ASG, RDS, Redis, Cognito, S3 |
-| **Pulumi Provisioner** | `platform/terraform/modules/pulumi-provisioner/` | ECS Fargate task for range provisioning |
-| **Guacamole** | `platform/terraform/modules/guacamole/` | Browser-based RDP access to range instances |
-| **CloudFormation** | `platform/cloudformation/{env}/` | Cortex XDR connector IAM roles (manually deployed) |
+| **Global** | `global/iam/` | GitHub OIDC provider, CI/CD IAM roles, github-runner, dev-box |
+| **Core** | `environments/{env}/` | ECR repositories, budget alerts |
+| **Range** | `modules/range/` | Range VPC, security groups, Network Firewall |
+| **Portal*** | `modules/portal/` | ALB, EC2 (configurable ASG), RDS, Redis, Cognito, S3 |
+| **Provisioner** | `modules/pulumi-provisioner/` | ECS Fargate task for range provisioning |
+| **Guacamole** | `modules/guacamole/` | Browser-based RDP access to range instances |
+| **CloudFormation** | `cloudformation/{env}/` | Cortex XDR connector IAM roles (manually deployed) |
 
-*Portal is a legacy name. Deploys Shifter Django infrastructure. Redis uses single-node in dev, HA replication group in prod.
+*Portal is a legacy name. Deploys Shifter Django infrastructure.
 
-## State Management
+### State Management
 
-Terraform state stored in S3 with DynamoDB locking:
+Terraform state stored in S3 with DynamoDB locking per environment.
 
-| Environment | Bucket | Lock Table |
-|-------------|--------|------------|
-| dev | `shifter-dev-infra-*` | `shifter-dev-terraform-*` |
-| prod | `shifter-prod-infra-*` | `shifter-prod-terraform-*` |
+## GCP
 
-## Redis
+See [GCP Infrastructure](gcp-infrastructure) for full details.
 
-ElastiCache Redis:
-- **Dev:** Single-node `cache.t3.micro`
-- **Prod:** Replication group (primary + 1 replica, Multi-AZ, automatic failover)
-- Used for Django Channels
-- Prod snapshots: 1-day retention
+### Directory Structure
+
+```
+platform/
+├── terraform/gcp/
+│   ├── modules/platform-core/    # All GCP infrastructure
+│   └── environments/gcp-dev/     # Environment config
+├── charts/shifter/               # Helm chart for the GCP control plane
+└── k8s/gcp/                      # GCP base manifests and generated deployment assets
+```
+
+### Components
+
+| Component | Service | Purpose |
+|-----------|---------|---------|
+| **GKE Cluster** | GKE | Private nodes with node pools (web, workers, provisioner) and public control-plane endpoint restricted by authorized CIDRs |
+| **Cloud SQL** | Cloud SQL | PostgreSQL (platform + Guacamole databases) |
+| **Memorystore** | Memorystore | Redis (channel layer, worker coordination) |
+| **Pub/Sub** | Pub/Sub | Event topic with per-domain subscriptions |
+| **Artifact Registry** | Artifact Registry | Container image repositories |
+| **Secret Manager** | Secret Manager | Runtime secret bundles |
+| **Cloud DNS** | Cloud DNS | Optional public hostname with managed TLS |
+| **Cloud Armor** | Cloud Armor | Baseline WAF policy on the public portal and Guacamole backends |
+
+### State Management
+
+Terraform state stored in GCS bucket per environment.
 
 ## Related Docs
 
-- [AMI Management](ami-management) - Packer builds and SSM parameter management
+- [GCP Infrastructure](gcp-infrastructure) - GKE, Helm, Cloud Armor, and GCP services
+- [GDC Provisioning](gdc-provisioning) - Range guest provisioning on GDC
+- [AMI Management](ami-management) - Packer builds and SSM parameter management (AWS)
 - [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD
 - [CI/CD](cicd) - Deployment pipelines
 - [GitHub Runners](github-runners) - Self-hosted runner setup and maintenance

@@ -299,6 +299,22 @@ class SSMExecutor:
 
         return False
 
+    def wait_for_ready(
+        self,
+        target: str,
+        timeout_seconds: int = 300,
+        document_name: str = "AWS-RunShellScript",
+    ) -> bool:
+        """Wait for SSM to be online and able to execute the requested document type."""
+        self.wait_for_agent(target, timeout_seconds=timeout_seconds)
+        remaining = max(30, min(timeout_seconds, 60))
+        return self.verify_agent_ready(
+            target,
+            timeout_seconds=remaining,
+            max_attempts=6,
+            document_name=document_name,
+        )
+
     def reboot_and_wait(
         self,
         instance_id: str,

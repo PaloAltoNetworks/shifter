@@ -1,0 +1,12 @@
+checks:
+  include:
+    - "run-as-non-root"
+    - "no-read-only-root-fs"
+    - "privilege-escalation-container"
+    - "unset-cpu-requirements"
+    - "unset-memory-requirements"
+    - "dangling-service"
+    - "mismatching-selector"
+    - "writable-host-mount"
+    - "unsafe-sysctls"
+  exclude: []

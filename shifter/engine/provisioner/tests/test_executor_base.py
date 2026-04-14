@@ -1,6 +1,7 @@
 """Tests for executor base module."""
 
 from executors.base import CommandResult, Executor
+from executors.guest_ssh_executor import GuestSSHExecutor
 from executors.ssh_executor import SSHExecutor
 from executors.ssm_executor import SSMExecutor
 
@@ -17,3 +18,4 @@ class TestExecutorImports:
         """Executor implementations import successfully."""
         assert SSMExecutor is not None
         assert SSHExecutor is not None
+        assert GuestSSHExecutor is not None

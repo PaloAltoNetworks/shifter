@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guacd
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: guacd
+spec:
+  replicas: {{ .Values.guacd.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: guacd
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: guacd
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      containers:
+        - name: guacd
+          image: {{ include "shifter.guacdImage" . }}
+          imagePullPolicy: {{ .Values.images.guacd.pullPolicy }}
+          {{- include "shifter.containerSecurityContextGuacd" . | nindent 10 }}
+          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          ports:
+            - name: guacd
+              containerPort: 4822
+          readinessProbe:
+            tcpSocket:
+              port: guacd
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: guacd
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.guacd.resources | nindent 12 }}
+      {{- include "shifter.tmpVolume" . | nindent 6 }}

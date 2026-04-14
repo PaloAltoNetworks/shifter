@@ -1,0 +1,39 @@
+apiVersion: vm.cluster.gke.io/v1
+kind: VirtualMachineDisk
+metadata:
+  name: l2-cirros-boot
+  namespace: vmrt-mixed-subnet
+spec:
+  size: 2Gi
+  storageClassName: local-shared
+  source:
+    http:
+      url: https://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
+---
+apiVersion: vm.cluster.gke.io/v1
+kind: VirtualMachine
+metadata:
+  name: l2-vm
+  namespace: vmrt-mixed-subnet
+spec:
+  osType: Linux
+  compute:
+    cpu:
+      vcpus: 1
+    memory:
+      capacity: 1Gi
+  interfaces:
+    - name: eth0
+      networkName: vmrt-shared-l2
+      ipAddresses:
+        - 10.200.0.110/28
+      default: true
+  disks:
+    - boot: true
+      virtualMachineDiskName: l2-cirros-boot
+  cloudInit:
+    noCloud:
+      userData: |
+        #cloud-config
+        runcmd:
+          - [ sh, -c, "mkdir -p /var/www && echo shared-l2-ok > /var/www/index.html && busybox httpd -f -p 8080 -h /var/www >/tmp/httpd.log 2>&1 &" ]

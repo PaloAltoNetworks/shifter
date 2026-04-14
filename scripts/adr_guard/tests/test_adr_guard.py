@@ -108,5 +108,94 @@ class AdrGuardTests(unittest.TestCase):
         self.assertEqual(filtered[0].rule_id, "ADR-002-R1")
 
 
+class CloudFactorySeamTests(unittest.TestCase):
+    def _make_cloud_tree(self, tmp: str, aws_files: list[str], gcp_files: list[str]) -> Path:
+        """Create a minimal cloud adapter tree under a fake repo root."""
+        repo_root = Path(tmp)
+        for cloud_root in ADR_GUARD.CLOUD_ROOTS:
+            aws_dir = repo_root / cloud_root / "aws"
+            gcp_dir = repo_root / cloud_root / "gcp"
+            aws_dir.mkdir(parents=True, exist_ok=True)
+            gcp_dir.mkdir(parents=True, exist_ok=True)
+            for name in aws_files:
+                (aws_dir / name).write_text("", encoding="utf-8")
+            for name in gcp_files:
+                (gcp_dir / name).write_text("", encoding="utf-8")
+        return repo_root
+
+    def test_parity_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = self._make_cloud_tree(
+                tmp,
+                ["__init__.py", "base.py", "storage.py", "secrets.py"],
+                ["__init__.py", "base.py", "storage.py", "secrets.py"],
+            )
+            violations = ADR_GUARD.check_cloud_factory_seam(repo_root, None)
+            self.assertEqual(violations, [])
+
+    def test_missing_gcp_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = self._make_cloud_tree(
+                tmp,
+                ["__init__.py", "storage.py", "queue.py"],
+                ["__init__.py", "storage.py"],
+            )
+            violations = ADR_GUARD.check_cloud_factory_seam(repo_root, None)
+            self.assertTrue(len(violations) >= 1)
+            self.assertTrue(any("queue.py" in v.message and "no GCP counterpart" in v.message for v in violations))
+
+    def test_missing_aws_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = self._make_cloud_tree(
+                tmp,
+                ["__init__.py", "storage.py"],
+                ["__init__.py", "storage.py", "task_runner.py"],
+            )
+            violations = ADR_GUARD.check_cloud_factory_seam(repo_root, None)
+            self.assertTrue(len(violations) >= 1)
+            self.assertTrue(any("task_runner.py" in v.message and "no AWS counterpart" in v.message for v in violations))
+
+    def test_skips_init_and_base(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = self._make_cloud_tree(
+                tmp,
+                ["__init__.py", "base.py"],
+                ["__init__.py"],
+            )
+            violations = ADR_GUARD.check_cloud_factory_seam(repo_root, None)
+            self.assertEqual(violations, [])
+
+    def test_skipped_when_no_cloud_files_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = self._make_cloud_tree(
+                tmp,
+                ["__init__.py", "storage.py", "queue.py"],
+                ["__init__.py", "storage.py"],
+            )
+            violations = ADR_GUARD.check_cloud_factory_seam(
+                repo_root,
+                ["shifter/shifter_platform/cms/views.py"],
+            )
+            self.assertEqual(violations, [])
+
+    def test_runs_when_cloud_files_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = self._make_cloud_tree(
+                tmp,
+                ["__init__.py", "storage.py", "queue.py"],
+                ["__init__.py", "storage.py"],
+            )
+            violations = ADR_GUARD.check_cloud_factory_seam(
+                repo_root,
+                ["shifter/shifter_platform/shared/cloud/gcp/storage.py"],
+            )
+            self.assertTrue(len(violations) >= 1)
+
+    def test_real_repo_passes(self) -> None:
+        """The actual repo cloud adapters should be in parity."""
+        violations = ADR_GUARD.check_cloud_factory_seam(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -386,6 +386,7 @@ Thumbs.db
 
 # Notes, scratchpad, etc
 temp/
+.tmp/
 
 risks/
 
@@ -413,3 +414,6 @@ CLAUDE.local.md
 # screenshots the plugin dumps into a per-session directory). These are
 # ephemeral debug output, not source.
 .playwright-mcp/
+
+# Claude Code scheduled-tasks runtime lock (per-session state)
+.claude/scheduled_tasks.lock

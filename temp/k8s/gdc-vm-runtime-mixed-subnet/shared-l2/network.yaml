@@ -1,0 +1,14 @@
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: vmrt-shared-l2
+spec:
+  type: L2
+  nodeInterfaceMatcher:
+    interfaceName: vxlan0
+  gateway4: 10.200.0.111
+  routes:
+    - to: 10.200.0.96/28
+  dnsConfig:
+    nameservers:
+      - 8.8.8.8

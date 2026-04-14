@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-mc
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: worker-mc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: worker-mc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: shifter
+        app.kubernetes.io/component: worker-mc
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: workers
+      containers:
+        - name: worker-mc
+          image: us-docker.pkg.dev/placeholder-project/shifter/portal:0.0.0
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          args: ["python", "manage.py", "run_worker", "--queue", "mc"]
+          envFrom:
+            - configMapRef:
+                name: platform-runtime
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "find /tmp/worker-mc-heartbeat -mmin -2 | grep -q ."]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}

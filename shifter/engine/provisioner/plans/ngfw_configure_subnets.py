@@ -53,20 +53,22 @@ def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
 def build_configure_input(
     subnets: list[dict],
     range_id: int,
-    vpc_gateway_ip: str,
+    route_next_hop_ip: str,
     stale_routes_to_delete: list[str] | None = None,
     ssm_endpoints_subnet_cidr: str = "",
+    route_interface: str = "ethernet1/1",
 ) -> str:
     """Build PAN-OS configure commands for routes, addresses and security rules.
 
     Args:
         subnets: List of dicts with 'name', 'cidr', and 'connected_to' keys.
         range_id: Range ID for unique naming.
-        vpc_gateway_ip: VPC gateway IP address for static route next-hop.
+        route_next_hop_ip: Next-hop IP address for static route configuration.
         stale_routes_to_delete: Optional list of existing route names to delete first.
             Used to clean up stale routes from destroyed ranges that reused CIDRs.
         ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR. When set,
             adds a route and allow-all rule so Bedrock traffic passes through NGFW.
+        route_interface: PAN-OS interface to use for the static routes.
 
     Returns:
         Multi-line string with configure commands and single commit.
@@ -88,8 +90,8 @@ def build_configure_input(
         cidr = subnet["cidr"]
         lines.append(
             f"set network virtual-router default routing-table ip static-route "
-            f"{route_name} destination {cidr} interface ethernet1/1 "
-            f"nexthop ip-address {vpc_gateway_ip}"
+            f"{route_name} destination {cidr} interface {route_interface} "
+            f"nexthop ip-address {route_next_hop_ip}"
         )
 
     # Add static route for SSM/Bedrock endpoints subnet so NGFW can forward traffic
@@ -97,8 +99,8 @@ def build_configure_input(
         endpoints_route = f"range-{range_id}-endpoints"
         lines.append(
             f"set network virtual-router default routing-table ip static-route "
-            f"{endpoints_route} destination {ssm_endpoints_subnet_cidr} interface ethernet1/1 "
-            f"nexthop ip-address {vpc_gateway_ip}"
+            f"{endpoints_route} destination {ssm_endpoints_subnet_cidr} interface {route_interface} "
+            f"nexthop ip-address {route_next_hop_ip}"
         )
 
     # Add address objects for each subnet
@@ -243,24 +245,31 @@ class NGFWConfigureSubnetsPlan:
         self,
         subnets: list[dict],
         range_id: int,
-        vpc_gateway_ip: str,
+        route_next_hop_ip: str,
         stale_routes_to_delete: list[str] | None = None,
         ssm_endpoints_subnet_cidr: str = "",
+        route_interface: str = "ethernet1/1",
     ) -> list[SetupStep]:
         """Build steps with dynamic stdin_input for the given subnets.
 
         Args:
             subnets: List of subnet dicts with 'name', 'cidr', 'connected_to'.
             range_id: Range ID for unique naming.
-            vpc_gateway_ip: VPC gateway IP address for static route next-hop.
+            route_next_hop_ip: Next-hop IP address for static route configuration.
             stale_routes_to_delete: Optional list of stale route names to delete first.
             ssm_endpoints_subnet_cidr: SSM/Bedrock endpoints subnet CIDR for NGFW routing.
+            route_interface: PAN-OS interface to use for the static routes.
 
         Returns:
             List with single SetupStep containing all configure commands.
         """
         stdin_input = build_configure_input(
-            subnets, range_id, vpc_gateway_ip, stale_routes_to_delete, ssm_endpoints_subnet_cidr
+            subnets,
+            range_id,
+            route_next_hop_ip,
+            stale_routes_to_delete,
+            ssm_endpoints_subnet_cidr,
+            route_interface,
         )
         return [
             SetupStep(

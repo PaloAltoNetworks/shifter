@@ -37,7 +37,9 @@ If something is required, make it fail when missing.
 
 ### Branching
 - `main` is production - always deployable
-- `dev` is integration - deploy to dev environment
+- `dev` is integration - validation only
+- `aws-dev` deploys the AWS dev environment
+- `gcp-dev` deploys the GCP dev environment through the narrow fast path
 - `feature/*` for development work
 
 ### Commits
@@ -52,8 +54,8 @@ If something is required, make it fail when missing.
 - Wait for CI to pass before requesting review
 
 ### Never
-- Force push to main or dev
-- Commit directly to protected branches
+- Force push to `main`, `aws-dev`, or `gcp-dev`
+- Commit directly to protected deployment branches
 - Merge your own PR without review (for significant changes)
 
 ## Code Style

@@ -9,6 +9,9 @@ on:
       is_dev:
         required: true
         type: boolean
+      deploy_changes:
+        required: true
+        type: boolean
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -19,37 +22,22 @@ env:
   AWS_REGION: us-east-2
 
 jobs:
-  # Test job disabled - provisioner tests need cleanup (too slow, many low-value tests)
-  # test:
-  #   name: Test
-  #   runs-on: self-hosted
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - name: Install dependencies
-  #       working-directory: shifter/engine/provisioner
-  #       run: |
-  #         python3.12 -m venv .venv
-  #         source .venv/bin/activate
-  #         pip install --upgrade pip
-  #         pip install -r requirements.txt -r requirements-dev.txt
-  #
-  #     - name: Run tests
-  #       working-directory: shifter/engine/provisioner
-  #       env:
-  #         TESTING: "1"
-  #       run: |
-  #         source .venv/bin/activate
-  #         pytest tests/ -q
+  validate:
+    name: Validate (${{ inputs.environment }})
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build provisioner image locally
+        run: docker build --no-cache -t shifter-engine-validate ./shifter/engine/provisioner
 
   build:
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
-    # needs: test  # Disabled - test job commented out
+    needs: validate
     permissions:
       id-token: write
       contents: read
-    if: github.event_name != 'pull_request'
+    if: inputs.deploy_changes && github.event_name != 'pull_request'
     outputs:
       image_tag: ${{ steps.sha.outputs.short }}
     env:
@@ -89,7 +77,7 @@ jobs:
     permissions:
       id-token: write
     needs: build
-    if: github.event_name != 'pull_request'
+    if: inputs.deploy_changes && github.event_name != 'pull_request'
     env:
       TASK_FAMILY: ${{ inputs.is_dev && 'dev-portal-pulumi-provisioner' || 'prod-portal-pulumi-provisioner' }}
     steps:

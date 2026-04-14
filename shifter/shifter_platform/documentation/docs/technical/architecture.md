@@ -1,43 +1,63 @@
 # Shifter Architecture
 
-Enterprise, multi-user, extensible cyber range platform.
+Enterprise, multi-user, extensible cyber range platform. Deploys to AWS or GCP.
 
 ## Platform Infrastructure
 
-Two AWS accounts: `dev` and `prod`.
+Infrastructure is defined per cloud provider. A `CLOUD_PROVIDER` environment variable selects the active provider at runtime.
 
 ```mermaid
 graph TB
     subgraph Platform["Platform Infrastructure"]
-        Global["Global<br/>(IAM, OIDC)"]
-        Core["Core<br/>(ECR, base resources)"]
-        Range["Range<br/>(VPC, networking)"]
+        Global["Global<br/>(IAM, identity federation)"]
+        Core["Core<br/>(Container registry, base resources)"]
+        Range["Range<br/>(Networking, guest isolation)"]
     end
 
     Global --> Core
     Core --> Range
 ```
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| **Global** | `platform/terraform/global/` | IAM roles, OIDC providers, cross-account resources. |
-| **Core** | `platform/terraform/modules/ecr/`, `platform/terraform/environments/` | ECR, base environment resources. |
-| **Range** | `platform/terraform/modules/range/` | Range VPC, shared networking foundation. |
-| **Portal*** | `platform/terraform/modules/portal/` | Shifter application infrastructure (ALB, ECS, RDS, S3). |
+| Component | Purpose |
+|-----------|---------|
+| **Global** | IAM roles, cloud identity services, CI/CD identity federation. |
+| **Core** | Container registries, base environment resources. |
+| **Range** | Range networking and guest isolation. |
+| **Portal*** | Shifter application infrastructure (load balancer, compute, database, object storage). |
 
-*Portal is a legacy name. This module deploys the Shifter Django application infrastructure.
+*Portal is a legacy name. This component deploys the Shifter Django application infrastructure.
+
+| | AWS | GCP |
+|---|---|---|
+| **IaC** | Terraform (`platform/terraform/modules/`, `environments/`) | Terraform (`platform/terraform/gcp/`) + Helm (`platform/charts/shifter/`) with bootstrap-generated values |
+| **Compute** | EC2 (configurable ASG) + ECS Fargate | GKE (node pools: web, workers, provisioner) |
+| **Database** | RDS PostgreSQL | Cloud SQL PostgreSQL |
+| **Cache** | ElastiCache Redis | Memorystore Redis |
+| **Object Storage** | S3 | GCS |
+| **Messaging** | SNS (fanout) → SQS (per-domain queues) | Pub/Sub (topic → per-domain subscriptions) |
+| **Container Registry** | ECR | Artifact Registry |
+| **Secrets** | Secrets Manager + SSM Parameter Store | Secret Manager |
+| **Identity** | Cognito hosted UI via OIDC | Identity Platform browser-side auth via FirebaseUI/Google SDKs + TOTP |
+| **Range Guests** | EC2 instances in isolated VPC subnets | GDC VM Runtime (KubeVirt) with optional lower-fidelity pod execution on GDC cluster |
+| **Egress Filtering** | AWS Network Firewall (domain-based rules) | Per-range namespace and L2 network isolation |
 
 ### Identity
 
-Cognito user pool configured with:
+AWS and GCP keep provider-specific identity stacks behind a shared auth seam:
+
+- AWS uses Cognito through `mozilla-django-oidc`
+- GCP uses Identity Platform through FirebaseUI/browser-side Google auth flows. Django only exchanges verified identity tokens for Shifter sessions.
+
+Common operator requirements:
 - Email as username
 - MFA required (TOTP)
-- Pre-signup Lambda for domain restriction (`@paloaltonetworks.com`)
+- Domain restriction for allowed email domains
 - Email verification required
+- CTF participant magic links remain separate from the corporate identity-provider flow
 
 ### Hosting
 
-CI/CD via GitHub Actions with self-hosted runners. DNS hosted on Cloudflare (`dev.shifter.keplerops.com`, `shifter.keplerops.com`).
+CI/CD via GitHub Actions with self-hosted runners. Separate workflow per cloud target.
 
 ## Shifter (Django)
 
@@ -69,24 +89,26 @@ graph TB
 
 ### Event-Driven Communication
 
-Provisioner publishes status events to SNS. All domains subscribe via SQS and process events through domain-specific handlers.
+Provisioner publishes status events to a message topic. All domains subscribe via per-domain queues and process events through domain-specific handlers.
+
+On AWS this is SNS → SQS. On GCP this is Pub/Sub topic → subscriptions. The application code uses cloud adapter interfaces (see [Cloud Adapters](dev/cloud-adapters)) and does not reference provider APIs directly.
 
 ```mermaid
 sequenceDiagram
     participant P as Provisioner
-    participant SNS as SNS
-    participant SQS as SQS
+    participant T as Event Topic
+    participant Q as Domain Queues
     participant ENG as Engine Handlers
     participant CMS as CMS Handlers
     participant MC as MC Handlers
     participant R as Redis Channels
     participant B as Browser
 
-    P->>SNS: publish event
-    SNS->>SQS: fanout
-    SQS->>ENG: process
-    SQS->>CMS: process
-    SQS->>MC: process
+    P->>T: publish event
+    T->>Q: fanout
+    Q->>ENG: process
+    Q->>CMS: process
+    Q->>MC: process
     ENG->>ENG: update Engine models
     CMS->>CMS: update CMS models
     MC->>R: broadcast
@@ -97,11 +119,18 @@ sequenceDiagram
 - **CMS handlers**: Update `RangeInstance`, `Instance`, `App` status
 - **MC handlers**: Broadcast to WebSocket for real-time UI updates
 
+## Cloud Adapters
+
+The platform and provisioner use protocol-based abstractions to isolate cloud-specific code. `CLOUD_PROVIDER` selects the implementation at runtime via factory functions.
+
+See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
+
 ## Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| UI separation | Mission Control is presentation only | Migrating to Angular + PrimeNG to align with Cortex UI practices. Current Django templates are temporary. |
+| UI separation | Mission Control is presentation only | Clean separation of presentation from domain logic. Views handle HTTP; services own business rules. |
 | API style | REST via Django REST Framework | Proven, simple, mature Django ecosystem support. |
-| Identity | Cognito | Project initiated by Cortex Domain Consultant; will be replaced by PANW SSO if officially adopted. |
-| Domains | keplerops.com | Project initiated by Cortex Domain Consultant; will be replaced by paloaltonetworks.com if officially adopted. |
+| Cloud abstraction | Protocol-based adapters per provider | Same Django app runs on AWS or GCP. Cloud-specific code isolated behind interfaces. |
+| Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform with FirebaseUI/browser auth. Both require MFA, email-based usernames, and keep provider-specific auth details behind the app auth seam. |
+| Domains | keplerops.com | Operator-owned domain. DNS may be hosted externally or in cloud-managed DNS. Current `gcp-dev` hostname is `shifter.keplerops.com`. |

@@ -16,7 +16,7 @@ Participants click their magic link, land on Mission Control, and open Terminal 
 
 All 6 boxes are on a single flat `/28` subnet. Every box is directly reachable from Kali -- no pivoting required.
 
-| Box | Name | OS | AMI | Role |
+| Box | Name | OS | Image | Role |
 |-----|------|----|-----|------|
 | -- | kali | Kali | (base) | Attacker (participant's box) |
 | 0 | webdev01 | Ubuntu | `ctf-webshell` | Walkthrough target |

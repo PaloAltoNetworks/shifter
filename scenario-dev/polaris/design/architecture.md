@@ -4,7 +4,7 @@
 
 ```mermaid
 graph LR
-    W[Boreas Systems Website - E:5 M:1 shared] --> A[Front Office - E:6 M:5 H:3 X:1]
+    W[Boreas / Shared - E:5 M:1 shared] --> A[Front Office - E:6 M:5 H:3 X:1]
     A -->|A15 pivot| S[SCADA - H:1 X:1]
     A -->|A16 pivot| B[Lab - E:3 M:5 H:2 X:1]
     S -->|range-local splice trigger| C[Bunker - M:1 H:3 X:2]
@@ -15,7 +15,7 @@ graph LR
 
 | Zone | Easy | Medium | Hard | Expert | Total |
 |------|------|--------|------|--------|-------|
-| Shared OSINT | 5 | 1 | - | - | 6 |
+| Shared / Boreas | 5 | 1 | - | - | 6 |
 | Front Office | 6 | 5 | 3 | 1 | 15 |
 | Lab | 3 | 5 | 2 | 1 | 11 |
 | Bunker | - | 1 | 3 | 2 | 6 |
@@ -27,61 +27,67 @@ graph LR
 
 ## Missions
 
-- **M1: Who are they?** — Identify the organization and its people. OSINT + Front Office. Easy/Medium.
-- **M2: What are they building?** — Piece together the project from fragments. Front Office + Lab. Medium/Hard.
-- **M3: Lights out** — Disrupt operations, kill the generator. Front Office. Hard/Expert. Per-range splice trigger.
-- **M4: Into the bunker** — Reach the buried control path and take it over. Lab + Bunker. Expert.
+- **Mission 1 — Boreas**
+  Who are Boreas?
+- **Mission 2 — Inside Boreas**
+  How do we get inside?
+- **Mission 3 — The Lab**
+  What are they building?
+- **Mission 4 — Lights Out**
+  How do we create the opening?
+- **Mission 5 — Bunker**
+  How do we take control?
 
 ## Flag Breakdown
 
-| # | Flag | Zone | Diff | M1 | M2 | M3 | M4 |
-|---|------|------|------|:--:|:--:|:--:|:--:|
-| 1 | Boreas Systems company info | OSINT | E | x | | | |
-| 2 | Employee directory / org chart | OSINT | E | x | | | |
-| 3 | Job posting reveals tech stack | OSINT | E | x | | | |
-| 4 | Client list / cover contracts | OSINT | E | x | | | |
-| 5 | DNS records reveal internal hostnames | OSINT | E | x | | | |
-| 6 | Supplier identified from public filings | OSINT | M | x | x | | |
-| 7 | Creds in web app config | FO | E | x | | | |
-| 8 | Employee email with project hints | FO | E | x | x | | |
-| 9 | HR records — terminated engineer | FO | E | x | | | |
-| 10 | Password reuse gives mail access | FO | E | x | | | |
-| 11 | Cafeteria menu / mundane file share | FO | E | x | | | |
-| 12 | Internal wiki — "the project" references | FO | E | x | x | | |
-| 13 | Procurement orders — hydraulic actuators | FO | M | x | x | | |
-| 14 | AD enumeration — suspicious accounts | FO | M | | x | | |
-| 15 | Lateral movement to second host | FO | M | | | x | |
-| 16 | Guard rotation logs — unreliable guard | FO | M | x | | x | |
-| 17 | Privilege escalation — domain admin | FO | H | | | x | |
-| 18 | Control Room | FO | H | | | x | |
-| 19 | Lights Out | FO | X | | | x | |
-| 37 | On Call | FO | H | | | x | |
-| 38 | The Analyst's Desk | FO | M | | x | | |
-| 20 | Old Defaults | Lab | E | | x | | |
-| 21 | Compartment A | Lab | E | | x | | |
-| 22 | Heavy Delivery | Lab | E | | x | | |
-| 23 | MIDNIGHT-7 | Lab | M | | x | | |
-| 24 | What Git Remembers | Lab | M | | x | | x |
-| 25 | After Hours | Lab | M | | x | | |
-| 26 | Balance Point | Lab | M | | x | | |
-| 27 | Compartment B | Lab | M | | x | | |
-| 28 | What's Built | Lab | H | | x | | x |
-| 29 | What Was Erased | Lab | H | | x | | |
-| 30 | Full Run | Lab | X | | x | | |
-| 31 | Underground Signals | Bunker | M | | | | x |
-| 32 | First Motion | Bunker | H | | x | | x |
-| 33 | Walking Pattern | Bunker | H | | x | | x |
-| 34 | Response Window | Bunker | H | | x | | x |
-| 35 | Control Channel | Bunker | X | | | | x |
-| 36 | Full Override | Bunker | X | | | | x |
+| # | Flag | Zone | Diff | Mission |
+|---|------|------|------|---------|
+| 1 | Company Info | Shared | E | Mission 1 — Boreas |
+| 2 | Employee Directory | Shared | E | Mission 1 — Boreas |
+| 3 | Tech Stack Revealed | Shared | E | Mission 1 — Boreas |
+| 4 | Client Contracts | Shared | E | Mission 1 — Boreas |
+| 5 | DNS Reconnaissance | Shared | E | Mission 1 — Boreas |
+| 6 | Follow the Money | Shared | M | Mission 1 — Boreas |
+| 7 | Configuration Leak | FO | E | Mission 2 — Inside Boreas |
+| 8 | Project Hints | FO | E | Mission 2 — Inside Boreas |
+| 9 | Terminated Engineer | FO | E | Mission 2 — Inside Boreas |
+| 10 | Password Reuse | FO | E | Mission 2 — Inside Boreas |
+| 11 | Mundane File Share | FO | E | Mission 2 — Inside Boreas |
+| 12 | The Project | FO | E | Mission 2 — Inside Boreas |
+| 13 | Procurement Trail | FO | M | Mission 2 — Inside Boreas |
+| 14 | Hidden Group | FO | M | Mission 2 — Inside Boreas |
+| 15 | Lateral Movement | FO | M | Mission 2 — Inside Boreas |
+| 16 | Unreliable Guard | FO | M | Mission 2 — Inside Boreas |
+| 17 | Domain Admin | FO | H | Mission 2 — Inside Boreas |
+| 37 | On Call | FO | H | Mission 4 — Lights Out |
+| 18 | Control Room | FO | H | Mission 4 — Lights Out |
+| 19 | Lights Out | FO | X | Mission 4 — Lights Out |
+| 38 | The Analyst's Desk | FO | M | Mission 3 — The Lab |
+| 20 | Old Defaults | Lab | E | Mission 3 — The Lab |
+| 21 | Compartment A | Lab | E | Mission 3 — The Lab |
+| 22 | Heavy Delivery | Lab | E | Mission 3 — The Lab |
+| 23 | MIDNIGHT-7 | Lab | M | Mission 3 — The Lab |
+| 24 | What Git Remembers | Lab | M | Mission 3 — The Lab |
+| 25 | After Hours | Lab | M | Mission 3 — The Lab |
+| 26 | Balance Point | Lab | M | Mission 3 — The Lab |
+| 27 | Compartment B | Lab | M | Mission 3 — The Lab |
+| 28 | What's Built | Lab | H | Mission 3 — The Lab |
+| 29 | What Was Erased | Lab | H | Mission 3 — The Lab |
+| 30 | Full Run | Lab | X | Mission 3 — The Lab |
+| 31 | Underground Signals | Bunker | M | Mission 5 — Bunker |
+| 32 | First Motion | Bunker | H | Mission 5 — Bunker |
+| 33 | Walking Pattern | Bunker | H | Mission 5 — Bunker |
+| 34 | Response Window | Bunker | H | Mission 5 — Bunker |
+| 35 | Control Channel | Bunker | X | Mission 5 — Bunker |
+| 36 | Full Override | Bunker | X | Mission 5 — Bunker |
 
 ## Expected Progression (4 hours, with AI agent)
 
 | Participant Level | Likely Missions | Flags |
 |---|---|---|
-| Novice | M1 complete | 10-14 |
-| Intermediate | M1 + M2 partial | 16-22 |
-| Advanced | M1 + M2 + M3 + M4 attempt | 25-35 |
+| Novice | Mission 1 complete, Mission 2 partial | 10-16 |
+| Intermediate | Missions 1-3 with some Mission 4 setup | 18-26 |
+| Advanced | Missions 1-5 with Bunker attempt | 28-36 |
 
 ## Asset Map
 
@@ -89,6 +95,8 @@ graph LR
 graph LR
     subgraph Shared
         A0[A0: Boreas Website]
+        A5[A5: SCADA / Generator HMI]
+        A7[A7: Source Repo Server<br/>shared service, lab-only access]
     end
     subgraph Front Office
         A1[A1: Mail Server]
@@ -98,12 +106,8 @@ graph LR
         A15[A15: Ops Workstation]
         A16[A16: Research Analyst Workstation]
     end
-    subgraph SCADA
-        A5[A5: SCADA / Generator HMI]
-    end
     subgraph Lab
         A6[A6: Engineering Workstation]
-        A7[A7: Source Repo Server]
         A8[A8: Research Database]
     end
     subgraph Bunker
@@ -116,18 +120,19 @@ graph LR
     subgraph Attacker
         A14[A14: Kali + AI Agent]
     end
-    A0 --> A3
     A14 --> A0
     A14 --> A1
     A14 --> A3
     A14 --> A4
-    A14 --> A7
     A14 --> A15
     A14 --> A16
+    A0 --> A3
     A3 --> A2
     A2 --> A4
     A15 -->|pivot| A5
     A16 -->|pivot| A6
+    A16 -->|pivot| A7
+    A16 -->|pivot| A8
     A6 --> A7
     A6 --> A8
     A5 -->|meltdown observed locally| A9
@@ -166,10 +171,11 @@ graph LR
 ## Infrastructure
 
 - Single GKE cluster on GCP
-- One namespace per participant (~110 namespaces), each containing A1, A3, A4, A6, A8-A13, A14 (Kali) — 11 pods each
-- Shared namespace for A0 (Boreas website), A5 (SCADA/Generator HMI), A7 (Source Repo Server), and CTFd scoreboard
-- A2 (Domain Controller): **Shared Windows Server 2022 VM** on GCE (not a container). Samba AD DC was tested and cannot support Impacket Kerberoasting/DCSync. Pre-baked GCE custom image (`ctf-a2-windc-base-v1`). See `temp/a2-samba-ad-spike.md` for spike details.
+- One namespace per participant (~110 namespaces), each containing A1, A3, A4, A6, A8-A13, A14, A15, A16
+- Shared services for A0 (Boreas website), A5 (SCADA / Generator HMI), A7 (Source Repo Server, lab-only network attachment), DNS, and CTFd scoreboard
+- A2 (Domain Controller): **Shared Windows Server 2022 VM** on GCE (not a container). Samba AD DC was tested and cannot support Impacket Kerberoasting / DCSync. Pre-baked GCE custom image (`ctf-a2-windc-base-v1`). See `temp/a2-samba-ad-spike.md` for spike details.
 - Network policies isolate participant namespaces from each other
-- ~110 namespaces x 11 pods = ~1210 pods + shared pods + 1 shared Windows VM
+- Participant topology now uses A15 for SCADA reachback and A16 for Lab reachback; A3 is corporate-only
+- A7 is a shared service but is no longer directly reachable from Kali; all Gitea access goes through the Lab pivot
 
 > **Implementation note:** The current Polaris VM direction for implementation is per-range, not room-shared, for A5. The flag 19 meltdown state and the resulting splice trigger are participant-local.

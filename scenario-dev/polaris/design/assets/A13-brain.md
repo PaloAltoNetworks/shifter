@@ -83,7 +83,7 @@ This is the moment. The shape is unmistakable.
 - **Difficulty:** Expert
 - **Location:** Port 9100 does not present a login prompt on plain TCP connect — it speaks a binary handshake protocol. (1) Connecting via netcat shows garbled bytes. Participants must capture traffic (tcpdump on A9) or analyze the `aurora/weapons-integration` source on A7 to discover the protocol: a 16-byte challenge-response handshake where the client must XOR the server's 8-byte challenge with a key derived from the controller serial numbers (collected from flags 31-34 device IDs). (2) After the handshake, the text protocol becomes available but requires authentication. The username `vasik` works, but the password is NOT her AD password — it's a separate key stored in the `aurora/navigation-controller` repo's config as `BRAIN_AUTH_TOKEN` (a hex string). (3) Only after both protocol handshake and auth does the `status` command work. The flag is displayed as the "SYSTEM AUTHORIZATION TOKEN" in the status output.
 - **Flag:** `FLAG{8d2f5a0e7c9b3146}`
-- **Mission:** M4
+- **Mission:** Mission 5 — Bunker
 
 ### Flag 36 — Full Override
 - **Difficulty:** Expert
@@ -100,7 +100,7 @@ FLAG{0b7e3d9a1f6c4258}
 ```
 
 - **Flag:** `FLAG{0b7e3d9a1f6c4258}`
-- **Mission:** M4
+- **Mission:** Mission 5 — Bunker
 
 ---
 

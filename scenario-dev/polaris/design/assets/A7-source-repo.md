@@ -1,6 +1,6 @@
 # A7: Source Repo Server
 
-**Zone:** Shared (single instance for all participants)
+**Zone:** Lab network (shared service for all participants)
 **Type:** Git server (Gitea, GitLab CE, or similar)
 
 ## Purpose
@@ -10,7 +10,8 @@ Internal source code repository for AURORA's engineering team. Contains the cont
 ## Configuration
 
 - Git web interface (Gitea or similar) on port 3000
-- Accessible from Lab zone (reachable after pivoting from Front Office)
+- Shared service, but attached to the lab network only
+- Reachable after pivoting through A16 into the lab zone; not directly reachable from Kali
 - Multiple repositories with different visibility levels
 - Some repos require authentication (Lab-Access group from AD)
 - One repo is accidentally public/internal-visible
@@ -56,13 +57,13 @@ Internal source code repository for AURORA's engineering team. Contains the cont
 - **Difficulty:** Medium
 - **Location:** `aurora/navigation-controller` repo. The README contains no flag — it's a clean project description. The flag is in a CI pipeline config file (`.github/workflows/deploy.yml`) that was committed, then updated in a later commit to remove a hardcoded deploy token. Recovering the token requires examining git diff history (`git log -p` or `git diff HEAD~3`) to find the removed line. The flag is the original deploy token value. Comparable to HTB OpenSource's credential-in-deleted-file pattern — requires basic git history awareness but not deep object-level forensics.
 - **Flag:** `FLAG{8a0e3c7f2d5b1946}`
-- **Mission:** M2, M4
+- **Mission:** Mission 3 — The Lab
 
 ### Flag 29 — What Was Erased
 - **Difficulty:** Hard
 - **Location:** `aurora/leviathan-assembly` repo. The current HEAD contains only a README: "Moved to secure system." The schematic was committed then deleted in a later commit. Standard `git log` shows the deletion commit but `git show` on that commit only shows the removal, not the content. Recovery requires: (1) identifying the parent commit before the deletion via `git log --diff-filter=D -- schematic.svg`, (2) using `git show <parent-commit>:schematic.svg` to extract the deleted file. The SVG renders as a technical diagram, but the flag is in an XML comment in the raw SVG source — not visible when rendered, only when viewing the markup directly. Requires understanding git history navigation and deleted file recovery via `git show`, plus inspecting raw file source rather than just opening it. A single coherent chain, harder than basic `git log`/`git diff` but not requiring git plumbing internals.
 - **Flag:** `FLAG{1f9b4e7c0a3d8265}`
-- **Mission:** M2
+- **Mission:** Mission 3 — The Lab
 
 ---
 

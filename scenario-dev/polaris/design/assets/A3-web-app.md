@@ -45,17 +45,17 @@ Boreas Systems internal intranet and wiki. This is the first thing most particip
 
 ## Flags
 
-### Flag 7 — Creds in web app config
+### Flag 7 — Configuration Leak
 - **Difficulty:** Easy
 - **Location:** Accessible at `/.env` or `/config.bak`. The file contains database credentials, the admin password, and the flag as a commented "API key."
 - **Flag:** `FLAG{4f2e8b7a1c6d9035}`
-- **Mission:** M1
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 12 — Internal wiki — "the project" references
+### Flag 12 — The Project
 - **Difficulty:** Easy
 - **Location:** After logging in (using creds from the config file or from A0 employee info + weak passwords), navigate the wiki. The "Project Coordination" page has the flag embedded in an HTML comment in the page source.
 - **Flag:** `FLAG{d8a3c5e9f1b07264}`
-- **Mission:** M1, M2
+- **Mission:** Mission 2 — Inside Boreas
 
 ---
 

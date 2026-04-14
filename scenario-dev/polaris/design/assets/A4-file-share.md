@@ -54,26 +54,26 @@ Corporate file share for Boreas Systems. Contains HR documents, procurement reco
 
 ## Flags
 
-### Flag 9 — HR records — terminated engineer
+### Flag 9 — Terminated Engineer
 
 - **Difficulty:** Easy
 - **Location:** `\\fileshare\HR\personnel\chen_james_termination.pdf`. The flag is on the second page of the PDF in a "case reference number" field.
 - **Flag:** `FLAG{7a1b3d9e2c8f0546}`
-- **Mission:** M1
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 11 — Cafeteria menu / mundane file share
+### Flag 11 — Mundane File Share
 
 - **Difficulty:** Easy
 - **Location:** `\\fileshare\Public\cafeteria_menu_april.pdf`. The flag is hidden in the PDF metadata (Author field). This is a gimme flag to reward basic enumeration of the share.
 - **Flag:** `FLAG{0e6f9c2d4a8b7135}`
-- **Mission:** M1
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 13 — Procurement orders — hydraulic actuators
+### Flag 13 — Procurement Trail
 
 - **Difficulty:** Medium
 - **Location:** `\\fileshare\Procurement\PO-2847_hydraulic_actuators.pdf`. The flag is not on the PO itself — it's in a linked document referenced in the PO's "special instructions" field: a specifications PDF stored in a subdirectory `\\fileshare\Procurement\specs\actuator_requirements_v4.pdf`. Requires reading the PO carefully and following the reference.
 - **Flag:** `FLAG{8c5a0d3f7e1b2964}`
-- **Mission:** M1, M2
+- **Mission:** Mission 2 — Inside Boreas
 
 ---
 
@@ -88,7 +88,7 @@ Corporate file share for Boreas Systems. Contains HR documents, procurement reco
 1. **Install and configure Samba (standalone file server)**
    - Not a DC — standalone mode, or joined to A2 domain if auth integration works
    - If standalone: local user accounts mirroring A2 users + service accounts
-   - If domain-joined: authenticate against A2's Samba AD DC
+   - If domain-joined: authenticate against A2's Windows AD domain
 
 2. **Create SMB shares with permissions**
    - `Public` — all authenticated users (read)

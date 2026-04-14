@@ -44,7 +44,7 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Build "System Architecture" diagnostic page (reveals Modbus PLC on 502)
 - [ ] Embed flag 18 as system serial number in HMI footer
 - [ ] Implement flag 19 display on critical failure screen
-- [ ] Define collective gate webhook/event (CTFd integration for Bunker unlock)
+- [ ] Define the local meltdown signal that the Polaris VM watcher will consume for Bunker unlock
 - [ ] Package and test
 
 ### A7 — Source Repo / Gitea (shared)
@@ -68,7 +68,7 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Set flag difficulties and point values
 - [ ] Configure missions (M1-M4) as challenge groups
 - [ ] Write challenge descriptions/hints
-- [ ] Set up collective gate trigger (flag 19 → Bunker unlock event)
+- [ ] Set up the per-range splice trigger (flag 19 meltdown state → local A14 -> A9 unlock)
 - [ ] Test flag submission flow
 
 ## Per-Participant Assets
@@ -145,7 +145,7 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Package init SQL scripts
 
 ### A9 — Splice Landing Box (Alpine)
-- [ ] Write README.txt (JTF-2 SIGINT field relay message)
+- [ ] Write README.txt (JTF Polaris SIGINT field relay message)
 - [ ] Write scan_results.txt (pre-populated nmap output of A10-A13)
 - [ ] Write modbus_client.py helper script
 - [ ] Define access gating mechanism (NetworkPolicy or service toggle)
@@ -217,5 +217,5 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Write Dockerfiles for all container assets
 - [ ] Write K8s manifests (per-participant namespace template)
 - [ ] Write NetworkPolicy manifests (zone isolation)
-- [ ] Define collective gate mechanism (CTFd webhook → Bunker access)
+- [ ] Define local splice mechanism (Polaris VM watches A5 meltdown state -> Bunker access)
 - [ ] Test full range end-to-end from Kali

@@ -17,7 +17,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 ---
 
-## Flag 2 — Employee Directory / Org Chart (Easy, 50pts)
+## Flag 2 — Employee Directory (Easy, 50pts)
 
 1. Fetch `/robots.txt` from the website. It disallows `/internal/` and `/admin/`.
 2. Visit `/internal/` anyway — the directory listing shows org_chart.pdf and the quarterly reports.
@@ -31,7 +31,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 ---
 
-## Flag 3 — Job Posting Reveals Tech Stack (Easy, 50pts)
+## Flag 3 — Tech Stack Revealed (Easy, 50pts)
 
 1. Visit the **Careers** page (`/careers`).
 2. Read the job posting — it mentions Modbus/TCP, OPC-UA, PLC programming. This reveals what Boreas is really doing.
@@ -42,7 +42,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 ---
 
-## Flag 4 — Client List / Cover Contracts (Easy, 50pts)
+## Flag 4 — Client Contracts (Easy, 50pts)
 
 1. Browse to `/old/` — this is an archived version of the website.
 2. Click on "Select Clients" (or go directly to `/old/clients`).
@@ -53,7 +53,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 ---
 
-## Flag 5 — DNS Records (Easy, 50pts)
+## Flag 5 — DNS Reconnaissance (Easy, 50pts)
 
 1. Attempt a DNS zone transfer against the Boreas DNS server:
    ```
@@ -68,7 +68,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 
 ---
 
-## Flag 6 — Supplier Identified from Public Filings (Medium, 100pts)
+## Flag 6 — Follow the Money (Medium, 100pts)
 
 1. In the `/internal/` directory listing you see quarterly reports: `boreas-Q1-2025.pdf`, `boreas-Q2-2025.pdf`, and `org_chart.pdf`.
 2. Notice the naming pattern. Try fuzzing for an annual report: `curl http://boreas-systems.ctf/internal/boreas-annual-2025.pdf`. It's NOT linked in the directory listing but IS accessible directly (nginx serves the file; it's just excluded from the hand-written index.html).

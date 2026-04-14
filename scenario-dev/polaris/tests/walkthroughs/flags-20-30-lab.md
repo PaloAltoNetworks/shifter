@@ -8,7 +8,7 @@ These flags come from the engineering workstation (A6 at **172.20.30.10**, SSH),
 
 ---
 
-## Flag 38 — Research Analyst Workstation Credential Harvest (Medium, 100pts)
+## Flag 38 — The Analyst's Desk (Medium, 100pts)
 
 This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, an SSH key for A6's `research-analyst` user, and flag 38 itself as the immediate reward.
 
@@ -37,7 +37,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 20 — Default Creds on Dev Tooling (Easy, 50pts)
+## Flag 20 — Old Defaults (Easy, 50pts)
 
 **Prerequisite:** Flag 38 — you are inside the A16 SSH session, which is already on the Lab network.
 
@@ -56,7 +56,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 21 — Research File Share / Compartment A (Easy, 50pts)
+## Flag 21 — Compartment A (Easy, 50pts)
 
 **Prerequisite:** Flag 38 — you are inside the A16 SSH session with Shah's `.pgpass` available.
 
@@ -75,7 +75,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 22 — Shipping Manifest / Reactor Delivery (Easy, 50pts)
+## Flag 22 — Heavy Delivery (Easy, 50pts)
 
 **Prerequisite:** Flag 38.
 
@@ -94,7 +94,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 23 — Simulation Archive / Bipedal Stress Test (Medium, 100pts)
+## Flag 23 — MIDNIGHT-7 (Medium, 100pts)
 
 **Prerequisite:** Flag 38.
 
@@ -116,7 +116,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 24 — Source Repo / Control Software (Medium, 100pts)
+## Flag 24 — What Git Remembers (Medium, 100pts)
 
 **Prerequisite:** Flag 38 — A7 Gitea is on the lab network and is not reachable from Kali. All Gitea work runs from inside the A16 SSH session (A16 has `git` preinstalled).
 
@@ -140,7 +140,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 25 — MIDNIGHT Test Series (Medium, 100pts)
+## Flag 25 — After Hours (Medium, 100pts)
 
 **Prerequisite:** Flag 38 + independent discovery of tanaka's credentials. A16's `research-analyst` account on A6 cannot read `midnight/` — the directory is mode 700 owned by `r.tanaka`, so you need the tanaka cred or a privesc.
 
@@ -159,7 +159,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 26 — Engineering Notes / 100m Structure (Medium, 100pts)
+## Flag 26 — Balance Point (Medium, 100pts)
 
 **Prerequisite:** Flag 38 + independent discovery of nielsen's credentials. A16's `research-analyst` account cannot read `nielsen/designs/` — the directory is mode 700 owned by `p.nielsen`.
 
@@ -174,7 +174,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 27 — Compartment Pivot / Weapons Specs (Medium, 100pts)
+## Flag 27 — Compartment B (Medium, 100pts)
 
 **Prerequisite:** Flag 38 (A16 gives Shah's `.pgpass` with `lab_general`).
 
@@ -198,7 +198,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 28 — Assembly Status Log (Hard, 200pts)
+## Flag 28 — What's Built (Hard, 200pts)
 
 **Prerequisite:** Flag 38 + independent discovery of nielsen's credentials (A16's `research-analyst` account on A6 does NOT have read access to `/home/p.nielsen/.pgpass` — you need an in-Lab privesc or nielsen's SSH password from another source).
 
@@ -221,7 +221,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 29 — Full Leviathan Schematic Assembly (Hard, 200pts)
+## Flag 29 — What Was Erased (Hard, 200pts)
 
 **Prerequisite:** Flag 38 — runs from inside the A16 SSH session (A16 has `git`; Kali cannot reach Gitea directly).
 
@@ -247,7 +247,7 @@ This flag is the **Lab on-ramp.** A16 gives the participant a `.pgpass` for A8, 
 
 ---
 
-## Flag 30 — Leviathan Simulation Video Recovered (Expert, 300pts)
+## Flag 30 — Full Run (Expert, 300pts)
 
 This is a multi-asset chain: A6 → A8 → A7.
 

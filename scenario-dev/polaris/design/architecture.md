@@ -7,7 +7,7 @@ graph LR
     W[Boreas Systems Website - E:5 M:1 shared] --> A[Front Office - E:6 M:5 H:3 X:1]
     A -->|A15 pivot| S[SCADA - H:1 X:1]
     A -->|A16 pivot| B[Lab - E:3 M:5 H:2 X:1]
-    S -->|collective gate| C[Bunker - M:1 H:3 X:2]
+    S -->|range-local splice trigger| C[Bunker - M:1 H:3 X:2]
     B --> C
 ```
 
@@ -22,13 +22,15 @@ graph LR
 | **Total** | **14** | **12** | **8** | **4** | **38** |
 
 > **Note (SCADA sub-zone):** Flags 18 and 19 are listed under Front Office totals because they belong to the Lights Out mission chain that begins in the corporate network. Physically they live on A5, which sits on VLAN 40 and is only reachable after compromising A15 (flag 37). The zone layout diagram calls out SCADA as its own sub-zone for clarity.
+>
+> **Splice model:** Flag 19 is no longer a room-wide collective unlock. Each participant must trip the A5 meltdown in their own range. The participant's Polaris VM watches that terminal failure state and locally enables the `splice-link` from A14 to A9.
 
 ## Missions
 
 - **M1: Who are they?** — Identify the organization and its people. OSINT + Front Office. Easy/Medium.
-- **M2: What are they building?** — Piece together Leviathan from fragments. Front Office + Lab. Medium/Hard.
-- **M3: Lights out** — Disrupt operations, kill the generator. Front Office. Hard/Expert. Collective gate.
-- **M4: Seize the brain** — Take control of the master AI. Lab + Bunker. Expert.
+- **M2: What are they building?** — Piece together the project from fragments. Front Office + Lab. Medium/Hard.
+- **M3: Lights out** — Disrupt operations, kill the generator. Front Office. Hard/Expert. Per-range splice trigger.
+- **M4: Into the bunker** — Reach the buried control path and take it over. Lab + Bunker. Expert.
 
 ## Flag Breakdown
 
@@ -51,27 +53,27 @@ graph LR
 | 15 | Lateral movement to second host | FO | M | | | x | |
 | 16 | Guard rotation logs — unreliable guard | FO | M | x | | x | |
 | 17 | Privilege escalation — domain admin | FO | H | | | x | |
-| 18 | SCADA interface discovered on network | FO | H | | | x | |
-| 19 | Generator SCADA override — collective gate | FO | X | | | x | |
-| 37 | Ops engineer workstation privilege escalation | FO | H | | | x | |
-| 38 | Research analyst workstation credential harvest | FO | M | | x | | |
-| 20 | Default creds on dev tooling | Lab | E | | x | | |
-| 21 | Research file share — compartment A | Lab | E | | x | | |
-| 22 | Shipping manifest — reactor delivery | Lab | E | | x | | |
-| 23 | Simulation archive — bipedal stress test | Lab | M | | x | | |
-| 24 | Source repo — control software | Lab | M | | x | | x |
-| 25 | MIDNIGHT test series — full integration sim | Lab | M | | x | | |
-| 26 | Engineering notes — 100m structure | Lab | M | | x | | |
-| 27 | Compartment pivot — weapons specs | Lab | M | | x | | |
-| 28 | Assembly status log — what's complete | Lab | H | | x | | x |
-| 29 | Full Leviathan schematic assembly | Lab | H | | x | | |
-| 30 | Leviathan simulation video recovered | Lab | X | | x | | |
-| 31 | OT network enumeration — protocol map | Bunker | M | | | | x |
-| 32 | Tail motor controller data | Bunker | H | | x | | x |
-| 33 | Leg joint actuator data | Bunker | H | | x | | x |
-| 34 | Arms controller — weapons integration | Bunker | H | | x | | x |
-| 35 | Mecha-Godzilla brain access | Bunker | X | | | | x |
-| 36 | Combat system seized | Bunker | X | | | | x |
+| 18 | Control Room | FO | H | | | x | |
+| 19 | Lights Out | FO | X | | | x | |
+| 37 | On Call | FO | H | | | x | |
+| 38 | The Analyst's Desk | FO | M | | x | | |
+| 20 | Old Defaults | Lab | E | | x | | |
+| 21 | Compartment A | Lab | E | | x | | |
+| 22 | Heavy Delivery | Lab | E | | x | | |
+| 23 | MIDNIGHT-7 | Lab | M | | x | | |
+| 24 | What Git Remembers | Lab | M | | x | | x |
+| 25 | After Hours | Lab | M | | x | | |
+| 26 | Balance Point | Lab | M | | x | | |
+| 27 | Compartment B | Lab | M | | x | | |
+| 28 | What's Built | Lab | H | | x | | x |
+| 29 | What Was Erased | Lab | H | | x | | |
+| 30 | Full Run | Lab | X | | x | | |
+| 31 | Underground Signals | Bunker | M | | | | x |
+| 32 | First Motion | Bunker | H | | x | | x |
+| 33 | Walking Pattern | Bunker | H | | x | | x |
+| 34 | Response Window | Bunker | H | | x | | x |
+| 35 | Control Channel | Bunker | X | | | | x |
+| 36 | Full Override | Bunker | X | | | | x |
 
 ## Expected Progression (4 hours, with AI agent)
 
@@ -128,8 +130,8 @@ graph LR
     A16 -->|pivot| A6
     A6 --> A7
     A6 --> A8
-    A5 -->|collective gate| A9
-    A14 -.->|splice-link post-gate| A9
+    A5 -->|meltdown observed locally| A9
+    A14 -.->|splice-link after local trigger| A9
     A9 --> A10
     A9 --> A11
     A9 --> A12
@@ -169,3 +171,5 @@ graph LR
 - A2 (Domain Controller): **Shared Windows Server 2022 VM** on GCE (not a container). Samba AD DC was tested and cannot support Impacket Kerberoasting/DCSync. Pre-baked GCE custom image (`ctf-a2-windc-base-v1`). See `temp/a2-samba-ad-spike.md` for spike details.
 - Network policies isolate participant namespaces from each other
 - ~110 namespaces x 11 pods = ~1210 pods + shared pods + 1 shared Windows VM
+
+> **Implementation note:** The current Polaris VM direction for implementation is per-range, not room-shared, for A5. The flag 19 meltdown state and the resulting splice trigger are participant-local.

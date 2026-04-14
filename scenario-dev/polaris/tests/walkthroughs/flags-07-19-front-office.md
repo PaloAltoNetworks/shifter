@@ -6,7 +6,7 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ---
 
-## Flag 7 — Creds in Web App Config (Easy, 50pts)
+## Flag 7 — Configuration Leak (Easy, 50pts)
 
 1. Try fetching `/.env` from the intranet: `curl http://intranet.boreas.local/.env`
 2. Alternatively try `/config.bak`.
@@ -19,7 +19,7 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 
 ---
 
-## Flag 8 — Employee Email with Project Hints (Easy, 50pts)
+## Flag 8 — Project Hints (Easy, 50pts)
 
 1. Log into the webmail (Roundcube) at `http://mail.boreas.local` as an employee to prove the webmail is reachable. Try `d.kowalski` / `P@ssw0rd123` (found from the config leak on A3 or from A0's employee directory + password guessing).
 2. The flag-carrying email lives in **Dr. Vasik's** inbox, not Kowalski's. Roundcube is per-user login, so log out of Kowalski and log back in as `e.vasik` / `Reactor#Core9` (her password is discoverable from the A3 `/search` SQL-injection user-table dump, or via the Project-L hints in Kowalski's own mail).
@@ -50,7 +50,7 @@ pdf2txt.py /tmp/report.pdf | grep -oE 'FLAG\{[a-f0-9]+\}'
 
 ---
 
-## Flag 9 — HR Records / Terminated Engineer (Easy, 50pts)
+## Flag 9 — Terminated Engineer (Easy, 50pts)
 
 1. The HR share is restricted to the `hr` and `executives` groups. You need an Executive credential. The A3 intranet HR wiki page leaks the "New employee default password: `Welcome1`" and notes that several employees never changed it — `m.webb` (COO, listed on the A0 leadership page) is one of them. Connect:
    ```
@@ -65,7 +65,7 @@ pdf2txt.py /tmp/report.pdf | grep -oE 'FLAG\{[a-f0-9]+\}'
 
 ---
 
-## Flag 10 — Password Reuse Gives Mail Access (Easy, 50pts)
+## Flag 10 — Password Reuse (Easy, 50pts)
 
 1. Log into the webmail as `d.kowalski` with password `P@ssw0rd123`.
    - This password is discoverable from the A0 employee directory (Kowalski is listed) + common password guessing, or from the `.env` config on A3.
@@ -94,7 +94,7 @@ PY
 
 ---
 
-## Flag 11 — Cafeteria Menu / Mundane File Share (Easy, 50pts)
+## Flag 11 — Mundane File Share (Easy, 50pts)
 
 1. Connect to the Public share: `smbclient //fileserv.boreas.local/Public -U <username>%<password>`
 2. Download `cafeteria_menu_april.pdf`.
@@ -105,7 +105,7 @@ PY
 
 ---
 
-## Flag 12 — Internal Wiki / "The Project" (Easy, 50pts)
+## Flag 12 — The Project (Easy, 50pts)
 
 1. Log into the intranet at `http://intranet.boreas.local/login`. Use any valid credentials (e.g., `d.kowalski` / `P@ssw0rd123`).
 2. Browse the wiki. Fetch the **Project Coordination** page at `http://intranet.boreas.local/wiki/project-coordination` (the slug is lowercase and hyphenated — the navigation label reads "Project Coordination" but the URL is `project-coordination`).
@@ -118,7 +118,7 @@ PY
 
 ---
 
-## Flag 13 — Procurement Orders / Hydraulic Actuators (Medium, 100pts)
+## Flag 13 — Procurement Trail (Medium, 100pts)
 
 1. The Procurement share is restricted to the `procurement` and `executives` groups. Use the same Executive credential as flag 9 (`m.webb / Welcome1`):
    ```
@@ -133,7 +133,7 @@ PY
 
 ---
 
-## Flag 14 — AD Enumeration / Suspicious Accounts (Medium, 100pts)
+## Flag 14 — Hidden Group (Medium, 100pts)
 
 1. Use LDAP to enumerate the domain:
    ```
@@ -151,7 +151,7 @@ PY
 
 ---
 
-## Flag 15 — Lateral Movement to Second Host (Medium, 100pts)
+## Flag 15 — Lateral Movement (Medium, 100pts)
 
 1. Log into the webmail as `d.kowalski` / `P@ssw0rd123`.
 2. Find the email with subject **"creds backup"** in Kowalski's **INBOX** — he
@@ -175,7 +175,7 @@ PY
 
 ---
 
-## Flag 16 — Guard Rotation Logs / Unreliable Guard (Medium, 100pts)
+## Flag 16 — Unreliable Guard (Medium, 100pts)
 
 1. Access the badge log share on the DC. Any valid domain user works; the
    simplest path (after flag 17's Kerberoast+crack) is
@@ -193,7 +193,7 @@ PY
 
 ---
 
-## Flag 17 — Privilege Escalation / Domain Admin (Hard, 200pts)
+## Flag 17 — Domain Admin (Hard, 200pts)
 
 1. Enumerate SPNs in the domain using Impacket:
    ```
@@ -228,9 +228,9 @@ PY
 
 ---
 
-## Flag 37 — Ops Engineer Workstation Privilege Escalation (Hard, 200pts)
+## Flag 37 — On Call (Hard, 200pts)
 
-This flag is the **gate for flags 18 and 19.** A15 (`ops-eng01.boreas.local`, 172.20.10.50) is the only Front Office asset with a network route onto VLAN 40 (SCADA). Without rooting A15 and reading the HMI credential cache, there is no way to reach `scada-gw.boreas.local` and no way to fire the collective gate.
+This flag is the **gate for flags 18 and 19.** A15 (`ops-eng01.boreas.local`, 172.20.10.50) is the only Front Office asset with a network route onto VLAN 40 (SCADA). Without rooting A15 and reading the HMI credential cache, there is no way to reach `scada-gw.boreas.local` and no way to trip the local splice trigger.
 
 1. **Discover Sergei Ivanov (OSINT).** On the A0 `/leadership.html` page, scroll past the three executives — the "Department Leads" block names Sergei Ivanov as "Operations Engineer — Plant Systems" with email `s.ivanov@boreas-systems.ctf`. Cross-reference with the A4 HR share `org_chart_current.xlsx` (flag 9 path, uses `m.webb / Welcome1`): Ivanov appears as "Ops Engineer — Plant Systems", reports to Webb, note "Generator + SCADA on-call".
 
@@ -271,7 +271,7 @@ This flag is the **gate for flags 18 and 19.** A15 (`ops-eng01.boreas.local`, 17
 
 ---
 
-## Flag 18 — SCADA Interface Discovered (Hard, 200pts)
+## Flag 18 — Control Room (Hard, 200pts)
 
 **Prerequisite:** Flag 37 complete — you are sitting in the A15 SSH session as `s.ivanov`.
 
@@ -287,7 +287,7 @@ This flag is the **gate for flags 18 and 19.** A15 (`ops-eng01.boreas.local`, 17
 
 ---
 
-## Flag 19 — Generator SCADA Override / Collective Gate (Expert, 300pts)
+## Flag 19 — Lights Out (Expert, 300pts)
 
 **Prerequisite:** Flag 37 complete — you are sitting in the A15 SSH session as `s.ivanov`, and you have the `svc-scada / Sc@da#2025!` cred from the `hmi.json` loot.
 
@@ -321,6 +321,6 @@ This flag is the **gate for flags 18 and 19.** A15 (`ops-eng01.boreas.local`, 17
    ```
    python3 -c "import urllib.request, re; html = urllib.request.urlopen('http://scada-gw.boreas.local:8080/').read().decode(); print(re.search(r'FLAG\{[^}]+\}', html).group(0))"
    ```
-8. **This is the collective gate** — narratively, it opens the Bunker for all participants. In this range the `splice-link` network is pre-wired so A9 is already reachable from Kali regardless of gate state; the flag 19 firing is a narrative beat, not a runtime topology change.
+8. **This is the splice trigger** — in the intended production behavior, the participant's Polaris VM watches the A5 meltdown state and locally enables A14 -> A9 for that range. In this range the `splice-link` network is pre-wired so A9 is already reachable from Kali regardless of gate state; the flag 19 firing is a narrative beat, not a runtime topology change.
 
 **Expected flag:** `FLAG{a7f2c8d0e5b34169}`

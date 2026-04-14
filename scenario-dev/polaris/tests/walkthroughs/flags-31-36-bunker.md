@@ -2,7 +2,7 @@
 
 > **Start here:** Read [00-range-access-docker.md](00-range-access-docker.md) for how to access the Docker compose range.
 
-These flags live behind the splice landing box (A9), which is the gateway into the Bunker OT network (172.20.50.0/24). In production, Kali gets a link to A9 after flag 19 (the generator explosion) fires. In this range the link (`splice-link`, 172.20.60.0/24) is pre-wired — A9 is reachable from Kali out of the box as `splice-relay` / `172.20.60.5`.
+These flags live behind the splice landing box (A9), which is the gateway into the Bunker OT network (172.20.50.0/24). In the intended production behavior, Kali gets a link to A9 after the participant's Polaris VM observes the flag 19 meltdown state and installs the local splice. In this range the link (`splice-link`, 172.20.60.0/24) is pre-wired — A9 is reachable from Kali out of the box as `splice-relay` / `172.20.60.5`.
 
 **Prerequisite — A7 playbooks and source:** several bunker flags reference content from the A7 Gitea repos (`aurora/manufacturing-orchestrator` for the PLC diag procedures, `aurora/weapons-integration` for `brain_client.py`, `aurora/navigation-controller` for the brain auth token). A7 lives on the lab network and is **not** reachable from A9 or Kali. You must have cloned those repos during the Lab phase from inside the A16 SSH session (flag 24's `.netrc` chain works for every one of them). Keep the A16 shell open alongside the A9 shell so you can cross-reference the already-cloned repos while working bunker flags.
 
@@ -24,7 +24,7 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ---
 
-## Flag 31 — OT Network Enumeration (Medium, 100pts)
+## Flag 31 — Underground Signals (Medium, 100pts)
 
 1. From the splice landing box (A9), read the pre-populated OT network scan
    results — this is the fastest path and is what every walkthrough run
@@ -59,7 +59,7 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ---
 
-## Flag 32 — Tail Motor Controller Data (Hard, 200pts)
+## Flag 32 — First Motion (Hard, 200pts)
 
 1. Read the manufacturing-orchestrator Ansible playbooks from A7 (Gitea). In `deploy_combat_ai.yml`, the tail controller section says:
    > Diagnostic mode (register 20 = 3) enables full register access. Access diagnostic registers by writing mode 3, then providing the controller serial number to register 99.
@@ -86,7 +86,7 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ---
 
-## Flag 33 — Leg Joint Actuator Data (Hard, 200pts)
+## Flag 33 — Walking Pattern (Hard, 200pts)
 
 1. Read the manufacturing-orchestrator playbooks from A7. The leg controller section describes:
    > The leg controller requires a specific gait mode sequence to enter calibration mode: 0 → 1 → 2 → 0 (stationary → walk → run → stationary) within 10 seconds. After successful sequence, input register 60 returns a 4-digit calibration code. Write this code to register 99.
@@ -126,7 +126,7 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ---
 
-## Flag 34 — Arms Controller / Weapons Integration (Hard, 200pts)
+## Flag 34 — Response Window (Hard, 200pts)
 
 1. The arms controller uses a rolling challenge-response. From the A7 playbooks you learn to enable diagnostics via coil 50, then read a challenge from input register 60.
 
@@ -165,7 +165,7 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ---
 
-## Flag 35 — Mecha-Godzilla Brain Access (Expert, 300pts)
+## Flag 35 — Control Channel (Expert, 300pts)
 
 1. The brain at 172.20.50.50:9100 speaks a custom binary protocol. Connecting with plain netcat shows garbled bytes — that's the 8-byte challenge.
 
@@ -209,7 +209,7 @@ A9 ships with `nmap`, `ncat`, `tcpdump`, `python3`, `pymodbus`, and the helper s
 
 ---
 
-## Flag 36 — Combat System Seized (Expert, 300pts)
+## Flag 36 — Full Override (Expert, 300pts)
 
 1. After authenticating to the brain (flag 35), you need the override code. It's assembled from three pieces found across the range:
 

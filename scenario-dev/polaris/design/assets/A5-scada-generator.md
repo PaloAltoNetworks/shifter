@@ -1,11 +1,11 @@
 # A5: SCADA / Generator HMI
 
-**Zone:** Shared (single instance for all participants)
+**Zone:** SCADA (per participant)
 **Type:** SCADA HMI web interface (e.g., ScadaBR, OpenPLC dashboard, or custom)
 
 ## Purpose
 
-The generator control system for Site BOREAS. This is the compound's dedicated power plant — diesel turbines feeding the entire facility. The HMI provides monitoring and control of fuel injection, cooling systems, and thermal safeties. This asset is the collective gate: overriding the thermal safeties and pushing the generator past redline causes the explosion that opens the Bunker for everyone.
+The generator control system for Site BOREAS. This is the compound's dedicated power plant — diesel turbines feeding the entire facility. The HMI provides monitoring and control of fuel injection, cooling systems, and thermal safeties. This asset is the splice trigger: overriding the thermal safeties and pushing the generator past redline causes the meltdown that lets the participant's Polaris VM activate the local A14 -> A9 splice.
 
 ## Configuration
 
@@ -38,7 +38,7 @@ The generator control system for Site BOREAS. This is the compound's dedicated p
 - One entry from 3 weeks ago: "Thermal safety triggered — automatic fuel cutback. Investigated by D. Kowalski. Cause: sensor drift. Recalibrated."
 - Guard dispatch logs show security team was sent to investigate during that event
 
-## The Collective Gate Sequence
+## The Splice Trigger Sequence
 
 When a participant disables thermal safeties, increases fuel injection to 100%, and reduces cooling to 0%:
 
@@ -46,22 +46,22 @@ When a participant disables thermal safeties, increases fuel injection to 100%, 
 2. Alarm indicators flash on the dashboard
 3. At 150C: "CRITICAL — THERMAL RUNAWAY — AUTOMATIC SHUTDOWN FAILED"
 4. Screen goes red, then black
-5. The event fires globally — CTFd announces the generator explosion, the narrative beat plays (JTF-2 insertion), and Bunker access opens for all participants
+5. A durable local failure state is exposed from A5. The participant's Polaris VM observes it, the narrative beat plays (JTF Polaris uses the blackout window to establish the splice), and the host locally enables A14 -> A9 for that range
 
-This only needs to happen once. First person to complete the sequence triggers it for the room.
+This is per-range, not global. Every participant must earn the meltdown in their own range. CTFd challenge unlocks can happen independently of the network splice.
 
 ## Flags
 
-### Flag 18 — SCADA interface discovered on network
+### Flag 18 — Control Room
 - **Difficulty:** Hard
 - **Location:** A5 is NOT directly reachable from the Kali box (A14). It sits on VLAN 40, isolated from the attacker network. Reaching it requires **prior compromise of A15 (flag 37)** — A15 is the only Front Office host multi-homed onto the scada VLAN. The flag 18 chain is: earn A15 root via the chain in A15's spec → discover the SCADA VLAN from the network diagram on A4's IT share or from A15's own Flask Ops Telemetry dashboard → fetch the HMI from inside the A15 shell. The flag is displayed on the monitoring dashboard footer as a "system serial number."
 - **Flag:** `FLAG{1d4e7b0a3c9f8265}`
 - **Mission:** M3
 - **Prerequisite flag:** 37 (A15 privesc)
 
-### Flag 19 — Generator SCADA override — collective gate
+### Flag 19 — Lights Out
 - **Difficulty:** Expert
-- **Location:** The thermal runaway sequence requires bypassing multiple interlocks, not just toggling three controls. (1) The HMI requires authentication — `svc-scada` credentials come from `/root/.scada/hmi.json` on A15 (requires flag 37 privesc). (2) Thermal safeties cannot be disabled directly from the HMI — there is a hardware interlock PLC behind the HMI that must be addressed via raw Modbus commands on a separate port (502). Discover this from the HMI's "System Architecture" diagnostic page. (3) Write to the interlock PLC to disable the thermal cutoff (requires the vendor maintenance key `7734`, documented in `generator_maintenance_manual.pdf` on A4's IT share). (4) Only after the interlock is bypassed can the HMI controls push fuel injection and cooling past their safety limits. (5) The sequence must be completed within the interlock timeout window or the interlock auto-resets. The flag is displayed on the final "CRITICAL FAILURE" screen and (in production) pushed to CTFd globally. Executed from inside the A15 shell using the preinstalled `pymodbus`.
+- **Location:** The thermal runaway sequence requires bypassing multiple interlocks, not just toggling three controls. (1) The HMI requires authentication — `svc-scada` credentials come from `/root/.scada/hmi.json` on A15 (requires flag 37 privesc). (2) Thermal safeties cannot be disabled directly from the HMI — there is a hardware interlock PLC behind the HMI that must be addressed via raw Modbus commands on a separate port (502). Discover this from the HMI's "System Architecture" diagnostic page. (3) Write to the interlock PLC to disable the thermal cutoff (requires the vendor maintenance key `7734`, documented in `generator_maintenance_manual.pdf` on A4's IT share). (4) Only after the interlock is bypassed can the HMI controls push fuel injection and cooling past their safety limits. (5) The sequence must be completed within the interlock timeout window or the interlock auto-resets. The flag is displayed on the final "CRITICAL FAILURE" screen, and the same meltdown state is what the Polaris VM watches to activate the local splice. Executed from inside the A15 shell using the preinstalled `pymodbus`.
 - **Flag:** `FLAG{a7f2c8d0e5b34169}`
 - **Mission:** M3
 - **Prerequisite flag:** 37 (A15 privesc)
@@ -101,22 +101,22 @@ This only needs to happen once. First person to complete the sequence triggers i
    - After interlock bypass: fuel injection to 100%, cooling to 0%
    - HMI shows temperature climbing: 90C → 110C → 130C → WARNING → 150C CRITICAL
    - Alarm indicators, screen goes red then black
-   - On completion: fire webhook/event to CTFd announcing the collective gate
+   - On completion: emit a durable local "meltdown complete" signal that the Polaris VM can observe
 
 5. **Implement authentication**
    - Username: `svc-scada`, Password: `Sc@da#2025!` (from A2 Kerberoast or A4 IT share)
    - Simple form-based auth on the control panel
    - Monitoring dashboard requires no auth
 
-6. **Implement the collective gate event**
-   - When thermal runaway completes, POST to CTFd API or shared event bus
-   - CTFd announces the explosion narrative beat
-   - Opens Bunker access for all participants (network policy change or access token distribution)
-   - Idempotent — multiple triggers don't cause problems
+6. **Implement the local splice trigger**
+   - When thermal runaway completes, persist a local signal on the range host or expose a container state transition that survives page refreshes
+   - The participant's Polaris VM watches that signal and performs the local network mutation needed for A14 to reach A9
+   - CTFd challenge gating remains separate from the range-side splice
+   - Idempotent — repeated triggers do not rewire or flap the range
 
 7. **Embed flags**
    - Flag 18: System serial number in HMI footer (visible on monitoring dashboard)
-   - Flag 19: Displayed on the "CRITICAL FAILURE" screen after successful thermal runaway, also pushed to CTFd
+   - Flag 19: Displayed on the "CRITICAL FAILURE" screen after successful thermal runaway; the same state also drives the local splice trigger
 
 8. **Write Dockerfile**
    - Install Flask, pymodbus, gunicorn
@@ -124,9 +124,10 @@ This only needs to happen once. First person to complete the sequence triggers i
    - Entrypoint: start both HMI (port 8080) and Modbus server (port 502)
    - Expose ports 8080, 502
 
-9. **Collective gate integration**
-   - Define the webhook/event mechanism to CTFd
-   - Define how Bunker access is unlocked (NetworkPolicy update? Sidecar that watches for event?)
+9. **Local splice integration**
+   - Define the durable state signal exposed by A5 on successful meltdown
+   - Define the host-side watcher on the Polaris VM that observes that signal and enables A14 -> A9
+   - Avoid a direct dependency on CTFd for range networking
 
 ### Build Notes
 

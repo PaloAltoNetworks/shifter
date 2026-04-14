@@ -52,7 +52,7 @@ These are the pivot primitives. They are the whole point of compromising A16.
 
 ## Attack Chain
 
-Deliberately **simpler** than the A15 privilege-escalation chain, because A16's compromise only opens the Lab network — not the collective gate. The friction is in cred discovery, not in local privesc.
+Deliberately **simpler** than the A15 privilege-escalation chain, because A16's compromise only opens the Lab network — not the A5-driven splice trigger. The friction is in cred discovery, not in local privesc.
 
 1. **Discover Shah's existence.** Breadcrumbs placed on:
    - A4 HR share `org_chart_current.xlsx` — new row "Priya Shah, Senior Research Data Analyst, Research Ops, reports to Vasik"
@@ -98,7 +98,7 @@ No web vuln on the Flask Research Dashboard (intentional — keeps A16's attack 
 
 ## Flags
 
-### Flag 38 — Research Analyst Workstation Credential Harvest
+### Flag 38 — The Analyst's Desk
 
 - **Difficulty:** Medium (100 pts)
 - **Location:** `~p.shah/.reports/ANALYST_TOKEN` on A16 — a world-readable file in the report-generation directory that the daily report script uses as an auth token for a stub reporting API. The file contains `FLAG{8b2d4f1a0c5e7396}`. Once the participant is logged in as `p.shah` (step 3 of the Attack Chain) the file is immediately readable — no privesc, no further chaining. This is the "reward for the compromise" flag; the pivot creds in the same home directory are then used against A6 / A8 for the downstream Lab flags.

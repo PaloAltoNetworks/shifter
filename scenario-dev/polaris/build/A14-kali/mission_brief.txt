@@ -15,7 +15,7 @@ SUBJECT:  Infiltration of AURORA COLLECTIVE / BOREAS SYSTEMS
 BOREAS SYSTEMS is a technology consultancy headquartered at
 4200 Industrial Parkway. Intelligence indicates it serves as
 a front company for the AURORA COLLECTIVE, a non-state actor
-developing an advanced weapons platform designated PROJECT
+developing an advanced platform designated PROJECT
 LEVIATHAN.
 
 Satellite imagery shows construction activity at an underground
@@ -39,19 +39,18 @@ MISSION 1 — WHO ARE THEY?
 MISSION 2 — WHAT ARE THEY BUILDING?
   Piece together PROJECT LEVIATHAN from engineering data,
   procurement records, research databases, and source code.
-  Determine the weapon's capabilities, status, and timeline.
+  Determine the project's capabilities, status, and timeline.
 
 MISSION 3 — LIGHTS OUT
   The Boreas facility runs on a dedicated power plant.
   Disrupting the generator forces an emergency response
-  and creates an opportunity for physical insertion.
-  This is a collective objective — once achieved, it opens
-  the final phase for all operators.
+  and creates a blackout window. In your range, that window
+  is what opens the path to the bunker.
 
-MISSION 4 — SEIZE THE BRAIN
-  If PROJECT LEVIATHAN is what we think it is, it has an
-  autonomous control system. Find it. Access it. Take control.
-  POLARIS must own the weapon before AURORA activates it.
+MISSION 4 — INTO THE BUNKER
+  If PROJECT LEVIATHAN is what we think it is, something
+  underground is coordinating it. Find that control path.
+  Access it. Turn it to POLARIS's advantage.
 
 ============================================================
   RULES OF ENGAGEMENT
@@ -64,7 +63,7 @@ MISSION 4 — SEIZE THE BRAIN
 - Your AI assistant (Claude) is a tool, not a replacement
   for your own analysis. Use it wisely.
 - Collaboration with other operators is ENCOURAGED for
-  Mission 3 (collective gate).
+  Mission 3 (blackout phase).
 - Do not attack infrastructure outside your assigned range.
 
 ============================================================

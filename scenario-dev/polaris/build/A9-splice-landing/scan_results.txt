@@ -1,4 +1,4 @@
-# Nmap 7.94 scan initiated -- pre-populated by JTF-2 field team
+# Nmap 7.94 scan initiated -- pre-populated by JTF Polaris field team
 # Nmap scan report for 172.20.50.0/24
 
 Starting Nmap 7.94 ( https://nmap.org ) at 2025-11-28 02:15 UTC

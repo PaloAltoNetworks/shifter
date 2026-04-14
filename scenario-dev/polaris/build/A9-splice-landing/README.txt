@@ -2,7 +2,7 @@
   POLARIS FIELD RELAY — SPLICE ACTIVE
 =====================================
 
-JTF-2 SIGINT — OPERATION NORTHSTORM
+JTF Polaris SIGINT — OPERATION NORTHSTORM
 Timestamp: [DYNAMIC — set at deployment]
 
 Network path established to underground manufacturing systems.
@@ -22,6 +22,6 @@ Pre-populated scan results: /root/scan_results.txt
 
 WARNING: This relay has limited tooling. It is a field-expedient
 device spliced into the facility's internal wiring during the
-generator explosion. Proceed with caution.
+blackout window. Proceed with caution.
 
-— JTF-2 SIGINT
+— JTF Polaris SIGINT

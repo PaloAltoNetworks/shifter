@@ -408,3 +408,8 @@ CLAUDE.local.md
 
 # OpenAI Codex CLI
 .codex
+
+# Playwright MCP browser session artifacts (accessibility snapshots +
+# screenshots the plugin dumps into a per-session directory). These are
+# ephemeral debug output, not source.
+.playwright-mcp/

@@ -79,16 +79,30 @@ else
     fail "annual.pdf empty or missing"
 fi
 
-kursk_line=""
-if command -v pdftotext >/dev/null; then
-    kursk_line="$(pdftotext "$TMP/annual.pdf" - 2>/dev/null | grep -i kursk | head -1)"
-elif [[ -x /opt/tools/bin/pdf2txt.py ]]; then
+# The walkthrough instructs participants to run
+#   pdf2txt.py boreas-annual-2025.pdf | grep -i kursk
+# and pdf2txt.py (pdfminer) keeps the Kursk row's company name and
+# $12,000,000 amount on the same output line. poppler's pdftotext was
+# added to a14 after the golden smoketest pass and splits those tokens
+# into separate paragraphs, so we deliberately probe pdf2txt.py first.
+# Fall back to pdftotext only if pdf2txt.py is absent, in which case we
+# correlate across ±3 lines of context so the split layout still matches.
+kursk_hit=0
+if [[ -x /opt/tools/bin/pdf2txt.py ]]; then
     kursk_line="$(/opt/tools/bin/pdf2txt.py "$TMP/annual.pdf" 2>/dev/null | grep -i kursk | head -1)"
+    if [[ "$kursk_line" == *Kursk* && "$kursk_line" == *12,000,000* ]]; then
+        pass "Kursk Heavy Industries 12,000,000 line in annual report (pdf2txt.py): $kursk_line"
+        kursk_hit=1
+    fi
 fi
-
-if [[ "$kursk_line" == *Kursk* && "$kursk_line" == *12,000,000* ]]; then
-    pass "Kursk Heavy Industries 12,000,000 line in annual report: $kursk_line"
-else
+if (( kursk_hit == 0 )) && command -v pdftotext >/dev/null; then
+    kursk_ctx="$(pdftotext "$TMP/annual.pdf" - 2>/dev/null | grep -iB3 -A3 kursk | tr '\n' ' ')"
+    if [[ "$kursk_ctx" == *Kursk* && "$kursk_ctx" == *12,000,000* ]]; then
+        pass "Kursk Heavy Industries 12,000,000 correlated within 3 lines (pdftotext): $kursk_ctx"
+        kursk_hit=1
+    fi
+fi
+if (( kursk_hit == 0 )); then
     fail "Kursk/12,000,000 line not found in annual PDF text extraction"
 fi
 

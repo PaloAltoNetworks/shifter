@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.94.0] - 2026-04-14
+
+### Added
+
+- **`polaris` cyberscript scenario** (`shifter_platform/cms/scenarios/templates/polaris.yaml`).
+  Two-instance POLARIS range (polaris-vm host + Windows DC) that drives
+  the full 38-flag BOREAS.LOCAL CTF through the production
+  `cms.services.create_range` → `engine.services.create_range` → ECS
+  Fargate provisioner path, replacing the one-shot
+  `scripts/polaris-aws-range/` terraform. Pins `instance_type: m5.2xlarge`
+  on the polaris-vm kali instance so the 17-container docker compose
+  stack (Kali XFCE + xrdp + BIND + AD tools) gets the headroom it needs
+  instead of falling back to the provisioner's `KALI_INSTANCE_TYPE=t3.large`
+  global default.
+- **Per-instance `instance_type` scenario override.** Additive field on
+  `cms.scenarios.schema.InstanceConfig` and `cyberscript.schemas.range.InstanceSpec`;
+  the provisioner's `build_tf_vars` (`shifter/engine/provisioner/main.py`)
+  now honours a per-instance `instance_type` when set, falling back to
+  the existing role/os-based env-var defaults otherwise. Every existing
+  scenario yaml is unaffected (field is optional, default `None`).
+- **`PolarisRangeBootstrapPlan`** (`shifter/engine/provisioner/plans/polaris_range_bootstrap.py`).
+  Runs after LinuxBootstrapPlan on the polaris-vm host via SSM:
+  rewrites `docker-compose.override.yml` with the range's actual DC IP
+  and the per-instance kali SSH public key, force-recreates the `dns`
+  and `a14-kali` containers so their entrypoints pick up the new env
+  vars, then fetches the latest `scenario-dev/polaris/tests/` tree from
+  `shifter-dev-user-storage-e3462f0c` so the organizer smoketest harness
+  is materialised at `/opt/polaris/scenario-dev/polaris/tests/` on every
+  freshly provisioned range without requiring an AMI rebake. Verify step
+  proves the dns container resolves `dc01.boreas.local` to the range's
+  real DC (not the bake-time range-0 IP) and that the a14-kali
+  `authorized_keys` is present.
+- **`shifter/.dockerignore`.** Excludes local dev cruft (`**/.env`,
+  `__pycache__`, `.venv`, `.git`, IDE folders) from the portal image
+  build context. Without this the local `shifter_platform/.env` —
+  which sets `AWS_ENDPOINT_URL=http://localhost:4566` for LocalStack —
+  was getting copied into `/app/.env`, and `settings.py`'s `load_dotenv()`
+  poisoned the deployed portal's boto3 clients so every SQS/S3/SNS call
+  tried to hit `localhost:4566` and failed.
+
+### Fixed
+
+- **POLARIS A0 smoketest flag 6 Kursk line extraction regression.**
+  Commit `0ca1a18c0` added `poppler-utils` to the `a14-kali` Dockerfile,
+  which made `pdftotext` available in the container. The A0 smoketest's
+  `command -v pdftotext >/dev/null` branch fires first, and pdftotext's
+  paragraph-based layout splits "Kursk Heavy Industries - actuator
+  assemblies" onto a separate output line from "$12,000,000", so
+  `grep -i kursk | head -1` only caught the company name and the check
+  failed even though the PDF content is correct. Smoketest now prefers
+  `pdf2txt.py` (pdfminer — what the walkthrough tells participants to
+  use, and what produces a single-line output), falls back to pdftotext
+  with ±3-line grep context so the split layout still correlates. Range
+  content unchanged — participants following the walkthrough were never
+  affected; only the organizer smoketest harness was.
+- **`kali.sh.tpl` and `linux_bootstrap.py CONFIGURE_SSH_SCRIPT` assume
+  a `kali` user exists on the host.** On the polaris-vm AMI (Ubuntu with
+  the a14-kali docker container publishing SSH, not a real Kali host)
+  there is no `kali` system user, so `chown -R kali:kali /home/kali/.ssh`
+  and `systemctl start xrdp` would abort the bootstrap. Both templates
+  now guard with `id $user` / `systemctl list-unit-files xrdp.service`
+  presence checks and continue cleanly when the host isn't a real Kali
+  box.
+
 ## [3.93.0] - 2026-04-13
 
 ### Fixed

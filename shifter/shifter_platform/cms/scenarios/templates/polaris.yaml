@@ -1,0 +1,30 @@
+id: polaris
+name: POLARIS Operation Northstorm
+description: BOREAS.LOCAL Active Directory CTF range. One Ubuntu host running the polaris docker-compose stack (17 containers including a Kali attacker container that publishes SSH/RDP to the host) plus one Windows Server 2022 domain controller for boreas.local. 38 flags across OSINT, Front Office, Lab, and Bunker zones.
+enabled: true
+ngfw: false
+
+instances:
+  - name: kali
+    role: attacker
+    os_type: kali
+    ami_key: polaris-vm
+    # 17 docker containers including a Kali XFCE GUI + xrdp + dns + AD
+    # tools — needs an m5.2xlarge minimum. Overrides the global
+    # KALI_INSTANCE_TYPE env var on the dev provisioner (currently
+    # t3.large in platform/terraform/environments/dev/portal/
+    # terraform.tfvars) just for this instance.
+    instance_type: m5.2xlarge
+
+  - name: dc01
+    role: dc
+    os_type: windows
+    ami_key: polaris-dc
+    domain_controller: true
+    dc_config:
+      domain_name: boreas.local
+      netbios_name: BOREAS
+
+subnets:
+  - name: polaris
+    instances: [kali, dc01]

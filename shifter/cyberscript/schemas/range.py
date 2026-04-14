@@ -77,6 +77,7 @@ class InstanceSpec(SpecBase):
     dc_config: DCConfig | None = None
     join_domain: bool = False
     ami_key: str | None = None
+    instance_type: str | None = None
     ngfw_app: NGFWAppSpec | None = None
 
     @classmethod
@@ -127,6 +128,7 @@ class InstanceSpec(SpecBase):
             dc_config=dc_config,
             join_domain=data.get("join_domain", False),
             ami_key=data.get("ami_key"),
+            instance_type=data.get("instance_type"),
         )
 
 

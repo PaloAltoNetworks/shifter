@@ -136,6 +136,21 @@ repos:
       - id: terraform_validate
         files: ^platform/terraform/
 
+  # Custom: AWS security group ingress CIDR scoping check.
+  # Catches the polaris cross-range leak class of bug — a "shared SG"
+  # with `cidr_blocks = ["10.1.0.0/16"]` ingress that lets one user's
+  # range reach another user's subnet at L3. Scoped to range modules:
+  # the polaris bake range and the shifter provisioner range module.
+  # See scripts/check_tf_sg_cidrs/test_check_tf_sg_cidrs.py for the
+  # exact failure modes covered.
+  - repo: local
+    hooks:
+      - id: check-tf-sg-cidrs
+        name: AWS SG ingress CIDR scoping (polaris + provisioner range modules)
+        entry: python3 scripts/check_tf_sg_cidrs/check_tf_sg_cidrs.py
+        language: system
+        files: ^(scripts/polaris-aws-range/|shifter/engine/provisioner/terraform/modules/range/).*\.tf$
+
   # =============================================================================
   # STAGE 2: Security (SAST/DAST)
   # =============================================================================

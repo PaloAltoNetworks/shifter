@@ -45,9 +45,10 @@ networks:
     ipam:
       config:
         - subnet: 172.20.50.0/24
-  # splice-link: post-collective-gate link from the attacker box (A14) to
+  # splice-link: post-blackout local link from the attacker box (A14) to
   # the splice landing box (A9). In production this link is established
-  # dynamically after flag 19 fires; in this dev range it is pre-wired so
+  # dynamically after the participant's flag 19 blackout path completes; in
+  # this dev range it is pre-wired so
   # participants / testers can reach A9 directly from Kali. Only A14 and A9
   # join this network — A14 does NOT touch bunker-ot, so A9 remains the
   # gateway the participant has to pivot through to reach A10–A13.
@@ -227,8 +228,8 @@ services:
     restart: unless-stopped
 
   # ============================================
-  # BUNKER OT / VLAN 50 (per-participant, isolated until gate)
-  # A9 spec: "Access requires collective gate fired + Lab access"
+  # BUNKER OT / VLAN 50 (per-participant, isolated until blackout path)
+  # A9 spec: "Access opens after the local blackout and splice"
   # ============================================
 
   a9-splice:

@@ -30,6 +30,23 @@ python3 scripts/ctfd-workshop/seed_ctfd.py --base-url https://ctf.shifter.kepler
 
 The canonical workshop box/challenge metadata lives in [agentic_workshop.json](/home/atomik/src/shifter/scripts/ctfd-workshop/agentic_workshop.json).
 
+## Polaris Onboarding Pages + Mission 0
+
+This syncs the Polaris CTFd landing page (`index`), the `Kali Quickstart` page, and the `Mission 0 — Kali Warm-Up` challenge from:
+
+- [scenario-dev/polaris/build/ctfd-pages](/home/atomik/src/shifter/scenario-dev/polaris/build/ctfd-pages)
+- [scenario-dev/polaris/build/ctfd-onboarding.json](/home/atomik/src/shifter/scenario-dev/polaris/build/ctfd-onboarding.json)
+
+It does **not** modify the range bake or any scenario box content.
+
+```bash
+export CTFD_TOKEN=<admin-token>
+python3 scripts/ctfd-workshop/sync_polaris_ctfd_onboarding.py \
+  --base-url https://polaris.keplerops.com
+```
+
+If the core Polaris board has not been imported yet, rerun the sync after the main challenges exist so the warm-up challenge can wire its `next` link to `Company Info`.
+
 ## Sync Range Flags
 
 Run this after participant ranges are `ready` so the box flag files match CTFd:

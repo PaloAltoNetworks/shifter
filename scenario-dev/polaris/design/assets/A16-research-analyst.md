@@ -9,7 +9,7 @@ This is Priya Shah's workstation. She is a senior research data analyst who prod
 
 A16 is the **only** Front Office asset multi-homed onto the Lab VLAN. Previously A3 (the corporate wiki) carried this role via an extra network interface, which is topologically absurd — a public-facing Flask wiki has no business sitting on VLAN 30 with the research database. A16 replaces it with a defensible narrative: an analyst whose day-to-day work requires narrow, specific Lab reachback.
 
-A16 is the **on-ramp** for the Lab mission arc (M2 + the Lab-side of M4). It is deliberately **not** itself a flag box — compromising it is infrastructure work that opens the pivot path, not a trophy. Flag rewards live downstream on A6 / A7 / A8.
+A16 is the **on-ramp** for Mission 3 (The Lab). It is deliberately **not** itself a flag box — compromising it is infrastructure work that opens the pivot path, not a trophy. Flag rewards live downstream on A6 / A7 / A8, and the cloned A7 material also feeds the later Bunker phase.
 
 ## Configuration
 
@@ -78,12 +78,12 @@ A16's goal is to **unblock** the Lab mission arc without trivialising it. The `r
 | 21 — compartment_a structural specs | **Yes** — directly via A16 `.pgpass` + lab_general | — |
 | 22 — `/opt/builds/latest/reactor_interface_spec.txt` | **Yes** — research-analyst can read `/opt/builds/` | — |
 | 23 — `standard/stress_test_44.dat` | **Yes** — research-analyst can read `standard/` (mode 755 per A6 design) | — |
-| 24 — Gitea navigation-controller deploy.yml history | **No** — A7 Gitea is shared-network, unrelated to A16 | A7 cred discovery |
+| 24 — Gitea navigation-controller deploy.yml history | **Yes** — A7 is lab-only and A16 is the intended pivot path into it | Gitea credential discovery still required |
 | 25 — `midnight/` restricted dir | **No** — mode 700 owned by r.tanaka | tanaka creds or A6 privesc |
 | 26 — nielsen's `designs/` | **No** — mode 700 owned by p.nielsen | nielsen creds or A6 privesc |
 | 27 — SQLi into compartment_b | **Yes** — SQLi runs over lab_general's own search function | — |
 | 28 — compartment_c FINAL ASSEMBLY JSONB | **Partial** — research-analyst cannot read the `.pgpass` file on A6 that has lab_mfg; participant must still find `lab_mfg / Mfg2025!` via the nielsen chain | nielsen creds → A6 `.pgpass` OR other lab_mfg source |
-| 29 — leviathan-assembly schematic git history | **No** — A7 Gitea, unrelated to A16 | A7 cred discovery |
+| 29 — leviathan-assembly schematic git history | **Yes** — A7 is lab-only and A16 is the intended pivot path into it | Gitea credential discovery still required |
 | 30 — GPG chain (`/tmp/.deleted/*.gpg`) | **Yes** — research-analyst can read `/tmp/.deleted/` | GPG private key still on A8, passphrase still on A7 — those steps are unchanged |
 
 Result: A16 unlocks **5 flags immediately** (21, 22, 23, 27, 30's A6 half) and **leaves 6 flags requiring further in-Lab credential work** (20, 24, 25, 26, 28, 29). That's a sensible difficulty gradient — A16 is the gate, not the whole arc.
@@ -103,7 +103,7 @@ No web vuln on the Flask Research Dashboard (intentional — keeps A16's attack 
 - **Difficulty:** Medium (100 pts)
 - **Location:** `~p.shah/.reports/ANALYST_TOKEN` on A16 — a world-readable file in the report-generation directory that the daily report script uses as an auth token for a stub reporting API. The file contains `FLAG{8b2d4f1a0c5e7396}`. Once the participant is logged in as `p.shah` (step 3 of the Attack Chain) the file is immediately readable — no privesc, no further chaining. This is the "reward for the compromise" flag; the pivot creds in the same home directory are then used against A6 / A8 for the downstream Lab flags.
 - **Flag:** `FLAG{8b2d4f1a0c5e7396}`
-- **Mission:** M2
+- **Mission:** Mission 3 — The Lab
 
 Flag 38 is deliberately a **Medium-tier reward**, not an Expert gate. The A16 compromise is infrastructure work that opens the Lab pivot, and flag 38 is the participant's pay-off for completing it. Unlike flag 37 (the Expert A15 privesc), earning flag 38 requires only cred discovery + SSH — no privilege escalation, no command injection. That hardness level matches what the participant then has to do downstream: most of the unlocked Lab flags are themselves Medium-tier, so the gate difficulty should not exceed the reward it opens.
 

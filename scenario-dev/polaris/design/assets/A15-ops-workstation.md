@@ -9,7 +9,7 @@ This is Sergei Ivanov's workstation. He is the SCADA operations engineer respons
 
 A15 is the **only** Front Office asset multi-homed onto the SCADA VLAN. Previously A3 (the corporate wiki) carried this role via an extra network interface — topologically absurd for a public-facing Flask wiki. A15 replaces it with a narratively defensible pivot: an engineer whose day-to-day work legitimately requires OT reach.
 
-**A15 is the gate for flags 18 and 19.** Flag 19 is the splice trigger for the participant's Bunker chain, which makes A15 the upstream gate for the entire M3 (Lights Out) mission arc. Losing any step in the A15 compromise chain blocks the rest of the scenario — the path has to be earned.
+**A15 is the gate for flags 18 and 19.** Flag 19 is the splice trigger for the participant's Bunker chain, which makes A15 the upstream gate for the entire Mission 4 (Lights Out) arc. Losing any step in the A15 compromise chain blocks the rest of the scenario — the path has to be earned.
 
 ## Configuration
 
@@ -81,7 +81,7 @@ Standard OpenSSH. Password auth enabled for `s.ivanov`. Root login disabled. No 
 - **Difficulty:** Hard (200 pts)
 - **Location:** `/root/.scada/hmi.json` on A15, readable only as root via the sudo-arg-injection chain above.
 - **Flag:** `FLAG{5c3e7a9f1b8d4602}`
-- **Mission:** M3
+- **Mission:** Mission 4 — Lights Out
 
 Flag 37 is a **prerequisite** for flags 18 and 19 — without root on A15 the participant has no route onto the SCADA VLAN, no `svc-scada` credential, and therefore no way to complete the Modbus bypass that trips the local splice trigger.
 

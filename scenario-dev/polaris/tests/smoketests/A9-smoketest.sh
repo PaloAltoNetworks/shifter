@@ -2,7 +2,7 @@
 # A9 Splice Landing Box smoketest.
 #
 # Runs from inside the a9-splice container (only entry point to the
-# Bunker OT network). Verifies the JTF-2 field relay artifacts, the
+# Bunker OT network). Verifies the JTF Polaris field relay artifacts, the
 # Modbus helper script, and queries A10/A11/A12 device identification
 # to build the flag 31 concatenation answer.
 #
@@ -27,7 +27,7 @@ fail() { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); }
 echo "A9 smoketest - running inside a9-splice (Bunker OT entry point)"
 
 echo
-echo "--- JTF-2 field relay artifacts ---"
+echo "--- JTF Polaris field relay artifacts ---"
 [ -f /root/README.txt ] && pass "/root/README.txt present" || fail "/root/README.txt missing"
 grep -q 'POLARIS FIELD RELAY' /root/README.txt 2>/dev/null \
     && pass "README mentions POLARIS FIELD RELAY" || fail "README text wrong"

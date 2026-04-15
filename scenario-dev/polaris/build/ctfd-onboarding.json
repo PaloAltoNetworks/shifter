@@ -6,8 +6,8 @@
   "challenges": [
     {
       "id": 0,
-      "name": "Mission 0 — Kali Warm-Up",
-      "category": "Mission 0 — Start Here",
+      "name": "Start Here — Kali Warm-Up",
+      "category": "Start Here",
       "description": "Before you touch Boreas, orient yourself on the Kali box. Find the helper script that submits flags to CTFd and submit its filename wrapped in the standard flag format.",
       "value": 50,
       "type": "standard",

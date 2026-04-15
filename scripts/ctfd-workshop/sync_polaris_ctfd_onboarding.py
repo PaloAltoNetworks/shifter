@@ -17,7 +17,7 @@ DEFAULT_PAGES_DIR = REPO_ROOT / "scenario-dev/polaris/build/ctfd-pages"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Sync Polaris CTFd onboarding pages and Mission 0 warm-up challenge."
+        description="Sync Polaris CTFd onboarding pages and the Start Here warm-up challenge."
     )
     parser.add_argument("--base-url", required=True, help="CTFd base URL, e.g. https://polaris.keplerops.com")
     parser.add_argument(
@@ -242,7 +242,7 @@ def ensure_hints(
             print(f"sync hint: {challenge_name} :: Hint {index}")
         return
 
-    existing_hints = client.get("/hints", {"challenge_id": challenge_id}).get("data", [])
+    existing_hints = client.get(f"/challenges/{challenge_id}/hints").get("data", [])
     expected_titles: set[str] = set()
 
     for index, hint in enumerate(hints, start=1):

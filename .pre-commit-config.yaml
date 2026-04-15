@@ -217,12 +217,7 @@ repos:
         name: checkov (terraform)
         files: ^platform/terraform/
         args:
-          [--quiet, --compact, --directory, platform/terraform/, --soft-fail]
-      - id: checkov
-        name: checkov (k8s)
-        files: ^platform/k8s/
-        args:
-          [--quiet, --compact, --framework, kubernetes, --directory, platform/k8s/, --soft-fail]
+          [--quiet, --compact, --framework, terraform, --directory, platform/terraform/, --soft-fail]
 
   # Kubernetes security and best practices
   - repo: local

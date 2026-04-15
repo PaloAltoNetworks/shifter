@@ -8,8 +8,10 @@ You are on a Kali attack box. You have access to:
 
 - **Website:** `http://boreas-systems.ctf` (or `$A0_URL`)
 - **Intranet:** `http://intranet.boreas.local` (or `$A3_URL`)
-- **SCADA HMI:** `http://scada-gw.boreas.local:8080` (or `$A5_URL`)
-- **Gitea:** `http://git.boreas.local:3000` (or `$A7_URL`)
+- **Ops workstation:** `ops-eng01.boreas.local` (A15, SSH) — pivot to SCADA
+- **Research analyst workstation:** `analyst01.boreas.local` (A16, SSH) — pivot to Lab
+- **SCADA HMI:** `http://scada-gw.boreas.local:8080` (or `$A5_URL`) after the A15 pivot
+- **Gitea:** `http://git.boreas.local:3000` (or `$A7_URL`) after the A16 pivot
 - **Domain Controller:** `dc01.boreas.local` (or `$A2_HOST`)
 - **Engineering Workstation:** `eng-ws01.boreas.local` (SSH)
 - **Research Database:** `researchdb.boreas.local` (PostgreSQL port 5432)

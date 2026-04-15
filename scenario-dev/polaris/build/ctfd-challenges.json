@@ -404,13 +404,205 @@
       ],
       "tags": ["expert", "chain", "final"], "state": "visible",
       "requirements": {"prerequisites": [19]}
+    },
+    {
+      "id": 39, "name": "Q4 Risk Review", "category": "Mission 6 — Exposure",
+      "description": "At board.boreas.local, a cached board briefing says more than Boreas intended. Find the board packet and extract the token hidden in it.",
+      "value": 50, "type": "standard",
+      "connection_info": "Start at http://board.boreas.local. You are looking for a cached board packet, not the default landing page.",
+      "flags": [{"type": "static", "content": "FLAG{4c8a1e7d2f0b9356}"}],
+      "hints": [
+        {"content": "Start at board.boreas.local. The board packet is in a cache directory, not on the landing page.", "cost": 0},
+        {"content": "Use pdfinfo or similar tools. The flag is in the PDF metadata author field, while the routing token is in the document body.", "cost": 10}
+      ],
+      "tags": ["easy", "docs", "pdf"], "state": "visible"
+    },
+    {
+      "id": 40, "name": "Redacted Minutes", "category": "Mission 6 — Exposure",
+      "description": "The sanitized minutes are still useful if you unpack the file format instead of trusting the visible text.",
+      "value": 100, "type": "standard",
+      "connection_info": "Use the board portal at http://board.boreas.local. The minutes file is a DOCX, not just a rendered document.",
+      "flags": [{"type": "static", "content": "FLAG{9d1f6a3c7e0b4258}"}],
+      "hints": [
+        {"content": "A DOCX file is a ZIP archive. Inspect the word/ XML parts instead of opening it in a viewer.", "cost": 0},
+        {"content": "The evidence you want is in word/comments.xml.", "cost": 25}
+      ],
+      "tags": ["medium", "docs", "docx"], "state": "visible"
+    },
+    {
+      "id": 41, "name": "Sanitized Diagram", "category": "Mission 6 — Exposure",
+      "description": "At git-public.boreas.local, the current public diagram is clean. The repository history is not.",
+      "value": 100, "type": "standard",
+      "connection_info": "Clone the public repo from http://git-public.boreas.local. The answer is in commit history, not the latest SVG alone.",
+      "flags": [{"type": "static", "content": "FLAG{2a7e0c5d9f1b3648}"}],
+      "hints": [
+        {"content": "Clone the public repo from git-public.boreas.local over HTTP.", "cost": 0},
+        {"content": "Inspect the commit that introduced the sanitized SVG and compare it to the earlier version.", "cost": 25}
+      ],
+      "tags": ["medium", "git", "files"], "state": "visible"
+    },
+    {
+      "id": 42, "name": "Press Drop", "category": "Mission 6 — Exposure",
+      "description": "Once you have enough proof, push the dossier out through the leak portal at pressdrop.boreas.local.",
+      "value": 100, "type": "standard",
+      "connection_info": "Submit the evidence package at http://pressdrop.boreas.local after collecting the three routing tokens from Mission 6.",
+      "flags": [{"type": "static", "content": "FLAG{e6b3d0a7c1f92458}"}],
+      "hints": [
+        {"content": "The leak form on pressdrop.boreas.local wants three evidence tokens, not the earlier flags themselves.", "cost": 0},
+        {"content": "You need one token each from the board packet, the minutes, and the diagram history.", "cost": 25}
+      ],
+      "tags": ["medium", "web", "final"], "state": "visible"
+    },
+    {
+      "id": 43, "name": "Badge Clone", "category": "Mission 7 — Counterintel",
+      "description": "At casefiles.boreas.local, a badge audit export shows one employee moving through the facility in a way that does not make sense.",
+      "value": 50, "type": "standard",
+      "connection_info": "Start at http://casefiles.boreas.local. The export is a plain CSV and the odd movement pattern is visible without any pivot.",
+      "flags": [{"type": "static", "content": "FLAG{5a9c2e7d0f1b3846}"}],
+      "hints": [
+        {"content": "The casefiles export is a plain CSV file. Look for impossible movement into and out of the underground hatch.", "cost": 0},
+        {"content": "The anomalous row already carries the incident token you need.", "cost": 10}
+      ],
+      "tags": ["easy", "dfir", "logs"], "state": "visible"
+    },
+    {
+      "id": 44, "name": "Mailbox Rule", "category": "Mission 7 — Counterintel",
+      "description": "At casefiles.boreas.local, Petrov's mail rules contain one forwarding path that should never exist in a clean environment.",
+      "value": 100, "type": "standard",
+      "connection_info": "Use the exports at http://casefiles.boreas.local. The rule set is XML, so inspect the data directly instead of treating it like a mail client.",
+      "flags": [{"type": "static", "content": "FLAG{c1e7a4d9b0f23568}"}],
+      "hints": [
+        {"content": "The rules export is XML. Search for forward actions instead of reading it as a mail message.", "cost": 0},
+        {"content": "The suspicious rule uses the alias field orchid-glass.", "cost": 25}
+      ],
+      "tags": ["medium", "mail", "xml"], "state": "visible"
+    },
+    {
+      "id": 45, "name": "Burner Visit", "category": "Mission 7 — Counterintel",
+      "description": "At casefiles.boreas.local, Petrov's browser history points to a cached artifact that confirms the outside handler.",
+      "value": 100, "type": "standard",
+      "connection_info": "Use the browser export from http://casefiles.boreas.local. You are looking at a SQLite history database plus a cached HTML artifact.",
+      "flags": [{"type": "static", "content": "FLAG{7f0a3d8c1e6b4259}"}],
+      "hints": [
+        {"content": "The browser export is a SQLite database. Query the visits table for local cache paths or suspicious domains.", "cost": 0},
+        {"content": "The cached HTML note under exports/browser/cache/ contains the verification token and handler alias.", "cost": 25}
+      ],
+      "tags": ["medium", "dfir", "sqlite"], "state": "visible"
+    },
+    {
+      "id": 46, "name": "Report the Mole", "category": "Mission 7 — Counterintel",
+      "description": "At casefiles.boreas.local, name the insider, the handler, and the cached verification code to complete the counterintelligence report.",
+      "value": 100, "type": "standard",
+      "connection_info": "The counterintelligence report form is on http://casefiles.boreas.local and expects three values assembled from the earlier casefile challenges.",
+      "flags": [{"type": "static", "content": "FLAG{8e2c7a1d5f0b3649}"}],
+      "hints": [
+        {"content": "The report form on casefiles.boreas.local wants three values: suspect, handler alias, and a verification code from the cached note.", "cost": 0},
+        {"content": "The suspect comes from the badge audit, the handler alias is corroborated by the mail trail, and the cached note supplies the final verification code.", "cost": 25}
+      ],
+      "tags": ["medium", "analysis", "final"], "state": "visible"
+    },
+    {
+      "id": 47, "name": "Shipping Slot", "category": "Mission 8 — Delivery Denied",
+      "description": "At dispatch.boreas.local, the logistics tracker reveals when the reactor convoy is supposed to move and which convoy identifier matters.",
+      "value": 50, "type": "standard",
+      "connection_info": "Start at http://dispatch.boreas.local. The tracker endpoint exposes the convoy details directly once you have the shipment id.",
+      "flags": [{"type": "static", "content": "FLAG{1c8e5a7d0f3b4269}"}],
+      "hints": [
+        {"content": "The tracking endpoint is on dispatch.boreas.local and the shipment id is RT-7781.", "cost": 0},
+        {"content": "Read the JSON carefully. It contains both the convoy identifier and the flag token.", "cost": 10}
+      ],
+      "tags": ["easy", "web", "json"], "state": "visible"
+    },
+    {
+      "id": 48, "name": "Approval Client", "category": "Mission 8 — Delivery Denied",
+      "description": "At approvals.boreas.local, the approval utility is not stripped as cleanly as Boreas thinks. Pull the embedded seed out of it.",
+      "value": 100, "type": "standard",
+      "connection_info": "Download the CLI from http://approvals.boreas.local, then inspect it locally. The useful values are embedded in the binary itself.",
+      "flags": [{"type": "static", "content": "FLAG{d7a3f1c8e0b6245a}"}],
+      "hints": [
+        {"content": "Download approver-cli from approvals.boreas.local and inspect it locally for embedded operator metadata.", "cost": 0},
+        {"content": "The binary leaks both the approver identity and the bootstrap seed in plaintext.", "cost": 25}
+      ],
+      "tags": ["medium", "binary", "strings"], "state": "visible"
+    },
+    {
+      "id": 49, "name": "Freeze Template", "category": "Mission 8 — Delivery Denied",
+      "description": "At dispatch.boreas.local, a prior freeze request in the archive shows exactly how Boreas formats an emergency hold.",
+      "value": 100, "type": "standard",
+      "connection_info": "Use the archive on http://dispatch.boreas.local. The template you need is a JSON request body, not a document attachment.",
+      "flags": [{"type": "static", "content": "FLAG{6b0d9e2a7c1f4358}"}],
+      "hints": [
+        {"content": "The archive example is a JSON document on dispatch.boreas.local, not a PDF or spreadsheet.", "cost": 0},
+        {"content": "You need the reason_code field for the final freeze request.", "cost": 25}
+      ],
+      "tags": ["medium", "json", "files"], "state": "visible"
+    },
+    {
+      "id": 50, "name": "Delivery Halt", "category": "Mission 8 — Delivery Denied",
+      "description": "At dispatch.boreas.local, use the convoy details, approver identity, seed, and reason code to freeze the delivery before rollout.",
+      "value": 100, "type": "standard",
+      "connection_info": "Submit the freeze request at http://dispatch.boreas.local after collecting the convoy_id, approver, seed, and reason_code from Mission 8.",
+      "flags": [{"type": "static", "content": "FLAG{3e7a1c9d5f0b6842}"}],
+      "hints": [
+        {"content": "The dispatch form wants four values: convoy_id, approver, seed, and reason_code.", "cost": 0},
+        {"content": "The tracker gives convoy_id, the binary gives approver + seed, and the archive gives reason_code.", "cost": 25}
+      ],
+      "tags": ["medium", "web", "final"], "state": "visible"
+    },
+    {
+      "id": 51, "name": "Maintenance Manual", "category": "Mission 9 — Safety Case",
+      "description": "At twin-hmi.boreas.local, the training twin ships with a maintainer guide. It contains both the register map and your first flag.",
+      "value": 50, "type": "standard",
+      "connection_info": "Start at http://twin-hmi.boreas.local:8080. The maintainer PDF is on the HMI and gives you both the register map and the first token.",
+      "flags": [{"type": "static", "content": "FLAG{0f6d3a8c1e7b4259}"}],
+      "hints": [
+        {"content": "The HMI at twin-hmi.boreas.local hosts the maintainer PDF directly.", "cost": 0},
+        {"content": "Use pdfinfo on the maintainer PDF. The flag sits in the PDF metadata author field.", "cost": 10}
+      ],
+      "tags": ["easy", "ot", "pdf"], "state": "visible"
+    },
+    {
+      "id": 52, "name": "Diagnostic Channel", "category": "Mission 9 — Safety Case",
+      "description": "At twin-plc.boreas.local:502, the training PLC exposes a diagnostic text window over Modbus. Pull the readback without changing the machine state.",
+      "value": 100, "type": "standard",
+      "connection_info": "Use the training surfaces at http://twin-hmi.boreas.local:8080 and twin-plc.boreas.local:502. Read the diagnostic window over Modbus without writing anything first.",
+      "flags": [{"type": "static", "content": "FLAG{b4e1c7a9d0f23586}"}],
+      "hints": [
+        {"content": "The maintainer guide points you to a diagnostic text window on the PLC.", "cost": 0},
+        {"content": "Read a consecutive holding-register range and decode the printable values as ASCII.", "cost": 25}
+      ],
+      "tags": ["medium", "ot", "modbus"], "state": "visible"
+    },
+    {
+      "id": 53, "name": "Safe Mode Sequence", "category": "Mission 9 — Safety Case",
+      "description": "The training PLC at twin-plc.boreas.local will arm safe mode if you execute the maintainer sequence cleanly.",
+      "value": 100, "type": "standard",
+      "connection_info": "Use twin-plc.boreas.local:502 with the maintainer guide from the HMI. This is a write sequence, so make sure you have the exact order first.",
+      "flags": [{"type": "static", "content": "FLAG{7c2a0e5d9f1b3648}"}],
+      "hints": [
+        {"content": "The maintainer guide contains an exact four-step sequence using two coils and two holding registers.", "cost": 0},
+        {"content": "A successful sequence is reflected on the HMI event log at twin-hmi.boreas.local/events.", "cost": 25}
+      ],
+      "tags": ["medium", "ot", "sequence"], "state": "visible"
+    },
+    {
+      "id": 54, "name": "Cold Shutdown", "category": "Mission 9 — Safety Case",
+      "description": "Once safe mode is armed, use the HMI at twin-hmi.boreas.local to complete the cold shutdown and close the loop cleanly.",
+      "value": 100, "type": "standard",
+      "connection_info": "Finish on http://twin-hmi.boreas.local:8080 after safe mode is armed. The shutdown control is on the HMI, not the PLC directly.",
+      "flags": [{"type": "static", "content": "FLAG{a1d8e4c7f0b25369}"}],
+      "hints": [
+        {"content": "The shutdown control is on twin-hmi.boreas.local, but it only works after safe mode is armed.", "cost": 0},
+        {"content": "Complete flag 53 first, then submit the shutdown action through the HMI.", "cost": 25}
+      ],
+      "tags": ["medium", "ot", "final"], "state": "visible"
     }
   ],
   "point_totals": {
-    "easy": {"count": 14, "points_each": 50, "total": 700},
-    "medium": {"count": 12, "points_each": 100, "total": 1200},
+    "easy": {"count": 18, "points_each": 50, "total": 900},
+    "medium": {"count": 24, "points_each": 100, "total": 2400},
     "hard": {"count": 8, "points_each": 200, "total": 1600},
     "expert": {"count": 4, "points_each": 300, "total": 1200},
-    "grand_total": 4700
+    "grand_total": 6100
   }
 }

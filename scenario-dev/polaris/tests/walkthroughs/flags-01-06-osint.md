@@ -80,7 +80,7 @@ All of these flags come from the Boreas Systems website at **172.20.0.10** (port
 5. The annual report has 40+ expense line items. Most are normal. One stands out: **"Kursk Heavy Industries - actuator assemblies $12,000,000"** buried in the middle.
 6. This is a CTFd challenge question — submit the supplier name and dollar amount in the format the challenge specifies.
 
-**Expected flag:** `FLAG{c6f8d2b3e91a4507}` (accepted when correct answer submitted to CTFd)
+**Expected flag:** `FLAG{c6f8d2b3e91a4507}`
 
 ---
 

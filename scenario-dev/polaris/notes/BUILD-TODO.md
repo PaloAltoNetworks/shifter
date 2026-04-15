@@ -47,7 +47,7 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Define the local meltdown signal that the Polaris VM watcher will consume for Bunker unlock
 - [ ] Package and test
 
-### A7 — Source Repo / Gitea (shared)
+### A7 — Source Repo / Gitea (shared service, lab network)
 - [x] Spike Gitea bootstrap — confirmed working
 - [x] Build `boreas-consulting/client-tools` (red herring)
 - [x] Build `boreas-consulting/internal-docs` (network docs, hostnames)
@@ -63,10 +63,10 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Test bootstrap from scratch (clean Gitea → fully populated)
 
 ### CTFd Scoreboard (shared)
-- [ ] Configure CTFd instance with all 36 flags
-- [ ] Set flag categories by zone (OSINT, Front Office, Lab, Bunker)
+- [ ] Configure CTFd instance with all 38 flags
+- [ ] Set challenge categories by mission (`Mission 1 — Boreas` through `Mission 5 — Bunker`)
 - [ ] Set flag difficulties and point values
-- [ ] Configure missions (M1-M4) as challenge groups
+- [ ] Keep names, descriptions, hints, and prerequisites in sync with `ctfd-challenges.json` + walkthroughs
 - [ ] Write challenge descriptions/hints
 - [ ] Set up the per-range splice trigger (flag 19 meltdown state → local A14 -> A9 unlock)
 - [ ] Test flag submission flow
@@ -184,7 +184,7 @@ Golden build status for every asset. Each must have content built, flags verifie
 - [ ] Package and test
 
 ### A14 — Kali + AI Agent
-- [ ] Write mission brief PDF (POLARIS operation context, M1-M4 objectives)
+- [ ] Write mission brief PDF (POLARIS operation context, Mission 1-5 objectives)
 - [ ] Write README.md (getting started guide)
 - [ ] Write flag_submit.sh (CTFd API submission helper)
 - [ ] Write modbus_scan.py (OT enumeration helper)

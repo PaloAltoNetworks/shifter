@@ -136,7 +136,7 @@ def ensure_hints(
 
     existing_hints: list[dict[str, Any]] = []
     if not dry_run and challenge_id is not None:
-        existing_hints = client.get("/hints", {"challenge_id": challenge_id}).get("data", [])
+        existing_hints = client.get(f"/challenges/{challenge_id}/hints").get("data", [])
 
     for hint in hints:
         payload = {

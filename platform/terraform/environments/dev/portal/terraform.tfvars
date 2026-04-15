@@ -27,7 +27,7 @@ enable_nat_gateway = true
 db_name                  = "shifter"
 db_username              = "shifter_admin"
 db_engine_version        = "16"
-db_instance_class        = "db.t3.micro"
+db_instance_class        = "db.m5.large"
 db_allocated_storage     = 20
 db_max_allocated_storage = 50
 db_multi_az              = true
@@ -41,7 +41,7 @@ db_skip_final_snapshot   = true
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
 ec2_ami_id           = "ami-00e428798e77d38d9"
-ec2_instance_type    = "t3.large"
+ec2_instance_type    = "m5.xlarge"
 ec2_root_volume_size = 30
 
 # Standalone CTFd host in the portal VPC
@@ -100,9 +100,9 @@ kali_instance_type   = "t3.large"
 # ------------------------------------------------------------------------------
 
 enable_autoscaling   = true
-asg_min_size         = 3
-asg_max_size         = 5
-asg_desired_capacity = 3
+asg_min_size         = 6
+asg_max_size         = 8
+asg_desired_capacity = 6
 scale_up_threshold   = 70
 scale_down_threshold = 30
 
@@ -110,7 +110,7 @@ scale_down_threshold = 30
 # Redis
 # ------------------------------------------------------------------------------
 
-redis_node_type          = "cache.t3.micro"
+redis_node_type          = "cache.m6g.large"
 redis_engine_version     = "7.1"
 redis_enable_replication = true
 
@@ -154,12 +154,12 @@ dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
 
 guacd_image_tag                = "1.5.5"
 guacamole_client_image_tag     = "1.5.5"
-guacd_cpu                      = 512
-guacd_memory                   = 1024
-guacamole_client_cpu           = 512
-guacamole_client_memory        = 1024
-guacd_desired_count            = 1
-guacamole_client_desired_count = 1
+guacd_cpu                      = 1024
+guacd_memory                   = 2048
+guacamole_client_cpu           = 1024
+guacamole_client_memory        = 2048
+guacd_desired_count            = 4
+guacamole_client_desired_count = 3
 
 # Database
 guacamole_db_instance_class        = "db.t3.small"

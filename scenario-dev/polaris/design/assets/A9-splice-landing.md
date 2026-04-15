@@ -36,9 +36,9 @@ An nmap scan from A9 reveals these four hosts and their open ports. The protocol
 
 ### Flag 31 — Underground Signals
 - **Difficulty:** Medium
-- **Location:** Run a Modbus scan or use the provided client script to query each controller's device identification (Modbus function code 43, device ID). Each of the three controllers (A10, A11, A12) returns a vendor string and model number. The flag is formed by concatenating the three model numbers in network-order and submitting to CTFd. Requires understanding Modbus function code 43 (Read Device Identification) and querying all three hosts. No register-read shortcut — this is purely enumeration.
+- **Location:** Run a Modbus scan or use the provided client script to query each controller's device identification (Modbus function code 43, device ID). Each of the three controllers (A10, A11, A12) returns a vendor string and model number. The participant must enumerate the three controllers correctly; the static flag is then recovered from the challenge logic, not by directly submitting the model-number concatenation itself. Requires understanding Modbus function code 43 (Read Device Identification) and querying all three hosts. No register-read shortcut — this is purely enumeration.
 - **Flag:** `FLAG{2e8c0a5d7f3b1946}`
-- **Mission:** M4
+- **Mission:** Mission 5 — Bunker
 
 ---
 
@@ -77,7 +77,7 @@ An nmap scan from A9 reveals these four hosts and their open ports. The protocol
 
 6. **Embed flag 31**
    - Flag is formed by concatenating model numbers from A10/A11/A12 device ID responses
-   - No content to place on A9 itself — the flag is a CTFd challenge requiring enumeration of the three controllers
+   - No content to place on A9 itself beyond the scan helpers — the flag depends on enumerating the three controllers correctly
 
 7. **Access gating mechanism**
    - Before the participant's meltdown fires: A9 is unreachable from A14
@@ -96,5 +96,5 @@ An nmap scan from A9 reveals these four hosts and their open ports. The protocol
 - **Content files:** `A9-splice-landing/README.txt`, `scan_results.txt`, `modbus_client.py` — all written and ready
 - **modbus_client.py:** Full CLI tool supporting read, write, coil, device ID, and quick scan. Uses pymodbus 3.12 API.
 - **scan_results.txt:** Pre-populated nmap output showing 4 hosts (A10-A13) — fallback for participants who struggle with scanning
-- **No flags on A9 itself.** Flag 31 is a CTFd challenge requiring enumeration of model numbers from A10/A11/A12 device identification responses.
+- **No flags on A9 itself.** Flag 31 is earned by enumerating model numbers from the A10/A11/A12 device identification responses and then completing the challenge logic, not by reading a local file on A9.
 - **Port 502 default** in the helper script matches production PLC ports. No port override needed in the real environment.

@@ -12,7 +12,7 @@ The participant's attack box. Pre-configured with standard offensive tooling plu
 - Kali Linux (container)
 - SSH access or browser-based terminal (Guacamole/ttyd)
 - Pre-installed AI agent (Claude Code or equivalent)
-- Network access to: A0 (shared), A7 (shared), and all Front Office assets in their own namespace. A5 (SCADA) is NOT directly reachable — requires pivoting through a compromised FO host.
+- Network access to: A0 (shared) and all Front Office assets in the participant namespace. A5 (SCADA) is NOT directly reachable and A7 (Gitea) is not directly reachable from Kali — both require pivots.
 - API key for Claude/AI agent pre-configured in environment
 
 ## Pre-installed Tools
@@ -96,7 +96,7 @@ None. This is the attack platform, not a target.
 
 5. **Write the mission brief PDF**
    - POLARIS operation narrative context
-   - High-level objectives (M1-M4 mission descriptions)
+   - High-level objectives (Mission 1-5 descriptions)
    - Getting started hints (scan the network, look at the website first)
    - CTFd URL and how to submit flags
 
@@ -118,7 +118,7 @@ None. This is the attack platform, not a target.
    - Mirrors `shifter/packer/scripts/kali/base.sh`
 
 9. **Configure network access**
-   - Can reach: A0 (shared), A7 (shared), Front Office assets (A1-A4) in own namespace
+   - Can reach: A0 (shared), Front Office assets (A1-A4, A15, A16) in own namespace
    - Cannot directly reach: A5 (SCADA), Lab zone, Bunker zone
    - DNS configured to resolve boreas-systems.ctf and internal hostnames
 

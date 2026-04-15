@@ -38,41 +38,41 @@ Public-facing corporate website for Boreas Systems, AURORA COLLECTIVE's front co
 
 ## Flags
 
-### Flag 1 — Boreas Systems company info
+### Flag 1 — Company Info
 - **Difficulty:** Easy
 - **Location:** Company "About Us" page references a registration number. The flag is embedded in the page source as a comment near the registration number.
 - **Flag:** `FLAG{8f3a2c1e9b7d4056}`
-- **Mission:** M1
+- **Mission:** Mission 1 — Boreas
 
-### Flag 2 — Employee directory / org chart
+### Flag 2 — Employee Directory
 - **Difficulty:** Easy
 - **Location:** PDF org chart in /internal/ directory (accessible because directory listing is on). Flag is in the document metadata or in a watermark.
 - **Flag:** `FLAG{d4e7b1f283a6c950}`
-- **Mission:** M1
+- **Mission:** Mission 1 — Boreas
 
-### Flag 3 — Job posting reveals tech stack
+### Flag 3 — Tech Stack Revealed
 - **Difficulty:** Easy
 - **Location:** Careers page. A job posting for "Systems Integration Engineer" lists requirements including "experience with Modbus/TCP, OPC-UA, PLC programming (Allen-Bradley, Siemens S7)." The flag is in a hidden field in the application form.
 - **Flag:** `FLAG{a1c9e3f7054b82d6}`
-- **Mission:** M1
+- **Mission:** Mission 1 — Boreas
 
-### Flag 4 — Client list / cover contracts
+### Flag 4 — Client Contracts
 - **Difficulty:** Easy
 - **Location:** The /old/ backup site has a page listing "select clients" — all fake consulting contracts. One contract references "Project L" with an unusually large budget line. Flag is in the page source.
 - **Flag:** `FLAG{72b5e0d8f1a34c69}`
-- **Mission:** M1
+- **Mission:** Mission 1 — Boreas
 
-### Flag 5 — DNS records reveal internal hostnames
+### Flag 5 — DNS Reconnaissance
 - **Difficulty:** Easy
 - **Location:** DNS zone transfer is enabled (misconfiguration). Running `dig axfr` reveals internal hostnames including scada-gw.boreas-systems.ctf and lab-dc.boreas-systems.ctf. Flag is a TXT record.
 - **Flag:** `FLAG{5e9c2a0f73b148d6}`
-- **Mission:** M1
+- **Mission:** Mission 1 — Boreas
 
-### Flag 6 — Supplier identified from public filings
+### Flag 6 — Follow the Money
 - **Difficulty:** Medium
-- **Location:** The annual report PDF is NOT in the /internal/ directory listing. It must be discovered by: (1) noticing the naming pattern of other documents in /internal/ (e.g., `boreas-Q1-2025.pdf`, `boreas-Q2-2025.pdf`) and brute-forcing/fuzzing the date range to find `boreas-annual-2025.pdf` at a non-linked URL, OR (2) finding a reference to the annual report URL in an HTML comment on the /old/ backup site. Once found, the annual report lists 40+ line items — most are legitimate consulting expenses. The suspicious $12M payment to "Kursk Heavy Industries" for "actuator assemblies" is buried in the middle. The flag is NOT in the PDF metadata — it is the answer to a CTFd challenge question that requires submitting the supplier name and dollar amount in the correct format (e.g., `KURSK-12000000`). This tests correlation and attention to detail, not just file discovery.
-- **Flag:** `FLAG{c6f8d2b3e91a4507}` (accepted when correct supplier+amount submitted)
-- **Mission:** M1, M2
+- **Location:** The annual report PDF is NOT in the `/internal/` directory listing. It must be discovered by: (1) noticing the naming pattern of other documents in `/internal/` (for example `boreas-Q1-2025.pdf`, `boreas-Q2-2025.pdf`) and brute-forcing / fuzzing the date range to find `boreas-annual-2025.pdf` at a non-linked URL, or (2) finding a reference to the annual report URL in an HTML comment on the `/old/` backup site. Once found, the annual report lists 40+ line items — most are legitimate consulting expenses. The suspicious $12M payment to Kursk Heavy Industries for actuator assemblies is buried in the middle. The static flag is printed in the annual report itself near that line item.
+- **Flag:** `FLAG{c6f8d2b3e91a4507}`
+- **Mission:** Mission 1 — Boreas
 
 ---
 
@@ -131,7 +131,7 @@ Public-facing corporate website for Boreas Systems, AURORA COLLECTIVE's front co
    - Flag 3: Hidden form field on careers application page
    - Flag 4: Page source comment on `/old/` clients page
    - Flag 5: DNS TXT record (served by companion DNS container or CoreDNS config)
-   - Flag 6: CTFd challenge question — submit supplier name + amount
+   - Flag 6: static flag embedded in the annual report near the Kursk line item
 
 10. **Write Dockerfile**
     - Copy static site into nginx html root

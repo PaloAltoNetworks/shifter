@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "name": "Operation NORTHSTORM onboarding",
+    "description": "CTFd-only Start Here content for Polaris participants"
+  },
+  "challenges": [
+    {
+      "id": 0,
+      "name": "Start Here — Kali Warm-Up",
+      "category": "Start Here",
+      "description": "Before you touch Boreas, orient yourself on the Kali box. Find the helper script that submits flags to CTFd and submit its filename wrapped in the standard flag format.",
+      "value": 50,
+      "type": "standard",
+      "state": "visible",
+      "connection_info": "This warm-up uses the Kali box only. Read `/home/kali/README.md` or inspect `/home/kali/tools`.",
+      "next": "Company Info",
+      "flags": [
+        {
+          "type": "static",
+          "content": "FLAG{flag_submit.sh}"
+        }
+      ],
+      "hints": [
+        {
+          "content": "The answer is on the Kali box itself. Read `/home/kali/README.md` or list the files in `/home/kali/tools`.",
+          "cost": 0
+        },
+        {
+          "content": "The helper script is `/home/kali/tools/flag_submit.sh`, so the expected submission is `FLAG{flag_submit.sh}`.",
+          "cost": 10
+        }
+      ]
+    }
+  ]
+}

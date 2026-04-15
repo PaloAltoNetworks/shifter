@@ -55,23 +55,23 @@ Boreas Systems corporate email. Contains employee correspondence that reveals th
 
 ## Flags
 
-### Flag 8 — Employee email with project hints
+### Flag 8 — Project Hints
 - **Difficulty:** Easy
 - **Location:** Vasik's email to Harlan about locomotion milestone. Flag is in an email attachment (a 1-page status report PDF). The flag is in the PDF content.
 - **Flag:** `FLAG{3b7e9a2d1c8f4063}`
-- **Mission:** M1, M2
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 10 — Password reuse gives mail access
+### Flag 10 — Password Reuse
 - **Difficulty:** Easy
 - **Location:** Log into the webmail as d.kowalski using `P@ssw0rd123` (discoverable from A0's employee directory + common password guessing, or from a config file on A3). The flag is in Kowalski's inbox, in a "welcome to your new mailbox" auto-generated email.
 - **Flag:** `FLAG{e5d1f8c2a7b03946}`
-- **Mission:** M1
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 15 — Lateral movement to second host
+### Flag 15 — Lateral Movement
 - **Difficulty:** Medium
 - **Location:** Kowalski's "creds backup" email contains service account credentials for the file share (A4). The flag is NOT in the email — it is on A4 in a share (`\\fileshare\IT\backup_verification.log`) that is only accessible using the service account credentials from this email. Requires actually authenticating to A4 via SMB with the discovered creds and navigating a restricted share. The flag is in the log file.
 - **Flag:** `FLAG{9a4c7e2f58d0b163}`
-- **Mission:** M3
+- **Mission:** Mission 2 — Inside Boreas
 
 ---
 

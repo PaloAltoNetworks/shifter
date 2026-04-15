@@ -8,11 +8,12 @@ lives under this folder.
 
 ```
 scenario-dev/polaris/
-├── design/                         authoritative spec — source of truth
+├── design/                         intended scenario spec — keep synced to build + walkthroughs
 │   ├── architecture.md             zone layout, flags, missions, progression
 │   ├── range-diagram.md            network topology diagram
 │   ├── benchmark-report.md         mechag benchmark data
 │   ├── shared-constants.md         cross-asset values (serials, override codes)
+│   ├── missions/                   proposed future mission docs
 │   └── assets/                     per-asset design docs
 │       ├── A0-boreas-website.md    Boreas OSINT site
 │       ├── A1-mail-server.md       Postfix / Dovecot / Roundcube
@@ -28,11 +29,15 @@ scenario-dev/polaris/
 │       ├── A11-leg-controller.md   Modbus PLC, timed gait sequence
 │       ├── A12-arms-controller.md  Modbus PLC, rolling nonce + XOR
 │       ├── A13-brain.md            TCP 9100 binary handshake + override
-│       └── A14-kali.md             Participant attack box
+│       ├── A14-kali.md             Participant attack box
+│       ├── A17-contractor-mirror.md proposed public forge mission asset
+│       └── A18-release-vault.md    proposed release-registry mission asset
 │
 ├── build/                          container build artifacts
 │   ├── docker-compose.yml          range topology: shared / corporate / scada / lab / bunker-ot
-│   ├── ctfd-challenges.json        CTFd flag metadata
+│   ├── ctfd-challenges.json        live challenge metadata, mission categories, hints
+│   ├── ctfd-onboarding.json        Start Here warm-up challenge and onboarding-only CTFd extras
+│   ├── ctfd-pages/                 CTFd Start Here / Kali Quickstart page content
 │   ├── dns/                        BIND sidecar (boreas-systems.ctf + boreas.local zones, AXFR enabled)
 │   ├── a0/ ... a14/                Dockerfiles + runtime configs per asset
 │   └── A0-boreas-website/ ...      content generators (server.py, build_*.py, bootstrap.sh, init SQL)
@@ -47,15 +52,15 @@ scenario-dev/polaris/
 │   │   ├── A0-smoketest.sh ... A14-smoketest.(sh|py)
 │   └── walkthroughs/               step-by-step happy-path participant guides, grouped by flag range
 │       ├── README.md
-│       ├── 00-range-access.md
 │       ├── 00-range-access-docker.md
 │       ├── flags-01-06-osint.md
 │       ├── flags-07-19-front-office.md
 │       ├── flags-20-30-lab.md
-│       └── flags-31-36-bunker.md
+│       ├── flags-31-36-bunker.md
+│       └── proposed-flags-39-42-release-trail.md
 │
 └── notes/                          spike notes + handoff / TODO
-    ├── HANDOFF.md                  session handoff context
+    ├── HANDOFF.md                  historical session context — not authoritative
     ├── BUILD-TODO.md               outstanding build items
     ├── a2-samba-ad-spike.md        why we gave up on Samba AD DC and switched to Windows
     ├── a6-a7-golden-build.md       a6 + a7 golden build notes
@@ -64,10 +69,17 @@ scenario-dev/polaris/
 
 ## Source of truth
 
-**`design/` is canonical.** If implementation (`build/`, `tests/`) disagrees
-with the design doc, fix the implementation. Never edit design to match
-whatever got built without explicit user approval. Smoketests and walkthroughs
-exist to validate that the implementation matches the design.
+There is no single perfect doc source of truth here. For the current range,
+trust these in this order:
+
+1. `build/docker-compose.yml` and the build/runtime content under `build/`
+2. `build/ctfd-challenges.json` for the core Polaris board: challenge names, categories, values, hints, and prerequisites
+3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd-only onboarding content such as the landing page, quickstart page, and Start Here warm-up
+4. `tests/walkthroughs/` for the intended participant path through the live topology
+5. `design/` as the spec that should be kept in sync with the implementation
+
+If these disagree, reconcile the docs against the actual build and walkthroughs
+first instead of assuming the older design prose is correct.
 
 ## Getting started
 
@@ -97,13 +109,15 @@ exist to validate that the implementation matches the design.
 | A0     | shared                   | a14-kali            | a14 is on shared |
 | A1     | corporate                | a14-kali            | a14 is on corporate |
 | A2     | external GCP VM          | a14-kali            | routed via host |
-| A3     | corporate + scada + lab  | a14-kali            | a14 reaches on corporate |
+| A3     | corporate                | a14-kali            | a14 reaches on corporate |
 | A4     | corporate                | a14-kali            | a14 is on corporate |
-| A5     | scada (VLAN 40)          | a3-intranet         | only A3 reaches scada |
-| A6     | lab (VLAN 30)            | a3-intranet         | only A3 reaches lab |
-| A7     | shared + lab             | a14-kali            | a14 is on shared |
-| A8     | lab (VLAN 30)            | a3-intranet         | only A3 reaches lab |
+| A5     | scada (VLAN 40)          | a15-ops-eng         | only A15 reaches scada |
+| A6     | lab (VLAN 30)            | a16-research-analyst| only A16 reaches lab directly |
+| A7     | lab (shared service)     | a16-research-analyst| shared service, but lab-only access |
+| A8     | lab (VLAN 30)            | a16-research-analyst| only A16 reaches lab directly |
 | A9     | bunker-ot (VLAN 50)      | a9-splice (self)    | A9 is the bunker entry point |
 | A10-13 | bunker-ot (VLAN 50)      | a9-splice           | only the bunker can reach bunker |
 | A14    | shared + corporate       | a14-kali (self)     | platform readiness check |
+| A15    | corporate + scada        | a14-kali            | attacker reaches corporate face first |
+| A16    | corporate + lab          | a14-kali            | attacker reaches corporate face first |
 | (net)  | cross-cutting            | range host          | docker exec into each source container |

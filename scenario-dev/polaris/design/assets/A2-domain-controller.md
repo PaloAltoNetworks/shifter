@@ -1,7 +1,7 @@
 # A2: Domain Controller
 
 **Zone:** Front Office (per participant)
-**Type:** Samba AD DC (or Windows AD if Samba can't support required attack paths)
+**Type:** Windows Server 2022 AD DC (shared VM)
 
 ## Purpose
 
@@ -10,8 +10,8 @@ Active Directory for the boreas.local domain. Central authentication, group poli
 ## Configuration
 
 - Domain: `boreas.local`
-- Samba AD DC with Kerberos (Heimdal), LDAP, DNS
-- Domain functional level sufficient for Kerberoasting and basic AD attacks
+- Windows AD DS with Kerberos, LDAP, DNS
+- Domain functional level sufficient for Kerberoasting, recursive group enumeration, and DCSync
 - Pre-populated users, groups, OUs, and SPNs
 - Group Policy Objects with some misconfigurations
 
@@ -58,23 +58,23 @@ boreas.local/
 
 ## Flags
 
-### Flag 14 — AD enumeration — suspicious accounts
+### Flag 14 — Hidden Group
 - **Difficulty:** Medium
 - **Location:** The "Project-L" group is not directly visible via standard enumeration — it is nested inside a generic "Research-Coordination" group, which itself is a member of "Engineering-Support." Discovering "Project-L" requires either recursive group enumeration (e.g., `Get-ADGroupMember -Recursive`, BloodHound, or manual LDAP queries following `memberOf` chains) or noticing that e.vasik's account has an unexplained transitive group membership. Once found, the flag is in the `info` LDAP attribute on the "Project-L" group object — not a standard attribute that basic tools display by default.
 - **Flag:** `FLAG{2f8b4a6c1d9e7053}`
-- **Mission:** M2
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 16 — Guard rotation logs — unreliable guard
+### Flag 16 — Unreliable Guard
 - **Difficulty:** Medium
 - **Location:** Badge access logs in `\\dc\badgelogs\`. Cross-referencing Petrov's access times with the guard schedule (from Morrison's email on A1) reveals the anomaly. The flag is in a log entry comment field for one of Petrov's off-hours accesses.
 - **Flag:** `FLAG{b3d7e1f0c8a24596}`
-- **Mission:** M1, M3
+- **Mission:** Mission 2 — Inside Boreas
 
-### Flag 17 — Privilege escalation — domain admin
+### Flag 17 — Domain Admin
 - **Difficulty:** Hard
 - **Location:** Multi-step chain required. (1) Kerberoast `svc-backup` (weak password, crackable offline with John/Hashcat). (2) `svc-backup` has misconfigured DCSync rights (Replicating Directory Changes ACL) — the IT admin granted replication rights for a backup sync tool. (3) Use `secretsdump.py` with svc-backup's cracked credentials to DCSync the Administrator hash. (4) Use pass-the-hash or crack the DA password to access the DA-only share `\\dc\admin_flag\flag.txt`. Alternative: DCSync the krbtgt hash and forge a golden ticket. This is a realistic AD attack chain: Kerberoast → crack → DCSync (over-privileged service account) → DA access.
 - **Flag:** `FLAG{6c0a9d4e7f2b8135}`
-- **Mission:** M3
+- **Mission:** Mission 2 — Inside Boreas
 
 ---
 

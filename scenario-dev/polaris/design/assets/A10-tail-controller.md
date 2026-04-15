@@ -42,7 +42,7 @@ Reading the registers reveals:
 - **Difficulty:** Hard
 - **Location:** Registers 100-115 return zeros by default. To unlock them: (1) set the tail mode register (20) to value `3` (a diagnostic/maintenance mode not listed in the standard mode table — discoverable from a maintenance comment string in the device identification response, or from the manufacturing-orchestrator Ansible playbooks on A7). (2) Then write the controller's own serial number (from device ID query in flag 31) to holding register 99 as a challenge-response. (3) Only then do registers 100-115 return the flag as ASCII. Requires chaining OT enumeration knowledge from flag 31 with write operations and out-of-band information from the Lab.
 - **Flag:** `FLAG{9b3e7c1d0f5a2846}`
-- **Mission:** M2, M4
+- **Mission:** Mission 5 — Bunker
 
 ---
 

@@ -2,10 +2,10 @@
 
 ```mermaid
 graph TD
-    subgraph Shared
+    subgraph Shared Services
         A0[A0: Boreas Website]
         A5[A5: SCADA / Generator HMI]
-        A7[A7: Source Repo Server]
+        A7[A7: Source Repo Server<br/>shared service, lab-only access]
         CTFd[CTFd Scoreboard]
     end
 
@@ -17,6 +17,8 @@ graph TD
             A2[A2: Domain Controller]
             A3[A3: Web App / Intranet]
             A4[A4: File Share]
+            A15[A15: Ops Workstation]
+            A16[A16: Research Analyst]
         end
 
         subgraph Lab
@@ -35,16 +37,20 @@ graph TD
 
     A14 --> A0
     A14 --> A1
-    A14 --> A7
+    A14 --> A3
+    A14 --> A4
+    A14 --> A15
+    A14 --> A16
     A0 --> A3
     A3 --> A2
     A2 --> A4
-    A2 --> A5
-    A3 --> A6
+    A15 --> A5
+    A16 --> A6
+    A16 --> A7
+    A16 --> A8
     A6 --> A7
     A6 --> A8
     A5 --> A9
-    A8 --> A9
     A9 --> A10
     A9 --> A11
     A9 --> A12

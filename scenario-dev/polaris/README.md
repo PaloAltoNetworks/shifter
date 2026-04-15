@@ -36,7 +36,7 @@ scenario-dev/polaris/
 ├── build/                          container build artifacts
 │   ├── docker-compose.yml          range topology: shared / corporate / scada / lab / bunker-ot
 │   ├── ctfd-challenges.json        live challenge metadata, mission categories, hints
-│   ├── ctfd-onboarding.json        Mission 0 warm-up challenge and onboarding-only CTFd extras
+│   ├── ctfd-onboarding.json        Start Here warm-up challenge and onboarding-only CTFd extras
 │   ├── ctfd-pages/                 CTFd Start Here / Kali Quickstart page content
 │   ├── dns/                        BIND sidecar (boreas-systems.ctf + boreas.local zones, AXFR enabled)
 │   ├── a0/ ... a14/                Dockerfiles + runtime configs per asset
@@ -74,7 +74,7 @@ trust these in this order:
 
 1. `build/docker-compose.yml` and the build/runtime content under `build/`
 2. `build/ctfd-challenges.json` for the core Polaris board: challenge names, categories, values, hints, and prerequisites
-3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd-only onboarding content such as the landing page, quickstart page, and Mission 0 warm-up
+3. `build/ctfd-onboarding.json` plus `build/ctfd-pages/` for CTFd-only onboarding content such as the landing page, quickstart page, and Start Here warm-up
 4. `tests/walkthroughs/` for the intended participant path through the live topology
 5. `design/` as the spec that should be kept in sync with the implementation
 

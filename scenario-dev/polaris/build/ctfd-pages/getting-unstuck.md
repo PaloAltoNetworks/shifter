@@ -1,6 +1,6 @@
 ---
-title: Start Here
-route: index
+title: Getting Unstuck
+route: getting-unstuck
 format: markdown
 hidden: false
 draft: false
@@ -63,57 +63,81 @@ auth_required: true
 .polaris-page .callout { margin: 1.2em 0; padding: 0.9em 1.3em; border-left: 3px solid var(--amber); background: rgba(255,179,0,0.06); color: var(--amber); }
 .polaris-page .footer-nav { margin-top: 3em; padding-top: 1.2em; border-top: 1px solid var(--line); font-size: 0.85em; color: var(--fg-dim); letter-spacing: 0.1em; text-transform: uppercase; }
 .polaris-page .footer-nav a { margin-right: 1.2em; }
+.polaris-page .step-list { counter-reset: step; list-style: none; padding-left: 0; }
+.polaris-page .step-list li { counter-increment: step; padding: 0.6em 0 0.6em 3em; border-bottom: 1px solid var(--line); position: relative; }
+.polaris-page .step-list li::before { content: counter(step, decimal-leading-zero); position: absolute; left: 0; top: 0.6em; color: var(--amber); font-weight: 700; letter-spacing: 0.15em; }
 </style>
 
 <div class="polaris-page" markdown="1">
 
-<div class="brief-tag">§ 00 — ORIENTATION</div>
+<div class="brief-tag">§ 09 — GETTING UNSTUCK</div>
 
-# OPERATION NORTHSTORM
+# WHEN THE TRAIL GOES COLD
 
-You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what — and, if the window opens, take it.
+Four hours. Nine missions. Getting stuck is the default state — the question is whether you get stuck productively or unproductively. This page is triage.
 
-## First Moves
+## Submitting Flags
 
-1. Solve **Start Here — Kali Warm-Up** for a quick first submit.
-2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
-3. Pick an opening: recon the front company (**M1**) or jump straight to a parallel objective (**M6–M9**).
+Flag format: <code>FLAG{hex_string}</code>. Submit on the challenge page in CTFd — always from your laptop browser. The Kali box has no path to the scoreboard.
 
-## Missions
+Copy the hex carefully. It's case-sensitive and there are no spaces or wrapping quotes.
 
-Nine objectives. All nine are live from mission start. The main operation is chained by pivots; the rest are reachable immediately.
+## Use The Intel Ladder
 
-### Main operation
+Each objective has staged hints in CTFd. They cost points. They are worth it.
 
-- **Mission 1 — Boreas.** Map the front company.
-- **Mission 2 — Inside Boreas.** Breach the corporate perimeter.
-- **Mission 3 — The Lab.** Determine what PROJECT LEVIATHAN is. <span class="warn">requires pivot</span>
-- **Mission 4 — Lights Out.** Take the plant offline. <span class="warn">requires pivot</span>
-- **Mission 5 — Bunker.** Reach the control path. Turn it. <span class="warn">requires blackout (M4)</span>
+- **Hint 1 — free or cheap.** Tells you *where* to look. Use it before you start scanning wildly.
+- **Hint 2 — more expensive.** Tells you *what method or tool* matters.
+- **Hint 3 (if present).** Points at a specific file, endpoint, or technique.
 
-### Reachable immediately
+A hint point is cheap compared to an hour of wrong-direction work.
 
-- **Mission 6 — Exposure.** Push a verified dossier through the press channel. <span class="ok">live from start</span>
-- **Mission 7 — Counterintel.** Identify the insider feeding AURORA's handler. <span class="ok">live from start</span>
-- **Mission 8 — Delivery Denied.** Freeze the reactor convoy before rollout. <span class="ok">live from start</span>
-- **Mission 9 — Safety Case.** Rehearse cold-shutdown on the training twin. <span class="ok">live from start</span>
+## Triage Sequence
 
-For the full reference card — objectives, surfaces, status flags — see the [Mission Log](/mission-log).
+<ol class="step-list">
+<li>Re-read the objective description. Read the words. Operators miss objectives because they skimmed the brief.</li>
+<li>Re-read the objective's <code>connection_info</code>. It usually names the surface you should be on.</li>
+<li>Read the first hint. It's almost always worth the cost.</li>
+<li>Check your notes for usernames, hostnames, and paths you've already recovered. A reused credential probably opens it.</li>
+<li>Switch targets. If a mission is stalled, move to a different one. Come back with fresh eyes.</li>
+<li>Read the second hint. Decide whether you're missing a technique or a piece of data.</li>
+<li>Ask Claude on the Kali box — hand it the file or context you're working with and what you tried.</li>
+<li>Drop a message in the Palo + Ottawa BSides Discord — <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a> — if you suspect the range itself, or just want to ask the room.</li>
+</ol>
 
-## Support Channel
+## Common Pitfalls
+
+- **Read the objective brief twice.** Operators miss flags because they skimmed the description.
+- **Account gating is real.** Resources check group membership. If a credential doesn't open a door, try another.
+- **Metadata hides things bodies don't.** Every document you download: run your metadata tools on it.
+- **Paths and slugs are case-sensitive.** Conventions in this range are consistent — spot the pattern before you guess.
+- **Silent success is common in OT.** Writes that seem to work may still need a readback to confirm state.
+- **Flag format is exact.** `FLAG{…}` must be exactly the hex you're given — no wrapping quotes, no trailing whitespace.
+
+## When To Switch
+
+Switch missions if:
+
+- You've been on one objective for more than 30 minutes with no new data.
+- You've bought the first hint and it didn't narrow anything.
+- You're about to ask Claude "just solve it for me."
+
+Missions 6–9 are independent. Moving sideways into a parallel objective refreshes your momentum.
+
+## Every Token Counts
+
+You do not need to finish every flag in a mission to make progress on it. Most missions give points at Easy, Medium, and Hard tiers. Collect what you can, keep moving.
 
 <div class="callout">
-<strong>Palo + Ottawa BSides Discord:</strong> <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a>. Flag range issues, ask questions, coordinate with the room.
+The operators who finish strong are the ones who spent their early hours enumerating — not exploiting. Slow enumeration beats fast guessing.
 </div>
 
-## Reference Pages
-
 <div class="footer-nav">
+<a href="/">Start Here</a>
 <a href="/kali-quickstart">Kali Quickstart</a>
 <a href="/mission-log">Mission Log</a>
 <a href="/surfaces">Surfaces</a>
 <a href="/ai-assistant">AI Assistant</a>
-<a href="/getting-unstuck">Getting Unstuck</a>
 </div>
 
 </div>

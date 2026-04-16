@@ -80,16 +80,15 @@ RUN touch /var/log/xrdp.log /var/log/xrdp-sesman.log && \
 # Tmux mouse-on (matches AWS tools.sh)
 RUN echo 'set -g mouse on' > /etc/tmux.conf
 
-# CTF content overlay — these files live in A14-kali/ (content dir) per
-# convention; the Modbus scan helper is shared with A9-splice-landing/.
-# Build context is the parent mechag/ dir so COPY can reach both.
-COPY A14-kali/README.md /home/kali/README.md
-COPY A14-kali/mission_brief.txt /home/kali/mission_brief.txt
-COPY A14-kali/mission_brief.pdf /home/kali/mission_brief.pdf
-COPY A14-kali/flag_submit.sh /home/kali/tools/flag_submit.sh
+# CTF content overlay — modbus scan helper is shared with A9-splice-landing/.
+# welcome.txt is the warm-up challenge target; lives hidden in /home/kali/.polaris/.
+# README, mission_brief, and flag_submit.sh were removed — they were stale
+# relative to the CTFd board and Kali has no route to CTFd anyway, so a
+# Kali-side submission helper is broken by design. CTFd is the reference.
 COPY A9-splice-landing/modbus_client.py /home/kali/tools/modbus_scan.py
 COPY A14-kali/claude_system_prompt.txt /home/kali/.config/claude/system_prompt.txt
-RUN chmod +x /home/kali/tools/*.sh /home/kali/tools/*.py && \
+COPY A14-kali/welcome.txt /home/kali/.polaris/welcome.txt
+RUN chmod +x /home/kali/tools/*.py && \
     chown -R kali:kali /home/kali
 
 # Entrypoint: start sshd + xrdp and stay foreground

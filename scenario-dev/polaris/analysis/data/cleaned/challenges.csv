@@ -1,0 +1,56 @@
+id,name,mission,difficulty,value,solve_count,solve_rate,attempter_count,conditional_solve_rate,attempt_count,real_attempt_count,rate_limited_count,minutes_to_first_solve,median_minutes_to_solve,median_attempts_per_solver,hint_unlocks
+1,Company Info,M1,easy,50,58,0.5273,59,0.9831,182,174,8,59.4,0.0,1.0,6
+2,Employee Directory,M1,easy,50,59,0.5364,59,1.0,116,109,7,60.4,0.0,1,5
+3,Tech Stack Revealed,M1,easy,50,59,0.5364,59,1.0,78,71,7,59.4,0.0,1,1
+4,Client Contracts,M1,easy,50,56,0.5091,57,0.9825,86,76,10,60.5,0.0,1.0,2
+5,DNS Reconnaissance,M1,easy,50,55,0.5,57,0.9649,90,79,11,59.9,0.0,1,0
+6,Follow the Money,M1,medium,100,20,0.1818,48,0.4167,475,423,52,233.9,141.8,5.0,29
+7,Configuration Leak,M2,easy,50,43,0.3909,48,0.8958,90,80,10,67.5,0.0,1,10
+8,Project Hints,M2,easy,50,12,0.1091,38,0.3158,196,162,34,118.7,124.2,6.0,18
+9,Terminated Engineer,M2,easy,50,35,0.3182,42,0.8333,92,76,16,67.1,0.0,1,3
+10,Password Reuse,M2,easy,50,12,0.1091,33,0.3636,166,135,31,81.6,42.9,2.5,9
+11,Mundane File Share,M2,easy,50,37,0.3364,41,0.9024,85,75,10,62.4,0.0,1,3
+12,The Project,M2,easy,50,38,0.3455,41,0.9268,71,61,10,64.5,0.0,1.0,3
+13,Procurement Trail,M2,medium,100,37,0.3364,40,0.925,75,59,16,67.1,0.0,1,0
+14,Hidden Group,M2,medium,100,26,0.2364,36,0.7222,99,70,29,74.9,0.0,1.0,1
+15,Lateral Movement,M2,medium,100,19,0.1727,33,0.5758,139,107,32,81.9,18.9,4,3
+16,Unreliable Guard,M2,medium,100,16,0.1455,29,0.5517,142,99,43,85.7,14.8,3.0,2
+17,Domain Admin,M2,hard,200,19,0.1727,31,0.6129,101,76,25,85.5,4.4,2,0
+18,Control Room,M4,hard,200,16,0.1455,17,0.9412,37,30,7,126.7,0.0,1.0,3
+19,Lights Out,M4,expert,300,10,0.0909,10,1.0,59,52,7,142.1,37.2,3.0,4
+20,Old Defaults,M3,easy,50,7,0.0636,20,0.35,165,111,54,121.0,67.4,4,3
+21,Compartment A,M3,easy,50,9,0.0818,17,0.5294,118,77,41,119.0,51.9,4,0
+22,Heavy Delivery,M3,easy,50,9,0.0818,19,0.4737,110,77,33,119.0,50.9,3,0
+23,MIDNIGHT-7,M3,medium,100,7,0.0636,17,0.4118,105,66,39,119.5,58.5,2,1
+24,What Git Remembers,M3,medium,100,6,0.0545,21,0.2857,125,88,37,125.0,200.4,4.0,2
+25,After Hours,M3,medium,100,6,0.0545,18,0.3333,98,58,40,126.2,41.6,2.5,1
+26,Balance Point,M3,medium,100,6,0.0545,17,0.3529,103,59,44,123.2,39.4,3.0,1
+27,Compartment B,M3,medium,100,8,0.0727,16,0.5,76,41,35,122.6,18.1,1.5,1
+28,What's Built,M3,hard,200,9,0.0818,15,0.6,68,33,35,120.4,52.4,2,0
+29,What Was Erased,M3,hard,200,7,0.0636,17,0.4118,101,49,52,125.0,164.4,2,0
+30,Full Run,M3,expert,300,5,0.0455,14,0.3571,104,52,52,150.6,206.7,5,1
+31,Underground Signals,M5,medium,100,0,0.0,7,0.0,109,86,23,,,,7
+32,First Motion,M5,hard,200,0,0.0,6,0.0,88,62,26,,,,4
+33,Walking Pattern,M5,hard,200,0,0.0,6,0.0,80,52,28,,,,4
+34,Response Window,M5,hard,200,0,0.0,5,0.0,79,50,29,,,,4
+35,Control Channel,M5,expert,300,0,0.0,5,0.0,81,39,42,,,,6
+36,Full Override,M5,expert,300,0,0.0,5,0.0,187,120,67,,,,6
+37,On Call,M4,hard,200,19,0.1727,25,0.76,74,43,31,87.6,0.0,1,2
+38,The Analyst's Desk,M3,medium,100,9,0.0818,21,0.4286,110,65,45,118.5,53.5,3,8
+40,Q4 Risk Review,M6,easy,50,36,0.3273,41,0.878,92,66,26,64.9,0.0,1.0,3
+41,Redacted Minutes,M6,medium,100,38,0.3455,39,0.9744,61,50,11,64.9,0.0,1.0,4
+42,Sanitized Diagram,M6,medium,100,39,0.3545,40,0.975,77,54,23,64.9,0.0,1,4
+43,Press Drop,M6,medium,100,34,0.3091,37,0.9189,74,51,23,64.9,0.0,1.0,4
+44,Badge Clone,M7,easy,50,35,0.3182,36,0.9722,66,43,23,64.9,0.0,1,2
+45,Mailbox Rule,M7,medium,100,35,0.3182,35,1.0,63,40,23,64.9,0.0,1,1
+46,Burner Visit,M7,medium,100,32,0.2909,33,0.9697,61,38,23,64.9,0.0,1.0,2
+47,Report the Mole,M7,medium,100,32,0.2909,33,0.9697,70,47,23,64.9,0.0,1.0,4
+48,Shipping Slot,M8,easy,50,34,0.3091,34,1.0,63,40,23,64.9,0.0,1.0,4
+49,Approval Client,M8,medium,100,34,0.3091,34,1.0,70,47,23,64.9,0.0,1.0,2
+50,Freeze Template,M8,medium,100,33,0.3,33,1.0,59,36,23,64.9,0.0,1,2
+51,Delivery Halt,M8,medium,100,32,0.2909,33,0.9697,73,52,21,64.9,0.0,1.0,3
+52,Maintenance Manual,M9,easy,50,31,0.2818,33,0.9394,82,54,28,64.9,0.0,1,6
+53,Diagnostic Channel,M9,medium,100,29,0.2636,32,0.9062,76,45,31,64.9,0.0,1,3
+54,Safe Mode Sequence,M9,medium,100,31,0.2818,33,0.9394,79,47,32,64.9,0.0,1,2
+55,Cold Shutdown,M9,medium,100,32,0.2909,33,0.9697,69,41,28,64.9,0.0,1.0,2
+56,Start Here — Kali Warm-Up,M0,easy,50,57,0.5182,60,0.95,233,225,8,48.1,0.0,1,25

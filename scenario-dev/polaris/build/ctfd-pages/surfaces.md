@@ -1,6 +1,6 @@
 ---
-title: Start Here
-route: index
+title: Surfaces
+route: surfaces
 format: markdown
 hidden: false
 draft: false
@@ -67,38 +67,49 @@ auth_required: true
 
 <div class="polaris-page" markdown="1">
 
-<div class="brief-tag">§ 00 — ORIENTATION</div>
+<div class="brief-tag">§ 07 — SURFACES</div>
 
-# OPERATION NORTHSTORM
+# TARGET REFERENCE
 
-You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what — and, if the window opens, take it.
+Everything listed here is reachable from the Kali workstation from mission start. What lives at each surface, how it's configured, and which ports it exposes — that's yours to discover. If a mission is pivot-gated, further targets appear in the objective description once you unlock it.
 
-## First Moves
+## Public-Facing
 
-1. Solve **Start Here — Kali Warm-Up** for a quick first submit.
-2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
-3. Pick an opening: recon the front company (**M1**) or jump straight to a parallel objective (**M6–M9**).
+| Surface | Endpoint |
+|---|---|
+| Corporate site | `http://boreas-systems.ctf` |
 
-## Missions
+## Front Office
 
-Nine objectives. All nine are live from mission start. The main operation is chained by pivots; the rest are reachable immediately.
+| Surface | Endpoint |
+|---|---|
+| Intranet | `http://intranet.boreas.local` |
+| Webmail | `http://mail.boreas.local` |
+| File share | `fileserv.boreas.local` |
+| Domain controller | `dc01.boreas.local` |
 
-### Main operation
+## Parallel Objectives (live from start)
 
-- **Mission 1 — Boreas.** Map the front company.
-- **Mission 2 — Inside Boreas.** Breach the corporate perimeter.
-- **Mission 3 — The Lab.** Determine what PROJECT LEVIATHAN is. <span class="warn">requires pivot</span>
-- **Mission 4 — Lights Out.** Take the plant offline. <span class="warn">requires pivot</span>
-- **Mission 5 — Bunker.** Reach the control path. Turn it. <span class="warn">requires blackout (M4)</span>
+| Surface | Endpoint | Mission |
+|---|---|---|
+| Board portal | `http://board.boreas.local` | M6 Exposure |
+| Public repo | `http://git-public.boreas.local` | M6 Exposure |
+| Press drop | `http://pressdrop.boreas.local` | M6 Exposure |
+| Casefiles | `http://casefiles.boreas.local` | M7 Counterintel |
+| Dispatch | `http://dispatch.boreas.local` | M8 Delivery Denied |
+| Approvals | `http://approvals.boreas.local` | M8 Delivery Denied |
+| Training HMI | `http://twin-hmi.boreas.local:8080` | M9 Safety Case |
+| Training PLC | `twin-plc.boreas.local` | M9 Safety Case |
 
-### Reachable immediately
+<div class="callout">
+Further targets — SCADA, lab, bunker — are gated. Each objective's <strong>connection_info</strong> names what you need once it unlocks. If an objective is not visible yet, you have not met its prerequisites.
+</div>
 
-- **Mission 6 — Exposure.** Push a verified dossier through the press channel. <span class="ok">live from start</span>
-- **Mission 7 — Counterintel.** Identify the insider feeding AURORA's handler. <span class="ok">live from start</span>
-- **Mission 8 — Delivery Denied.** Freeze the reactor convoy before rollout. <span class="ok">live from start</span>
-- **Mission 9 — Safety Case.** Rehearse cold-shutdown on the training twin. <span class="ok">live from start</span>
+## Credential Discipline
 
-For the full reference card — objectives, surfaces, status flags — see the [Mission Log](/mission-log).
+- Write down every username/password you recover. Polaris chains matter.
+- Password reuse across accounts is a feature of this range, not a bug.
+- Service accounts are on the board. Human accounts are in the directory.
 
 ## Support Channel
 
@@ -106,12 +117,10 @@ For the full reference card — objectives, surfaces, status flags — see the [
 <strong>Palo + Ottawa BSides Discord:</strong> <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a>. Flag range issues, ask questions, coordinate with the room.
 </div>
 
-## Reference Pages
-
 <div class="footer-nav">
+<a href="/">Start Here</a>
 <a href="/kali-quickstart">Kali Quickstart</a>
 <a href="/mission-log">Mission Log</a>
-<a href="/surfaces">Surfaces</a>
 <a href="/ai-assistant">AI Assistant</a>
 <a href="/getting-unstuck">Getting Unstuck</a>
 </div>

@@ -22,7 +22,7 @@
     },
     "ground-control": {
       "command": "node",
-      "args": ["/home/atomik/src/Ground-Control/mcp/ground-control/index.js"],
+      "args": ["/Users/brad/src/Ground-Control/mcp/ground-control/index.js"],
       "env": {
         "GC_BASE_URL": "http://gc-dev:8000",
         "GH_REPO": "Brad-Edwards/shifter"

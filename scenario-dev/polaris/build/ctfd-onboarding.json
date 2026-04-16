@@ -8,25 +8,25 @@
       "id": 0,
       "name": "Start Here — Kali Warm-Up",
       "category": "Start Here",
-      "description": "Before you touch Boreas, orient yourself on the Kali box. Find the helper script that submits flags to CTFd and submit its filename wrapped in the standard flag format.",
+      "description": "Welcome, Operator. POLARIS left an orientation note on your Kali box. Find it, read it, submit the flag inside.",
       "value": 50,
       "type": "standard",
       "state": "visible",
-      "connection_info": "This warm-up uses the Kali box only. Read `/home/kali/README.md` or inspect `/home/kali/tools`.",
+      "connection_info": "The file is hidden somewhere under your home directory on the Kali box. Standard Linux tricks will find it — or ask Claude Code on the box to find it for you.",
       "next": "Company Info",
       "flags": [
         {
           "type": "static",
-          "content": "FLAG{flag_submit.sh}"
+          "content": "FLAG{0a5c7e3f91b8d426}"
         }
       ],
       "hints": [
         {
-          "content": "The answer is on the Kali box itself. Read `/home/kali/README.md` or list the files in `/home/kali/tools`.",
+          "content": "Try `ls -la ~` on the Kali box and look for anything starting with a dot. Or ask Claude Code to find hidden files in your home directory.",
           "cost": 0
         },
         {
-          "content": "The helper script is `/home/kali/tools/flag_submit.sh`, so the expected submission is `FLAG{flag_submit.sh}`.",
+          "content": "The file is `/home/kali/.polaris/welcome.txt`. `cat` it — the flag is printed inline.",
           "cost": 10
         }
       ]

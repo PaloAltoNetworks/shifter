@@ -1,6 +1,6 @@
 ---
-title: Start Here
-route: index
+title: AI Assistant
+route: ai-assistant
 format: markdown
 hidden: false
 draft: false
@@ -63,56 +63,72 @@ auth_required: true
 .polaris-page .callout { margin: 1.2em 0; padding: 0.9em 1.3em; border-left: 3px solid var(--amber); background: rgba(255,179,0,0.06); color: var(--amber); }
 .polaris-page .footer-nav { margin-top: 3em; padding-top: 1.2em; border-top: 1px solid var(--line); font-size: 0.85em; color: var(--fg-dim); letter-spacing: 0.1em; text-transform: uppercase; }
 .polaris-page .footer-nav a { margin-right: 1.2em; }
+.polaris-page .mode { border-left: 3px solid var(--amber); background: rgba(255,179,0,0.04); padding: 1em 1.3em; margin: 1em 0; }
+.polaris-page .mode__name { color: var(--amber); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.95em; display: block; margin-bottom: 0.3em; }
+.polaris-page .mode__sub { color: var(--cyan); font-size: 0.78em; letter-spacing: 0.2em; text-transform: uppercase; margin-left: 0.5em; }
 </style>
 
 <div class="polaris-page" markdown="1">
 
-<div class="brief-tag">§ 00 — ORIENTATION</div>
+<div class="brief-tag">§ 08 — AI ASSISTANT</div>
 
-# OPERATION NORTHSTORM
+# WORKING WITH CLAUDE
 
-You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what — and, if the window opens, take it.
+Claude is pre-configured on your Kali box. It knows the operation context — who POLARIS is, what Boreas is, what the missions look like. Invoke it with:
 
-## First Moves
+```
+claude
+```
 
-1. Solve **Start Here — Kali Warm-Up** for a quick first submit.
-2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
-3. Pick an opening: recon the front company (**M1**) or jump straight to a parallel objective (**M6–M9**).
+Ask it anything. Worst case, it declines gracefully.
 
-## Missions
+## Three Modes
 
-Nine objectives. All nine are live from mission start. The main operation is chained by pivots; the rest are reachable immediately.
+Naming the modes helps you pick the right one instead of defaulting to whatever comes to mind first.
 
-### Main operation
-
-- **Mission 1 — Boreas.** Map the front company.
-- **Mission 2 — Inside Boreas.** Breach the corporate perimeter.
-- **Mission 3 — The Lab.** Determine what PROJECT LEVIATHAN is. <span class="warn">requires pivot</span>
-- **Mission 4 — Lights Out.** Take the plant offline. <span class="warn">requires pivot</span>
-- **Mission 5 — Bunker.** Reach the control path. Turn it. <span class="warn">requires blackout (M4)</span>
-
-### Reachable immediately
-
-- **Mission 6 — Exposure.** Push a verified dossier through the press channel. <span class="ok">live from start</span>
-- **Mission 7 — Counterintel.** Identify the insider feeding AURORA's handler. <span class="ok">live from start</span>
-- **Mission 8 — Delivery Denied.** Freeze the reactor convoy before rollout. <span class="ok">live from start</span>
-- **Mission 9 — Safety Case.** Rehearse cold-shutdown on the training twin. <span class="ok">live from start</span>
-
-For the full reference card — objectives, surfaces, status flags — see the [Mission Log](/mission-log).
-
-## Support Channel
-
-<div class="callout">
-<strong>Palo + Ottawa BSides Discord:</strong> <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a>. Flag range issues, ask questions, coordinate with the room.
+<div class="mode">
+<span class="mode__name">Advice / Analysis</span>
+Claude explains, interprets, reasons. No action — just thinking together. Good for walking through a technique before you try it, asking what a piece of output means, or getting a second opinion on an ambiguous finding. Fastest turns. No execution risk.
 </div>
 
-## Reference Pages
+<div class="mode">
+<span class="mode__name">Co-Operator <span class="mode__sub">usually the sweet spot</span></span>
+You drive, Claude is your wingman — writes the script you ask for, suggests the next step, debugs the command that didn't work. You decide what runs and when. Fast enough to move, slow enough to actually learn what you did. Most operator time is well spent here.
+</div>
+
+<div class="mode">
+<span class="mode__name">Autonomous Operator</span>
+Hand Claude a task and let it run for a stretch — enumerate something, try an attack and report back, parse a dataset. Useful for long-running work or parallel effort. Less useful when you're close to a flag and want full control over the final step.
+</div>
+
+Most operators spend most of the day in Co-Operator. Advice / Analysis before attempting a technique they haven't seen. Autonomous when they're waiting on something else.
+
+## What Claude Brings
+
+- Explains error messages, protocol behavior, and tool output.
+- Writes exploit scripts from a description of the vulnerability you found.
+- Parses binary, decodes formats, extracts fields from noisy data.
+- Walks through attack techniques end-to-end.
+- Translates between toolchains.
+- Challenges your assumptions when your mental model is off.
+
+## Workflow Tips
+
+- **Give it real context.** Where you are, what you tried, what you got, what you expected. Vague context, vague answers.
+- **Point it at files.** Claude reads paths on the Kali box directly — handing it a file path is faster than moving the contents around.
+- **Ask for code, then read it.** Run exploit scripts knowing what they do, not on trust.
+- **Push back on it.** If a suggestion fails, tell it. It will debug with you.
+- **Switch modes deliberately.** Different work, different mode.
+
+<div class="callout">
+Claude is a force multiplier. Operators who name their mode, hand over context, and ask narrow questions move faster.
+</div>
 
 <div class="footer-nav">
+<a href="/">Start Here</a>
 <a href="/kali-quickstart">Kali Quickstart</a>
 <a href="/mission-log">Mission Log</a>
 <a href="/surfaces">Surfaces</a>
-<a href="/ai-assistant">AI Assistant</a>
 <a href="/getting-unstuck">Getting Unstuck</a>
 </div>
 

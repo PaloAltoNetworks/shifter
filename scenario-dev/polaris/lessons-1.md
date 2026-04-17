@@ -343,6 +343,98 @@ Save this as a snippet. Don't fight shell escaping on event day.
 
 ---
 
+## Red-team events: the participants ARE the threat actor
+
+### 20. Participants will pivot on the infrastructure you built for them
+
+**What happened.** Every polaris-vm had a `/etc/profile.d/claude-bedrock.sh` file with
+`ANTHROPIC_MODEL=us.anthropic.claude-sonnet-4-6` plus either the instance profile or
+static IAM keys granting broad `bedrock:InvokeModel` on `*`. That env var is just a
+string in a file the operator has shell on. Post-event Bedrock CloudWatch showed
+**5,732 Opus 4.6 invocations in the backup account on event day** — participants
+(or agentic Claude acting on their instructions) overrode `ANTHROPIC_MODEL` to an
+Opus inference-profile ID and ran for hours on the expensive tier we hadn't planned
+to spend on.
+
+Total event Bedrock cost ended up ~$1,515, with an estimated $200+ of that being
+Opus output tokens that should never have been invoked. Nothing maliciously broken
+— just participants finding and taking the most interesting option available.
+
+**Takeaway.**
+
+- **Bedrock access from range identities must be allow-listed, not deny-listed.** Default
+  `bedrock:InvokeModel on *` is wrong for events. The correct posture is `Deny` with
+  `NotResource` enumerating the exact set of approved inference profiles and their
+  underlying foundation model ARNs. Applied after the fact:
+
+  ```json
+  {
+    "Effect": "Deny",
+    "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream",
+               "bedrock:Converse", "bedrock:ConverseStream"],
+    "NotResource": [
+      "arn:aws:bedrock:*:*:inference-profile/<approved-profile-1>",
+      "arn:aws:bedrock:*:*:inference-profile/<approved-profile-2>",
+      "arn:aws:bedrock:*::foundation-model/<approved-model-1>*",
+      "arn:aws:bedrock:*::foundation-model/<approved-model-2>*"
+    ]
+  }
+  ```
+
+  Invoking an inference profile authorizes against **both** the profile ARN AND the
+  underlying foundation model ARN, so both must be in the `NotResource` list.
+
+- **Env vars on an operator box are not security controls — they're defaults.** Any
+  config file, environment variable, or credential reachable from the Kali box is in
+  scope from the participants' perspective. If the business cost of abuse is
+  significant (model pricing, API quotas, outbound traffic), enforce it with IAM or
+  network policy, not config.
+
+- **Pre-event, threat-model the range from the participants' side.** Ask: if an
+  operator got full root on their Kali box and examined every file, env var, and
+  reachable credential, what could they spend money on or get access to that we
+  don't want? Apply controls accordingly.
+
+- **Audit Bedrock CloudWatch metrics during the event, not after.** The
+  `AWS/Bedrock → Invocations` metric breaks down by `ModelId` dimension. An unexpected
+  `opus` ModelId showing up midway through an event is a visible signal. Budget a
+  5-minute check every 30 minutes.
+
+- **Block by default in the next event's bake.** Add the Deny-with-NotResource policy
+  to the terraform role definition, not as a post-event hotfix. Test it pre-event by
+  trying to invoke a non-allowlisted model from a range and confirming the
+  AccessDeniedException fires.
+
+### 21. Other infrastructure follows the same rule
+
+Bedrock happened to be the interesting target at BSides. At future events with
+different mixes, the same threat surface includes:
+
+- **S3 buckets.** If the range role can `s3:GetObject` on `*`, participants can read
+  buckets you didn't intend (and sometimes write). Scope to specific bucket ARNs.
+- **Secrets Manager.** Any secret the range role can `GetSecretValue` on is reachable.
+  Scope to the specific secret(s) needed for the range (DNS creds, game-time tokens)
+  and nothing else.
+- **EC2 metadata.** IMDSv2 is default on newer AMIs but participants on Linux have
+  shell and can hit `169.254.169.254` to enumerate the instance role's perms. If the
+  role has more permissions than they need, those permissions are theirs.
+- **SSM Parameter Store.** Same as Secrets Manager — scope read perms tightly.
+- **Outbound network.** If the VPC egress isn't restricted, participants can exfiltrate
+  what they've collected or route traffic through your infrastructure. Applies to
+  both IPv4 and IPv6.
+
+The red-team-event checklist before any future bake:
+
+1. Enumerate every AWS identity the participant environment can reach (instance role,
+   static keys in config/env/secrets, federated roles, cross-account assume-role).
+2. For each identity, list every service it can call and every resource it can call
+   them on (`iam:SimulatePrincipalPolicy` is the tool for this).
+3. For each line, ask: "If 110 clever red-teamers explored this, what would cost me
+   money or expose data I don't want to expose?"
+4. Tighten. Re-run the simulation after changes.
+
+---
+
 ## Things that went right
 
 1. **The briefing deck aesthetic worked.** Themed classification-stamp cold-open + mission

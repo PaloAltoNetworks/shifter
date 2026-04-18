@@ -1,37 +1,361 @@
 {
-  "generated_at": "2026-04-16T20:18:46.996758+00:00",
+  "generated_at": "2026-04-17T02:07:23.975479+00:00",
   "event": {
     "name": "Operation NORTHSTORM \u2014 BSides Ottawa",
     "start_utc": "2026-04-15T21:45:00+00:00",
     "end_utc": "2026-04-17T03:00:00+00:00"
   },
+  "stuck_signatures": {
+    "full_override": [
+      {
+        "op_num": 107,
+        "total_subs": 804,
+        "exact_correct_code_submitted": 20,
+        "three_piece_variants": 71,
+        "two_piece_variants": 20,
+        "flag_format_guesses": 115,
+        "solved": false,
+        "category": "HAS_ANSWER_STUCK"
+      },
+      {
+        "op_num": 7,
+        "total_subs": 79,
+        "exact_correct_code_submitted": 1,
+        "three_piece_variants": 40,
+        "two_piece_variants": 0,
+        "flag_format_guesses": 72,
+        "solved": false,
+        "category": "HAS_ANSWER_STUCK"
+      },
+      {
+        "op_num": 17,
+        "total_subs": 22,
+        "exact_correct_code_submitted": 2,
+        "three_piece_variants": 7,
+        "two_piece_variants": 2,
+        "flag_format_guesses": 6,
+        "solved": false,
+        "category": "HAS_ANSWER_STUCK"
+      },
+      {
+        "op_num": 95,
+        "total_subs": 21,
+        "exact_correct_code_submitted": 0,
+        "three_piece_variants": 0,
+        "two_piece_variants": 0,
+        "flag_format_guesses": 21,
+        "solved": false,
+        "category": "BRUTE_SPRAYING"
+      },
+      {
+        "op_num": 1,
+        "total_subs": 8,
+        "exact_correct_code_submitted": 0,
+        "three_piece_variants": 0,
+        "two_piece_variants": 0,
+        "flag_format_guesses": 8,
+        "solved": false,
+        "category": "ATTEMPTING"
+      },
+      {
+        "op_num": 22,
+        "total_subs": 8,
+        "exact_correct_code_submitted": 0,
+        "three_piece_variants": 0,
+        "two_piece_variants": 0,
+        "flag_format_guesses": 8,
+        "solved": false,
+        "category": "ATTEMPTING"
+      }
+    ]
+  },
+  "frustration_index": [
+    {
+      "op_num": 107,
+      "mission": "M5",
+      "submissions": 765,
+      "solves": 0
+    },
+    {
+      "op_num": 7,
+      "mission": "M5",
+      "submissions": 135,
+      "solves": 0
+    },
+    {
+      "op_num": 1,
+      "mission": "M5",
+      "submissions": 107,
+      "solves": 0
+    },
+    {
+      "op_num": 95,
+      "mission": "M5",
+      "submissions": 103,
+      "solves": 0
+    },
+    {
+      "op_num": 38,
+      "mission": "M3",
+      "submissions": 95,
+      "solves": 0
+    },
+    {
+      "op_num": 64,
+      "mission": "M3",
+      "submissions": 50,
+      "solves": 0
+    },
+    {
+      "op_num": 17,
+      "mission": "M5",
+      "submissions": 48,
+      "solves": 0
+    },
+    {
+      "op_num": 22,
+      "mission": "M5",
+      "submissions": 41,
+      "solves": 0
+    },
+    {
+      "op_num": 49,
+      "mission": "M3",
+      "submissions": 31,
+      "solves": 0
+    },
+    {
+      "op_num": 14,
+      "mission": "M3",
+      "submissions": 24,
+      "solves": 0
+    }
+  ],
   "summary": {
     "participants_total": 110,
     "participants_active": 61,
     "participants_scoring": 60,
     "challenges_visible": 55,
-    "solves_total": 1328,
-    "submissions_total": 5728,
-    "correct_total": 1328,
-    "incorrect_total": 2890,
-    "ratelimited_total": 1510,
-    "hint_unlocks_total": 231,
+    "solves_total": 1391,
+    "submissions_total": 7432,
+    "correct_total": 1391,
+    "incorrect_total": 3873,
+    "ratelimited_total": 2168,
+    "hint_unlocks_total": 266,
     "top_score": 4850,
     "median_score": 300,
-    "mean_score_of_active": 1782.0,
+    "mean_score_of_active": 1898.4,
     "median_solves": 6
   },
   "pareto": {
     "active_participants": 61,
-    "top_5pct_points_share": 0.1339,
-    "top_10pct_points_share": 0.264,
-    "top_25pct_points_share": 0.5285,
-    "top_50pct_points_share": 0.8178,
-    "top_5pct_solves_share": 0.1107,
-    "top_10pct_solves_share": 0.2191,
-    "top_25pct_solves_share": 0.4646
+    "top_5pct_points_share": 0.1256,
+    "top_10pct_points_share": 0.2513,
+    "top_25pct_points_share": 0.5371,
+    "top_50pct_points_share": 0.8191,
+    "top_5pct_solves_share": 0.1057,
+    "top_10pct_solves_share": 0.2114,
+    "top_25pct_solves_share": 0.4709
   },
   "users": [
+    {
+      "user_id": 3,
+      "op_num": 1,
+      "label": "op001",
+      "points": 4850,
+      "net_points": 4675,
+      "solves": 49,
+      "attempts_real": 289,
+      "attempts_total": 308,
+      "correct": 49,
+      "incorrect": 240,
+      "ratelimited": 19,
+      "success_rate": 0.1696,
+      "rate_limit_ratio": 0.0617,
+      "hints_bought": 6,
+      "hint_cost": 175,
+      "arrival_minutes": 79.8,
+      "first_solve_minutes": 81.4,
+      "active_minutes": 1556.9,
+      "effective_minutes": 527.0,
+      "sessions": 9,
+      "burst_density": 0.2704,
+      "burst_density_early": 0.4118,
+      "burst_density_late": 0.1299,
+      "discovered_mid_event": false,
+      "burst_buckets": {
+        "10_60s": 60,
+        "1_10min": 59,
+        "2_10s": 82,
+        "10min_plus": 23,
+        "under_2s": 83
+      },
+      "efficiency_pts_per_min": 9.2,
+      "missions_touched": [
+        "M0",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "missions_completed": [
+        "M0",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "per_mission": {
+        "M0": {
+          "attempts": 3,
+          "solves": 1
+        },
+        "M1": {
+          "attempts": 54,
+          "solves": 6
+        },
+        "M2": {
+          "attempts": 63,
+          "solves": 11
+        },
+        "M3": {
+          "attempts": 44,
+          "solves": 12
+        },
+        "M4": {
+          "attempts": 15,
+          "solves": 3
+        },
+        "M5": {
+          "attempts": 110,
+          "solves": 0
+        },
+        "M6": {
+          "attempts": 4,
+          "solves": 4
+        },
+        "M7": {
+          "attempts": 4,
+          "solves": 4
+        },
+        "M8": {
+          "attempts": 4,
+          "solves": 4
+        },
+        "M9": {
+          "attempts": 7,
+          "solves": 4
+        }
+      },
+      "cluster": "burst-low-accuracy"
+    },
+    {
+      "user_id": 9,
+      "op_num": 7,
+      "label": "op007",
+      "points": 4850,
+      "net_points": 3640,
+      "solves": 49,
+      "attempts_real": 274,
+      "attempts_total": 413,
+      "correct": 49,
+      "incorrect": 225,
+      "ratelimited": 139,
+      "success_rate": 0.1788,
+      "rate_limit_ratio": 0.3366,
+      "hints_bought": 19,
+      "hint_cost": 1210,
+      "arrival_minutes": 88.6,
+      "first_solve_minutes": 90.1,
+      "active_minutes": 1439.1,
+      "effective_minutes": 564.8,
+      "sessions": 11,
+      "burst_density": 0.6286,
+      "burst_density_early": 0.4612,
+      "burst_density_late": 0.7961,
+      "discovered_mid_event": false,
+      "burst_buckets": {
+        "1_10min": 32,
+        "under_2s": 259,
+        "2_10s": 48,
+        "10_60s": 41,
+        "10min_plus": 32
+      },
+      "efficiency_pts_per_min": 8.59,
+      "missions_touched": [
+        "M0",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "missions_completed": [
+        "M0",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "per_mission": {
+        "M0": {
+          "attempts": 5,
+          "solves": 1
+        },
+        "M1": {
+          "attempts": 15,
+          "solves": 6
+        },
+        "M2": {
+          "attempts": 38,
+          "solves": 11
+        },
+        "M3": {
+          "attempts": 111,
+          "solves": 12
+        },
+        "M4": {
+          "attempts": 13,
+          "solves": 3
+        },
+        "M5": {
+          "attempts": 175,
+          "solves": 0
+        },
+        "M6": {
+          "attempts": 17,
+          "solves": 4
+        },
+        "M7": {
+          "attempts": 16,
+          "solves": 4
+        },
+        "M8": {
+          "attempts": 14,
+          "solves": 4
+        },
+        "M9": {
+          "attempts": 9,
+          "solves": 4
+        }
+      },
+      "cluster": "burst-low-accuracy"
+    },
     {
       "user_id": 19,
       "op_num": 17,
@@ -231,38 +555,137 @@
       "cluster": "burst-low-accuracy"
     },
     {
+      "user_id": 84,
+      "op_num": 82,
+      "label": "op082",
+      "points": 4850,
+      "net_points": 4645,
+      "solves": 49,
+      "attempts_real": 248,
+      "attempts_total": 260,
+      "correct": 49,
+      "incorrect": 199,
+      "ratelimited": 12,
+      "success_rate": 0.1976,
+      "rate_limit_ratio": 0.0462,
+      "hints_bought": 20,
+      "hint_cost": 205,
+      "arrival_minutes": 56.5,
+      "first_solve_minutes": 67.3,
+      "active_minutes": 1497.6,
+      "effective_minutes": 359.6,
+      "sessions": 14,
+      "burst_density": 0.0039,
+      "burst_density_early": 0.0078,
+      "burst_density_late": 0.0,
+      "discovered_mid_event": false,
+      "burst_buckets": {
+        "10_60s": 40,
+        "1_10min": 38,
+        "2_10s": 157,
+        "10min_plus": 23,
+        "under_2s": 1
+      },
+      "efficiency_pts_per_min": 13.49,
+      "missions_touched": [
+        "M0",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "missions_completed": [
+        "M0",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "per_mission": {
+        "M0": {
+          "attempts": 7,
+          "solves": 1
+        },
+        "M1": {
+          "attempts": 24,
+          "solves": 6
+        },
+        "M2": {
+          "attempts": 64,
+          "solves": 11
+        },
+        "M3": {
+          "attempts": 120,
+          "solves": 12
+        },
+        "M4": {
+          "attempts": 13,
+          "solves": 3
+        },
+        "M5": {
+          "attempts": 4,
+          "solves": 0
+        },
+        "M6": {
+          "attempts": 11,
+          "solves": 4
+        },
+        "M7": {
+          "attempts": 5,
+          "solves": 4
+        },
+        "M8": {
+          "attempts": 4,
+          "solves": 4
+        },
+        "M9": {
+          "attempts": 8,
+          "solves": 4
+        }
+      },
+      "cluster": "manual-struggling"
+    },
+    {
       "user_id": 97,
       "op_num": 95,
       "label": "op095",
       "points": 4850,
       "net_points": 4850,
       "solves": 49,
-      "attempts_real": 221,
-      "attempts_total": 285,
+      "attempts_real": 243,
+      "attempts_total": 309,
       "correct": 49,
-      "incorrect": 172,
-      "ratelimited": 64,
-      "success_rate": 0.2217,
-      "rate_limit_ratio": 0.2246,
+      "incorrect": 194,
+      "ratelimited": 66,
+      "success_rate": 0.2016,
+      "rate_limit_ratio": 0.2136,
       "hints_bought": 0,
       "hint_cost": 0,
       "arrival_minutes": 60.8,
       "first_solve_minutes": 60.8,
-      "active_minutes": 997.9,
-      "effective_minutes": 293.3,
-      "sessions": 6,
-      "burst_density": 0.5775,
-      "burst_density_early": 0.2606,
-      "burst_density_late": 0.8944,
+      "active_minutes": 1568.3,
+      "effective_minutes": 302.0,
+      "sessions": 8,
+      "burst_density": 0.6006,
+      "burst_density_early": 0.2857,
+      "burst_density_late": 0.9156,
       "discovered_mid_event": true,
       "burst_buckets": {
-        "10min_plus": 18,
+        "10min_plus": 20,
         "10_60s": 27,
         "2_10s": 52,
-        "under_2s": 164,
-        "1_10min": 23
+        "under_2s": 185,
+        "1_10min": 24
       },
-      "efficiency_pts_per_min": 16.54,
+      "efficiency_pts_per_min": 16.06,
       "missions_touched": [
         "M0",
         "M1",
@@ -307,7 +730,7 @@
           "solves": 3
         },
         "M5": {
-          "attempts": 103,
+          "attempts": 127,
           "solves": 0
         },
         "M6": {
@@ -334,34 +757,34 @@
       "op_num": 107,
       "label": "op107",
       "points": 4850,
-      "net_points": 3355,
+      "net_points": 3305,
       "solves": 49,
-      "attempts_real": 327,
-      "attempts_total": 749,
+      "attempts_real": 876,
+      "attempts_total": 1782,
       "correct": 49,
-      "incorrect": 278,
-      "ratelimited": 422,
-      "success_rate": 0.1498,
-      "rate_limit_ratio": 0.5634,
-      "hints_bought": 32,
-      "hint_cost": 1495,
+      "incorrect": 827,
+      "ratelimited": 906,
+      "success_rate": 0.0559,
+      "rate_limit_ratio": 0.5084,
+      "hints_bought": 34,
+      "hint_cost": 1545,
       "arrival_minutes": 77.9,
       "first_solve_minutes": 77.9,
-      "active_minutes": 1029.6,
-      "effective_minutes": 376.9,
-      "sessions": 9,
-      "burst_density": 0.7968,
-      "burst_density_early": 0.7139,
-      "burst_density_late": 0.8797,
+      "active_minutes": 1524.2,
+      "effective_minutes": 724.4,
+      "sessions": 12,
+      "burst_density": 0.8265,
+      "burst_density_early": 0.8101,
+      "burst_density_late": 0.8429,
       "discovered_mid_event": false,
       "burst_buckets": {
-        "10min_plus": 22,
-        "under_2s": 596,
-        "1_10min": 27,
-        "10_60s": 40,
-        "2_10s": 63
+        "10min_plus": 34,
+        "under_2s": 1472,
+        "1_10min": 81,
+        "10_60s": 72,
+        "2_10s": 122
       },
-      "efficiency_pts_per_min": 12.87,
+      "efficiency_pts_per_min": 6.7,
       "missions_touched": [
         "M0",
         "M1",
@@ -390,77 +813,77 @@
           "solves": 1
         },
         "M1": {
-          "attempts": 39,
+          "attempts": 45,
           "solves": 6
         },
         "M2": {
-          "attempts": 98,
+          "attempts": 109,
           "solves": 11
         },
         "M3": {
-          "attempts": 99,
+          "attempts": 115,
           "solves": 12
         },
         "M4": {
-          "attempts": 20,
+          "attempts": 27,
           "solves": 3
         },
         "M5": {
-          "attempts": 387,
+          "attempts": 1335,
           "solves": 0
         },
         "M6": {
-          "attempts": 25,
+          "attempts": 39,
           "solves": 4
         },
         "M7": {
-          "attempts": 24,
+          "attempts": 36,
           "solves": 4
         },
         "M8": {
-          "attempts": 25,
+          "attempts": 36,
           "solves": 4
         },
         "M9": {
-          "attempts": 26,
+          "attempts": 34,
           "solves": 4
         }
       },
       "cluster": "burst-low-accuracy"
     },
     {
-      "user_id": 3,
-      "op_num": 1,
-      "label": "op001",
-      "points": 4800,
-      "net_points": 4675,
-      "solves": 48,
-      "attempts_real": 211,
-      "attempts_total": 227,
-      "correct": 48,
-      "incorrect": 163,
-      "ratelimited": 16,
-      "success_rate": 0.2275,
-      "rate_limit_ratio": 0.0705,
-      "hints_bought": 5,
-      "hint_cost": 125,
-      "arrival_minutes": 79.8,
-      "first_solve_minutes": 81.4,
-      "active_minutes": 988.2,
-      "effective_minutes": 413.2,
+      "user_id": 24,
+      "op_num": 22,
+      "label": "op022",
+      "points": 4400,
+      "net_points": 4400,
+      "solves": 46,
+      "attempts_real": 188,
+      "attempts_total": 269,
+      "correct": 46,
+      "incorrect": 142,
+      "ratelimited": 81,
+      "success_rate": 0.2447,
+      "rate_limit_ratio": 0.3011,
+      "hints_bought": 0,
+      "hint_cost": 0,
+      "arrival_minutes": 120.1,
+      "first_solve_minutes": 120.5,
+      "active_minutes": 1506.1,
+      "effective_minutes": 262.9,
       "sessions": 4,
-      "burst_density": 0.3186,
-      "burst_density_early": 0.4779,
-      "burst_density_late": 0.1593,
+      "burst_density": 0.6604,
+      "burst_density_early": 0.597,
+      "burst_density_late": 0.7239,
       "discovered_mid_event": false,
       "burst_buckets": {
-        "10_60s": 45,
-        "1_10min": 49,
-        "2_10s": 46,
-        "10min_plus": 14,
-        "under_2s": 72
+        "10_60s": 26,
+        "1_10min": 32,
+        "2_10s": 22,
+        "under_2s": 177,
+        "10min_plus": 11
       },
-      "efficiency_pts_per_min": 11.62,
+      "efficiency_pts_per_min": 16.74,
       "missions_touched": [
         "M0",
         "M1",
@@ -475,7 +898,6 @@
       "missions_completed": [
         "M0",
         "M1",
-        "M3",
         "M4",
         "M6",
         "M7",
@@ -488,23 +910,23 @@
           "solves": 1
         },
         "M1": {
-          "attempts": 54,
+          "attempts": 14,
           "solves": 6
         },
         "M2": {
-          "attempts": 57,
+          "attempts": 47,
           "solves": 10
         },
         "M3": {
-          "attempts": 44,
-          "solves": 12
+          "attempts": 129,
+          "solves": 10
         },
         "M4": {
-          "attempts": 15,
+          "attempts": 4,
           "solves": 3
         },
         "M5": {
-          "attempts": 35,
+          "attempts": 53,
           "solves": 0
         },
         "M6": {
@@ -527,38 +949,37 @@
       "cluster": "burst-low-accuracy"
     },
     {
-      "user_id": 9,
-      "op_num": 7,
-      "label": "op007",
-      "points": 4500,
-      "net_points": 4490,
-      "solves": 47,
-      "attempts_real": 153,
-      "attempts_total": 245,
-      "correct": 47,
-      "incorrect": 106,
-      "ratelimited": 92,
-      "success_rate": 0.3072,
-      "rate_limit_ratio": 0.3755,
-      "hints_bought": 2,
-      "hint_cost": 10,
-      "arrival_minutes": 88.6,
-      "first_solve_minutes": 90.1,
-      "active_minutes": 1001.1,
-      "effective_minutes": 364.3,
-      "sessions": 7,
-      "burst_density": 0.5369,
-      "burst_density_early": 0.2131,
-      "burst_density_late": 0.8607,
+      "user_id": 46,
+      "op_num": 44,
+      "label": "op044",
+      "points": 4100,
+      "net_points": 4100,
+      "solves": 44,
+      "attempts_real": 102,
+      "attempts_total": 143,
+      "correct": 44,
+      "incorrect": 58,
+      "ratelimited": 41,
+      "success_rate": 0.4314,
+      "rate_limit_ratio": 0.2867,
+      "hints_bought": 1,
+      "hint_cost": 0,
+      "arrival_minutes": 75.9,
+      "first_solve_minutes": 76.2,
+      "active_minutes": 1479.8,
+      "effective_minutes": 332.8,
+      "sessions": 8,
+      "burst_density": 0.6127,
+      "burst_density_early": 0.3662,
+      "burst_density_late": 0.8592,
       "discovered_mid_event": true,
       "burst_buckets": {
-        "1_10min": 26,
-        "under_2s": 131,
-        "2_10s": 34,
-        "10_60s": 33,
-        "10min_plus": 20
+        "10_60s": 16,
+        "1_10min": 19,
+        "10min_plus": 20,
+        "under_2s": 87
       },
-      "efficiency_pts_per_min": 12.35,
+      "efficiency_pts_per_min": 12.32,
       "missions_touched": [
         "M0",
         "M1",
@@ -573,7 +994,6 @@
       "missions_completed": [
         "M0",
         "M1",
-        "M2",
         "M4",
         "M6",
         "M7",
@@ -582,140 +1002,47 @@
       ],
       "per_mission": {
         "M0": {
-          "attempts": 4,
+          "attempts": 2,
           "solves": 1
         },
         "M1": {
-          "attempts": 15,
+          "attempts": 9,
           "solves": 6
         },
         "M2": {
-          "attempts": 38,
-          "solves": 11
+          "attempts": 36,
+          "solves": 9
         },
         "M3": {
-          "attempts": 97,
-          "solves": 10
+          "attempts": 65,
+          "solves": 9
         },
         "M4": {
-          "attempts": 12,
+          "attempts": 14,
           "solves": 3
         },
         "M5": {
-          "attempts": 39,
+          "attempts": 1,
           "solves": 0
         },
         "M6": {
-          "attempts": 13,
+          "attempts": 4,
           "solves": 4
         },
         "M7": {
-          "attempts": 12,
+          "attempts": 4,
           "solves": 4
         },
         "M8": {
-          "attempts": 10,
+          "attempts": 4,
           "solves": 4
         },
         "M9": {
-          "attempts": 5,
+          "attempts": 4,
           "solves": 4
         }
       },
       "cluster": "burst-low-accuracy"
-    },
-    {
-      "user_id": 84,
-      "op_num": 82,
-      "label": "op082",
-      "points": 4100,
-      "net_points": 4070,
-      "solves": 43,
-      "attempts_real": 223,
-      "attempts_total": 235,
-      "correct": 43,
-      "incorrect": 180,
-      "ratelimited": 12,
-      "success_rate": 0.1928,
-      "rate_limit_ratio": 0.0511,
-      "hints_bought": 7,
-      "hint_cost": 30,
-      "arrival_minutes": 56.5,
-      "first_solve_minutes": 67.3,
-      "active_minutes": 659.6,
-      "effective_minutes": 333.6,
-      "sessions": 7,
-      "burst_density": 0.0043,
-      "burst_density_early": 0.0085,
-      "burst_density_late": 0.0,
-      "discovered_mid_event": false,
-      "burst_buckets": {
-        "10_60s": 40,
-        "1_10min": 29,
-        "2_10s": 148,
-        "10min_plus": 16,
-        "under_2s": 1
-      },
-      "efficiency_pts_per_min": 12.29,
-      "missions_touched": [
-        "M0",
-        "M1",
-        "M2",
-        "M3",
-        "M4",
-        "M6",
-        "M7",
-        "M8",
-        "M9"
-      ],
-      "missions_completed": [
-        "M0",
-        "M1",
-        "M4",
-        "M6",
-        "M7",
-        "M8",
-        "M9"
-      ],
-      "per_mission": {
-        "M0": {
-          "attempts": 7,
-          "solves": 1
-        },
-        "M1": {
-          "attempts": 24,
-          "solves": 6
-        },
-        "M2": {
-          "attempts": 62,
-          "solves": 10
-        },
-        "M3": {
-          "attempts": 101,
-          "solves": 7
-        },
-        "M4": {
-          "attempts": 13,
-          "solves": 3
-        },
-        "M6": {
-          "attempts": 11,
-          "solves": 4
-        },
-        "M7": {
-          "attempts": 5,
-          "solves": 4
-        },
-        "M8": {
-          "attempts": 4,
-          "solves": 4
-        },
-        "M9": {
-          "attempts": 8,
-          "solves": 4
-        }
-      },
-      "cluster": "manual-struggling"
     },
     {
       "user_id": 100,
@@ -1089,6 +1416,97 @@
       "cluster": "manual-struggling"
     },
     {
+      "user_id": 16,
+      "op_num": 14,
+      "label": "op014",
+      "points": 3050,
+      "net_points": 3015,
+      "solves": 35,
+      "attempts_real": 107,
+      "attempts_total": 109,
+      "correct": 35,
+      "incorrect": 72,
+      "ratelimited": 2,
+      "success_rate": 0.3271,
+      "rate_limit_ratio": 0.0183,
+      "hints_bought": 3,
+      "hint_cost": 35,
+      "arrival_minutes": 56.4,
+      "first_solve_minutes": 71.8,
+      "active_minutes": 1313.0,
+      "effective_minutes": 235.9,
+      "sessions": 7,
+      "burst_density": 0.0463,
+      "burst_density_early": 0.0556,
+      "burst_density_late": 0.037,
+      "discovered_mid_event": false,
+      "burst_buckets": {
+        "10min_plus": 14,
+        "10_60s": 30,
+        "1_10min": 28,
+        "2_10s": 31,
+        "under_2s": 5
+      },
+      "efficiency_pts_per_min": 12.93,
+      "missions_touched": [
+        "M0",
+        "M1",
+        "M2",
+        "M4",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "missions_completed": [
+        "M0",
+        "M1",
+        "M6",
+        "M7",
+        "M8",
+        "M9"
+      ],
+      "per_mission": {
+        "M0": {
+          "attempts": 2,
+          "solves": 1
+        },
+        "M1": {
+          "attempts": 19,
+          "solves": 6
+        },
+        "M2": {
+          "attempts": 30,
+          "solves": 10
+        },
+        "M3": {
+          "attempts": 26,
+          "solves": 0
+        },
+        "M4": {
+          "attempts": 6,
+          "solves": 2
+        },
+        "M6": {
+          "attempts": 4,
+          "solves": 4
+        },
+        "M7": {
+          "attempts": 10,
+          "solves": 4
+        },
+        "M8": {
+          "attempts": 6,
+          "solves": 4
+        },
+        "M9": {
+          "attempts": 6,
+          "solves": 4
+        }
+      },
+      "cluster": "manual-struggling"
+    },
+    {
       "user_id": 72,
       "op_num": 70,
       "label": "op070",
@@ -1435,177 +1853,6 @@
         }
       },
       "cluster": "mixed"
-    },
-    {
-      "user_id": 16,
-      "op_num": 14,
-      "label": "op014",
-      "points": 2550,
-      "net_points": 2515,
-      "solves": 32,
-      "attempts_real": 85,
-      "attempts_total": 87,
-      "correct": 32,
-      "incorrect": 53,
-      "ratelimited": 2,
-      "success_rate": 0.3765,
-      "rate_limit_ratio": 0.023,
-      "hints_bought": 3,
-      "hint_cost": 35,
-      "arrival_minutes": 56.4,
-      "first_solve_minutes": 71.8,
-      "active_minutes": 1051.1,
-      "effective_minutes": 230.0,
-      "sessions": 5,
-      "burst_density": 0.0581,
-      "burst_density_early": 0.0698,
-      "burst_density_late": 0.0465,
-      "discovered_mid_event": false,
-      "burst_buckets": {
-        "10min_plus": 12,
-        "10_60s": 22,
-        "1_10min": 26,
-        "2_10s": 21,
-        "under_2s": 5
-      },
-      "efficiency_pts_per_min": 11.09,
-      "missions_touched": [
-        "M0",
-        "M1",
-        "M2",
-        "M6",
-        "M7",
-        "M8",
-        "M9"
-      ],
-      "missions_completed": [
-        "M0",
-        "M1",
-        "M6",
-        "M7",
-        "M8",
-        "M9"
-      ],
-      "per_mission": {
-        "M0": {
-          "attempts": 2,
-          "solves": 1
-        },
-        "M1": {
-          "attempts": 19,
-          "solves": 6
-        },
-        "M2": {
-          "attempts": 28,
-          "solves": 9
-        },
-        "M3": {
-          "attempts": 12,
-          "solves": 0
-        },
-        "M6": {
-          "attempts": 4,
-          "solves": 4
-        },
-        "M7": {
-          "attempts": 10,
-          "solves": 4
-        },
-        "M8": {
-          "attempts": 6,
-          "solves": 4
-        },
-        "M9": {
-          "attempts": 6,
-          "solves": 4
-        }
-      },
-      "cluster": "mixed"
-    },
-    {
-      "user_id": 46,
-      "op_num": 44,
-      "label": "op044",
-      "points": 2500,
-      "net_points": 2500,
-      "solves": 31,
-      "attempts_real": 40,
-      "attempts_total": 40,
-      "correct": 31,
-      "incorrect": 9,
-      "ratelimited": 0,
-      "success_rate": 0.775,
-      "rate_limit_ratio": 0.0,
-      "hints_bought": 1,
-      "hint_cost": 0,
-      "arrival_minutes": 75.9,
-      "first_solve_minutes": 76.2,
-      "active_minutes": 1034.4,
-      "effective_minutes": 116.6,
-      "sessions": 4,
-      "burst_density": 0.1795,
-      "burst_density_early": 0.0,
-      "burst_density_late": 0.35,
-      "discovered_mid_event": true,
-      "burst_buckets": {
-        "10_60s": 10,
-        "1_10min": 15,
-        "10min_plus": 7,
-        "under_2s": 7
-      },
-      "efficiency_pts_per_min": 21.44,
-      "missions_touched": [
-        "M0",
-        "M1",
-        "M2",
-        "M6",
-        "M7",
-        "M8",
-        "M9"
-      ],
-      "missions_completed": [
-        "M0",
-        "M1",
-        "M6",
-        "M7",
-        "M8",
-        "M9"
-      ],
-      "per_mission": {
-        "M0": {
-          "attempts": 2,
-          "solves": 1
-        },
-        "M1": {
-          "attempts": 9,
-          "solves": 6
-        },
-        "M2": {
-          "attempts": 12,
-          "solves": 8
-        },
-        "M3": {
-          "attempts": 1,
-          "solves": 0
-        },
-        "M6": {
-          "attempts": 4,
-          "solves": 4
-        },
-        "M7": {
-          "attempts": 4,
-          "solves": 4
-        },
-        "M8": {
-          "attempts": 4,
-          "solves": 4
-        },
-        "M9": {
-          "attempts": 4,
-          "solves": 4
-        }
-      },
-      "cluster": "high-accuracy-slow"
     },
     {
       "user_id": 25,
@@ -3461,58 +3708,67 @@
       "cluster": "mixed"
     },
     {
-      "user_id": 24,
-      "op_num": 22,
-      "label": "op022",
-      "points": 650,
+      "user_id": 37,
+      "op_num": 35,
+      "label": "op035",
+      "points": 700,
       "net_points": 650,
-      "solves": 10,
-      "attempts_real": 23,
-      "attempts_total": 23,
-      "correct": 10,
-      "incorrect": 13,
+      "solves": 12,
+      "attempts_real": 31,
+      "attempts_total": 31,
+      "correct": 12,
+      "incorrect": 19,
       "ratelimited": 0,
-      "success_rate": 0.4348,
+      "success_rate": 0.3871,
       "rate_limit_ratio": 0.0,
-      "hints_bought": 0,
-      "hint_cost": 0,
-      "arrival_minutes": 120.1,
-      "first_solve_minutes": 120.5,
-      "active_minutes": 53.0,
-      "effective_minutes": 53.0,
-      "sessions": 1,
-      "burst_density": 0.0455,
-      "burst_density_early": 0.0909,
+      "hints_bought": 3,
+      "hint_cost": 50,
+      "arrival_minutes": 164.1,
+      "first_solve_minutes": 176.4,
+      "active_minutes": 963.0,
+      "effective_minutes": 85.1,
+      "sessions": 2,
+      "burst_density": 0.0333,
+      "burst_density_early": 0.0667,
       "burst_density_late": 0.0,
       "discovered_mid_event": false,
       "burst_buckets": {
-        "10_60s": 6,
-        "1_10min": 12,
-        "2_10s": 3,
-        "under_2s": 1
+        "1_10min": 15,
+        "10_60s": 9,
+        "2_10s": 1,
+        "under_2s": 1,
+        "10min_plus": 4
       },
-      "efficiency_pts_per_min": 12.26,
+      "efficiency_pts_per_min": 8.23,
       "missions_touched": [
         "M0",
         "M1",
-        "M9"
+        "M2",
+        "M7"
       ],
       "missions_completed": [
-        "M0",
-        "M9"
+        "M0"
       ],
       "per_mission": {
         "M0": {
-          "attempts": 3,
+          "attempts": 2,
           "solves": 1
         },
         "M1": {
-          "attempts": 13,
+          "attempts": 16,
           "solves": 5
         },
-        "M9": {
-          "attempts": 7,
+        "M2": {
+          "attempts": 8,
           "solves": 4
+        },
+        "M3": {
+          "attempts": 1,
+          "solves": 0
+        },
+        "M7": {
+          "attempts": 4,
+          "solves": 2
         }
       },
       "cluster": "mixed"
@@ -3572,72 +3828,6 @@
         }
       },
       "cluster": "mixed"
-    },
-    {
-      "user_id": 37,
-      "op_num": 35,
-      "label": "op035",
-      "points": 600,
-      "net_points": 600,
-      "solves": 10,
-      "attempts_real": 29,
-      "attempts_total": 29,
-      "correct": 10,
-      "incorrect": 19,
-      "ratelimited": 0,
-      "success_rate": 0.3448,
-      "rate_limit_ratio": 0.0,
-      "hints_bought": 1,
-      "hint_cost": 0,
-      "arrival_minutes": 164.1,
-      "first_solve_minutes": 176.4,
-      "active_minutes": 83.7,
-      "effective_minutes": 83.7,
-      "sessions": 1,
-      "burst_density": 0.0357,
-      "burst_density_early": 0.0714,
-      "burst_density_late": 0.0,
-      "discovered_mid_event": false,
-      "burst_buckets": {
-        "1_10min": 14,
-        "10_60s": 9,
-        "2_10s": 1,
-        "under_2s": 1,
-        "10min_plus": 3
-      },
-      "efficiency_pts_per_min": 7.17,
-      "missions_touched": [
-        "M0",
-        "M1",
-        "M2",
-        "M7"
-      ],
-      "missions_completed": [
-        "M0"
-      ],
-      "per_mission": {
-        "M0": {
-          "attempts": 2,
-          "solves": 1
-        },
-        "M1": {
-          "attempts": 16,
-          "solves": 5
-        },
-        "M2": {
-          "attempts": 6,
-          "solves": 2
-        },
-        "M3": {
-          "attempts": 1,
-          "solves": 0
-        },
-        "M7": {
-          "attempts": 4,
-          "solves": 2
-        }
-      },
-      "cluster": "manual-struggling"
     },
     {
       "user_id": 56,
@@ -6112,9 +6302,9 @@
       "solve_rate": 0.5273,
       "attempter_count": 59,
       "conditional_solve_rate": 0.9831,
-      "attempt_count": 182,
+      "attempt_count": 183,
       "real_attempt_count": 174,
-      "rate_limited_count": 8,
+      "rate_limited_count": 9,
       "first_solve": "2026-04-15T22:44:24.638690+00:00",
       "minutes_to_first_solve": 59.4,
       "median_attempts_per_solver": 1.0,
@@ -6132,9 +6322,9 @@
       "solve_rate": 0.5364,
       "attempter_count": 59,
       "conditional_solve_rate": 1.0,
-      "attempt_count": 116,
+      "attempt_count": 117,
       "real_attempt_count": 109,
-      "rate_limited_count": 7,
+      "rate_limited_count": 8,
       "first_solve": "2026-04-15T22:45:23.270291+00:00",
       "minutes_to_first_solve": 60.4,
       "median_attempts_per_solver": 1,
@@ -6152,9 +6342,9 @@
       "solve_rate": 0.5364,
       "attempter_count": 59,
       "conditional_solve_rate": 1.0,
-      "attempt_count": 78,
+      "attempt_count": 79,
       "real_attempt_count": 71,
-      "rate_limited_count": 7,
+      "rate_limited_count": 8,
       "first_solve": "2026-04-15T22:44:24.713745+00:00",
       "minutes_to_first_solve": 59.4,
       "median_attempts_per_solver": 1,
@@ -6172,9 +6362,9 @@
       "solve_rate": 0.5091,
       "attempter_count": 57,
       "conditional_solve_rate": 0.9825,
-      "attempt_count": 86,
+      "attempt_count": 87,
       "real_attempt_count": 76,
-      "rate_limited_count": 10,
+      "rate_limited_count": 11,
       "first_solve": "2026-04-15T22:45:32.549046+00:00",
       "minutes_to_first_solve": 60.5,
       "median_attempts_per_solver": 1.0,
@@ -6192,9 +6382,9 @@
       "solve_rate": 0.5,
       "attempter_count": 57,
       "conditional_solve_rate": 0.9649,
-      "attempt_count": 90,
+      "attempt_count": 91,
       "real_attempt_count": 79,
-      "rate_limited_count": 11,
+      "rate_limited_count": 12,
       "first_solve": "2026-04-15T22:44:51.639918+00:00",
       "minutes_to_first_solve": 59.9,
       "median_attempts_per_solver": 1,
@@ -6208,17 +6398,17 @@
       "mission": "M1",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 20,
-      "solve_rate": 0.1818,
+      "solve_count": 21,
+      "solve_rate": 0.1909,
       "attempter_count": 48,
-      "conditional_solve_rate": 0.4167,
-      "attempt_count": 475,
-      "real_attempt_count": 423,
-      "rate_limited_count": 52,
+      "conditional_solve_rate": 0.4375,
+      "attempt_count": 477,
+      "real_attempt_count": 424,
+      "rate_limited_count": 53,
       "first_solve": "2026-04-16T01:38:53.724256+00:00",
       "minutes_to_first_solve": 233.9,
-      "median_attempts_per_solver": 5.0,
-      "median_minutes_to_solve": 141.8,
+      "median_attempts_per_solver": 5,
+      "median_minutes_to_solve": 158.9,
       "hint_unlocks": 29
     },
     {
@@ -6228,16 +6418,16 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 43,
-      "solve_rate": 0.3909,
-      "attempter_count": 48,
-      "conditional_solve_rate": 0.8958,
-      "attempt_count": 90,
-      "real_attempt_count": 80,
-      "rate_limited_count": 10,
+      "solve_count": 44,
+      "solve_rate": 0.4,
+      "attempter_count": 49,
+      "conditional_solve_rate": 0.898,
+      "attempt_count": 93,
+      "real_attempt_count": 82,
+      "rate_limited_count": 11,
       "first_solve": "2026-04-15T22:52:30.767529+00:00",
       "minutes_to_first_solve": 67.5,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 10
     },
@@ -6248,17 +6438,17 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 12,
-      "solve_rate": 0.1091,
-      "attempter_count": 38,
-      "conditional_solve_rate": 0.3158,
-      "attempt_count": 196,
-      "real_attempt_count": 162,
-      "rate_limited_count": 34,
+      "solve_count": 14,
+      "solve_rate": 0.1273,
+      "attempter_count": 39,
+      "conditional_solve_rate": 0.359,
+      "attempt_count": 219,
+      "real_attempt_count": 181,
+      "rate_limited_count": 38,
       "first_solve": "2026-04-15T23:43:44.111254+00:00",
       "minutes_to_first_solve": 118.7,
       "median_attempts_per_solver": 6.0,
-      "median_minutes_to_solve": 124.2,
+      "median_minutes_to_solve": 141.5,
       "hint_unlocks": 18
     },
     {
@@ -6268,16 +6458,16 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 35,
-      "solve_rate": 0.3182,
-      "attempter_count": 42,
-      "conditional_solve_rate": 0.8333,
-      "attempt_count": 92,
-      "real_attempt_count": 76,
-      "rate_limited_count": 16,
+      "solve_count": 36,
+      "solve_rate": 0.3273,
+      "attempter_count": 43,
+      "conditional_solve_rate": 0.8372,
+      "attempt_count": 96,
+      "real_attempt_count": 78,
+      "rate_limited_count": 18,
       "first_solve": "2026-04-15T22:52:07.631067+00:00",
       "minutes_to_first_solve": 67.1,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 3
     },
@@ -6288,17 +6478,17 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 12,
-      "solve_rate": 0.1091,
-      "attempter_count": 33,
-      "conditional_solve_rate": 0.3636,
-      "attempt_count": 166,
-      "real_attempt_count": 135,
-      "rate_limited_count": 31,
+      "solve_count": 14,
+      "solve_rate": 0.1273,
+      "attempter_count": 35,
+      "conditional_solve_rate": 0.4,
+      "attempt_count": 186,
+      "real_attempt_count": 154,
+      "rate_limited_count": 32,
       "first_solve": "2026-04-15T23:06:36.198545+00:00",
       "minutes_to_first_solve": 81.6,
-      "median_attempts_per_solver": 2.5,
-      "median_minutes_to_solve": 42.9,
+      "median_attempts_per_solver": 3.0,
+      "median_minutes_to_solve": 54.0,
       "hint_unlocks": 9
     },
     {
@@ -6308,13 +6498,13 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 37,
-      "solve_rate": 0.3364,
-      "attempter_count": 41,
-      "conditional_solve_rate": 0.9024,
-      "attempt_count": 85,
-      "real_attempt_count": 75,
-      "rate_limited_count": 10,
+      "solve_count": 39,
+      "solve_rate": 0.3545,
+      "attempter_count": 43,
+      "conditional_solve_rate": 0.907,
+      "attempt_count": 91,
+      "real_attempt_count": 79,
+      "rate_limited_count": 12,
       "first_solve": "2026-04-15T22:47:21.262879+00:00",
       "minutes_to_first_solve": 62.4,
       "median_attempts_per_solver": 1,
@@ -6328,13 +6518,13 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 38,
-      "solve_rate": 0.3455,
-      "attempter_count": 41,
-      "conditional_solve_rate": 0.9268,
-      "attempt_count": 71,
-      "real_attempt_count": 61,
-      "rate_limited_count": 10,
+      "solve_count": 40,
+      "solve_rate": 0.3636,
+      "attempter_count": 43,
+      "conditional_solve_rate": 0.9302,
+      "attempt_count": 76,
+      "real_attempt_count": 64,
+      "rate_limited_count": 12,
       "first_solve": "2026-04-15T22:49:31.737773+00:00",
       "minutes_to_first_solve": 64.5,
       "median_attempts_per_solver": 1.0,
@@ -6348,16 +6538,16 @@
       "mission": "M2",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 37,
-      "solve_rate": 0.3364,
-      "attempter_count": 40,
-      "conditional_solve_rate": 0.925,
-      "attempt_count": 75,
-      "real_attempt_count": 59,
-      "rate_limited_count": 16,
+      "solve_count": 38,
+      "solve_rate": 0.3455,
+      "attempter_count": 41,
+      "conditional_solve_rate": 0.9268,
+      "attempt_count": 78,
+      "real_attempt_count": 61,
+      "rate_limited_count": 17,
       "first_solve": "2026-04-15T22:52:07.732812+00:00",
       "minutes_to_first_solve": 67.1,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 0
     },
@@ -6368,13 +6558,13 @@
       "mission": "M2",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 26,
-      "solve_rate": 0.2364,
-      "attempter_count": 36,
-      "conditional_solve_rate": 0.7222,
-      "attempt_count": 99,
-      "real_attempt_count": 70,
-      "rate_limited_count": 29,
+      "solve_count": 28,
+      "solve_rate": 0.2545,
+      "attempter_count": 37,
+      "conditional_solve_rate": 0.7568,
+      "attempt_count": 105,
+      "real_attempt_count": 74,
+      "rate_limited_count": 31,
       "first_solve": "2026-04-15T22:59:52.553900+00:00",
       "minutes_to_first_solve": 74.9,
       "median_attempts_per_solver": 1.0,
@@ -6388,18 +6578,18 @@
       "mission": "M2",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 19,
-      "solve_rate": 0.1727,
-      "attempter_count": 33,
-      "conditional_solve_rate": 0.5758,
-      "attempt_count": 139,
-      "real_attempt_count": 107,
-      "rate_limited_count": 32,
+      "solve_count": 20,
+      "solve_rate": 0.1818,
+      "attempter_count": 34,
+      "conditional_solve_rate": 0.5882,
+      "attempt_count": 143,
+      "real_attempt_count": 110,
+      "rate_limited_count": 33,
       "first_solve": "2026-04-15T23:06:56.299306+00:00",
       "minutes_to_first_solve": 81.9,
-      "median_attempts_per_solver": 4,
-      "median_minutes_to_solve": 18.9,
-      "hint_unlocks": 3
+      "median_attempts_per_solver": 3.5,
+      "median_minutes_to_solve": 20.7,
+      "hint_unlocks": 4
     },
     {
       "id": 16,
@@ -6408,17 +6598,17 @@
       "mission": "M2",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 16,
-      "solve_rate": 0.1455,
-      "attempter_count": 29,
-      "conditional_solve_rate": 0.5517,
-      "attempt_count": 142,
-      "real_attempt_count": 99,
-      "rate_limited_count": 43,
+      "solve_count": 17,
+      "solve_rate": 0.1545,
+      "attempter_count": 30,
+      "conditional_solve_rate": 0.5667,
+      "attempt_count": 160,
+      "real_attempt_count": 113,
+      "rate_limited_count": 47,
       "first_solve": "2026-04-15T23:10:40.398227+00:00",
       "minutes_to_first_solve": 85.7,
-      "median_attempts_per_solver": 3.0,
-      "median_minutes_to_solve": 14.8,
+      "median_attempts_per_solver": 3,
+      "median_minutes_to_solve": 21.9,
       "hint_unlocks": 2
     },
     {
@@ -6428,17 +6618,17 @@
       "mission": "M2",
       "value": 200,
       "difficulty": "hard",
-      "solve_count": 19,
-      "solve_rate": 0.1727,
-      "attempter_count": 31,
-      "conditional_solve_rate": 0.6129,
-      "attempt_count": 101,
-      "real_attempt_count": 76,
-      "rate_limited_count": 25,
+      "solve_count": 20,
+      "solve_rate": 0.1818,
+      "attempter_count": 32,
+      "conditional_solve_rate": 0.625,
+      "attempt_count": 103,
+      "real_attempt_count": 77,
+      "rate_limited_count": 26,
       "first_solve": "2026-04-15T23:10:27.511428+00:00",
       "minutes_to_first_solve": 85.5,
-      "median_attempts_per_solver": 2,
-      "median_minutes_to_solve": 4.4,
+      "median_attempts_per_solver": 2.0,
+      "median_minutes_to_solve": 2.9,
       "hint_unlocks": 0
     },
     {
@@ -6448,16 +6638,16 @@
       "mission": "M4",
       "value": 200,
       "difficulty": "hard",
-      "solve_count": 16,
-      "solve_rate": 0.1455,
-      "attempter_count": 17,
-      "conditional_solve_rate": 0.9412,
-      "attempt_count": 37,
-      "real_attempt_count": 30,
-      "rate_limited_count": 7,
+      "solve_count": 19,
+      "solve_rate": 0.1727,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.95,
+      "attempt_count": 41,
+      "real_attempt_count": 33,
+      "rate_limited_count": 8,
       "first_solve": "2026-04-15T23:51:43.330951+00:00",
       "minutes_to_first_solve": 126.7,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 3
     },
@@ -6468,17 +6658,17 @@
       "mission": "M4",
       "value": 300,
       "difficulty": "expert",
-      "solve_count": 10,
-      "solve_rate": 0.0909,
-      "attempter_count": 10,
-      "conditional_solve_rate": 1.0,
-      "attempt_count": 59,
-      "real_attempt_count": 52,
-      "rate_limited_count": 7,
+      "solve_count": 12,
+      "solve_rate": 0.1091,
+      "attempter_count": 13,
+      "conditional_solve_rate": 0.9231,
+      "attempt_count": 63,
+      "real_attempt_count": 55,
+      "rate_limited_count": 8,
       "first_solve": "2026-04-16T00:07:06.808683+00:00",
       "minutes_to_first_solve": 142.1,
       "median_attempts_per_solver": 3.0,
-      "median_minutes_to_solve": 37.2,
+      "median_minutes_to_solve": 21.1,
       "hint_unlocks": 4
     },
     {
@@ -6488,17 +6678,17 @@
       "mission": "M3",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 7,
-      "solve_rate": 0.0636,
-      "attempter_count": 20,
-      "conditional_solve_rate": 0.35,
-      "attempt_count": 165,
-      "real_attempt_count": 111,
-      "rate_limited_count": 54,
+      "solve_count": 10,
+      "solve_rate": 0.0909,
+      "attempter_count": 22,
+      "conditional_solve_rate": 0.4545,
+      "attempt_count": 188,
+      "real_attempt_count": 129,
+      "rate_limited_count": 59,
       "first_solve": "2026-04-15T23:46:02.102883+00:00",
       "minutes_to_first_solve": 121.0,
-      "median_attempts_per_solver": 4,
-      "median_minutes_to_solve": 67.4,
+      "median_attempts_per_solver": 4.0,
+      "median_minutes_to_solve": 123.0,
       "hint_unlocks": 3
     },
     {
@@ -6508,13 +6698,13 @@
       "mission": "M3",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 9,
-      "solve_rate": 0.0818,
-      "attempter_count": 17,
-      "conditional_solve_rate": 0.5294,
-      "attempt_count": 118,
-      "real_attempt_count": 77,
-      "rate_limited_count": 41,
+      "solve_count": 11,
+      "solve_rate": 0.1,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.55,
+      "attempt_count": 134,
+      "real_attempt_count": 87,
+      "rate_limited_count": 47,
       "first_solve": "2026-04-15T23:44:02.411363+00:00",
       "minutes_to_first_solve": 119.0,
       "median_attempts_per_solver": 4,
@@ -6528,17 +6718,17 @@
       "mission": "M3",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 9,
-      "solve_rate": 0.0818,
-      "attempter_count": 19,
-      "conditional_solve_rate": 0.4737,
-      "attempt_count": 110,
-      "real_attempt_count": 77,
-      "rate_limited_count": 33,
+      "solve_count": 11,
+      "solve_rate": 0.1,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.55,
+      "attempt_count": 128,
+      "real_attempt_count": 90,
+      "rate_limited_count": 38,
       "first_solve": "2026-04-15T23:44:02.506952+00:00",
       "minutes_to_first_solve": 119.0,
       "median_attempts_per_solver": 3,
-      "median_minutes_to_solve": 50.9,
+      "median_minutes_to_solve": 68.8,
       "hint_unlocks": 0
     },
     {
@@ -6548,18 +6738,18 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 7,
-      "solve_rate": 0.0636,
-      "attempter_count": 17,
-      "conditional_solve_rate": 0.4118,
-      "attempt_count": 105,
-      "real_attempt_count": 66,
-      "rate_limited_count": 39,
+      "solve_count": 10,
+      "solve_rate": 0.0909,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.5,
+      "attempt_count": 130,
+      "real_attempt_count": 86,
+      "rate_limited_count": 44,
       "first_solve": "2026-04-15T23:44:30.732931+00:00",
       "minutes_to_first_solve": 119.5,
-      "median_attempts_per_solver": 2,
-      "median_minutes_to_solve": 58.5,
-      "hint_unlocks": 1
+      "median_attempts_per_solver": 4.0,
+      "median_minutes_to_solve": 93.2,
+      "hint_unlocks": 3
     },
     {
       "id": 24,
@@ -6568,17 +6758,17 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 6,
-      "solve_rate": 0.0545,
-      "attempter_count": 21,
-      "conditional_solve_rate": 0.2857,
-      "attempt_count": 125,
-      "real_attempt_count": 88,
-      "rate_limited_count": 37,
+      "solve_count": 7,
+      "solve_rate": 0.0636,
+      "attempter_count": 23,
+      "conditional_solve_rate": 0.3043,
+      "attempt_count": 161,
+      "real_attempt_count": 112,
+      "rate_limited_count": 49,
       "first_solve": "2026-04-15T23:49:59.636853+00:00",
       "minutes_to_first_solve": 125.0,
-      "median_attempts_per_solver": 4.0,
-      "median_minutes_to_solve": 200.4,
+      "median_attempts_per_solver": 4,
+      "median_minutes_to_solve": 239.9,
       "hint_unlocks": 2
     },
     {
@@ -6588,18 +6778,18 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 6,
-      "solve_rate": 0.0545,
-      "attempter_count": 18,
-      "conditional_solve_rate": 0.3333,
-      "attempt_count": 98,
-      "real_attempt_count": 58,
-      "rate_limited_count": 40,
+      "solve_count": 9,
+      "solve_rate": 0.0818,
+      "attempter_count": 21,
+      "conditional_solve_rate": 0.4286,
+      "attempt_count": 113,
+      "real_attempt_count": 67,
+      "rate_limited_count": 46,
       "first_solve": "2026-04-15T23:51:13.247374+00:00",
       "minutes_to_first_solve": 126.2,
-      "median_attempts_per_solver": 2.5,
-      "median_minutes_to_solve": 41.6,
-      "hint_unlocks": 1
+      "median_attempts_per_solver": 3,
+      "median_minutes_to_solve": 57.4,
+      "hint_unlocks": 3
     },
     {
       "id": 26,
@@ -6608,17 +6798,17 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 6,
-      "solve_rate": 0.0545,
-      "attempter_count": 17,
-      "conditional_solve_rate": 0.3529,
-      "attempt_count": 103,
-      "real_attempt_count": 59,
-      "rate_limited_count": 44,
+      "solve_count": 9,
+      "solve_rate": 0.0818,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.45,
+      "attempt_count": 127,
+      "real_attempt_count": 70,
+      "rate_limited_count": 57,
       "first_solve": "2026-04-15T23:48:11.123705+00:00",
       "minutes_to_first_solve": 123.2,
-      "median_attempts_per_solver": 3.0,
-      "median_minutes_to_solve": 39.4,
+      "median_attempts_per_solver": 3,
+      "median_minutes_to_solve": 120.0,
       "hint_unlocks": 1
     },
     {
@@ -6628,17 +6818,17 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 8,
-      "solve_rate": 0.0727,
-      "attempter_count": 16,
-      "conditional_solve_rate": 0.5,
-      "attempt_count": 76,
-      "real_attempt_count": 41,
-      "rate_limited_count": 35,
+      "solve_count": 10,
+      "solve_rate": 0.0909,
+      "attempter_count": 19,
+      "conditional_solve_rate": 0.5263,
+      "attempt_count": 89,
+      "real_attempt_count": 47,
+      "rate_limited_count": 42,
       "first_solve": "2026-04-15T23:47:36.226029+00:00",
       "minutes_to_first_solve": 122.6,
-      "median_attempts_per_solver": 1.5,
-      "median_minutes_to_solve": 18.1,
+      "median_attempts_per_solver": 2.0,
+      "median_minutes_to_solve": 38.8,
       "hint_unlocks": 1
     },
     {
@@ -6648,13 +6838,13 @@
       "mission": "M3",
       "value": 200,
       "difficulty": "hard",
-      "solve_count": 9,
-      "solve_rate": 0.0818,
-      "attempter_count": 15,
-      "conditional_solve_rate": 0.6,
-      "attempt_count": 68,
-      "real_attempt_count": 33,
-      "rate_limited_count": 35,
+      "solve_count": 11,
+      "solve_rate": 0.1,
+      "attempter_count": 18,
+      "conditional_solve_rate": 0.6111,
+      "attempt_count": 78,
+      "real_attempt_count": 37,
+      "rate_limited_count": 41,
       "first_solve": "2026-04-15T23:45:21.440555+00:00",
       "minutes_to_first_solve": 120.4,
       "median_attempts_per_solver": 2,
@@ -6668,17 +6858,17 @@
       "mission": "M3",
       "value": 200,
       "difficulty": "hard",
-      "solve_count": 7,
-      "solve_rate": 0.0636,
-      "attempter_count": 17,
-      "conditional_solve_rate": 0.4118,
-      "attempt_count": 101,
-      "real_attempt_count": 49,
-      "rate_limited_count": 52,
+      "solve_count": 8,
+      "solve_rate": 0.0727,
+      "attempter_count": 19,
+      "conditional_solve_rate": 0.4211,
+      "attempt_count": 124,
+      "real_attempt_count": 57,
+      "rate_limited_count": 67,
       "first_solve": "2026-04-15T23:50:01.802281+00:00",
       "minutes_to_first_solve": 125.0,
-      "median_attempts_per_solver": 2,
-      "median_minutes_to_solve": 164.4,
+      "median_attempts_per_solver": 2.0,
+      "median_minutes_to_solve": 159.5,
       "hint_unlocks": 0
     },
     {
@@ -6688,18 +6878,18 @@
       "mission": "M3",
       "value": 300,
       "difficulty": "expert",
-      "solve_count": 5,
-      "solve_rate": 0.0455,
-      "attempter_count": 14,
-      "conditional_solve_rate": 0.3571,
-      "attempt_count": 104,
-      "real_attempt_count": 52,
-      "rate_limited_count": 52,
+      "solve_count": 7,
+      "solve_rate": 0.0636,
+      "attempter_count": 16,
+      "conditional_solve_rate": 0.4375,
+      "attempt_count": 141,
+      "real_attempt_count": 73,
+      "rate_limited_count": 68,
       "first_solve": "2026-04-16T00:15:33.259600+00:00",
       "minutes_to_first_solve": 150.6,
       "median_attempts_per_solver": 5,
-      "median_minutes_to_solve": 206.7,
-      "hint_unlocks": 1
+      "median_minutes_to_solve": 333.4,
+      "hint_unlocks": 4
     },
     {
       "id": 31,
@@ -6710,16 +6900,16 @@
       "difficulty": "medium",
       "solve_count": 0,
       "solve_rate": 0.0,
-      "attempter_count": 7,
+      "attempter_count": 10,
       "conditional_solve_rate": 0.0,
-      "attempt_count": 109,
-      "real_attempt_count": 86,
-      "rate_limited_count": 23,
+      "attempt_count": 247,
+      "real_attempt_count": 200,
+      "rate_limited_count": 47,
       "first_solve": null,
       "minutes_to_first_solve": null,
       "median_attempts_per_solver": null,
       "median_minutes_to_solve": null,
-      "hint_unlocks": 7
+      "hint_unlocks": 10
     },
     {
       "id": 32,
@@ -6730,16 +6920,16 @@
       "difficulty": "hard",
       "solve_count": 0,
       "solve_rate": 0.0,
-      "attempter_count": 6,
+      "attempter_count": 8,
       "conditional_solve_rate": 0.0,
-      "attempt_count": 88,
-      "real_attempt_count": 62,
-      "rate_limited_count": 26,
+      "attempt_count": 181,
+      "real_attempt_count": 135,
+      "rate_limited_count": 46,
       "first_solve": null,
       "minutes_to_first_solve": null,
       "median_attempts_per_solver": null,
       "median_minutes_to_solve": null,
-      "hint_unlocks": 4
+      "hint_unlocks": 6
     },
     {
       "id": 33,
@@ -6750,16 +6940,16 @@
       "difficulty": "hard",
       "solve_count": 0,
       "solve_rate": 0.0,
-      "attempter_count": 6,
+      "attempter_count": 7,
       "conditional_solve_rate": 0.0,
-      "attempt_count": 80,
-      "real_attempt_count": 52,
-      "rate_limited_count": 28,
+      "attempt_count": 163,
+      "real_attempt_count": 113,
+      "rate_limited_count": 50,
       "first_solve": null,
       "minutes_to_first_solve": null,
       "median_attempts_per_solver": null,
       "median_minutes_to_solve": null,
-      "hint_unlocks": 4
+      "hint_unlocks": 6
     },
     {
       "id": 34,
@@ -6770,16 +6960,16 @@
       "difficulty": "hard",
       "solve_count": 0,
       "solve_rate": 0.0,
-      "attempter_count": 5,
+      "attempter_count": 6,
       "conditional_solve_rate": 0.0,
-      "attempt_count": 79,
-      "real_attempt_count": 50,
-      "rate_limited_count": 29,
+      "attempt_count": 165,
+      "real_attempt_count": 112,
+      "rate_limited_count": 53,
       "first_solve": null,
       "minutes_to_first_solve": null,
       "median_attempts_per_solver": null,
       "median_minutes_to_solve": null,
-      "hint_unlocks": 4
+      "hint_unlocks": 6
     },
     {
       "id": 35,
@@ -6790,16 +6980,16 @@
       "difficulty": "expert",
       "solve_count": 0,
       "solve_rate": 0.0,
-      "attempter_count": 5,
+      "attempter_count": 6,
       "conditional_solve_rate": 0.0,
-      "attempt_count": 81,
-      "real_attempt_count": 39,
-      "rate_limited_count": 42,
+      "attempt_count": 167,
+      "real_attempt_count": 92,
+      "rate_limited_count": 75,
       "first_solve": null,
       "minutes_to_first_solve": null,
       "median_attempts_per_solver": null,
       "median_minutes_to_solve": null,
-      "hint_unlocks": 6
+      "hint_unlocks": 8
     },
     {
       "id": 36,
@@ -6810,16 +7000,16 @@
       "difficulty": "expert",
       "solve_count": 0,
       "solve_rate": 0.0,
-      "attempter_count": 5,
+      "attempter_count": 6,
       "conditional_solve_rate": 0.0,
-      "attempt_count": 187,
-      "real_attempt_count": 120,
-      "rate_limited_count": 67,
+      "attempt_count": 942,
+      "real_attempt_count": 554,
+      "rate_limited_count": 388,
       "first_solve": null,
       "minutes_to_first_solve": null,
       "median_attempts_per_solver": null,
       "median_minutes_to_solve": null,
-      "hint_unlocks": 6
+      "hint_unlocks": 9
     },
     {
       "id": 37,
@@ -6828,17 +7018,17 @@
       "mission": "M4",
       "value": 200,
       "difficulty": "hard",
-      "solve_count": 19,
-      "solve_rate": 0.1727,
-      "attempter_count": 25,
-      "conditional_solve_rate": 0.76,
-      "attempt_count": 74,
-      "real_attempt_count": 43,
-      "rate_limited_count": 31,
+      "solve_count": 22,
+      "solve_rate": 0.2,
+      "attempter_count": 28,
+      "conditional_solve_rate": 0.7857,
+      "attempt_count": 98,
+      "real_attempt_count": 52,
+      "rate_limited_count": 46,
       "first_solve": "2026-04-15T23:12:35.103820+00:00",
       "minutes_to_first_solve": 87.6,
-      "median_attempts_per_solver": 1,
-      "median_minutes_to_solve": 0.0,
+      "median_attempts_per_solver": 1.0,
+      "median_minutes_to_solve": 0.1,
       "hint_unlocks": 2
     },
     {
@@ -6848,18 +7038,18 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 9,
-      "solve_rate": 0.0818,
-      "attempter_count": 21,
-      "conditional_solve_rate": 0.4286,
-      "attempt_count": 110,
-      "real_attempt_count": 65,
-      "rate_limited_count": 45,
+      "solve_count": 11,
+      "solve_rate": 0.1,
+      "attempter_count": 23,
+      "conditional_solve_rate": 0.4783,
+      "attempt_count": 126,
+      "real_attempt_count": 69,
+      "rate_limited_count": 57,
       "first_solve": "2026-04-15T23:43:29.260940+00:00",
       "minutes_to_first_solve": 118.5,
-      "median_attempts_per_solver": 3,
+      "median_attempts_per_solver": 2,
       "median_minutes_to_solve": 53.5,
-      "hint_unlocks": 8
+      "hint_unlocks": 9
     },
     {
       "id": 40,
@@ -6868,16 +7058,16 @@
       "mission": "M6",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 36,
-      "solve_rate": 0.3273,
-      "attempter_count": 41,
-      "conditional_solve_rate": 0.878,
-      "attempt_count": 92,
-      "real_attempt_count": 66,
-      "rate_limited_count": 26,
+      "solve_count": 37,
+      "solve_rate": 0.3364,
+      "attempter_count": 42,
+      "conditional_solve_rate": 0.881,
+      "attempt_count": 99,
+      "real_attempt_count": 67,
+      "rate_limited_count": 32,
       "first_solve": "2026-04-15T22:49:54.946287+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 3
     },
@@ -6888,16 +7078,16 @@
       "mission": "M6",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 38,
-      "solve_rate": 0.3455,
-      "attempter_count": 39,
-      "conditional_solve_rate": 0.9744,
-      "attempt_count": 61,
-      "real_attempt_count": 50,
-      "rate_limited_count": 11,
+      "solve_count": 39,
+      "solve_rate": 0.3545,
+      "attempter_count": 40,
+      "conditional_solve_rate": 0.975,
+      "attempt_count": 66,
+      "real_attempt_count": 51,
+      "rate_limited_count": 15,
       "first_solve": "2026-04-15T22:49:55.040690+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 4
     },
@@ -6908,16 +7098,16 @@
       "mission": "M6",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 39,
-      "solve_rate": 0.3545,
-      "attempter_count": 40,
-      "conditional_solve_rate": 0.975,
-      "attempt_count": 77,
-      "real_attempt_count": 54,
-      "rate_limited_count": 23,
+      "solve_count": 40,
+      "solve_rate": 0.3636,
+      "attempter_count": 41,
+      "conditional_solve_rate": 0.9756,
+      "attempt_count": 82,
+      "real_attempt_count": 55,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:55.137904+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 4
     },
@@ -6928,16 +7118,16 @@
       "mission": "M6",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 34,
-      "solve_rate": 0.3091,
-      "attempter_count": 37,
-      "conditional_solve_rate": 0.9189,
-      "attempt_count": 74,
-      "real_attempt_count": 51,
-      "rate_limited_count": 23,
+      "solve_count": 35,
+      "solve_rate": 0.3182,
+      "attempter_count": 38,
+      "conditional_solve_rate": 0.9211,
+      "attempt_count": 79,
+      "real_attempt_count": 52,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:55.243118+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 4
     },
@@ -6948,16 +7138,16 @@
       "mission": "M7",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 35,
-      "solve_rate": 0.3182,
-      "attempter_count": 36,
-      "conditional_solve_rate": 0.9722,
-      "attempt_count": 66,
-      "real_attempt_count": 43,
-      "rate_limited_count": 23,
+      "solve_count": 36,
+      "solve_rate": 0.3273,
+      "attempter_count": 37,
+      "conditional_solve_rate": 0.973,
+      "attempt_count": 71,
+      "real_attempt_count": 44,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.544561+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 2
     },
@@ -6968,16 +7158,16 @@
       "mission": "M7",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 35,
-      "solve_rate": 0.3182,
-      "attempter_count": 35,
+      "solve_count": 36,
+      "solve_rate": 0.3273,
+      "attempter_count": 36,
       "conditional_solve_rate": 1.0,
-      "attempt_count": 63,
-      "real_attempt_count": 40,
-      "rate_limited_count": 23,
+      "attempt_count": 68,
+      "real_attempt_count": 41,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.645256+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 1
     },
@@ -6988,16 +7178,16 @@
       "mission": "M7",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 32,
-      "solve_rate": 0.2909,
-      "attempter_count": 33,
-      "conditional_solve_rate": 0.9697,
-      "attempt_count": 61,
-      "real_attempt_count": 38,
-      "rate_limited_count": 23,
+      "solve_count": 33,
+      "solve_rate": 0.3,
+      "attempter_count": 34,
+      "conditional_solve_rate": 0.9706,
+      "attempt_count": 66,
+      "real_attempt_count": 39,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.743204+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 2
     },
@@ -7008,16 +7198,16 @@
       "mission": "M7",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 32,
-      "solve_rate": 0.2909,
-      "attempter_count": 33,
-      "conditional_solve_rate": 0.9697,
-      "attempt_count": 70,
-      "real_attempt_count": 47,
-      "rate_limited_count": 23,
+      "solve_count": 33,
+      "solve_rate": 0.3,
+      "attempter_count": 34,
+      "conditional_solve_rate": 0.9706,
+      "attempt_count": 75,
+      "real_attempt_count": 48,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.846782+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 4
     },
@@ -7028,16 +7218,16 @@
       "mission": "M8",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 34,
-      "solve_rate": 0.3091,
-      "attempter_count": 34,
+      "solve_count": 35,
+      "solve_rate": 0.3182,
+      "attempter_count": 35,
       "conditional_solve_rate": 1.0,
-      "attempt_count": 63,
-      "real_attempt_count": 40,
-      "rate_limited_count": 23,
+      "attempt_count": 68,
+      "real_attempt_count": 41,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.122715+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 4
     },
@@ -7048,16 +7238,16 @@
       "mission": "M8",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 34,
-      "solve_rate": 0.3091,
-      "attempter_count": 34,
+      "solve_count": 35,
+      "solve_rate": 0.3182,
+      "attempter_count": 35,
       "conditional_solve_rate": 1.0,
-      "attempt_count": 70,
-      "real_attempt_count": 47,
-      "rate_limited_count": 23,
+      "attempt_count": 75,
+      "real_attempt_count": 48,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.227497+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 2
     },
@@ -7068,16 +7258,16 @@
       "mission": "M8",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 33,
-      "solve_rate": 0.3,
-      "attempter_count": 33,
+      "solve_count": 34,
+      "solve_rate": 0.3091,
+      "attempter_count": 34,
       "conditional_solve_rate": 1.0,
-      "attempt_count": 59,
-      "real_attempt_count": 36,
-      "rate_limited_count": 23,
+      "attempt_count": 64,
+      "real_attempt_count": 37,
+      "rate_limited_count": 27,
       "first_solve": "2026-04-15T22:49:54.327489+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1,
+      "median_attempts_per_solver": 1.0,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 2
     },
@@ -7088,16 +7278,16 @@
       "mission": "M8",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 32,
-      "solve_rate": 0.2909,
-      "attempter_count": 33,
-      "conditional_solve_rate": 0.9697,
-      "attempt_count": 73,
-      "real_attempt_count": 52,
-      "rate_limited_count": 21,
+      "solve_count": 33,
+      "solve_rate": 0.3,
+      "attempter_count": 34,
+      "conditional_solve_rate": 0.9706,
+      "attempt_count": 77,
+      "real_attempt_count": 53,
+      "rate_limited_count": 24,
       "first_solve": "2026-04-15T22:49:54.427763+00:00",
       "minutes_to_first_solve": 64.9,
-      "median_attempts_per_solver": 1.0,
+      "median_attempts_per_solver": 1,
       "median_minutes_to_solve": 0.0,
       "hint_unlocks": 3
     },
@@ -7112,9 +7302,9 @@
       "solve_rate": 0.2818,
       "attempter_count": 33,
       "conditional_solve_rate": 0.9394,
-      "attempt_count": 82,
+      "attempt_count": 85,
       "real_attempt_count": 54,
-      "rate_limited_count": 28,
+      "rate_limited_count": 31,
       "first_solve": "2026-04-15T22:49:53.696296+00:00",
       "minutes_to_first_solve": 64.9,
       "median_attempts_per_solver": 1,
@@ -7132,9 +7322,9 @@
       "solve_rate": 0.2636,
       "attempter_count": 32,
       "conditional_solve_rate": 0.9062,
-      "attempt_count": 76,
+      "attempt_count": 79,
       "real_attempt_count": 45,
-      "rate_limited_count": 31,
+      "rate_limited_count": 34,
       "first_solve": "2026-04-15T22:49:53.814289+00:00",
       "minutes_to_first_solve": 64.9,
       "median_attempts_per_solver": 1,
@@ -7152,9 +7342,9 @@
       "solve_rate": 0.2818,
       "attempter_count": 33,
       "conditional_solve_rate": 0.9394,
-      "attempt_count": 79,
+      "attempt_count": 82,
       "real_attempt_count": 47,
-      "rate_limited_count": 32,
+      "rate_limited_count": 35,
       "first_solve": "2026-04-15T22:49:53.915187+00:00",
       "minutes_to_first_solve": 64.9,
       "median_attempts_per_solver": 1,
@@ -7172,9 +7362,9 @@
       "solve_rate": 0.2909,
       "attempter_count": 33,
       "conditional_solve_rate": 0.9697,
-      "attempt_count": 69,
+      "attempt_count": 72,
       "real_attempt_count": 41,
-      "rate_limited_count": 28,
+      "rate_limited_count": 31,
       "first_solve": "2026-04-15T22:49:54.012455+00:00",
       "minutes_to_first_solve": 64.9,
       "median_attempts_per_solver": 1.0,
@@ -7192,9 +7382,9 @@
       "solve_rate": 0.5182,
       "attempter_count": 60,
       "conditional_solve_rate": 0.95,
-      "attempt_count": 233,
+      "attempt_count": 234,
       "real_attempt_count": 225,
-      "rate_limited_count": 8,
+      "rate_limited_count": 9,
       "first_solve": "2026-04-15T22:33:04.764358+00:00",
       "minutes_to_first_solve": 48.1,
       "median_attempts_per_solver": 1,
@@ -7203,13 +7393,13 @@
     }
   ],
   "score_histogram": {
-    "4000-5000": 7,
-    "3000-4000": 5,
-    "2500-3000": 5,
+    "4000-5000": 9,
+    "3000-4000": 6,
+    "2500-3000": 3,
     "2000-2500": 10,
     "1500-2000": 4,
     "1000-1500": 7,
-    "500-1000": 8,
+    "500-1000": 7,
     "250-500": 10,
     "100-250": 3,
     "50-100": 1,
@@ -7223,9 +7413,8 @@
     "7": 3,
     "8": 3,
     "9": 1,
-    "10": 2,
     "11": 3,
-    "12": 1,
+    "12": 2,
     "13": 2,
     "15": 1,
     "16": 1,
@@ -7239,16 +7428,16 @@
     "27": 2,
     "28": 5,
     "29": 1,
-    "31": 2,
-    "32": 2,
+    "31": 1,
+    "32": 1,
     "33": 1,
+    "35": 1,
     "36": 3,
     "37": 1,
     "42": 1,
-    "43": 1,
-    "47": 1,
-    "48": 1,
-    "49": 4
+    "44": 1,
+    "46": 1,
+    "49": 7
   },
   "arrival_histogram": {
     "45": 16,
@@ -7272,56 +7461,56 @@
       "challenges_in_mission": 6,
       "participants_attempted": 59,
       "participants_touched": 59,
-      "participants_completed": 20,
+      "participants_completed": 21,
       "participants_stuck": 0
     },
     "M2": {
       "challenges_in_mission": 11,
-      "participants_attempted": 50,
-      "participants_touched": 47,
-      "participants_completed": 8,
+      "participants_attempted": 51,
+      "participants_touched": 48,
+      "participants_completed": 10,
       "participants_stuck": 3
     },
     "M3": {
       "challenges_in_mission": 12,
-      "participants_attempted": 26,
-      "participants_touched": 9,
-      "participants_completed": 5,
-      "participants_stuck": 17
+      "participants_attempted": 27,
+      "participants_touched": 11,
+      "participants_completed": 7,
+      "participants_stuck": 16
     },
     "M4": {
       "challenges_in_mission": 3,
-      "participants_attempted": 25,
-      "participants_touched": 19,
-      "participants_completed": 10,
+      "participants_attempted": 28,
+      "participants_touched": 22,
+      "participants_completed": 12,
       "participants_stuck": 6
     },
     "M5": {
       "challenges_in_mission": 6,
-      "participants_attempted": 7,
+      "participants_attempted": 10,
       "participants_touched": 0,
       "participants_completed": 0,
-      "participants_stuck": 7
+      "participants_stuck": 10
     },
     "M6": {
       "challenges_in_mission": 4,
-      "participants_attempted": 41,
-      "participants_touched": 40,
-      "participants_completed": 32,
+      "participants_attempted": 42,
+      "participants_touched": 41,
+      "participants_completed": 33,
       "participants_stuck": 1
     },
     "M7": {
       "challenges_in_mission": 4,
-      "participants_attempted": 36,
-      "participants_touched": 35,
-      "participants_completed": 31,
+      "participants_attempted": 37,
+      "participants_touched": 36,
+      "participants_completed": 32,
       "participants_stuck": 1
     },
     "M8": {
       "challenges_in_mission": 4,
-      "participants_attempted": 34,
-      "participants_touched": 34,
-      "participants_completed": 32,
+      "participants_attempted": 35,
+      "participants_touched": 35,
+      "participants_completed": 33,
       "participants_stuck": 0
     },
     "M9": {
@@ -7339,31 +7528,31 @@
   "difficulty_summary": {
     "easy": {
       "count": 19,
-      "mean_solve_rate": 0.3263,
-      "median_solve_rate": 0.3273,
-      "min_solve_rate": 0.0636,
+      "mean_solve_rate": 0.3359,
+      "median_solve_rate": 0.3364,
+      "min_solve_rate": 0.0909,
       "max_solve_rate": 0.5364
     },
     "medium": {
       "count": 24,
-      "mean_solve_rate": 0.2125,
+      "mean_solve_rate": 0.2235,
       "median_solve_rate": 0.2727,
       "min_solve_rate": 0.0,
-      "max_solve_rate": 0.3545
+      "max_solve_rate": 0.3636
     },
     "hard": {
       "count": 8,
-      "mean_solve_rate": 0.0795,
-      "median_solve_rate": 0.0727,
+      "mean_solve_rate": 0.0909,
+      "median_solve_rate": 0.0864,
       "min_solve_rate": 0.0,
-      "max_solve_rate": 0.1727
+      "max_solve_rate": 0.2
     },
     "expert": {
       "count": 4,
-      "mean_solve_rate": 0.0341,
-      "median_solve_rate": 0.0227,
+      "mean_solve_rate": 0.0432,
+      "median_solve_rate": 0.0318,
       "min_solve_rate": 0.0,
-      "max_solve_rate": 0.0909
+      "max_solve_rate": 0.1091
     }
   },
   "timeline": [
@@ -8766,6 +8955,231 @@
       "minute": 1110,
       "new_solves": 1,
       "cumulative": 1328
+    },
+    {
+      "minute": 1116,
+      "new_solves": 1,
+      "cumulative": 1329
+    },
+    {
+      "minute": 1125,
+      "new_solves": 1,
+      "cumulative": 1330
+    },
+    {
+      "minute": 1127,
+      "new_solves": 1,
+      "cumulative": 1331
+    },
+    {
+      "minute": 1133,
+      "new_solves": 1,
+      "cumulative": 1332
+    },
+    {
+      "minute": 1147,
+      "new_solves": 1,
+      "cumulative": 1333
+    },
+    {
+      "minute": 1183,
+      "new_solves": 1,
+      "cumulative": 1334
+    },
+    {
+      "minute": 1184,
+      "new_solves": 1,
+      "cumulative": 1335
+    },
+    {
+      "minute": 1185,
+      "new_solves": 1,
+      "cumulative": 1336
+    },
+    {
+      "minute": 1207,
+      "new_solves": 1,
+      "cumulative": 1337
+    },
+    {
+      "minute": 1211,
+      "new_solves": 1,
+      "cumulative": 1338
+    },
+    {
+      "minute": 1232,
+      "new_solves": 1,
+      "cumulative": 1339
+    },
+    {
+      "minute": 1270,
+      "new_solves": 1,
+      "cumulative": 1340
+    },
+    {
+      "minute": 1275,
+      "new_solves": 1,
+      "cumulative": 1341
+    },
+    {
+      "minute": 1276,
+      "new_solves": 1,
+      "cumulative": 1342
+    },
+    {
+      "minute": 1279,
+      "new_solves": 2,
+      "cumulative": 1344
+    },
+    {
+      "minute": 1321,
+      "new_solves": 1,
+      "cumulative": 1345
+    },
+    {
+      "minute": 1327,
+      "new_solves": 1,
+      "cumulative": 1346
+    },
+    {
+      "minute": 1334,
+      "new_solves": 1,
+      "cumulative": 1347
+    },
+    {
+      "minute": 1344,
+      "new_solves": 7,
+      "cumulative": 1354
+    },
+    {
+      "minute": 1345,
+      "new_solves": 3,
+      "cumulative": 1357
+    },
+    {
+      "minute": 1346,
+      "new_solves": 3,
+      "cumulative": 1360
+    },
+    {
+      "minute": 1351,
+      "new_solves": 1,
+      "cumulative": 1361
+    },
+    {
+      "minute": 1360,
+      "new_solves": 1,
+      "cumulative": 1362
+    },
+    {
+      "minute": 1363,
+      "new_solves": 2,
+      "cumulative": 1364
+    },
+    {
+      "minute": 1367,
+      "new_solves": 1,
+      "cumulative": 1365
+    },
+    {
+      "minute": 1368,
+      "new_solves": 1,
+      "cumulative": 1366
+    },
+    {
+      "minute": 1370,
+      "new_solves": 1,
+      "cumulative": 1367
+    },
+    {
+      "minute": 1371,
+      "new_solves": 1,
+      "cumulative": 1368
+    },
+    {
+      "minute": 1386,
+      "new_solves": 1,
+      "cumulative": 1369
+    },
+    {
+      "minute": 1387,
+      "new_solves": 1,
+      "cumulative": 1370
+    },
+    {
+      "minute": 1399,
+      "new_solves": 2,
+      "cumulative": 1372
+    },
+    {
+      "minute": 1400,
+      "new_solves": 2,
+      "cumulative": 1374
+    },
+    {
+      "minute": 1405,
+      "new_solves": 2,
+      "cumulative": 1376
+    },
+    {
+      "minute": 1430,
+      "new_solves": 1,
+      "cumulative": 1377
+    },
+    {
+      "minute": 1467,
+      "new_solves": 1,
+      "cumulative": 1378
+    },
+    {
+      "minute": 1469,
+      "new_solves": 3,
+      "cumulative": 1381
+    },
+    {
+      "minute": 1471,
+      "new_solves": 1,
+      "cumulative": 1382
+    },
+    {
+      "minute": 1472,
+      "new_solves": 1,
+      "cumulative": 1383
+    },
+    {
+      "minute": 1473,
+      "new_solves": 1,
+      "cumulative": 1384
+    },
+    {
+      "minute": 1476,
+      "new_solves": 1,
+      "cumulative": 1385
+    },
+    {
+      "minute": 1487,
+      "new_solves": 1,
+      "cumulative": 1386
+    },
+    {
+      "minute": 1525,
+      "new_solves": 1,
+      "cumulative": 1387
+    },
+    {
+      "minute": 1537,
+      "new_solves": 2,
+      "cumulative": 1389
+    },
+    {
+      "minute": 1554,
+      "new_solves": 1,
+      "cumulative": 1390
+    },
+    {
+      "minute": 1560,
+      "new_solves": 1,
+      "cumulative": 1391
     }
   ],
   "rl_timeline": [
@@ -9108,45 +9522,257 @@
     {
       "minute": 1105,
       "rate_limits": 2
+    },
+    {
+      "minute": 1117,
+      "rate_limits": 4
+    },
+    {
+      "minute": 1131,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1173,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1174,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1184,
+      "rate_limits": 14
+    },
+    {
+      "minute": 1187,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1197,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1204,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1256,
+      "rate_limits": 4
+    },
+    {
+      "minute": 1279,
+      "rate_limits": 9
+    },
+    {
+      "minute": 1282,
+      "rate_limits": 12
+    },
+    {
+      "minute": 1291,
+      "rate_limits": 25
+    },
+    {
+      "minute": 1297,
+      "rate_limits": 23
+    },
+    {
+      "minute": 1330,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1335,
+      "rate_limits": 32
+    },
+    {
+      "minute": 1342,
+      "rate_limits": 5
+    },
+    {
+      "minute": 1348,
+      "rate_limits": 13
+    },
+    {
+      "minute": 1365,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1370,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1372,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1374,
+      "rate_limits": 4
+    },
+    {
+      "minute": 1399,
+      "rate_limits": 27
+    },
+    {
+      "minute": 1401,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1408,
+      "rate_limits": 82
+    },
+    {
+      "minute": 1409,
+      "rate_limits": 52
+    },
+    {
+      "minute": 1435,
+      "rate_limits": 15
+    },
+    {
+      "minute": 1438,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1455,
+      "rate_limits": 5
+    },
+    {
+      "minute": 1460,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1461,
+      "rate_limits": 38
+    },
+    {
+      "minute": 1467,
+      "rate_limits": 20
+    },
+    {
+      "minute": 1482,
+      "rate_limits": 5
+    },
+    {
+      "minute": 1485,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1495,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1499,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1500,
+      "rate_limits": 6
+    },
+    {
+      "minute": 1502,
+      "rate_limits": 6
+    },
+    {
+      "minute": 1514,
+      "rate_limits": 15
+    },
+    {
+      "minute": 1517,
+      "rate_limits": 26
+    },
+    {
+      "minute": 1522,
+      "rate_limits": 74
+    },
+    {
+      "minute": 1531,
+      "rate_limits": 14
+    },
+    {
+      "minute": 1535,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1536,
+      "rate_limits": 6
+    },
+    {
+      "minute": 1537,
+      "rate_limits": 4
+    },
+    {
+      "minute": 1540,
+      "rate_limits": 3
+    },
+    {
+      "minute": 1542,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1544,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1546,
+      "rate_limits": 2
+    },
+    {
+      "minute": 1556,
+      "rate_limits": 20
+    },
+    {
+      "minute": 1576,
+      "rate_limits": 14
+    },
+    {
+      "minute": 1585,
+      "rate_limits": 8
+    },
+    {
+      "minute": 1587,
+      "rate_limits": 1
+    },
+    {
+      "minute": 1629,
+      "rate_limits": 2
     }
   ],
   "cluster_summary": {
-    "burst-low-accuracy": 13,
+    "burst-low-accuracy": 15,
     "manual-struggling": 11,
-    "high-accuracy-slow": 8,
-    "mixed": 27,
+    "high-accuracy-slow": 7,
+    "mixed": 26,
     "low-engagement": 1,
     "inactive": 49,
     "engaged-unsuccessful": 1
   },
   "workflow_summary": {
-    "Claude drives submission": 13,
+    "Claude drives submission": 15,
     "manual / unassisted": 11,
-    "human-in-loop (copy-paste from Claude)": 8,
-    "mixed / transitional": 27,
+    "human-in-loop (copy-paste from Claude)": 7,
+    "mixed / transitional": 26,
     "barely engaged": 1,
     "never engaged": 49,
     "engaged but stuck": 1
   },
   "rl_cluster_summary": {
     "burst-low-accuracy": {
-      "n": 13,
-      "mean_rl_ratio": 0.3022,
-      "median_rl_ratio": 0.2246
+      "n": 15,
+      "mean_rl_ratio": 0.2935,
+      "median_rl_ratio": 0.2867
     },
     "manual-struggling": {
       "n": 11,
-      "mean_rl_ratio": 0.0244,
-      "median_rl_ratio": 0.0
+      "mean_rl_ratio": 0.0256,
+      "median_rl_ratio": 0.0135
     },
     "high-accuracy-slow": {
-      "n": 8,
+      "n": 7,
       "mean_rl_ratio": 0.0,
       "median_rl_ratio": 0.0
     },
     "mixed": {
-      "n": 27,
-      "mean_rl_ratio": 0.0044,
+      "n": 26,
+      "mean_rl_ratio": 0.0037,
       "median_rl_ratio": 0.0
     },
     "low-engagement": {
@@ -9160,7 +9786,7 @@
       "median_rl_ratio": 0.0
     }
   },
-  "discovered_mid_event_count": 11,
+  "discovered_mid_event_count": 10,
   "discovered_mid_event_operators": [
     {
       "label": "op024",
@@ -9174,16 +9800,16 @@
       "label": "op095",
       "points": 4850,
       "solves": 49,
-      "bd_early": 0.2606,
-      "bd_late": 0.8944,
+      "bd_early": 0.2857,
+      "bd_late": 0.9156,
       "cluster": "burst-low-accuracy"
     },
     {
-      "label": "op007",
-      "points": 4500,
-      "solves": 47,
-      "bd_early": 0.2131,
-      "bd_late": 0.8607,
+      "label": "op044",
+      "points": 4100,
+      "solves": 44,
+      "bd_early": 0.3662,
+      "bd_late": 0.8592,
       "cluster": "burst-low-accuracy"
     },
     {
@@ -9193,14 +9819,6 @@
       "bd_early": 0.0758,
       "bd_late": 0.2045,
       "cluster": "manual-struggling"
-    },
-    {
-      "label": "op044",
-      "points": 2500,
-      "solves": 31,
-      "bd_early": 0.0,
-      "bd_late": 0.35,
-      "cluster": "high-accuracy-slow"
     },
     {
       "label": "op037",
@@ -9304,8 +9922,8 @@
       "value": 100,
       "unlockers": 18,
       "unlocker_solve_rate": 0.4444,
-      "non_unlocker_solve_rate": 0.1304,
-      "lift": 0.314
+      "non_unlocker_solve_rate": 0.1413,
+      "lift": 0.3031
     },
     {
       "id": 7,
@@ -9315,8 +9933,8 @@
       "value": 50,
       "unlockers": 10,
       "unlocker_solve_rate": 0.8,
-      "non_unlocker_solve_rate": 0.35,
-      "lift": 0.45
+      "non_unlocker_solve_rate": 0.36,
+      "lift": 0.44
     },
     {
       "id": 8,
@@ -9326,8 +9944,8 @@
       "value": 50,
       "unlockers": 11,
       "unlocker_solve_rate": 0.1818,
-      "non_unlocker_solve_rate": 0.101,
-      "lift": 0.0808
+      "non_unlocker_solve_rate": 0.1212,
+      "lift": 0.0606
     },
     {
       "id": 9,
@@ -9337,8 +9955,8 @@
       "value": 50,
       "unlockers": 3,
       "unlocker_solve_rate": 0.6667,
-      "non_unlocker_solve_rate": 0.3084,
-      "lift": 0.3583
+      "non_unlocker_solve_rate": 0.3178,
+      "lift": 0.3489
     },
     {
       "id": 10,
@@ -9348,8 +9966,8 @@
       "value": 50,
       "unlockers": 9,
       "unlocker_solve_rate": 0.3333,
-      "non_unlocker_solve_rate": 0.0891,
-      "lift": 0.2442
+      "non_unlocker_solve_rate": 0.1089,
+      "lift": 0.2244
     },
     {
       "id": 11,
@@ -9359,8 +9977,8 @@
       "value": 50,
       "unlockers": 3,
       "unlocker_solve_rate": 0.6667,
-      "non_unlocker_solve_rate": 0.3271,
-      "lift": 0.3396
+      "non_unlocker_solve_rate": 0.3458,
+      "lift": 0.3209
     },
     {
       "id": 12,
@@ -9370,8 +9988,8 @@
       "value": 50,
       "unlockers": 3,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.3271,
-      "lift": 0.6729
+      "non_unlocker_solve_rate": 0.3458,
+      "lift": 0.6542
     },
     {
       "id": 14,
@@ -9381,8 +9999,8 @@
       "value": 100,
       "unlockers": 1,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.2294,
-      "lift": 0.7706
+      "non_unlocker_solve_rate": 0.2477,
+      "lift": 0.7523
     },
     {
       "id": 15,
@@ -9390,10 +10008,10 @@
       "mission": "M2",
       "difficulty": "medium",
       "value": 100,
-      "unlockers": 2,
-      "unlocker_solve_rate": 0.5,
-      "non_unlocker_solve_rate": 0.1667,
-      "lift": 0.3333
+      "unlockers": 3,
+      "unlocker_solve_rate": 0.3333,
+      "non_unlocker_solve_rate": 0.1776,
+      "lift": 0.1558
     },
     {
       "id": 16,
@@ -9403,8 +10021,8 @@
       "value": 100,
       "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.1296,
-      "lift": 0.8704
+      "non_unlocker_solve_rate": 0.1389,
+      "lift": 0.8611
     },
     {
       "id": 18,
@@ -9414,8 +10032,8 @@
       "value": 200,
       "unlockers": 2,
       "unlocker_solve_rate": 0.5,
-      "non_unlocker_solve_rate": 0.1389,
-      "lift": 0.3611
+      "non_unlocker_solve_rate": 0.1667,
+      "lift": 0.3333
     },
     {
       "id": 19,
@@ -9425,8 +10043,8 @@
       "value": 300,
       "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.0741,
-      "lift": 0.9259
+      "non_unlocker_solve_rate": 0.0926,
+      "lift": 0.9074
     },
     {
       "id": 20,
@@ -9435,9 +10053,9 @@
       "difficulty": "easy",
       "value": 50,
       "unlockers": 2,
-      "unlocker_solve_rate": 0.5,
-      "non_unlocker_solve_rate": 0.0556,
-      "lift": 0.4444
+      "unlocker_solve_rate": 1.0,
+      "non_unlocker_solve_rate": 0.0741,
+      "lift": 0.9259
     },
     {
       "id": 23,
@@ -9445,10 +10063,10 @@
       "mission": "M3",
       "difficulty": "medium",
       "value": 100,
-      "unlockers": 1,
+      "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.055,
-      "lift": 0.945
+      "non_unlocker_solve_rate": 0.0741,
+      "lift": 0.9259
     },
     {
       "id": 24,
@@ -9458,8 +10076,8 @@
       "value": 100,
       "unlockers": 2,
       "unlocker_solve_rate": 0.5,
-      "non_unlocker_solve_rate": 0.0463,
-      "lift": 0.4537
+      "non_unlocker_solve_rate": 0.0556,
+      "lift": 0.4444
     },
     {
       "id": 25,
@@ -9467,10 +10085,10 @@
       "mission": "M3",
       "difficulty": "medium",
       "value": 100,
-      "unlockers": 1,
+      "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.0459,
-      "lift": 0.9541
+      "non_unlocker_solve_rate": 0.0648,
+      "lift": 0.9352
     },
     {
       "id": 26,
@@ -9480,8 +10098,8 @@
       "value": 100,
       "unlockers": 1,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.0459,
-      "lift": 0.9541
+      "non_unlocker_solve_rate": 0.0734,
+      "lift": 0.9266
     },
     {
       "id": 27,
@@ -9491,8 +10109,8 @@
       "value": 100,
       "unlockers": 1,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.0642,
-      "lift": 0.9358
+      "non_unlocker_solve_rate": 0.0826,
+      "lift": 0.9174
     },
     {
       "id": 30,
@@ -9500,10 +10118,10 @@
       "mission": "M3",
       "difficulty": "expert",
       "value": 300,
-      "unlockers": 1,
+      "unlockers": 3,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.0367,
-      "lift": 0.9633
+      "non_unlocker_solve_rate": 0.0374,
+      "lift": 0.9626
     },
     {
       "id": 31,
@@ -9511,7 +10129,7 @@
       "mission": "M5",
       "difficulty": "medium",
       "value": 100,
-      "unlockers": 4,
+      "unlockers": 5,
       "unlocker_solve_rate": 0.0,
       "non_unlocker_solve_rate": 0.0,
       "lift": 0.0
@@ -9522,7 +10140,7 @@
       "mission": "M5",
       "difficulty": "hard",
       "value": 200,
-      "unlockers": 2,
+      "unlockers": 3,
       "unlocker_solve_rate": 0.0,
       "non_unlocker_solve_rate": 0.0,
       "lift": 0.0
@@ -9533,7 +10151,7 @@
       "mission": "M5",
       "difficulty": "hard",
       "value": 200,
-      "unlockers": 2,
+      "unlockers": 3,
       "unlocker_solve_rate": 0.0,
       "non_unlocker_solve_rate": 0.0,
       "lift": 0.0
@@ -9544,7 +10162,7 @@
       "mission": "M5",
       "difficulty": "hard",
       "value": 200,
-      "unlockers": 2,
+      "unlockers": 3,
       "unlocker_solve_rate": 0.0,
       "non_unlocker_solve_rate": 0.0,
       "lift": 0.0
@@ -9555,7 +10173,7 @@
       "mission": "M5",
       "difficulty": "expert",
       "value": 300,
-      "unlockers": 2,
+      "unlockers": 3,
       "unlocker_solve_rate": 0.0,
       "non_unlocker_solve_rate": 0.0,
       "lift": 0.0
@@ -9566,7 +10184,7 @@
       "mission": "M5",
       "difficulty": "expert",
       "value": 300,
-      "unlockers": 2,
+      "unlockers": 3,
       "unlocker_solve_rate": 0.0,
       "non_unlocker_solve_rate": 0.0,
       "lift": 0.0
@@ -9579,8 +10197,8 @@
       "value": 200,
       "unlockers": 1,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.1651,
-      "lift": 0.8349
+      "non_unlocker_solve_rate": 0.1927,
+      "lift": 0.8073
     },
     {
       "id": 38,
@@ -9588,10 +10206,10 @@
       "mission": "M3",
       "difficulty": "medium",
       "value": 100,
-      "unlockers": 6,
-      "unlocker_solve_rate": 0.6667,
-      "non_unlocker_solve_rate": 0.0481,
-      "lift": 0.6186
+      "unlockers": 7,
+      "unlocker_solve_rate": 0.5714,
+      "non_unlocker_solve_rate": 0.068,
+      "lift": 0.5035
     },
     {
       "id": 40,
@@ -9601,8 +10219,8 @@
       "value": 50,
       "unlockers": 3,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.3084,
-      "lift": 0.6916
+      "non_unlocker_solve_rate": 0.3178,
+      "lift": 0.6822
     },
     {
       "id": 41,
@@ -9612,8 +10230,8 @@
       "value": 100,
       "unlockers": 4,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.3208,
-      "lift": 0.6792
+      "non_unlocker_solve_rate": 0.3302,
+      "lift": 0.6698
     },
     {
       "id": 42,
@@ -9623,8 +10241,8 @@
       "value": 100,
       "unlockers": 4,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.3302,
-      "lift": 0.6698
+      "non_unlocker_solve_rate": 0.3396,
+      "lift": 0.6604
     },
     {
       "id": 43,
@@ -9634,8 +10252,8 @@
       "value": 100,
       "unlockers": 4,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.283,
-      "lift": 0.717
+      "non_unlocker_solve_rate": 0.2925,
+      "lift": 0.7075
     },
     {
       "id": 44,
@@ -9645,8 +10263,8 @@
       "value": 50,
       "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.3056,
-      "lift": 0.6944
+      "non_unlocker_solve_rate": 0.3148,
+      "lift": 0.6852
     },
     {
       "id": 45,
@@ -9656,8 +10274,8 @@
       "value": 100,
       "unlockers": 1,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.3119,
-      "lift": 0.6881
+      "non_unlocker_solve_rate": 0.3211,
+      "lift": 0.6789
     },
     {
       "id": 46,
@@ -9667,8 +10285,8 @@
       "value": 100,
       "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.2778,
-      "lift": 0.7222
+      "non_unlocker_solve_rate": 0.287,
+      "lift": 0.713
     },
     {
       "id": 47,
@@ -9678,8 +10296,8 @@
       "value": 100,
       "unlockers": 4,
       "unlocker_solve_rate": 0.75,
-      "non_unlocker_solve_rate": 0.2736,
-      "lift": 0.4764
+      "non_unlocker_solve_rate": 0.283,
+      "lift": 0.467
     },
     {
       "id": 48,
@@ -9689,8 +10307,8 @@
       "value": 50,
       "unlockers": 4,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.283,
-      "lift": 0.717
+      "non_unlocker_solve_rate": 0.2925,
+      "lift": 0.7075
     },
     {
       "id": 49,
@@ -9700,8 +10318,8 @@
       "value": 100,
       "unlockers": 2,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.2963,
-      "lift": 0.7037
+      "non_unlocker_solve_rate": 0.3056,
+      "lift": 0.6944
     },
     {
       "id": 50,
@@ -9711,8 +10329,8 @@
       "value": 100,
       "unlockers": 2,
       "unlocker_solve_rate": 0.5,
-      "non_unlocker_solve_rate": 0.2963,
-      "lift": 0.2037
+      "non_unlocker_solve_rate": 0.3056,
+      "lift": 0.1944
     },
     {
       "id": 51,
@@ -9722,8 +10340,8 @@
       "value": 100,
       "unlockers": 3,
       "unlocker_solve_rate": 1.0,
-      "non_unlocker_solve_rate": 0.271,
-      "lift": 0.729
+      "non_unlocker_solve_rate": 0.2804,
+      "lift": 0.7196
     },
     {
       "id": 52,
@@ -9783,13 +10401,13 @@
   ],
   "hint_roi_summary": {
     "users_with_hints": 41,
-    "users_net_positive": 35,
-    "users_net_zero": 0,
-    "users_net_negative": 6,
-    "total_hint_spend": 5385,
-    "total_earned_on_hinted": 12000,
-    "net_community": 6615,
-    "wasted_hints": 80
+    "users_net_positive": 33,
+    "users_net_zero": 1,
+    "users_net_negative": 7,
+    "total_hint_spend": 6910,
+    "total_earned_on_hinted": 13350,
+    "net_community": 6440,
+    "wasted_hints": 95
   },
   "grind_challenges": [
     {
@@ -9799,17 +10417,17 @@
       "mission": "M2",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 12,
-      "solve_rate": 0.1091,
-      "attempter_count": 38,
-      "conditional_solve_rate": 0.3158,
-      "attempt_count": 196,
-      "real_attempt_count": 162,
-      "rate_limited_count": 34,
+      "solve_count": 14,
+      "solve_rate": 0.1273,
+      "attempter_count": 39,
+      "conditional_solve_rate": 0.359,
+      "attempt_count": 219,
+      "real_attempt_count": 181,
+      "rate_limited_count": 38,
       "first_solve": "2026-04-15T23:43:44.111254+00:00",
       "minutes_to_first_solve": 118.7,
       "median_attempts_per_solver": 6.0,
-      "median_minutes_to_solve": 124.2,
+      "median_minutes_to_solve": 141.5,
       "hint_unlocks": 18
     },
     {
@@ -9819,17 +10437,17 @@
       "mission": "M1",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 20,
-      "solve_rate": 0.1818,
+      "solve_count": 21,
+      "solve_rate": 0.1909,
       "attempter_count": 48,
-      "conditional_solve_rate": 0.4167,
-      "attempt_count": 475,
-      "real_attempt_count": 423,
-      "rate_limited_count": 52,
+      "conditional_solve_rate": 0.4375,
+      "attempt_count": 477,
+      "real_attempt_count": 424,
+      "rate_limited_count": 53,
       "first_solve": "2026-04-16T01:38:53.724256+00:00",
       "minutes_to_first_solve": 233.9,
-      "median_attempts_per_solver": 5.0,
-      "median_minutes_to_solve": 141.8,
+      "median_attempts_per_solver": 5,
+      "median_minutes_to_solve": 158.9,
       "hint_unlocks": 29
     },
     {
@@ -9839,38 +10457,18 @@
       "mission": "M3",
       "value": 300,
       "difficulty": "expert",
-      "solve_count": 5,
-      "solve_rate": 0.0455,
-      "attempter_count": 14,
-      "conditional_solve_rate": 0.3571,
-      "attempt_count": 104,
-      "real_attempt_count": 52,
-      "rate_limited_count": 52,
+      "solve_count": 7,
+      "solve_rate": 0.0636,
+      "attempter_count": 16,
+      "conditional_solve_rate": 0.4375,
+      "attempt_count": 141,
+      "real_attempt_count": 73,
+      "rate_limited_count": 68,
       "first_solve": "2026-04-16T00:15:33.259600+00:00",
       "minutes_to_first_solve": 150.6,
       "median_attempts_per_solver": 5,
-      "median_minutes_to_solve": 206.7,
-      "hint_unlocks": 1
-    },
-    {
-      "id": 15,
-      "name": "Lateral Movement",
-      "category": "Mission 2 \u2014 Inside Boreas",
-      "mission": "M2",
-      "value": 100,
-      "difficulty": "medium",
-      "solve_count": 19,
-      "solve_rate": 0.1727,
-      "attempter_count": 33,
-      "conditional_solve_rate": 0.5758,
-      "attempt_count": 139,
-      "real_attempt_count": 107,
-      "rate_limited_count": 32,
-      "first_solve": "2026-04-15T23:06:56.299306+00:00",
-      "minutes_to_first_solve": 81.9,
-      "median_attempts_per_solver": 4,
-      "median_minutes_to_solve": 18.9,
-      "hint_unlocks": 3
+      "median_minutes_to_solve": 333.4,
+      "hint_unlocks": 4
     },
     {
       "id": 20,
@@ -9879,17 +10477,17 @@
       "mission": "M3",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 7,
-      "solve_rate": 0.0636,
-      "attempter_count": 20,
-      "conditional_solve_rate": 0.35,
-      "attempt_count": 165,
-      "real_attempt_count": 111,
-      "rate_limited_count": 54,
+      "solve_count": 10,
+      "solve_rate": 0.0909,
+      "attempter_count": 22,
+      "conditional_solve_rate": 0.4545,
+      "attempt_count": 188,
+      "real_attempt_count": 129,
+      "rate_limited_count": 59,
       "first_solve": "2026-04-15T23:46:02.102883+00:00",
       "minutes_to_first_solve": 121.0,
-      "median_attempts_per_solver": 4,
-      "median_minutes_to_solve": 67.4,
+      "median_attempts_per_solver": 4.0,
+      "median_minutes_to_solve": 123.0,
       "hint_unlocks": 3
     },
     {
@@ -9899,18 +10497,38 @@
       "mission": "M3",
       "value": 50,
       "difficulty": "easy",
-      "solve_count": 9,
-      "solve_rate": 0.0818,
-      "attempter_count": 17,
-      "conditional_solve_rate": 0.5294,
-      "attempt_count": 118,
-      "real_attempt_count": 77,
-      "rate_limited_count": 41,
+      "solve_count": 11,
+      "solve_rate": 0.1,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.55,
+      "attempt_count": 134,
+      "real_attempt_count": 87,
+      "rate_limited_count": 47,
       "first_solve": "2026-04-15T23:44:02.411363+00:00",
       "minutes_to_first_solve": 119.0,
       "median_attempts_per_solver": 4,
       "median_minutes_to_solve": 51.9,
       "hint_unlocks": 0
+    },
+    {
+      "id": 23,
+      "name": "MIDNIGHT-7",
+      "category": "Mission 3 \u2014 The Lab",
+      "mission": "M3",
+      "value": 100,
+      "difficulty": "medium",
+      "solve_count": 10,
+      "solve_rate": 0.0909,
+      "attempter_count": 20,
+      "conditional_solve_rate": 0.5,
+      "attempt_count": 130,
+      "real_attempt_count": 86,
+      "rate_limited_count": 44,
+      "first_solve": "2026-04-15T23:44:30.732931+00:00",
+      "minutes_to_first_solve": 119.5,
+      "median_attempts_per_solver": 4.0,
+      "median_minutes_to_solve": 93.2,
+      "hint_unlocks": 3
     },
     {
       "id": 24,
@@ -9919,18 +10537,58 @@
       "mission": "M3",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 6,
-      "solve_rate": 0.0545,
-      "attempter_count": 21,
-      "conditional_solve_rate": 0.2857,
-      "attempt_count": 125,
-      "real_attempt_count": 88,
-      "rate_limited_count": 37,
+      "solve_count": 7,
+      "solve_rate": 0.0636,
+      "attempter_count": 23,
+      "conditional_solve_rate": 0.3043,
+      "attempt_count": 161,
+      "real_attempt_count": 112,
+      "rate_limited_count": 49,
       "first_solve": "2026-04-15T23:49:59.636853+00:00",
       "minutes_to_first_solve": 125.0,
-      "median_attempts_per_solver": 4.0,
-      "median_minutes_to_solve": 200.4,
+      "median_attempts_per_solver": 4,
+      "median_minutes_to_solve": 239.9,
       "hint_unlocks": 2
+    },
+    {
+      "id": 15,
+      "name": "Lateral Movement",
+      "category": "Mission 2 \u2014 Inside Boreas",
+      "mission": "M2",
+      "value": 100,
+      "difficulty": "medium",
+      "solve_count": 20,
+      "solve_rate": 0.1818,
+      "attempter_count": 34,
+      "conditional_solve_rate": 0.5882,
+      "attempt_count": 143,
+      "real_attempt_count": 110,
+      "rate_limited_count": 33,
+      "first_solve": "2026-04-15T23:06:56.299306+00:00",
+      "minutes_to_first_solve": 81.9,
+      "median_attempts_per_solver": 3.5,
+      "median_minutes_to_solve": 20.7,
+      "hint_unlocks": 4
+    },
+    {
+      "id": 10,
+      "name": "Password Reuse",
+      "category": "Mission 2 \u2014 Inside Boreas",
+      "mission": "M2",
+      "value": 50,
+      "difficulty": "easy",
+      "solve_count": 14,
+      "solve_rate": 0.1273,
+      "attempter_count": 35,
+      "conditional_solve_rate": 0.4,
+      "attempt_count": 186,
+      "real_attempt_count": 154,
+      "rate_limited_count": 32,
+      "first_solve": "2026-04-15T23:06:36.198545+00:00",
+      "minutes_to_first_solve": 81.6,
+      "median_attempts_per_solver": 3.0,
+      "median_minutes_to_solve": 54.0,
+      "hint_unlocks": 9
     },
     {
       "id": 16,
@@ -9939,58 +10597,18 @@
       "mission": "M2",
       "value": 100,
       "difficulty": "medium",
-      "solve_count": 16,
-      "solve_rate": 0.1455,
-      "attempter_count": 29,
-      "conditional_solve_rate": 0.5517,
-      "attempt_count": 142,
-      "real_attempt_count": 99,
-      "rate_limited_count": 43,
+      "solve_count": 17,
+      "solve_rate": 0.1545,
+      "attempter_count": 30,
+      "conditional_solve_rate": 0.5667,
+      "attempt_count": 160,
+      "real_attempt_count": 113,
+      "rate_limited_count": 47,
       "first_solve": "2026-04-15T23:10:40.398227+00:00",
       "minutes_to_first_solve": 85.7,
-      "median_attempts_per_solver": 3.0,
-      "median_minutes_to_solve": 14.8,
-      "hint_unlocks": 2
-    },
-    {
-      "id": 19,
-      "name": "Lights Out",
-      "category": "Mission 4 \u2014 Lights Out",
-      "mission": "M4",
-      "value": 300,
-      "difficulty": "expert",
-      "solve_count": 10,
-      "solve_rate": 0.0909,
-      "attempter_count": 10,
-      "conditional_solve_rate": 1.0,
-      "attempt_count": 59,
-      "real_attempt_count": 52,
-      "rate_limited_count": 7,
-      "first_solve": "2026-04-16T00:07:06.808683+00:00",
-      "minutes_to_first_solve": 142.1,
-      "median_attempts_per_solver": 3.0,
-      "median_minutes_to_solve": 37.2,
-      "hint_unlocks": 4
-    },
-    {
-      "id": 22,
-      "name": "Heavy Delivery",
-      "category": "Mission 3 \u2014 The Lab",
-      "mission": "M3",
-      "value": 50,
-      "difficulty": "easy",
-      "solve_count": 9,
-      "solve_rate": 0.0818,
-      "attempter_count": 19,
-      "conditional_solve_rate": 0.4737,
-      "attempt_count": 110,
-      "real_attempt_count": 77,
-      "rate_limited_count": 33,
-      "first_solve": "2026-04-15T23:44:02.506952+00:00",
-      "minutes_to_first_solve": 119.0,
       "median_attempts_per_solver": 3,
-      "median_minutes_to_solve": 50.9,
-      "hint_unlocks": 0
+      "median_minutes_to_solve": 21.9,
+      "hint_unlocks": 2
     }
   ]
 }

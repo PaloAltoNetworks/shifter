@@ -181,6 +181,48 @@ details summary {
 .takeaways p { margin: 0 0 0.6rem; color: var(--fg); }
 .takeaways .small { color: var(--fg-dim); font-size: 0.88rem; }
 
+.confidence-note {
+  background: rgba(77,208,255,0.06);
+  border-left: 3px solid var(--cyan);
+  padding: 0.7em 1em;
+  margin: 0 0 1.2rem;
+  font-size: 0.86rem;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+}
+.confidence-note strong { color: var(--cyan); }
+
+.badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.65em;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 2px 8px;
+  border-radius: 2px;
+  margin-left: 0.5em;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+.landscape {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--cyan);
+  padding: 1.2rem 1.6rem;
+}
+.landscape h3 {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+  margin: 1rem 0 0.3rem;
+}
+.landscape h3:first-child { margin-top: 0; }
+.landscape p { margin: 0 0 0.6rem; color: var(--fg); }
+.landscape ul { color: var(--fg); margin: 0.2rem 0 0.8rem 1.2rem; }
+.landscape a { color: var(--cyan); }
+
 footer {
   border-top: 1px solid var(--line);
   padding: 1.5rem 2rem;

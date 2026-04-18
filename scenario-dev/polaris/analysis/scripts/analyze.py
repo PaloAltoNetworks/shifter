@@ -550,10 +550,104 @@ write_csv("challenges", challenge_rows, [
 # ---------------------------------------------------------------------------
 # analysis.json for the website
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Stuck-signature analysis — detect operators who had the answer but couldn't
+# complete the mechanic. Crucial for distinguishing skill gaps from infrastructure
+# bugs. For Full Override (id 36), the challenge expects the flag from the
+# brain's response after running `override 7741-MN07-AL42` on the TCP binary
+# endpoint. Operators who submit the CODE to CTFd (instead of to the brain) are
+# a canary for "knew the answer, couldn't reach the brain" — which is exactly
+# what the splice-watcher bug caused during the event.
+# ---------------------------------------------------------------------------
+STUCK_SIGNATURES = {}
+
+# Full Override: three-piece code 7741-MN07-AL42. Detect operators whose
+# submissions contain any variant with all three pieces.
+FO_CID = None
+for c in challenges:
+    if c["name"] == "Full Override":
+        FO_CID = c["id"]
+        break
+
+if FO_CID:
+    # First pieces are derived from M1 A0 (7741 from the registration number),
+    # M3 A6 MIDNIGHT-7 (MN07), and M3 A8 final-assembly metadata (AL42).
+    import re as _re
+    three_piece = _re.compile(r"7741.*MN07.*AL42|MN07.*AL42.*7741|AL42.*7741.*MN07|AL42.*MN07.*7741|MN07.*7741.*AL42|7741.*AL42.*MN07", _re.IGNORECASE)
+    two_piece   = _re.compile(r"(MN07.*AL42|AL42.*MN07)", _re.IGNORECASE)
+    partial_pieces = _re.compile(r"(7741|MN07|AL42)", _re.IGNORECASE)
+
+    fo_stuck = []
+    for uid, user in participants.items():
+        user_fo_subs = [s for s in submissions if s["user_id"] == uid and s["challenge_id"] == FO_CID]
+        if not user_fo_subs:
+            continue
+        solved = any(s for s in user_fo_subs if s["type"] == "correct")
+        exact_code = sum(1 for s in user_fo_subs if (s.get("provided") or "").strip() == "7741-MN07-AL42")
+        three_piece_variants = sum(1 for s in user_fo_subs if three_piece.search((s.get("provided") or "")))
+        two_piece_variants = sum(1 for s in user_fo_subs if two_piece.search((s.get("provided") or "")) and not three_piece.search((s.get("provided") or "")))
+        any_piece = sum(1 for s in user_fo_subs if partial_pieces.search((s.get("provided") or "")))
+        flag_format = sum(1 for s in user_fo_subs if (s.get("provided") or "").strip().startswith("FLAG{"))
+
+        # Classification:
+        # - has_answer: submitted correct code at least once
+        # - knows_two_pieces: submitted 2 of 3 pieces but couldn't reach brain
+        # - spraying: heavy FLAG{hex} guessing
+        if exact_code > 0 and not solved:
+            category = "HAS_ANSWER_STUCK"  # had exact code, never solved
+        elif three_piece_variants > 0 and not solved:
+            category = "KNOWS_PIECES_STUCK"  # has all pieces, guessing order
+        elif two_piece_variants >= 5 and not solved:
+            category = "PARTIAL_STUCK"
+        elif flag_format >= 20 and not solved:
+            category = "BRUTE_SPRAYING"
+        elif not solved:
+            category = "ATTEMPTING"
+        else:
+            category = "SOLVED"
+
+        fo_stuck.append({
+            "op_num": op_num(user),
+            "total_subs": len(user_fo_subs),
+            "exact_correct_code_submitted": exact_code,
+            "three_piece_variants": three_piece_variants,
+            "two_piece_variants": two_piece_variants,
+            "flag_format_guesses": flag_format,
+            "solved": solved,
+            "category": category,
+        })
+    fo_stuck.sort(key=lambda r: (-r["three_piece_variants"], -r["exact_correct_code_submitted"], -r["total_subs"]))
+    STUCK_SIGNATURES["full_override"] = fo_stuck
+
+# Per-mission frustration index — high submissions on a mission with no solves
+# per operator
+frustration = []
+for uid, user in participants.items():
+    user_subs = [s for s in submissions if s["user_id"] == uid]
+    user_solves = {s["challenge_id"] for s in solves if s["user_id"] == uid}
+    per_m = defaultdict(lambda: {"subs": 0, "solves": 0})
+    for s in user_subs:
+        if s["type"] not in ("correct", "incorrect"): continue
+        m = mission_of(s["challenge_id"])
+        per_m[m]["subs"] += 1
+        if s["challenge_id"] in user_solves:
+            per_m[m]["solves"] += 1 if s["type"] == "correct" else 0
+    for m, stats in per_m.items():
+        if stats["subs"] >= 20 and stats["solves"] == 0:
+            frustration.append({
+                "op_num": op_num(user),
+                "mission": m,
+                "submissions": stats["subs"],
+                "solves": 0,
+            })
+frustration.sort(key=lambda r: -r["submissions"])
+
 out = {
     "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     "event": {"name": "Operation NORTHSTORM — BSides Ottawa",
               "start_utc": EVENT_START.isoformat(), "end_utc": EVENT_END.isoformat()},
+    "stuck_signatures": STUCK_SIGNATURES,
+    "frustration_index": frustration[:30],
     "summary": {
         "participants_total": len(participants),
         "participants_active": sum(1 for u in user_rows if u["attempts_total"] > 0),
@@ -603,6 +697,12 @@ print(f"wrote {OUT_JSON}  ({OUT_JSON.stat().st_size} bytes)")
 # Human report
 # ---------------------------------------------------------------------------
 s = out["summary"]
+# Count HAS_ANSWER_STUCK operators from stuck analysis
+_fo_stuck = (STUCK_SIGNATURES.get("full_override") or [])
+_has_answer = [r for r in _fo_stuck if r["category"] == "HAS_ANSWER_STUCK"]
+_has_answer_ops = ", ".join(f"op{r['op_num']}" for r in _has_answer) or "(none)"
+_has_answer_count = len(_has_answer)
+
 lines = [
     "# Operation NORTHSTORM — Event Data Report",
     "",
@@ -610,28 +710,35 @@ lines = [
     "",
     "## Top-line numbers",
     "",
-    f"- **{s['participants_total']}** participants enrolled; **{s['participants_active']}** made at least one submission; **{s['participants_scoring']}** scored.",
+    f"- **{s['participants_active']}** operators participated (submitted at least once); **{s['participants_scoring']}** scored.",
     f"- **{s['solves_total']}** total solves across **{s['challenges_visible']}** visible challenges.",
     f"- **{s['submissions_total']}** total submissions: **{s['correct_total']}** correct, **{s['incorrect_total']}** incorrect, **{s['ratelimited_total']}** rate-limited (_{round(s['ratelimited_total']/s['submissions_total']*100,1)}% of all submissions_).",
-    f"- Top score: **{s['top_score']}**. Mean among active: **{s['mean_score_of_active']}**. Median (all): **{s['median_score']}**.",
+    f"- Top score: **{s['top_score']}**. Mean among active: **{s['mean_score_of_active']}**. Median (active): **{statistics.median([u['points'] for u in user_rows if u['attempts_total']>0]):.0f}**.",
     "",
-    "## Headline findings",
+    "## The headline finding (revised with post-event infra analysis)",
     "",
-    "**Submission-loop discoverability explains most of the variance.** Operators split into two Claude-assisted workflows: ({copy}) who copy-pasted Claude's output into the CTFd browser tab, and ({drives}) who figured out how to let Claude hit the submission endpoint directly. **{discovered} operators visibly crossed over mid-event** (early-session burst density under 10%, late-session burst density above 20%). Two of the four ceiling-tied operators are in this group — they started slow and sped up after discovering the Claude-drives-submission workflow. The two clusters are not two Claude styles; they are two operator integrations.",
+    "**M5 Bunker's zero-solve rate was a deployment bug, not design difficulty or skill gap.** The splice-watcher systemd unit on every polaris-vm was configured with a container name (`a5-scada-generator`) that did not match what was actually baked (`a5-scada`). The watcher silently failed every 10 seconds for ~30 hours. Every operator who tripped the A5 meltdown (by solving M4 — Lights Out) SHOULD have had `a14-kali` automatically attached to `build_splice-link` — none did. The bunker was unreachable for the entire event window.",
     "",
-    "**The ceiling is structural.** {tied} operators tied at the top score (${top}). They did not solve similar challenges — they solved the **exact same 49 challenges**, every one of them. The ceiling is everything except M5 Bunker.",
+    "**The data reveals operators who knew the answer but couldn't send it.** {has_answer_count} operators — {has_answer_ops} — submitted the **correct override code** `7741-MN07-AL42` directly to the CTFd endpoint, having correctly assembled it from three separate range artifacts (M1 A0 registration number, M3 A6 MIDNIGHT-7 simulation ID, M3 A8 assembly-log metadata). They were submitting to CTFd because they had no network route to run `override 7741-MN07-AL42` on the brain (A13:9100) — which is the real mechanic. Once the splice-watcher was patched mid-event, the splice worked correctly for any fresh meltdown. Twelve of the operators who had done the M4 work got a manual splice for a 24h extension to finish.",
     "",
-    "**Two bottlenecks.** M3 Lab: {m3a} attempted, {m3t} got any solve, {m3c} cleared. Hard content even once the pivot lands. M5 Bunker: {m5a} attempted, **0 solved anything** across 6 challenges. Either the blackout→splice mechanic didn't fully open the route, or the OT protocol work is too far outside most comfort zones for a 4-hour window.",
+    "## Other findings",
     "",
-    "**Attendance was the real gate.** {active}/{total} enrolled operators submitted anything. For an event whose design assumption was \"everyone has Claude,\" the loss in the onboarding funnel mattered more than any content tuning.",
+    "**Stuck-signature detection could have caught the infra failure live.** The signature — high submission rate + internally-consistent near-answers + zero solves, concentrated on one challenge — is detectable with a trivial heuristic (per-challenge near-answer regex, alert when ≥2 operators ≥5 near-answers with 0 solves). We had the signal throughout; we weren't watching for it. Build this into the next event's dashboard.",
     "",
-    "**Platform rate-limits.** CTFd threw **{rl} rate-limit responses** (26% of all submissions) concentrated in the Claude-drives-submission cluster. Default CTFd rate-limit config treats a human typing and an AI looping the same — that's a platform-tuning gap for agentic events.",
+    "**Submission-loop discoverability explains most of the score variance.** Operators split into two Claude-assisted workflows: ({copy}) who copy-pasted Claude's output into the CTFd browser tab, and ({drives}) who figured out how to let Claude hit the submission endpoint directly. **{discovered} operators visibly crossed over mid-event** (early-session burst density under 10%, late-session burst density above 20%). Two of the four ceiling-tied operators are in this group. The clusters are not two Claude modes; they are two operator integrations.",
     "",
-    "**Hint 2 = answer on hard content.** {big_lifts} challenges show +80% or greater solve-rate lift for hint-unlockers. By design, but economically it means paying for the answer, not paying for a nudge.",
+    "**The ceiling is structural.** {tied} operators tied at the top score (${top}). They all solved the **exact same 49 challenges** — everything except M5 Bunker. Now we know why: the splice-watcher bug capped them there.",
+    "",
+    "**M3 Lab was genuine difficulty.** M3: {m3a} attempted, {m3t} got any solve, {m3c} cleared. Unlike M5, operators who reached M3 ran out of time and technique, not infrastructure. This is what intended-difficulty looks like in the data: plenty of attempts, some solves, clear gradient.",
+    "",
+    "**Platform rate-limits.** CTFd threw **{rl} rate-limit responses** (~{rl_pct}% of all submissions) concentrated in the Claude-drives-submission cluster. Default CTFd rate-limit config treats a human typing and an AI looping the same — a platform-tuning gap for agentic events.",
+    "",
+    "**Hint 2 = answer on hard content.** {big_lifts} challenges show +80% or greater solve-rate lift for hint-unlockers. Economically: paying for the answer, not paying for a nudge.",
     "",
 ]
 lines = [l.format(
     rl=s["ratelimited_total"],
+    rl_pct=round(s["ratelimited_total"]/s["submissions_total"]*100),
     copy=workflow_summary.get("human-in-loop (copy-paste from Claude)", 0),
     drives=workflow_summary.get("Claude drives submission", 0),
     discovered=discovered_count,
@@ -641,9 +748,71 @@ lines = [l.format(
     m3t=mission_funnel.get("M3",{}).get("participants_touched",0),
     m3c=mission_funnel.get("M3",{}).get("participants_completed",0),
     m5a=mission_funnel.get("M5",{}).get("participants_attempted",0),
-    active=s["participants_active"], total=s["participants_total"],
+    has_answer_count=_has_answer_count,
+    has_answer_ops=_has_answer_ops,
     big_lifts=sum(1 for h in hint_impact if h["lift"]>=0.8),
 ) for l in lines]
+
+# Add a full stuck-signature table
+lines += [
+    "## Stuck-signature detection (Full Override)",
+    "",
+    "Per-operator breakdown of Full Override (challenge 36) submissions. `HAS_ANSWER_STUCK` means the operator submitted the exact correct override code to CTFd but never solved the challenge — the unambiguous signature that they knew the answer but couldn't execute the mechanic. `KNOWS_PIECES_STUCK` means they assembled all three pieces (7741, MN07, AL42) in some ordering but never landed on the correct permutation at CTFd (which still wouldn't have worked — the code had to run against the brain).",
+    "",
+    "| Operator | Category | Total subs | Exact code | 3-piece variants | 2-piece variants | FLAG{} guesses |",
+    "|---|---|---:|---:|---:|---:|---:|",
+]
+for r in _fo_stuck:
+    lines.append(
+        f"| op{r['op_num']:03d} | {r['category']} | {r['total_subs']} | "
+        f"{r['exact_correct_code_submitted']} | {r['three_piece_variants']} | "
+        f"{r['two_piece_variants']} | {r['flag_format_guesses']} |"
+    )
+lines.append("")
+lines.append("## Related work / landscape (as of April 2026)")
+lines.append("")
+lines.append("Context for the findings above: how our results sit next to what's publicly known about AI-assisted CTFs.")
+lines.append("")
+lines.append("### Format scarcity")
+lines.append("")
+lines.append("I could not find a published analog at this scale — ~110 human operators, each issued a preconfigured frontier agent inside an isolated range, running against a difficulty-calibrated IT+OT challenge set. Related but distinct formats exist:")
+lines.append("")
+lines.append("- **AI-vs-human CTFs** — autonomous agent teams competing against humans. E.g., [HTB × Palisade Research (Jan 2025)](https://www.hackthebox.com/blog/ai-vs-human-ctf-hack-the-box-results): 8 agent teams vs 153 human teams. Different question.")
+lines.append("- **AI-as-copilot pilots** — [HTB \"Attack of the Agents\" (June 2025)](https://www.hackthebox.com/blog/attack-of-the-agents-ctf) — same format as ours but much smaller scale.")
+lines.append("- **Agent-building competitions** — [CSAW Agentic Automated CTF (2025)](https://www.csaw.io/agentic-automated-ctf): participants build the agent rather than play with it.")
+lines.append("- **BYO-AI** — tolerated at BSides / picoCTF / etc., but no uniform provisioning, not measurement-comparable.")
+lines.append("")
+lines.append("### What published data exists on AI × CTF solve rates")
+lines.append("")
+lines.append("- **[DARPA AIxCC final](https://www.darpa.mil/news/2025/aixcc-results)** (DEF CON 33, Aug 2025) — autonomous cyber reasoning systems. Agent capability, not human-plus-agent.")
+lines.append("- **[Cybench](https://arxiv.org/abs/2408.08926)** (Stanford CRFM, NeurIPS 2024, arXiv:2408.08926) — agent first-solve-time correlates with human difficulty; first-solve-time cliff above ~11 minutes. Closest published analog to our difficulty-gradient observation.")
+lines.append("- **[NYU CTF Bench](https://arxiv.org/abs/2406.05590)** (NeurIPS 2024), **EnIGMA**, **CTF-Dojo**, **CAI** — all agent-capability benchmarks.")
+lines.append("- **[UK AISI Claude \"Mythos Preview\" eval](https://www.aisi.gov.uk/blog/our-evaluation-of-claude-mythos-previews-cyber-capabilities)** (Apr 2026): 73% on expert cyber tasks; Claude at top 3% on PicoCTF 2025.")
+lines.append("- **Suzu Labs — \"Death of the CTF\"** (Mar 2026): root-blood times on HTB declining ~16%/yr post-LLM, with 27% (Hard) → 67% (Insane) compression across difficulty tiers. Measures the time dimension of agent impact.")
+lines.append("")
+lines.append("### Is our \"monotonic solve-rate decline despite AI access\" result novel?")
+lines.append("")
+lines.append("Direction is expected — Cybench and Suzu Labs both show agents still hit a difficulty ceiling. What's plausibly new in this data:")
+lines.append("")
+lines.append("- **Scale in a human population**: 61 active operators each with an agent, not agent-only benchmarks or single-operator pilots.")
+lines.append("- **Clean calibration (easy/medium/hard/expert) surviving universal AI access**: this is a stronger claim than \"agents have a ceiling\" — it says the designers' labels still correctly sorted the content under AI assistance.")
+lines.append("- **IT + OT mix** (SCADA/Modbus + custom binary protocol). OT content is near-absent from published LLM-CTF literature, making our M9 and M5 data the most novel slice.")
+lines.append("")
+lines.append("### Honest gaps")
+lines.append("")
+lines.append("- Can't rule out unpublished industry events running similar formats. \"Unprecedented\" here = \"I couldn't find one published.\"")
+lines.append("- Causal claims about *why* solve rates fell (what makes expert harder than hard for AI-assisted teams) aren't in the data. We see the what, not the why.")
+lines.append("- The M5 Bunker confound — the hardest mission was also the broken one. The solve rate on M5 tells us nothing about its actual difficulty.")
+lines.append("")
+lines.append("### Mission-level frustration index")
+lines.append("")
+lines.append("Per-operator × per-mission: ≥20 submissions, 0 solves in that mission. Concentration on a single mission — especially M5 in this table — is the coarse-grained version of the stuck signature.")
+lines.append("")
+lines.append("| Operator | Mission | Submissions | Solves |")
+lines.append("|---|---|---:|---:|")
+for r in frustration[:20]:
+    lines.append(f"| op{r['op_num']:03d} | {r['mission']} | {r['submissions']} | {r['solves']} |")
+lines.append("")
 
 lines += [
     "## Difficulty calibration",

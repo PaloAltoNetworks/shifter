@@ -59,7 +59,104 @@ function render(d) {
   renderHints(d);
   renderHintROI(d);
   renderGrind(d);
+  renderLandscape(d);
+  renderStuck(d);
   renderTakeaways(d);
+}
+
+function renderLandscape(d) {
+  const el = document.getElementById('landscape-body');
+  el.innerHTML = `
+    <h3>How common is "every participant has their own AI agent in an isolated range"?</h3>
+    <p>Effectively unprecedented at 100+ participants with a frontier agent per operator. Related formats:</p>
+    <ul>
+      <li><strong>AI-vs-human CTFs</strong> — autonomous agent teams competing <em>against</em> humans. Example: <a href="https://www.hackthebox.com/blog/ai-vs-human-ctf-hack-the-box-results">HTB × Palisade Research (Jan 2025)</a>: 8 agent teams vs 153 human teams on 20 crypto/reverse challenges. Different format from ours.</li>
+      <li><strong>AI-as-copilot pilots</strong> — HTB's <a href="https://www.hackthebox.com/blog/attack-of-the-agents-ctf">"Attack of the Agents" (June 2025)</a> tested AI copilots for small groups via their MCP integration. Similar format, much smaller scale.</li>
+      <li><strong>Agent-building competitions</strong> — <a href="https://www.csaw.io/agentic-automated-ctf">CSAW Agentic Automated CTF (2025)</a>: participants <em>build</em> the agent rather than play with it.</li>
+      <li><strong>BYO-AI</strong> — widely tolerated at BSides / picoCTF / etc., but no uniform provisioning, no controlled environment. Measurement not comparable.</li>
+    </ul>
+    <p>Polaris-format (uniform preconfigured frontier agent, 110 isolated ranges, IT+OT content, difficulty-calibrated challenge set) doesn't have a published analog I could find.</p>
+
+    <h3>What's published on AI impact on CTF solve rates?</h3>
+    <ul>
+      <li><strong>DARPA AIxCC final</strong> (DEF CON 33, Aug 2025) — autonomous cyber reasoning systems found 86% of synthetic vulns, 18 real 0-days. Measures agent capability, not human-plus-agent. <a href="https://www.darpa.mil/news/2025/aixcc-results">results</a></li>
+      <li><strong>Cybench</strong> (Stanford CRFM, NeurIPS 2024, <a href="https://arxiv.org/abs/2408.08926">arXiv:2408.08926</a>) — agent first-solve-time correlates with human difficulty; strong cliff above ~11 minutes. Closest published analog to our difficulty-gradient result.</li>
+      <li><strong>NYU CTF Bench</strong> (NeurIPS 2024, <a href="https://arxiv.org/abs/2406.05590">arXiv:2406.05590</a>), <strong>EnIGMA</strong>, <strong>CTF-Dojo</strong>, <strong>CAI</strong>. All agent-capability evals.</li>
+      <li><strong>UK AISI Claude "Mythos Preview" eval</strong> (Apr 2026): 73% on expert cyber tasks; Claude at top 3% on PicoCTF 2025. <a href="https://www.aisi.gov.uk/blog/our-evaluation-of-claude-mythos-previews-cyber-capabilities">report</a></li>
+      <li><strong>Suzu Labs / Security Boulevard — "Death of the CTF"</strong> (Mar 2026): root-blood times on HTB declining ~16%/yr post-LLM, with 27% (Hard) → 67% (Insane) compression across difficulty tiers.</li>
+    </ul>
+
+    <h3>Is our "monotonic solve-rate decline despite AI access" result novel?</h3>
+    <p><strong>Direction:</strong> expected. Cybench and Suzu Labs both show agents still hit a difficulty ceiling.</p>
+    <p><strong>What's plausibly new in this data:</strong></p>
+    <ul>
+      <li>The pattern holding at <strong>scale in a human population</strong> (61 active operators, each with an agent) rather than in agent-only benchmarks or single-operator pilots.</li>
+      <li>Clean calibration (33% / 21% / 8% / 3% easy→expert) surviving universal AI access — a stronger claim than "agents have a ceiling"; this is "the <em>designers' labels</em> still sorted the content correctly when every participant had AI help."</li>
+      <li>The <strong>IT+OT mix</strong> — specifically SCADA/Modbus and a custom binary protocol. OT content is near-absent from published LLM-CTF literature.</li>
+    </ul>
+
+    <h3>Honest gaps</h3>
+    <ul>
+      <li>We can't rule out unpublished industry events running similar formats. "Unprecedented" is "I couldn't find one published."</li>
+      <li>Our inference about <em>why</em> solve rates fell (ie what specifically made expert harder than hard for AI-assisted teams) isn't in the data — we see the what, not the why. Causal claims would need a controlled comparison.</li>
+      <li>The M5 Bunker confound — the hardest mission was also the broken one. The solve rate on M5 says nothing about its actual difficulty.</li>
+    </ul>
+
+    <p class="small" style="margin-top:1rem;color:var(--fg-dim)">Research compiled April 2026. See citations for original sources.</p>
+  `;
+}
+
+function renderStuck(d) {
+  const fo = (d.stuck_signatures || {}).full_override || [];
+  const frustration = d.frustration_index || [];
+
+  const tS = document.getElementById('table-stuck');
+  tS.innerHTML = `<thead><tr>
+    <th>Operator</th><th>Category</th>
+    <th class="num">Total subs</th>
+    <th class="num">Exact code</th>
+    <th class="num">3-piece variants</th>
+    <th class="num">2-piece variants</th>
+    <th class="num">FLAG{} guesses</th>
+    <th>Solved?</th>
+  </tr></thead>`;
+  const tb = document.createElement('tbody');
+  fo.forEach(r => {
+    const color = r.category === 'HAS_ANSWER_STUCK' ? COLORS.red :
+                  r.category === 'KNOWS_PIECES_STUCK' ? COLORS.amber :
+                  r.category === 'BRUTE_SPRAYING' ? COLORS.amber :
+                  r.category === 'SOLVED' ? COLORS.green : COLORS.dim;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>op${String(r.op_num).padStart(3,'0')}</td>` +
+      `<td style="color:${color};font-weight:600">${r.category}</td>` +
+      `<td class="num">${r.total_subs}</td>` +
+      `<td class="num">${r.exact_correct_code_submitted}</td>` +
+      `<td class="num">${r.three_piece_variants}</td>` +
+      `<td class="num">${r.two_piece_variants}</td>` +
+      `<td class="num">${r.flag_format_guesses}</td>` +
+      `<td>${r.solved ? '<span style="color:'+COLORS.green+'">yes</span>' : 'no'}</td>`;
+    tb.appendChild(tr);
+  });
+  tS.appendChild(tb);
+
+  const tF = document.getElementById('table-frustration');
+  tF.innerHTML = `<thead><tr>
+    <th>Operator</th><th>Mission</th>
+    <th class="num">Submissions</th>
+    <th class="num">Solves</th>
+  </tr></thead>`;
+  const tfb = document.createElement('tbody');
+  frustration.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>op${String(r.op_num).padStart(3,'0')}</td>` +
+      `<td>${r.mission}</td>` +
+      `<td class="num" style="color:${r.submissions > 100 ? COLORS.red : COLORS.amber}">${r.submissions}</td>` +
+      `<td class="num">${r.solves}</td>`;
+    tfb.appendChild(tr);
+  });
+  tF.appendChild(tfb);
 }
 
 // --- summary ---
@@ -86,33 +183,43 @@ function renderHeadlines(d) {
   const s = d.summary;
   const m5 = d.mission_funnel.M5 || {};
   const m3 = d.mission_funnel.M3 || {};
+  const ds = d.difficulty_summary;
   const bigLifts = d.hint_impact.filter(h => h.lift >= 0.8).length;
   const ceilingCount = d.users.filter(u => u.points === d.users[0].points).length;
-  const activePct = Math.round(s.participants_active / s.participants_total * 100);
   const wf = d.workflow_summary || {};
   const claudeDrives = wf['Claude drives submission'] || 0;
   const copyPaste = wf['human-in-loop (copy-paste from Claude)'] || 0;
   const discoveredMid = d.discovered_mid_event_count || 0;
+  const fo = (d.stuck_signatures || {}).full_override || [];
+  const hasAnswerStuck = fo.filter(r => r.category === 'HAS_ANSWER_STUCK').length;
+  const knowsPiecesStuck = fo.filter(r => r.category === 'KNOWS_PIECES_STUCK').length;
 
   document.getElementById('headlines-body').innerHTML = `
-    <h3>Submission-loop discoverability explains most of the score variance</h3>
-    <p>Operators split into two dominant workflows: <strong>${copyPaste} copy-paste-from-Claude</strong> (reading Claude's output and typing the flag into CTFd) and <strong>${claudeDrives} Claude-drives-submission</strong> (Claude hits the flag endpoint directly). <strong>${discoveredMid} operators visibly transitioned mid-event</strong>, jumping from slow cadence to bursty — that's when they figured out Claude could submit. This discoverability gap, not AI quality or flag difficulty, is the biggest single source of score variance.</p>
+    <div class="confidence-note"><strong>Note on confidence:</strong> the findings below are graded — <span style="color:${COLORS.green}">STRONG</span> means the signal maps cleanly to a known mechanic (specific flag values, baked infrastructure, etc.); <span style="color:${COLORS.amber}">SUGGESTIVE</span> means the data is consistent with an interpretation but multiple alternatives fit; <span style="color:${COLORS.dim}">DESCRIPTIVE</span> means we're reporting aggregates without claiming causation.</div>
 
-    <h3>The ceiling is structural, not skill-based</h3>
-    <p>${ceilingCount} operators tied at ${fmtNum(d.users[0].points)} points — all solved the <strong>exact same 49 challenges</strong>. Everything except M5 Bunker. Two of the four got there efficiently; two brute-forced it. Same result, dramatically different process cost.</p>
+    <h3>Difficulty calibration held under universal AI access <span class="badge" style="background:rgba(76,217,100,0.2);color:${COLORS.green}">STRONG</span></h3>
+    <p>Every participant had a frontier Claude agent (Sonnet 4.5 / 4.6) preconfigured. Despite that, solve rates fell monotonically across designated difficulty tiers: easy ${fmtPct1(ds.easy.mean_solve_rate)} → medium ${fmtPct1(ds.medium.mean_solve_rate)} → hard ${fmtPct1(ds.hard.mean_solve_rate)} → expert ${fmtPct1(ds.expert.mean_solve_rate)}. The designers' difficulty labels matched observed behavior. <strong>This is the headline result</strong> — it means the challenge set remained meaningful and differentiated even with AI assistance, which was not a given. (Related result in <a href="https://arxiv.org/abs/2408.08926">Cybench</a>: agents showed a clean first-solve-time cliff that correlated with human difficulty; we observe the same gradient survives in a 61-operator human population running with agents.)</p>
 
-    <h3>Two bottlenecks in the main chain</h3>
-    <p><strong>M3 Lab</strong>: ${m3.participants_attempted || 0} attempted, ${m3.participants_touched || 0} got any solve, ${m3.participants_completed || 0} cleared. Hard content once you're in — the pivot didn't auto-win the mission.
-    <strong>M5 Bunker</strong>: ${m5.participants_attempted || 0} attempted, <strong>0 solved anything</strong>. Zero solves from 587 submissions. Either the splice→bunker path didn't fully open, or the OT protocol work is too far outside most operators' comfort zone for a 4-hour window.</p>
+    <h3>M5 Bunker was an infrastructure failure, not a content failure <span class="badge" style="background:rgba(76,217,100,0.2);color:${COLORS.green}">STRONG</span></h3>
+    <p>0 of ${m5.participants_attempted || 0} Bunker attempters solved anything. <strong>${hasAnswerStuck} operators submitted the correct override code <code>7741-MN07-AL42</code> directly to CTFd</strong>, having assembled it from three separate range artifacts. They were stuck at the transport layer: a splice-watcher bug (looking for container <code>a5-scada-generator</code> instead of <code>a5-scada</code>) prevented <code>a14-kali</code> from ever attaching to the bunker network, so the <code>override</code> command could never be sent to the brain. Those operators had the answer; they had nowhere to send it. This reading is tightly constrained by the data — exact-string match on a known code is an unambiguous signal.</p>
 
-    <h3>Attendance, not difficulty, was the real gate</h3>
-    <p>${s.participants_active}/${s.participants_total} enrolled accounts (${activePct}%) submitted anything. The onboarding funnel mattered more than the content tuning did.</p>
+    <h3>The ceiling is structural <span class="badge" style="background:rgba(76,217,100,0.2);color:${COLORS.green}">STRONG</span></h3>
+    <p>${ceilingCount} operators tied at ${fmtNum(d.users[0].points)} points — all solved the <strong>exact same 49 challenges</strong> (everything except M5 Bunker). Same wall, same cause: the splice-watcher bug.</p>
 
-    <h3>The rate-limit story</h3>
-    <p>${fmtNum(s.ratelimited_total)} rate-limit responses (${Math.round(s.ratelimited_total/s.submissions_total*100)}% of all HTTP submissions). Concentrated in the Claude-drives-submission cluster (~30% of their submissions throttled). CTFd's default limiter is tuned for human typing, not agentic loops — this is a platform-tuning lesson, not a participant-behavior problem.</p>
+    <h3>Stuck-signature detection as an infra-health canary <span class="badge" style="background:rgba(76,217,100,0.2);color:${COLORS.green}">STRONG for Bunker, weaker elsewhere</span></h3>
+    <p>For the Bunker case, the canary is clean: we know what the exact correct code is, so exact-match detection against non-solving submissions is definitive. For other challenges without a single known "near-answer" string, the signal degrades. The method is cheap to implement ahead of the next event and worth it <em>for challenges where we can pre-declare what "close but missing" looks like</em>.</p>
 
-    <h3>Hints were load-bearing on hard content</h3>
-    <p>${bigLifts} challenges had +80% or greater solve-rate lift for hint unlockers. By design (Hint 2 essentially gives the flag on hard content), but it means "pay for a hint" is economically "pay for the answer" at the top tiers.</p>
+    <h3>Workflow splits in submission cadence <span class="badge" style="background:rgba(255,179,0,0.2);color:${COLORS.amber}">SUGGESTIVE</span></h3>
+    <p>Operators split into clusters based on success rate and inter-submission gap: <strong>${copyPaste} high-accuracy-slow</strong>, <strong>${claudeDrives} burst-low-accuracy</strong>, and <strong>${discoveredMid} who visibly shifted from slow to bursty mid-event</strong>. The intuition is that these correspond to "Claude writes, human copy-pastes" vs. "Claude drives submissions," with some operators discovering the latter partway through. <strong>Caveat:</strong> submission cadence alone doesn't distinguish agentic-spraying from human-fatigue-guessing or misconfigured-agent-loops. Treat this as a plausible hypothesis, not a proven decomposition.</p>
+
+    <h3>M3 Lab was genuine difficulty <span class="badge" style="background:rgba(76,217,100,0.2);color:${COLORS.green}">STRONG</span></h3>
+    <p>${m3.participants_attempted || 0} attempted, ${m3.participants_touched || 0} got any solve, ${m3.participants_completed || 0} cleared. Unlike M5, the mission gradient is clean and the content was reachable. Runs-out-of-time-and-technique, not infrastructure failure.</p>
+
+    <h3>Rate-limit volume <span class="badge" style="background:rgba(138,146,154,0.2);color:${COLORS.dim}">DESCRIPTIVE</span></h3>
+    <p>${fmtNum(s.ratelimited_total)} rate-limit responses (${Math.round(s.ratelimited_total/s.submissions_total*100)}% of all HTTP submissions). Concentrated in the high-burst cohort. We can't cleanly attribute "why" — bruteforcing flags, agentic loops hitting the endpoint, frustrated retrying, misconfigured scripts — all produce the same telemetry. What's defensible: CTFd's default rate-limit config is tuned for human typing cadence, and events with AI agents should raise per-user caps.</p>
+
+    <h3>Hints were load-bearing on hard content <span class="badge" style="background:rgba(76,217,100,0.2);color:${COLORS.green}">STRONG</span></h3>
+    <p>${bigLifts} challenges had +80% or greater solve-rate lift for hint unlockers. By design (Hint 2 essentially gives the flag on hard content), but it means "pay for a hint" is economically "pay for the answer" at the top tiers. If the intent is "nudge not answer," Hint 2 on hard challenges needs rewriting.</p>
   `;
 }
 
@@ -564,39 +671,44 @@ function renderTakeaways(d) {
 
   const wf = d.workflow_summary || {};
   const dm = d.discovered_mid_event_count || 0;
+  const fo = (d.stuck_signatures || {}).full_override || [];
+  const hasAnswerStuck = fo.filter(r => r.category === 'HAS_ANSWER_STUCK');
 
   document.getElementById('takeaways-body').innerHTML = `
+    <h3>The single most important finding</h3>
+    <p><strong>M5 Bunker's zero-solve rate was caused by a deployment bug, not by design or skill.</strong> The splice-watcher systemd unit on every polaris-vm was configured with a container name (<code>a5-scada-generator</code>) that didn't match what was actually baked (<code>a5-scada</code>). The watcher silently failed every 10 seconds for ~30 hours. Every operator who tripped the A5 meltdown (by solving Lights Out) SHOULD have had <code>a14-kali</code> attached to <code>build_splice-link</code> automatically — none did. The bunker was unreachable for the entire event window.</p>
+    <p>This is a deployment issue, not a content issue. Once patched mid-event (env var override <code>A5_CONTAINER=a5-scada</code>), the splice worked correctly for any fresh meltdown. Twelve of the operators who had done the M4 work got a manual splice and were given the 24h extension to finish.</p>
+
+    <h3>Stuck-signature detection could have caught this live</h3>
+    <p>The signature was visible in the data throughout the event: operators submitting <strong>the correct override code directly to CTFd</strong> instead of ever claiming the resulting flag. ${hasAnswerStuck.length} operators did this — they had everything they needed to win except the network route to execute the final mechanic:</p>
+    <ul style="color:var(--fg);margin:0 0 0.8rem 1.2rem">
+      ${hasAnswerStuck.map(r => `<li><strong>op${r.op_num}</strong> — submitted correct code <code>7741-MN07-AL42</code> ${r.exact_correct_code_submitted}× (plus ${r.three_piece_variants} permutation variants and ${r.flag_format_guesses} FLAG{hex} guesses, zero solves on Full Override).</li>`).join('')}
+    </ul>
+    <p><strong>Build this into the dashboard for next event.</strong> A cheap rule: for each challenge, count submissions matching a pre-declared "near-answer" regex. When ≥2 operators are ≥5 submissions deep in near-answers without a single solve, page the operations team. The data to detect infrastructure failures is in the scoreboard itself — we just weren't watching for this pattern.</p>
+
     <h3>The clusters are workflows, not Claude modes</h3>
     <p>The two "agentic-looking" clusters in §12 aren't two styles of AI — they're two different submission loops:</p>
     <ul style="color:var(--fg);margin:0 0 0.8rem 1.2rem">
       <li><strong>human-in-loop (copy-paste from Claude):</strong> ${wf['human-in-loop (copy-paste from Claude)'] || 0} operators. Claude does the investigation; the human types/pastes the flag into CTFd. Produces "high-accuracy-slow" telemetry — accuracy near 100% (Claude rarely proposes wrong flags) and paced in seconds-to-minutes (human copy-paste cadence).</li>
       <li><strong>Claude drives submission:</strong> ${wf['Claude drives submission'] || 0} operators. Operator gave Claude a path to submit flags directly. Produces "burst-low-accuracy" telemetry — fast bursts, lower per-submission accuracy because Claude also fires wrong guesses, much higher rate-limit ratio.</li>
     </ul>
-    <p>Both are legitimate Claude-assisted play. The telemetry difference is the <em>submission loop configuration</em>, not the quality of the AI. That's the single biggest insight in this data.</p>
+    <p>Both are legitimate Claude-assisted play. The telemetry difference is the <em>submission loop configuration</em>, not the quality of the AI.</p>
 
-    <h3>Discoverability was the hidden variable</h3>
-    <p><strong>${dm} operators visibly transitioned mid-event</strong> from copy-paste pacing to burst pacing — a bimodal burst-density signature where late-session bursts are ≥2× early-session bursts. That's the point where they figured out how to hand Claude the submission loop. Two of the four ceiling-tied operators (op024, op095) show this transition clearly.</p>
-    <p>The implication: operator score variance was partly driven by <em>discovering</em> an advanced workflow partway through, not by raw skill or AI quality. This is a knowledge asymmetry we should directly address in the onboarding docs next time.</p>
+    <h3>Discoverability was the hidden score-variance driver</h3>
+    <p><strong>${dm} operators visibly transitioned mid-event</strong> from copy-paste pacing to burst pacing — a bimodal burst-density signature where late-session bursts are ≥2× early-session bursts. That's the point where they figured out Claude could submit. Two of the four ceiling-tied operators (op024, op095) show this transition clearly. Score variance was partly driven by <em>discovering</em> an advanced workflow partway through. This is a knowledge asymmetry we should directly address in onboarding next time.</p>
 
     <h3>For content design</h3>
-    <p><strong>Difficulty calibration held.</strong> Mean solve rates fell monotonically from easy (${fmtPct1(ds.easy.mean_solve_rate)}) → medium (${fmtPct1(ds.medium.mean_solve_rate)}) → hard (${fmtPct1(ds.hard.mean_solve_rate)}) → expert (${fmtPct1(ds.expert.mean_solve_rate)}). The designers' tiers matched observed difficulty.</p>
-    <p><strong>M3 Lab was hard even once reached.</strong> Conditional solve rate (among the ${m.M3 ? m.M3.participants_attempted : 0} who attempted) was ${m.M3 ? Math.round(m.M3.participants_touched / (m.M3.participants_attempted || 1) * 100) : 0}%. The pivot didn't auto-win; the content needed real work.</p>
-    <p><strong>M5 Bunker didn't open for anyone.</strong> 0 solves out of ${m.M5 ? m.M5.participants_attempted : 0} attempters. Either the blackout→splice chain failed to deliver the route for most, or the OT protocol work is too far outside comfort zones for a 4-hour window. Agentic tooling didn't substitute for either.</p>
+    <p><strong>Difficulty calibration held.</strong> Mean solve rates fell monotonically easy → medium → hard → expert. The designers' tiers matched observed difficulty.</p>
+    <p><strong>M3 Lab was genuine difficulty.</strong> Conditional solve rate (among the ${m.M3 ? m.M3.participants_attempted : 0} who attempted) was ${m.M3 ? Math.round(m.M3.participants_touched / (m.M3.participants_attempted || 1) * 100) : 0}%. This is what content-tier-hard looks like when the infrastructure isn't blocking you: plenty of attempts, some solves, clear gradient.</p>
     <p><strong>Hint 2 = the answer on hard content.</strong> ${d.hint_impact.filter(h => h.lift >= 0.8).length} challenges had +80% lift for hint unlockers. If the intent is "nudge not answer," Hint 2 on hard content needs rewriting.</p>
 
     <h3>For the platform</h3>
-    <p><strong>CTFd's rate limiter threw ${fmtNum(s.ratelimited_total)} rejections</strong> (~26% of all submissions), concentrated in the Claude-drives-submission cluster (${fmtPct1(rlSorted[0][1].mean_rl_ratio)} mean throttle rate). An agentic-friendly rate-limit config — higher per-user caps, gentler penalties for wrong-flag bursts — would cut invisible friction. A sensible default for events where every participant has an AI co-operator.</p>
-    <p><strong>Default CTFd behavior treated correct flags and wrong flags the same.</strong> That punishes the "Claude drives submission" workflow more than the "copy-paste from Claude" workflow. Worth revisiting.</p>
-
-    <h3>For thinking about agentic CTF</h3>
-    <p><strong>Attendance, not AI quality, is the real gate.</strong> ${s.participants_total - s.participants_active} of ${s.participants_total} enrolled operators (${Math.round((s.participants_total-s.participants_active)/s.participants_total*100)}%) never submitted. If AI co-operators were meant to lift the floor, that floor never met the carpet for half the room.</p>
-    <p><strong>Pareto flattened.</strong> Top 10% captured ${fmtPct(d.pareto.top_10pct_points_share)} of points — less concentrated than classical CTF folklore. When everyone has Claude, the distribution flattens. For organizers: plan for fewer dramatic top-heavy outcomes; plan for richer mid-band engagement.</p>
-    <p><strong>The ceiling was structural.</strong> 4 operators, same 49 flags, same wall at M5 Bunker. Agentic Claude doesn't brute-force structural gating — it amplifies operators who can already navigate the range, but it doesn't unlock content that requires external state the AI can't observe.</p>
+    <p><strong>Rate-limit config needs tuning for agentic events.</strong> ${fmtNum(s.ratelimited_total)} rejections (~${Math.round(s.ratelimited_total/s.submissions_total*100)}% of all submissions), concentrated in the Claude-drives-submission cluster. Higher per-user caps + distinguish "many wrong flags in a burst" (warn/backoff) from "many submissions overall" (allow).</p>
 
     <h3>For next event</h3>
+    <p><strong>Pre-event: do end-to-end smoketests of every pivot-gated mission.</strong> Every splice, every network transition, every inter-container route. The splice-watcher bug was caught by no smoketest because no one ran the M4 → M5 transition against a live range before the event. A single integration test "solve Lights Out, confirm kali reaches bunker within 30s" would have caught it.</p>
+    <p><strong>Build the stuck-signature detector into the dashboard.</strong> Per-challenge near-answer regex. When N≥2 operators have ≥5 near-answer submissions and 0 solves, raise an alert. We had the signal; we weren't looking for it.</p>
     <p><strong>Document the Claude-submits workflow up-front.</strong> Add an example to the AI-Assistant CTFd page. Don't leave it as hidden advanced knowledge — discoverability was a large source of variance.</p>
-    <p><strong>Bake M5 Bunker accessibility.</strong> Either verify the splice mechanic reliably opens after M4, or put the bunker behind a less brittle gate. Right now it's technically reachable content that no operator reached.</p>
-    <p><strong>Tune rate-limit config for agentic clients.</strong> Raise per-user throughput caps. Consider distinguishing "many wrong flags in a burst" (warn/backoff) from "many submissions overall" (allow).</p>
-    <p><strong>Invest in the onboarding funnel.</strong> Half the enrolled operators never submitted. A 15-min warm-up that proves their environment works end-to-end (and surfaces the Claude-submits pattern as an option) would move that number.</p>
+    <p><strong>Pareto is less top-heavy than classical CTFs.</strong> Top 10% captured ${fmtPct(d.pareto.top_10pct_points_share)} of points. When everyone has Claude, the distribution flattens. Plan for richer mid-band engagement, fewer dramatic top-heavy outcomes.</p>
   `;
 }

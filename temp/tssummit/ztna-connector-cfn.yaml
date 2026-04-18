@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Prisma Access ZTNA Connector Deployment, use this template for 1-ARM deployments
+  only. Version: 4.0 Date: 02-28-2023 Contact:  https://www.paloaltonetworks.com/company/contact-support '
+Parameters:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/marketplace/prod-6r2pklf7vcn54/6.2.8-ztna-connector-b3
+    AllowedValues:
+    - /aws/service/marketplace/prod-6r2pklf7vcn54/6.2.8-ztna-connector-b3
+    Description: 'This is the alias of the Marketplace AMI that will be deployed as
+      part of this stack. Ensure this parameter is set to the following value: /aws/service/marketplace/prod-6r2pklf7vcn54/6.2.8-ztna-connector-b3.'
+    ConstraintDescription: 'The provided parameter value does not match the current
+      version of the template. Update the parameter to the following value: /aws/service/marketplace/prod-6r2pklf7vcn54/6.2.8-ztna-connector-b3.'
+  InstanceName:
+    Description: ZTNA Connector EC2 Instance Name
+    Type: String
+  IONKey:
+    Description: ZTNA Connector Key
+    Type: String
+  IONSecret:
+    Description: ZTNA Connector Secret
+    Type: String
+    NoEcho: true
+  MyVPC:
+    Description: VPC to operate in
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnet:
+    Description: Subnet for Private port
+    Type: AWS::EC2::Subnet::Id
+  DCLanIP:
+    Description: Optionally specify a static IP for Single port, 0.0.0.0 = DHCP
+    Type: String
+    MinLength: '7'
+    MaxLength: '15'
+    Default: 0.0.0.0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})
+    ConstraintDescription: must be a valid IPv4 address in the form x.x.x.x
+
+Conditions:
+  StaticDCLanIP: !Not [!Equals [!Ref 'DCLanIP', 0.0.0.0]]
+Mappings:
+  InstanceMap:
+    ion200v:
+      instanceType: "m5.xlarge"
+  ModelMap:
+    ion200v:
+      model: "ion 200v"
+
+Resources:
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      # based on ION model number entered
+      InstanceType: !FindInMap [InstanceMap, "ion200v", instanceType]
+      # from Parameter ImageId
+      ImageId: !Ref ImageId
+      # PA ZTNA Connector requires 1 interface for a combined Internet and data center LAN port.
+      NetworkInterfaces:
+        -
+          NetworkInterfaceId: !Ref DCLanIface
+          DeviceIndex: 0
+
+
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              General:
+                model: ${LocalModelMap}
+
+              License:
+                key: ${IONKey}
+                secret: ${IONSecret}
+
+              1:
+                role: PublicWAN
+                type: DHCP
+
+            - {
+              LocalModelMap:  !FindInMap [ModelMap, "ion200v", model]
+              }
+      Tags:
+        -
+          Key: Name
+          Value: !Ref InstanceName
+
+  DCLanIface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      PrivateIpAddress: !If [StaticDCLanIP, !Ref 'DCLanIP', !Ref 'AWS::NoValue']
+      SubnetId: !Ref 'PrivateSubnet'
+      Description: Interface for single port
+      GroupSet:
+      - !Ref 'ZTNASG'
+      SourceDestCheck: false
+      Tags:
+      - Key: Network
+        Value: DCLan
+
+  ZTNASG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${AWS::StackName}-security-group
+      GroupDescription: ZTNA Connector Allow Egress SG
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      VpcId: !Ref 'MyVPC'
+      Tags:
+      - Key: Name
+        Value: !Join [' ', [!Ref 'InstanceName', Public Security Group]]
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Required Network Configuration
+      Parameters:
+      - MyVPC
+      - PrivateSubnet
+    - Label:
+        default: Required ZTNA Connector Details
+      Parameters:
+      - InstanceName
+      - IONKey
+      - IONSecret
+    - Label:
+        default: Optional Network Configuration
+      Parameters:
+      - DCLanIP
+    ParameterLabels:
+      MyVPC:
+        default: Which VPC should ZTNA Connector be deployed to?
+      PrivateSubnet:
+        default: Specify the subnet for the single port
+      DCLanIP:
+        default: Single Port Static IP
+      IONKey:
+        default: Provide the ZTNA Connector License Key
+      IONSecret:
+        default: Provide the ZTNA Connector License Secret
+Outputs:
+  InstanceId:
+    Description: InstanceId of the newly created EC2 instance
+    Value: !Ref 'MyEC2Instance'
+  IONModel:
+    Description: ION model selected
+    Value: !FindInMap [ModelMap, "ion200v", model]

@@ -385,8 +385,6 @@ Thumbs.db
 *.log
 
 # Notes, scratchpad, etc
-temp/
-.tmp/
 
 risks/
 

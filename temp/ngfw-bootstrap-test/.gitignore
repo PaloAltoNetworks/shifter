@@ -1,0 +1,12 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# SSH keys
+*.pem
+
+# Local overrides
+terraform.tfvars
+*.auto.tfvars

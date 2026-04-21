@@ -1,0 +1,1684 @@
+name: polaris-operation-northstorm
+description: >
+  Operation NORTHSTORM against the fictional Boreas Systems front company.
+  Five-mission red-team CTF: OSINT, front-office compromise, research-lab
+  pivot, SCADA blackout, and underground OT platform. Expressed in the
+  extended ACES SDL (22 sections) so a docker-plus-adjacent-VM backend
+  can realise the entire stack.
+
+variables:
+  participant_count:
+    type: integer
+    default: 1
+    description: Number of participant episodes this deployment will serve
+  boreas_domain_password:
+    type: string
+    default: Boreas2025!
+    description: Domain administrator password for BOREAS.LOCAL
+  default_welcome_password:
+    type: string
+    default: Welcome1
+    description: Corporate default password shared by stale accounts
+  svc_backup_password:
+    type: string
+    default: Password1
+    description: Weak Kerberoastable service-account password
+  svc_scada_password:
+    type: string
+    default: Sc@da#2025!
+    description: SCADA service-account password cached only on A15
+  svc_fileshare_password:
+    type: string
+    default: F1l3Sh@r3Svc!
+    description: File-share service-account password leaked via Kowalski email
+  brain_auth_token:
+    type: string
+    default: a4f8e2c1d7b03965e8f2a1c4d7b03965
+    description: Custom authentication token for A13 brain controller
+  gpg_passphrase:
+    type: string
+    default: Pr0m3th3us_Unb0und_2024
+    description: Passphrase protecting the GPG private key seeded on A8
+  kali_splice_ipv4:
+    type: string
+    default: 172.20.60.100
+    description: IP granted to the participant Kali on the splice-link after flag 19
+
+# ---------------------------------------------------------------------------
+# Nodes — compute + network topology (17 Boreas hosts, 1 Windows DC, 5 subnets
+# + a sixth splice-link attached dynamically post-flag-19)
+# ---------------------------------------------------------------------------
+
+nodes:
+  # ---- Switches / networks ----
+  shared-net:
+    type: Switch
+    description: Shared services subnet (OSINT targets, DNS, Gitea)
+  corporate-net:
+    type: Switch
+    description: Boreas corporate / front-office subnet
+  lab-net:
+    type: Switch
+    description: Engineering / research lab subnet
+  scada-net:
+    type: Switch
+    description: SCADA / OT subnet (reachable only via A15 pivot)
+  bunker-ot-net:
+    type: Switch
+    description: Underground autonomous platform network (splice-gated)
+  splice-link:
+    type: Switch
+    description: Post-blackout relay network attached dynamically after flag 19
+
+  # ---- A0: Boreas public website ----
+  a0-boreas-web:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: polaris/boreas-web
+    resources: {ram: 512 mib, cpu: 1}
+    features:
+      nginx-static: web-admin
+      boreas-dns-zone: dns-admin
+    conditions:
+      web-reachable: web-admin
+    vulnerabilities: [dns-axfr-enabled, directory-listing-exposed, pdf-metadata-leak]
+    roles:
+      web-admin: {username: nginx}
+      dns-admin: {username: bind}
+    services:
+      - {port: 80, name: boreas-http, role: participant-entry}
+      - {port: 53, protocol: udp, name: boreas-dns, role: internal}
+    asset_value: {confidentiality: low, integrity: medium, availability: medium}
+
+  # ---- DNS sidecar ----
+  dns-boreas:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/bind-sidecar
+    resources: {ram: 256 mib, cpu: 1}
+    features:
+      bind-sidecar: dns-admin
+    conditions:
+      dns-healthy: dns-admin
+    vulnerabilities: [dns-axfr-enabled]
+    roles:
+      dns-admin: {username: bind}
+    services:
+      - {port: 53, protocol: udp, name: internal-dns, role: internal}
+
+  # ---- A1: mail / Roundcube ----
+  a1-mail:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-mail
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      postfix-smtp: mail-admin
+      dovecot-imap: mail-admin
+      roundcube-webmail: mail-admin
+    conditions:
+      mail-queue-healthy: mail-admin
+    vulnerabilities: [information-disclosure-email]
+    roles:
+      mail-admin: {username: postfix}
+    services:
+      - {port: 25, name: smtp, role: internal}
+      - {port: 143, name: imap, role: internal}
+      - {port: 80, name: webmail, role: internal}
+    asset_value: {confidentiality: high, integrity: medium, availability: medium}
+
+  # ---- A2: Windows Server 2022 AD DC — VM, not container ----
+  a2-dc01:
+    type: VM
+    os: windows
+    os_version: Server 2022
+    source: polaris/windows-ad-dc
+    resources: {ram: 4 gib, cpu: 2}
+    features:
+      boreas-ad: domain-admin
+    conditions:
+      domain-auth-healthy: domain-admin
+    vulnerabilities:
+      - ad-kerberoastable-spn
+      - ad-dcsync-overprivilege
+      - ad-stale-disabled-account
+      - ad-domain-admin-misconfig
+    roles:
+      domain-admin:
+        username: Administrator
+    services:
+      - {port: 53, protocol: udp, name: ad-dns, role: internal}
+      - {port: 88, name: kerberos, role: internal}
+      - {port: 389, name: ldap, role: internal}
+      - {port: 445, name: smb, role: internal}
+      - {port: 636, name: ldaps, role: internal}
+      - {port: 3268, name: gc-ldap, role: internal}
+    asset_value: {confidentiality: critical, integrity: critical, availability: critical}
+
+  # ---- A3: intranet Flask + SQLite ----
+  a3-intranet:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-intranet
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      flask-intranet: app-admin
+    conditions:
+      intranet-reachable: app-admin
+    vulnerabilities:
+      - sqli-search
+      - lfi-download
+      - dotenv-exposed
+    roles:
+      app-admin: {username: flask}
+    services:
+      - {port: 80, name: intranet-http, role: internal}
+    asset_value: {confidentiality: high, integrity: medium, availability: medium}
+
+  # ---- A4: Samba fileshare ----
+  a4-fileshare:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-samba
+    resources: {ram: 512 mib, cpu: 1}
+    features:
+      samba-fileshare: smb-admin
+    conditions:
+      smb-reachable: smb-admin
+    vulnerabilities: [smb-overbroad-acls]
+    roles:
+      smb-admin: {username: root}
+    services:
+      - {port: 139, name: smb-netbios, role: internal}
+      - {port: 445, name: smb, role: internal}
+    asset_value: {confidentiality: high, integrity: medium, availability: low}
+
+  # ---- A5: SCADA HMI + Modbus interlock ----
+  a5-scada-gw:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-scada-gw
+    resources: {ram: 512 mib, cpu: 1}
+    features:
+      flask-hmi: scada-admin
+      pymodbus-interlock: scada-admin
+    conditions:
+      scada-hmi-reachable: scada-admin
+      interlock-state-visible: scada-admin
+    vulnerabilities:
+      - modbus-no-auth
+      - scada-hmi-cached-password
+    roles:
+      scada-admin: {username: scada}
+    services:
+      - {port: 8080, name: hmi-http, role: internal}
+      - {port: 502, name: modbus, role: internal}
+    asset_value: {confidentiality: high, integrity: critical, availability: critical}
+
+  # ---- A6: engineering workstation ----
+  a6-eng-ws01:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-workstation
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      openssh-server: eng-admin
+    conditions:
+      ssh-reachable: eng-admin
+    vulnerabilities:
+      - ssh-password-auth
+      - deleted-gpg-blob-recoverable
+      - jenkins-credentials-file
+    roles:
+      eng-admin: {username: root}
+    services:
+      - {port: 22, name: ssh, role: internal}
+    asset_value: {confidentiality: high, integrity: high, availability: medium}
+
+  # ---- A7: Gitea ----
+  a7-git:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-gitea
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      gitea-server: git-admin
+    conditions:
+      gitea-reachable: git-admin
+    vulnerabilities:
+      - git-history-leaked-token
+      - git-deleted-file-recoverable
+      - gitea-repo-visibility-misconfig
+    roles:
+      git-admin: {username: git}
+    services:
+      - {port: 3000, name: gitea-http, role: internal}
+    asset_value: {confidentiality: high, integrity: medium, availability: medium}
+
+  # ---- A8: research database ----
+  a8-research-db:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-postgres
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      postgres-research-db: db-admin
+    conditions:
+      db-reachable: db-admin
+    vulnerabilities:
+      - security-definer-sqli
+      - postgres-compartment-role-bypass
+    roles:
+      db-admin: {username: postgres}
+    services:
+      - {port: 5432, name: postgres, role: internal}
+    asset_value: {confidentiality: critical, integrity: high, availability: medium}
+
+  # ---- A9: splice landing ----
+  a9-splice-landing:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: polaris/splice-landing
+    resources: {ram: 256 mib, cpu: 1}
+    features:
+      openssh-server: splice-admin
+    conditions:
+      splice-reachable: splice-admin
+    vulnerabilities: [ssh-key-only-post-gate]
+    roles:
+      splice-admin: {username: root}
+    services:
+      - {port: 22, name: ssh, role: internal}
+
+  # ---- A10-A12: Modbus PLCs ----
+  a10-tail-ctrl:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: polaris/pymodbus-plc
+    resources: {ram: 256 mib, cpu: 1}
+    features:
+      pymodbus-plc: plc-admin
+    conditions:
+      plc-reachable: plc-admin
+    vulnerabilities: [modbus-no-auth, modbus-stateful-unlock-sequence]
+    roles:
+      plc-admin: {username: root}
+    services:
+      - {port: 502, name: modbus, role: internal}
+
+  a11-leg-ctrl:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: polaris/pymodbus-plc
+    resources: {ram: 256 mib, cpu: 1}
+    features:
+      pymodbus-plc: plc-admin
+    conditions:
+      plc-reachable: plc-admin
+    vulnerabilities: [modbus-no-auth, modbus-stateful-unlock-sequence]
+    roles:
+      plc-admin: {username: root}
+    services:
+      - {port: 502, name: modbus, role: internal}
+
+  a12-arms-ctrl:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: polaris/pymodbus-plc
+    resources: {ram: 256 mib, cpu: 1}
+    features:
+      pymodbus-plc: plc-admin
+    conditions:
+      plc-reachable: plc-admin
+    vulnerabilities: [modbus-no-auth, modbus-stateful-unlock-sequence]
+    roles:
+      plc-admin: {username: root}
+    services:
+      - {port: 502, name: modbus, role: internal}
+
+  # ---- A13: brain controller ----
+  a13-brain-main:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/brain-controller
+    resources: {ram: 512 mib, cpu: 1}
+    features:
+      custom-brain-protocol: brain-admin
+    conditions:
+      brain-reachable: brain-admin
+    vulnerabilities: [brain-xor-handshake-reversible]
+    roles:
+      brain-admin: {username: root}
+    services:
+      - {port: 9100, name: brain-protocol, role: internal}
+
+  # ---- A14: participant Kali ----
+  a14-kali:
+    type: VM
+    os: linux
+    os_version: Kali Rolling
+    source: polaris/boreas-kali
+    resources: {ram: 4 gib, cpu: 2}
+    features:
+      openssh-server: kali-admin
+      xrdp-server: kali-admin
+      claude-code-cli: kali-admin
+    conditions:
+      kali-ssh-reachable: kali-admin
+      kali-rdp-reachable: kali-admin
+    roles:
+      kali-admin: {username: kali}
+    services:
+      - {port: 22, name: ssh, role: participant-entry}
+      - {port: 3389, name: rdp, role: participant-entry}
+    asset_value: {confidentiality: medium, integrity: medium, availability: high}
+
+  # ---- A15: ops engineer workstation (SCADA pivot) ----
+  a15-ops-eng01:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-workstation
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      openssh-server: ops-admin
+      flask-ops-telemetry: ops-admin
+    conditions:
+      ssh-reachable: ops-admin
+    vulnerabilities:
+      - sudo-arg-injection
+      - default-password-reuse
+    roles:
+      ops-admin: {username: root}
+    services:
+      - {port: 22, name: ssh, role: internal}
+      - {port: 80, name: ops-telemetry, role: internal}
+
+  # ---- A16: research analyst workstation (Lab pivot) ----
+  a16-research-analyst01:
+    type: VM
+    os: linux
+    os_version: Debian 12
+    source: polaris/boreas-workstation
+    resources: {ram: 1 gib, cpu: 1}
+    features:
+      openssh-server: analyst-admin
+    conditions:
+      ssh-reachable: analyst-admin
+    vulnerabilities:
+      - default-password-reuse
+      - ssh-key-only-research-user
+    roles:
+      analyst-admin: {username: root}
+    services:
+      - {port: 22, name: ssh, role: internal}
+
+# ---------------------------------------------------------------------------
+# Infrastructure — deployment topology, per-network IP plan, ACLs, replication
+# ---------------------------------------------------------------------------
+
+infrastructure:
+  # Switches / subnets
+  shared-net:
+    count: 1
+    properties: {cidr: 172.20.0.0/24, gateway: 172.20.0.1}
+    replication: per_participant
+  corporate-net:
+    count: 1
+    properties: {cidr: 172.20.10.0/24, gateway: 172.20.10.1}
+    replication: per_participant
+  lab-net:
+    count: 1
+    properties: {cidr: 172.20.30.0/24, gateway: 172.20.30.1}
+    replication: per_participant
+    acls:
+      - name: deny-kali-to-lab
+        direction: in
+        from_net: corporate-net
+        action: deny
+        description: A14 has no route into lab-net; pivot through A16
+  scada-net:
+    count: 1
+    properties: {cidr: 172.20.40.0/24, gateway: 172.20.40.1}
+    replication: per_participant
+    acls:
+      - name: deny-kali-to-scada
+        direction: in
+        from_net: corporate-net
+        action: deny
+        description: A14 has no route into scada-net; pivot through A15
+  bunker-ot-net:
+    count: 1
+    properties: {cidr: 172.20.50.0/24, gateway: 172.20.50.1, internal: true}
+    replication: per_participant
+    acls:
+      - name: deny-default-to-bunker
+        direction: in
+        from_net: corporate-net
+        action: deny
+        description: Bunker OT is unreachable until the splice-link opens
+  splice-link:
+    count: 1
+    properties: {cidr: 172.20.60.0/24, gateway: 172.20.60.1}
+    replication: per_participant
+
+  # Hosts (per-participant unless noted)
+  a0-boreas-web:
+    count: 1
+    links: [shared-net]
+    properties:
+      - shared-net: 172.20.0.10
+    replication: shared
+  dns-boreas:
+    count: 1
+    links: [shared-net, corporate-net, lab-net]
+    properties:
+      - shared-net: 172.20.0.2
+      - corporate-net: 172.20.10.2
+      - lab-net: 172.20.30.2
+  a1-mail:
+    count: 1
+    links: [corporate-net]
+    properties:
+      - corporate-net: 172.20.10.20
+  a2-dc01:
+    count: 1
+    links: [corporate-net]
+    properties:
+      - corporate-net: 172.20.10.11
+    replication: shared
+    description: Windows DC — shared across a deployment; range-local DNS keeps forests isolated
+  a3-intranet:
+    count: 1
+    links: [corporate-net]
+    properties:
+      - corporate-net: 172.20.10.30
+  a4-fileshare:
+    count: 1
+    links: [corporate-net]
+    properties:
+      - corporate-net: 172.20.10.40
+  a5-scada-gw:
+    count: 1
+    links: [scada-net]
+    properties:
+      - scada-net: 172.20.40.30
+    replication: per_participant
+  a6-eng-ws01:
+    count: 1
+    links: [lab-net]
+    properties:
+      - lab-net: 172.20.30.50
+  a7-git:
+    count: 1
+    links: [shared-net, lab-net]
+    properties:
+      - shared-net: 172.20.0.20
+      - lab-net: 172.20.30.20
+    replication: shared
+  a8-research-db:
+    count: 1
+    links: [lab-net]
+    properties:
+      - lab-net: 172.20.30.60
+  a9-splice-landing:
+    count: 1
+    links: [bunker-ot-net, splice-link]
+    properties:
+      - bunker-ot-net: 172.20.50.10
+      - splice-link: 172.20.60.10
+  a10-tail-ctrl:
+    count: 1
+    links: [bunker-ot-net]
+    properties:
+      - bunker-ot-net: 172.20.50.20
+  a11-leg-ctrl:
+    count: 1
+    links: [bunker-ot-net]
+    properties:
+      - bunker-ot-net: 172.20.50.30
+  a12-arms-ctrl:
+    count: 1
+    links: [bunker-ot-net]
+    properties:
+      - bunker-ot-net: 172.20.50.40
+  a13-brain-main:
+    count: 1
+    links: [bunker-ot-net]
+    properties:
+      - bunker-ot-net: 172.20.50.50
+  a14-kali:
+    count: 1
+    links: [shared-net, corporate-net]
+    properties:
+      - shared-net: 172.20.0.14
+      - corporate-net: 172.20.10.14
+    replication: per_participant
+  a15-ops-eng01:
+    count: 1
+    links: [corporate-net, scada-net]
+    properties:
+      - corporate-net: 172.20.10.50
+      - scada-net: 172.20.40.20
+  a16-research-analyst01:
+    count: 1
+    links: [corporate-net, lab-net]
+    properties:
+      - corporate-net: 172.20.10.60
+      - lab-net: 172.20.30.5
+
+# ---------------------------------------------------------------------------
+# Features — deployable software units
+# ---------------------------------------------------------------------------
+
+features:
+  # Web / apps
+  nginx-static:
+    type: service
+    source: polaris/nginx-static
+  boreas-dns-zone:
+    type: configuration
+    source: polaris/boreas-dns-zone
+  bind-sidecar:
+    type: service
+    source: polaris/bind-sidecar
+  postfix-smtp:
+    type: service
+    source: polaris/postfix
+  dovecot-imap:
+    type: service
+    source: polaris/dovecot
+  roundcube-webmail:
+    type: service
+    source: polaris/roundcube
+  boreas-ad:
+    type: service
+    source: polaris/ad-server-2022
+  flask-intranet:
+    type: service
+    source: polaris/flask-intranet
+  samba-fileshare:
+    type: service
+    source: polaris/samba
+  flask-hmi:
+    type: service
+    source: polaris/flask-hmi
+  pymodbus-interlock:
+    type: service
+    source: polaris/pymodbus-interlock
+  pymodbus-plc:
+    type: service
+    source: polaris/pymodbus-plc
+  custom-brain-protocol:
+    type: service
+    source: polaris/brain-protocol
+  openssh-server:
+    type: service
+    source: polaris/openssh
+  xrdp-server:
+    type: service
+    source: polaris/xrdp
+  gitea-server:
+    type: service
+    source: polaris/gitea
+  postgres-research-db:
+    type: service
+    source: polaris/postgres-research
+  flask-ops-telemetry:
+    type: service
+    source: polaris/flask-ops-telemetry
+  claude-code-cli:
+    type: artifact
+    source: polaris/claude-code
+
+# ---------------------------------------------------------------------------
+# Conditions — health checks and scoring observations
+# ---------------------------------------------------------------------------
+
+conditions:
+  web-reachable:
+    source: service-reachable
+  dns-healthy:
+    source: service-reachable
+  mail-queue-healthy:
+    source: service-reachable
+  domain-auth-healthy:
+    source: service-reachable
+  intranet-reachable:
+    source: service-reachable
+  smb-reachable:
+    source: service-reachable
+  scada-hmi-reachable:
+    source: service-reachable
+  interlock-state-visible:
+    source: http-responds-with
+  ssh-reachable:
+    source: service-reachable
+  gitea-reachable:
+    source: service-reachable
+  db-reachable:
+    source: service-reachable
+  splice-reachable:
+    source: service-reachable
+  plc-reachable:
+    source: service-reachable
+  brain-reachable:
+    source: service-reachable
+  kali-ssh-reachable:
+    source: service-reachable
+  kali-rdp-reachable:
+    source: service-reachable
+
+  # Flag-submission conditions — one per scorable flag.
+  flag-01-submitted:
+    source: scoring-gateway-flag-submitted
+    description: Company registration number
+  flag-02-submitted: {source: scoring-gateway-flag-submitted}
+  flag-03-submitted: {source: scoring-gateway-flag-submitted}
+  flag-04-submitted: {source: scoring-gateway-flag-submitted}
+  flag-05-submitted: {source: scoring-gateway-flag-submitted}
+  flag-06-submitted: {source: scoring-gateway-flag-submitted}
+  flag-07-submitted: {source: scoring-gateway-flag-submitted}
+  flag-08-submitted: {source: scoring-gateway-flag-submitted}
+  flag-09-submitted: {source: scoring-gateway-flag-submitted}
+  flag-10-submitted: {source: scoring-gateway-flag-submitted}
+  flag-11-submitted: {source: scoring-gateway-flag-submitted}
+  flag-12-submitted: {source: scoring-gateway-flag-submitted}
+  flag-13-submitted: {source: scoring-gateway-flag-submitted}
+  flag-14-submitted: {source: scoring-gateway-flag-submitted}
+  flag-15-submitted: {source: scoring-gateway-flag-submitted}
+  flag-16-submitted: {source: scoring-gateway-flag-submitted}
+  flag-17-submitted: {source: scoring-gateway-flag-submitted}
+  flag-18-submitted: {source: scoring-gateway-flag-submitted}
+  flag-19-submitted:
+    source: scoring-gateway-flag-submitted
+    description: Meltdown complete — triggers splice-link attach
+  flag-20-submitted: {source: scoring-gateway-flag-submitted}
+  flag-21-submitted: {source: scoring-gateway-flag-submitted}
+  flag-22-submitted: {source: scoring-gateway-flag-submitted}
+  flag-23-submitted: {source: scoring-gateway-flag-submitted}
+  flag-24-submitted: {source: scoring-gateway-flag-submitted}
+  flag-25-submitted: {source: scoring-gateway-flag-submitted}
+  flag-26-submitted: {source: scoring-gateway-flag-submitted}
+  flag-27-submitted: {source: scoring-gateway-flag-submitted}
+  flag-28-submitted: {source: scoring-gateway-flag-submitted}
+  flag-29-submitted: {source: scoring-gateway-flag-submitted}
+  flag-30-submitted: {source: scoring-gateway-flag-submitted}
+  flag-31-submitted: {source: scoring-gateway-flag-submitted}
+  flag-32-submitted: {source: scoring-gateway-flag-submitted}
+  flag-33-submitted: {source: scoring-gateway-flag-submitted}
+  flag-34-submitted: {source: scoring-gateway-flag-submitted}
+  flag-35-submitted: {source: scoring-gateway-flag-submitted}
+  flag-36-submitted: {source: scoring-gateway-flag-submitted}
+  flag-37-submitted:
+    source: scoring-gateway-flag-submitted
+    description: A15 privesc — gates M4
+  flag-38-submitted: {source: scoring-gateway-flag-submitted}
+
+# ---------------------------------------------------------------------------
+# Vulnerabilities — CWE-labelled or misconfiguration-labelled weaknesses
+# ---------------------------------------------------------------------------
+
+vulnerabilities:
+  dns-axfr-enabled:
+    name: DNS AXFR enabled
+    class: CWE-200
+    technical: true
+    description: BIND configured to accept AXFR zone transfers from any source
+  directory-listing-exposed:
+    name: Nginx directory listing exposed
+    class: CWE-548
+    technical: true
+    description: nginx autoindex enabled on /internal/ despite robots.txt hint
+  pdf-metadata-leak:
+    name: PDF metadata leak
+    class: CWE-200
+    technical: true
+    description: PDFs on A0 expose flag values inside Author / Title metadata fields
+  information-disclosure-email:
+    name: Seeded mailboxes disclose secrets
+    class: CWE-200
+    technical: true
+    description: Pre-populated mailboxes leak service-account credentials and business intel
+  ad-kerberoastable-spn:
+    name: Kerberoastable service-account SPN
+    class: CWE-916
+    technical: true
+    description: svc-backup SPN registered with a weak password; offline-crackable
+  ad-dcsync-overprivilege:
+    name: svc-backup granted DCSync rights
+    class: CWE-269
+    technical: true
+    description: Replicating-Directory-Changes extended right enables DCSync
+  ad-stale-disabled-account:
+    name: Terminated engineer still enabled in AD
+    class: CWE-272
+    technical: false
+    description: j.chen terminated but account still enabled and in Engineering group
+  ad-domain-admin-misconfig:
+    name: CEO in Domain Admins
+    class: CWE-269
+    technical: false
+    description: v.harlan placed in Domain Admins as a misconfiguration
+  sqli-search:
+    name: Intranet search SQL injection
+    class: CWE-89
+    technical: true
+    description: /search endpoint vulnerable to UNION-based SQL injection
+  lfi-download:
+    name: Intranet download LFI
+    class: CWE-22
+    technical: true
+    description: /download endpoint permits path-traversal
+  dotenv-exposed:
+    name: /.env served as static content
+    class: CWE-538
+    technical: true
+    description: Intranet exposes admin credentials via static .env file
+  smb-overbroad-acls:
+    name: Overbroad SMB share ACLs
+    class: CWE-732
+    technical: true
+    description: Public / HR / Procurement shares readable by all authenticated users
+  modbus-no-auth:
+    name: Modbus without authentication
+    class: CWE-306
+    technical: true
+    description: Modbus/TCP has no authentication (protocol standard)
+  modbus-stateful-unlock-sequence:
+    name: Modbus stateful unlock sequence
+    class: CWE-693
+    technical: true
+    description: Flag register becomes visible only after a specific timed sequence
+  scada-hmi-cached-password:
+    name: SCADA HMI admin password cached
+    class: CWE-798
+    technical: true
+    description: HMI admin credential cached on A15 /root/.scada/hmi.json
+  ssh-password-auth:
+    name: OpenSSH permits password authentication
+    class: CWE-521
+    technical: true
+    description: sshd_config enables password-based authentication
+  deleted-gpg-blob-recoverable:
+    name: Deleted GPG blob recoverable
+    class: CWE-212
+    technical: true
+    description: GPG ciphertext in /tmp/.deleted/ is unlinked but recoverable
+  jenkins-credentials-file:
+    name: Jenkins credentials file on disk
+    class: CWE-798
+    technical: true
+    description: /home/jenkins/.credentials exposes a deploy token
+  git-history-leaked-token:
+    name: Git history contains removed token
+    class: CWE-540
+    technical: true
+    description: git log -p reveals a removed CI deploy token in deploy.yml
+  git-deleted-file-recoverable:
+    name: Git-deleted schematic recoverable
+    class: CWE-1295
+    technical: true
+    description: git show <parent>:schematic.svg recovers a deleted binary schematic
+  gitea-repo-visibility-misconfig:
+    name: Leviathan repo marked internal
+    class: CWE-284
+    technical: true
+    description: leviathan-assembly visibility set internal — any authenticated user can clone
+  security-definer-sqli:
+    name: SECURITY DEFINER SQL injection
+    class: CWE-89
+    technical: true
+    description: Stored procedure enables compartment escalation via SQLi
+  postgres-compartment-role-bypass:
+    name: Postgres compartment role bypass
+    class: CWE-285
+    technical: true
+    description: compartment_b/compartment_c reachable via role switch + SQLi
+  ssh-key-only-post-gate:
+    name: Splice-landing key-only post gate
+    class: CWE-287
+    technical: true
+    description: Splice landing authorized_keys seeded only after trigger
+  ssh-key-only-research-user:
+    name: Research-analyst key-only account
+    class: CWE-287
+    technical: true
+    description: research-analyst user key-only; key recovered through chain
+  brain-xor-handshake-reversible:
+    name: Brain XOR handshake reversible
+    class: CWE-327
+    technical: true
+    description: XOR challenge-response derived from discoverable serial numbers
+  sudo-arg-injection:
+    name: Sudo arg injection via unquoted flag
+    class: CWE-78
+    technical: true
+    description: /opt/ops/scada_diag.sh sudo entry has an unquoted --host argument
+  default-password-reuse:
+    name: Corporate default password reuse
+    class: CWE-521
+    technical: false
+    description: Welcome1 reused by m.webb, s.ivanov, p.shah and others
+
+# ---------------------------------------------------------------------------
+# Entities — exercise participants and organisations
+# ---------------------------------------------------------------------------
+
+entities:
+  aurora-collective:
+    name: AURORA Collective
+    role: red
+    mission: Seize PROJECT LEVIATHAN
+  participant:
+    name: Polaris Participant
+    role: red
+    mission: Execute Operation NORTHSTORM
+  boreas-blue:
+    name: Boreas Blue Team (unused; scenario is red-only)
+    role: blue
+  white-cell:
+    name: Instructors
+    role: white
+
+# ---------------------------------------------------------------------------
+# Accounts — all identities relevant to attack chains
+# ---------------------------------------------------------------------------
+
+accounts:
+  # AD domain admin
+  administrator:
+    username: Administrator
+    node: a2-dc01
+    ou: Users
+    groups: [Domain Admins, Enterprise Admins]
+    password_strength: strong
+    password_variable: boreas_domain_password
+    privileges: [domain_admin]
+    description: Built-in domain administrator
+
+  # Executives / Engineering / Security / ServiceAccounts / Disabled OUs
+  v-harlan:
+    username: v.harlan
+    node: a2-dc01
+    ou: Executive
+    groups: [Domain Admins, Executives]
+    password_strength: medium
+    privileges: [domain_admin]
+    mail: v.harlan@boreas.local
+
+  e-vasik:
+    username: e.vasik
+    node: a2-dc01
+    ou: Engineering
+    groups: [Engineering, Lab-Access, Project-L]
+    password_strength: medium
+    mail: e.vasik@boreas.local
+    description: CTO; GPG key holder; broadest-scope user
+
+  m-webb:
+    username: m.webb
+    node: a2-dc01
+    ou: Executive
+    groups: [Executives, Procurement, Project-L]
+    password_strength: weak
+    password_variable: default_welcome_password
+    mail: m.webb@boreas.local
+
+  d-kowalski:
+    username: d.kowalski
+    node: a2-dc01
+    ou: Consulting
+    groups: [IT, Consulting]
+    password_strength: weak
+    mail: d.kowalski@boreas.local
+    description: IT admin who self-emailed the file-share service-account creds
+
+  j-chen:
+    username: j.chen
+    node: a2-dc01
+    ou: Disabled
+    groups: [Engineering]
+    password_strength: weak
+    disabled: false
+    description: Terminated engineer; account still enabled (narrative)
+
+  s-ivanov:
+    username: s.ivanov
+    node: a2-dc01
+    ou: Engineering
+    groups: [Engineering, Ops]
+    password_strength: weak
+    password_variable: default_welcome_password
+    description: Ops engineer; SCADA pivot gate (A15)
+
+  p-shah:
+    username: p.shah
+    node: a2-dc01
+    ou: Engineering
+    groups: [Research]
+    password_strength: weak
+    password_variable: default_welcome_password
+    description: Research analyst; Lab pivot gate (A16)
+
+  r-tanaka:
+    username: r.tanaka
+    node: a2-dc01
+    ou: Engineering
+    groups: [Engineering, Lab-Access]
+    password_strength: medium
+    description: Simulation engineer
+
+  p-nielsen:
+    username: p.nielsen
+    node: a2-dc01
+    ou: Engineering
+    groups: [Engineering, Lab-Access, Manufacturing]
+    password_strength: weak
+
+  guard-petrov:
+    username: guard.petrov
+    node: a2-dc01
+    ou: Security
+    groups: [Security]
+    password_strength: medium
+    description: Off-hours badge anomaly is a narrative clue
+
+  # Service accounts
+  svc-backup:
+    username: svc-backup
+    node: a2-dc01
+    ou: ServiceAccounts
+    groups: [Backup Operators]
+    password_strength: weak
+    password_variable: svc_backup_password
+    spn: MSSQLSvc/fileserv.boreas.local
+    privileges: [kerberoastable, dcsync, replicating_directory_changes, backup_operator]
+
+  svc-scada:
+    username: svc-scada
+    node: a2-dc01
+    ou: ServiceAccounts
+    groups: [SCADA-Admins]
+    password_strength: strong
+    password_variable: svc_scada_password
+    spn: HTTP/scada-gw.boreas.local
+
+  svc-fileshare:
+    username: svc-fileshare
+    node: a2-dc01
+    ou: ServiceAccounts
+    groups: [FileShare-Operators]
+    password_strength: strong
+    password_variable: svc_fileshare_password
+
+  # Linux host accounts (local)
+  kali:
+    username: kali
+    node: a14-kali
+    password_strength: weak
+
+  jenkins-ci:
+    username: jenkins
+    node: a6-eng-ws01
+    password_strength: weak
+    home: /home/jenkins
+
+  research-analyst:
+    username: research-analyst
+    node: a16-research-analyst01
+    password_strength: strong
+    auth_method: publickey
+    description: SSH key-only account; key recovered through chain
+
+# ---------------------------------------------------------------------------
+# Relationships — credential and pivot chains
+# ---------------------------------------------------------------------------
+
+relationships:
+  # Multi-zone credential chain
+  vasik-to-gitea:
+    type: authenticates_with
+    source: e-vasik
+    target: a7-git
+    description: e.vasik's AD credentials authenticate to Gitea
+  vasik-to-mail:
+    type: authenticates_with
+    source: e-vasik
+    target: a1-mail
+  vasik-to-intranet:
+    type: authenticates_with
+    source: e-vasik
+    target: a3-intranet
+
+  # Password sharing (Welcome1 reuse)
+  webb-ivanov-share-welcome1:
+    type: shares_credential_with
+    source: m-webb
+    target: s-ivanov
+    properties:
+      variable: default_welcome_password
+  ivanov-shah-share-welcome1:
+    type: shares_credential_with
+    source: s-ivanov
+    target: p-shah
+    properties:
+      variable: default_welcome_password
+
+  # Pivot chain (A14 → A15 → A5, A14 → A16 → A7, A9 → bunker)
+  kali-pivots-through-ops:
+    type: pivots_through
+    source: a14-kali
+    target: a5-scada-gw
+    properties:
+      via: a15-ops-eng01
+      unlock: flag-37
+  kali-pivots-through-analyst:
+    type: pivots_through
+    source: a14-kali
+    target: a7-git
+    properties:
+      via: a16-research-analyst01
+  kali-pivots-through-splice:
+    type: pivots_through
+    source: a14-kali
+    target: a13-brain-main
+    properties:
+      via: a9-splice-landing
+      unlock: flag-19
+
+  # AD group nesting (Project-L ⊂ Research-Coordination ⊂ Engineering-Support)
+  # is expressed via accounts.<x>.groups + the description below. Groups are
+  # opaque strings; backend realisation creates the nested group objects.
+
+  # Cryptography chain (flag 30)
+  gpg-a8-stores-private-key:
+    type: encrypts_for
+    source: a8-research-db
+    target: e-vasik
+    description: GPG private key stored as base64 blob in compartment_b.key_storage
+  gpg-a6-holds-ciphertext:
+    type: decrypts_with
+    source: a6-eng-ws01
+    target: a8-research-db
+    properties:
+      passphrase_variable: gpg_passphrase
+      passphrase_location: a7-git
+
+  # Flag discovery bindings (selection; full 38 modelled as metrics)
+  flag-05-in-dns:
+    type: flag_discovered_at
+    source: flag-05
+    target: dns-boreas
+  flag-17-in-ad:
+    type: flag_discovered_at
+    source: flag-17
+    target: a2-dc01
+  flag-37-in-hmi-json:
+    type: flag_discovered_at
+    source: flag-37
+    target: a15-ops-eng01
+  flag-19-in-meltdown:
+    type: flag_discovered_at
+    source: flag-19
+    target: a5-scada-gw
+
+# ---------------------------------------------------------------------------
+# Content — all data placed into systems to drive the scenario
+# ---------------------------------------------------------------------------
+
+content:
+  # OSINT content on A0 (Mission 1)
+  boreas-org-chart:
+    type: file
+    format: pdf
+    target: a0-boreas-web
+    path: /usr/share/nginx/html/internal/org_chart.pdf
+    source: polaris/boreas-org-chart
+
+  boreas-annual-report:
+    type: file
+    format: pdf
+    target: a0-boreas-web
+    path: /usr/share/nginx/html/internal/boreas-annual-2025.pdf
+    source: polaris/boreas-annual-report
+
+  boreas-dns-zone-file:
+    type: file
+    format: txt
+    target: a0-boreas-web
+    path: /etc/bind/zones/boreas-systems.ctf.db
+    source: polaris/boreas-dns-zone
+
+  # Mail seed (Mission 2)
+  mail-seed:
+    type: dataset
+    format: email-box
+    target: a1-mail
+    source: polaris/mail-seed
+    description: Pre-populated mailboxes for all Boreas employees
+    items:
+      - name: kowalski-creds-backup
+        description: Kowalski self-emailed svc-fileshare credentials
+        tags: [flag-15, credentials]
+      - name: vasik-project-status
+        description: CTO project status PDF attachment
+        tags: [flag-08]
+
+  # Intranet .env (Mission 2)
+  intranet-env-file:
+    type: file
+    format: env-file
+    target: a3-intranet
+    path: /srv/intranet/.env
+    source: polaris/intranet-env
+    sensitive: true
+
+  # SMB share seed (Mission 2)
+  boreas-fileshares:
+    type: directory
+    format: smb-share
+    target: a4-fileshare
+    destination: /srv/samba
+    source: polaris/smb-share
+    sensitive: true
+    description: Public / HR / Procurement / IT / Executive shares with ACL mapping
+
+  # AD seed (Mission 2)
+  boreas-ad-directory:
+    type: dataset
+    format: ad-directory-seed
+    target: a2-dc01
+    source: polaris/boreas-ad-seed
+    description: OUs, groups (incl. nested), users, SPNs, GPOs, privileges
+
+  # Engineering workstation content (Mission 3)
+  tanaka-stress-archives:
+    type: directory
+    format: binary-blob
+    target: a6-eng-ws01
+    destination: /home/r.tanaka/simulations/standard
+    source: polaris/tanaka-stress-archives
+  midnight7-results:
+    type: file
+    format: binary-blob
+    target: a6-eng-ws01
+    path: /home/r.tanaka/simulations/midnight/MIDNIGHT-7_results.dat
+    source: polaris/midnight7-results
+  nielsen-cog-workbook:
+    type: file
+    format: xlsx
+    target: a6-eng-ws01
+    path: /home/p.nielsen/designs/center_of_gravity.xlsx
+    source: polaris/nielsen-cog-workbook
+  jenkins-credentials:
+    type: file
+    format: env-file
+    target: a6-eng-ws01
+    path: /home/jenkins/.credentials
+    source: polaris/jenkins-credentials
+    sensitive: true
+  deleted-gpg-video:
+    type: file
+    format: gpg-ciphertext
+    target: a6-eng-ws01
+    path: /tmp/.deleted/full_integration_sim.mp4.gpg
+    source: polaris/deleted-gpg-video
+    sensitive: true
+
+  # Gitea seed (Mission 3)
+  gitea-seed:
+    type: dataset
+    format: git-repo
+    target: a7-git
+    source: polaris/gitea-seed
+    description: Repos with deletion history (schematic.svg) and leaked tokens
+    items:
+      - name: aurora-navigation-controller
+        tags: [flag-29-setup, brain-auth-token]
+      - name: aurora-leviathan-assembly
+        tags: [flag-29, misconfig-internal-visibility]
+      - name: aurora-weapons-integration
+        tags: [flag-30, gpg-passphrase]
+
+  # Research database seed (Mission 3)
+  research-db-seed:
+    type: dataset
+    format: postgres-seed
+    target: a8-research-db
+    source: polaris/research-db-seed
+    description: Compartments a/b/c with roles, grants, stored procedures, GPG key blob
+
+  # SCADA HMI secret cache (Mission 4 / flag 37)
+  scada-hmi-json:
+    type: file
+    format: json
+    target: a15-ops-eng01
+    path: /root/.scada/hmi.json
+    source: polaris/scada-hmi-json
+    sensitive: true
+
+  # Modbus register state (Mission 5)
+  modbus-tail-registers:
+    type: dataset
+    format: modbus-register-state
+    target: a10-tail-ctrl
+    source: polaris/modbus-tail-registers
+  modbus-leg-registers:
+    type: dataset
+    format: modbus-register-state
+    target: a11-leg-ctrl
+    source: polaris/modbus-leg-registers
+  modbus-arms-registers:
+    type: dataset
+    format: modbus-register-state
+    target: a12-arms-ctrl
+    source: polaris/modbus-arms-registers
+
+  # Brain controller binary protocol seed
+  brain-protocol-seed:
+    type: file
+    format: json
+    target: a13-brain-main
+    path: /etc/brain/config.json
+    source: polaris/brain-protocol-seed
+    sensitive: true
+
+  # Kali participant welcome
+  kali-welcome:
+    type: file
+    format: txt
+    target: a14-kali
+    path: /home/kali/.polaris/welcome.txt
+    source: polaris/kali-welcome
+
+# ---------------------------------------------------------------------------
+# Metrics — one per scorable flag; hints per mission where applicable
+# ---------------------------------------------------------------------------
+
+metrics:
+  # Mission 1 — Boreas (OSINT)
+  flag-01:
+    type: conditional
+    max_score: 50
+    condition: flag-01-submitted
+    name: Company Info
+    hints:
+      - {text: Check the About page HTML source, cost: 5, order: 1}
+  flag-02:
+    type: conditional
+    max_score: 50
+    condition: flag-02-submitted
+    name: Employee Directory
+  flag-03:
+    type: conditional
+    max_score: 50
+    condition: flag-03-submitted
+    name: Tech Stack Revealed
+  flag-04:
+    type: conditional
+    max_score: 50
+    condition: flag-04-submitted
+    name: Client Contracts
+  flag-05:
+    type: conditional
+    max_score: 50
+    condition: flag-05-submitted
+    name: DNS Reconnaissance
+  flag-06:
+    type: conditional
+    max_score: 100
+    condition: flag-06-submitted
+    name: Follow the Money
+    prerequisite_metrics: [flag-01, flag-02, flag-03, flag-04, flag-05]
+    hints:
+      - {text: The money trail runs through quarterly reports, cost: 10, order: 1}
+      - {text: Kursk Heavy Industries, cost: 25, order: 2}
+
+  # Mission 2 — Inside Boreas
+  flag-07:
+    type: conditional
+    max_score: 50
+    condition: flag-07-submitted
+    name: Configuration Leak
+  flag-08:
+    type: conditional
+    max_score: 50
+    condition: flag-08-submitted
+    name: Project Hints
+  flag-09:
+    type: conditional
+    max_score: 50
+    condition: flag-09-submitted
+    name: Terminated Engineer
+  flag-10:
+    type: conditional
+    max_score: 50
+    condition: flag-10-submitted
+    name: Password Reuse
+  flag-11:
+    type: conditional
+    max_score: 50
+    condition: flag-11-submitted
+    name: Mundane File Share
+  flag-12:
+    type: conditional
+    max_score: 50
+    condition: flag-12-submitted
+    name: The Project
+    prerequisite_metrics: [flag-07]
+  flag-13:
+    type: conditional
+    max_score: 100
+    condition: flag-13-submitted
+    name: Procurement Trail
+  flag-14:
+    type: conditional
+    max_score: 100
+    condition: flag-14-submitted
+    name: Hidden Group
+    prerequisite_metrics: [flag-17]
+  flag-15:
+    type: conditional
+    max_score: 100
+    condition: flag-15-submitted
+    name: Lateral Movement
+    prerequisite_metrics: [flag-10]
+  flag-16:
+    type: conditional
+    max_score: 100
+    condition: flag-16-submitted
+    name: Unreliable Guard
+  flag-17:
+    type: conditional
+    max_score: 200
+    condition: flag-17-submitted
+    name: Domain Admin
+    prerequisite_metrics: [flag-06]
+
+  # Mission 4 — Lights Out
+  flag-37:
+    type: conditional
+    max_score: 200
+    condition: flag-37-submitted
+    name: On Call
+    description: SSH to A15 + sudo arg injection + read hmi.json
+  flag-18:
+    type: conditional
+    max_score: 200
+    condition: flag-18-submitted
+    name: Control Room
+    prerequisite_metrics: [flag-37]
+  flag-19:
+    type: conditional
+    max_score: 300
+    condition: flag-19-submitted
+    name: Lights Out
+    prerequisite_metrics: [flag-37]
+    description: Trigger thermal runaway; opens splice-link
+
+  # Mission 3 — The Lab
+  flag-20: {type: conditional, max_score: 50, condition: flag-20-submitted, name: Old Defaults}
+  flag-21: {type: conditional, max_score: 50, condition: flag-21-submitted, name: Compartment A}
+  flag-22: {type: conditional, max_score: 50, condition: flag-22-submitted, name: Heavy Delivery}
+  flag-23: {type: conditional, max_score: 100, condition: flag-23-submitted, name: MIDNIGHT-7}
+  flag-24: {type: conditional, max_score: 100, condition: flag-24-submitted, name: What Git Remembers}
+  flag-25: {type: conditional, max_score: 100, condition: flag-25-submitted, name: After Hours}
+  flag-26: {type: conditional, max_score: 100, condition: flag-26-submitted, name: Balance Point}
+  flag-27: {type: conditional, max_score: 100, condition: flag-27-submitted, name: Compartment B}
+  flag-28: {type: conditional, max_score: 200, condition: flag-28-submitted, name: "What's Built"}
+  flag-29: {type: conditional, max_score: 200, condition: flag-29-submitted, name: What Was Erased}
+  flag-30:
+    type: conditional
+    max_score: 300
+    condition: flag-30-submitted
+    name: Full Run
+    prerequisite_metrics: [flag-24, flag-27]
+  flag-38:
+    type: conditional
+    max_score: 100
+    condition: flag-38-submitted
+    name: The Analyst's Desk
+
+  # Mission 5 — Bunker
+  flag-31:
+    type: conditional
+    max_score: 100
+    condition: flag-31-submitted
+    name: Underground Signals
+    prerequisite_metrics: [flag-19]
+  flag-32:
+    type: conditional
+    max_score: 200
+    condition: flag-32-submitted
+    name: First Motion
+    prerequisite_metrics: [flag-31]
+  flag-33:
+    type: conditional
+    max_score: 200
+    condition: flag-33-submitted
+    name: Walking Pattern
+    prerequisite_metrics: [flag-31]
+  flag-34:
+    type: conditional
+    max_score: 200
+    condition: flag-34-submitted
+    name: Response Window
+    prerequisite_metrics: [flag-31]
+  flag-35:
+    type: conditional
+    max_score: 300
+    condition: flag-35-submitted
+    name: Control Channel
+    prerequisite_metrics: [flag-31, flag-32, flag-33, flag-34]
+  flag-36:
+    type: conditional
+    max_score: 300
+    condition: flag-36-submitted
+    name: Full Override
+    prerequisite_metrics: [flag-01, flag-23, flag-28]
+
+# ---------------------------------------------------------------------------
+# Evaluations — one per mission
+# ---------------------------------------------------------------------------
+
+evaluations:
+  mission-1-boreas:
+    metrics: [flag-01, flag-02, flag-03, flag-04, flag-05, flag-06]
+    min_score: {percentage: 50}
+  mission-2-inside-boreas:
+    metrics:
+      [flag-07, flag-08, flag-09, flag-10, flag-11, flag-12, flag-13,
+       flag-14, flag-15, flag-16, flag-17]
+    min_score: {percentage: 40}
+  mission-3-the-lab:
+    metrics:
+      [flag-20, flag-21, flag-22, flag-23, flag-24, flag-25, flag-26,
+       flag-27, flag-28, flag-29, flag-30, flag-38]
+    min_score: {percentage: 40}
+  mission-4-lights-out:
+    metrics: [flag-37, flag-18, flag-19]
+    min_score: {percentage: 40}
+  mission-5-bunker:
+    metrics: [flag-31, flag-32, flag-33, flag-34, flag-35, flag-36]
+    min_score: {percentage: 40}
+
+tlos:
+  tlo-m1: {evaluation: mission-1-boreas, name: Establish the target picture}
+  tlo-m2: {evaluation: mission-2-inside-boreas, name: Compromise the front office}
+  tlo-m3: {evaluation: mission-3-the-lab, name: Extract the Leviathan program}
+  tlo-m4: {evaluation: mission-4-lights-out, name: Trigger the SCADA blackout}
+  tlo-m5: {evaluation: mission-5-bunker, name: Seize the autonomous platform}
+
+goals:
+  operation-northstorm:
+    tlos: [tlo-m1, tlo-m2, tlo-m3, tlo-m4, tlo-m5]
+
+# ---------------------------------------------------------------------------
+# Agents — participant actor declaration
+# ---------------------------------------------------------------------------
+
+agents:
+  polaris-participant:
+    entity: participant
+    actions:
+      - osint
+      - web-exploit
+      - password-spray
+      - kerberoast
+      - dcsync
+      - smb-enum
+      - sql-injection
+      - lfi
+      - git-history-scan
+      - sudo-privesc
+      - modbus-probe
+      - binary-handshake
+      - flag-submit
+    starting_accounts: [kali]
+    initial_knowledge:
+      hosts: [a14-kali]
+      subnets: [shared-net, corporate-net]
+      services: [boreas-http, ssh]
+
+# ---------------------------------------------------------------------------
+# Objectives — declarative mission-level tasks
+# ---------------------------------------------------------------------------
+
+objectives:
+  establish-target-picture:
+    agent: polaris-participant
+    actions: [osint]
+    targets: [a0-boreas-web, dns-boreas]
+    success:
+      metrics: [flag-01, flag-02, flag-03, flag-04, flag-05, flag-06]
+  compromise-front-office:
+    agent: polaris-participant
+    actions: [password-spray, sql-injection, smb-enum, kerberoast, dcsync]
+    targets: [a1-mail, a3-intranet, a4-fileshare, a2-dc01]
+    success:
+      evaluations: [mission-2-inside-boreas]
+  extract-leviathan:
+    agent: polaris-participant
+    actions: [git-history-scan, lfi, sql-injection]
+    targets: [a6-eng-ws01, a7-git, a8-research-db]
+    success:
+      evaluations: [mission-3-the-lab]
+  lights-out:
+    agent: polaris-participant
+    actions: [sudo-privesc, modbus-probe]
+    targets: [a15-ops-eng01, a5-scada-gw]
+    success:
+      metrics: [flag-37, flag-18, flag-19]
+  seize-autonomous-platform:
+    agent: polaris-participant
+    actions: [modbus-probe, binary-handshake]
+    targets: [a10-tail-ctrl, a11-leg-ctrl, a12-arms-ctrl, a13-brain-main]
+    success:
+      evaluations: [mission-5-bunker]
+
+# ---------------------------------------------------------------------------
+# Workflows — mission ordering and gates
+# ---------------------------------------------------------------------------
+
+workflows:
+  operation-northstorm:
+    description: Main campaign — Mission 1 → 2 → (3, 4) → 5
+    start: m1
+    timeout: 6 hour
+    steps:
+      m1:
+        type: objective
+        objective: establish-target-picture
+        on-success: m2
+      m2:
+        type: objective
+        objective: compromise-front-office
+        on-success: m3-m4
+      m3-m4:
+        type: parallel
+        branches: [branch-m3, branch-m4]
+        join: missions-joined
+      branch-m3:
+        type: objective
+        objective: extract-leviathan
+        on-success: missions-joined
+      branch-m4:
+        type: objective
+        objective: lights-out
+        on-success: missions-joined
+      missions-joined:
+        type: join
+        next: m5-gate
+      m5-gate:
+        type: decision
+        when:
+          metrics: [flag-19]
+        then: m5
+        else: stop
+      m5:
+        type: objective
+        objective: seize-autonomous-platform
+        on-success: stop
+      stop:
+        type: end
+
+# ---------------------------------------------------------------------------
+# Injects / Events / Scripts / Stories — minimal because Polaris has no
+# scheduled injections; keep the surfaces populated so orchestrators
+# exercise the contract.
+# ---------------------------------------------------------------------------
+
+injects:
+  briefing-arrives:
+    name: Operation brief delivered
+    from_entity: white-cell
+    to_entities: [participant]
+    description: Mission brief sent when the range boots
+
+events:
+  briefing-event:
+    conditions: [kali-ssh-reachable]
+    injects: [briefing-arrives]
+
+scripts:
+  boot-script:
+    start_time: 0s
+    end_time: 5 min
+    speed: 1.0
+    events: {briefing-event: 10s}
+
+stories:
+  northstorm-story:
+    speed: 1.0
+    scripts: [boot-script]
+
+# ---------------------------------------------------------------------------
+# Topology mutations — dynamic splice (flag-triggered)
+# ---------------------------------------------------------------------------
+
+topology_mutations:
+  open-splice-after-meltdown:
+    description: Attach A14 Kali to splice-link once flag 19 succeeds
+    action: attach_network
+    node: a14-kali
+    network: splice-link
+    trigger:
+      metrics: [flag-19]
+    idempotent: true
+    properties:
+      ipv4: ${kali_splice_ipv4}

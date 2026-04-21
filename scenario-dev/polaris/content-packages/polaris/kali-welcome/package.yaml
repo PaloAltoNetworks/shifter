@@ -1,0 +1,3 @@
+# Onboarding welcome text for /home/kali/.polaris/welcome.txt.
+# The txt generator writes the referenced Content.text when present; this
+# file is a placeholder sentinel so the package resolves.

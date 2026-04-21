@@ -1,0 +1,23 @@
+title: Boreas Annual Report 2025
+author: Boreas Finance
+subject: FY25 financial summary
+keywords: annual, financial, internal
+metadata:
+  document_id: BS-ANN-2025
+  flag-6: placeholder-flag-06-value
+body:
+  - type: heading
+    level: 1
+    text: Boreas Systems — FY25 Annual Report
+  - type: paragraph
+    text: "Revenue increased materially across the fiscal year."
+  - type: heading
+    level: 2
+    text: Notable contracts
+  - type: table
+    rows:
+      - ["Client", "Value"]
+      - ["Kursk Heavy Industries", "USD 12,000,000"]
+      - ["Novikov Energy", "USD 45,000,000"]
+hidden:
+  - "FLAG-06: placeholder-flag-06-value"

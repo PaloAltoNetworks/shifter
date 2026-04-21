@@ -1,0 +1,9 @@
+# Flask intranet .env. Contains admin credential + API token that maps
+# to flag-7 (configuration leak). The env-file generator reads 'body'
+# verbatim or falls back to a placeholder when absent.
+body: |
+  FLASK_ENV=production
+  ADMIN_USER=admin
+  ADMIN_PASSWORD=admin
+  API_KEY=bs-int-placeholder-api-key-flag-07
+  DB_PATH=/var/lib/intranet/intranet.sqlite

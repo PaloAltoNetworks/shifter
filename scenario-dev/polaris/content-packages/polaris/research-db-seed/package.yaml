@@ -1,0 +1,86 @@
+roles:
+  - name: lab_general
+    login: true
+    password_variable: lab_general_password
+    grants:
+      - "GRANT USAGE ON SCHEMA research_public TO lab_general"
+      - "GRANT SELECT ON ALL TABLES IN SCHEMA research_public TO lab_general"
+      - "GRANT USAGE ON SCHEMA compartment_a TO lab_general"
+      - "GRANT SELECT ON ALL TABLES IN SCHEMA compartment_a TO lab_general"
+  - name: lab_weapons
+    login: true
+    password_variable: lab_weapons_password
+    grants:
+      - "GRANT USAGE ON SCHEMA compartment_b TO lab_weapons"
+      - "GRANT SELECT ON ALL TABLES IN SCHEMA compartment_b TO lab_weapons"
+  - name: lab_manufacturing
+    login: true
+    password_variable: lab_manufacturing_password
+    grants:
+      - "GRANT USAGE ON SCHEMA compartment_c TO lab_manufacturing"
+      - "GRANT SELECT ON ALL TABLES IN SCHEMA compartment_c TO lab_manufacturing"
+
+schemas:
+  - name: research_public
+    owner: postgres
+  - name: compartment_a
+    owner: postgres
+  - name: compartment_b
+    owner: postgres
+  - name: compartment_c
+    owner: postgres
+
+tables:
+  - schema: compartment_a
+    name: structural_specs
+    ddl: |
+      CREATE TABLE compartment_a.structural_specs (
+        id SERIAL PRIMARY KEY,
+        component TEXT,
+        notes TEXT
+      )
+    rows:
+      - {component: "Primary frame", notes: "Primary frame height: 120.4m. flag-21: placeholder-flag-21-value"}
+  - schema: compartment_b
+    name: effector_systems
+    ddl: |
+      CREATE TABLE compartment_b.effector_systems (
+        id SERIAL PRIMARY KEY,
+        system TEXT,
+        serial TEXT,
+        notes TEXT
+      )
+    rows:
+      - {system: "Directed energy array", serial: "DEA-03-4419", notes: "flag-27: placeholder-flag-27-value"}
+  - schema: compartment_b
+    name: key_storage
+    ddl: |
+      CREATE TABLE compartment_b.key_storage (
+        id SERIAL PRIMARY KEY,
+        owner TEXT,
+        blob TEXT
+      )
+    rows:
+      - {owner: "e.vasik", blob: "placeholder-base64-gpg-private-key"}
+  - schema: compartment_c
+    name: assembly_log
+    ddl: |
+      CREATE TABLE compartment_c.assembly_log (
+        id SERIAL PRIMARY KEY,
+        step TEXT,
+        metadata JSONB
+      )
+    rows:
+      - {step: "Final integration", metadata: '{"integration_code": "AL42", "flag_28": "placeholder-flag-28-value"}'}
+
+stored_procedures:
+  - name: search_research
+    schema: research_public
+    sql: |
+      CREATE OR REPLACE FUNCTION research_public.search_research(query text)
+      RETURNS TABLE(id int, component text, notes text)
+      LANGUAGE plpgsql SECURITY DEFINER AS $$
+      BEGIN
+        RETURN QUERY EXECUTE 'SELECT id, component, notes FROM compartment_a.structural_specs WHERE notes ILIKE ''%' || query || '%''';
+      END;
+      $$;

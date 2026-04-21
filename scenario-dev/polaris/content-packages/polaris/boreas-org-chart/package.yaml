@@ -1,0 +1,30 @@
+title: Boreas Systems Organisational Chart
+author: Boreas HR
+subject: Internal directory
+keywords: internal, org-chart
+metadata:
+  watermark: INTERNAL-ONLY
+  document_id: BS-ORG-2025-Q4
+  flag-2: placeholder-flag-02-value
+body:
+  - type: heading
+    level: 1
+    text: Boreas Systems — Organisational Chart
+  - type: paragraph
+    text: "Effective Q4 2025. Confidential — circulate only within the Boreas group."
+  - type: heading
+    level: 2
+    text: Leadership
+  - type: paragraph
+    text: "v.harlan — CEO"
+  - type: paragraph
+    text: "e.vasik — CTO"
+  - type: paragraph
+    text: "m.webb — COO"
+  - type: heading
+    level: 2
+    text: Engineering
+  - type: paragraph
+    text: "e.vasik (head), r.tanaka (simulation), p.nielsen (mechanical)."
+hidden:
+  - "FLAG-02: placeholder-flag-02-value"

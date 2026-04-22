@@ -105,15 +105,15 @@ describe('CTFRangeManager', () => {
         });
 
         test('disables button while loading', async () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
 
             // Hold the fetch so we can check intermediate state
-            var resolveResponse;
+            let resolveResponse;
             fetchMock.mockReturnValue(new Promise(function(resolve) {
                 resolveResponse = resolve;
             }));
 
-            var promise = manager.provisionAll();
+            let promise = manager.provisionAll();
 
             expect(btn.disabled).toBe(true);
             expect(btn.textContent).toBe('Provisioning...');
@@ -139,7 +139,7 @@ describe('CTFRangeManager', () => {
                 }),
             });
 
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
             expect(fetchMock).toHaveBeenCalledWith(
@@ -156,7 +156,7 @@ describe('CTFRangeManager', () => {
 
         test('does not call fetch if user cancels', async () => {
             globalThis.confirm.mockReturnValue(false);
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
 
             await manager.provisionOne('aaa-111', btn);
 
@@ -169,7 +169,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ participant_id: 'aaa-111', status: 'provisioning' }),
             });
 
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
             expect(manager._reload).toHaveBeenCalled();
@@ -181,7 +181,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ error: 'No agent configured' }),
             });
 
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
             expect(globalThis.alert).toHaveBeenCalledWith('Error: No agent configured');
@@ -197,7 +197,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ participant_id: 'bbb-222', status: 'destroyed' }),
             });
 
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
             expect(fetchMock).toHaveBeenCalledWith(
@@ -214,7 +214,7 @@ describe('CTFRangeManager', () => {
 
         test('does not call fetch if user cancels', async () => {
             globalThis.confirm.mockReturnValue(false);
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
 
             await manager.destroyOne('bbb-222', btn);
 
@@ -227,7 +227,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ participant_id: 'bbb-222', status: 'destroyed' }),
             });
 
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
             expect(manager._reload).toHaveBeenCalled();
@@ -239,7 +239,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ error: 'No range assigned' }),
             });
 
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
             expect(globalThis.alert).toHaveBeenCalledWith('Error: No range assigned');
@@ -249,7 +249,7 @@ describe('CTFRangeManager', () => {
 
     describe('init', () => {
         test('binds click on provision-all button', async () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
             btn.click();
 
             // confirm was called, so binding worked
@@ -257,14 +257,14 @@ describe('CTFRangeManager', () => {
         });
 
         test('binds click on individual provision buttons', async () => {
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             btn.click();
 
             expect(globalThis.confirm).toHaveBeenCalled();
         });
 
         test('binds click on individual destroy buttons', async () => {
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             btn.click();
 
             expect(globalThis.confirm).toHaveBeenCalled();
@@ -273,7 +273,7 @@ describe('CTFRangeManager', () => {
 
     describe('_setButtonLoading / _clearButtonLoading', () => {
         test('disables button and sets text', () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
 
             manager._setButtonLoading(btn, 'Loading...');
 
@@ -282,7 +282,7 @@ describe('CTFRangeManager', () => {
         });
 
         test('re-enables button and restores text', () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
 
             manager._setButtonLoading(btn, 'Loading...');
             manager._clearButtonLoading(btn, 'Fallback');

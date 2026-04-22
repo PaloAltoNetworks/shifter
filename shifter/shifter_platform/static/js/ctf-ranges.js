@@ -24,45 +24,45 @@ class CTFRangeManager {
     }
 
     _bindProvisionAll() {
-        var btn = document.getElementById('btn-provision-all');
+        let btn = document.getElementById('btn-provision-all');
         if (!btn) return;
         btn.addEventListener('click', () => this.provisionAll());
     }
 
     _bindPerParticipantButtons() {
-        var self = this;
+        let self = this;
 
         document.querySelectorAll('.btn-provision').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var participantId = this.getAttribute('data-participant-id');
+                let participantId = this.getAttribute('data-participant-id');
                 self.provisionOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-destroy').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var participantId = this.getAttribute('data-participant-id');
+                let participantId = this.getAttribute('data-participant-id');
                 self.destroyOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-stop').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var participantId = this.getAttribute('data-participant-id');
+                let participantId = this.getAttribute('data-participant-id');
                 self.stopOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-start').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var participantId = this.getAttribute('data-participant-id');
+                let participantId = this.getAttribute('data-participant-id');
                 self.startOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-restart').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var participantId = this.getAttribute('data-participant-id');
+                let participantId = this.getAttribute('data-participant-id');
                 self.restartOne(participantId, this);
             });
         });
@@ -71,11 +71,11 @@ class CTFRangeManager {
     async provisionAll() {
         if (!confirm('Provision ranges for all unassigned participants?')) return;
 
-        var btn = document.getElementById('btn-provision-all');
+        let btn = document.getElementById('btn-provision-all');
         this._setButtonLoading(btn, 'Provisioning...');
 
         try {
-            var response = await fetch(this.provisionAllUrl, {
+            let response = await fetch(this.provisionAllUrl, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': this.csrfToken,
@@ -83,14 +83,14 @@ class CTFRangeManager {
                 },
             });
 
-            var data = await response.json();
+            let data = await response.json();
 
             if (!response.ok) {
                 alert('Error: ' + (data.error || 'Provisioning failed'));
                 return;
             }
 
-            var msg = 'Provisioned: ' + data.successful + ', Failed: ' + data.failed;
+            let msg = 'Provisioned: ' + data.successful + ', Failed: ' + data.failed;
             if (data.errors && data.errors.length > 0) {
                 msg += '\n\nErrors:\n';
                 data.errors.forEach(function(e) {
@@ -112,8 +112,8 @@ class CTFRangeManager {
         this._setButtonLoading(btn, 'Provisioning...');
 
         try {
-            var url = '/ctf/api/participants/' + participantId + '/range/provision/';
-            var response = await fetch(url, {
+            let url = '/ctf/api/participants/' + participantId + '/range/provision/';
+            let response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': this.csrfToken,
@@ -121,7 +121,7 @@ class CTFRangeManager {
                 },
             });
 
-            var data = await response.json();
+            let data = await response.json();
 
             if (!response.ok) {
                 alert('Error: ' + (data.error || 'Provisioning failed'));
@@ -142,8 +142,8 @@ class CTFRangeManager {
         this._setButtonLoading(btn, 'Destroying...');
 
         try {
-            var url = '/ctf/api/participants/' + participantId + '/range/destroy/';
-            var response = await fetch(url, {
+            let url = '/ctf/api/participants/' + participantId + '/range/destroy/';
+            let response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': this.csrfToken,
@@ -151,7 +151,7 @@ class CTFRangeManager {
                 },
             });
 
-            var data = await response.json();
+            let data = await response.json();
 
             if (!response.ok) {
                 alert('Error: ' + (data.error || 'Destruction failed'));
@@ -185,8 +185,8 @@ class CTFRangeManager {
         this._setButtonLoading(btn, loadingText);
 
         try {
-            var url = '/ctf/api/participants/' + participantId + '/range/' + action + '/';
-            var response = await fetch(url, {
+            let url = '/ctf/api/participants/' + participantId + '/range/' + action + '/';
+            let response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': this.csrfToken,
@@ -194,7 +194,7 @@ class CTFRangeManager {
                 },
             });
 
-            var data = await response.json();
+            let data = await response.json();
 
             if (!response.ok) {
                 alert('Error: ' + (data.error || action + ' failed'));

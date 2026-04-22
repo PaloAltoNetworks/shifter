@@ -6,12 +6,12 @@ MAIN_REPO="/home/atomik/src/shifter"
 WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 
 if [[ -z "$WORKTREE_ROOT" ]]; then
-    echo "Error: Not in a git repository"
+    echo "Error: Not in a git repository" >&2
     exit 1
 fi
 
 if [[ "$WORKTREE_ROOT" = "$MAIN_REPO" ]]; then
-    echo "Error: This script is for worktrees, not the main repo"
+    echo "Error: This script is for worktrees, not the main repo" >&2
     exit 1
 fi
 

@@ -29,11 +29,11 @@ describe('CTFRangeManager', () => {
             ok: true,
             json: () => Promise.resolve({ successful: 2, failed: 0, errors: [] }),
         });
-        global.fetch = fetchMock;
-        global.confirm = jest.fn().mockReturnValue(true);
-        global.alert = jest.fn();
+        globalThis.fetch = fetchMock;
+        globalThis.confirm = jest.fn().mockReturnValue(true);
+        globalThis.alert = jest.fn();
 
-        manager = new window.CTFRangeManager({
+        manager = new globalThis.CTFRangeManager({
             csrfToken: 'test-csrf',
             provisionAllUrl: '/ctf/api/events/evt-1/ranges/provision/',
             rangeListUrl: '/ctf/api/events/evt-1/ranges/',
@@ -59,7 +59,7 @@ describe('CTFRangeManager', () => {
         });
 
         test('does not call fetch if user cancels confirmation', async () => {
-            global.confirm.mockReturnValue(false);
+            globalThis.confirm.mockReturnValue(false);
 
             await manager.provisionAll();
 
@@ -69,7 +69,7 @@ describe('CTFRangeManager', () => {
         test('shows success message and reloads on success', async () => {
             await manager.provisionAll();
 
-            expect(global.alert).toHaveBeenCalledWith(
+            expect(globalThis.alert).toHaveBeenCalledWith(
                 'Provisioned: 2, Failed: 0'
             );
             expect(manager._reload).toHaveBeenCalled();
@@ -87,7 +87,7 @@ describe('CTFRangeManager', () => {
 
             await manager.provisionAll();
 
-            expect(global.alert).toHaveBeenCalledWith(
+            expect(globalThis.alert).toHaveBeenCalledWith(
                 expect.stringContaining('No agent configured')
             );
         });
@@ -100,7 +100,7 @@ describe('CTFRangeManager', () => {
 
             await manager.provisionAll();
 
-            expect(global.alert).toHaveBeenCalledWith('Error: Event not found');
+            expect(globalThis.alert).toHaveBeenCalledWith('Error: Event not found');
             expect(manager._reload).not.toHaveBeenCalled();
         });
 
@@ -155,7 +155,7 @@ describe('CTFRangeManager', () => {
         });
 
         test('does not call fetch if user cancels', async () => {
-            global.confirm.mockReturnValue(false);
+            globalThis.confirm.mockReturnValue(false);
             var btn = document.querySelector('.btn-provision');
 
             await manager.provisionOne('aaa-111', btn);
@@ -184,7 +184,7 @@ describe('CTFRangeManager', () => {
             var btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
-            expect(global.alert).toHaveBeenCalledWith('Error: No agent configured');
+            expect(globalThis.alert).toHaveBeenCalledWith('Error: No agent configured');
             expect(btn.disabled).toBe(false);
             expect(manager._reload).not.toHaveBeenCalled();
         });
@@ -213,7 +213,7 @@ describe('CTFRangeManager', () => {
         });
 
         test('does not call fetch if user cancels', async () => {
-            global.confirm.mockReturnValue(false);
+            globalThis.confirm.mockReturnValue(false);
             var btn = document.querySelector('.btn-destroy');
 
             await manager.destroyOne('bbb-222', btn);
@@ -242,7 +242,7 @@ describe('CTFRangeManager', () => {
             var btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
-            expect(global.alert).toHaveBeenCalledWith('Error: No range assigned');
+            expect(globalThis.alert).toHaveBeenCalledWith('Error: No range assigned');
             expect(btn.disabled).toBe(false);
         });
     });
@@ -253,21 +253,21 @@ describe('CTFRangeManager', () => {
             btn.click();
 
             // confirm was called, so binding worked
-            expect(global.confirm).toHaveBeenCalled();
+            expect(globalThis.confirm).toHaveBeenCalled();
         });
 
         test('binds click on individual provision buttons', async () => {
             var btn = document.querySelector('.btn-provision');
             btn.click();
 
-            expect(global.confirm).toHaveBeenCalled();
+            expect(globalThis.confirm).toHaveBeenCalled();
         });
 
         test('binds click on individual destroy buttons', async () => {
             var btn = document.querySelector('.btn-destroy');
             btn.click();
 
-            expect(global.confirm).toHaveBeenCalled();
+            expect(globalThis.confirm).toHaveBeenCalled();
         });
     });
 

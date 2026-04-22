@@ -228,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ngfw = data.ngfws.find(n => n.id === ngfwId);
                 if (ngfw) {
                     // Reload page to show updated status
-                    window.location.reload();
+                    globalThis.location.reload();
                 }
             } catch (err) {
                 console.error('Refresh failed:', err);

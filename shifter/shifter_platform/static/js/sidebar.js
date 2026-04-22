@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (trigger && template && submenuPanel) {
             // Set the title
             if (submenuTitle) {
-                submenuTitle.textContent = trigger.getAttribute('data-submenu-title');
+                submenuTitle.textContent = trigger.dataset.submenuTitle;
             }
 
             // Clear and populate submenu items
@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function() {
     submenuTriggers.forEach(trigger => {
         trigger.addEventListener('click', function(e) {
             e.preventDefault();
-            const submenuId = this.getAttribute('data-submenu');
+            const submenuId = this.dataset.submenu;
             openSubmenu(submenuId);
         });
     });

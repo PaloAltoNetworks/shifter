@@ -34,35 +34,35 @@ class CTFRangeManager {
 
         document.querySelectorAll('.btn-provision').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                let participantId = this.getAttribute('data-participant-id');
+                let participantId = this.dataset.participantId;
                 self.provisionOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-destroy').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                let participantId = this.getAttribute('data-participant-id');
+                let participantId = this.dataset.participantId;
                 self.destroyOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-stop').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                let participantId = this.getAttribute('data-participant-id');
+                let participantId = this.dataset.participantId;
                 self.stopOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-start').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                let participantId = this.getAttribute('data-participant-id');
+                let participantId = this.dataset.participantId;
                 self.startOne(participantId, this);
             });
         });
 
         document.querySelectorAll('.btn-restart').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                let participantId = this.getAttribute('data-participant-id');
+                let participantId = this.dataset.participantId;
                 self.restartOne(participantId, this);
             });
         });
@@ -223,7 +223,7 @@ class CTFRangeManager {
     _clearButtonLoading(btn, fallbackText) {
         if (!btn) return;
         btn.disabled = false;
-        btn.textContent = btn.getAttribute('data-original-text') || fallbackText;
+        btn.textContent = btn.dataset.originalText || fallbackText;
     }
 }
 

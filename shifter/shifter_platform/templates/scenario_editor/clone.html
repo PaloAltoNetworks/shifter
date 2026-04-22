@@ -49,19 +49,19 @@
         <div class="card-title">Source Scenario</div>
         <table style="width: 100%;">
             <tr>
-                <td class="text-muted" style="padding: 4px 0; width: 120px;">Name</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0; width: 120px;">Name</th>
                 <td style="padding: 4px 0;">{{ source.name }}</td>
             </tr>
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">Instances</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">Instances</th>
                 <td style="padding: 4px 0;">{{ source.instances|length }}</td>
             </tr>
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">Subnets</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">Subnets</th>
                 <td style="padding: 4px 0;">{{ source.subnets|length }}</td>
             </tr>
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">NGFW</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">NGFW</th>
                 <td style="padding: 4px 0;">{% if source.ngfw %}Yes{% else %}No{% endif %}</td>
             </tr>
         </table>

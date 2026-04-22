@@ -38,7 +38,7 @@ class DirectUploader {
                 navigator.sendBeacon(this.cancelUrl, new Blob([data], { type: 'application/json' }));
             }
         };
-        window.addEventListener('beforeunload', this._boundBeforeUnload);
+        globalThis.addEventListener('beforeunload', this._boundBeforeUnload);
     }
 
     /**
@@ -46,7 +46,7 @@ class DirectUploader {
      */
     _unregisterBeforeUnload() {
         if (this._boundBeforeUnload) {
-            window.removeEventListener('beforeunload', this._boundBeforeUnload);
+            globalThis.removeEventListener('beforeunload', this._boundBeforeUnload);
             this._boundBeforeUnload = null;
         }
     }
@@ -218,4 +218,4 @@ class DirectUploader {
 }
 
 // Export for use in templates
-window.DirectUploader = DirectUploader;
+globalThis.DirectUploader = DirectUploader;

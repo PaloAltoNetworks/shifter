@@ -59,11 +59,11 @@ describe('NGFWWizardManager', () => {
 
     beforeEach(() => {
         document.body.innerHTML = buildWizardMarkup();
-        global.alert = jest.fn();
-        global.fetch = jest.fn();
+        globalThis.alert = jest.fn();
+        globalThis.fetch = jest.fn();
 
 
-        wizard = new window.NGFWWizardManager({
+        wizard = new globalThis.NGFWWizardManager({
             csrfToken: 'test-csrf',
             provisionUrl: '/api/ngfw/provision/',
             statusUrlTemplate: '/api/ngfw/{id}/status/',
@@ -244,14 +244,14 @@ describe('NGFWWizardManager', () => {
                 onclose: null,
                 onerror: null,
             };
-            global.WebSocket = jest.fn(() => mockWebSocket);
+            globalThis.WebSocket = jest.fn(() => mockWebSocket);
         });
 
         test('connectWebSocket creates WebSocket with correct URL', () => {
             wizard.ngfwId = 42;
             wizard.connectWebSocket();
 
-            expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost/ws/ngfw-status/42/');
+            expect(globalThis.WebSocket).toHaveBeenCalledWith('ws://localhost/ws/ngfw-status/42/');
         });
 
         test('WebSocket onmessage shows success on ready status', () => {
@@ -285,7 +285,7 @@ describe('NGFWWizardManager', () => {
 
             mockWebSocket.onmessage({ data: JSON.stringify({ status: 'failed', error: 'Test error' }) });
 
-            expect(global.alert).toHaveBeenCalledWith('Provisioning failed: Test error');
+            expect(globalThis.alert).toHaveBeenCalledWith('Provisioning failed: Test error');
 
             console.error = originalError;
         });

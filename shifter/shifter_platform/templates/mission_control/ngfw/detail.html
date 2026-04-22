@@ -343,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 await fetch('{% url "mission_control:api_ngfw_list" %}');
                 // Reload page to show updated status
-                window.location.reload();
+                globalThis.location.reload();
             } catch (err) {
                 console.error('Refresh failed:', err);
             } finally {
@@ -396,11 +396,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Open in new tab and check if it was blocked
-                const popup = window.open(data.url, '_blank');
+                const popup = globalThis.open(data.url, '_blank');
                 if (!popup || popup.closed || typeof popup.closed === 'undefined') {
                     // Popup was blocked
                     if (confirm('Popup blocked. Click OK to try again.\n\nTip: Allow popups for this site to use CLI access.')) {
-                        window.location.href = data.url;
+                        globalThis.location.href = data.url;
                     } else {
                         throw new Error('Popup blocked by browser');
                     }

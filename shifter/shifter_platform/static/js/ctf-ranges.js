@@ -227,6 +227,6 @@ class CTFRangeManager {
     }
 }
 
-if (typeof window !== 'undefined') {
-    window.CTFRangeManager = CTFRangeManager;
+if (typeof globalThis !== 'undefined') {
+    globalThis.CTFRangeManager = CTFRangeManager;
 }

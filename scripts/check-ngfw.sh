@@ -14,7 +14,7 @@ NGFW_INFO=$(aws ec2 describe-instances \
   --output text 2>&1)
 
 if [[ -z "$NGFW_INFO" ]] || [[ "$NGFW_INFO" = "None" ]]; then
-  echo "ERROR: No running NGFW instance found"
+  echo "ERROR: No running NGFW instance found" >&2
   exit 1
 fi
 
@@ -40,7 +40,7 @@ SECRET_ARN=$(aws secretsmanager list-secrets \
   --output json 2>&1 | jq -r ".SecretList[] | select(.Name | contains(\"ngfw/$UUID_PREFIX\")) | .ARN" | head -1)
 
 if [[ -z "$SECRET_ARN" ]]; then
-  echo "ERROR: Could not find SSH key secret for UUID prefix: $UUID_PREFIX"
+  echo "ERROR: Could not find SSH key secret for UUID prefix: $UUID_PREFIX" >&2
   exit 1
 fi
 
@@ -56,7 +56,7 @@ KEY_CONTENT=$(aws secretsmanager get-secret-value \
   --output text 2>&1)
 
 if [[ -z "$KEY_CONTENT" ]]; then
-  echo "ERROR: Could not retrieve SSH key"
+  echo "ERROR: Could not retrieve SSH key" >&2
   exit 1
 fi
 
@@ -72,7 +72,7 @@ PORTAL_ID=$(aws ec2 describe-instances \
   --output text 2>&1)
 
 if [[ -z "$PORTAL_ID" ]] || [[ "$PORTAL_ID" = "None" ]]; then
-  echo "ERROR: No running portal instance found"
+  echo "ERROR: No running portal instance found" >&2
   exit 1
 fi
 

@@ -15,6 +15,7 @@ check() {
         echo "[FAIL] $desc"
         ((FAIL++))
     fi
+    return 0
 }
 
 echo "=== Validating WebShell Box ==="

@@ -28,6 +28,7 @@ get_instance_id() {
         --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
         --query 'Reservations[0].Instances[0].InstanceId' \
         --output text 2>/dev/null
+        return 0
 }
 
 # Get instance state
@@ -39,6 +40,7 @@ get_instance_state() {
         --instance-ids "$instance_id" \
         --query 'Reservations[0].Instances[0].State.Name' \
         --output text 2>/dev/null
+        return 0
 }
 
 # Get public IP
@@ -50,6 +52,7 @@ get_public_ip() {
         --instance-ids "$instance_id" \
         --query 'Reservations[0].Instances[0].PublicIpAddress' \
         --output text 2>/dev/null
+        return 0
 }
 
 case "${1:-status}" in

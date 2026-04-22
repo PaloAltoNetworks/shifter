@@ -22,7 +22,7 @@ INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.2
 
 # Get ASG name from instance tags (if in ASG)
 ASG_NAME=""
-if [ -n "$LIFECYCLE_HOOK_NAME" ]; then
+if [[ -n "$LIFECYCLE_HOOK_NAME" ]]; then
   ASG_NAME=$(aws autoscaling describe-auto-scaling-instances \
     --instance-ids "$INSTANCE_ID" \
     --query 'AutoScalingInstances[0].AutoScalingGroupName' \
@@ -41,7 +41,7 @@ echo "=========================================="
 # ------------------------------------------------------------------------------
 complete_lifecycle_action() {
   local result=$1
-  if [ -n "$LIFECYCLE_HOOK_NAME" ] && [ -n "$ASG_NAME" ]; then
+  if [[ -n "$LIFECYCLE_HOOK_NAME" ]] && [[ -n "$ASG_NAME" ]]; then
     echo "Completing lifecycle action with result: $result"
     aws autoscaling complete-lifecycle-action \
       --lifecycle-hook-name "$LIFECYCLE_HOOK_NAME" \
@@ -102,7 +102,7 @@ echo "Docker installed and configured."
 # ------------------------------------------------------------------------------
 # Read configuration from Parameter Store
 # ------------------------------------------------------------------------------
-if [ -z "$PS_PREFIX" ]; then
+if [[ -z "$PS_PREFIX" ]]; then
   echo "No Parameter Store prefix configured. Skipping container deployment."
   echo "Bootstrap complete (Docker only)."
   exit 0
@@ -161,23 +161,23 @@ COMMON_ENV="$COMMON_ENV -e SQS_ENGINE_URL=$SQS_ENGINE_URL"
 COMMON_ENV="$COMMON_ENV -e SQS_MC_URL=$SQS_MC_URL"
 
 # Add Redis if configured
-if [ -n "$REDIS_ENDPOINT" ]; then
+if [[ -n "$REDIS_ENDPOINT" ]]; then
   COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
 fi
 
 # Add Guacamole config if configured (for RDP integration)
-if [ -n "$GUACAMOLE_SECRET_ARN" ]; then
+if [[ -n "$GUACAMOLE_SECRET_ARN" ]]; then
   COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
 fi
-if [ -n "$GUACAMOLE_BASE_URL" ]; then
+if [[ -n "$GUACAMOLE_BASE_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
 fi
-if [ -n "$GUACAMOLE_API_BASE_URL" ]; then
+if [[ -n "$GUACAMOLE_API_BASE_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
 fi
 
 # Add DB host override if configured
-if [ -n "$DB_HOST_OVERRIDE" ]; then
+if [[ -n "$DB_HOST_OVERRIDE" ]]; then
   COMMON_ENV="$COMMON_ENV -e DB_HOST=$DB_HOST_OVERRIDE"
 fi
 
@@ -185,7 +185,7 @@ fi
 COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
 COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
 
-if [ -n "$CTFD_PLATFORM_URL" ]; then
+if [[ -n "$CTFD_PLATFORM_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e CTFD_PLATFORM_URL=$CTFD_PLATFORM_URL"
 fi
 

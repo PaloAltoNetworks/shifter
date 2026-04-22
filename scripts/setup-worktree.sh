@@ -5,12 +5,12 @@
 MAIN_REPO="/home/atomik/src/shifter"
 WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 
-if [ -z "$WORKTREE_ROOT" ]; then
+if [[ -z "$WORKTREE_ROOT" ]]; then
     echo "Error: Not in a git repository"
     exit 1
 fi
 
-if [ "$WORKTREE_ROOT" = "$MAIN_REPO" ]; then
+if [[ "$WORKTREE_ROOT" = "$MAIN_REPO" ]]; then
     echo "Error: This script is for worktrees, not the main repo"
     exit 1
 fi
@@ -25,7 +25,7 @@ ensure_symlink() {
     local desc="$3"
 
     # Check if target exists
-    if [ ! -e "$target" ]; then
+    if [[ ! -e "$target" ]]; then
         echo "Warning: $desc target does not exist: $target"
         return 1
     fi
@@ -33,31 +33,31 @@ ensure_symlink() {
     # Check parent directory exists
     local parent_dir
     parent_dir="$(dirname "$link_path")"
-    if [ ! -d "$parent_dir" ]; then
+    if [[ ! -d "$parent_dir" ]]; then
         echo "Skipping $desc: parent directory does not exist"
         return 1
     fi
 
     # Valid symlink pointing to correct target
-    if [ -L "$link_path" ] && [ -e "$link_path" ] && [ "$(readlink "$link_path")" = "$target" ]; then
+    if [[ -L "$link_path" ]] && [[ -e "$link_path" ]] && [[ "$(readlink "$link_path")" = "$target" ]]; then
         echo "$desc symlink already exists and is valid"
         return 0
     fi
 
     # Broken symlink - remove and recreate
-    if [ -L "$link_path" ] && [ ! -e "$link_path" ]; then
+    if [[ -L "$link_path" ]] && [[ ! -e "$link_path" ]]; then
         echo "Removing broken $desc symlink..."
         rm "$link_path"
     fi
 
     # Symlink pointing to wrong target - remove and recreate
-    if [ -L "$link_path" ]; then
+    if [[ -L "$link_path" ]]; then
         echo "Fixing $desc symlink (wrong target)..."
         rm "$link_path"
     fi
 
     # Regular file or directory - remove and recreate
-    if [ -e "$link_path" ]; then
+    if [[ -e "$link_path" ]]; then
         echo "Replacing $desc with symlink..."
         rm -rf "$link_path"
     fi
@@ -86,8 +86,8 @@ ensure_symlink \
     "shifter/engine/provisioner/.venv"
 
 # Node modules (for stylelint, prettier, etc.)
-if [ -f "$WORKTREE_ROOT/package.json" ]; then
-    if [ -d "$WORKTREE_ROOT/node_modules" ]; then
+if [[ -f "$WORKTREE_ROOT/package.json" ]]; then
+    if [[ -d "$WORKTREE_ROOT/node_modules" ]]; then
         echo "node_modules already exists"
     else
         echo "Installing node modules..."

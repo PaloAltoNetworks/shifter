@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-if [ $# -eq 0 ]; then
+if [[ $# -eq 0 ]]; then
   echo "Error: Version argument required"
   echo "Usage: $0 <version>"
   echo "Example: $0 0.2.0"
@@ -10,7 +10,7 @@ fi
 
 VERSION=$1
 
-if [ -z "$VERSION" ]; then
+if [[ -z "$VERSION" ]]; then
   echo "Usage: $0 <version>"
   echo "Example: $0 0.2.0"
   exit 1
@@ -26,7 +26,7 @@ echo "Bumping version to $VERSION..."
 
 # Update sonar-project.properties
 SONAR_PROPS="sonar-project.properties"
-if [ -f "$SONAR_PROPS" ]; then
+if [[ -f "$SONAR_PROPS" ]]; then
   sed -i "s/sonar.projectVersion=.*/sonar.projectVersion=$VERSION/" "$SONAR_PROPS"
   echo "Updated $SONAR_PROPS"
 else

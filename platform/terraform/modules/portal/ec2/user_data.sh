@@ -50,6 +50,7 @@ complete_lifecycle_action() {
       --lifecycle-action-result "$result" \
       --region "$AWS_REGION" || echo "Warning: Failed to complete lifecycle action"
   fi
+  return 0
 }
 
 # Trap errors and abandon lifecycle on failure
@@ -112,6 +113,7 @@ echo "Reading configuration from Parameter Store..."
 
 get_param() {
   aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text --region "$AWS_REGION"
+  return 0
 }
 
 IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")

@@ -59,6 +59,7 @@ output_var() {
     else
         echo "${name}=${value}"
     fi
+    return 0
 }
 
 # Fetch task definition to get env vars

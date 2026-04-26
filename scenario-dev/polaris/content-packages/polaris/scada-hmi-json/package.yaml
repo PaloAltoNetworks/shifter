@@ -1,0 +1,8 @@
+# Scenario-seeded JSON config for A15's /root/.scada/hmi.json. Consumed by
+# the json generator when the Content entry references format=json.
+text: |
+  {
+    "hmi_admin": "scada-admin",
+    "password": "{{svc_scada_password}}",
+    "flag-37": "placeholder-flag-37-value"
+  }

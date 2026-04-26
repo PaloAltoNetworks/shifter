@@ -91,18 +91,22 @@ NEW_PROJECT_TYPE=""
 
 log_info() {
     echo "INFO: $1"
+    return 0
 }
 
 log_success() {
     echo "✓ $1"
+    return 0
 }
 
 log_error() {
     echo "ERROR: $1" >&2
+    return 0
 }
 
 log_warning() {
     echo "WARNING: $1" >&2
+    return 0
 }
 
 # Cleanup function for temporary files
@@ -147,6 +151,7 @@ validate_environment() {
         log_warning "Template file not found at $TEMPLATE_FILE"
         log_warning "Creating new agent files will fail"
     fi
+    return 0
 }
 
 #==============================================================================
@@ -163,6 +168,7 @@ extract_plan_field() {
         sed 's/^[ \t]*//;s/[ \t]*$//' | \
         grep -v "NEEDS CLARIFICATION" | \
         grep -v "^N/A$" || echo ""
+        return 0
 }
 
 parse_plan_data() {
@@ -241,6 +247,7 @@ get_project_structure() {
     else
         echo "src/\\ntests/"
     fi
+    return 0
 }
 
 get_commands_for_language() {
@@ -260,11 +267,13 @@ get_commands_for_language() {
             echo "# Add commands for $lang"
             ;;
     esac
+    return 0
 }
 
 get_language_conventions() {
     local lang="$1"
     echo "$lang: Follow standard conventions"
+    return 0
 }
 
 create_new_agent_file() {
@@ -639,6 +648,7 @@ update_specific_agent() {
             exit 1
             ;;
     esac
+    return 0
 }
 
 update_all_existing_agents() {
@@ -725,6 +735,7 @@ update_all_existing_agents() {
         log_info "No existing agent files found, creating default Claude file..."
         update_agent_file "$CLAUDE_FILE" "Claude Code"
     fi
+    return 0
 }
 print_summary() {
     echo
@@ -745,6 +756,7 @@ print_summary() {
     echo
 
     log_info "Usage: $0 [claude|gemini|copilot|cursor-agent|qwen|opencode|codex|windsurf|kilocode|auggie|codebuddy|shai|q|bob|qoder]"
+    return 0
 }
 
 #==============================================================================
@@ -790,6 +802,7 @@ main() {
         log_error "Agent context update completed with errors"
         exit 1
     fi
+    return 0
 }
 
 # Execute main function if script is run directly

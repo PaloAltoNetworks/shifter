@@ -222,7 +222,7 @@
 {% block extra_js %}
 <script>
 function copyPrompt(btn) {
-    var text = btn.getAttribute('data-prompt');
+    var text = btn.dataset.prompt;
     navigator.clipboard.writeText(text).then(function() {
         btn.textContent = 'Copied!';
         btn.classList.add('copied');

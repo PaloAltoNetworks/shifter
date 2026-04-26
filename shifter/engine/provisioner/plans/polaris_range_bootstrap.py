@@ -73,6 +73,18 @@ mv docker-compose.override.yml.new docker-compose.override.yml
 # other 15 stay running undisturbed.
 docker compose up -d --force-recreate dns a14-kali
 
+# The baked compose attaches a14-kali to splice-link at container start
+# (legacy pre-gate wiring). Strip that here — the splice landing is gated
+# on flag 19 via the polaris-splice-watcher systemd service, which will
+# reattach a14-kali once A5 reports runaway_complete. Docker compose
+# prefixes network names with the project name (here: "build"), so the
+# actual name is "build_splice-link"; discover by suffix to stay robust
+# against project-name changes. Non-fatal if already disconnected.
+splice_net_name=$(docker network ls --format '{{.Name}}' | grep -E '(^|_)splice-link$' | head -n1 || true)
+if [[ -n "$splice_net_name" ]]; then
+  docker network disconnect "$splice_net_name" a14-kali 2>/dev/null || true
+fi
+
 # Wait up to 60s for both containers to be Up before declaring success.
 # `docker ps --format` uses Go template syntax (e.g. .Names, .Status)
 # inside double-brace delimiters. The orchestrator's render pass uses a
@@ -158,6 +170,111 @@ ls "$DEST_ROOT/tests/smoketests" | wc -l | xargs -I{} echo "polaris tests fetch:
 exit 0
 """
 
+# Installs the splice watcher as a systemd service. The watcher polls
+# A5's /api/status for `runaway_complete` and, when the participant
+# earns flag 19 (generator meltdown), attaches a14-kali to the
+# splice-link docker network so the A14 -> A9 pivot opens. At range
+# start A14 is NOT on splice-link (the preceding bootstrap step runs
+# `docker network disconnect splice-link a14-kali` to strip the baked
+# compose pre-wiring), so until the watcher fires the bunker-ot path
+# is sealed.
+#
+# Both the watcher script and the systemd unit are written from here —
+# nothing is read from the baked build/ tree — so pushing provisioner
+# code changes propagates to every new range without an AMI rebake.
+# Idempotent: safe to re-run on bootstrap retries.
+INSTALL_SPLICE_WATCHER_SCRIPT = """#!/bin/bash
+set -euo pipefail
+
+WATCHER="/usr/local/bin/polaris-splice-watcher.sh"
+UNIT="/etc/systemd/system/polaris-splice-watcher.service"
+
+# Quoted heredoc delimiter prevents host-side shell expansion — the
+# watcher's shell vars and command substitutions are interpreted at
+# watcher runtime, not now. Uses Go template tokens (docker --format);
+# those all carry a leading dot, so the orchestrator's Jinja regex
+# (which matches word-chars-only between the double-brace delimiters)
+# leaves them untouched. No bare word-only tokens appear inside the
+# braces anywhere in this heredoc — those would be matched and
+# treated as missing template variables by the renderer.
+cat > "$WATCHER" <<'WATCHER_EOF'
+#!/bin/bash
+# polaris-splice-watcher: poll A5 HMI state; when the generator goes
+# into thermal runaway (flag 19 earned), attach a14-kali to the
+# splice-link docker network so the participant can reach a9-splice.
+set -euo pipefail
+
+A5_CONTAINER="${A5_CONTAINER:-a5-scada-generator}"
+KALI_CONTAINER="${KALI_CONTAINER:-a14-kali}"
+# Compose network name is "<project>_splice-link"; the compose project
+# lives at /opt/polaris/scenario-dev/polaris/build so project name is
+# "build" by default. Allow env override for local testing.
+SPLICE_NETWORK="${SPLICE_NETWORK:-build_splice-link}"
+SPLICE_IP="${SPLICE_IP:-172.20.60.140}"
+POLL_INTERVAL_S="${POLL_INTERVAL_S:-10}"
+
+poll_runaway_complete() {
+  local body
+  body=$(docker exec "$A5_CONTAINER" python3 -c \
+    'import urllib.request;print(urllib.request.urlopen("http://127.0.0.1:8080/api/status", timeout=5).read().decode())' \
+    2>/dev/null) || return 1
+  [[ "$body" == *'"runaway_complete": true'* ]] || [[ "$body" == *'"runaway_complete":true'* ]]
+}
+
+is_connected() {
+  # Dot-prefixed Go template fields pass through the orchestrator's
+  # Jinja regex untouched.
+  docker inspect "$KALI_CONTAINER" \
+    --format '{{json .NetworkSettings.Networks}}' 2>/dev/null \
+    | grep -q "\\"$SPLICE_NETWORK\\""
+}
+
+connect_splice() {
+  echo "polaris-splice-watcher: connecting $KALI_CONTAINER to $SPLICE_NETWORK ($SPLICE_IP)"
+  docker network connect --ip "$SPLICE_IP" "$SPLICE_NETWORK" "$KALI_CONTAINER"
+}
+
+echo "polaris-splice-watcher: starting (network=$SPLICE_NETWORK, container=$KALI_CONTAINER)"
+
+while true; do
+  if poll_runaway_complete; then
+    if ! is_connected; then
+      if connect_splice; then
+        echo "polaris-splice-watcher: splice established"
+      else
+        echo "polaris-splice-watcher: connect failed, will retry" >&2
+      fi
+    fi
+  fi
+  sleep "$POLL_INTERVAL_S"
+done
+WATCHER_EOF
+chmod +x "$WATCHER"
+
+cat > "$UNIT" <<UNIT_EOF
+[Unit]
+Description=Polaris splice watcher (attaches a14-kali to splice-link on flag 19)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=$WATCHER
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+systemctl daemon-reload
+systemctl enable polaris-splice-watcher.service
+systemctl restart polaris-splice-watcher.service
+
+echo "polaris splice watcher: installed and started"
+exit 0
+"""
+
 # Verification: prove a14-kali is up and dns resolves dc01 to this range's
 # DC. If any check fails, the plan is reported as failed and the range
 # provisioner aborts. The dig query runs from inside a14-kali because
@@ -201,7 +318,24 @@ if ! docker exec a14-kali test -s /home/kali/.ssh/authorized_keys; then
   exit 1
 fi
 
-echo "polaris verify: dc01 -> $resolved, kali key installed"
+# 5. a14-kali is NOT on splice-link at range start (the watcher attaches
+#    it only after flag 19 is earned). Inspect the container directly
+#    with a dot-prefixed Go template so the orchestrator's Jinja
+#    placeholder regex does not collide (see comments above).
+a14_nets=$(docker inspect a14-kali --format '{{json .NetworkSettings.Networks}}' 2>/dev/null || true)
+if echo "$a14_nets" | grep -q '"[a-z0-9_-]*splice-link"'; then
+  echo "polaris verify: a14-kali is already on splice-link at boot (should attach only after flag 19)" >&2
+  exit 1
+fi
+
+# 6. splice watcher service is active.
+if ! systemctl is-active --quiet polaris-splice-watcher.service; then
+  echo "polaris verify: polaris-splice-watcher.service is not active" >&2
+  systemctl status polaris-splice-watcher.service --no-pager >&2 || true
+  exit 1
+fi
+
+echo "polaris verify: dc01 -> $resolved, kali key installed, splice gated, watcher active"
 exit 0
 """
 
@@ -218,12 +352,18 @@ class PolarisRangeBootstrapPlan:
     3. Fetch the latest scenario-dev/polaris/tests/ tree from the
        shared dev-range-readable S3 bucket so the organizer smoketest
        harness is available on every freshly provisioned range.
+    4. Install and start the polaris-splice-watcher systemd service,
+       which attaches a14-kali to the splice-link docker network when
+       the participant earns flag 19 (A5 thermal runaway). At range
+       start A14 is NOT on splice-link.
 
     Verification:
 
     - dns container resolves dc01.boreas.local to the range-local DC IP
       (not the bake-time IP from range 0).
     - a14-kali container has /home/kali/.ssh/authorized_keys present.
+    - a14-kali is NOT attached to splice-link at boot.
+    - polaris-splice-watcher.service is active.
     """
 
     steps: ClassVar[list[SetupStep]] = [
@@ -237,6 +377,12 @@ class PolarisRangeBootstrapPlan:
             name="polaris_fetch_tests",
             script=FETCH_POLARIS_TESTS_SCRIPT,
             timeout_seconds=120,
+            requires_reboot=False,
+        ),
+        SetupStep(
+            name="polaris_install_splice_watcher",
+            script=INSTALL_SPLICE_WATCHER_SCRIPT,
+            timeout_seconds=60,
             requires_reboot=False,
         ),
     ]

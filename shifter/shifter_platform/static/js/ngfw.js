@@ -294,8 +294,8 @@ class NGFWWizardManager {
     }
 
     connectWebSocket() {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/ngfw-status/${this.ngfwId}/`;
+        const wsProtocol = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${globalThis.location.host}/ws/ngfw-status/${this.ngfwId}/`;
 
         console.log('Connecting to WebSocket:', wsUrl);
         this.ws = new WebSocket(wsUrl);
@@ -314,7 +314,7 @@ class NGFWWizardManager {
                     this.ws.close();
                 } else if (data.status === 'failed') {
                     alert('Provisioning failed: ' + (data.error || 'Unknown error'));
-                    window.location.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
+                    globalThis.location.href = this.detailUrlTemplate.replace('{id}', this.ngfwId);
                 }
                 // For other statuses (pending, provisioning, stopped), just wait for next message
             } catch (err) {

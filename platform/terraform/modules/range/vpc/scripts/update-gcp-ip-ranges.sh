@@ -13,7 +13,7 @@
 # To update the IP list, manually edit victim_allowed_cidrs.auto.tfvars
 # based on the PANW documentation above.
 
-echo "ERROR: This script is deprecated."
+echo "ERROR: This script is deprecated." >&2
 echo ""
 echo "The firewall allowlist now uses specific PANW-published IPs, not broad GCP ranges."
 echo "To update, edit victim_allowed_cidrs.auto.tfvars manually from:"

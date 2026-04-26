@@ -197,9 +197,9 @@
 
             // Redirect on success (server redirects via 302)
             if (completeResp.redirected) {
-                window.location.href = completeResp.url;
+                globalThis.location.href = completeResp.url;
             } else {
-                window.location.href = '{% url "experiments:script_list" %}';
+                globalThis.location.href = '{% url "experiments:script_list" %}';
             }
 
         } catch (err) {

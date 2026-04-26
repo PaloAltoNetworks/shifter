@@ -127,7 +127,7 @@ class DashboardManager {
 
     _bindCleanup() {
         // Clean up WebSocket on page unload to prevent memory leaks
-        window.addEventListener('beforeunload', () => {
+        globalThis.addEventListener('beforeunload', () => {
             this._closeStatusSocket();
         });
 
@@ -937,8 +937,8 @@ class DashboardManager {
      * @param {string} requestId - UUID of the request
      */
     _buildWebSocketUrl(requestId) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//${window.location.host}/ws/range-status/${requestId}/`;
+        const protocol = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${globalThis.location.host}/ws/range-status/${requestId}/`;
     }
 
     /**
@@ -1134,15 +1134,15 @@ class DashboardManager {
     }
 
     _initDropdown(dropdown) {
-        if (!dropdown || !window.XdrDropdown) {
+        if (!dropdown || !globalThis.XdrDropdown) {
             return null;
         }
 
-        if (typeof window.XdrDropdown.init === 'function') {
-            return window.XdrDropdown.init(dropdown);
+        if (typeof globalThis.XdrDropdown.init === 'function') {
+            return globalThis.XdrDropdown.init(dropdown);
         }
 
-        return new window.XdrDropdown(dropdown);
+        return new globalThis.XdrDropdown(dropdown);
     }
 
     _populateWindowsAgentDropdown(agents) {
@@ -1233,4 +1233,4 @@ class DashboardManager {
 }
 
 // Export for use in templates
-window.DashboardManager = DashboardManager;
+globalThis.DashboardManager = DashboardManager;

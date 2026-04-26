@@ -11,7 +11,7 @@ class TerminalManager {
         this.instances = options.instances || [];
         this.connectionUrls = options.connectionUrls || [];
         this.wsProtocol = options.wsProtocol || 'ws:';
-        this.wsHost = options.wsHost || window.location.host;
+        this.wsHost = options.wsHost || globalThis.location.host;
 
         // Terminal storage: Map<uuid, {terminal, fitAddon, socket, retries, retryTimeout}>
         this.terminals = new Map();
@@ -759,11 +759,11 @@ class TerminalManager {
     }
 
     /**
-     * Setup window resize handler
+     * Setup globalThis resize handler
      */
     setupWindowResize() {
         let resizeTimeout;
-        window.addEventListener('resize', () => {
+        globalThis.addEventListener('resize', () => {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(() => {
                 this.fitVisibleTerminals();
@@ -830,4 +830,4 @@ class TerminalManager {
 }
 
 // Export for use in template
-window.TerminalManager = TerminalManager;
+globalThis.TerminalManager = TerminalManager;

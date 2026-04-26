@@ -17,10 +17,10 @@ describe('DashboardManager destroyRange', () => {
             ok: true,
             json: () => Promise.resolve({}),
         });
-        global.fetch = fetchMock;
-        global.confirm = jest.fn().mockReturnValue(true);
+        globalThis.fetch = fetchMock;
+        globalThis.confirm = jest.fn().mockReturnValue(true);
 
-        dashboard = new window.DashboardManager({
+        dashboard = new globalThis.DashboardManager({
             csrfToken: 'test-csrf-token',
             rangeUrl: '/range',
             launchUrl: '/launch',
@@ -46,7 +46,7 @@ describe('DashboardManager destroyRange', () => {
     });
 
     test('does not call fetch if user cancels confirmation', async () => {
-        global.confirm.mockReturnValue(false);
+        globalThis.confirm.mockReturnValue(false);
 
         await dashboard.destroyRange();
 
@@ -63,11 +63,11 @@ describe('DashboardManager dropdown initialization', () => {
 
     beforeEach(() => {
         document.body.innerHTML = buildScenarioMarkup();
-        window.XdrDropdown = { init: jest.fn() };
+        globalThis.XdrDropdown = { init: jest.fn() };
     });
 
     test('uses XdrDropdown.init for explicit init', () => {
-        const dashboard = new window.DashboardManager({
+        const dashboard = new globalThis.DashboardManager({
             csrfToken: 'csrf',
             statusUrl: '/status',
             launchUrl: '/launch',
@@ -78,7 +78,7 @@ describe('DashboardManager dropdown initialization', () => {
 
         dashboard._initScenarioDropdown();
 
-        expect(window.XdrDropdown.init).toHaveBeenCalledWith(dashboard.scenarioDropdown);
+        expect(globalThis.XdrDropdown.init).toHaveBeenCalledWith(dashboard.scenarioDropdown);
     });
 });
 
@@ -101,9 +101,9 @@ describe('DashboardManager status polling', () => {
             ok: true,
             json: () => Promise.resolve({ range: { range_id: 42, status: 'provisioning' } }),
         });
-        global.fetch = fetchMock;
+        globalThis.fetch = fetchMock;
 
-        dashboard = new window.DashboardManager({
+        dashboard = new globalThis.DashboardManager({
             csrfToken: 'test-csrf-token',
             rangeUrl: '/range',
             launchUrl: '/launch',

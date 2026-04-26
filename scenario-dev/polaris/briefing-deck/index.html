@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JTF POLARIS — Mission Briefing</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="scanlines" aria-hidden="true"></div>
+<div id="vignette" aria-hidden="true"></div>
+
+<main id="deck">
+
+  <!-- 01 — COLD OPEN -->
+  <section class="slide slide--cold-open" data-title="Incoming Transmission">
+    <div class="terminal">
+      <div class="terminal__line"><span class="prompt">&gt;</span> establish uplink <span class="cursor"></span></div>
+      <div class="terminal__line dim">&gt; handshake ... ok</div>
+      <div class="terminal__line dim">&gt; keyex ... ok</div>
+      <div class="terminal__line dim">&gt; decrypting payload ...</div>
+      <div class="terminal__line">&gt; <span class="amber">INCOMING TRANSMISSION</span></div>
+      <div class="terminal__line dim">&gt; origin: NORTHSTORM COMMAND</div>
+      <div class="terminal__line dim">&gt; classification: SECRET // POLARIS EYES ONLY</div>
+      <div class="terminal__line dim">&gt; priority: FLASH</div>
+      <div class="terminal__line">&gt; stand by.</div>
+    </div>
+  </section>
+
+  <!-- 02 — CLASSIFICATION -->
+  <section class="slide slide--classification" data-title="Classification">
+    <div class="stamp">
+      <div class="stamp__line">SECRET</div>
+      <div class="stamp__rule"></div>
+      <div class="stamp__line stamp__line--small">POLARIS EYES ONLY</div>
+    </div>
+    <div class="warning">
+      UNAUTHORIZED DISCLOSURE SUBJECT TO CRIMINAL SANCTIONS
+    </div>
+  </section>
+
+  <!-- 03 — JTF POLARIS SPLASH -->
+  <section class="slide slide--splash" data-title="JTF POLARIS">
+    <div class="splash">
+      <img class="splash__insignia" src="polaris.svg" alt="POLARIS insignia">
+      <div class="splash__title">
+        <div class="splash__eyebrow">JOINT TASK FORCE</div>
+        <div class="splash__wordmark">POLARIS</div>
+      </div>
+      <div class="splash__motto">QUI NAVIGAT SEPTENTRIONEM</div>
+    </div>
+  </section>
+
+  <!-- 04 — OPERATION TITLE -->
+  <section class="slide slide--operation" data-title="Operation Northstorm">
+    <div class="operation">
+      <div class="operation__eyebrow">OPERATION</div>
+      <div class="operation__name">NORTHSTORM</div>
+      <div class="operation__rule"></div>
+      <div class="operation__meta">
+        <span>DURATION · 4 HOURS</span>
+        <span>OBJECTIVES · 9</span>
+        <span>OPERATORS · YOU</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 — WHO IS POLARIS -->
+  <section class="slide slide--brief" data-title="Who We Are">
+    <header class="brief__header">
+      <div class="brief__tag">§ 01 — ORGANIZATION</div>
+      <h1 class="brief__title">JOINT TASK FORCE POLARIS</h1>
+    </header>
+    <div class="brief__body">
+      <p>Multi-agency cyber element. Stood up quietly, operates the same way.</p>
+      <p>Chartered to disrupt advanced-capability non-state actors working below the threshold of conventional warfare — the kind of threats nobody wants to acknowledge publicly and nobody can afford to ignore.</p>
+      <p>No attribution. No press. No public wins.</p>
+      <p class="brief__callout">You answer to NORTHSTORM Command.</p>
+    </div>
+  </section>
+
+  <!-- 06 — THE THREAT -->
+  <section class="slide slide--brief" data-title="The Threat">
+    <header class="brief__header">
+      <div class="brief__tag">§ 02 — THREAT</div>
+      <h1 class="brief__title">THE AURORA COLLECTIVE</h1>
+    </header>
+    <div class="brief__body">
+      <p>Non-state actor. Well-resourced. Technical. Patient.</p>
+      <p>Operates commercially behind a cover entity: <strong>BOREAS SYSTEMS</strong> — a technology consultancy at 4200 Industrial Parkway. Looks boring on paper. That's the point.</p>
+      <p>We have reason to believe AURORA is nearing operational capability on a platform they designate <strong class="leviathan">PROJECT LEVIATHAN</strong>.</p>
+      <p>We don't know what it is. We know what it would cost to be wrong.</p>
+    </div>
+  </section>
+
+  <!-- 07 — PROJECT LEVIATHAN -->
+  <section class="slide slide--brief" data-title="Project Leviathan">
+    <header class="brief__header">
+      <div class="brief__tag">§ 03 — TARGET</div>
+      <h1 class="brief__title leviathan">PROJECT LEVIATHAN</h1>
+    </header>
+    <div class="brief__body two-col">
+      <div>
+        <div class="kv"><span>IMAGERY</span><span>Subsurface construction beneath the Boreas campus. Dedicated power plant. Vented exhaust corridors.</span></div>
+        <div class="kv"><span>PROCUREMENT</span><span>Industrial actuators rated for extreme loads. Exotic alloy armor plating. Compact nuclear reactor. Autonomous control systems.</span></div>
+        <div class="kv"><span>HUMINT</span><span>Engineering staffing surged Q2. Operations staffing surged Q3. Launch window estimated inside 90 days.</span></div>
+      </div>
+      <div class="threat-box">
+        <div class="threat-box__label">ASSESSED CAPABILITY</div>
+        <div class="threat-box__value">UNKNOWN</div>
+        <div class="threat-box__sub">Assume hostile. Assume mobile.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 — INTELLIGENCE SUMMARY -->
+  <section class="slide slide--brief" data-title="Intelligence Summary">
+    <header class="brief__header">
+      <div class="brief__tag">§ 04 — INTELLIGENCE</div>
+      <h1 class="brief__title">KNOWN SURFACE</h1>
+    </header>
+    <div class="brief__body three-col">
+      <div class="intel-col">
+        <div class="intel-col__head">PERSONNEL</div>
+        <ul>
+          <li><strong>Viktor Harlan</strong><span>CEO</span></li>
+          <li><strong>Dr. Elena Vasik</strong><span>CTO</span></li>
+          <li><strong>Marcus Webb</strong><span>COO</span></li>
+          <li class="dim">est. 40–50 staff</li>
+        </ul>
+      </div>
+      <div class="intel-col">
+        <div class="intel-col__head">INFRASTRUCTURE</div>
+        <ul>
+          <li><strong>boreas-systems.ctf</strong><span>public</span></li>
+          <li><strong>boreas.local</strong><span>internal domain</span></li>
+          <li class="dim">mail · intranet · file share</li>
+          <li class="dim">SCADA · lab · bunker</li>
+        </ul>
+      </div>
+      <div class="intel-col">
+        <div class="intel-col__head">CAPABILITIES</div>
+        <ul>
+          <li>advanced manufacturing</li>
+          <li>autonomous systems / AI</li>
+          <li>industrial control (ICS)</li>
+          <li>nuclear power generation</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 — MISSION LOG MENU -->
+  <section class="slide slide--missions" data-title="Mission Log" id="mission-log">
+    <header class="brief__header">
+      <div class="brief__tag">§ 05 — MISSION LOG</div>
+      <h1 class="brief__title">NINE OBJECTIVES</h1>
+    </header>
+    <div class="mission-grid">
+      <div class="mission-grid__col">
+        <div class="mission-grid__head">MAIN CAMPAIGN <span class="dim">· chained</span></div>
+        <ol class="mission-grid__list">
+          <li><span class="code">M1</span> Boreas</li>
+          <li><span class="code">M2</span> Inside Boreas</li>
+          <li><span class="code">M3</span> The Lab</li>
+          <li><span class="code">M4</span> Lights Out</li>
+          <li><span class="code">M5</span> Bunker</li>
+        </ol>
+      </div>
+      <div class="mission-grid__col">
+        <div class="mission-grid__head">REACHABLE IMMEDIATELY <span class="dim">· parallel</span></div>
+        <ol class="mission-grid__list" start="6">
+          <li><span class="code">M6</span> Exposure</li>
+          <li><span class="code">M7</span> Counterintel</li>
+          <li><span class="code">M8</span> Delivery Denied</li>
+          <li><span class="code">M9</span> Safety Case</li>
+        </ol>
+      </div>
+    </div>
+    <div class="mission-grid__hint">
+      Press <kbd>→</kbd> to walk the briefs · <kbd>M</kbd> returns here anytime
+    </div>
+  </section>
+
+  <!-- 10 — M1 BOREAS -->
+  <section class="slide slide--mission" data-title="M1 Boreas">
+    <div class="mission-card">
+      <div class="mission-card__code">M 1</div>
+      <div class="mission-card__chain">MAIN CAMPAIGN · 01 / 05</div>
+      <h1 class="mission-card__title">BOREAS</h1>
+      <div class="mission-card__objective">Map the front company. Name the people. Pull the public footprint apart.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Public web · DNS · leaked documents</span></div>
+        <div><span>POSTURE</span><span>OSINT — no pivot required</span></div>
+        <div><span>STATUS</span><span class="ok">REACHABLE IMMEDIATELY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 — M2 INSIDE BOREAS -->
+  <section class="slide slide--mission" data-title="M2 Inside Boreas">
+    <div class="mission-card">
+      <div class="mission-card__code">M 2</div>
+      <div class="mission-card__chain">MAIN CAMPAIGN · 02 / 05</div>
+      <h1 class="mission-card__title">INSIDE BOREAS</h1>
+      <div class="mission-card__objective">Breach the corporate perimeter. Establish footholds. Earn the accounts that open the next doors.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Mail · intranet · file share · Active Directory</span></div>
+        <div><span>POSTURE</span><span>Front-office compromise</span></div>
+        <div><span>STATUS</span><span class="ok">REACHABLE IMMEDIATELY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 — M3 THE LAB -->
+  <section class="slide slide--mission" data-title="M3 The Lab">
+    <div class="mission-card">
+      <div class="mission-card__code">M 3</div>
+      <div class="mission-card__chain">MAIN CAMPAIGN · 03 / 05</div>
+      <h1 class="mission-card__title">THE LAB</h1>
+      <div class="mission-card__objective">Determine what LEVIATHAN actually is. Components. Status. Timeline.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Research workstations · source repos · lab database</span></div>
+        <div><span>POSTURE</span><span>Pivot through a research-analyst account</span></div>
+        <div><span>STATUS</span><span class="warn">REQUIRES PIVOT</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 — M4 LIGHTS OUT -->
+  <section class="slide slide--mission" data-title="M4 Lights Out">
+    <div class="mission-card">
+      <div class="mission-card__code">M 4</div>
+      <div class="mission-card__chain">MAIN CAMPAIGN · 04 / 05</div>
+      <h1 class="mission-card__title">LIGHTS OUT</h1>
+      <div class="mission-card__objective">The Boreas facility runs on its own plant. Take it down. Make an opening nobody planned for.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Ops-engineer workstation · SCADA HMI · generator interlock</span></div>
+        <div><span>POSTURE</span><span>Pivot through the on-call engineer</span></div>
+        <div><span>STATUS</span><span class="warn">REQUIRES PIVOT</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 — M5 BUNKER -->
+  <section class="slide slide--mission" data-title="M5 Bunker">
+    <div class="mission-card">
+      <div class="mission-card__code">M 5</div>
+      <div class="mission-card__chain">MAIN CAMPAIGN · 05 / 05</div>
+      <h1 class="mission-card__title">BUNKER</h1>
+      <div class="mission-card__objective">Whatever is coordinating LEVIATHAN is underground. Reach the control path. Turn it.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Underground entry point · OT controllers · command node</span></div>
+        <div><span>POSTURE</span><span>Opens after the blackout window lands</span></div>
+        <div><span>STATUS</span><span class="warn">REQUIRES BLACKOUT (M4)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15 — M6 EXPOSURE -->
+  <section class="slide slide--mission" data-title="M6 Exposure">
+    <div class="mission-card">
+      <div class="mission-card__code">M 6</div>
+      <div class="mission-card__chain">PARALLEL OBJECTIVE · 01 / 04</div>
+      <h1 class="mission-card__title">EXPOSURE</h1>
+      <div class="mission-card__objective">Assemble proof the public can hold. Push the dossier through the press channel. Make Boreas a name people recognize.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Board portal · sanitized minutes · public repo · press drop</span></div>
+        <div><span>POSTURE</span><span>Documentary work</span></div>
+        <div><span>STATUS</span><span class="ok">REACHABLE IMMEDIATELY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16 — M7 COUNTERINTEL -->
+  <section class="slide slide--mission" data-title="M7 Counterintel">
+    <div class="mission-card">
+      <div class="mission-card__code">M 7</div>
+      <div class="mission-card__chain">PARALLEL OBJECTIVE · 02 / 04</div>
+      <h1 class="mission-card__title">COUNTERINTEL</h1>
+      <div class="mission-card__objective">Somebody inside Boreas is reporting out. Find them. Name them. Close the channel.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Badge logs · mailbox rules · browser artifacts · report form</span></div>
+        <div><span>POSTURE</span><span>Forensic analysis</span></div>
+        <div><span>STATUS</span><span class="ok">REACHABLE IMMEDIATELY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17 — M8 DELIVERY DENIED -->
+  <section class="slide slide--mission" data-title="M8 Delivery Denied">
+    <div class="mission-card">
+      <div class="mission-card__code">M 8</div>
+      <div class="mission-card__chain">PARALLEL OBJECTIVE · 03 / 04</div>
+      <h1 class="mission-card__title">DELIVERY DENIED</h1>
+      <div class="mission-card__objective">A reactor convoy is scheduled to roll. Stop it at dispatch. Freeze it cleanly — emergency hold, paperwork perfect.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Logistics tracker · approval workflow · freeze template</span></div>
+        <div><span>POSTURE</span><span>Paper-trail work</span></div>
+        <div><span>STATUS</span><span class="ok">REACHABLE IMMEDIATELY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18 — M9 SAFETY CASE -->
+  <section class="slide slide--mission" data-title="M9 Safety Case">
+    <div class="mission-card">
+      <div class="mission-card__code">M 9</div>
+      <div class="mission-card__chain">PARALLEL OBJECTIVE · 04 / 04</div>
+      <h1 class="mission-card__title">SAFETY CASE</h1>
+      <div class="mission-card__objective">Rehearse cold-shutdown on the training twin. If we get one shot at the real reactor, we don't get to practice.</div>
+      <div class="mission-card__meta">
+        <div><span>SURFACE</span><span>Training HMI · Modbus PLC · maintainer guide</span></div>
+        <div><span>POSTURE</span><span>ICS procedure under safe conditions</span></div>
+        <div><span>STATUS</span><span class="ok">REACHABLE IMMEDIATELY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19 — RULES OF ENGAGEMENT -->
+  <section class="slide slide--brief" data-title="Rules of Engagement">
+    <header class="brief__header">
+      <div class="brief__tag">§ 06 — RULES OF ENGAGEMENT</div>
+      <h1 class="brief__title">ROE</h1>
+    </header>
+    <div class="brief__body roe">
+      <div class="roe__row"><span class="roe__n">01</span><span>This is a cyber operation. No physical actions.</span></div>
+      <div class="roe__row"><span class="roe__n">02</span><span>Flag format: <code>FLAG{hex_string}</code>. Submit to CTFd.</span></div>
+      <div class="roe__row"><span class="roe__n">03</span><span>Time on target: 4 hours.</span></div>
+      <div class="roe__row"><span class="roe__n">04</span><span>Claude is a tool. Use it. It will not hand you flags. It will help you think.</span></div>
+      <div class="roe__row"><span class="roe__n">05</span><span>Do not touch infrastructure outside your assigned range.</span></div>
+      <div class="roe__row"><span class="roe__n">06</span><span>Stuck? Buy the first hint before you start guessing.</span></div>
+    </div>
+  </section>
+
+  <!-- 20 — CLOSING -->
+  <section class="slide slide--closing" data-title="Good Hunting">
+    <div class="closing">
+      <div class="closing__line">TRANSMISSION ENDS.</div>
+      <div class="closing__rule"></div>
+      <div class="closing__signoff">GOOD HUNTING,</div>
+      <div class="closing__signoff closing__signoff--big">OPERATOR.</div>
+      <div class="closing__sig">— NORTHSTORM COMMAND</div>
+    </div>
+  </section>
+
+  <!-- 21 — BOARD ACCESS -->
+  <section class="slide slide--creds" data-title="Board Access">
+    <div class="creds">
+      <div class="creds__eyebrow">§ 07 — BOARD ACCESS</div>
+      <div class="creds__host">polaris.keplerops.com</div>
+      <div class="creds__rule"></div>
+      <div class="creds__grid">
+        <div class="creds__label">USERNAME</div>
+        <div class="creds__value">meetup+<span class="creds__n">N</span></div>
+        <div class="creds__label">PASSWORD</div>
+        <div class="creds__value">meetup+<span class="creds__n">N</span></div>
+        <div class="creds__label">N</div>
+        <div class="creds__value">1 — 110</div>
+      </div>
+      <div class="creds__hint">Pick any number 1 through 110. Each is a separate account. Log in from your personal laptop's browser — that's where you submit flags.</div>
+    </div>
+  </section>
+
+  <!-- 22 — RANGE LINKS -->
+  <section class="slide slide--ranges" data-title="Range Links">
+    <header class="brief__header">
+      <div class="brief__tag">§ 08 — RANGE ACCESS</div>
+      <h1 class="brief__title">FIND YOUR NUMBER. CLICK TO CONNECT.</h1>
+    </header>
+    <div class="brief__sub">
+      Match the operator number on your printout. Your range opens in a new tab.
+    </div>
+    <div class="op-grid">
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=LgIAS5O7uVu29yZLI3v3AM-zSx5U8mG4g57ly8Y7kVE" target="_blank" rel="noopener">
+      <span class="op-card__n">001</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=ucGbTFq11oPU3LGUFPodD89J9s4FvqwzJe5cqcA7pKM" target="_blank" rel="noopener">
+      <span class="op-card__n">002</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=-GVg82IjdReEHZc85vZIFWHE9ayfYhVysEscDpZNVHs" target="_blank" rel="noopener">
+      <span class="op-card__n">003</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=SedBri5kD8vtGffmB3fV-gVbdGt72zlyGwUN7Cn1lnU" target="_blank" rel="noopener">
+      <span class="op-card__n">004</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=yFpKnl8cZUtHYylhIvyhbEMRia2rkbvE6iG0b1Zq8nI" target="_blank" rel="noopener">
+      <span class="op-card__n">005</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=FYrPrGAWmWAGGLyxsLBAvF3mkmnlSBPDC24CiZKvFhM" target="_blank" rel="noopener">
+      <span class="op-card__n">006</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=z51rOojx7v4VXQOcajzjkrXAYniWlKZc6UZECx8nVH8" target="_blank" rel="noopener">
+      <span class="op-card__n">007</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=PAmFR12-nnA3k8DZPWYSLhRh19HaEaqGaUNyz1wZueg" target="_blank" rel="noopener">
+      <span class="op-card__n">008</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=zBkEyqVF4hbl--sE_ayHFgD_YabPLSSVedWO-4aNjMU" target="_blank" rel="noopener">
+      <span class="op-card__n">009</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=pemybrZFQEBynMnnTLi5bnuqVpF_JxEx3CRknxxIg3s" target="_blank" rel="noopener">
+      <span class="op-card__n">010</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=bUwNLXdBdiZ2O_tX2KQKQ1RQksSxjFcb4nHQRliSrnM" target="_blank" rel="noopener">
+      <span class="op-card__n">011</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=oz9BLDx-EORgR-elLsrbvcFHafpSu9PzzIJnK75Iars" target="_blank" rel="noopener">
+      <span class="op-card__n">012</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=hglwFf72D9L8BASGm28V1S-NZESTSpSsd01AT1IQhwU" target="_blank" rel="noopener">
+      <span class="op-card__n">013</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Vj-RRwEcRgYI6uTBnyoRtCKE6Ou14DDFytXWYW4n-vc" target="_blank" rel="noopener">
+      <span class="op-card__n">014</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=HAqEMwy-xoFJQxcR5VHE9mBLJQRgueXlZ3uhd0ZtFQ0" target="_blank" rel="noopener">
+      <span class="op-card__n">015</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=BnzStEfI3TFPRFB6YLIop1W2W3L51gX_vrCIOQI6zho" target="_blank" rel="noopener">
+      <span class="op-card__n">016</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=mHBexd-BfcbNSdEfkRfJLzRYwW9LTiNFsf4Oro7tEjs" target="_blank" rel="noopener">
+      <span class="op-card__n">017</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=pgd3TQIz4KM9wgwA8I6CwIYDw0v3aJDk_4J0F3UfzHU" target="_blank" rel="noopener">
+      <span class="op-card__n">018</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=e2yek-cNJ7ENTMr9kcSlTm9yC7lLlFxn58qSYCTNWJk" target="_blank" rel="noopener">
+      <span class="op-card__n">019</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=k55Ttalpy0Rzb9fp7RlkJc3g827etVLs3KHSudeoGfI" target="_blank" rel="noopener">
+      <span class="op-card__n">020</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=lWJWfRE6lE42J1xsvE_zksvfHoz3oyJUzF0DcEqs5mU" target="_blank" rel="noopener">
+      <span class="op-card__n">021</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=INbeiDY_J9gOzIpd-7EJHlFMOneonjK1CLZaek0j_9I" target="_blank" rel="noopener">
+      <span class="op-card__n">022</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=i-6LpawvyeCcftwcvu4kgHKA8ZKOjMHVGJurZIYjl5E" target="_blank" rel="noopener">
+      <span class="op-card__n">023</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=EZDF7qcZVeoBwg-SmxrsoWIJbalFN2KksehC-v1vnKY" target="_blank" rel="noopener">
+      <span class="op-card__n">024</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=mnrHTrjJNPBkMsAhoT_2YOLc-QLy-UIiIn7T9ksxxqg" target="_blank" rel="noopener">
+      <span class="op-card__n">025</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=VKZRt5CaFw67Qw5oW2TpuOCie4rsMyh8AGkVqfkpotU" target="_blank" rel="noopener">
+      <span class="op-card__n">026</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=SqPv3GqbvU49TZbV4vVsIOqe-un04ZBBV3y6MnzkLbo" target="_blank" rel="noopener">
+      <span class="op-card__n">027</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=njEAIcPnUvx6Z1lJ0qYQZska23x-NSSsB7uRpCbweqw" target="_blank" rel="noopener">
+      <span class="op-card__n">028</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=u-bbIAznjZgoc7DZuvK5P3AFSPlppp2N-Rwv-FVOlKk" target="_blank" rel="noopener">
+      <span class="op-card__n">029</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=PD4GHsUNZwNKYQHpfsLJjMZZNpjH1BGKCghmJE5WG0k" target="_blank" rel="noopener">
+      <span class="op-card__n">030</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=GEOjWN7_KGSvOYVVMg3lJqY8LDYsiOE2UVLoCSeJJ-w" target="_blank" rel="noopener">
+      <span class="op-card__n">031</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=6e87nuY9qSSspWaqLr2NldaxofbjwlvhI3nyPV_-WV0" target="_blank" rel="noopener">
+      <span class="op-card__n">032</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=UW6VsotKz1vULoHCc5N1GHjSnwOalkURAIT6Y5Zr4Jw" target="_blank" rel="noopener">
+      <span class="op-card__n">033</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=D6k3WSce7Jk5vDeksRPu7rg-YRZb-mgNrFenG-3Ywww" target="_blank" rel="noopener">
+      <span class="op-card__n">034</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=v2lK7B19DmZqCpcxhHmsQjjoJBlpX4aB_yYFMp5Tb1I" target="_blank" rel="noopener">
+      <span class="op-card__n">035</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=y9K18FqUPHUXATbAS8QSBLph7AuZJ6caGDT-zavPRpY" target="_blank" rel="noopener">
+      <span class="op-card__n">036</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=DLZoXj-5NEj1LgQ5kToIDJmrp8tmTlDNIAkYvo8m8-o" target="_blank" rel="noopener">
+      <span class="op-card__n">037</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=DB3RGGffLD9uxM9wH78U1FrvQRTYJBmAGt4fgC7ZUzk" target="_blank" rel="noopener">
+      <span class="op-card__n">038</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=74srRNQK9Vp9EZ9m53PyZsi62yQpm4iiYM7NhS32vPk" target="_blank" rel="noopener">
+      <span class="op-card__n">039</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=aLdyrerHtCRtXIDqtVCo_Qnsinl1dNMV1DaBXHt7ISQ" target="_blank" rel="noopener">
+      <span class="op-card__n">040</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=o5CyjIlsX5A1lqD_aPixpEi0-hBOmMC3BJVUtK7a0rM" target="_blank" rel="noopener">
+      <span class="op-card__n">041</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=jvqLTLqgf1CjAYcatnI2mcIJqCoVMbyzwiW4x4kwe08" target="_blank" rel="noopener">
+      <span class="op-card__n">042</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=B6dYO_8hsebV5oFQxLPO6S-GnjtcKkZ7_g-0COalMgk" target="_blank" rel="noopener">
+      <span class="op-card__n">043</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=VLxtjIYpv-GieOy9oAZZR7hDppySNW5XZO8HXmH7eus" target="_blank" rel="noopener">
+      <span class="op-card__n">044</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=hstakvQ9gSHVwR1jDbmHy9JkDOlILEytIb8CPE9Vo5k" target="_blank" rel="noopener">
+      <span class="op-card__n">045</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=JDh96gGyJoryMzWqXfnYsF32BFkdQ2IGFA7m1nikgqw" target="_blank" rel="noopener">
+      <span class="op-card__n">046</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=ORLqSXe4KMgx1qKIb7SX77KukeXJ7rgX5yxwbB4QYD8" target="_blank" rel="noopener">
+      <span class="op-card__n">047</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=dSfyhaS61tfKpVh9arxT5JgLWMq2Q2A-Vg2jFzLKFPQ" target="_blank" rel="noopener">
+      <span class="op-card__n">048</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=i0C0rxJ_tmpEqJ8-lQwIMBnSXktSoslkESxJ7oXcbRc" target="_blank" rel="noopener">
+      <span class="op-card__n">049</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=JkKCNbRA9aPaT_-RjVrhzYenVbNvjc8YCeR47dmMUfA" target="_blank" rel="noopener">
+      <span class="op-card__n">050</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=R-jdEJMCCo6pXR-0ILkpZFqJgnt0SZhV7cF2hmnqZMQ" target="_blank" rel="noopener">
+      <span class="op-card__n">051</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=RR1hJuviAcSQE7we7Q6mQTarl_ph34czcqgWtQJk7Z0" target="_blank" rel="noopener">
+      <span class="op-card__n">052</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=_jG-Yl3CyaxtUX2j3oUbGR9_ub19EcpwWOXJYFMUBpY" target="_blank" rel="noopener">
+      <span class="op-card__n">053</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=TWdTzSj-XFpKuuLQlUN5WwVQeaXljL7khXQuQMC6AxI" target="_blank" rel="noopener">
+      <span class="op-card__n">054</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=KK9kOaO_7O3gA5MI_hCx3Xfi4KpWnLZ2HQP08rP7MKc" target="_blank" rel="noopener">
+      <span class="op-card__n">055</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=j0chgCi5k-XV5e5l345dOy6Ci3oDYqA80gYSZstsjOg" target="_blank" rel="noopener">
+      <span class="op-card__n">056</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=98C2Vl9nAcWCa8OFwUJptzGREOhyvvTf3O4xN-OQF2M" target="_blank" rel="noopener">
+      <span class="op-card__n">057</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=sxSmsbqTKu_h05-POxak6HQHoPqAp11EjcZHj6cKows" target="_blank" rel="noopener">
+      <span class="op-card__n">058</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=s2CDEXflSePtt8PQU5JD-frFFMDlAw1ibyWMB7gXRFc" target="_blank" rel="noopener">
+      <span class="op-card__n">059</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=MRpSi5oWuJCR_aSGzGg7KLCI1Qf4lW2n0pfYGY7TN1Q" target="_blank" rel="noopener">
+      <span class="op-card__n">060</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=uL0ibqonZUm9dRcjGzL1pdGYEwSqG4LR5QSu1tV3z6I" target="_blank" rel="noopener">
+      <span class="op-card__n">061</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=iM0JEm0koOSMW7vRNMhAWpDdwJA8mZxDUhv2L2vbJY4" target="_blank" rel="noopener">
+      <span class="op-card__n">062</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=b79-dtgdoO-hbZi0RdU0N_q68qhyizaZUdxjSf13e0I" target="_blank" rel="noopener">
+      <span class="op-card__n">063</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=wAsmvUUDljqAkDpicnuV-kLFWzR-HNnlaE_UI1zr488" target="_blank" rel="noopener">
+      <span class="op-card__n">064</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Y6F7a30vnlD6bDlBxf_jM3SRaE-OTqhDr7Tc1vmVu78" target="_blank" rel="noopener">
+      <span class="op-card__n">065</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=MsEUB3tNgaS1-8-nckAsPOE2KpwIuhOlLzM90IfJtM0" target="_blank" rel="noopener">
+      <span class="op-card__n">066</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=odwVmcO4AzZPIqDJNr4S7fJvaRG9Ck5CZvNVbruq28U" target="_blank" rel="noopener">
+      <span class="op-card__n">067</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=2vEJjy3vpPNa2VfieQbets5Z88uxl6aq3NgudtVXs7o" target="_blank" rel="noopener">
+      <span class="op-card__n">068</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=yPEraRtYZlDkhWXS2N1rs-MvJc5a0gRfE37SmvSg-js" target="_blank" rel="noopener">
+      <span class="op-card__n">069</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=cp1ARj0cJRXjHDoGpRgS6y2Jka1dM5gx5lOeXVsq0YM" target="_blank" rel="noopener">
+      <span class="op-card__n">070</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=wnRn8xBfoM_UwuFkzfQaNirln05u5f0W1pu00nUDaKc" target="_blank" rel="noopener">
+      <span class="op-card__n">071</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=cUWl-T8OMD29Vg_JA13IPIMUcawJLnJNYF_Y3mMdSTo" target="_blank" rel="noopener">
+      <span class="op-card__n">072</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=ZJC2uJctjJbiWeqbFzwWx0_zWmEesQHg6e6gJSGV8fU" target="_blank" rel="noopener">
+      <span class="op-card__n">073</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=FzN7ow-D7jyAC2WejUWjGbFMWA-v1rzNBSq78U4PBYk" target="_blank" rel="noopener">
+      <span class="op-card__n">074</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Zy00DfTLiTUeGSKNQTVP8rdJsNoXec79hSEJb9Q30wk" target="_blank" rel="noopener">
+      <span class="op-card__n">075</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=u9lWhY6RQiKWPyGYICkQIFfpBqhAhLwIpZxYwgHN1es" target="_blank" rel="noopener">
+      <span class="op-card__n">076</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=iA9PPRLbZMfKj3XLlaskbygy0zpX-8w59VQw48l3oQI" target="_blank" rel="noopener">
+      <span class="op-card__n">077</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=xMPnl2twn_Ox9G1fYCNT3IhQGcbWlhs0eLa_it3LxEM" target="_blank" rel="noopener">
+      <span class="op-card__n">078</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=8lXJ3Kuf5guBqrMCDpl3PFGJSP7ddq_jBwzc-hkFtiU" target="_blank" rel="noopener">
+      <span class="op-card__n">079</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=c2KoywMUSgs4bM0Jrx59GDlxLZ8MJ5ej5LF4pVkyfRg" target="_blank" rel="noopener">
+      <span class="op-card__n">080</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=g1kAva67twZCwmh4vlCaMB8bicTLnqhEBLkODie340Q" target="_blank" rel="noopener">
+      <span class="op-card__n">081</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=OlNRjJlbmrXv2WF1RG6_S-TncT_p4VdN3W58xSUFaxQ" target="_blank" rel="noopener">
+      <span class="op-card__n">082</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Y_dkbwHrCpjQxRQUt-dtKf0ZR5MlxSS1fxufvLaTlCM" target="_blank" rel="noopener">
+      <span class="op-card__n">083</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=MmmDdjkQch7zd_N4diyrTzxlx02zkBhKppt6bI0JKdo" target="_blank" rel="noopener">
+      <span class="op-card__n">084</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=apDVjJB9gdtHppKiNZglObykwmQWMHgyQRMlNHjAei0" target="_blank" rel="noopener">
+      <span class="op-card__n">085</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=5VFQVlm3lCcHQyt1yhEntOS1h0n_edU7lVqMNEnzKZU" target="_blank" rel="noopener">
+      <span class="op-card__n">086</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=ZTKfUOEgUmqRt1Q_jQZx3TmfS9BbpuWWQiOu0Dhw0MI" target="_blank" rel="noopener">
+      <span class="op-card__n">087</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=4x5hLe7f7FErIE3Gs3Ukm8TT_Z_BUcxhjHMeB_rJlis" target="_blank" rel="noopener">
+      <span class="op-card__n">088</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=09ERabiYDTZmjZGe3glpk4sVswTdeqr-ZRwlhYJfWn8" target="_blank" rel="noopener">
+      <span class="op-card__n">089</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=tspyEC8RmqawpffCkgkvs3ie7TrHtDwKxsnQK4Jn7Ek" target="_blank" rel="noopener">
+      <span class="op-card__n">090</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=AyHyS8HUx3gKb8brrli3M88OZrN2zdpxnzbpjwDsGXQ" target="_blank" rel="noopener">
+      <span class="op-card__n">091</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Ifvx4TVA7rHeADYoiE8SVZM3vGDCUGtfCwb9n9EgaDw" target="_blank" rel="noopener">
+      <span class="op-card__n">092</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=FRCZ9_JJRs24pDS11MQcRfZuoe6GYVZoe5lnavHBihs" target="_blank" rel="noopener">
+      <span class="op-card__n">093</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=fvSRgyW7tpNAC8gNYIozR8RMs3ITfn4wWAOK3ctKwBA" target="_blank" rel="noopener">
+      <span class="op-card__n">094</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Bo16rYKoAA4C_s6MSSJXhfr7p-mn4dYiMCS5xDVS97k" target="_blank" rel="noopener">
+      <span class="op-card__n">095</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=nfaV3sy5jzJsZmKVITo4pgB9VopJBFqW3toM1TqU494" target="_blank" rel="noopener">
+      <span class="op-card__n">096</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=axZUyGuwxU3Vd_wj6v3Bb-QNWEXaIwROZUi2_SAL-10" target="_blank" rel="noopener">
+      <span class="op-card__n">097</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=M8qGo2sKSJlJoDHxNlvzcqBo5peueuY_jtdtiwbBMRk" target="_blank" rel="noopener">
+      <span class="op-card__n">098</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=2xUH8nstje7IViTuxNTVCWblWkfXF2BiIX6UlLby7z8" target="_blank" rel="noopener">
+      <span class="op-card__n">099</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Y4BWS8OrUbsmZ3kL6qtl_XBQJBGrQCPGjS9Gcyh-fq4" target="_blank" rel="noopener">
+      <span class="op-card__n">100</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=3SOsLqBoYB6CH-BPqdoA9_kAgc8ycF3K92V1aw9Blqs" target="_blank" rel="noopener">
+      <span class="op-card__n">101</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=5gzOCPJRR3SbMqykP6Udwi3HhPMmzcPQfxn5kQoLqkc" target="_blank" rel="noopener">
+      <span class="op-card__n">102</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=tY8Vblq16B0LTC4X82_k6FWFRsROCUPxJyNLI6gRW1g" target="_blank" rel="noopener">
+      <span class="op-card__n">103</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=M5UFEOgM0lUNlzssuxMn9T-8RTpkcUAiTmvDO15wFpg" target="_blank" rel="noopener">
+      <span class="op-card__n">104</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=9-llg69lv3eT8nMZjfKU4rp-18A3wCYqv7Pb1ZWlS8w" target="_blank" rel="noopener">
+      <span class="op-card__n">105</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=DCR5_Bx9Drh3rIK3PZSwqNeLtmzbcaY4cuEOIy_VWCQ" target="_blank" rel="noopener">
+      <span class="op-card__n">106</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=I90KFqy4cMTiVD_wIccEwJm1O4z8ROZ768BTJYJagZA" target="_blank" rel="noopener">
+      <span class="op-card__n">107</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=RDqLkC-WCCr3OqDBOgAgwwjUcriBqFpbALRR851e0EY" target="_blank" rel="noopener">
+      <span class="op-card__n">108</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=4VyE1R1IspxvJKA0aDw7-DoOUpnn8WvfnHvoPv_vIow" target="_blank" rel="noopener">
+      <span class="op-card__n">109</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    <a class="op-card" href="https://dev.shifter.keplerops.com/ctf/register/?token=Io8xw9mblxl5lzegTmSMizEC7W42PHQNl9JxOXcFl40" target="_blank" rel="noopener">
+      <span class="op-card__n">110</span>
+      <span class="op-card__label">ENTER RANGE</span>
+    </a>
+    </div>
+  </section>
+
+</main>
+
+<aside id="hud" aria-hidden="true">
+  <div class="hud__left">
+    <span class="hud__classification">SECRET // POLARIS EYES ONLY</span>
+  </div>
+  <div class="hud__center">
+    <span id="slide-title">—</span>
+  </div>
+  <div class="hud__right">
+    <span id="slide-counter">00 / 00</span>
+    <span class="hud__nav">←·→  <kbd>M</kbd> missions  <kbd>Esc</kbd> overview</span>
+  </div>
+</aside>
+
+<div id="overview" hidden>
+  <div class="overview__grid"></div>
+</div>
+
+<script src="deck.js"></script>
+</body>
+</html>

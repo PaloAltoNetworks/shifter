@@ -29,11 +29,11 @@ describe('CTFRangeManager', () => {
             ok: true,
             json: () => Promise.resolve({ successful: 2, failed: 0, errors: [] }),
         });
-        global.fetch = fetchMock;
-        global.confirm = jest.fn().mockReturnValue(true);
-        global.alert = jest.fn();
+        globalThis.fetch = fetchMock;
+        globalThis.confirm = jest.fn().mockReturnValue(true);
+        globalThis.alert = jest.fn();
 
-        manager = new window.CTFRangeManager({
+        manager = new globalThis.CTFRangeManager({
             csrfToken: 'test-csrf',
             provisionAllUrl: '/ctf/api/events/evt-1/ranges/provision/',
             rangeListUrl: '/ctf/api/events/evt-1/ranges/',
@@ -59,7 +59,7 @@ describe('CTFRangeManager', () => {
         });
 
         test('does not call fetch if user cancels confirmation', async () => {
-            global.confirm.mockReturnValue(false);
+            globalThis.confirm.mockReturnValue(false);
 
             await manager.provisionAll();
 
@@ -69,7 +69,7 @@ describe('CTFRangeManager', () => {
         test('shows success message and reloads on success', async () => {
             await manager.provisionAll();
 
-            expect(global.alert).toHaveBeenCalledWith(
+            expect(globalThis.alert).toHaveBeenCalledWith(
                 'Provisioned: 2, Failed: 0'
             );
             expect(manager._reload).toHaveBeenCalled();
@@ -87,7 +87,7 @@ describe('CTFRangeManager', () => {
 
             await manager.provisionAll();
 
-            expect(global.alert).toHaveBeenCalledWith(
+            expect(globalThis.alert).toHaveBeenCalledWith(
                 expect.stringContaining('No agent configured')
             );
         });
@@ -100,20 +100,20 @@ describe('CTFRangeManager', () => {
 
             await manager.provisionAll();
 
-            expect(global.alert).toHaveBeenCalledWith('Error: Event not found');
+            expect(globalThis.alert).toHaveBeenCalledWith('Error: Event not found');
             expect(manager._reload).not.toHaveBeenCalled();
         });
 
         test('disables button while loading', async () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
 
             // Hold the fetch so we can check intermediate state
-            var resolveResponse;
+            let resolveResponse;
             fetchMock.mockReturnValue(new Promise(function(resolve) {
                 resolveResponse = resolve;
             }));
 
-            var promise = manager.provisionAll();
+            let promise = manager.provisionAll();
 
             expect(btn.disabled).toBe(true);
             expect(btn.textContent).toBe('Provisioning...');
@@ -139,7 +139,7 @@ describe('CTFRangeManager', () => {
                 }),
             });
 
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
             expect(fetchMock).toHaveBeenCalledWith(
@@ -155,8 +155,8 @@ describe('CTFRangeManager', () => {
         });
 
         test('does not call fetch if user cancels', async () => {
-            global.confirm.mockReturnValue(false);
-            var btn = document.querySelector('.btn-provision');
+            globalThis.confirm.mockReturnValue(false);
+            let btn = document.querySelector('.btn-provision');
 
             await manager.provisionOne('aaa-111', btn);
 
@@ -169,7 +169,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ participant_id: 'aaa-111', status: 'provisioning' }),
             });
 
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
             expect(manager._reload).toHaveBeenCalled();
@@ -181,10 +181,10 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ error: 'No agent configured' }),
             });
 
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             await manager.provisionOne('aaa-111', btn);
 
-            expect(global.alert).toHaveBeenCalledWith('Error: No agent configured');
+            expect(globalThis.alert).toHaveBeenCalledWith('Error: No agent configured');
             expect(btn.disabled).toBe(false);
             expect(manager._reload).not.toHaveBeenCalled();
         });
@@ -197,7 +197,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ participant_id: 'bbb-222', status: 'destroyed' }),
             });
 
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
             expect(fetchMock).toHaveBeenCalledWith(
@@ -213,8 +213,8 @@ describe('CTFRangeManager', () => {
         });
 
         test('does not call fetch if user cancels', async () => {
-            global.confirm.mockReturnValue(false);
-            var btn = document.querySelector('.btn-destroy');
+            globalThis.confirm.mockReturnValue(false);
+            let btn = document.querySelector('.btn-destroy');
 
             await manager.destroyOne('bbb-222', btn);
 
@@ -227,7 +227,7 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ participant_id: 'bbb-222', status: 'destroyed' }),
             });
 
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
             expect(manager._reload).toHaveBeenCalled();
@@ -239,41 +239,41 @@ describe('CTFRangeManager', () => {
                 json: () => Promise.resolve({ error: 'No range assigned' }),
             });
 
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             await manager.destroyOne('bbb-222', btn);
 
-            expect(global.alert).toHaveBeenCalledWith('Error: No range assigned');
+            expect(globalThis.alert).toHaveBeenCalledWith('Error: No range assigned');
             expect(btn.disabled).toBe(false);
         });
     });
 
     describe('init', () => {
         test('binds click on provision-all button', async () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
             btn.click();
 
             // confirm was called, so binding worked
-            expect(global.confirm).toHaveBeenCalled();
+            expect(globalThis.confirm).toHaveBeenCalled();
         });
 
         test('binds click on individual provision buttons', async () => {
-            var btn = document.querySelector('.btn-provision');
+            let btn = document.querySelector('.btn-provision');
             btn.click();
 
-            expect(global.confirm).toHaveBeenCalled();
+            expect(globalThis.confirm).toHaveBeenCalled();
         });
 
         test('binds click on individual destroy buttons', async () => {
-            var btn = document.querySelector('.btn-destroy');
+            let btn = document.querySelector('.btn-destroy');
             btn.click();
 
-            expect(global.confirm).toHaveBeenCalled();
+            expect(globalThis.confirm).toHaveBeenCalled();
         });
     });
 
     describe('_setButtonLoading / _clearButtonLoading', () => {
         test('disables button and sets text', () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
 
             manager._setButtonLoading(btn, 'Loading...');
 
@@ -282,7 +282,7 @@ describe('CTFRangeManager', () => {
         });
 
         test('re-enables button and restores text', () => {
-            var btn = document.getElementById('btn-provision-all');
+            let btn = document.getElementById('btn-provision-all');
 
             manager._setButtonLoading(btn, 'Loading...');
             manager._clearButtonLoading(btn, 'Fallback');

@@ -44,7 +44,7 @@ else
     echo "  ⚠️  Warning: Flags may be missing"
 fi
 
-if [ -u /usr/local/bin/backup ]; then
+if [[ -u /usr/local/bin/backup ]]; then
     echo "  ✅ SUID binary intact"
 else
     echo "  ⚠️  Warning: SUID binary missing"

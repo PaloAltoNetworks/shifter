@@ -1,0 +1,12 @@
+text: |
+  {
+    "listen": "0.0.0.0:9100",
+    "auth_token": "{{brain_auth_token}}",
+    "controller_addresses": {
+      "tail": "172.20.50.20:502",
+      "leg": "172.20.50.30:502",
+      "arms": "172.20.50.40:502"
+    },
+    "serials": ["AHS-T-00482", "AHS-L-00483", "AHS-A-00484"],
+    "override_code": "{{override_code}}"
+  }

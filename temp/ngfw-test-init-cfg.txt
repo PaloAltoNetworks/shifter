@@ -1,0 +1,10 @@
+type=dhcp-client
+hostname=ngfw-api-test
+dns-primary=8.8.8.8
+dns-secondary=8.8.4.4
+panorama-server=cloud
+vm-series-auto-registration-pin-id=f3593d62-c955-4dbe-8b31-1b143ff4c214
+vm-series-auto-registration-pin-value=bac7e24559084fa68cfd4a386d904e26
+dgname=All Firewalls
+admin-username=admin
+admin-password=admin

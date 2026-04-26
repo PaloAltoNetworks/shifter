@@ -1,0 +1,4 @@
+body: |
+  # Jenkins deploy credentials. Read by the CI runner at build time.
+  JENKINS_USER=jenkins
+  JENKINS_TOKEN=placeholder-flag-20-jenkins-deploy-token

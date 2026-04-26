@@ -47,7 +47,7 @@ done
 
 # Validate environment
 if [[ "$ENV" != "dev" && "$ENV" != "prod" && "$ENV" != "all" ]]; then
-    echo "Error: Environment must be 'dev', 'prod', or 'all'"
+    echo "Error: Environment must be 'dev', 'prod', or 'all'" >&2
     exit 1
 fi
 
@@ -117,7 +117,7 @@ case "$ACTION" in
         AWS_PROFILE="$AWS_PROFILE" terraform destroy -var-file="${ENV}.tfvars"
         ;;
     *)
-        echo "Error: Unknown action '$ACTION'"
+        echo "Error: Unknown action '$ACTION'" >&2
         exit 1
         ;;
 esac

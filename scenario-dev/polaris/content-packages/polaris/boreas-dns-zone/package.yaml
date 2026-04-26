@@ -1,0 +1,4 @@
+# BIND zone file text. Intentionally configures AXFR open to any source
+# — that misconfiguration is the flag-05 discovery path.
+# Written verbatim by the txt generator when referenced from a Content
+# entry with format=txt.

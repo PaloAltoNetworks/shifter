@@ -1,0 +1,10 @@
+myhostname = mail.boreas.local
+mydestination = $myhostname, localhost.$mydomain, localhost, boreas.local
+inet_interfaces = all
+inet_protocols = ipv4
+home_mailbox = Maildir/
+virtual_mailbox_domains = boreas.local
+virtual_mailbox_base = /var/mail
+virtual_mailbox_maps = hash:/etc/postfix/vmailbox
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+mynetworks = 127.0.0.0/8 10.0.0.0/8 172.20.0.0/16 [::1]/128

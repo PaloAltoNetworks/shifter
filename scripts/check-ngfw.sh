@@ -13,8 +13,8 @@ NGFW_INFO=$(aws ec2 describe-instances \
   --query 'Reservations[0].Instances[0].[InstanceId,PrivateIpAddress,KeyName,Tags[?Key==`Name`].Value|[0]]' \
   --output text 2>&1)
 
-if [ -z "$NGFW_INFO" ] || [ "$NGFW_INFO" = "None" ]; then
-  echo "ERROR: No running NGFW instance found"
+if [[ -z "$NGFW_INFO" ]] || [[ "$NGFW_INFO" = "None" ]]; then
+  echo "ERROR: No running NGFW instance found" >&2
   exit 1
 fi
 
@@ -39,8 +39,8 @@ SECRET_ARN=$(aws secretsmanager list-secrets \
   --region "$REGION" \
   --output json 2>&1 | jq -r ".SecretList[] | select(.Name | contains(\"ngfw/$UUID_PREFIX\")) | .ARN" | head -1)
 
-if [ -z "$SECRET_ARN" ]; then
-  echo "ERROR: Could not find SSH key secret for UUID prefix: $UUID_PREFIX"
+if [[ -z "$SECRET_ARN" ]]; then
+  echo "ERROR: Could not find SSH key secret for UUID prefix: $UUID_PREFIX" >&2
   exit 1
 fi
 
@@ -55,8 +55,8 @@ KEY_CONTENT=$(aws secretsmanager get-secret-value \
   --query 'SecretString' \
   --output text 2>&1)
 
-if [ -z "$KEY_CONTENT" ]; then
-  echo "ERROR: Could not retrieve SSH key"
+if [[ -z "$KEY_CONTENT" ]]; then
+  echo "ERROR: Could not retrieve SSH key" >&2
   exit 1
 fi
 
@@ -71,8 +71,8 @@ PORTAL_ID=$(aws ec2 describe-instances \
   --query 'Reservations[0].Instances[0].InstanceId' \
   --output text 2>&1)
 
-if [ -z "$PORTAL_ID" ] || [ "$PORTAL_ID" = "None" ]; then
-  echo "ERROR: No running portal instance found"
+if [[ -z "$PORTAL_ID" ]] || [[ "$PORTAL_ID" = "None" ]]; then
+  echo "ERROR: No running portal instance found" >&2
   exit 1
 fi
 
@@ -120,7 +120,7 @@ for _ in {1..30}; do
     --query 'Status' \
     --output text 2>&1)
 
-  if [ "$STATUS" != "Pending" ] && [ "$STATUS" != "InProgress" ]; then
+  if [[ "$STATUS" != "Pending" ]] && [[ "$STATUS" != "InProgress" ]]; then
     break
   fi
 done
@@ -135,7 +135,7 @@ aws ssm get-command-invocation \
   --query 'StandardOutputContent' \
   --output text 2>&1
 
-if [ "$STATUS" != "Success" ]; then
+if [[ "$STATUS" != "Success" ]]; then
   echo ""
   echo "=== Errors ==="
   aws ssm get-command-invocation \

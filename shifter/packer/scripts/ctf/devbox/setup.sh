@@ -30,7 +30,7 @@ wait_for_apt() {
             sleep 2
             continue
         fi
-        if [ "$waited" -ge "$timeout" ]; then
+        if [[ "$waited" -ge "$timeout" ]]; then
             echo "Timed out waiting for apt/dpkg lock holders to exit"
             ps -ef | grep -E 'apt|dpkg|unattended' | grep -v grep || true
             return 1
@@ -277,7 +277,7 @@ systemctl restart nginx
 
 echo "=== Creating SSH key backup (privesc breadcrumb) ==="
 mkdir -p /opt/backups
-[ -f /opt/backups/devops_key.bak ] || ssh-keygen -t rsa -b 2048 -f /opt/backups/devops_key.bak -N "" -q
+[[ -f /opt/backups/devops_key.bak ]] || ssh-keygen -t rsa -b 2048 -f /opt/backups/devops_key.bak -N "" -q
 mkdir -p /home/devops/.ssh
 cp /opt/backups/devops_key.bak.pub /home/devops/.ssh/authorized_keys
 chown -R devops:devops /home/devops/.ssh

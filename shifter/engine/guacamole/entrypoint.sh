@@ -37,7 +37,7 @@ if [[ -n "${POSTGRESQL_HOSTNAME:-}" ]] && [[ -n "${POSTGRESQL_DATABASE:-}" ]]; t
         if [[ $? -eq 0 ]]; then
             echo "Database schema initialized successfully"
         else
-            echo "ERROR: Failed to initialize database schema"
+            echo "ERROR: Failed to initialize database schema" >&2
             exit 1
         fi
     fi

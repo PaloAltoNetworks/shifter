@@ -1,5 +1,0 @@
-# Raw CTFd DB dumps contain PII (emails, IPs) and the flag answer key in
-# submissions.provided. Regenerate from the live DB via scripts/dump_ctfd.py
-# instead of committing.
-data/raw/
-website/data/

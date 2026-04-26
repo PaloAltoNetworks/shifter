@@ -1,0 +1,18 @@
+device_id:
+  vendor_name: AURORA HEAVY SYSTEMS
+  product_code: AHS-ARMS
+  product_name: Arms Controller
+  serial: AHS-A-00484
+  revision: "1.0"
+holding_registers:
+  0: 0
+  500: 0
+unlock_sequences:
+  - name: response_window
+    description: "flag-34: response window reveal"
+    gate_registers: [42]
+    flag_register: 500
+    timeout_seconds: 30
+listen:
+  host: 0.0.0.0
+  port: 502

@@ -1,0 +1,28 @@
+device_id:
+  vendor_name: AURORA HEAVY SYSTEMS
+  product_code: AHS-TAIL
+  vendor_url: ""
+  product_name: Tail Controller
+  serial: AHS-T-00482
+  revision: "1.0"
+holding_registers:
+  0: 1
+  1: 0
+  20: 0
+  99: 0
+  100: 1
+  # flag-32 reveal register — readable after the unlock sequence
+  500: 0
+input_registers:
+  0: 1234
+coils: {}
+discrete_inputs: {}
+unlock_sequences:
+  - name: maintenance_unlock
+    description: "Write 3 to reg 20 and 7734 to reg 99 within 60s to populate reg 500 with the flag-32 value"
+    gate_registers: [20, 99]
+    flag_register: 500
+    timeout_seconds: 60
+listen:
+  host: 0.0.0.0
+  port: 502

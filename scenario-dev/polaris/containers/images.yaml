@@ -1,0 +1,53 @@
+# Image realization manifest.
+#
+# Maps an SDL ``source.name`` reference to the concrete realization strategy
+# for the docker backend. Two strategies:
+#
+#   image: "<hub-ref>"     — use a pre-built image from a registry
+#   build: "<subdir>"      — build locally from containers/<subdir>/Dockerfile
+#
+# Scenario-specific; the backend is generic and only consults this file
+# when aces_backend_containers resolves the node's image.
+
+images:
+  polaris/boreas-web:
+    image: "nginx:alpine"
+    content_mounts:
+      "/generated/boreas-org-chart": "/usr/share/nginx/html/internal/org_chart.pdf"
+      "/generated/boreas-annual-report": "/usr/share/nginx/html/internal/boreas-annual-2025.pdf"
+
+  polaris/bind-sidecar:
+    image: "ubuntu/bind9:latest"
+
+  polaris/boreas-mail:
+    build: "boreas-mail"
+
+  polaris/boreas-intranet:
+    build: "boreas-intranet"
+
+  polaris/boreas-samba:
+    image: "dperson/samba:latest"
+
+  polaris/boreas-scada-gw:
+    build: "boreas-scada-gw"
+
+  polaris/boreas-workstation:
+    build: "boreas-workstation"
+
+  polaris/boreas-gitea:
+    image: "gitea/gitea:1.21"
+
+  polaris/boreas-postgres:
+    image: "postgres:16-alpine"
+
+  polaris/pymodbus-plc:
+    build: "pymodbus-plc"
+
+  polaris/brain-controller:
+    build: "brain-controller"
+
+  polaris/splice-landing:
+    build: "splice-landing"
+
+  polaris/boreas-kali:
+    build: "boreas-kali"

@@ -19,13 +19,12 @@ on:
           - ctf-devbox
           - ctf-vault
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   # DC AMIs are prebaked - just update SSM from config file
   update-dc:
+    permissions:
+      id-token: write
+      contents: read
     name: Update DC AMI in prod SSM
     if: inputs.ami_type == 'dc'
     runs-on: self-hosted
@@ -64,6 +63,9 @@ jobs:
 
   # Other AMIs are copied from dev to prod
   promote:
+    permissions:
+      id-token: write
+      contents: read
     name: Promote ${{ inputs.ami_type }} AMI to prod
     if: inputs.ami_type != 'dc'
     runs-on: self-hosted

@@ -1,0 +1,61 @@
+shares:
+  - name: Public
+    comment: Public files
+    path_suffix: public
+    browseable: true
+    guest_ok: true
+    read_only: true
+    posix_mode: "0755"
+    tree:
+      README.txt: "Boreas Public share"
+      cafeteria_menu.pdf:
+        file: files/cafeteria_menu.bin
+  - name: HR
+    comment: HR docs
+    path_suffix: hr
+    browseable: true
+    guest_ok: false
+    read_only: true
+    valid_users: ["@HR"]
+    posix_mode: "0750"
+    tree:
+      chen_termination.pdf:
+        file: files/chen_termination.bin
+      org_chart.pdf:
+        file: files/org_chart.bin
+  - name: Procurement
+    comment: Purchase orders
+    path_suffix: procurement
+    browseable: true
+    guest_ok: false
+    read_only: true
+    valid_users: ["@Procurement"]
+    posix_mode: "0750"
+    tree:
+      PO-2847.pdf:
+        file: files/PO-2847.bin
+      invoice_reactor.pdf:
+        file: files/invoice_reactor.bin
+  - name: IT
+    comment: IT administration
+    path_suffix: it
+    browseable: true
+    guest_ok: false
+    read_only: true
+    valid_users: ["@IT"]
+    posix_mode: "0750"
+    tree:
+      network_diagram.vsd: "VLAN layout: 10, 20, 30, 40, 50 (underground OFFLINE)"
+      backup_verification.log: |
+        2026-01-14 02:00 INFO svc-fileshare ok
+        2026-01-15 02:00 INFO svc-fileshare ok
+  - name: Executive
+    comment: Executive share
+    path_suffix: executive
+    browseable: true
+    guest_ok: false
+    read_only: true
+    valid_users: ["@Executive"]
+    posix_mode: "0750"
+    tree:
+      README.txt: "Executives only"

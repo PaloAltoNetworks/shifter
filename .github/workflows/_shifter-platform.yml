@@ -18,13 +18,12 @@ on:
       AWS_ROLE_ARN_DEV:
         required: true
 
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: write
-
 jobs:
   plan:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     name: Plan (${{ inputs.environment }})
     runs-on: self-hosted
     defaults:
@@ -59,6 +58,10 @@ jobs:
             });
 
   push-guacamole-images:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     name: Push Guacamole Images (${{ inputs.environment }})
     runs-on: self-hosted
     needs: plan
@@ -106,6 +109,10 @@ jobs:
           no-cache: true
 
   apply:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     name: Apply (${{ inputs.environment }})
     runs-on: self-hosted
     needs: [plan, push-guacamole-images]
@@ -255,6 +262,10 @@ jobs:
           echo "::warning::Guacamole services did not stabilize within 20 minutes — continuing (services may still be starting)"
 
   build:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     name: Build (${{ inputs.environment }})
     runs-on: self-hosted
     needs: apply
@@ -290,6 +301,10 @@ jobs:
           no-cache: true
 
   deploy:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     name: Deploy (${{ inputs.environment }})
     runs-on: self-hosted
     needs: build

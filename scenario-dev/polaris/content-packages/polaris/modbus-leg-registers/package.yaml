@@ -1,0 +1,19 @@
+device_id:
+  vendor_name: AURORA HEAVY SYSTEMS
+  product_code: AHS-LEG
+  product_name: Leg Controller
+  serial: AHS-L-00483
+  revision: "1.0"
+holding_registers:
+  0: 0
+  1: 0
+  500: 0
+unlock_sequences:
+  - name: walking_pattern_reveal
+    description: "flag-33: writing the walking-pattern sequence reveals reg 500"
+    gate_registers: [10, 11, 12]
+    flag_register: 500
+    timeout_seconds: 90
+listen:
+  host: 0.0.0.0
+  port: 502

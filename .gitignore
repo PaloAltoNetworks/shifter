@@ -415,3 +415,5 @@ CLAUDE.local.md
 
 # Claude Code scheduled-tasks runtime lock (per-session state)
 .claude/scheduled_tasks.lock
+
+temp/

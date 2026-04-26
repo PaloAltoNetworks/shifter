@@ -15,6 +15,7 @@ check() {
         echo "[FAIL] $desc"
         ((FAIL++))
     fi
+    return 0
 }
 
 echo "=== Validating MailRoom Box ==="
@@ -59,5 +60,5 @@ check "Effective SSH password auth enabled" sh -c 'sshd -T 2>/dev/null | grep -q
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
-[ "$FAIL" -eq 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
+[[ "$FAIL" -eq 0 ]] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
 exit "$FAIL"

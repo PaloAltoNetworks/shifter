@@ -303,7 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 deprovisionBtn.textContent = 'Deprovision NGFW';
             } else {
                 // Redirect to list page
-                window.location.href = '{% url "mission_control:ngfw_list" %}';
+                globalThis.location.href = '{% url "mission_control:ngfw_list" %}';
             }
         })
         .catch(err => {

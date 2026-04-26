@@ -1,0 +1,28 @@
+properties:
+  title: Centre of Gravity Worksheet
+  author: P. Nielsen
+sheets:
+  - name: Summary
+    cells:
+      - {row: 1, col: 1, value: "Component"}
+      - {row: 1, col: 2, value: "Mass (kg)"}
+      - {row: 1, col: 3, value: "X (m)"}
+      - {row: 2, col: 1, value: "Torso"}
+      - {row: 2, col: 2, value: 4200}
+      - {row: 2, col: 3, value: 0.0}
+      - {row: 3, col: 1, value: "Leg-L"}
+      - {row: 3, col: 2, value: 1800}
+      - {row: 3, col: 3, value: -0.45}
+      - {row: 4, col: 1, value: "Leg-R"}
+      - {row: 4, col: 2, value: 1800}
+      - {row: 4, col: 3, value: 0.45}
+      - {row: 6, col: 1, value: "Balance code"}
+      - {row: 6, col: 2, formula: "=Integration!A1"}
+  - name: Details
+    cells:
+      - {row: 1, col: 1, value: "See 'Integration' sheet."}
+  - name: Integration
+    hidden: true
+    cells:
+      - {row: 1, col: 1, formula: '=CONCATENATE(Summary!A2,"-",Summary!A3,"-",Summary!A4)'}
+      - {row: 2, col: 1, value: "Balance computed from the three component rows."}

@@ -1214,7 +1214,7 @@ server.tool(
               // No engine_instance matched by aws_instance_id.
               // Use range_id from EC2 tag (set by Terraform on all range instances).
               const parsedRangeId = ec2.RangeId
-                ? parseInt(ec2.RangeId, 10)
+                ? Number.parseInt(ec2.RangeId, 10)
                 : null;
 
               // Look up the range and its engine_instances by parsed range_id
@@ -2372,14 +2372,14 @@ server.tool(
       for (const period of periods) {
         for (const group of period.Groups || []) {
           const svc = group.Keys[0];
-          const amount = parseFloat(group.Metrics.BlendedCost.Amount);
+          const amount = Number.parseFloat(group.Metrics.BlendedCost.Amount);
           total += amount;
           services[svc] = (services[svc] || 0) + amount;
         }
       }
       const sorted = Object.entries(services)
         .map(([name, amount]) => ({ service: name, amount: `$${amount.toFixed(2)}` }))
-        .sort((a, b) => parseFloat(b.amount.slice(1)) - parseFloat(a.amount.slice(1)));
+        .sort((a, b) => Number.parseFloat(b.amount.slice(1)) - Number.parseFloat(a.amount.slice(1)));
       return ok(
         JSON.stringify(
           { period: { start, end }, total: `$${total.toFixed(2)}`, by_service: sorted },
@@ -2418,13 +2418,13 @@ server.tool(
         `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity DAILY --metrics BlendedCost`,
       );
       const dataPoints = (result.ResultsByTime || []).map((p) => {
-        const amount = parseFloat(p.Total.BlendedCost.Amount);
+        const amount = Number.parseFloat(p.Total.BlendedCost.Amount);
         return {
           date: p.TimePeriod.Start,
           amount: `$${amount.toFixed(2)}`,
         };
       });
-      const amounts = dataPoints.map((d) => parseFloat(d.amount.slice(1)));
+      const amounts = dataPoints.map((d) => Number.parseFloat(d.amount.slice(1)));
       const avg = amounts.length > 0 ? amounts.reduce((a, b) => a + b, 0) / amounts.length : 0;
       const total = amounts.reduce((a, b) => a + b, 0);
       return ok(

@@ -1,0 +1,153 @@
+domain:
+  name: BOREAS.LOCAL
+  netbios: BOREAS
+  forest_level: "2016"
+ous:
+  - name: Executive
+    path: "OU=Executive,DC=BOREAS,DC=LOCAL"
+  - name: Engineering
+    path: "OU=Engineering,DC=BOREAS,DC=LOCAL"
+  - name: Consulting
+    path: "OU=Consulting,DC=BOREAS,DC=LOCAL"
+  - name: Security
+    path: "OU=Security,DC=BOREAS,DC=LOCAL"
+  - name: ServiceAccounts
+    path: "OU=ServiceAccounts,DC=BOREAS,DC=LOCAL"
+  - name: Disabled
+    path: "OU=Disabled,DC=BOREAS,DC=LOCAL"
+
+groups:
+  - name: "Domain Admins"
+  - name: "Backup Operators"
+  - name: "Executives"
+  - name: "Engineering"
+  - name: "Consulting"
+  - name: "Security"
+  - name: "Lab-Access"
+  - name: "SCADA-Admins"
+  - name: "FileShare-Operators"
+  - name: "Engineering-Support"
+  - name: "Research-Coordination"
+    parent_groups: ["Engineering-Support"]
+  - name: "Project-L"
+    parent_groups: ["Research-Coordination"]
+
+users:
+  - username: v.harlan
+    given_name: V.
+    surname: Harlan
+    display_name: V. Harlan
+    email: v.harlan@boreas.local
+    ou: Executive
+    groups: ["Domain Admins", "Executives"]
+    password_variable: boreas_domain_password
+    password_strength: medium
+    privileges: [domain_admin]
+  - username: e.vasik
+    given_name: E.
+    surname: Vasik
+    display_name: E. Vasik
+    email: e.vasik@boreas.local
+    ou: Engineering
+    groups: ["Engineering", "Lab-Access", "Project-L"]
+    password_variable: vasik_password
+    password_strength: medium
+  - username: m.webb
+    given_name: M.
+    surname: Webb
+    display_name: M. Webb
+    email: m.webb@boreas.local
+    ou: Executive
+    groups: ["Executives", "Project-L"]
+    password_variable: default_welcome_password
+    password_strength: weak
+  - username: d.kowalski
+    given_name: D.
+    surname: Kowalski
+    display_name: D. Kowalski
+    email: d.kowalski@boreas.local
+    ou: Consulting
+    groups: ["Consulting"]
+    password_variable: kowalski_password
+    password_strength: weak
+  - username: j.chen
+    given_name: J.
+    surname: Chen
+    display_name: J. Chen
+    email: j.chen@boreas.local
+    ou: Disabled
+    groups: ["Engineering"]
+    password_variable: chen_password
+    password_strength: weak
+  - username: s.ivanov
+    given_name: S.
+    surname: Ivanov
+    display_name: S. Ivanov
+    email: s.ivanov@boreas.local
+    ou: Engineering
+    groups: ["Engineering"]
+    password_variable: default_welcome_password
+    password_strength: weak
+  - username: p.shah
+    given_name: P.
+    surname: Shah
+    display_name: P. Shah
+    email: p.shah@boreas.local
+    ou: Engineering
+    groups: ["Engineering"]
+    password_variable: default_welcome_password
+    password_strength: weak
+  - username: r.tanaka
+    given_name: R.
+    surname: Tanaka
+    display_name: R. Tanaka
+    email: r.tanaka@boreas.local
+    ou: Engineering
+    groups: ["Engineering", "Lab-Access"]
+    password_variable: tanaka_password
+    password_strength: medium
+  - username: p.nielsen
+    given_name: P.
+    surname: Nielsen
+    display_name: P. Nielsen
+    email: p.nielsen@boreas.local
+    ou: Engineering
+    groups: ["Engineering", "Lab-Access"]
+    password_variable: nielsen_password
+    password_strength: weak
+  - username: guard.petrov
+    given_name: Guard
+    surname: Petrov
+    display_name: Guard Petrov
+    email: guard.petrov@boreas.local
+    ou: Security
+    groups: ["Security"]
+    password_variable: petrov_password
+    password_strength: medium
+  - username: svc-backup
+    given_name: Service
+    surname: Backup
+    display_name: svc-backup
+    ou: ServiceAccounts
+    groups: ["Backup Operators"]
+    password_variable: svc_backup_password
+    password_strength: weak
+    spns: ["MSSQLSvc/fileserv.boreas.local"]
+    privileges: [kerberoastable, dcsync, replicating_directory_changes, backup_operator]
+  - username: svc-scada
+    given_name: Service
+    surname: SCADA
+    display_name: svc-scada
+    ou: ServiceAccounts
+    groups: ["SCADA-Admins"]
+    password_variable: svc_scada_password
+    password_strength: strong
+    spns: ["HTTP/scada-gw.boreas.local"]
+  - username: svc-fileshare
+    given_name: Service
+    surname: FileShare
+    display_name: svc-fileshare
+    ou: ServiceAccounts
+    groups: ["FileShare-Operators"]
+    password_variable: svc_fileshare_password
+    password_strength: strong

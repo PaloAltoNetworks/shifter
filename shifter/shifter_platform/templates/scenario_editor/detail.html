@@ -49,20 +49,20 @@
         <div class="card-title">Properties</div>
         <table style="width: 100%;">
             <tr>
-                <td class="text-muted" style="padding: 4px 0; width: 140px;">NGFW Required</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0; width: 140px;">NGFW Required</th>
                 <td style="padding: 4px 0;">{% if scenario.ngfw %}Yes{% else %}No{% endif %}</td>
             </tr>
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">Total Instances</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">Total Instances</th>
                 <td style="padding: 4px 0;">{{ scenario.instances|length }}</td>
             </tr>
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">Total Subnets</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">Total Subnets</th>
                 <td style="padding: 4px 0;">{{ scenario.subnets|length }}</td>
             </tr>
             {% if scenario.agent_requirements %}
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">Requires Agent</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">Requires Agent</th>
                 <td style="padding: 4px 0;">
                     {% if scenario.agent_requirements.has_from_agent %}User selects OS{% endif %}
                     {% if scenario.agent_requirements.requires_windows %}Windows{% endif %}
@@ -77,7 +77,7 @@
         <div class="card-title">Access Control</div>
         <table style="width: 100%;">
             <tr>
-                <td class="text-muted" style="padding: 4px 0; width: 140px;">Enabled</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0; width: 140px;">Enabled</th>
                 <td style="padding: 4px 0;">
                     <form method="post" action="{% url 'scenario_editor:toggle_enabled' scenario_id=scenario.id %}" style="display: inline;">
                         {% csrf_token %}
@@ -88,7 +88,7 @@
                 </td>
             </tr>
             <tr>
-                <td class="text-muted" style="padding: 4px 0;">Access</td>
+                <th scope="row" class="text-muted" style="padding: 4px 0;">Access</th>
                 <td style="padding: 4px 0;">
                     <form method="post" action="{% url 'scenario_editor:toggle_staff_only' scenario_id=scenario.id %}" style="display: inline;">
                         {% csrf_token %}

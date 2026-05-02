@@ -3651,6 +3651,120 @@ def _update_remote_state_references(env: str, bucket: str, region: str, dry_run:
             warn("Skipping remote_state updates - you'll need to update them manually")
 
 
+def walkthrough_git_commit(bootstrap_result: dict, dry_run: bool = False) -> None:
+    """Commit and push the bootstrap-updated .s3.tfbackend (and any
+    terraform_remote_state) files. Scoped strictly to env-specific paths
+    so a `--env dev` run never stages prod files.
+    """
+    header("Commit and Push Bootstrap Updates")
+
+    env = bootstrap_result["env"]
+    bucket = bootstrap_result["bucket_name"]
+
+    repo_root = get_repo_root()
+
+    # Env-scoped candidate paths. The portal/main.tf is included because
+    # _update_remote_state_references may have rewritten its
+    # terraform_remote_state bucket references.
+    candidates = [
+        f"platform/terraform/global/iam/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/portal/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/range/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/portal/main.tf",
+    ]
+    # Pick up any other global/**/<env>.s3.tfbackend files that the
+    # _update_global_backend_configs step may have rewritten.
+    global_dir = repo_root / "platform" / "terraform" / "global"
+    if global_dir.exists():
+        for f in sorted(global_dir.rglob(f"{env}.s3.tfbackend")):
+            rel = str(f.relative_to(repo_root))
+            if rel not in candidates:
+                candidates.append(rel)
+
+    # Keep only paths that actually exist on disk.
+    existing = [p for p in candidates if (repo_root / p).exists()]
+
+    if not existing:
+        info("No bootstrap files found to commit")
+        return
+
+    # Filter to only files git sees as modified or untracked.
+    status = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "status", "--porcelain", "--", *existing],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if not status.stdout.strip():
+        info("No bootstrap changes to commit (nothing modified)")
+        return
+
+    print("Files to commit:\n")
+    print(status.stdout)
+
+    if dry_run:
+        info("[DRY-RUN] Would stage, commit, and push these files")
+        return
+
+    choice = confirm_or_manual("Commit these bootstrap files?")
+    if choice == "no":
+        warn("Skipping commit — stage and push the changes manually when ready")
+        return
+    if choice == "manual":
+        wait_for_user(
+            f"Commit the {env}.s3.tfbackend files manually:\n"
+            f"  git add {' '.join(existing)}\n"
+            f"  git commit -m 'Bootstrap {env}: fill in state bucket {bucket}'\n"
+            f"  git push origin <branch>"
+        )
+        success("Bootstrap commit ready (manual)")
+        return
+
+    commit_msg = f"Bootstrap {env}: fill in state bucket {bucket}"
+
+    add_result = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "add", "--", *existing],
+        capture_output=True,
+        text=True,
+    )
+    if add_result.returncode != 0:
+        error(f"git add failed: {add_result.stderr}")
+        sys.exit(1)
+
+    commit_result = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "commit", "-m", commit_msg],
+        capture_output=True,
+        text=True,
+    )
+    if commit_result.returncode != 0:
+        error(f"git commit failed:\n{commit_result.stdout}\n{commit_result.stderr}")
+        sys.exit(1)
+    success(f"Created commit: {commit_msg}")
+
+    branch_result = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    branch = branch_result.stdout.strip()
+
+    if confirm(f"Push to origin/{branch}?", default_yes=True):
+        push_result = subprocess.run(  # nosec B603 B607
+            ["git", "-C", str(repo_root), "push", "origin", branch],
+            capture_output=True,
+            text=True,
+        )
+        if push_result.returncode != 0:
+            error(f"git push failed:\n{push_result.stdout}\n{push_result.stderr}")
+            warn(f"Run 'git push origin {branch}' manually after fixing the issue")
+            return
+        success(f"Pushed to origin/{branch}")
+    else:
+        warn(f"Skipping push — run 'git push origin {branch}' manually when ready")
+
+
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
@@ -3927,6 +4041,9 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     # Phase 3: Backend Configuration
     walkthrough_backend_config(bootstrap_result, dry_run=dry_run)
 
+    # Phase 3b: Commit + push the filled-in .s3.tfbackend files
+    walkthrough_git_commit(bootstrap_result, dry_run=dry_run)
+
     # Phase 4: GitHub Actions Runner Setup (optional)
     runner_result = None
     if RUNNER_AVAILABLE:
@@ -4083,6 +4200,7 @@ Examples:
         if not args.dry_run:
             walkthrough_github_secrets(result, dry_run=args.dry_run)
             walkthrough_backend_config(result, dry_run=args.dry_run)
+            walkthrough_git_commit(result, dry_run=args.dry_run)
 
     elif args.command == "terraform":
         outputs = terraform_deploy(args.env, args.profile, dry_run=args.dry_run)

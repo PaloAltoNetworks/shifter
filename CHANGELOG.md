@@ -99,6 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.95.2] - 2026-05-03
 
+### Fixed
+
+- **`terraform_deploy` now passes `-backend-config=<env>.s3.tfbackend`**
+  to `terraform init`. Was running bare `terraform init -reconfigure`,
+  which would have failed against the new partial backends (placeholder
+  bucket inline → real value supplied via `-backend-config`). Affects
+  the `terraform` and `full` subcommands; bootstrap-only flow was
+  unaffected because it inits IAM separately.
+
 ### Added
 
 - **Bootstrap script now actually commits and pushes** the filled-in

@@ -3806,15 +3806,18 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         os.chdir(tf_dir)
 
         try:
-            # Init with -reconfigure (backend config is in backend.tf)
-            info("Running terraform init...")
+            # Init with -reconfigure + -backend-config to fill in the partial
+            # backend (bucket/key are placeholders in backend.tf; real values
+            # come from <env>.s3.tfbackend).
+            backend_config = f"{env}.s3.tfbackend"
+            info(f"Running terraform init -backend-config={backend_config}...")
             init_result = run_cmd(
-                ["terraform", "init", "-reconfigure"],
+                ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
                 dry_run=dry_run,
             )
             if not dry_run and init_result and init_result.returncode != 0:
                 error(f"Terraform init failed for {component}")
-                error("Check that backend.tf exists and is correctly configured")
+                error(f"Check that {backend_config} exists in {tf_dir} and has the real bucket name")
                 sys.exit(1)
 
             # Plan

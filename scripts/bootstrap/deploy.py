@@ -3547,10 +3547,17 @@ use_lockfile = true
 
 
 def _update_global_backend_configs(env: str, bucket: str, region: str, dry_run: bool = False) -> None:
-    """Update .tfbackend files and hardcoded bucket refs under global/.
+    """Update <env>.s3.tfbackend files under global/ with the new bucket name.
 
-    Replaces the templated REPLACE_AT_BOOTSTRAP placeholder (or any
-    pre-existing UUID-suffixed shifter bucket name) with the new bucket.
+    Only `<env>.s3.tfbackend` files are walked, so a `--env dev` run cannot
+    clobber `prod.s3.tfbackend` and vice versa. The regex is anchored to
+    the current env's bucket prefix (`shifter-infra` for prod,
+    `shifter-<env>-infra` otherwise) plus the templated REPLACE_AT_BOOTSTRAP
+    placeholder, so it never matches another env's UUID-suffixed bucket.
+
+    All inline `*.tf` backend blocks under global/ are partial (placeholder
+    bucket names that are overridden via -backend-config at init time), so
+    we no longer rewrite *.tf content here.
     """
     repo_root = get_repo_root()
     global_dir = repo_root / "platform" / "terraform" / "global"
@@ -3559,24 +3566,18 @@ def _update_global_backend_configs(env: str, bucket: str, region: str, dry_run: 
         return
 
     subheader("Update Global Module Backend Configs")
-    print("Scanning global/ for .tfbackend files and hardcoded bucket references")
-    print("that need to match the new state backend.\n")
+    print(f"Scanning global/ for {env}.s3.tfbackend files that need the new state bucket.\n")
 
     updated_files = []
 
-    # Match either the templated placeholder or a UUID-suffixed shifter bucket name
+    # Match the templated placeholder OR an existing bucket whose prefix matches
+    # THIS env (so prod runs don't clobber dev buckets and vice versa).
+    bucket_prefix = "shifter-infra" if env == "prod" else f"shifter-{env}-infra"
     bucket_pattern = re.compile(
-        r"REPLACE_AT_BOOTSTRAP|shifter-(?:\w+-)?infra-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+        rf"REPLACE_AT_BOOTSTRAP|{re.escape(bucket_prefix)}-[0-9a-f]{{8}}(?:-[0-9a-f]{{4}}){{3}}-[0-9a-f]{{12}}"
     )
 
     for tf_file in sorted(global_dir.rglob(f"{env}.s3.tfbackend")):
-        content = tf_file.read_text()
-        new_content = bucket_pattern.sub(bucket, content)
-        if new_content != content:
-            rel_path = tf_file.relative_to(repo_root)
-            updated_files.append((tf_file, rel_path, new_content))
-
-    for tf_file in sorted(global_dir.rglob("*.tf")):
         content = tf_file.read_text()
         new_content = bucket_pattern.sub(bucket, content)
         if new_content != content:

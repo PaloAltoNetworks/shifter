@@ -97,6 +97,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.1] - 2026-05-03
+
+### Changed
+
+- **`global/dev-box/` converted to partial-backend pattern.** The
+  inline `backend "s3"` block hard-coded `shifter-dev-infra-b7113d6f-…`
+  as the bucket — the only file in the repo that still did so. Replaced
+  with `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders + new
+  `dev.s3.tfbackend` file, matching the rest of the tree. README updated
+  with the `-backend-config=dev.s3.tfbackend` init flag.
+
+### Fixed
+
+- **Bootstrap regex was env-blind and could clobber the wrong
+  environment's bucket.** `_update_global_backend_configs` matched
+  both `shifter-infra-<uuid>` and `shifter-dev-infra-<uuid>` regardless
+  of the `--env` flag, so a `--env prod` run would have rewritten
+  `dev-box/main.tf`'s dev bucket reference with the prod bucket.
+  Tightened the regex to anchor on the current env's bucket prefix
+  (`shifter-infra` for prod, `shifter-<env>-infra` otherwise) plus the
+  `REPLACE_AT_BOOTSTRAP` placeholder. Also dropped the `*.tf` walker
+  since every `*.tf` backend block is now partial (placeholder bucket,
+  real value supplied via `-backend-config` at init).
+
 ## [3.94.0] - 2026-04-14
 
 ### Added

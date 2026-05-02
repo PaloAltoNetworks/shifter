@@ -14,7 +14,7 @@ This module is **manually managed** (not part of CI/CD):
 
 ```bash
 cd platform/terraform/global/dev-box
-AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init
+AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init -backend-config=dev.s3.tfbackend
 AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
 ```
 
@@ -82,6 +82,10 @@ If you've added your IP to `allowed_rdp_cidrs`:
    AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
    # Connect to public IP shown in output
    ```
+
+> **Note:** state backend is partial; the first `terraform init` requires
+> `-backend-config=dev.s3.tfbackend` to supply the bucket name. Subsequent
+> commands don't need the flag (the local `.terraform/` cache remembers it).
 
 ## Accessing the Portal Database
 

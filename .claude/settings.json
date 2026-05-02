@@ -7,6 +7,9 @@
       "Read(//home/atomik/src/aptl/**)",
       "Read(//home/atomik/src/aptl/mcp/mcp-red/src/**)",
       "Bash(curl:*)"
+    ],
+    "deny": [
+      "Read(//home/atomik/.aws/**)"
     ]
   },
   "hooks": {

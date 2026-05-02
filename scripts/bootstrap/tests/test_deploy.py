@@ -3709,6 +3709,7 @@ class TestMainCLI:
             patch("deploy.bootstrap_account") as mock_bootstrap,
             patch("deploy.walkthrough_github_secrets"),
             patch("deploy.walkthrough_backend_config"),
+            patch("deploy.walkthrough_git_commit"),
         ):
             mock_bootstrap.return_value = {"role_arn": "test"}
 

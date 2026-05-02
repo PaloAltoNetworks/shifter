@@ -97,6 +97,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.2] - 2026-05-03
+
+### Added
+
+- **Bootstrap script now actually commits and pushes** the filled-in
+  `.s3.tfbackend` files at the end of `bootstrap` and `full` commands
+  (the README listed this as automated but the code did not implement
+  it — stale doc → real behaviour). New `walkthrough_git_commit`
+  function stages env-scoped paths only (`global/iam/<env>.s3.tfbackend`,
+  `environments/<env>/{,portal,range}/<env>.s3.tfbackend`,
+  `environments/<env>/portal/main.tf`, plus any other
+  `global/**/<env>.s3.tfbackend` rewritten by the bootstrap), shows
+  `git status --porcelain` of those paths, prompts to commit (yes / no /
+  manual), commits with `Bootstrap <env>: fill in state bucket <bucket>`,
+  then prompts separately to push to `origin/<current-branch>`. Runs in
+  both `bootstrap` and `full` flows.
+
 ## [3.95.1] - 2026-05-03
 
 ### Changed

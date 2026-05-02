@@ -1,18 +1,19 @@
 terraform {
+  # Bucket/key supplied via -backend-config=prod.s3.tfbackend at init time.
   backend "s3" {
-    bucket         = "shifter-infra-c0045c36-4e43-4710-9a2e-ce8534cb5851"
-    key            = "shifter/prod/terraform.tfstate"
-    region         = "us-east-2"
-    dynamodb_table = "shifter-terraform-c0045c36-4e43-4710-9a2e-ce8534cb5851"
-    encrypt        = true
+    bucket       = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    key          = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
   }
 
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }

@@ -4,7 +4,7 @@ asgiref==3.8.1
 boto3==1.42.14
 botocore==1.42.14
 cffi==2.0.0
-cryptography==46.0.5
+cryptography==46.0.7
 debugpy==1.8.19
 dill==0.4.0
 grpcio==1.76.0

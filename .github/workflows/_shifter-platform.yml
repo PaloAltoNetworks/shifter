@@ -37,10 +37,10 @@ jobs:
           aws-region: us-east-2
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.7.1"
+          terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
         working-directory: platform/terraform
-      - run: terraform init
+      - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
       - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
@@ -133,8 +133,8 @@ jobs:
           aws-region: us-east-2
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.7.1"
-      - run: terraform init
+          terraform_version: "1.13.3"
+      - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - name: Handle Service Discovery replacement
         env:
           ENV: ${{ inputs.environment }}

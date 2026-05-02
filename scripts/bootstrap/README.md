@@ -8,15 +8,14 @@ The `deploy.py` CLI provides an interactive walkthrough for bootstrapping a bare
 
 **Automated Steps (with confirmation):**
 - GitHub secrets configuration (via `gh` CLI)
-- Backend.tf file updates
+- Per-environment `.s3.tfbackend` file updates
 - Git commit and push
 
 **Manual Steps (external systems):**
 - DNS record creation (ACM validation, ALB pointing)
 
 **AWS Bootstrap Creates:**
-- S3 bucket for Terraform state
-- DynamoDB table for state locking
+- S3 bucket for Terraform state (with `use_lockfile = true` S3 native locking — no DynamoDB)
 - GitHub OIDC provider for keyless CI/CD
 - IAM role with all required permissions
 - Optionally deploys Terraform infrastructure

@@ -332,7 +332,6 @@ dist
 *.tfstate.*
 .terraformrc
 terraform.rc
-.terraform.lock.hcl
 crash.log
 crash.*.log
 override.tf

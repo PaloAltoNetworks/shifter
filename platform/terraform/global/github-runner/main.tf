@@ -6,16 +6,23 @@
 # ------------------------------------------------------------------------------
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 
-  backend "s3" {}
+  # Bucket/key supplied via -backend-config=dev.s3.tfbackend at init time.
+  backend "s3" {
+    bucket       = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    key          = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {

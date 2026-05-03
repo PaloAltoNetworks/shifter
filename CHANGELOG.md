@@ -97,6 +97,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.7] - 2026-05-03
+
+### Changed
+
+- **`shifter/packer/dev.pkrvars.hcl`** updated for the fresh aws-dev
+  account `788327019743`: `vpc_id`/`subnet_id` were hardcoded to the
+  previous dev account and packer aborted immediately with
+  `InvalidSubnetID.NotFound`. Same fix as the github-runner `dev.tfvars`
+  in 3.95.3.
+
 ## [3.95.6] - 2026-05-03
 
 ### Fixed

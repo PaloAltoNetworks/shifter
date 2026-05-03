@@ -83,7 +83,7 @@ allowed_emails        = []
 # S3
 # ------------------------------------------------------------------------------
 
-user_storage_bucket = "shifter-dev-user-storage-e3462f0c"
+user_storage_bucket = "shifter-dev-user-storage-788327019743"
 
 # ------------------------------------------------------------------------------
 # Provisioner

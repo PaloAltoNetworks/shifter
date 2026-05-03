@@ -8,6 +8,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from shared.db import SoftDeleteMixin, SoftDeleteQuerySet
+
 
 class Severity(models.TextChoices):
     """Risk severity levels."""
@@ -39,7 +41,7 @@ class StrideCategory(models.TextChoices):
     ELEVATION = "E", "Elevation of Privilege"
 
 
-class Risk(models.Model):
+class Risk(SoftDeleteMixin, models.Model):
     """Security risk entry with threat modeling data."""
 
     title = models.CharField(max_length=200)
@@ -65,6 +67,8 @@ class Risk(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = SoftDeleteQuerySet.as_manager()
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [
@@ -77,11 +81,6 @@ class Risk(models.Model):
         return f"{self.title} ({self.severity})"
 
     @property
-    def is_deleted(self) -> bool:
-        """Return True if risk has been soft-deleted."""
-        return self.deleted_at is not None
-
-    @property
     def risk_score(self) -> int | None:
         """Compute risk score as likelihood * impact."""
         if self.likelihood_score and self.impact_score:
@@ -91,12 +90,12 @@ class Risk(models.Model):
     @property
     def comment_count(self) -> int:
         """Return count of non-deleted comments."""
-        return self.comments.filter(deleted_at__isnull=True).count()
+        return self.comments.active().count()
 
     @classmethod
     def active(cls):
-        """Return queryset of non-deleted risks."""
-        return cls.objects.filter(deleted_at__isnull=True)
+        """Return queryset of non-deleted risks (delegates to SoftDeleteQuerySet)."""
+        return cls.objects.active()
 
     def soft_delete(self):
         """Mark risk as deleted without removing from database."""
@@ -109,7 +108,7 @@ class Risk(models.Model):
         self.save(update_fields=["deleted_at"])
 
 
-class Comment(models.Model):
+class Comment(SoftDeleteMixin, models.Model):
     """Immutable comment attached to a risk."""
 
     risk = models.ForeignKey(Risk, on_delete=models.CASCADE, related_name="comments")
@@ -143,6 +142,8 @@ class Comment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = SoftDeleteQuerySet.as_manager()
+
     class Meta:
         ordering = ["created_at"]
         indexes = [
@@ -152,11 +153,6 @@ class Comment(models.Model):
     def __str__(self):
         author = self.author_display
         return f"Comment by {author} on {self.risk.title}"
-
-    @property
-    def is_deleted(self) -> bool:
-        """Return True if comment has been soft-deleted."""
-        return self.deleted_at is not None
 
     @property
     def author_display(self) -> str:

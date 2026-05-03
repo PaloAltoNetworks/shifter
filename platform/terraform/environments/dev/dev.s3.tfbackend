@@ -1,4 +1,4 @@
-bucket       = "REPLACE_AT_BOOTSTRAP"
+bucket       = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
 key          = "shifter/dev/terraform.tfstate"
 region       = "us-east-2"
 encrypt      = true

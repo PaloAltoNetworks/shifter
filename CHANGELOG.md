@@ -97,6 +97,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.3] - 2026-05-03
+
+### Changed
+
+- **`platform/terraform/global/github-runner/dev.tfvars`** updated for
+  the fresh aws-dev account `788327019743`: VPC `vpc-07d0a461204c02a06`,
+  public subnet `subnet-0e7da35c92d13cd1d` (us-east-2a). Was pointing
+  at IDs from the previous dev account.
+- **`scripts/runner-deploy.sh`** cleaned up. Stale `Prerequisites` block
+  about a GitHub App + `/shifter/github-runner/key-base64` /
+  `webhook-secret` SSM params removed (artifact of an abandoned
+  philips-labs/terraform-aws-github-runner approach; current module is
+  plain EC2 + manual registration). `rm -rf .terraform.lock.hcl` reduced
+  to `rm -rf .terraform/` so the now-tracked lockfile survives. Stale
+  `terraform output webhook_endpoint`/`runner_labels` (don't exist)
+  replaced with `runner_instance_ids`/`ssm_commands`. Top-of-file
+  comment now documents the actual manual-registration flow.
+
+### Removed
+
+- **Cruft zips under `global/github-runner/`** (`webhook.zip`,
+  `runners.zip`, `runner-binaries-syncer.zip`, `tfplan`) — leftovers
+  from the abandoned philips-labs auto-scaler attempt. None were
+  referenced by the current `main.tf`.
+
 ## [3.95.2] - 2026-05-03
 
 ### Fixed

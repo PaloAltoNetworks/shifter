@@ -10,10 +10,18 @@
 #   ./scripts/runner-deploy.sh --destroy    # destroy
 #
 # Prerequisites:
-#   - GitHub App created with required permissions
-#   - SSM parameters created:
-#     /shifter/github-runner/key-base64 (base64-encoded private key)
-#     /shifter/github-runner/webhook-secret
+#   - PANW_SHIFTER_DEV_PROFILE set in .env (AWS profile for dev account)
+#
+# Post-apply: each EC2 runner needs to be registered with the repo manually:
+#   1. Generate a registration token:
+#        gh api -X POST /repos/<org>/<repo>/actions/runners/registration-token --jq .token
+#   2. SSM into the runner (terraform output ssm_commands shows the commands)
+#   3. As ec2-user, run:
+#        cd /home/ec2-user/actions-runner
+#        ./config.sh --url https://github.com/<org>/<repo> --token <TOKEN> \
+#          --labels self-hosted,linux,X64 --unattended --replace
+#        sudo ./svc.sh install ec2-user
+#        sudo ./svc.sh start
 #
 set -euo pipefail
 
@@ -41,10 +49,8 @@ while [[ $# -gt 0 ]]; do
             echo "Note: Runners deploy to dev account only but have cross-account"
             echo "      access to deploy to both dev and prod environments."
             echo ""
-            echo "Prerequisites:"
-            echo "  Create SSM parameters before first deploy:"
-            echo "    /shifter/github-runner/key-base64"
-            echo "    /shifter/github-runner/webhook-secret"
+            echo "Post-apply: register each runner manually with the repo via SSM."
+            echo "See top-of-file comment for the registration commands."
             exit 0
             ;;
         *)
@@ -73,8 +79,8 @@ echo "=========================================="
 
 cd "$(dirname "$0")/../platform/terraform/global/github-runner"
 
-# Clean and reinitialize
-rm -rf .terraform .terraform.lock.hcl
+# Clean local terraform plugin cache; KEEP the lockfile so providers stay pinned.
+rm -rf .terraform/
 
 echo ""
 echo "Initializing terraform..."
@@ -96,19 +102,14 @@ case "$ACTION" in
         echo "=========================================="
         echo "GitHub Runner infrastructure deployed!"
         echo ""
-        echo "Webhook endpoint (configure in GitHub App):"
-        AWS_PROFILE="$AWS_PROFILE" terraform output webhook_endpoint
+        echo "Runner instance IDs:"
+        AWS_PROFILE="$AWS_PROFILE" terraform output runner_instance_ids
         echo ""
-        echo "Runner labels:"
-        AWS_PROFILE="$AWS_PROFILE" terraform output runner_labels
+        echo "SSM connect commands:"
+        AWS_PROFILE="$AWS_PROFILE" terraform output ssm_commands
         echo ""
-        echo "Next steps:"
-        echo "  1. Go to GitHub App settings → Webhook"
-        echo "  2. Enable webhook"
-        echo "  3. Paste the webhook URL above"
-        echo "  4. Enter the webhook secret (from .env or SSM)"
-        echo "  5. Subscribe to events: check 'Workflow Job' only"
-        echo "  6. Install the app on your repository"
+        echo "Next: register each runner with the repo (see top-of-file comment"
+        echo "for the exact registration commands)."
         echo "=========================================="
         ;;
     destroy)

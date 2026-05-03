@@ -23,7 +23,7 @@ class TestProcessEvent:
             )
         }
 
-        with patch("cms.handlers.range_events.process_range_event") as mock_range_handler:
+        with patch("cms.handlers.process_range_event") as mock_range_handler:
             process_event(message)
             mock_range_handler.assert_called_once_with(message)
 
@@ -41,7 +41,7 @@ class TestProcessEvent:
             )
         }
 
-        with patch("cms.handlers.ngfw_events.process_ngfw_event") as mock_ngfw_handler:
+        with patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler:
             process_event(message)
             mock_ngfw_handler.assert_called_once_with(message)
 
@@ -76,8 +76,8 @@ class TestProcessEvent:
         }
 
         with (
-            patch("cms.handlers.range_events.process_range_event") as mock_range_handler,
-            patch("cms.handlers.ngfw_events.process_ngfw_event") as mock_ngfw_handler,
+            patch("cms.handlers.process_range_event") as mock_range_handler,
+            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
             patch("cms.experiments.handlers.process_event") as mock_exp_handler,
         ):
             process_event(message)
@@ -92,8 +92,8 @@ class TestProcessEvent:
         message = {"Message": json.dumps({"range_id": 1})}
 
         with (
-            patch("cms.handlers.range_events.process_range_event") as mock_range_handler,
-            patch("cms.handlers.ngfw_events.process_ngfw_event") as mock_ngfw_handler,
+            patch("cms.handlers.process_range_event") as mock_range_handler,
+            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
             patch("cms.experiments.handlers.process_event") as mock_exp_handler,
         ):
             process_event(message)

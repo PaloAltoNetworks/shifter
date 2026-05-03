@@ -39,17 +39,20 @@ Current mechanisms:
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
-  flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that BOTH
-  imports `child_process` (any shape — named, default, namespace,
-  CommonJS destructure, or bare-`require` property access, with or
-  without the `node:` prefix) AND contains an `execSync(...)` call
-  site (or an `execSync as <alias>` ESM rename used as `<alias>(`).
-  String literals and comments are flattened to whitespace before the
-  call-site scan so `"https://..."` URLs cannot accidentally erase a
-  real call site, and so commented-out call sites cannot false-
-  positive trip the check. The check is a cheap pre-commit backstop;
-  motivated bypasses such as `const run = cp.execSync; run(...)` are
-  outside its reach by design and rely on code review. Enforces
+  flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
+  `child_process` (any shape — named, default, namespace, CommonJS
+  destructure, or bare-`require` property access, with or without
+  the `node:` prefix) AND uses one of the shell-string call shapes:
+  `execSync(...)`, `exec(...)`, an `execSync as <alias>` rename
+  used as `<alias>(`, or `spawn`/`spawnSync`/`execFile`/
+  `execFileSync` invoked with `{ shell: true }`. String literals
+  and comments are flattened to whitespace before the call-site
+  scan so `"https://..."` URLs do not accidentally erase a real
+  call site, and so commented-out call sites or strings containing
+  `execSync as run` do not trip the check or synthesise fake
+  aliases. The check is a cheap pre-commit backstop; motivated
+  bypasses such as `const run = cp.execSync; run(...)` are outside
+  its reach by design and rely on code review. Enforces
   ADR-010-R1; current exception covers `mcp/ngfw/*` until the
   deferred migration lands.
 

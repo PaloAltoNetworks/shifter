@@ -25,6 +25,9 @@ import {
   awsExec,
   awsJson,
   awsText,
+  buildFilterLogEventsArgs,
+  buildSsmSendCommandArgs,
+  buildRunManageArgs,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -744,6 +747,163 @@ describe("awsJson", () => {
     const { argv } = runner.calls[0];
     const last = argv.lastIndexOf("--output");
     assert.equal(argv[last + 1], "json");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-tool argv builders for the named-vulnerable paths in #763.
+//
+// These tests are the per-tool counterpart to spawn-roundtrip.test.js
+// and the buildAwsArgv tests above. Together they prove that:
+//   1. The argv builder for each named-vulnerable tool drops a
+//      metacharacter-laden user payload into a single argv element
+//      (these tests).
+//   2. spawnSync forwards every argv element literally
+//      (spawn-roundtrip.test.js).
+//   3. The shared awsExec wrapper does not modify caller args
+//      (buildAwsArgv / awsExec tests above).
+// Chained, the three guarantees mean a `$()`/backtick/quote payload
+// reaching `filter_log_events`, `ssm_send_command`, or
+// `run_manage_command` cannot be evaluated by the local host shell.
+// ---------------------------------------------------------------------------
+
+describe("buildFilterLogEventsArgs", () => {
+  it("drops the filter pattern into a single argv element", () => {
+    const argv = buildFilterLogEventsArgs({
+      logGroup: "/portal/dev",
+      filterPattern: "error",
+      limit: 50,
+    });
+    assert.deepEqual(argv, [
+      "logs",
+      "filter-log-events",
+      "--log-group-name",
+      "/portal/dev",
+      "--filter-pattern",
+      "error",
+      "--limit",
+      "50",
+    ]);
+  });
+
+  it("preserves $() in the filter pattern as a literal argv element", () => {
+    const argv = buildFilterLogEventsArgs({
+      logGroup: "/portal/dev",
+      filterPattern: "$(rm -rf /)",
+      limit: 1,
+    });
+    assert.equal(argv.indexOf("--filter-pattern") + 1, argv.indexOf("$(rm -rf /)"));
+    assert.equal(argv[5], "$(rm -rf /)");
+  });
+
+  it("preserves backticks, quotes, semicolons, ampersands, pipes, and newlines literally", () => {
+    const payload = "`id`\";'|&;\nrm -rf /";
+    const argv = buildFilterLogEventsArgs({
+      logGroup: "/portal/dev",
+      filterPattern: payload,
+      limit: 1,
+    });
+    assert.equal(argv[5], payload);
+  });
+
+  it("stringifies a numeric limit so the argv element is always a string", () => {
+    const argv = buildFilterLogEventsArgs({
+      logGroup: "/g",
+      filterPattern: "x",
+      limit: 200,
+    });
+    assert.equal(argv[7], "200");
+    assert.equal(typeof argv[7], "string");
+  });
+});
+
+describe("buildSsmSendCommandArgs", () => {
+  it("wraps commands in a JSON.stringified --parameters argv element", () => {
+    const argv = buildSsmSendCommandArgs({
+      instanceId: "i-0123456789abcdef0",
+      docName: "AWS-RunShellScript",
+      commands: ["uptime"],
+    });
+    assert.deepEqual(argv, [
+      "ssm",
+      "send-command",
+      "--instance-ids",
+      "i-0123456789abcdef0",
+      "--document-name",
+      "AWS-RunShellScript",
+      "--parameters",
+      JSON.stringify({ commands: ["uptime"] }),
+    ]);
+  });
+
+  it("keeps shell metacharacters inside the commands JSON literal (single argv element)", () => {
+    const cmd = "echo $(whoami) && touch /tmp/pwn";
+    const argv = buildSsmSendCommandArgs({
+      instanceId: "i-aaaa",
+      docName: "AWS-RunShellScript",
+      commands: [cmd],
+    });
+    const parametersIdx = argv.indexOf("--parameters");
+    assert.equal(typeof argv[parametersIdx + 1], "string");
+    assert.equal(argv.length, parametersIdx + 2);
+    const parsed = JSON.parse(argv[parametersIdx + 1]);
+    assert.deepEqual(parsed, { commands: [cmd] });
+  });
+
+  it("survives a single-quote breakout payload as one argv element", () => {
+    const cmd = "'; rm -rf /; echo '";
+    const argv = buildSsmSendCommandArgs({
+      instanceId: "i-aaaa",
+      docName: "AWS-RunShellScript",
+      commands: [cmd],
+    });
+    const parameters = argv[argv.indexOf("--parameters") + 1];
+    assert.deepEqual(JSON.parse(parameters), { commands: [cmd] });
+  });
+
+  it("encodes embedded newlines into the JSON parameters argv element", () => {
+    const cmd = "line one\nline two\n; rm -rf /";
+    const argv = buildSsmSendCommandArgs({
+      instanceId: "i-aaaa",
+      docName: "AWS-RunShellScript",
+      commands: [cmd],
+    });
+    const parameters = argv[argv.indexOf("--parameters") + 1];
+    assert.deepEqual(JSON.parse(parameters), { commands: [cmd] });
+  });
+});
+
+describe("buildRunManageArgs", () => {
+  it("wraps the management command in docker-exec inside the SSM JSON parameters", () => {
+    const argv = buildRunManageArgs({
+      targetId: "i-deadbeef",
+      command: "showmigrations",
+    });
+    assert.equal(argv[0], "ssm");
+    assert.equal(argv[1], "send-command");
+    assert.equal(argv[5], "AWS-RunShellScript");
+    const parameters = argv[argv.indexOf("--parameters") + 1];
+    const parsed = JSON.parse(parameters);
+    assert.deepEqual(parsed, {
+      commands: ["docker exec portal python manage.py showmigrations"],
+    });
+  });
+
+  it("preserves user metacharacters inside the docker-exec command (single argv element)", () => {
+    const argv = buildRunManageArgs({
+      targetId: "i-deadbeef",
+      command: "check; touch /tmp/pwn $(id)",
+    });
+    const parameters = argv[argv.indexOf("--parameters") + 1];
+    const parsed = JSON.parse(parameters);
+    assert.deepEqual(parsed, {
+      commands: [
+        "docker exec portal python manage.py check; touch /tmp/pwn $(id)",
+      ],
+    });
+    // The whole JSON payload is still one argv element — never split
+    // by spaces, never re-evaluated by the local shell.
+    assert.equal(typeof argv[argv.indexOf("--parameters") + 1], "string");
   });
 });
 

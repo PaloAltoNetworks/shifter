@@ -23,6 +23,9 @@ import {
   awsJson,
   awsText as awsTextLib,
   buildAwsArgv,
+  buildFilterLogEventsArgs,
+  buildSsmSendCommandArgs,
+  buildRunManageArgs,
 } from "./lib.js";
 
 // Spawn a long-running aws-cli process (e.g. an SSM port-forward that
@@ -444,16 +447,14 @@ server.tool(
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const result = aws(profile, [
-        "logs",
-        "filter-log-events",
-        "--log-group-name",
-        logGroup,
-        "--filter-pattern",
-        filter_pattern,
-        "--limit",
-        String(limit),
-      ]);
+      const result = aws(
+        profile,
+        buildFilterLogEventsArgs({
+          logGroup,
+          filterPattern: filter_pattern,
+          limit,
+        })
+      );
       const lines = result.events.map(
         (e) =>
           `[${new Date(e.timestamp).toISOString()}] [${e.logStreamName}] ${e.message}`
@@ -839,17 +840,14 @@ server.tool(
       const profile = getProfile(env);
       const platform = getInstancePlatform(profile, instance_id);
       const docName = getSsmDocument(platform);
-      const params = JSON.stringify({ commands: [command] });
-      const result = aws(profile, [
-        "ssm",
-        "send-command",
-        "--instance-ids",
-        instance_id,
-        "--document-name",
-        docName,
-        "--parameters",
-        params,
-      ]);
+      const result = aws(
+        profile,
+        buildSsmSendCommandArgs({
+          instanceId: instance_id,
+          docName,
+          commands: [command],
+        })
+      );
       const cmdId = result.Command.CommandId;
       return ok(
         `Command sent (${docName}). ID: ${cmdId}\nUse ssm_get_command_output to check results.`
@@ -2664,18 +2662,10 @@ server.tool(
         }
       }
 
-      const dockerCmd = `docker exec portal python manage.py ${command}`;
-      const params = JSON.stringify({ commands: [dockerCmd] });
-      const result = aws(profile, [
-        "ssm",
-        "send-command",
-        "--instance-ids",
-        targetId,
-        "--document-name",
-        "AWS-RunShellScript",
-        "--parameters",
-        params,
-      ]);
+      const result = aws(
+        profile,
+        buildRunManageArgs({ targetId, command })
+      );
       const cmdId = result.Command.CommandId;
       return ok(
         `Command sent: manage.py ${command}\nInstance: ${targetId}\nCommand ID: ${cmdId}\nUse ssm_get_command_output to check results.`,

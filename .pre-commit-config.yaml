@@ -275,7 +275,7 @@ repos:
         name: architecture (adr guard fast)
         entry: python3 scripts/adr_guard/adr_guard.py --changed --level fast
         language: system
-        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$)
+        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$|mcp/.*\.(js|mjs|cjs)$)
         pass_filenames: false
         verbose: true
 

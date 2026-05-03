@@ -1,5 +1,5 @@
 schema_version: 1
-project: aphelion
+project: shifter
 github_repo: Brad-Edwards/shifter
 workflow:
   # shifter has no single-command test suite; CI runs many parallel jobs.

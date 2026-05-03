@@ -43,20 +43,20 @@ class TestProcessEvent:
         mock_orch_cls.assert_called_once_with(42)
         mock_orch.schedule_runs.assert_called_once()
 
-    @patch("cms.experiments.models.Experiment")
-    @patch("cms.experiments.models.ExperimentRun")
+    @patch("cms.experiments.handlers.Experiment")
+    @patch("cms.experiments.handlers.ExperimentRun")
     @patch("cms.experiments.handlers.ExperimentOrchestrator")
     def test_run_failed_event(self, mock_orch_cls, mock_run_model, mock_exp_model):
         """experiment.run.failed event calls handle_run_failed on orchestrator."""
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
 
-        # Mock the ExperimentRun.objects.get for broadcast (local import inside handler)
+        # Mock the ExperimentRun.objects.get for broadcast (lookup at handler module level).
         mock_run = MagicMock(run_number=1, status=RunStatus.FAILED.value)
         mock_run_model.objects.get.return_value = mock_run
         mock_run_model.DoesNotExist = Exception
 
-        # Mock Experiment.objects.get for broadcast (local import inside handler)
+        # Mock Experiment.objects.get for broadcast (lookup at handler module level).
         mock_exp = MagicMock(status="failed")
         mock_exp_model.objects.get.return_value = mock_exp
         mock_exp_model.DoesNotExist = Exception

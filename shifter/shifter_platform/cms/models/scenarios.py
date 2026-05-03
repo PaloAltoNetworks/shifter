@@ -16,10 +16,12 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 
+from cms.models.mixins import SoftDeleteMixin
+
 logger = logging.getLogger(__name__)
 
 
-class Scenario(models.Model):
+class Scenario(SoftDeleteMixin, models.Model):
     """Staff-created scenario template stored in the database.
 
     Default scenarios ship as YAML in cms/scenarios/templates/ and are
@@ -87,11 +89,6 @@ class Scenario(models.Model):
         if not self.is_deleted:
             self.validate_definition()
         super().save(*args, **kwargs)
-
-    @property
-    def is_deleted(self):
-        """Return True if this scenario has been soft-deleted."""
-        return self.deleted_at is not None
 
     def to_template(self):
         """Convert to a ScenarioTemplate for validation and hydration.

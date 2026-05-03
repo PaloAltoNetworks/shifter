@@ -11,10 +11,9 @@ from __future__ import annotations
 import logging
 
 from django.db import models
-from django.utils import timezone
 
 from cms.models.assets import AgentConfig
-from shared.enums import TERMINAL_STATUSES
+from cms.models.lifecycle import apply_terminal_soft_delete
 
 logger = logging.getLogger(__name__)
 
@@ -92,27 +91,16 @@ class RangeInstance(models.Model):
         return f"Range {self.range_id}: {self.scenario_id}"
 
     def save(self, *args, **kwargs):
-        """Save with terminal status invariant enforcement.
+        """Save with terminal-status soft-delete invariant enforcement.
 
-        When status is set to a terminal value (DESTROYED, FAILED),
-        deleted_at is automatically set if not already set.
-
-        If update_fields is specified and we set deleted_at, we add it
-        to update_fields to ensure it's persisted.
+        Delegates the invariant to
+        :func:`~cms.models.lifecycle.apply_terminal_soft_delete` and emits a
+        debug log when the helper applies the soft-delete.
         """
-        # Enforce invariant: terminal status → soft delete
-        terminal_values = {s.value for s in TERMINAL_STATUSES}
-        if self.status in terminal_values and self.deleted_at is None:
-            self.deleted_at = timezone.now()
+        if apply_terminal_soft_delete(self, kwargs):
             logger.debug(
                 "RangeInstance %s: auto-setting deleted_at due to terminal status %s",
                 self.range_id,
                 self.status,
             )
-
-            # If update_fields is specified, add deleted_at to ensure it's saved
-            update_fields = kwargs.get("update_fields")
-            if update_fields is not None and "deleted_at" not in update_fields:
-                kwargs["update_fields"] = [*list(update_fields), "deleted_at"]
-
         super().save(*args, **kwargs)

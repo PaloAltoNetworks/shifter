@@ -15,10 +15,11 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import models
-from django.utils import timezone
 
 from cms.models.catalogs import AppType, InstanceType
-from shared.enums import TERMINAL_STATUSES, RequestType, ResourceStatus
+from cms.models.lifecycle import apply_terminal_soft_delete
+from cms.models.mixins import SoftDeleteMixin
+from shared.enums import RequestType, ResourceStatus
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 
 
-class EntityBase(models.Model):
+class EntityBase(SoftDeleteMixin, models.Model):
     """Abstract base for concrete entities in ranges (Instance, App).
 
     Entities represent materialized "things" that exist in provisioned ranges.
@@ -36,7 +37,8 @@ class EntityBase(models.Model):
     and events.
 
     The UUID is auto-generated on first save and included in specs sent to Engine.
-    Status tracks lifecycle and automatically soft-deletes on terminal states.
+    Status tracks lifecycle and automatically soft-deletes on terminal states
+    via :func:`~cms.models.lifecycle.apply_terminal_soft_delete`.
 
     Attributes:
         id: UUID primary key (auto-generated).
@@ -58,29 +60,9 @@ class EntityBase(models.Model):
         abstract = True
 
     def save(self, *args, **kwargs):
-        """Save with terminal status invariant enforcement.
-
-        When status is set to a terminal value (DESTROYED, FAILED),
-        deleted_at is automatically set if not already set.
-        """
-        # Auto-set deleted_at for terminal statuses
-        try:
-            status_enum = ResourceStatus(self.status)
-            if status_enum in TERMINAL_STATUSES and not self.deleted_at:
-                self.deleted_at = timezone.now()
-                # If update_fields specified, ensure deleted_at is included
-                update_fields = kwargs.get("update_fields")
-                if update_fields is not None and "deleted_at" not in update_fields:
-                    kwargs["update_fields"] = [*list(update_fields), "deleted_at"]
-        except ValueError:
-            pass  # Invalid status, let save proceed and fail validation elsewhere
-
+        """Save with terminal-status soft-delete invariant enforcement."""
+        apply_terminal_soft_delete(self, kwargs)
         super().save(*args, **kwargs)
-
-    @property
-    def is_deleted(self):
-        """Return True if this entity has been soft-deleted."""
-        return self.deleted_at is not None
 
 
 # -----------------------------------------------------------------------------
@@ -88,11 +70,12 @@ class EntityBase(models.Model):
 # -----------------------------------------------------------------------------
 
 
-class Request(models.Model):
+class Request(SoftDeleteMixin, models.Model):
     """Provisioning request container.
 
     Groups items requested together while allowing independent lifecycles.
-    Maps 1:1 with RequestSpec schema.
+    Maps 1:1 with RequestSpec schema. The :class:`~cms.models.mixins.SoftDeleteMixin`
+    supplies ``is_deleted``.
 
     Attributes:
         request_id: UUID identifier for this request (correlation key).
@@ -122,11 +105,6 @@ class Request(models.Model):
 
     def __str__(self):
         return f"Request {self.request_id}"
-
-    @property
-    def is_deleted(self):
-        """Return True if this request has been soft-deleted."""
-        return self.deleted_at is not None
 
 
 class Instance(EntityBase):

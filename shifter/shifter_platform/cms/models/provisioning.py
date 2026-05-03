@@ -154,6 +154,10 @@ class Instance(EntityBase):
         ordering = ["-created_at"]
         verbose_name = "Instance"
         verbose_name_plural = "Instances"
+        # Concrete Meta does not inherit Meta from the abstract EntityBase
+        # in Django; restate base_manager_name so reverse-FK descriptors and
+        # admin introspection stay on the unfiltered manager.
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.name} ({self.id})"
@@ -201,6 +205,8 @@ class App(EntityBase):
         ordering = ["-created_at"]
         verbose_name = "App"
         verbose_name_plural = "Apps"
+        # See Instance.Meta.base_manager_name for rationale.
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.name} ({self.id})"
@@ -239,6 +245,8 @@ class Subnet(EntityBase):
         ordering = ["-created_at"]
         verbose_name = "Subnet"
         verbose_name_plural = "Subnets"
+        # See Instance.Meta.base_manager_name for rationale.
+        base_manager_name = "all_objects"
 
     def __str__(self) -> str:
         return f"{self.name} ({self.id})"

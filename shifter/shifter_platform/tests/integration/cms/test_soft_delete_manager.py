@@ -5,9 +5,9 @@ These tests exercise :class:`shared.db.SoftDeleteManager` and
 representative consumer model (``cms.models.Request``). They verify
 the *behavior* of the bug-class fix — that ``Model.objects`` cannot
 return soft-deleted rows, that ``Model.all_objects`` can, and that
-the chainable ``.active()`` / ``.deleted()`` / ``.with_deleted()``
-helpers compose correctly. Mock-based unit tests pin the call shape;
-these tests pin the actual queries.
+the chainable ``.active()`` / ``.deleted()`` helpers compose
+correctly. Mock-based unit tests pin the call shape; these tests pin
+the actual queries.
 
 ``Request`` was chosen as the representative because it's a concrete
 model with the canonical (``objects = SoftDeleteManager()``,
@@ -107,7 +107,7 @@ class TestSoftDeleteManagerSemantics:
 
 @pytest.mark.django_db
 class TestSoftDeleteQuerySetHelpers:
-    """``.active()`` / ``.deleted()`` / ``.with_deleted()`` chained behavior."""
+    """``.active()`` / ``.deleted()`` chained behavior."""
 
     def test_active_on_objects_is_idempotent(self, request_user):
         """``Model.objects.active()`` returns the same set as ``Model.objects``."""

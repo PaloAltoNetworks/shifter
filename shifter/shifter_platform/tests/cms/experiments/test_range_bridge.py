@@ -18,10 +18,10 @@ from uuid import uuid4
 from cms.experiments.schemas import RunStatus
 from shared.enums import ResourceStatus
 
-# notify_experiment_on_range_ready does a local import:
-#   from cms.experiments.models import ExperimentRun
-# We patch at the source module so the local import picks up the mock.
-PATCH_EXP_RUN = "cms.experiments.models.ExperimentRun"
+# experiment_bridge imports ExperimentRun at its module top, so patches must
+# target the bridge module's binding (where the name is looked up at call time)
+# rather than the source module.
+PATCH_EXP_RUN = "cms.handlers.experiment_bridge.ExperimentRun"
 
 
 class TestRangeToExperimentBridge:

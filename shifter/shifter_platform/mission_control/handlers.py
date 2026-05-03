@@ -5,13 +5,13 @@ These handlers process range and NGFW status updates and broadcast them to WebSo
 
 from __future__ import annotations
 
-import json
 import logging
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from shared.channels.groups import ngfw_event_group, range_event_group
+from shared.messages.envelope import parse_sns_message
 from shared.messages.events import EVENT_TYPE_NGFW
 
 logger = logging.getLogger(__name__)
@@ -38,27 +38,6 @@ def process_event(message: str | dict) -> None:
         process_ngfw_event(message)
     else:
         logger.debug("Ignoring unknown event_type=%s event_id=%s", event_type, event_id)
-
-
-def parse_sns_message(message: str | dict) -> dict:
-    """Unwrap SNS envelope to get event payload.
-
-    SNS wraps messages in an envelope with a "Message" key containing
-    the actual event payload as a JSON string.
-
-    Args:
-        message: Either a dict (SNS envelope or direct event) or
-                 a JSON string representation of either.
-
-    Returns:
-        The parsed event payload as a dict.
-    """
-    body = json.loads(message) if isinstance(message, str) else message
-
-    if "Message" in body:
-        return json.loads(body["Message"])
-
-    return body
 
 
 def process_range_event(message: str | dict) -> None:

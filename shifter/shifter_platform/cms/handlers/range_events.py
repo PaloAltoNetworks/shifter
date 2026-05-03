@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 
 from cms.handlers.ctf_bridge import notify_ctf_range_status
-from cms.handlers.envelope import parse_sns_message
 from cms.handlers.experiment_bridge import notify_experiment_on_range_ready
 from cms.models import RangeInstance
 from shared.enums import ResourceStatus
+from shared.messages.envelope import parse_sns_message
+from shared.messages.events import EVENT_TYPE_STATUS_UPDATED
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def process_range_event(message: str | dict) -> None:
     event = parse_sns_message(message)
 
     event_type = event.get("event_type")
-    if event_type != "range.status.updated":
+    if event_type != EVENT_TYPE_STATUS_UPDATED:
         logger.debug("Ignoring event_type=%s", event_type)
         return
 

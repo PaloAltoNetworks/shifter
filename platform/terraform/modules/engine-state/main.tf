@@ -19,7 +19,9 @@ data "aws_region" "current" {}
 # ------------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "engine_state" {
-  bucket = "${var.name_prefix}-pulumi-state"
+  # Account-id suffix keeps the name globally unique (S3 bucket names share
+  # one global namespace) without sacrificing per-account determinism.
+  bucket = "${var.name_prefix}-pulumi-state-${data.aws_caller_identity.current.account_id}"
 
   # State is critical - do not allow accidental deletion
   force_destroy = false

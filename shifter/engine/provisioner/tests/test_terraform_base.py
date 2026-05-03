@@ -51,6 +51,24 @@ class TestWorkspaceInitialization:
 
     @patch.dict(
         "os.environ",
+        {"TF_STATE_BUCKET": "dev-range-pulumi-state-788327019743"},
+        clear=True,
+    )
+    @patch("terraform_base.run_terraform")
+    def test_init_workspace_handles_account_id_suffixed_bucket(self, mock_run):
+        # Buckets created by the engine-state module post-3.95.6 carry an
+        # account-id suffix to dodge the global S3 namespace collision.
+        # The lock table name still strips at "-pulumi-state" → "-pulumi-locks".
+        from terraform_base import init_workspace
+
+        init_workspace("ranges", "req-456", MagicMock(), "Range")
+
+        init_args = mock_run.call_args.args[0]
+        assert "-backend-config=bucket=dev-range-pulumi-state-788327019743" in init_args
+        assert "-backend-config=dynamodb_table=dev-range-pulumi-locks" in init_args
+
+    @patch.dict(
+        "os.environ",
         {"CLOUD_PROVIDER": "gcp", "TF_STATE_BUCKET": "shifter-gcp-dev-terraform-state"},
         clear=True,
     )

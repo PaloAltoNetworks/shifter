@@ -97,6 +97,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.11] - 2026-05-03
+
+### Fixed
+
+- **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
+  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  `shifter/engine/provisioner/terraform_base.py` derives the lock table
+  name from the state bucket: it stripped `-pulumi-state` and replaced
+  with `-pulumi-locks`, otherwise fell through to `<bucket>-locks`. The
+  3.95.6 bucket-name fix added a `-<account_id>` suffix, breaking the
+  `endswith("-pulumi-state")` check, so the fallback computed
+  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  (the actual table from the engine-state module is still
+  `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
+  regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
+  account-id-suffixed forms; lock table name resolves to
+  `<prefix>-pulumi-locks` either way. Added a test case for the new
+  pattern.
+
 ## [3.95.10] - 2026-05-03
 
 ### Fixed

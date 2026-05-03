@@ -590,19 +590,27 @@ describe("buildAwsArgv", () => {
   });
 });
 
-describe("awsExec", () => {
-  function fakeRunner({ status = 0, stdout = "", stderr = "", error = null } = {}) {
-    const calls = [];
-    const fn = (cmd, argv, options) => {
-      calls.push({ cmd, argv, options });
-      return { status, stdout, stderr, error };
-    };
-    fn.calls = calls;
-    return fn;
-  }
+// Module-scoped helper: builds a runner that records every call and
+// returns a canned result, so tests can assert on the argv without
+// spawning a real `aws` process.
+function makeRecordingRunner({
+  status = 0,
+  stdout = "",
+  stderr = "",
+  error = null,
+} = {}) {
+  const calls = [];
+  const fn = (cmd, argv, options) => {
+    calls.push({ cmd, argv, options });
+    return { status, stdout, stderr, error };
+  };
+  fn.calls = calls;
+  return fn;
+}
 
+describe("awsExec", () => {
   it("invokes the runner with cmd='aws' and the built argv", () => {
-    const runner = fakeRunner({ stdout: "ok\n" });
+    const runner = makeRecordingRunner({ stdout: "ok\n" });
     awsExec("p", ["s3", "ls"], { runner });
     assert.equal(runner.calls.length, 1);
     assert.equal(runner.calls[0].cmd, "aws");
@@ -617,7 +625,7 @@ describe("awsExec", () => {
   });
 
   it("forwards extraFlags and region overrides through buildAwsArgv ordering", () => {
-    const runner = fakeRunner({ stdout: "x" });
+    const runner = makeRecordingRunner({ stdout: "x" });
     awsExec("p", ["logs"], {
       runner,
       region: "eu-west-1",
@@ -635,18 +643,18 @@ describe("awsExec", () => {
   });
 
   it("returns stdout untrimmed", () => {
-    const runner = fakeRunner({ stdout: "  hello\n" });
+    const runner = makeRecordingRunner({ stdout: "  hello\n" });
     assert.equal(awsExec("p", ["s3", "ls"], { runner }), "  hello\n");
   });
 
   it("rethrows runner.error", () => {
     const boom = new Error("boom");
-    const runner = fakeRunner({ error: boom });
+    const runner = makeRecordingRunner({ error: boom });
     assert.throws(() => awsExec("p", ["s3", "ls"], { runner }), /boom/);
   });
 
   it("throws with trimmed stderr on non-zero status", () => {
-    const runner = fakeRunner({
+    const runner = makeRecordingRunner({
       status: 1,
       stderr: "  AccessDenied: bad creds\n",
     });
@@ -657,7 +665,7 @@ describe("awsExec", () => {
   });
 
   it("falls back to a generic message when stderr is empty and status is non-zero", () => {
-    const runner = fakeRunner({ status: 2 });
+    const runner = makeRecordingRunner({ status: 2 });
     assert.throws(
       () => awsExec("p", ["s3", "ls"], { runner }),
       /aws exited with status 2/
@@ -665,13 +673,13 @@ describe("awsExec", () => {
   });
 
   it("propagates timeout option to the runner", () => {
-    const runner = fakeRunner({ stdout: "x" });
+    const runner = makeRecordingRunner({ stdout: "x" });
     awsExec("p", ["s3", "ls"], { runner, timeoutMs: 500 });
     assert.equal(runner.calls[0].options.timeout, 500);
   });
 
   it("requires args to be an array (rejects shell strings)", () => {
-    const runner = fakeRunner({ stdout: "x" });
+    const runner = makeRecordingRunner({ stdout: "x" });
     assert.throws(
       () => awsExec("p", "s3 ls", { runner }),
       (e) => e instanceof TypeError
@@ -681,18 +689,11 @@ describe("awsExec", () => {
 });
 
 describe("awsJson", () => {
-  function fakeRunner(stdout) {
-    return (cmd, argv) => {
-      fakeRunner.lastArgv = argv;
-      return { status: 0, stdout, stderr: "", error: null };
-    };
-  }
-
   it("appends --output json after caller args and parses stdout", () => {
-    const runner = fakeRunner('{"a":1}');
+    const runner = makeRecordingRunner({ stdout: '{"a":1}' });
     const out = awsJson("p", ["ec2", "describe-instances"], { runner });
     assert.deepEqual(out, { a: 1 });
-    assert.deepEqual(fakeRunner.lastArgv, [
+    assert.deepEqual(runner.calls[0].argv, [
       "ec2",
       "describe-instances",
       "--profile",
@@ -705,22 +706,22 @@ describe("awsJson", () => {
   });
 
   it("places --output json AFTER caller-supplied --output flags so it wins", () => {
-    const runner = fakeRunner('{"a":1}');
+    const runner = makeRecordingRunner({ stdout: '{"a":1}' });
     awsJson("p", ["ec2", "describe-instances", "--output", "text"], {
       runner,
     });
-    const argv = fakeRunner.lastArgv;
+    const { argv } = runner.calls[0];
     const last = argv.lastIndexOf("--output");
     assert.equal(argv[last + 1], "json");
   });
 
   it("forwards user-supplied extraFlags before the json output flags", () => {
-    const runner = fakeRunner('[]');
+    const runner = makeRecordingRunner({ stdout: "[]" });
     awsJson("p", ["s3api", "list-buckets"], {
       runner,
       extraFlags: ["--max-items", "10"],
     });
-    assert.deepEqual(fakeRunner.lastArgv, [
+    assert.deepEqual(runner.calls[0].argv, [
       "s3api",
       "list-buckets",
       "--profile",

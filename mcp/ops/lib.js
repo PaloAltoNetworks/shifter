@@ -1,5 +1,7 @@
 // Shared constants and helpers for the shifter-ops MCP server.
 
+import { spawnSync } from "node:child_process";
+
 export const REGION = "us-east-2";
 
 // --- AWS ---
@@ -204,6 +206,97 @@ export function validateManageCommand(command) {
     );
   }
   return parts;
+}
+
+// --- AWS CLI execution ---
+//
+// All aws-cli invocations run through these helpers. Callers MUST pass
+// args as an argv array, not a shell string — buildAwsArgv enforces it
+// via TypeError. The argv is handed to spawnSync, so values containing
+// `$()`, backticks, quotes, etc. are forwarded literally to the aws
+// binary instead of being interpreted by the local host shell. Shell
+// escaping is not a remediation strategy for this component; see
+// mcp/ops/SECURITY.md.
+
+/**
+ * Build the argv array passed to spawnSync("aws", ...).
+ * Preserves caller args byte-for-byte and appends profile, region, and
+ * any extra flags last so the helper's flags override anything the
+ * caller supplied (matches the prior shell-string ordering).
+ */
+export function buildAwsArgv(args, profile, region, extraFlags = []) {
+  if (!Array.isArray(args)) {
+    throw new TypeError(
+      "AWS CLI args must be an argv array, not a shell string. " +
+        "Passing a shell string would re-introduce the command-injection " +
+        "path that issue #763 closed."
+    );
+  }
+  return [
+    ...args,
+    "--profile",
+    profile,
+    "--region",
+    region,
+    ...extraFlags,
+  ];
+}
+
+function defaultRunner(cmd, argv, options) {
+  return spawnSync(cmd, argv, options);
+}
+
+/**
+ * Run `aws` with an argv array. Returns stdout. Throws on non-zero exit
+ * with the trimmed stderr (or a generic message). The runner is
+ * injectable so tests can capture the argv without spawning a real
+ * process.
+ */
+export function awsExec(profile, args, options = {}) {
+  const {
+    extraFlags = [],
+    region = REGION,
+    runner = defaultRunner,
+    timeoutMs = 60000,
+  } = options;
+  const argv = buildAwsArgv(args, profile, region, extraFlags);
+  const result = runner("aws", argv, {
+    encoding: "utf-8",
+    timeout: timeoutMs,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const stderr = (result.stderr || "").trim();
+    throw new Error(
+      stderr || `aws exited with status ${result.status}`
+    );
+  }
+  return result.stdout;
+}
+
+/**
+ * Run `aws` with `--output json` appended and parse the result.
+ * Append after the caller's flags so it overrides any user-supplied
+ * `--output` (matches the prior shell-string behavior of `aws()`).
+ */
+export function awsJson(profile, args, options = {}) {
+  const extraFlags = [
+    "--output",
+    "json",
+    ...(options.extraFlags || []),
+  ];
+  const stdout = awsExec(profile, args, { ...options, extraFlags });
+  return JSON.parse(stdout);
+}
+
+/**
+ * Run `aws` and return trimmed stdout. Does NOT append `--output text`;
+ * callers that need text output must include it in their args.
+ */
+export function awsText(profile, args, options = {}) {
+  return awsExec(profile, args, options).trim();
 }
 
 // --- Shared ---

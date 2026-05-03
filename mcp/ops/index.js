@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { execSync, spawn } from "child_process";
+import { spawn } from "child_process";
 import pg from "pg";
 import net from "net";
 import {
@@ -20,6 +20,8 @@ import {
   MAX_S3_READ_SIZE,
   isBinaryContentType,
   validateManageCommand,
+  awsJson,
+  awsText as awsTextLib,
 } from "./lib.js";
 
 const { Pool } = pg;
@@ -35,23 +37,30 @@ function getProfile(env) {
 
 // ==========================================================================
 // AWS helpers
+//
+// All aws-cli invocations go through these wrappers, which delegate to
+// the argv-array helpers in lib.js. Callers MUST pass `args` as an
+// array of argv elements — never as a shell string. The lib helpers
+// throw TypeError if a string slips through.
 // ==========================================================================
 
 function aws(profile, args) {
-  const cmd = `aws ${args} --profile "${profile}" --region "${REGION}" --output json`;
-  return JSON.parse(execSync(cmd, { encoding: "utf-8", timeout: 60000 }));
+  return awsJson(profile, args);
 }
 
 function awsText(profile, args) {
-  const cmd = `aws ${args} --profile "${profile}" --region "${REGION}"`;
-  return execSync(cmd, { encoding: "utf-8", timeout: 60000 }).trim();
+  return awsTextLib(profile, args);
 }
 
 function getInstancePlatform(profile, instanceId) {
-  return awsText(
-    profile,
-    `ec2 describe-instances --instance-ids "${instanceId}" --query "Reservations[0].Instances[0].PlatformDetails"`,
-  );
+  return awsText(profile, [
+    "ec2",
+    "describe-instances",
+    "--instance-ids",
+    instanceId,
+    "--query",
+    "Reservations[0].Instances[0].PlatformDetails",
+  ]);
 }
 
 function ok(text) {
@@ -97,12 +106,22 @@ async function fetchCredentials(env) {
   const profile = getProfile(env);
   const secretId = `shifter-${env}-portal-db-credentials`;
 
-  const result = execSync(
-    `aws secretsmanager get-secret-value --secret-id "${secretId}" --region "${REGION}" --profile "${profile}" --query SecretString --output text`,
-    { encoding: "utf-8", timeout: 30000 }
+  const result = awsTextLib(
+    profile,
+    [
+      "secretsmanager",
+      "get-secret-value",
+      "--secret-id",
+      secretId,
+      "--query",
+      "SecretString",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
   );
 
-  credentials[env] = JSON.parse(result.trim());
+  credentials[env] = JSON.parse(result);
   return credentials[env];
 }
 
@@ -125,20 +144,39 @@ async function ensureTunnel(env) {
 
   const profile = getProfile(env);
 
-  const instanceId = execSync(
-    `aws ec2 describe-instances --filters "Name=tag:Name,Values=${env}-portal-ec2" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region "${REGION}" --profile "${profile}"`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const instanceId = awsTextLib(
+    profile,
+    [
+      "ec2",
+      "describe-instances",
+      "--filters",
+      `Name=tag:Name,Values=${env}-portal-ec2`,
+      "Name=instance-state-name,Values=running",
+      "--query",
+      "Reservations[0].Instances[0].InstanceId",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
+  );
 
   if (!instanceId || instanceId === "None") {
     throw new Error(`Could not find running ${env} portal EC2 instance`);
   }
 
   const jmesQuery = `DBInstances[?DBInstanceIdentifier==\`${env}-portal-db\`].Endpoint.Address`;
-  const rdsHost = execSync(
-    `aws rds describe-db-instances --region "${REGION}" --profile "${profile}" --query '${jmesQuery}' --output text`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const rdsHost = awsTextLib(
+    profile,
+    [
+      "rds",
+      "describe-db-instances",
+      "--query",
+      jmesQuery,
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
+  );
 
   if (!rdsHost || rdsHost === "None") {
     throw new Error(`Could not find RDS endpoint for ${env}`);
@@ -263,7 +301,7 @@ const EnvSchema = z
   .default("dev")
   .describe("Environment (dev or prod). Defaults to dev.");
 
-// Input validation patterns — prevent shell injection in execSync calls
+// Input validation patterns — defense in depth on top of argv-array AWS execution
 const Ec2Id = z
   .string()
   .regex(/^i-[0-9a-f]{8,17}$/, "Must be a valid EC2 instance ID");
@@ -308,10 +346,17 @@ server.tool(
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const result = aws(
-        profile,
-        `logs describe-log-streams --log-group-name "${logGroup}" --order-by LastEventTime --descending --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "describe-log-streams",
+        "--log-group-name",
+        logGroup,
+        "--order-by",
+        "LastEventTime",
+        "--descending",
+        "--limit",
+        String(limit),
+      ]);
       const streams = result.logStreams.map((s) => ({
         name: s.logStreamName,
         lastEvent: s.lastEventTimestamp
@@ -344,10 +389,16 @@ server.tool(
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const result = aws(
-        profile,
-        `logs get-log-events --log-group-name "${logGroup}" --log-stream-name "${stream_name}" --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "get-log-events",
+        "--log-group-name",
+        logGroup,
+        "--log-stream-name",
+        stream_name,
+        "--limit",
+        String(limit),
+      ]);
       const lines = result.events.map(
         (e) => `[${new Date(e.timestamp).toISOString()}] ${e.message}`
       );
@@ -381,10 +432,16 @@ server.tool(
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const result = aws(
-        profile,
-        `logs filter-log-events --log-group-name "${logGroup}" --filter-pattern ${JSON.stringify(filter_pattern)} --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "filter-log-events",
+        "--log-group-name",
+        logGroup,
+        "--filter-pattern",
+        filter_pattern,
+        "--limit",
+        String(limit),
+      ]);
       const lines = result.events.map(
         (e) =>
           `[${new Date(e.timestamp).toISOString()}] [${e.logStreamName}] ${e.message}`
@@ -416,18 +473,31 @@ server.tool(
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const streams = aws(
-        profile,
-        `logs describe-log-streams --log-group-name "${logGroup}" --order-by LastEventTime --descending --limit 1`
-      );
+      const streams = aws(profile, [
+        "logs",
+        "describe-log-streams",
+        "--log-group-name",
+        logGroup,
+        "--order-by",
+        "LastEventTime",
+        "--descending",
+        "--limit",
+        "1",
+      ]);
       if (!streams.logStreams || streams.logStreams.length === 0) {
         return ok("No log streams found.");
       }
       const streamName = streams.logStreams[0].logStreamName;
-      const result = aws(
-        profile,
-        `logs get-log-events --log-group-name "${logGroup}" --log-stream-name "${streamName}" --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "get-log-events",
+        "--log-group-name",
+        logGroup,
+        "--log-stream-name",
+        streamName,
+        "--limit",
+        String(limit),
+      ]);
       const lines = result.events.map(
         (e) => `[${new Date(e.timestamp).toISOString()}] ${e.message}`
       );
@@ -461,11 +531,14 @@ server.tool(
     try {
       const profile = getProfile(env);
       const filters = buildInstanceFilters({ name_filter, include_terminated });
-      const filtersJson = JSON.stringify(JSON.stringify(filters));
-      const result = aws(
-        profile,
-        `ec2 describe-instances --filters ${filtersJson} --query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==\`Name\`].Value|[0],PrivateIp:PrivateIpAddress,Type:InstanceType}'`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "describe-instances",
+        "--filters",
+        JSON.stringify(filters),
+        "--query",
+        "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==`Name`].Value|[0],PrivateIp:PrivateIpAddress,Type:InstanceType}",
+      ]);
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
@@ -483,10 +556,12 @@ server.tool(
   async ({ env, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ec2 start-instances --instance-ids "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "start-instances",
+        "--instance-ids",
+        instance_id,
+      ]);
       const state = result.StartingInstances?.[0]?.CurrentState?.Name;
       return ok(`Instance ${instance_id}: ${state}`);
     } catch (e) {
@@ -505,10 +580,12 @@ server.tool(
   async ({ env, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ec2 stop-instances --instance-ids "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "stop-instances",
+        "--instance-ids",
+        instance_id,
+      ]);
       const state = result.StoppingInstances?.[0]?.CurrentState?.Name;
       return ok(`Instance ${instance_id}: ${state}`);
     } catch (e) {
@@ -527,10 +604,12 @@ server.tool(
   async ({ env, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ec2 terminate-instances --instance-ids "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "terminate-instances",
+        "--instance-ids",
+        instance_id,
+      ]);
       const state =
         result.TerminatingInstances?.[0]?.CurrentState?.Name;
       return ok(`Instance ${instance_id}: ${state}`);
@@ -557,18 +636,23 @@ server.tool(
     try {
       const profile = getProfile(env);
       const clusterName = cluster || `${env}-portal`;
-      const tasks = aws(
-        profile,
-        `ecs list-tasks --cluster "${clusterName}"`
-      );
+      const tasks = aws(profile, [
+        "ecs",
+        "list-tasks",
+        "--cluster",
+        clusterName,
+      ]);
       if (!tasks.taskArns || tasks.taskArns.length === 0) {
         return ok(`No running tasks in cluster ${clusterName}.`);
       }
-      const arns = tasks.taskArns.map((a) => `"${a}"`).join(" ");
-      const details = aws(
-        profile,
-        `ecs describe-tasks --cluster "${clusterName}" --tasks ${arns}`
-      );
+      const details = aws(profile, [
+        "ecs",
+        "describe-tasks",
+        "--cluster",
+        clusterName,
+        "--tasks",
+        ...tasks.taskArns,
+      ]);
       const summary = details.tasks.map((t) => ({
         taskId: t.taskArn.split("/").pop(),
         status: t.lastStatus,
@@ -596,10 +680,14 @@ server.tool(
     try {
       const profile = getProfile(env);
       const clusterName = cluster || `${env}-portal`;
-      const result = aws(
-        profile,
-        `ecs describe-services --cluster "${clusterName}" --services "${service}"`,
-      );
+      const result = aws(profile, [
+        "ecs",
+        "describe-services",
+        "--cluster",
+        clusterName,
+        "--services",
+        service,
+      ]);
       const svc = result.services?.[0];
       if (!svc) return ok(`Service "${service}" not found in cluster ${clusterName}.`);
       const summary = {
@@ -646,10 +734,15 @@ server.tool(
     try {
       const profile = getProfile(env);
       const clusterName = cluster || `${env}-portal`;
-      const result = aws(
-        profile,
-        `ecs update-service --cluster "${clusterName}" --service "${service}" --force-new-deployment`,
-      );
+      const result = aws(profile, [
+        "ecs",
+        "update-service",
+        "--cluster",
+        clusterName,
+        "--service",
+        service,
+        "--force-new-deployment",
+      ]);
       const svc = result.service;
       const deployment = svc.deployments?.find((d) => d.status === "PRIMARY");
       return ok(
@@ -682,7 +775,7 @@ server.tool(
   async ({ env }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(profile, `secretsmanager list-secrets`);
+      const result = aws(profile, ["secretsmanager", "list-secrets"]);
       const secrets = result.SecretList.map((s) => ({
         name: s.Name,
         lastChanged: s.LastChangedDate,
@@ -704,10 +797,12 @@ server.tool(
   async ({ env, secret_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `secretsmanager get-secret-value --secret-id "${secret_id}"`
-      );
+      const result = aws(profile, [
+        "secretsmanager",
+        "get-secret-value",
+        "--secret-id",
+        secret_id,
+      ]);
       return ok(result.SecretString || "(binary secret)");
     } catch (e) {
       return err(e);
@@ -733,10 +828,16 @@ server.tool(
       const platform = getInstancePlatform(profile, instance_id);
       const docName = getSsmDocument(platform);
       const params = JSON.stringify({ commands: [command] });
-      const result = aws(
-        profile,
-        `ssm send-command --instance-ids "${instance_id}" --document-name ${docName} --parameters '${params}'`
-      );
+      const result = aws(profile, [
+        "ssm",
+        "send-command",
+        "--instance-ids",
+        instance_id,
+        "--document-name",
+        docName,
+        "--parameters",
+        params,
+      ]);
       const cmdId = result.Command.CommandId;
       return ok(
         `Command sent (${docName}). ID: ${cmdId}\nUse ssm_get_command_output to check results.`
@@ -758,10 +859,14 @@ server.tool(
   async ({ env, command_id, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ssm get-command-invocation --command-id "${command_id}" --instance-id "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ssm",
+        "get-command-invocation",
+        "--command-id",
+        command_id,
+        "--instance-id",
+        instance_id,
+      ]);
       return ok(
         `Status: ${result.Status}\n\n--- stdout ---\n${result.StandardOutputContent}\n--- stderr ---\n${result.StandardErrorContent}`
       );
@@ -790,10 +895,21 @@ server.tool(
       }
 
       const profile = getProfile(env);
-      const instanceId = execSync(
-        `aws ec2 describe-instances --filters "Name=tag:Name,Values=${env}-portal-ec2" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region "${REGION}" --profile "${profile}"`,
-        { encoding: "utf-8", timeout: 30000 }
-      ).trim();
+      const instanceId = awsTextLib(
+        profile,
+        [
+          "ec2",
+          "describe-instances",
+          "--filters",
+          `Name=tag:Name,Values=${env}-portal-ec2`,
+          "Name=instance-state-name,Values=running",
+          "--query",
+          "Reservations[0].Instances[0].InstanceId",
+          "--output",
+          "text",
+        ],
+        { timeoutMs: 30000 }
+      );
 
       if (!instanceId || instanceId === "None") {
         return err(new Error(`Could not find running ${env} portal EC2 instance`));
@@ -903,10 +1019,12 @@ server.tool(
     try {
       const profile = getProfile(env);
       const name = asg_name || `${env}-portal-asg`;
-      const result = aws(
-        profile,
-        `autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${name}"`
-      );
+      const result = aws(profile, [
+        "autoscaling",
+        "describe-auto-scaling-groups",
+        "--auto-scaling-group-names",
+        name,
+      ]);
       const asg = result.AutoScalingGroups[0];
       if (!asg) return ok(`ASG ${name} not found.`);
       const summary = {
@@ -937,10 +1055,12 @@ server.tool(
   async ({ env, target_group_arn }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `elbv2 describe-target-health --target-group-arn "${target_group_arn}"`
-      );
+      const result = aws(profile, [
+        "elbv2",
+        "describe-target-health",
+        "--target-group-arn",
+        target_group_arn,
+      ]);
       const targets = result.TargetHealthDescriptions.map((t) => ({
         id: t.Target.Id,
         port: t.Target.Port,
@@ -1162,11 +1282,14 @@ server.tool(
         { Name: "tag:shifter:range_id", Values: ["*"] },
         { Name: "instance-state-name", Values: ["running"] },
       ];
-      const filtersJson = JSON.stringify(JSON.stringify(filters));
-      const ec2Result = aws(
-        profile,
-        `ec2 describe-instances --filters ${filtersJson} --query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==\`Name\`].Value|[0],RangeId:Tags[?Key==\`shifter:range_id\`].Value|[0]}'`
-      );
+      const ec2Result = aws(profile, [
+        "ec2",
+        "describe-instances",
+        "--filters",
+        JSON.stringify(filters),
+        "--query",
+        "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==`Name`].Value|[0],RangeId:Tags[?Key==`shifter:range_id`].Value|[0]}",
+      ]);
 
       const runningEc2s = ec2Result.filter(
         (i) => i.State === "running" && i.RangeId
@@ -1317,10 +1440,12 @@ server.tool(
       // 3. Execute: terminate EC2s and update DB
       const terminated = [];
       for (const orphan of orphans) {
-        const termResult = aws(
-          profile,
-          `ec2 terminate-instances --instance-ids "${orphan.ec2_id}"`
-        );
+        const termResult = aws(profile, [
+          "ec2",
+          "terminate-instances",
+          "--instance-ids",
+          orphan.ec2_id,
+        ]);
         const state =
           termResult.TerminatingInstances?.[0]?.CurrentState?.Name;
         terminated.push({ ec2_id: orphan.ec2_id, state });
@@ -2163,7 +2288,7 @@ server.tool(
   async ({ env, name_filter }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(profile, "s3api list-buckets");
+      const result = aws(profile, ["s3api", "list-buckets"]);
       let buckets = (result.Buckets || []).map((b) => ({
         name: b.Name,
         created: b.CreationDate,
@@ -2198,8 +2323,15 @@ server.tool(
   async ({ env, bucket, prefix, max_keys }) => {
     try {
       const profile = getProfile(env);
-      let args = `s3api list-objects-v2 --bucket "${bucket}" --max-items ${max_keys}`;
-      if (prefix) args += ` --prefix "${prefix}"`;
+      const args = [
+        "s3api",
+        "list-objects-v2",
+        "--bucket",
+        bucket,
+        "--max-items",
+        String(max_keys),
+      ];
+      if (prefix) args.push("--prefix", prefix);
       const result = aws(profile, args);
       const objects = (result.Contents || []).map((o) => ({
         key: o.Key,
@@ -2226,10 +2358,14 @@ server.tool(
     try {
       const profile = getProfile(env);
       // Check size first
-      const head = aws(
-        profile,
-        `s3api head-object --bucket "${bucket}" --key "${key}"`,
-      );
+      const head = aws(profile, [
+        "s3api",
+        "head-object",
+        "--bucket",
+        bucket,
+        "--key",
+        key,
+      ]);
       const size = head.ContentLength;
       const contentType = head.ContentType || "";
 
@@ -2264,10 +2400,12 @@ server.tool(
         );
       }
 
-      const content = awsText(
-        profile,
-        `s3 cp "s3://${bucket}/${key}" -`,
-      );
+      const content = awsText(profile, [
+        "s3",
+        "cp",
+        `s3://${bucket}/${key}`,
+        "-",
+      ]);
       return ok(content);
     } catch (e) {
       return err(e);
@@ -2310,7 +2448,12 @@ server.tool(
       if (!b || !k) {
         return err(new Error("Could not determine state bucket/key. Provide bucket and key explicitly."));
       }
-      const content = awsText(profile, `s3 cp "s3://${b}/${k}" -`);
+      const content = awsText(profile, [
+        "s3",
+        "cp",
+        `s3://${b}/${k}`,
+        "-",
+      ]);
       const state = JSON.parse(content);
       const resources = (state.resources || []).map((r) => ({
         module: r.module || "(root)",
@@ -2362,10 +2505,18 @@ server.tool(
       const start =
         start_date ||
         new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-      const result = aws(
-        profile,
-        `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity MONTHLY --metrics BlendedCost --group-by Type=DIMENSION,Key=SERVICE`,
-      );
+      const result = aws(profile, [
+        "ce",
+        "get-cost-and-usage",
+        "--time-period",
+        `Start=${start},End=${end}`,
+        "--granularity",
+        "MONTHLY",
+        "--metrics",
+        "BlendedCost",
+        "--group-by",
+        "Type=DIMENSION,Key=SERVICE",
+      ]);
       const periods = result.ResultsByTime || [];
       let total = 0;
       const services = {};
@@ -2413,10 +2564,16 @@ server.tool(
       const start = new Date(Date.now() - days * 86400000)
         .toISOString()
         .slice(0, 10);
-      const result = aws(
-        profile,
-        `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity DAILY --metrics BlendedCost`,
-      );
+      const result = aws(profile, [
+        "ce",
+        "get-cost-and-usage",
+        "--time-period",
+        `Start=${start},End=${end}`,
+        "--granularity",
+        "DAILY",
+        "--metrics",
+        "BlendedCost",
+      ]);
       const dataPoints = (result.ResultsByTime || []).map((p) => {
         const amount = Number.parseFloat(p.Total.BlendedCost.Amount);
         return {
@@ -2469,14 +2626,17 @@ server.tool(
       // Auto-detect portal instance if not provided
       let targetId = instance_id;
       if (!targetId) {
-        const instances = aws(
-          profile,
-          `ec2 describe-instances --filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text`,
-        );
-        targetId = typeof instances === "string" ? instances : awsText(
-          profile,
-          `ec2 describe-instances --filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId"`,
-        );
+        targetId = awsText(profile, [
+          "ec2",
+          "describe-instances",
+          "--filters",
+          "Name=tag:Name,Values=*portal*",
+          "Name=instance-state-name,Values=running",
+          "--query",
+          "Reservations[0].Instances[0].InstanceId",
+          "--output",
+          "text",
+        ]);
         if (!targetId || targetId === "None") {
           return err(new Error(`No running portal instance found in ${env}`));
         }
@@ -2484,10 +2644,16 @@ server.tool(
 
       const dockerCmd = `docker exec portal python manage.py ${command}`;
       const params = JSON.stringify({ commands: [dockerCmd] });
-      const result = aws(
-        profile,
-        `ssm send-command --instance-ids "${targetId}" --document-name AWS-RunShellScript --parameters '${params}'`,
-      );
+      const result = aws(profile, [
+        "ssm",
+        "send-command",
+        "--instance-ids",
+        targetId,
+        "--document-name",
+        "AWS-RunShellScript",
+        "--parameters",
+        params,
+      ]);
       const cmdId = result.Command.CommandId;
       return ok(
         `Command sent: manage.py ${command}\nInstance: ${targetId}\nCommand ID: ${cmdId}\nUse ssm_get_command_output to check results.`,

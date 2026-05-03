@@ -68,35 +68,45 @@ class TestOperatingSystem:
         os = OperatingSystem(slug="test", name="Test OS", extensions=[".test"])
         assert str(os) == "Test OS"
 
-    @patch.object(OperatingSystem.objects, "all")
-    def test_get_for_extension_finds_match(self, mock_all, windows_os):
+    # ``get_for_extension`` now delegates to
+    # ``OperatingSystemQuerySet.for_extension``; patch that method directly
+    # so the dispatch works through the new queryset entry point. The
+    # iteration / normalisation logic itself is covered by
+    # ``tests/cms/test_models_operating_system.py``.
+
+    @patch.object(OperatingSystem.objects, "for_extension")
+    def test_get_for_extension_finds_match(self, mock_for_extension, windows_os):
         """get_for_extension returns OS when extension matches."""
-        mock_all.return_value = [windows_os]
+        mock_for_extension.return_value = windows_os
         result = OperatingSystem.get_for_extension(".msi")
         assert result == windows_os
+        mock_for_extension.assert_called_once_with(".msi")
 
-    @patch.object(OperatingSystem.objects, "all")
-    def test_get_for_extension_case_insensitive(self, mock_all, windows_os):
-        """get_for_extension is case insensitive."""
-        mock_all.return_value = [windows_os]
+    @patch.object(OperatingSystem.objects, "for_extension")
+    def test_get_for_extension_case_insensitive(self, mock_for_extension, windows_os):
+        """get_for_extension forwards extension as-is to the queryset method."""
+        mock_for_extension.return_value = windows_os
         result = OperatingSystem.get_for_extension(".MSI")
         assert result is not None
         assert result.slug == "windows"
+        mock_for_extension.assert_called_once_with(".MSI")
 
-    @patch.object(OperatingSystem.objects, "all")
-    def test_get_for_extension_adds_dot_if_missing(self, mock_all, windows_os):
-        """get_for_extension adds leading dot if missing."""
-        mock_all.return_value = [windows_os]
+    @patch.object(OperatingSystem.objects, "for_extension")
+    def test_get_for_extension_adds_dot_if_missing(self, mock_for_extension, windows_os):
+        """get_for_extension forwards the raw input; queryset normalises it."""
+        mock_for_extension.return_value = windows_os
         result = OperatingSystem.get_for_extension("msi")
         assert result is not None
         assert result.slug == "windows"
+        mock_for_extension.assert_called_once_with("msi")
 
-    @patch.object(OperatingSystem.objects, "all")
-    def test_get_for_extension_returns_none_for_unknown(self, mock_all, windows_os):
-        """get_for_extension returns None for unknown extensions."""
-        mock_all.return_value = [windows_os]
+    @patch.object(OperatingSystem.objects, "for_extension")
+    def test_get_for_extension_returns_none_for_unknown(self, mock_for_extension, windows_os):
+        """get_for_extension returns whatever the queryset method returns (None for unknown)."""
+        mock_for_extension.return_value = None
         result = OperatingSystem.get_for_extension(".xyz")
         assert result is None
+        mock_for_extension.assert_called_once_with(".xyz")
 
 
 # ---------------------------------------------------------------------------

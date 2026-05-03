@@ -79,16 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RiskViewSet.restore` now bypasses the active-only `get_object()` and
   looks up via `Risk.all_objects` directly so deleted risks are
   reachable for restore.
-- **Reverse-FK relations stay unfiltered** by setting
-  `Meta.default_manager_name = "all_objects"` (in addition to
-  `base_manager_name`) on every soft-delete-aware concrete model and
-  abstract base. Reverse-relation managers in Django are built from
-  `_default_manager`, not `_base_manager`, so without this `parent.children.all()`
-  silently dropped soft-deleted descendants — surfacing as missing rows
-  in cascade and audit walks. The two-name canonical pair makes both
-  `Model.objects.X` (active-only, via the named `objects` manager) and
-  `parent.children.all()` / Django internals (unfiltered, via
-  `_default_manager`) do the right thing.
+- **Reverse-FK traversal is intentionally active-only.** The split
+  between `_default_manager` (active) and `_base_manager` (unfiltered) is
+  load-bearing: every implicit Django integration (`get_object_or_404`,
+  ModelForm, admin, DRF serializers, generic CBVs) reaches for
+  `_default_manager` and must default to active to keep the soft-delete
+  bypass closed. Reverse-FK access (`parent.children.all()`) goes
+  through the same `_default_manager`, so it is also active-only by
+  design. Cascade delete and migration introspection use
+  `_base_manager`, which `Meta.base_manager_name = "all_objects"` points
+  at the unfiltered manager — so cascades still walk soft-deleted
+  descendants and integrity stays correct. Audit / restore / admin code
+  that needs to walk reverse relations *including* deleted rows must
+  use the explicit `Child.all_objects.filter(parent=parent)` pattern.
+  The verbosity is the contract: it makes the intent grep-able.
 - **DB-backed integration tests** in
   `tests/integration/cms/test_soft_delete_manager.py` pin the canonical
   semantics: `Model.objects` excludes deleted rows even via explicit

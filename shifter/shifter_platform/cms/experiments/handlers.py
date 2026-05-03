@@ -10,8 +10,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from cms.experiments.models import Experiment, ExperimentRun
 from cms.experiments.orchestrator import ExperimentOrchestrator
 from shared.messages.envelope import parse_sns_message
+
+_TERMINAL_EXPERIMENT_STATUSES = ("completed", "failed")
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,36 @@ def _broadcast_run_status(
         )
     except Exception:
         logger.warning("_broadcast_run_status: channel layer unavailable", exc_info=True)
+
+
+def _broadcast_run_status_for(
+    experiment_id: int,
+    run_id: int,
+    error_message: str = "",
+) -> None:
+    """Look up the run and broadcast its current status. No-op if the row is gone."""
+    try:
+        run = ExperimentRun.objects.get(pk=run_id)
+    except ExperimentRun.DoesNotExist:
+        return
+    _broadcast_run_status(
+        experiment_id,
+        run_id,
+        run.run_number,
+        run.status,
+        error_message=error_message,
+    )
+
+
+def _broadcast_experiment_status_if_terminal(experiment_id: int) -> None:
+    """Broadcast experiment status only when it has reached a terminal state.
+    No-op if the row is gone or the experiment is still running."""
+    try:
+        exp = Experiment.objects.get(pk=experiment_id)
+    except Experiment.DoesNotExist:
+        return
+    if exp.status in _TERMINAL_EXPERIMENT_STATUSES:
+        _broadcast_experiment_status(experiment_id, exp.status)
 
 
 def _broadcast_experiment_status(experiment_id: int, status: str) -> None:
@@ -165,14 +198,7 @@ def _handle_range_provisioned(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(ids["experiment_id"])
     orchestrator.handle_range_provisioned(ids["run_id"], provisioned_instances)
 
-    # Broadcast updated run status
-    from cms.experiments.models import ExperimentRun
-
-    try:
-        run = ExperimentRun.objects.get(pk=ids["run_id"])
-        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
-    except ExperimentRun.DoesNotExist:
-        pass
+    _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
 def _handle_victim_scripts_completed(event: dict) -> None:
@@ -184,13 +210,7 @@ def _handle_victim_scripts_completed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(ids["experiment_id"])
     orchestrator.handle_victim_scripts_completed(ids["run_id"])
 
-    from cms.experiments.models import ExperimentRun
-
-    try:
-        run = ExperimentRun.objects.get(pk=ids["run_id"])
-        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
-    except ExperimentRun.DoesNotExist:
-        pass
+    _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
 def _handle_attacker_scripts_completed(event: dict) -> None:
@@ -202,13 +222,7 @@ def _handle_attacker_scripts_completed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(ids["experiment_id"])
     orchestrator.handle_attacker_scripts_completed(ids["run_id"])
 
-    from cms.experiments.models import ExperimentRun
-
-    try:
-        run = ExperimentRun.objects.get(pk=ids["run_id"])
-        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
-    except ExperimentRun.DoesNotExist:
-        pass
+    _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
 
 
 def _handle_artifacts_collected(event: dict) -> None:
@@ -220,21 +234,8 @@ def _handle_artifacts_collected(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(ids["experiment_id"])
     orchestrator.handle_artifacts_collected(ids["run_id"])
 
-    from cms.experiments.models import Experiment, ExperimentRun
-
-    try:
-        run = ExperimentRun.objects.get(pk=ids["run_id"])
-        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status)
-    except ExperimentRun.DoesNotExist:
-        pass
-
-    # Check if experiment completed and broadcast
-    try:
-        exp = Experiment.objects.get(pk=ids["experiment_id"])
-        if exp.status in ("completed", "failed"):
-            _broadcast_experiment_status(ids["experiment_id"], exp.status)
-    except Experiment.DoesNotExist:
-        pass
+    _broadcast_run_status_for(ids["experiment_id"], ids["run_id"])
+    _broadcast_experiment_status_if_terminal(ids["experiment_id"])
 
 
 def _handle_run_failed(event: dict) -> None:
@@ -248,21 +249,8 @@ def _handle_run_failed(event: dict) -> None:
     orchestrator = ExperimentOrchestrator(ids["experiment_id"])
     orchestrator.handle_run_failed(ids["run_id"], error_message)
 
-    from cms.experiments.models import Experiment, ExperimentRun
-
-    try:
-        run = ExperimentRun.objects.get(pk=ids["run_id"])
-        _broadcast_run_status(ids["experiment_id"], ids["run_id"], run.run_number, run.status, error_message)
-    except ExperimentRun.DoesNotExist:
-        pass
-
-    # Check if experiment completed and broadcast
-    try:
-        exp = Experiment.objects.get(pk=ids["experiment_id"])
-        if exp.status in ("completed", "failed"):
-            _broadcast_experiment_status(ids["experiment_id"], exp.status)
-    except Experiment.DoesNotExist:
-        pass
+    _broadcast_run_status_for(ids["experiment_id"], ids["run_id"], error_message=error_message)
+    _broadcast_experiment_status_if_terminal(ids["experiment_id"])
 
 
 # ---------------------------------------------------------------------------

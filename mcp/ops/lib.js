@@ -278,14 +278,16 @@ export function awsExec(profile, args, options = {}) {
 
 /**
  * Run `aws` with `--output json` appended and parse the result.
- * Append after the caller's flags so it overrides any user-supplied
- * `--output` (matches the prior shell-string behavior of `aws()`).
+ * `--output json` is the LAST flag in the final argv so it always
+ * overrides any `--output` flag the caller supplied via either `args`
+ * or `options.extraFlags` (matches the prior shell-string behavior of
+ * `aws()`, where `--output json` was tacked on at the end).
  */
 export function awsJson(profile, args, options = {}) {
   const extraFlags = [
+    ...(options.extraFlags || []),
     "--output",
     "json",
-    ...(options.extraFlags || []),
   ];
   const stdout = awsExec(profile, args, { ...options, extraFlags });
   return JSON.parse(stdout);

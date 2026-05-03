@@ -22,7 +22,17 @@ import {
   validateManageCommand,
   awsJson,
   awsText as awsTextLib,
+  buildAwsArgv,
 } from "./lib.js";
+
+// Spawn a long-running aws-cli process (e.g. an SSM port-forward that
+// must stay open). Uses the same argv-array discipline as the
+// shared aws()/awsText() helpers so tunnel call sites cannot
+// accidentally re-introduce shell-string interpolation.
+function spawnAws(profile, args, options = {}) {
+  const argv = buildAwsArgv(args, profile, REGION);
+  return spawn("aws", argv, options);
+}
 
 const { Pool } = pg;
 
@@ -53,6 +63,10 @@ function awsText(profile, args) {
 }
 
 function getInstancePlatform(profile, instanceId) {
+  // `--output text` so the scalar query result is returned as the raw
+  // string (`Linux/UNIX`, `Windows`) rather than JSON-quoted
+  // (`"Linux/UNIX"`). Without this getSsmDocument() never matches
+  // "windows" because the value starts with a `"` instead of `w`.
   return awsText(profile, [
     "ec2",
     "describe-instances",
@@ -60,6 +74,8 @@ function getInstancePlatform(profile, instanceId) {
     instanceId,
     "--query",
     "Reservations[0].Instances[0].PlatformDetails",
+    "--output",
+    "text",
   ]);
 }
 
@@ -182,8 +198,8 @@ async function ensureTunnel(env) {
     throw new Error(`Could not find RDS endpoint for ${env}`);
   }
 
-  const proc = spawn(
-    "aws",
+  const proc = spawnAws(
+    profile,
     [
       "ssm",
       "start-session",
@@ -197,10 +213,6 @@ async function ensureTunnel(env) {
         portNumber: ["5432"],
         localPortNumber: [String(port)],
       }),
-      "--region",
-      REGION,
-      "--profile",
-      profile,
     ],
     { stdio: ["ignore", "pipe", "pipe"] }
   );
@@ -915,14 +927,24 @@ server.tool(
         return err(new Error(`Could not find running ${env} portal EC2 instance`));
       }
 
-      const tunnelProc = spawn("aws", [
-        "ssm", "start-session",
-        "--target", instanceId,
-        "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
-        "--parameters", JSON.stringify({ host: ["localhost"], portNumber: ["8000"], localPortNumber: [local_port.toString()] }),
-        "--profile", profile,
-        "--region", REGION,
-      ], { stdio: ["ignore", "pipe", "pipe"] });
+      const tunnelProc = spawnAws(
+        profile,
+        [
+          "ssm",
+          "start-session",
+          "--target",
+          instanceId,
+          "--document-name",
+          "AWS-StartPortForwardingSessionToRemoteHost",
+          "--parameters",
+          JSON.stringify({
+            host: ["localhost"],
+            portNumber: ["8000"],
+            localPortNumber: [local_port.toString()],
+          }),
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] }
+      );
 
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {

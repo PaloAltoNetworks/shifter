@@ -97,7 +97,7 @@
         </thead>
         <tbody>
             {% for exp in experiments %}
-            <tr onclick="window.location='{% url 'experiments:experiment_detail' exp.pk %}'">
+            <tr tabindex="0" role="button" onclick="window.location='{% url 'experiments:experiment_detail' exp.pk %}'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.location='{% url 'experiments:experiment_detail' exp.pk %}';}">
                 <td>{{ exp.name }}</td>
                 <td>{{ exp.scenario_id }}</td>
                 <td><span class="status-badge status-badge-{{ exp.status }}">{{ exp.status }}</span></td>

@@ -28,6 +28,7 @@ get_instance_id() {
         --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
         --query 'Reservations[0].Instances[0].InstanceId' \
         --output text 2>/dev/null
+        return 0
 }
 
 # Get instance state
@@ -39,6 +40,7 @@ get_instance_state() {
         --instance-ids "$instance_id" \
         --query 'Reservations[0].Instances[0].State.Name' \
         --output text 2>/dev/null
+        return 0
 }
 
 # Get public IP
@@ -50,19 +52,20 @@ get_public_ip() {
         --instance-ids "$instance_id" \
         --query 'Reservations[0].Instances[0].PublicIpAddress' \
         --output text 2>/dev/null
+        return 0
 }
 
 case "${1:-status}" in
     start)
         instance_id=$(get_instance_id)
-        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+        if [[ "$instance_id" = "None" ]] || [[ -z "$instance_id" ]]; then
             echo "Dev box not found. Deploy it first with:"
             echo "  cd platform/terraform/global/dev-box && terraform apply"
             exit 1
         fi
 
         state=$(get_instance_state "$instance_id")
-        if [ "$state" = "running" ]; then
+        if [[ "$state" = "running" ]]; then
             echo "Dev box is already running"
         else
             echo "Starting dev box..."
@@ -84,7 +87,7 @@ case "${1:-status}" in
 
     stop)
         instance_id=$(get_instance_id)
-        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+        if [[ "$instance_id" = "None" ]] || [[ -z "$instance_id" ]]; then
             echo "Dev box not found"
             exit 1
         fi
@@ -99,7 +102,7 @@ case "${1:-status}" in
 
     status)
         instance_id=$(get_instance_id)
-        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+        if [[ "$instance_id" = "None" ]] || [[ -z "$instance_id" ]]; then
             echo "Dev box not found. Deploy it first with:"
             echo "  cd platform/terraform/global/dev-box && terraform apply"
             exit 1
@@ -112,10 +115,10 @@ case "${1:-status}" in
         echo "=============="
         echo "Instance ID: $instance_id"
         echo "State:       $state"
-        [ "$public_ip" != "None" ] && echo "Public IP:   $public_ip"
+        [[ "$public_ip" != "None" ]] && echo "Public IP:   $public_ip"
         echo ""
 
-        if [ "$state" = "running" ]; then
+        if [[ "$state" = "running" ]]; then
             echo "Commands:"
             echo "  ./scripts/dev-box.sh connect  - Open Fleet Manager RDP"
             echo "  ./scripts/dev-box.sh ssh      - CLI session"
@@ -127,13 +130,13 @@ case "${1:-status}" in
 
     connect)
         instance_id=$(get_instance_id)
-        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+        if [[ "$instance_id" = "None" ]] || [[ -z "$instance_id" ]]; then
             echo "Dev box not found"
             exit 1
         fi
 
         state=$(get_instance_state "$instance_id")
-        if [ "$state" != "running" ]; then
+        if [[ "$state" != "running" ]]; then
             echo "Dev box is not running. Start it first:"
             echo "  ./scripts/dev-box.sh start"
             exit 1
@@ -157,13 +160,13 @@ case "${1:-status}" in
 
     ssh)
         instance_id=$(get_instance_id)
-        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+        if [[ "$instance_id" = "None" ]] || [[ -z "$instance_id" ]]; then
             echo "Dev box not found"
             exit 1
         fi
 
         state=$(get_instance_state "$instance_id")
-        if [ "$state" != "running" ]; then
+        if [[ "$state" != "running" ]]; then
             echo "Dev box is not running. Start it first:"
             echo "  ./scripts/dev-box.sh start"
             exit 1
@@ -178,13 +181,13 @@ case "${1:-status}" in
 
     tunnel)
         instance_id=$(get_instance_id)
-        if [ "$instance_id" = "None" ] || [ -z "$instance_id" ]; then
+        if [[ "$instance_id" = "None" ]] || [[ -z "$instance_id" ]]; then
             echo "Dev box not found"
             exit 1
         fi
 
         state=$(get_instance_state "$instance_id")
-        if [ "$state" != "running" ]; then
+        if [[ "$state" != "running" ]]; then
             echo "Dev box is not running. Start it first:"
             echo "  ./scripts/dev-box.sh start"
             exit 1

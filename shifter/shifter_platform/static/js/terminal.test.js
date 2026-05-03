@@ -79,9 +79,9 @@ describe('TerminalManager', () => {
             onclose: null,
             onerror: null,
         };
-        global.WebSocket = jest.fn(() => mockWebSocket);
-        global.WebSocket.OPEN = 1;
-        global.WebSocket.CONNECTING = 0;
+        globalThis.WebSocket = jest.fn(() => mockWebSocket);
+        globalThis.WebSocket.OPEN = 1;
+        globalThis.WebSocket.CONNECTING = 0;
 
         // Mock xterm.js Terminal
         mockFitAddon = {
@@ -100,12 +100,12 @@ describe('TerminalManager', () => {
             rows: 24,
         };
 
-        global.Terminal = jest.fn(() => mockTerminal);
-        global.FitAddon = { FitAddon: jest.fn(() => mockFitAddon) };
-        global.WebLinksAddon = { WebLinksAddon: jest.fn(() => ({})) };
-        global.Split = jest.fn(() => ({ destroy: jest.fn() }));
+        globalThis.Terminal = jest.fn(() => mockTerminal);
+        globalThis.FitAddon = { FitAddon: jest.fn(() => mockFitAddon) };
+        globalThis.WebLinksAddon = { WebLinksAddon: jest.fn(() => ({})) };
+        globalThis.Split = jest.fn(() => ({ destroy: jest.fn() }));
 
-        manager = new window.TerminalManager({
+        manager = new globalThis.TerminalManager({
             instances: instances,
             connectionUrls: connectionUrls,
             wsProtocol: 'ws:',
@@ -245,15 +245,15 @@ describe('TerminalManager', () => {
             manager.activateTerminal('victim-uuid');
 
             expect(manager.connectedUuids.has('victim-uuid')).toBe(true);
-            expect(global.WebSocket).toHaveBeenCalled();
+            expect(globalThis.WebSocket).toHaveBeenCalled();
         });
 
         test('connects WebSocket for DC instances (SSH supported)', () => {
-            const callCountBefore = global.WebSocket.mock.calls.length;
+            const callCountBefore = globalThis.WebSocket.mock.calls.length;
             manager.activateTerminal('dc-uuid');
 
             // Should have made WebSocket call for DC
-            expect(global.WebSocket.mock.calls.length).toBe(callCountBefore + 1);
+            expect(globalThis.WebSocket.mock.calls.length).toBe(callCountBefore + 1);
             expect(manager.connectedUuids.has('dc-uuid')).toBe(true);
         });
     });
@@ -494,19 +494,19 @@ describe('TerminalManager', () => {
 
         test('does not reconnect if already connected', () => {
             manager.connectedUuids.add('victim-uuid');
-            const callCount = global.WebSocket.mock.calls.length;
+            const callCount = globalThis.WebSocket.mock.calls.length;
 
             manager.connectIfNeeded('victim-uuid');
 
-            expect(global.WebSocket.mock.calls.length).toBe(callCount);
+            expect(globalThis.WebSocket.mock.calls.length).toBe(callCount);
         });
 
         test('connects DC instances (SSH supported)', () => {
-            const callCount = global.WebSocket.mock.calls.length;
+            const callCount = globalThis.WebSocket.mock.calls.length;
 
             manager.connectIfNeeded('dc-uuid');
 
-            expect(global.WebSocket.mock.calls.length).toBe(callCount + 1);
+            expect(globalThis.WebSocket.mock.calls.length).toBe(callCount + 1);
             expect(manager.connectedUuids.has('dc-uuid')).toBe(true);
         });
 

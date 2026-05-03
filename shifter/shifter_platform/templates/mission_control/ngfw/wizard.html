@@ -278,8 +278,8 @@ document.addEventListener('DOMContentLoaded', function() {
     wizard.init();
 
     // Debug helpers - call from console: debugShowSuccess() or debugGoToStep(4)
-    window.debugShowSuccess = function() { wizard.debugShowSuccess(); };
-    window.debugGoToStep = function(step) { wizard.debugGoToStep(step); };
+    globalThis.debugShowSuccess = function() { wizard.debugShowSuccess(); };
+    globalThis.debugGoToStep = function(step) { wizard.debugGoToStep(step); };
 });
 </script>
 {% endblock %}

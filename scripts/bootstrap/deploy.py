@@ -3183,10 +3183,9 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
     # Generate UUID for uniqueness
     uid = str(uuid.uuid4())
     bucket_name = f"{config.bucket_prefix}-{uid}"
-    table_name = f"{config.table_prefix}-{uid}"
 
     info(f"S3 Bucket: {bucket_name}")
-    info(f"DynamoDB Table: {table_name}")
+    info("State locking: S3 native (use_lockfile = true) — no DynamoDB needed")
     info(f"IAM Role: {config.role_name}")
 
     if not dry_run and not confirm("Create these resources?"):
@@ -3194,7 +3193,7 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         sys.exit(0)
 
     # Step 1: S3 Bucket
-    header("Step 1/4: Creating S3 Bucket")
+    header("Step 1/3: Creating S3 Bucket")
 
     if not dry_run and s3_bucket_exists(bucket_name, profile):
         warn(f"S3 bucket '{bucket_name}' already exists")
@@ -3207,22 +3206,8 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
 
     success("S3 bucket ready")
 
-    # Step 2: DynamoDB Table
-    header("Step 2/4: Creating DynamoDB Table")
-
-    if not dry_run and dynamodb_table_exists(table_name, config.region, profile):
-        warn(f"DynamoDB table '{table_name}' already exists")
-        if not confirm("Continue using existing table?"):
-            error("Cannot continue without DynamoDB table for Terraform state locking")
-            sys.exit(1)
-        info("Using existing table")
-    else:
-        create_dynamodb_table(table_name, config.region, profile, dry_run)
-
-    success("DynamoDB table ready")
-
-    # Step 3: Bootstrap IAM Role (temporary - will be replaced by Terraform)
-    header("Step 3/4: Creating Bootstrap IAM Role")
+    # Step 2: Bootstrap IAM Role (temporary - will be replaced by Terraform)
+    header("Step 2/3: Creating Bootstrap IAM Role")
 
     # Construct OIDC ARN - the provider will be created by Terraform, but the ARN format is deterministic
     # Format: arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com
@@ -3289,8 +3274,8 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
 
     success("Bootstrap IAM role created with AdministratorAccess")
 
-    # Step 4: Run Terraform to create OIDC provider and production IAM role
-    header("Step 4/4: Creating OIDC Provider and IAM Role via Terraform")
+    # Step 3: Run Terraform to create OIDC provider and production IAM role
+    header("Step 3/3: Creating OIDC Provider and IAM Role via Terraform")
 
     info("Running Terraform to create properly scoped IAM policies...")
     info("The production role will be: " + config.role_name)
@@ -3302,13 +3287,13 @@ def bootstrap_account(config: BootstrapConfig, profile: str, dry_run: bool = Fal
         error(f"IAM Terraform directory not found: {iam_tf_dir}")
         sys.exit(1)
 
-    # Update the backend config file for this environment with the new bucket/table
+    # Update the backend config file for this environment with the new bucket
     backend_config_file = iam_tf_dir / f"{config.env}.s3.tfbackend"
-    backend_config_content = f"""bucket         = "{bucket_name}"
-key            = "global/iam/terraform.tfstate"
-region         = "{config.region}"
-dynamodb_table = "{table_name}"
-encrypt        = true
+    backend_config_content = f"""bucket       = "{bucket_name}"
+key          = "global/iam/terraform.tfstate"
+region       = "{config.region}"
+encrypt      = true
+use_lockfile = true
 """
     if not dry_run:
         info(f"Updating backend config: {backend_config_file}")
@@ -3406,7 +3391,6 @@ encrypt        = true
 
     return {
         "bucket_name": bucket_name,
-        "table_name": table_name,
         "role_arn": role_arn,
         "region": config.region,
         "env": config.env,
@@ -3484,75 +3468,41 @@ def walkthrough_github_secrets(bootstrap_result: dict, dry_run: bool = False) ->
 
 
 def walkthrough_backend_config(bootstrap_result: dict, dry_run: bool = False) -> None:
-    """Update backend.tf files with S3 backend configuration."""
+    """Write per-environment .s3.tfbackend files with the new bucket name.
+
+    The committed backend.tf files use the partial-backend pattern with
+    placeholder bucket/key — terraform init -backend-config=<env>.s3.tfbackend
+    supplies the real values. This step only writes/updates the .tfbackend
+    files; backend.tf is never modified.
+    """
     header("Update Terraform Backend Configuration")
 
     bucket = bootstrap_result["bucket_name"]
-    table = bootstrap_result["table_name"]
     region = bootstrap_result["region"]
     env = bootstrap_result["env"]
 
     repo_root = get_repo_root()
 
-    print("Updating backend.tf files with S3 state configuration.\n")
-    print("These files configure where Terraform stores infrastructure state.\n")
+    print("Writing .s3.tfbackend files with the new state bucket.\n")
+    print("State locking uses S3 native locking (use_lockfile = true).\n")
 
-    # Backend configurations for each component
-    # Note: Core uses shifter/{env}/, but portal/range use {env}/ (historical convention)
-    # Core needs full provider config in backend.tf; portal/range have it in main.tf
+    # Per-stack state keys mirror the pre-existing convention:
+    #   core (env root):  shifter/<env>/terraform.tfstate
+    #   portal:           <env>/portal/terraform.tfstate
+    #   range:            <env>/range/terraform.tfstate
     files_to_write = []
-
-    # Core backend.tf - needs full terraform block with provider config
-    core_path = f"platform/terraform/environments/{env}/backend.tf"
-    core_config = f'''terraform {{
-  backend "s3" {{
-    bucket         = "{bucket}"
-    key            = "shifter/{env}/terraform.tfstate"
-    region         = "{region}"
-    dynamodb_table = "{table}"
-    encrypt        = true
-  }}
-
-  required_version = ">= 1.0"
-
-  required_providers {{
-    aws = {{
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }}
-  }}
-}}
-
-provider "aws" {{
-  region = var.aws_region
-
-  default_tags {{
-    tags = {{
-      Environment = "{env}"
-      Project     = "shifter"
-      ManagedBy   = "terraform"
-    }}
-  }}
-}}
-'''
-    files_to_write.append((core_path, repo_root / core_path, core_config))
-
-    # Portal and Range backend.tf - just the backend block (provider in main.tf)
-    for component, state_key in [
-        ("portal", f"{env}/portal/terraform.tfstate"),
-        ("range", f"{env}/range/terraform.tfstate"),
+    for relative_dir, state_key in [
+        (f"platform/terraform/environments/{env}", f"shifter/{env}/terraform.tfstate"),
+        (f"platform/terraform/environments/{env}/portal", f"{env}/portal/terraform.tfstate"),
+        (f"platform/terraform/environments/{env}/range", f"{env}/range/terraform.tfstate"),
     ]:
-        filepath = f"platform/terraform/environments/{env}/{component}/backend.tf"
-        backend_config = f'''terraform {{
-  backend "s3" {{
-    bucket         = "{bucket}"
-    key            = "{state_key}"
-    region         = "{region}"
-    dynamodb_table = "{table}"
-    encrypt        = true
-  }}
-}}
-'''
+        filepath = f"{relative_dir}/{env}.s3.tfbackend"
+        backend_config = f"""bucket       = "{bucket}"
+key          = "{state_key}"
+region       = "{region}"
+encrypt      = true
+use_lockfile = true
+"""
         files_to_write.append((filepath, repo_root / filepath, backend_config))
 
     # Show what will be written
@@ -3560,10 +3510,10 @@ provider "aws" {{
         subheader(filepath)
         code_block(backend_config.strip())
         if full_path.exists():
-            warn(f"File exists (will be overwritten): {full_path}")
+            info(f"File exists (will be overwritten): {full_path}")
 
     if not dry_run:
-        choice = confirm_or_manual("Write these backend.tf files?")
+        choice = confirm_or_manual("Write these .s3.tfbackend files?")
 
         if choice == "yes":
             for filepath, full_path, backend_config in files_to_write:
@@ -3580,7 +3530,8 @@ provider "aws" {{
 
         elif choice == "manual":
             wait_for_user(
-                "Update the backend.tf files shown above manually.\nYou can copy the content directly into each file."
+                "Update the .s3.tfbackend files shown above manually.\n"
+                "You can copy the content directly into each file."
             )
             success("Backend configuration ready")
         else:
@@ -3591,12 +3542,23 @@ provider "aws" {{
     # Update terraform_remote_state bucket references in portal/main.tf
     _update_remote_state_references(env, bucket, region, dry_run)
 
-    # Update global module backend configs and hardcoded bucket references
-    _update_global_backend_configs(env, bucket, table, region, dry_run)
+    # Update global module .tfbackend files with the new bucket
+    _update_global_backend_configs(env, bucket, region, dry_run)
 
 
-def _update_global_backend_configs(env: str, bucket: str, table: str, region: str, dry_run: bool = False) -> None:
-    """Update .tfbackend files and hardcoded bucket refs under global/."""
+def _update_global_backend_configs(env: str, bucket: str, region: str, dry_run: bool = False) -> None:
+    """Update <env>.s3.tfbackend files under global/ with the new bucket name.
+
+    Only `<env>.s3.tfbackend` files are walked, so a `--env dev` run cannot
+    clobber `prod.s3.tfbackend` and vice versa. The regex is anchored to
+    the current env's bucket prefix (`shifter-infra` for prod,
+    `shifter-<env>-infra` otherwise) plus the templated REPLACE_AT_BOOTSTRAP
+    placeholder, so it never matches another env's UUID-suffixed bucket.
+
+    All inline `*.tf` backend blocks under global/ are partial (placeholder
+    bucket names that are overridden via -backend-config at init time), so
+    we no longer rewrite *.tf content here.
+    """
     repo_root = get_repo_root()
     global_dir = repo_root / "platform" / "terraform" / "global"
 
@@ -3604,24 +3566,18 @@ def _update_global_backend_configs(env: str, bucket: str, table: str, region: st
         return
 
     subheader("Update Global Module Backend Configs")
-    print("Scanning global/ for .tfbackend files and hardcoded bucket references")
-    print("that need to match the new state backend.\n")
+    print(f"Scanning global/ for {env}.s3.tfbackend files that need the new state bucket.\n")
 
     updated_files = []
 
-    # Pattern to match old shifter bucket names with UUIDs
-    bucket_pattern = re.compile(r"shifter-(?:\w+-)?infra-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
-    table_pattern = re.compile(r"shifter-(?:\w+-)?terraform-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+    # Match the templated placeholder OR an existing bucket whose prefix matches
+    # THIS env (so prod runs don't clobber dev buckets and vice versa).
+    bucket_prefix = "shifter-infra" if env == "prod" else f"shifter-{env}-infra"
+    bucket_pattern = re.compile(
+        rf"REPLACE_AT_BOOTSTRAP|{re.escape(bucket_prefix)}-[0-9a-f]{{8}}(?:-[0-9a-f]{{4}}){{3}}-[0-9a-f]{{12}}"
+    )
 
     for tf_file in sorted(global_dir.rglob(f"{env}.s3.tfbackend")):
-        content = tf_file.read_text()
-        new_content = bucket_pattern.sub(bucket, content)
-        new_content = table_pattern.sub(table, new_content)
-        if new_content != content:
-            rel_path = tf_file.relative_to(repo_root)
-            updated_files.append((tf_file, rel_path, new_content))
-
-    for tf_file in sorted(global_dir.rglob("*.tf")):
         content = tf_file.read_text()
         new_content = bucket_pattern.sub(bucket, content)
         if new_content != content:
@@ -3695,6 +3651,120 @@ def _update_remote_state_references(env: str, bucket: str, region: str, dry_run:
             warn("Skipping remote_state updates - you'll need to update them manually")
 
 
+def walkthrough_git_commit(bootstrap_result: dict, dry_run: bool = False) -> None:
+    """Commit and push the bootstrap-updated .s3.tfbackend (and any
+    terraform_remote_state) files. Scoped strictly to env-specific paths
+    so a `--env dev` run never stages prod files.
+    """
+    header("Commit and Push Bootstrap Updates")
+
+    env = bootstrap_result["env"]
+    bucket = bootstrap_result["bucket_name"]
+
+    repo_root = get_repo_root()
+
+    # Env-scoped candidate paths. The portal/main.tf is included because
+    # _update_remote_state_references may have rewritten its
+    # terraform_remote_state bucket references.
+    candidates = [
+        f"platform/terraform/global/iam/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/portal/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/range/{env}.s3.tfbackend",
+        f"platform/terraform/environments/{env}/portal/main.tf",
+    ]
+    # Pick up any other global/**/<env>.s3.tfbackend files that the
+    # _update_global_backend_configs step may have rewritten.
+    global_dir = repo_root / "platform" / "terraform" / "global"
+    if global_dir.exists():
+        for f in sorted(global_dir.rglob(f"{env}.s3.tfbackend")):
+            rel = str(f.relative_to(repo_root))
+            if rel not in candidates:
+                candidates.append(rel)
+
+    # Keep only paths that actually exist on disk.
+    existing = [p for p in candidates if (repo_root / p).exists()]
+
+    if not existing:
+        info("No bootstrap files found to commit")
+        return
+
+    # Filter to only files git sees as modified or untracked.
+    status = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "status", "--porcelain", "--", *existing],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if not status.stdout.strip():
+        info("No bootstrap changes to commit (nothing modified)")
+        return
+
+    print("Files to commit:\n")
+    print(status.stdout)
+
+    if dry_run:
+        info("[DRY-RUN] Would stage, commit, and push these files")
+        return
+
+    choice = confirm_or_manual("Commit these bootstrap files?")
+    if choice == "no":
+        warn("Skipping commit — stage and push the changes manually when ready")
+        return
+    if choice == "manual":
+        wait_for_user(
+            f"Commit the {env}.s3.tfbackend files manually:\n"
+            f"  git add {' '.join(existing)}\n"
+            f"  git commit -m 'Bootstrap {env}: fill in state bucket {bucket}'\n"
+            f"  git push origin <branch>"
+        )
+        success("Bootstrap commit ready (manual)")
+        return
+
+    commit_msg = f"Bootstrap {env}: fill in state bucket {bucket}"
+
+    add_result = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "add", "--", *existing],
+        capture_output=True,
+        text=True,
+    )
+    if add_result.returncode != 0:
+        error(f"git add failed: {add_result.stderr}")
+        sys.exit(1)
+
+    commit_result = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "commit", "-m", commit_msg],
+        capture_output=True,
+        text=True,
+    )
+    if commit_result.returncode != 0:
+        error(f"git commit failed:\n{commit_result.stdout}\n{commit_result.stderr}")
+        sys.exit(1)
+    success(f"Created commit: {commit_msg}")
+
+    branch_result = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    branch = branch_result.stdout.strip()
+
+    if confirm(f"Push to origin/{branch}?", default_yes=True):
+        push_result = subprocess.run(  # nosec B603 B607
+            ["git", "-C", str(repo_root), "push", "origin", branch],
+            capture_output=True,
+            text=True,
+        )
+        if push_result.returncode != 0:
+            error(f"git push failed:\n{push_result.stdout}\n{push_result.stderr}")
+            warn(f"Run 'git push origin {branch}' manually after fixing the issue")
+            return
+        success(f"Pushed to origin/{branch}")
+    else:
+        warn(f"Skipping push — run 'git push origin {branch}' manually when ready")
+
+
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
@@ -3736,15 +3806,18 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         os.chdir(tf_dir)
 
         try:
-            # Init with -reconfigure (backend config is in backend.tf)
-            info("Running terraform init...")
+            # Init with -reconfigure + -backend-config to fill in the partial
+            # backend (bucket/key are placeholders in backend.tf; real values
+            # come from <env>.s3.tfbackend).
+            backend_config = f"{env}.s3.tfbackend"
+            info(f"Running terraform init -backend-config={backend_config}...")
             init_result = run_cmd(
-                ["terraform", "init", "-reconfigure"],
+                ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
                 dry_run=dry_run,
             )
             if not dry_run and init_result and init_result.returncode != 0:
                 error(f"Terraform init failed for {component}")
-                error("Check that backend.tf exists and is correctly configured")
+                error(f"Check that {backend_config} exists in {tf_dir} and has the real bucket name")
                 sys.exit(1)
 
             # Plan
@@ -3971,6 +4044,9 @@ Estimated time: 30-45 minutes (mostly waiting for RDS and ACM)
     # Phase 3: Backend Configuration
     walkthrough_backend_config(bootstrap_result, dry_run=dry_run)
 
+    # Phase 3b: Commit + push the filled-in .s3.tfbackend files
+    walkthrough_git_commit(bootstrap_result, dry_run=dry_run)
+
     # Phase 4: GitHub Actions Runner Setup (optional)
     runner_result = None
     if RUNNER_AVAILABLE:
@@ -4127,6 +4203,7 @@ Examples:
         if not args.dry_run:
             walkthrough_github_secrets(result, dry_run=args.dry_run)
             walkthrough_backend_config(result, dry_run=args.dry_run)
+            walkthrough_git_commit(result, dry_run=args.dry_run)
 
     elif args.command == "terraform":
         outputs = terraform_deploy(args.env, args.profile, dry_run=args.dry_run)

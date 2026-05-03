@@ -1,9 +1,0 @@
-{
-  "target": "scada-gw.boreas.local",
-  "hmi_port": 8080,
-  "modbus_port": 502,
-  "username": "svc-scada",
-  "password": "Sc@da#2025!",
-  "flag": "FLAG{5c3e7a9f1b8d4602}",
-  "notes": "Vendor maintenance key rotated annually; current key documented in the NV-3200 maintenance manual on the IT share."
-}

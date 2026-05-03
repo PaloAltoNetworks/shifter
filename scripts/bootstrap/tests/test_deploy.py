@@ -2773,8 +2773,8 @@ class TestBootstrapAccount:
             ]
             assert len(s3_calls) > 0
 
-    def test_creates_dynamodb_table_for_state_locking(self, bootstrap_config, mock_subprocess, mock_repo_root):
-        """Function creates DynamoDB table for state locking."""
+    def test_does_not_create_dynamodb_table(self, bootstrap_config, mock_subprocess, mock_repo_root):
+        """State locking uses S3 native (use_lockfile = true), so no DynamoDB calls."""
         with (
             patch("deploy.get_aws_account_id", return_value="123456789012"),
             patch("deploy.confirm", return_value=True),
@@ -2783,13 +2783,12 @@ class TestBootstrapAccount:
         ):
             deploy.bootstrap_account(bootstrap_config, "my-profile")
 
-            # Should call aws dynamodb create-table
             dynamo_calls = [
                 c
                 for c in mock_subprocess.call_args_list
                 if len(c[0]) > 0 and len(c[0][0]) > 0 and c[0][0][0] == "aws" and "dynamodb" in " ".join(c[0][0])
             ]
-            assert len(dynamo_calls) > 0
+            assert dynamo_calls == []
 
     def test_runs_terraform_to_create_oidc_and_role(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function runs Terraform to create OIDC provider and production IAM role."""
@@ -2863,7 +2862,6 @@ class TestBootstrapAccount:
             assert isinstance(result, dict)
             assert "role_arn" in result
             assert "bucket_name" in result
-            assert "table_name" in result
 
     def test_uses_correct_github_org_and_repo_in_trust_policy(self, bootstrap_config, mock_subprocess, mock_repo_root):
         """Function includes correct GitHub org/repo in IAM trust policy."""
@@ -2932,25 +2930,6 @@ class TestBootstrapAccount:
             patch("pathlib.Path.write_text"),
         ):
             mock_run.side_effect = subprocess.CalledProcessError(returncode=1, cmd=["aws", "s3", "mb"])
-
-            with pytest.raises(SystemExit):
-                deploy.bootstrap_account(bootstrap_config, "my-profile")
-
-    def test_exits_when_dynamodb_table_creation_fails(self, bootstrap_config, mock_repo_root):
-        """Function exits when DynamoDB table creation fails."""
-        with (
-            patch("subprocess.run") as mock_run,
-            patch("deploy.get_aws_account_id", return_value="123456789012"),
-            patch("deploy.get_repo_root", return_value=mock_repo_root),
-            patch("pathlib.Path.write_text"),
-        ):
-            # Succeed for S3, fail for DynamoDB
-            def side_effect(cmd, **kwargs):
-                if "dynamodb" in cmd:
-                    raise subprocess.CalledProcessError(1, cmd)
-                return subprocess.CompletedProcess(args=cmd, returncode=0)
-
-            mock_run.side_effect = side_effect
 
             with pytest.raises(SystemExit):
                 deploy.bootstrap_account(bootstrap_config, "my-profile")
@@ -3262,11 +3241,13 @@ class TestWalkthroughBackendConfig:
         ):
             deploy.walkthrough_backend_config(bootstrap_result)
 
-            # Check that bucket and table appear in written content
+            # Bucket and region appear in the .tfbackend files. State locking
+            # is S3 native (use_lockfile = true), so no DynamoDB table name.
             all_content = "".join(written_content)
             assert "my-bucket" in all_content
-            assert "my-table" in all_content
             assert "us-west-2" in all_content
+            assert "use_lockfile = true" in all_content
+            assert "dynamodb_table" not in all_content
 
     # ---------------------------------------------------------------------
     # Error handling
@@ -3332,7 +3313,7 @@ class TestWalkthroughBackendConfig:
             # Should call wait_for_user with instructions
             assert mock_wait.called
             call_arg = mock_wait.call_args[0][0]
-            assert "backend.tf" in call_arg.lower()
+            assert ".s3.tfbackend" in call_arg.lower()
 
 
 # =============================================================================
@@ -3728,6 +3709,7 @@ class TestMainCLI:
             patch("deploy.bootstrap_account") as mock_bootstrap,
             patch("deploy.walkthrough_github_secrets"),
             patch("deploy.walkthrough_backend_config"),
+            patch("deploy.walkthrough_git_commit"),
         ):
             mock_bootstrap.return_value = {"role_arn": "test"}
 

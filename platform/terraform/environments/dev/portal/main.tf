@@ -1,9 +1,9 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -33,7 +33,7 @@ locals {
 data "terraform_remote_state" "foundation" {
   backend = "s3"
   config = {
-    bucket = "shifter-dev-infra-b7113d6f-5aec-4531-ad09-2e62b51c2a86"
+    bucket = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
     key    = "shifter/dev/terraform.tfstate"
     region = "us-east-2"
   }
@@ -46,7 +46,7 @@ data "terraform_remote_state" "foundation" {
 data "terraform_remote_state" "range" {
   backend = "s3"
   config = {
-    bucket = "shifter-dev-infra-b7113d6f-5aec-4531-ad09-2e62b51c2a86"
+    bucket = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
     key    = "dev/range/terraform.tfstate"
     region = "us-east-2"
   }

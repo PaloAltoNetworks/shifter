@@ -293,4 +293,4 @@ class XdrDropdown {
 }
 
 // Export for manual initialization
-window.XdrDropdown = XdrDropdown;
+globalThis.XdrDropdown = XdrDropdown;

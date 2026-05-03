@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             onSuccess: function(result) {
                 // Reload page to show new agent
-                window.location.reload();
+                globalThis.location.reload();
             },
 
             onError: function(message) {

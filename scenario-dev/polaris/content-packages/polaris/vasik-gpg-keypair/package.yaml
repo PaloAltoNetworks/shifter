@@ -1,0 +1,7 @@
+identity:
+  name: E. Vasik
+  email: e.vasik@boreas.local
+  comment: Boreas scenario seeded GPG keypair
+algorithm: RSA
+length: 2048
+passphrase: "{{gpg_passphrase}}"

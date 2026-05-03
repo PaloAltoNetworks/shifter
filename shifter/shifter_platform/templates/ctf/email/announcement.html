@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% if subject %}{{ subject }}{% else %}Announcement{% endif %}</title>
+</head>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
 <h2>{{ subject }}</h2>
 <p>Hi {{ participant.name }},</p>

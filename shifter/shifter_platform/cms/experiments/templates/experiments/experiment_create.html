@@ -362,7 +362,7 @@
 
             if (scriptType === 'python') {
                 const sel = row.querySelector('.script-id-select');
-                if (sel && sel.value) entry.script_id = parseInt(sel.value);
+                if (sel && sel.value) entry.script_id = Number.parseInt(sel.value);
             } else {
                 const prompt = row.querySelector('.claude-prompt');
                 if (prompt) entry.claude_prompt = prompt.value;

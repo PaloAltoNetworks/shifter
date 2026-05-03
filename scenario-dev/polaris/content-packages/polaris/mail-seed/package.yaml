@@ -1,0 +1,44 @@
+domain: boreas.local
+users:
+  - username: v.harlan
+    password_variable: boreas_domain_password
+    mailboxes:
+      - folder: INBOX
+        messages:
+          - from: "Board <board@boreas.local>"
+            to: "v.harlan@boreas.local"
+            subject: "Q4 board briefing"
+            date: "Mon, 13 Jan 2026 09:00:00 +0000"
+            body: "Briefing attached. Please review ahead of the Thursday session."
+  - username: e.vasik
+    password_variable: vasik_password
+    mailboxes:
+      - folder: INBOX
+        messages:
+          - from: "r.tanaka <r.tanaka@boreas.local>"
+            to: "e.vasik@boreas.local"
+            subject: "Project status — PROJECT LEVIATHAN"
+            date: "Tue, 14 Jan 2026 14:30:00 +0000"
+            body: "Status attached. Integration testing on track."
+            attachments:
+              - filename: project-status.pdf
+                content_type: application/pdf
+                file: attachments/project-status.pdf
+  - username: m.webb
+    password_variable: default_welcome_password
+    mailboxes:
+      - folder: INBOX
+        messages:
+          - from: "HR <hr@boreas.local>"
+            to: "m.webb@boreas.local"
+            subject: "Welcome packet"
+            body: "Your corporate credentials have been initialised."
+  - username: d.kowalski
+    password_variable: kowalski_password
+    mailboxes:
+      - folder: Sent
+        messages:
+          - from: "d.kowalski@boreas.local"
+            to: "d.kowalski@boreas.local"
+            subject: "creds backup"
+            body: "fileshare service account: svc-fileshare / placeholder-svc-fileshare-password"

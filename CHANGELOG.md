@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.95.11] - 2026-05-03
+## [3.95.15] - 2026-05-03
 
 ### Changed
 
@@ -121,97 +121,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full table. Callers wanting every row use `Model.all_objects`
   directly: single canonical entry point keeps intent unambiguous.
 
-## [3.95.0] - 2026-05-03
-
-### Fixed
-
-- **80+ Dependabot security alerts cleared** across every package manager
-  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
-  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
-  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
-  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
-  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
-  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
-  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
-  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
-  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
-  in `shifter/engine/provisioner/requirements.txt`.
+## [3.95.14] - 2026-05-03
 
 ### Changed
 
-- **Full dependency refresh on every uv- and npm-managed manifest**
-  beyond the security bumps above. `uv lock --upgrade` ran on
-  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
-  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
-  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
-  patch/minor versions of ~40 transitive packages including pydantic
-  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
-  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
-  `npm update --package-lock-only` ran on the four MCP servers
-  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
-  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
-- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
-  17 root configurations and provisioner modules. The 16 `modules/*`
-  subdirectories had already moved to aws 6.x via looser constraints;
-  this aligns the consumers (`environments/{dev,prod}`,
-  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
-  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
-  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
-- **Terraform `required_version` standardized to `>= 1.5.0`** across all
-  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
-- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
-  `_range.yml`, and `_shifter-platform.yml` — required by the
-  `use_lockfile` migration below (S3 native locking landed in 1.10).
-- **Terraform S3 backend state locking migrated from DynamoDB to S3
-  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
-  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
-  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
-  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
-  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
-  is unrelated to terraform state locking and was left intact (it
-  serves the Shifter engine application).
-- **Environment backend.tf files converted to partial-backend pattern.**
-  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
-  used to hard-code the bucket UUID inline; they now ship with
-  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
-  from `<env>.s3.tfbackend` at init time, matching the existing
-  `global/iam/` convention. Single source of truth for the bucket
-  name; backend.tf is never modified by automation.
-- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
-  `terraform init` (was bare `terraform init`). Required by the
-  partial-backend conversion above.
-- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
-  walkthrough now writes `.s3.tfbackend` files for env, portal, and
-  range (instead of overwriting `backend.tf`), emits
-  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
-  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
-  creation is gone. The unused `dynamodb_table_exists` and
-  `create_dynamodb_table` helpers are kept for now in case someone
-  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
-  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
-  templated `.tfbackend` files get filled in at bootstrap time.
-- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
-  the root `.gitignore` plus two nested `.gitignore` files in
-  `platform/terraform/global/dev-box/` and
-  `scripts/polaris-aws-range/`). All 30 lock files committed at
-  aws 6.43.0; the `temp/` tree remains intentionally excluded.
-- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
-  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
-  configs without leaving stale UUIDs in the repo. Three new
-  `dev.s3.tfbackend` files added under `environments/dev/`,
-  `environments/dev/portal/`, and `environments/dev/range/` (those
-  three previously had no `.tfbackend` and relied entirely on inline
-  config).
+- **`deploy.yml` cancels in-flight runs on new push to the same ref**
+  (`concurrency.cancel-in-progress: true`). Previous setting (`false`)
+  queued each new push behind the prior run's full duration, so a
+  rapid sequence of pushes to `dev` or `aws-dev` stacked up indefinitely
+  (saw 5 active runs after two back-to-back pushes today). Env
+  branches never go backwards, so a newer SHA always supersedes the
+  older queued one — cancelling is correct.
 
-### Removed
+## [3.95.13] - 2026-05-03
 
-- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
-  and `platform/terraform/modules/pulumi-state/` — they contained only
-  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
-  from a deleted module.
-- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
-  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
-  corresponding live infrastructure).
+### Changed
+
+- **`deploy.yml` skips Quality on env-branch pushes** to dedupe runs.
+  Pushing to `aws-dev`/`gcp-dev`/`main` previously re-ran the entire
+  Quality phase even though the same SHA had just passed Quality on
+  its `dev` push (per the repo rule: env branches never get commits
+  except via merge from `dev`). That doubled CI runner-minutes per
+  change. Quality now runs on PRs, `workflow_dispatch`, or direct
+  `dev` pushes only. Deploy jobs already tolerate
+  `needs.quality.result == 'skipped'`, so no downstream changes
+  needed.
+
+  Trust assumption: any SHA reaching an env branch must have green
+  Quality on its dev run. If you ever push directly to an env branch
+  bypassing dev, Quality won't gate it — keep the rule.
+
+## [3.95.12] - 2026-05-03
+
+### Fixed
+
+- **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
+  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  `shifter/engine/provisioner/terraform_base.py` derives the lock
+  table name from the state bucket: it stripped `-pulumi-state` and
+  replaced with `-pulumi-locks`, otherwise fell through to
+  `<bucket>-locks`. The 3.95.6 bucket-name fix added a
+  `-<account_id>` suffix, breaking the `endswith("-pulumi-state")`
+  check, so the fallback computed
+  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  (the actual table from the engine-state module is still
+  `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
+  regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
+  account-id-suffixed forms; lock table name resolves to
+  `<prefix>-pulumi-locks` either way. Added a test case for the new
+  pattern. (Commit message tagged this 3.95.11 but 3.95.11 was taken
+  by the cms refactor PR landing concurrently; bumped here for
+  correctness.)
+
+## [3.95.11] - 2026-05-03
+
+### Fixed
+
+- **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
+  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  `shifter/engine/provisioner/terraform_base.py` derives the lock table
+  name from the state bucket: it stripped `-pulumi-state` and replaced
+  with `-pulumi-locks`, otherwise fell through to `<bucket>-locks`. The
+  3.95.6 bucket-name fix added a `-<account_id>` suffix, breaking the
+  `endswith("-pulumi-state")` check, so the fallback computed
+  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  (the actual table from the engine-state module is still
+  `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
+  regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
+  account-id-suffixed forms; lock table name resolves to
+  `<prefix>-pulumi-locks` either way. Added a test case for the new
+  pattern.
 
 ## [3.95.10] - 2026-05-03
 
@@ -399,6 +378,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REPLACE_AT_BOOTSTRAP` placeholder. Also dropped the `*.tf` walker
   since every `*.tf` backend block is now partial (placeholder bucket,
   real value supplied via `-backend-config` at init).
+
+## [3.95.0] - 2026-05-03
+
+### Fixed
+
+- **80+ Dependabot security alerts cleared** across every package manager
+  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
+  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
+  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
+  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
+  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
+  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
+  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
+  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
+  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
+  in `shifter/engine/provisioner/requirements.txt`.
+
+### Changed
+
+- **Full dependency refresh on every uv- and npm-managed manifest**
+  beyond the security bumps above. `uv lock --upgrade` ran on
+  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
+  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
+  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
+  patch/minor versions of ~40 transitive packages including pydantic
+  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
+  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
+  `npm update --package-lock-only` ran on the four MCP servers
+  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
+  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
+- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
+  17 root configurations and provisioner modules. The 16 `modules/*`
+  subdirectories had already moved to aws 6.x via looser constraints;
+  this aligns the consumers (`environments/{dev,prod}`,
+  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
+  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
+  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
+- **Terraform `required_version` standardized to `>= 1.5.0`** across all
+  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
+- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
+  `_range.yml`, and `_shifter-platform.yml` — required by the
+  `use_lockfile` migration below (S3 native locking landed in 1.10).
+- **Terraform S3 backend state locking migrated from DynamoDB to S3
+  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
+  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
+  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
+  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
+  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
+  is unrelated to terraform state locking and was left intact (it
+  serves the Shifter engine application).
+- **Environment backend.tf files converted to partial-backend pattern.**
+  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
+  used to hard-code the bucket UUID inline; they now ship with
+  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
+  from `<env>.s3.tfbackend` at init time, matching the existing
+  `global/iam/` convention. Single source of truth for the bucket
+  name; backend.tf is never modified by automation.
+- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
+  `terraform init` (was bare `terraform init`). Required by the
+  partial-backend conversion above.
+- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
+  walkthrough now writes `.s3.tfbackend` files for env, portal, and
+  range (instead of overwriting `backend.tf`), emits
+  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
+  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
+  creation is gone. The unused `dynamodb_table_exists` and
+  `create_dynamodb_table` helpers are kept for now in case someone
+  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
+  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
+  templated `.tfbackend` files get filled in at bootstrap time.
+- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
+  the root `.gitignore` plus two nested `.gitignore` files in
+  `platform/terraform/global/dev-box/` and
+  `scripts/polaris-aws-range/`). All 30 lock files committed at
+  aws 6.43.0; the `temp/` tree remains intentionally excluded.
+- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
+  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
+  configs without leaving stale UUIDs in the repo. Three new
+  `dev.s3.tfbackend` files added under `environments/dev/`,
+  `environments/dev/portal/`, and `environments/dev/range/` (those
+  three previously had no `.tfbackend` and relied entirely on inline
+  config).
+
+### Removed
+
+- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
+  and `platform/terraform/modules/pulumi-state/` — they contained only
+  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
+  from a deleted module.
+- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
+  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
+  corresponding live infrastructure).
 
 ## [3.94.0] - 2026-04-14
 

@@ -1,0 +1,114 @@
+name: polaris-demo-minimal
+description: >
+  Three-container end-to-end demo exercising the aces_backend pipeline with
+  pre-built public images. Proves docker+topology-mutation mechanics without
+  needing the full Polaris build chain. Uses only images already on Docker
+  Hub so the demo works on a clean host.
+
+variables:
+  kali_splice_ip:
+    type: string
+    default: 10.77.60.100
+
+nodes:
+  shared-net:
+    type: Switch
+  splice-link:
+    type: Switch
+
+  a0-boreas-web:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: {name: "alpine", version: "3.19"}
+    resources: {ram: 256 mib, cpu: 1}
+    description: "aces-backend-command: sh -c 'while true; do sleep 30; done'"
+    services:
+      - {port: 80, name: http, role: internal}
+
+  dns-boreas:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: {name: "alpine", version: "3.19"}
+    resources: {ram: 256 mib, cpu: 1}
+    description: "stand-in for BIND. aces-backend-command: sh -c 'while true; do sleep 30; done'"
+    services:
+      - {port: 53, protocol: udp, name: dns, role: internal}
+
+  a14-kali:
+    type: VM
+    os: linux
+    os_version: Alpine 3.19
+    source: {name: "alpine", version: "3.19"}
+    resources: {ram: 256 mib, cpu: 1}
+    description: "stand-in for Kali. aces-backend-command: sh -c 'while true; do sleep 30; done'"
+    services:
+      - {port: 22, name: ssh, role: internal}
+
+infrastructure:
+  shared-net:
+    count: 1
+    properties: {cidr: 10.77.0.0/24, gateway: 10.77.0.1}
+  splice-link:
+    count: 1
+    properties: {cidr: 10.77.60.0/24, gateway: 10.77.60.1}
+  a0-boreas-web:
+    count: 1
+    links: [shared-net]
+    properties:
+      - shared-net: 10.77.0.10
+  dns-boreas:
+    count: 1
+    links: [shared-net]
+    properties:
+      - shared-net: 10.77.0.2
+  a14-kali:
+    count: 1
+    links: [shared-net]
+    properties:
+      - shared-net: 10.77.0.14
+
+conditions:
+  kali-health:
+    source: service-reachable
+  flag-demo-submitted:
+    source: scoring-gateway-flag-submitted
+
+metrics:
+  demo-flag:
+    type: conditional
+    max_score: 100
+    condition: flag-demo-submitted
+    name: Demo flag (triggers splice)
+
+evaluations:
+  demo-eval:
+    metrics: [demo-flag]
+    min_score: {percentage: 100}
+
+tlos:
+  demo-tlo:
+    evaluation: demo-eval
+    name: Demo evaluation
+
+goals:
+  demo-goal:
+    tlos: [demo-tlo]
+
+entities:
+  participant:
+    name: Demo participant
+    role: red
+
+topology_mutations:
+  open-demo-splice:
+    description: Attach Kali to the splice-link once the demo flag is earned
+    action: attach_network
+    node: a14-kali
+    network: splice-link
+    trigger:
+      metrics: [demo-flag]
+    idempotent: true
+    properties:
+      ipv4: ${kali_splice_ip}

@@ -10,9 +10,9 @@ dependencies = [
     "channels",
     "channels-redis",
     "daphne",
-    "django>=6.0.3",
+    "django>=6.0.4",
     "django-encrypted-model-fields>=0.6.5",
-    "django-health-check",
+    "django-health-check<4.0",
     "django-ses",
     "djangorestframework",
     "firebase-admin",
@@ -23,7 +23,7 @@ dependencies = [
     "psycopg[binary]",
     "pycurl>=7.45.7",
     "pydantic>=2.12.5",
-    "python-dotenv",
+    "python-dotenv>=1.2.2",
     "requests",
     "whitenoise",
 ]
@@ -32,7 +32,7 @@ dependencies = [
 dev = [
     "import-linter>=2.7.0",
     "pytest-cov>=7.0.0",
-    "pytest>=9.0.2",
+    "pytest>=9.0.3",
     "pytest-django>=4.11.1",
     "ruff>=0.14.9",
     "bandit>=1.9.2",
@@ -141,14 +141,16 @@ warn_return_any = true
 # uv - dependency constraints for transitive security fixes
 [tool.uv]
 constraint-dependencies = [
-    "cryptography>=46.0.5",
+    "cryptography>=46.0.7",
     "pyopenssl>=26.0.0",
     "pyasn1>=0.6.3",
     "ujson>=5.12.0",
-    "cbor2>=5.8.0",
+    "cbor2>=5.9.0",
     "urllib3>=2.6.3",
     "filelock>=3.20.3",
     "virtualenv>=20.36.1",
+    "pygments>=2.20.0",
+    "requests>=2.33.0",
 ]
 
 [tool.django-stubs]

@@ -105,18 +105,18 @@ describe('DirectUploader', () => {
 
     beforeEach(() => {
         // Store originals
-        originalFetch = global.fetch;
-        originalXMLHttpRequest = global.XMLHttpRequest;
+        originalFetch = globalThis.fetch;
+        originalXMLHttpRequest = globalThis.XMLHttpRequest;
         originalSendBeacon = navigator.sendBeacon;
-        originalAddEventListener = window.addEventListener;
-        originalRemoveEventListener = window.removeEventListener;
+        originalAddEventListener = globalThis.addEventListener;
+        originalRemoveEventListener = globalThis.removeEventListener;
 
-        // Setup window event handler tracking
+        // Setup globalThis event handler tracking
         windowEventHandlers = {};
-        window.addEventListener = jest.fn((event, handler) => {
+        globalThis.addEventListener = jest.fn((event, handler) => {
             windowEventHandlers[event] = handler;
         });
-        window.removeEventListener = jest.fn((event, handler) => {
+        globalThis.removeEventListener = jest.fn((event, handler) => {
             if (windowEventHandlers[event] === handler) {
                 delete windowEventHandlers[event];
             }
@@ -127,10 +127,10 @@ describe('DirectUploader', () => {
 
         // Setup XHR mock
         mockXhr = createMockXhr();
-        global.XMLHttpRequest = jest.fn(() => mockXhr);
+        globalThis.XMLHttpRequest = jest.fn(() => mockXhr);
 
         // Setup fetch mock
-        global.fetch = jest.fn();
+        globalThis.fetch = jest.fn();
 
         // Setup callbacks
         mockCallbacks = {
@@ -140,7 +140,7 @@ describe('DirectUploader', () => {
             onCancel: jest.fn(),
         };
 
-        uploader = new window.DirectUploader({
+        uploader = new globalThis.DirectUploader({
             ...defaultOptions,
             ...mockCallbacks,
         });
@@ -148,11 +148,11 @@ describe('DirectUploader', () => {
 
     afterEach(() => {
         // Restore originals
-        global.fetch = originalFetch;
-        global.XMLHttpRequest = originalXMLHttpRequest;
+        globalThis.fetch = originalFetch;
+        globalThis.XMLHttpRequest = originalXMLHttpRequest;
         navigator.sendBeacon = originalSendBeacon;
-        window.addEventListener = originalAddEventListener;
-        window.removeEventListener = originalRemoveEventListener;
+        globalThis.addEventListener = originalAddEventListener;
+        globalThis.removeEventListener = originalRemoveEventListener;
     });
 
     // =========================================================================
@@ -171,7 +171,7 @@ describe('DirectUploader', () => {
         });
 
         test('uses custom maxSizeMB when provided', () => {
-            const customUploader = new window.DirectUploader({
+            const customUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 maxSizeMB: 100,
             });
@@ -179,7 +179,7 @@ describe('DirectUploader', () => {
         });
 
         test('assigns no-op callbacks when not provided', () => {
-            const minimalUploader = new window.DirectUploader(defaultOptions);
+            const minimalUploader = new globalThis.DirectUploader(defaultOptions);
             // Should not throw when called
             expect(() => minimalUploader.onProgress(50, 'test')).not.toThrow();
             expect(() => minimalUploader.onSuccess({})).not.toThrow();
@@ -202,7 +202,7 @@ describe('DirectUploader', () => {
         test('adds beforeunload event listener', () => {
             uploader._registerBeforeUnload();
 
-            expect(window.addEventListener).toHaveBeenCalledWith(
+            expect(globalThis.addEventListener).toHaveBeenCalledWith(
                 'beforeunload',
                 expect.any(Function)
             );
@@ -262,7 +262,7 @@ describe('DirectUploader', () => {
 
             uploader._unregisterBeforeUnload();
 
-            expect(window.removeEventListener).toHaveBeenCalledWith(
+            expect(globalThis.removeEventListener).toHaveBeenCalledWith(
                 'beforeunload',
                 handler
             );
@@ -272,7 +272,7 @@ describe('DirectUploader', () => {
         test('unregister is idempotent (no-op when already unregistered)', () => {
             // Call unregister without ever registering
             expect(() => uploader._unregisterBeforeUnload()).not.toThrow();
-            expect(window.removeEventListener).not.toHaveBeenCalled();
+            expect(globalThis.removeEventListener).not.toHaveBeenCalled();
         });
     });
 
@@ -282,7 +282,7 @@ describe('DirectUploader', () => {
     describe('upload() - happy path', () => {
         const setupSuccessfulUpload = () => {
             // Mock initiate response
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -360,7 +360,7 @@ describe('DirectUploader', () => {
             const uploadPromise = uploader.upload(file, 'Test Agent');
 
             // Should have registered
-            expect(window.addEventListener).toHaveBeenCalledWith(
+            expect(globalThis.addEventListener).toHaveBeenCalledWith(
                 'beforeunload',
                 expect.any(Function)
             );
@@ -370,7 +370,7 @@ describe('DirectUploader', () => {
             await uploadPromise;
 
             // Should have unregistered
-            expect(window.removeEventListener).toHaveBeenCalled();
+            expect(globalThis.removeEventListener).toHaveBeenCalled();
         });
     });
 
@@ -380,7 +380,7 @@ describe('DirectUploader', () => {
     describe('upload() - failure modes', () => {
         test('file too large: calls onError with exact size message, does NOT call initiate', async () => {
             const maxSizeMB = 100;
-            const customUploader = new window.DirectUploader({
+            const customUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...mockCallbacks,
                 maxSizeMB,
@@ -394,11 +394,11 @@ describe('DirectUploader', () => {
             expect(mockCallbacks.onError).toHaveBeenCalledWith(
                 'File size (150.0 MB) exceeds maximum (100 MB)'
             );
-            expect(global.fetch).not.toHaveBeenCalled();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
         });
 
         test('initiate fails (HTTP error): calls onError, calls _cancelUpload', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(400, { error: 'Invalid file type' })
             );
 
@@ -408,7 +408,7 @@ describe('DirectUploader', () => {
         });
 
         test('initiate fails (network error): calls onError', async () => {
-            global.fetch.mockImplementationOnce(() => mockFetchNetworkError());
+            globalThis.fetch.mockImplementationOnce(() => mockFetchNetworkError());
 
             await uploader.upload(createMockFile(), 'Test Agent');
 
@@ -416,7 +416,7 @@ describe('DirectUploader', () => {
         });
 
         test('S3 upload fails (non-2xx): calls onError', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -438,7 +438,7 @@ describe('DirectUploader', () => {
         });
 
         test('S3 upload fails (network error): calls onError', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -460,7 +460,7 @@ describe('DirectUploader', () => {
         });
 
         test('complete fails: calls onError', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -483,7 +483,7 @@ describe('DirectUploader', () => {
         });
 
         test('error with custom message from server: uses server-provided error message', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(400, { error: 'Custom server error message' })
             );
 
@@ -495,7 +495,7 @@ describe('DirectUploader', () => {
         });
 
         test('error without message: uses default fallback message', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(400, {}) // No error field
             );
 
@@ -505,7 +505,7 @@ describe('DirectUploader', () => {
         });
 
         test('handles malformed JSON response from server', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 Promise.resolve({
                     ok: true,
                     json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
@@ -519,7 +519,7 @@ describe('DirectUploader', () => {
         });
 
         test('handles missing presigned_url in initiate response', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'token-abc',
                     // presigned_url is missing!
@@ -541,7 +541,7 @@ describe('DirectUploader', () => {
         });
 
         test('handles missing upload_token in initiate response', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         presigned_url: 'https://s3.example.com/upload',
@@ -570,7 +570,7 @@ describe('DirectUploader', () => {
     describe('upload() - edge cases and boundaries', () => {
         test('file exactly at size limit is allowed', async () => {
             const maxSizeMB = 100;
-            const customUploader = new window.DirectUploader({
+            const customUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...mockCallbacks,
                 maxSizeMB,
@@ -579,7 +579,7 @@ describe('DirectUploader', () => {
             // Exactly 100 MB (at the limit, not over)
             const exactLimitFile = createMockFile(100 * 1024 * 1024);
 
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'token-abc',
                     presigned_url: 'https://s3.example.com/upload',
@@ -591,13 +591,13 @@ describe('DirectUploader', () => {
             await new Promise((resolve) => setTimeout(resolve, 0));
 
             // Should have called fetch (not rejected due to size)
-            expect(global.fetch).toHaveBeenCalled();
+            expect(globalThis.fetch).toHaveBeenCalled();
             expect(mockCallbacks.onError).not.toHaveBeenCalled();
         });
 
         test('file one byte over limit is rejected', async () => {
             const maxSizeMB = 100;
-            const customUploader = new window.DirectUploader({
+            const customUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...mockCallbacks,
                 maxSizeMB,
@@ -608,14 +608,14 @@ describe('DirectUploader', () => {
 
             await customUploader.upload(overLimitFile, 'Test Agent');
 
-            expect(global.fetch).not.toHaveBeenCalled();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
             expect(mockCallbacks.onError).toHaveBeenCalled();
         });
 
         test('zero-byte file is handled correctly', async () => {
             const zeroByteFile = createMockFile(0, 'empty.exe');
 
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -641,7 +641,7 @@ describe('DirectUploader', () => {
         test('very large file (2GB) progress calculation does not overflow', async () => {
             const twoGBFile = createMockFile(2 * 1024 * 1024 * 1024); // 2 GB
 
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'token-abc',
                     presigned_url: 'https://s3.example.com/upload',
@@ -680,12 +680,12 @@ describe('DirectUploader', () => {
                 }),
             };
 
-            const throwingUploader = new window.DirectUploader({
+            const throwingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...throwingCallbacks,
             });
 
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(500, { error: 'Server error' })
             );
 
@@ -710,12 +710,12 @@ describe('DirectUploader', () => {
                 onCancel: jest.fn(),
             };
 
-            const throwingUploader = new window.DirectUploader({
+            const throwingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...throwingCallbacks,
             });
 
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -756,12 +756,12 @@ describe('DirectUploader', () => {
                 }),
             };
 
-            const throwingUploader = new window.DirectUploader({
+            const throwingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...throwingCallbacks,
             });
 
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -796,7 +796,7 @@ describe('DirectUploader', () => {
     describe('upload() - cancellation', () => {
         test('cancelled before initiate completes: early return, no S3 call', async () => {
             let resolveInitiate;
-            global.fetch.mockImplementationOnce(
+            globalThis.fetch.mockImplementationOnce(
                 () =>
                     new Promise((resolve) => {
                         resolveInitiate = resolve;
@@ -825,7 +825,7 @@ describe('DirectUploader', () => {
         });
 
         test('cancelled during S3 upload: early return, no complete call', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -850,16 +850,16 @@ describe('DirectUploader', () => {
             await uploadPromise;
 
             // Should have 2 fetches: initiate + cancel (NOT complete)
-            expect(global.fetch).toHaveBeenCalledTimes(2);
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
             // Verify that the second call was to cancel, not complete
-            expect(global.fetch).toHaveBeenLastCalledWith(
+            expect(globalThis.fetch).toHaveBeenLastCalledWith(
                 '/api/upload/cancel/',
                 expect.any(Object)
             );
         });
 
         test('does NOT call onError when cancelled (error suppressed)', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'token-abc',
                     presigned_url: 'https://s3.example.com/upload',
@@ -908,14 +908,14 @@ describe('DirectUploader', () => {
 
         test('calls _cancelUpload()', async () => {
             uploader.uploadToken = 'test-token';
-            global.fetch.mockImplementationOnce(() => mockFetchSuccess({}));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchSuccess({}));
 
             uploader.cancel();
 
             // Give async _cancelUpload time to execute
             await new Promise((resolve) => setTimeout(resolve, 0));
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 '/api/upload/cancel/',
                 expect.objectContaining({
                     method: 'POST',
@@ -935,7 +935,7 @@ describe('DirectUploader', () => {
 
             uploader.cancel();
 
-            expect(window.removeEventListener).toHaveBeenCalledWith(
+            expect(globalThis.removeEventListener).toHaveBeenCalledWith(
                 'beforeunload',
                 handler
             );
@@ -947,26 +947,26 @@ describe('DirectUploader', () => {
     // =========================================================================
     describe('_initiateUpload()', () => {
         test('sends POST to correct URL', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({ upload_token: 'token', presigned_url: 'url' })
             );
 
             await uploader._initiateUpload(createMockFile(), 'Test Agent');
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 '/api/upload/initiate/',
                 expect.any(Object)
             );
         });
 
         test('includes correct headers (Content-Type, X-CSRFToken)', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({ upload_token: 'token', presigned_url: 'url' })
             );
 
             await uploader._initiateUpload(createMockFile(), 'Test Agent');
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 expect.any(String),
                 expect.objectContaining({
                     headers: {
@@ -978,14 +978,14 @@ describe('DirectUploader', () => {
         });
 
         test('sends correct JSON body (name, filename, file_size)', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({ upload_token: 'token', presigned_url: 'url' })
             );
 
             const file = createMockFile(2048, 'agent.exe');
             await uploader._initiateUpload(file, 'My Agent');
 
-            const callArgs = global.fetch.mock.calls[0][1];
+            const callArgs = globalThis.fetch.mock.calls[0][1];
             const body = JSON.parse(callArgs.body);
 
             expect(body).toEqual({
@@ -1001,7 +1001,7 @@ describe('DirectUploader', () => {
                 upload_token: 'token-xyz',
                 presigned_url: 'https://s3.example.com/upload',
             };
-            global.fetch.mockImplementationOnce(() => mockFetchSuccess(responseData));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchSuccess(responseData));
 
             const result = await uploader._initiateUpload(createMockFile(), 'Test');
 
@@ -1009,7 +1009,7 @@ describe('DirectUploader', () => {
         });
 
         test('throws Error with data.error on non-2xx', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(400, { error: 'Specific error message' })
             );
 
@@ -1019,7 +1019,7 @@ describe('DirectUploader', () => {
         });
 
         test('throws Error with default message when data.error missing', async () => {
-            global.fetch.mockImplementationOnce(() => mockFetchError(400, {}));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchError(400, {}));
 
             await expect(
                 uploader._initiateUpload(createMockFile(), 'Test')
@@ -1145,26 +1145,26 @@ describe('DirectUploader', () => {
         });
 
         test('sends POST to correct URL', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({ id: 1, name: 'Agent' })
             );
 
             await uploader._completeUpload();
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 '/api/upload/complete/',
                 expect.any(Object)
             );
         });
 
         test('includes correct headers (Content-Type, X-CSRFToken)', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({ id: 1, name: 'Agent' })
             );
 
             await uploader._completeUpload();
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 expect.any(String),
                 expect.objectContaining({
                     headers: {
@@ -1176,13 +1176,13 @@ describe('DirectUploader', () => {
         });
 
         test('sends correct JSON body (upload_token)', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({ id: 1, name: 'Agent' })
             );
 
             await uploader._completeUpload();
 
-            const callArgs = global.fetch.mock.calls[0][1];
+            const callArgs = globalThis.fetch.mock.calls[0][1];
             const body = JSON.parse(callArgs.body);
 
             expect(body).toEqual({
@@ -1192,7 +1192,7 @@ describe('DirectUploader', () => {
 
         test('returns parsed JSON on 2xx response', async () => {
             const responseData = { id: 42, name: 'Completed Agent' };
-            global.fetch.mockImplementationOnce(() => mockFetchSuccess(responseData));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchSuccess(responseData));
 
             const result = await uploader._completeUpload();
 
@@ -1200,7 +1200,7 @@ describe('DirectUploader', () => {
         });
 
         test('throws Error with data.error on non-2xx', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(500, { error: 'Completion failed' })
             );
 
@@ -1210,7 +1210,7 @@ describe('DirectUploader', () => {
         });
 
         test('throws Error with default message when data.error missing', async () => {
-            global.fetch.mockImplementationOnce(() => mockFetchError(500, {}));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchError(500, {}));
 
             await expect(uploader._completeUpload()).rejects.toThrow(
                 'Failed to complete upload'
@@ -1227,16 +1227,16 @@ describe('DirectUploader', () => {
 
             await uploader._cancelUpload();
 
-            expect(global.fetch).not.toHaveBeenCalled();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
         });
 
         test('sends POST to cancel URL when token exists', async () => {
             uploader.uploadToken = 'token-to-cancel';
-            global.fetch.mockImplementationOnce(() => mockFetchSuccess({}));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchSuccess({}));
 
             await uploader._cancelUpload();
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 '/api/upload/cancel/',
                 expect.objectContaining({
                     method: 'POST',
@@ -1246,11 +1246,11 @@ describe('DirectUploader', () => {
 
         test('includes correct headers and body', async () => {
             uploader.uploadToken = 'token-to-cancel';
-            global.fetch.mockImplementationOnce(() => mockFetchSuccess({}));
+            globalThis.fetch.mockImplementationOnce(() => mockFetchSuccess({}));
 
             await uploader._cancelUpload();
 
-            expect(global.fetch).toHaveBeenCalledWith(
+            expect(globalThis.fetch).toHaveBeenCalledWith(
                 '/api/upload/cancel/',
                 expect.objectContaining({
                     headers: {
@@ -1260,14 +1260,14 @@ describe('DirectUploader', () => {
                 })
             );
 
-            const callArgs = global.fetch.mock.calls[0][1];
+            const callArgs = globalThis.fetch.mock.calls[0][1];
             const body = JSON.parse(callArgs.body);
             expect(body).toEqual({ upload_token: 'token-to-cancel' });
         });
 
         test('silently ignores fetch errors (no throw)', async () => {
             uploader.uploadToken = 'token-to-cancel';
-            global.fetch.mockImplementationOnce(() => mockFetchNetworkError());
+            globalThis.fetch.mockImplementationOnce(() => mockFetchNetworkError());
 
             // Should not throw
             await expect(uploader._cancelUpload()).resolves.toBeUndefined();
@@ -1289,13 +1289,13 @@ describe('DirectUploader', () => {
                 onCancel: jest.fn(),
             };
 
-            const trackingUploader = new window.DirectUploader({
+            const trackingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...trackingCallbacks,
             });
 
             // Track fetch calls
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() => {
                     callOrder.push('fetch:initiate');
                     return mockFetchSuccess({
@@ -1337,7 +1337,7 @@ describe('DirectUploader', () => {
         test('beforeunload is unregistered BEFORE onSuccess is called on success', async () => {
             const callOrder = [];
 
-            window.removeEventListener = jest.fn((event, handler) => {
+            globalThis.removeEventListener = jest.fn((event, handler) => {
                 if (event === 'beforeunload') {
                     callOrder.push('unregisterBeforeUnload');
                 }
@@ -1353,12 +1353,12 @@ describe('DirectUploader', () => {
                 onCancel: jest.fn(),
             };
 
-            const trackingUploader = new window.DirectUploader({
+            const trackingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...trackingCallbacks,
             });
 
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'token-abc',
@@ -1381,7 +1381,7 @@ describe('DirectUploader', () => {
         test('on error: cleanup happens before onError callback', async () => {
             const callOrder = [];
 
-            window.removeEventListener = jest.fn((event, handler) => {
+            globalThis.removeEventListener = jest.fn((event, handler) => {
                 if (event === 'beforeunload') {
                     callOrder.push('unregisterBeforeUnload');
                 }
@@ -1397,12 +1397,12 @@ describe('DirectUploader', () => {
                 onCancel: jest.fn(),
             };
 
-            const trackingUploader = new window.DirectUploader({
+            const trackingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...trackingCallbacks,
             });
 
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchError(500, { error: 'Server error' })
             );
 
@@ -1415,7 +1415,7 @@ describe('DirectUploader', () => {
         test('cancel() calls operations in correct order', async () => {
             const callOrder = [];
 
-            window.removeEventListener = jest.fn((event) => {
+            globalThis.removeEventListener = jest.fn((event) => {
                 if (event === 'beforeunload') {
                     callOrder.push('unregisterBeforeUnload');
                 }
@@ -1423,7 +1423,7 @@ describe('DirectUploader', () => {
 
             mockXhr.abort = jest.fn(() => callOrder.push('xhr:abort'));
 
-            global.fetch.mockImplementationOnce(() => {
+            globalThis.fetch.mockImplementationOnce(() => {
                 callOrder.push('fetch:cancel');
                 return mockFetchSuccess({});
             });
@@ -1435,7 +1435,7 @@ describe('DirectUploader', () => {
                 onCancel: jest.fn(() => callOrder.push('onCancel')),
             };
 
-            const trackingUploader = new window.DirectUploader({
+            const trackingUploader = new globalThis.DirectUploader({
                 ...defaultOptions,
                 ...trackingCallbacks,
             });
@@ -1464,7 +1464,7 @@ describe('DirectUploader', () => {
     describe('concurrent uploads', () => {
         test('starting second upload while first is in progress overwrites state', async () => {
             // First upload - will hang waiting for S3
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'first-token',
                     presigned_url: 'https://s3.example.com/first',
@@ -1479,7 +1479,7 @@ describe('DirectUploader', () => {
             expect(uploader.uploadToken).toBe('first-token');
 
             // Second upload starts before first completes
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'second-token',
                     presigned_url: 'https://s3.example.com/second',
@@ -1496,7 +1496,7 @@ describe('DirectUploader', () => {
         });
 
         test('rapid cancel and restart works correctly', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'first-token',
@@ -1545,7 +1545,7 @@ describe('DirectUploader', () => {
     // =========================================================================
     describe('state consistency', () => {
         test('uploadToken is cleared concept - token persists after upload for potential retry info', async () => {
-            global.fetch
+            globalThis.fetch
                 .mockImplementationOnce(() =>
                     mockFetchSuccess({
                         upload_token: 'persistent-token',
@@ -1568,7 +1568,7 @@ describe('DirectUploader', () => {
         });
 
         test('xhr reference is set during upload and accessible for abort', async () => {
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'token',
                     presigned_url: 'https://s3.example.com/upload',
@@ -1591,7 +1591,7 @@ describe('DirectUploader', () => {
             // Simulate a cancelled state
             uploader.cancelled = true;
 
-            global.fetch.mockImplementationOnce(() =>
+            globalThis.fetch.mockImplementationOnce(() =>
                 mockFetchSuccess({
                     upload_token: 'token',
                     presigned_url: 'https://s3.example.com/upload',

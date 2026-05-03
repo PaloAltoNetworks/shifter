@@ -1,15 +1,15 @@
 # Dev Box - Manually managed Windows development instance
 # NOT managed by CI/CD - apply manually with:
 #   cd terraform/global/dev-box
-#   AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init
+#   AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform init -backend-config=dev.s3.tfbackend
 #   AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -17,11 +17,13 @@ terraform {
     }
   }
 
+  # Bucket/key supplied via -backend-config=dev.s3.tfbackend at init time.
   backend "s3" {
-    bucket  = "shifter-dev-infra-b7113d6f-5aec-4531-ad09-2e62b51c2a86"
-    key     = "global/dev-box/terraform.tfstate"
-    region  = "us-east-2"
-    encrypt = true
+    bucket       = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    key          = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 

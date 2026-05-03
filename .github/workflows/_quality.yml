@@ -9,15 +9,14 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read
-
 jobs:
   # ===========================================================================
   # Linting
   # ===========================================================================
 
   adr-conformance:
+    permissions:
+      contents: read
     name: Architecture (adr conformance)
     runs-on: self-hosted
     steps:
@@ -27,6 +26,8 @@ jobs:
         run: python3 scripts/adr_guard/adr_guard.py --all --level ci
 
   workflow-lint:
+    permissions:
+      contents: read
     name: Lint (GitHub Actions)
     runs-on: self-hosted
     steps:
@@ -34,6 +35,8 @@ jobs:
       - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
 
   terraform-lint:
+    permissions:
+      contents: read
     name: Lint (terraform)
     runs-on: self-hosted
     steps:
@@ -50,6 +53,8 @@ jobs:
         run: tflint --recursive --config "${GITHUB_WORKSPACE}/.tflint.hcl"
 
   shifter-platform-lint:
+    permissions:
+      contents: read
     name: Lint (shifter_platform)
     runs-on: self-hosted
     steps:
@@ -69,6 +74,8 @@ jobs:
           uv run ruff format --check .
 
   shifter-platform-lint-js:
+    permissions:
+      contents: read
     name: Lint JavaScript/CSS (shifter_platform)
     runs-on: self-hosted
     steps:
@@ -94,6 +101,8 @@ jobs:
         run: npx stylelint static/css/
 
   provisioner-lint:
+    permissions:
+      contents: read
     name: Lint (provisioner)
     runs-on: self-hosted
     steps:
@@ -110,6 +119,8 @@ jobs:
           uv run ruff format --check .
 
   packer-lint:
+    permissions:
+      contents: read
     name: Lint (packer)
     runs-on: self-hosted
     steps:
@@ -126,6 +137,8 @@ jobs:
           uv run ruff format --check .
 
   bootstrap-lint:
+    permissions:
+      contents: read
     name: Lint (bootstrap)
     runs-on: self-hosted
     steps:
@@ -142,6 +155,8 @@ jobs:
           uv run ruff format --check .
 
   check-layer-imports-lint:
+    permissions:
+      contents: read
     name: Lint (check_layer_imports)
     runs-on: self-hosted
     steps:
@@ -158,6 +173,8 @@ jobs:
           uv run ruff format --check .
 
   k8s-lint:
+    permissions:
+      contents: read
     name: Lint (k8s manifests)
     runs-on: self-hosted
     steps:
@@ -173,6 +190,8 @@ jobs:
         run: /tmp/kube-linter lint --config .kube-linter.yaml platform/k8s/
 
   k8s-schema:
+    permissions:
+      contents: read
     name: Lint (k8s schemas)
     runs-on: self-hosted
     steps:
@@ -194,6 +213,8 @@ jobs:
   # ===========================================================================
 
   shifter-platform-typecheck:
+    permissions:
+      contents: read
     name: Type Check (shifter_platform)
     if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
@@ -215,6 +236,8 @@ jobs:
           echo "::notice::Type checking complete - see above for any type errors"
 
   provisioner-typecheck:
+    permissions:
+      contents: read
     name: Type Check (provisioner)
     if: ${{ !inputs.skip_tests }}
     runs-on: self-hosted
@@ -240,6 +263,8 @@ jobs:
   # ===========================================================================
 
   check-layer-imports-arch:
+    permissions:
+      contents: read
     name: Architecture (layer imports)
     runs-on: self-hosted
     steps:
@@ -257,6 +282,8 @@ jobs:
         run: uv run python check_layer_imports.py
 
   import-linter-arch:
+    permissions:
+      contents: read
     name: Architecture (import linter)
     runs-on: self-hosted
     steps:
@@ -278,6 +305,8 @@ jobs:
   # ===========================================================================
 
   shifter-platform-sast:
+    permissions:
+      contents: read
     name: SAST (shifter_platform)
     runs-on: self-hosted
     steps:
@@ -292,6 +321,8 @@ jobs:
           bandit -r shifter/shifter_platform/ --skip B101 --exclude shifter/shifter_platform/tests,shifter/shifter_platform/.venv
 
   provisioner-sast:
+    permissions:
+      contents: read
     name: SAST (provisioner)
     runs-on: self-hosted
     steps:
@@ -308,6 +339,8 @@ jobs:
           bandit -r shifter/engine/provisioner/ --skip B101,B404,B603,B607 --exclude shifter/engine/provisioner/tests,shifter/engine/provisioner/.venv
 
   packer-sast:
+    permissions:
+      contents: read
     name: SAST (packer)
     runs-on: self-hosted
     continue-on-error: true
@@ -323,6 +356,8 @@ jobs:
           bandit -r shifter/packer/ --skip B101 --exclude shifter/packer/tests,shifter/packer/.venv
 
   bootstrap-sast:
+    permissions:
+      contents: read
     name: SAST (bootstrap)
     runs-on: self-hosted
     continue-on-error: true
@@ -338,6 +373,8 @@ jobs:
           bandit -r scripts/bootstrap/ --skip B101 --exclude scripts/bootstrap/tests,scripts/bootstrap/.venv
 
   check-layer-imports-sast:
+    permissions:
+      contents: read
     name: SAST (check_layer_imports)
     runs-on: self-hosted
     continue-on-error: true
@@ -358,6 +395,8 @@ jobs:
   # ===========================================================================
 
   shifter-platform-tests:
+    permissions:
+      contents: read
     name: Tests (shifter_platform)
     if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
@@ -402,6 +441,8 @@ jobs:
           uv run pytest tests/ --ignore=tests/documentation --cov=config --cov=mission_control --cov=documentation --cov=cms --cov=shared --cov=ctf --cov=engine --cov=risk_register --cov-report=term-missing --cov-report=xml:coverage.xml
 
   shifter-engine-tests:
+    permissions:
+      contents: read
     name: Tests (provisioner)
     if: ${{ !inputs.skip_tests }}
     needs: [provisioner-lint, provisioner-sast]
@@ -423,6 +464,8 @@ jobs:
         run: uv run pytest tests/
 
   packer-tests:
+    permissions:
+      contents: read
     name: Tests (packer)
     if: ${{ !inputs.skip_tests }}
     needs: [packer-lint]
@@ -442,6 +485,8 @@ jobs:
         run: uv run pytest tests/
 
   bootstrap-tests:
+    permissions:
+      contents: read
     name: Tests (bootstrap)
     if: ${{ !inputs.skip_tests }}
     needs: [bootstrap-lint]
@@ -461,6 +506,8 @@ jobs:
         run: uv run pytest tests/
 
   check-layer-imports-tests:
+    permissions:
+      contents: read
     name: Tests (check_layer_imports)
     if: ${{ !inputs.skip_tests }}
     needs: [check-layer-imports-lint]
@@ -480,6 +527,8 @@ jobs:
         run: uv run pytest tests/
 
   adr-guard-tests:
+    permissions:
+      contents: read
     name: Tests (adr_guard)
     if: ${{ !inputs.skip_tests }}
     needs: [adr-conformance]
@@ -495,6 +544,8 @@ jobs:
   # ===========================================================================
 
   shifter-platform-js-tests:
+    permissions:
+      contents: read
     name: Tests JavaScript (shifter_platform)
     if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint-js]
@@ -522,6 +573,8 @@ jobs:
   # ===========================================================================
 
   security-iac:
+    permissions:
+      contents: read
     name: Security (IaC)
     runs-on: self-hosted
     steps:
@@ -546,6 +599,8 @@ jobs:
           soft_fail: true
 
   security-k8s:
+    permissions:
+      contents: read
     name: Security (k8s)
     runs-on: self-hosted
     continue-on-error: true  # Soft-fail until manifest remediation complete
@@ -570,6 +625,8 @@ jobs:
           soft_fail: true
 
   secrets-gitleaks:
+    permissions:
+      contents: read
     name: Security (gitleaks)
     runs-on: self-hosted
     steps:
@@ -598,6 +655,8 @@ jobs:
           log_opts: ${{ steps.range.outputs.log_opts }}
 
   model-fks-arch:
+    permissions:
+      contents: read
     name: Architecture (model FKs)
     runs-on: self-hosted
     services:

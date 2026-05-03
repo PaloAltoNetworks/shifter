@@ -15,12 +15,12 @@ describe('XdrDropdown explicit init', () => {
 
     const loadModule = () => {
         require('./xdr-dropdown.js');
-        return window.XdrDropdown;
+        return globalThis.XdrDropdown;
     };
 
     beforeEach(() => {
         jest.resetModules();
-        delete window.XdrDropdown;
+        delete globalThis.XdrDropdown;
         document.body.innerHTML = '';
     });
 

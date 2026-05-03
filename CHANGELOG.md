@@ -5,6 +5,195 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.0] - 2026-05-03
+
+### Fixed
+
+- **80+ Dependabot security alerts cleared** across every package manager
+  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
+  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
+  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
+  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
+  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
+  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
+  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
+  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
+  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
+  in `shifter/engine/provisioner/requirements.txt`.
+
+### Changed
+
+- **Full dependency refresh on every uv- and npm-managed manifest**
+  beyond the security bumps above. `uv lock --upgrade` ran on
+  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
+  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
+  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
+  patch/minor versions of ~40 transitive packages including pydantic
+  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
+  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
+  `npm update --package-lock-only` ran on the four MCP servers
+  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
+  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
+- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
+  17 root configurations and provisioner modules. The 16 `modules/*`
+  subdirectories had already moved to aws 6.x via looser constraints;
+  this aligns the consumers (`environments/{dev,prod}`,
+  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
+  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
+  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
+- **Terraform `required_version` standardized to `>= 1.5.0`** across all
+  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
+- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
+  `_range.yml`, and `_shifter-platform.yml` — required by the
+  `use_lockfile` migration below (S3 native locking landed in 1.10).
+- **Terraform S3 backend state locking migrated from DynamoDB to S3
+  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
+  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
+  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
+  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
+  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
+  is unrelated to terraform state locking and was left intact (it
+  serves the Shifter engine application).
+- **Environment backend.tf files converted to partial-backend pattern.**
+  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
+  used to hard-code the bucket UUID inline; they now ship with
+  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
+  from `<env>.s3.tfbackend` at init time, matching the existing
+  `global/iam/` convention. Single source of truth for the bucket
+  name; backend.tf is never modified by automation.
+- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
+  `terraform init` (was bare `terraform init`). Required by the
+  partial-backend conversion above.
+- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
+  walkthrough now writes `.s3.tfbackend` files for env, portal, and
+  range (instead of overwriting `backend.tf`), emits
+  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
+  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
+  creation is gone. The unused `dynamodb_table_exists` and
+  `create_dynamodb_table` helpers are kept for now in case someone
+  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
+  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
+  templated `.tfbackend` files get filled in at bootstrap time.
+- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
+  the root `.gitignore` plus two nested `.gitignore` files in
+  `platform/terraform/global/dev-box/` and
+  `scripts/polaris-aws-range/`). All 30 lock files committed at
+  aws 6.43.0; the `temp/` tree remains intentionally excluded.
+- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
+  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
+  configs without leaving stale UUIDs in the repo. Three new
+  `dev.s3.tfbackend` files added under `environments/dev/`,
+  `environments/dev/portal/`, and `environments/dev/range/` (those
+  three previously had no `.tfbackend` and relied entirely on inline
+  config).
+
+### Removed
+
+- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
+  and `platform/terraform/modules/pulumi-state/` — they contained only
+  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
+  from a deleted module.
+- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
+  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
+  corresponding live infrastructure).
+
+## [3.95.4] - 2026-05-03
+
+### Added
+
+- **`platform/terraform/global/github-runner/README.md`** documenting
+  the actual setup (manual EC2 + SSM registration), the registration
+  token semantics (single-use registration, long-lived runner
+  credentials after — no per-job re-auth), the AL2023 dependency
+  gotcha, and a clean removal procedure.
+
+### Fixed
+
+- **Runner `user_data` now installs libicu + .NET 6 runtime libs
+  directly via `dnf`** (`libicu krb5-libs zlib lttng-ust openssl-libs`),
+  so a freshly provisioned runner can register on the first
+  `./config.sh` call. The bundled `./bin/installdependencies.sh`
+  doesn't recognise Amazon Linux 2023 (matches `ID="amzn"` /
+  `ID_LIKE="fedora"` and aborts with `Can't detect current OS type`),
+  so without these packages registration fails with
+  `Libicu's dependencies is missing for Dotnet Core 6.0`. Future
+  runner replacements no longer need a manual second SSM pass.
+
+## [3.95.3] - 2026-05-03
+
+### Changed
+
+- **`platform/terraform/global/github-runner/dev.tfvars`** updated for
+  the fresh aws-dev account `788327019743`: VPC `vpc-07d0a461204c02a06`,
+  public subnet `subnet-0e7da35c92d13cd1d` (us-east-2a). Was pointing
+  at IDs from the previous dev account.
+- **`scripts/runner-deploy.sh`** cleaned up. Stale `Prerequisites` block
+  about a GitHub App + `/shifter/github-runner/key-base64` /
+  `webhook-secret` SSM params removed (artifact of an abandoned
+  philips-labs/terraform-aws-github-runner approach; current module is
+  plain EC2 + manual registration). `rm -rf .terraform.lock.hcl` reduced
+  to `rm -rf .terraform/` so the now-tracked lockfile survives. Stale
+  `terraform output webhook_endpoint`/`runner_labels` (don't exist)
+  replaced with `runner_instance_ids`/`ssm_commands`. Top-of-file
+  comment now documents the actual manual-registration flow.
+
+### Removed
+
+- **Cruft zips under `global/github-runner/`** (`webhook.zip`,
+  `runners.zip`, `runner-binaries-syncer.zip`, `tfplan`) — leftovers
+  from the abandoned philips-labs auto-scaler attempt. None were
+  referenced by the current `main.tf`.
+
+## [3.95.2] - 2026-05-03
+
+### Fixed
+
+- **`terraform_deploy` now passes `-backend-config=<env>.s3.tfbackend`**
+  to `terraform init`. Was running bare `terraform init -reconfigure`,
+  which would have failed against the new partial backends (placeholder
+  bucket inline → real value supplied via `-backend-config`). Affects
+  the `terraform` and `full` subcommands; bootstrap-only flow was
+  unaffected because it inits IAM separately.
+
+### Added
+
+- **Bootstrap script now actually commits and pushes** the filled-in
+  `.s3.tfbackend` files at the end of `bootstrap` and `full` commands
+  (the README listed this as automated but the code did not implement
+  it — stale doc → real behaviour). New `walkthrough_git_commit`
+  function stages env-scoped paths only (`global/iam/<env>.s3.tfbackend`,
+  `environments/<env>/{,portal,range}/<env>.s3.tfbackend`,
+  `environments/<env>/portal/main.tf`, plus any other
+  `global/**/<env>.s3.tfbackend` rewritten by the bootstrap), shows
+  `git status --porcelain` of those paths, prompts to commit (yes / no /
+  manual), commits with `Bootstrap <env>: fill in state bucket <bucket>`,
+  then prompts separately to push to `origin/<current-branch>`. Runs in
+  both `bootstrap` and `full` flows.
+
+## [3.95.1] - 2026-05-03
+
+### Changed
+
+- **`global/dev-box/` converted to partial-backend pattern.** The
+  inline `backend "s3"` block hard-coded `shifter-dev-infra-b7113d6f-…`
+  as the bucket — the only file in the repo that still did so. Replaced
+  with `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders + new
+  `dev.s3.tfbackend` file, matching the rest of the tree. README updated
+  with the `-backend-config=dev.s3.tfbackend` init flag.
+
+### Fixed
+
+- **Bootstrap regex was env-blind and could clobber the wrong
+  environment's bucket.** `_update_global_backend_configs` matched
+  both `shifter-infra-<uuid>` and `shifter-dev-infra-<uuid>` regardless
+  of the `--env` flag, so a `--env prod` run would have rewritten
+  `dev-box/main.tf`'s dev bucket reference with the prod bucket.
+  Tightened the regex to anchor on the current env's bucket prefix
+  (`shifter-infra` for prod, `shifter-<env>-infra` otherwise) plus the
+  `REPLACE_AT_BOOTSTRAP` placeholder. Also dropped the `*.tf` walker
+  since every `*.tf` backend block is now partial (placeholder bucket,
+  real value supplied via `-backend-config` at init).
+
 ## [3.94.0] - 2026-04-14
 
 ### Added

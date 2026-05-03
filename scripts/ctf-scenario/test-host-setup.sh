@@ -42,7 +42,7 @@ fi
 
 # Test 5: SUID binary
 echo "✓ Test 5: SUID Binary"
-if [ -u /usr/local/bin/backup ]; then
+if [[ -u /usr/local/bin/backup ]]; then
     echo "  ✅ SUID binary configured: $(ls -la /usr/local/bin/backup)"
 else
     echo "  ❌ SUID binary not properly configured"
@@ -58,7 +58,7 @@ fi
 
 # Test 7: SSH key backup
 echo "✓ Test 7: SSH Key Backup"
-if [ -f /var/backups/.old/john_ssh_key ]; then
+if [[ -f /var/backups/.old/john_ssh_key ]]; then
     echo "  ✅ SSH key backup found"
 else
     echo "  ❌ SSH key backup missing"

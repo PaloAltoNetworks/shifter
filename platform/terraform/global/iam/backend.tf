@@ -1,17 +1,23 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 
-  # Backend configured via -backend-config during init
-  # This allows separate state per environment
-  # checkov:skip=CKV_TF_3: State locking is configured via DynamoDB in external backend config files (dev.s3.tfbackend, prod.s3.tfbackend). The dynamodb_table parameter is provided via -backend-config during terraform init.
-  backend "s3" {}
+  # Backend bucket/key are environment-specific and supplied via
+  # -backend-config=<env>.s3.tfbackend at init time. The values below are
+  # placeholders so `terraform validate` succeeds standalone.
+  backend "s3" {
+    bucket       = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    key          = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {

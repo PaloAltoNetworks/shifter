@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <defs>
+    <path id="arcTop" d="M 20,100 A 80,80 0 0 1 180,100" />
+    <path id="arcBot" d="M 16,100 A 84,84 0 0 0 184,100" />
+    <radialGradient id="starGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb300" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffb300" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="100" cy="100" r="98" fill="url(#starGlow)"/>
+
+  <circle cx="100" cy="100" r="96" stroke="#ffb300" stroke-width="1.25"/>
+  <circle cx="100" cy="100" r="92" stroke="#7a5500" stroke-width="0.5"/>
+  <circle cx="100" cy="100" r="72" stroke="#7a5500" stroke-width="0.5"/>
+
+  <g stroke="#ffb300" stroke-width="1">
+    <line x1="100" y1="4"   x2="100" y2="14"/>
+    <line x1="100" y1="186" x2="100" y2="196"/>
+    <line x1="4"   y1="100" x2="14"  y2="100"/>
+    <line x1="186" y1="100" x2="196" y2="100"/>
+  </g>
+
+  <g stroke="#7a5500" stroke-width="0.75">
+    <g transform="rotate(22.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(45 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(67.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(112.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(135 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(157.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(202.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(225 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(247.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(292.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(315 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+    <g transform="rotate(337.5 100 100)">
+      <line x1="100" y1="4" x2="100" y2="10"/>
+    </g>
+  </g>
+
+  <path d="M 100 20 L 113 87 L 154 100 L 113 113 L 100 172 L 87 113 L 46 100 L 87 87 Z"
+        fill="#ffb300" fill-opacity="0.12"
+        stroke="#ffb300" stroke-width="1.4"
+        stroke-linejoin="miter"/>
+
+  <path d="M 100 20 L 100 172 M 46 100 L 154 100"
+        stroke="#ffb300" stroke-width="0.5" stroke-opacity="0.45"/>
+
+  <circle cx="100" cy="100" r="4.5" fill="#05080c" stroke="#ffb300" stroke-width="1.2"/>
+  <circle cx="100" cy="100" r="1.5" fill="#ffb300"/>
+
+  <text font-family="ui-monospace, 'JetBrains Mono', 'Share Tech Mono', monospace"
+        font-size="7" letter-spacing="1.5" fill="#ffb300" font-weight="700">
+    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">
+      JOINT TASK FORCE
+    </textPath>
+  </text>
+
+  <text font-family="ui-monospace, 'JetBrains Mono', 'Share Tech Mono', monospace"
+        font-size="6" letter-spacing="1.2" fill="#7a5500">
+    <textPath href="#arcBot" startOffset="50%" text-anchor="middle">
+      · QUI NAVIGAT SEPTENTRIONEM ·
+    </textPath>
+  </text>
+</svg>

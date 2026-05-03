@@ -6,16 +6,23 @@
 # ------------------------------------------------------------------------------
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 
-  backend "s3" {}
+  # Bucket/key supplied via -backend-config=dev.s3.tfbackend at init time.
+  backend "s3" {
+    bucket       = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    key          = "OVERRIDDEN_VIA_BACKEND_CONFIG"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {
@@ -153,9 +160,16 @@ resource "aws_instance" "runner" {
     #!/bin/bash
     set -ex
 
-    # Install dependencies
+    # Install build/runtime deps (docker, build chain) plus the .NET 6 runtime
+    # libs that the Actions runner binary needs at startup.
+    #
+    # libicu / krb5-libs / zlib / lttng-ust / openssl-libs are what
+    # `./bin/installdependencies.sh` would install on a recognised distro,
+    # but that script identifies AL2023 as bare "fedora" and bails out, so
+    # we install them ourselves at boot to avoid a manual second pass.
     dnf update -y
-    dnf install -y docker git jq tar unzip python3.12 python3.12-pip python3.12-devel nodejs npm
+    dnf install -y docker git jq tar unzip python3.12 python3.12-pip python3.12-devel nodejs npm \
+                   libicu krb5-libs zlib lttng-ust openssl-libs
 
     # Start Docker
     systemctl enable --now docker
@@ -171,7 +185,7 @@ resource "aws_instance" "runner" {
     tar xzf actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz
     chown -R ec2-user:ec2-user /home/ec2-user/actions-runner
 
-    echo "Runner downloaded. SSH in and run ./config.sh to register."
+    echo "Runner downloaded. Register with ./config.sh (see README)."
   EOF
   )
 

@@ -1,0 +1,5 @@
+bucket       = "shifter-dev-infra-2ff5b419-fe3a-4146-9838-74ff24869fb0"
+key          = "dev/range/terraform.tfstate"
+region       = "us-east-2"
+encrypt      = true
+use_lockfile = true

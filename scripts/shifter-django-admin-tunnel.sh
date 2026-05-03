@@ -39,7 +39,7 @@ done
 
 # Validate environment
 if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
-    echo "Error: Environment must be 'dev' or 'prod'"
+    echo "Error: Environment must be 'dev' or 'prod'" >&2
     exit 1
 fi
 
@@ -60,8 +60,8 @@ INSTANCE_ID=$(aws ec2 describe-instances \
   --region "$AWS_REGION" \
   --profile "$AWS_PROFILE")
 
-if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-  echo "Error: Could not find running Shifter platform EC2 instance for $ENV"
+if [[ "$INSTANCE_ID" == "None" ]] || [[ -z "$INSTANCE_ID" ]]; then
+  echo "Error: Could not find running Shifter platform EC2 instance for $ENV" >&2
   echo "The instance may be stopped (scheduled off 10pm-6am PST)"
   exit 1
 fi

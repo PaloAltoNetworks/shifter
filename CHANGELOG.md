@@ -97,6 +97,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.10] - 2026-05-03
+
+### Fixed
+
+- **Portal Apply hit `BucketAlreadyExists` (409) on `shifter-dev-user-storage-e3462f0c`.**
+  The user_storage bucket name was hard-pinned in
+  `platform/terraform/environments/dev/portal/terraform.tfvars` to a
+  UUID-suffixed name from the previous dev account; that name remains
+  globally claimed (S3 namespace is shared across all accounts).
+  Switched to `shifter-dev-user-storage-788327019743` (account-id
+  suffix) — same pattern as `engine-state` / `log-aggregation` in 3.95.6.
+
 ## [3.95.9] - 2026-05-03
 
 ### Fixed

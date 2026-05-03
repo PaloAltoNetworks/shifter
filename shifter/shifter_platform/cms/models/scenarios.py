@@ -16,7 +16,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 
-from cms.models.mixins import SoftDeleteMixin
+from shared.db import SoftDeleteMixin, SoftDeleteQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ class Scenario(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         ordering = ["name"]

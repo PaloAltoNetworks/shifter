@@ -87,17 +87,20 @@ class TestAssetAbstractBase:
         assert agent.is_deleted is True
 
     def test_active_for_user_excludes_deleted(self):
-        """active_for_user classmethod excludes soft-deleted records."""
+        """active_for_user chains SoftDeleteQuerySet.active() and the user filter."""
         user = _make_user()
         active = _make_agent(name="Active", user=user)
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([active])
+        mock_filtered = MagicMock()
+        mock_filtered.__iter__ = lambda self: iter([active])
+        mock_active_qs = MagicMock()
+        mock_active_qs.filter.return_value = mock_filtered
 
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
+        with patch.object(AgentConfig.objects, "active", return_value=mock_active_qs) as mock_active:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_active.assert_called_once_with()
+        mock_active_qs.filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0] == active
 
@@ -106,13 +109,16 @@ class TestAssetAbstractBase:
         user = _make_user()
         my_agent = _make_agent(name="My Agent", user=user)
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([my_agent])
+        mock_filtered = MagicMock()
+        mock_filtered.__iter__ = lambda self: iter([my_agent])
+        mock_active_qs = MagicMock()
+        mock_active_qs.filter.return_value = mock_filtered
 
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
+        with patch.object(AgentConfig.objects, "active", return_value=mock_active_qs) as mock_active:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_active.assert_called_once_with()
+        mock_active_qs.filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0].name == "My Agent"
 

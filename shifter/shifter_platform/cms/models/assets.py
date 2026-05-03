@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import models
 
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
-from cms.models.mixins import ExpiringStateMixin, SoftDeleteMixin
+from shared.db import ExpiringStateMixin, SoftDeleteMixin, SoftDeleteQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,17 @@ class Asset(SoftDeleteMixin, models.Model):
     - deleted_at: Soft delete timestamp (None = active)
 
     Subclasses must define a 'user' ForeignKey field.
+
+    The default manager is :class:`~shared.db.SoftDeleteQuerySet`-backed so
+    every concrete asset subclass exposes ``objects.active()`` /
+    ``objects.deleted()`` without restating the soft-delete filter.
     """
 
     name = models.CharField(max_length=100, help_text="User-friendly name")
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -55,9 +61,9 @@ class Asset(SoftDeleteMixin, models.Model):
             user: The user to filter by
 
         Returns:
-            QuerySet of active (non-deleted) assets for the user
+            QuerySet of active (non-deleted) assets for the user.
         """
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
+        return cls.objects.active().filter(user=user)
 
 
 class FileAsset(Asset):
@@ -92,7 +98,7 @@ class CredentialBase(ExpiringStateMixin, Asset):
     - last_verified_at: Last external validation timestamp
     - last_used_at: Last provisioning use timestamp
 
-    The :class:`~cms.models.mixins.ExpiringStateMixin` supplies
+    The :class:`~shared.db.ExpiringStateMixin` supplies
     ``is_expired`` and ``expires_soon``.
     """
 
@@ -121,27 +127,23 @@ class CredentialBase(ExpiringStateMixin, Asset):
 # -----------------------------------------------------------------------------
 
 
-class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
+class Credential(CredentialBase):
     """User's credential instance.
 
-    Stores user credentials with type-specific data in a JSON field.
-    Validation is delegated to Pydantic spec classes referenced by CredentialType.
+    Concrete credential model. Inherits the asset shape from
+    :class:`CredentialBase` (which extends :class:`Asset`):
+    ``name``, ``created_at``, ``deleted_at`` from Asset; ``expires_at``,
+    ``last_verified_at``, ``last_used_at`` from CredentialBase. The
+    :class:`~shared.db.SoftDeleteMixin` and
+    :class:`~shared.db.ExpiringStateMixin` properties (``is_deleted``,
+    ``is_expired``, ``expires_soon``) are inherited via the base chain.
 
-    The :class:`~cms.models.mixins.SoftDeleteMixin` supplies ``is_deleted``;
-    :class:`~cms.models.mixins.ExpiringStateMixin` supplies ``is_expired``
-    and ``expires_soon``.
-
-    Attributes:
-        name: User-friendly name for this credential.
+    Adds the credential-specific fields:
         user: Owner of this credential.
         credential_type: FK to CredentialType catalog.
         data: Type-specific fields as JSON (validated by spec_class).
-        created_at: When this credential was created.
-        expires_at: When this credential expires (optional).
-        deleted_at: Soft delete timestamp (None = active).
     """
 
-    name = models.CharField(max_length=100, help_text="User-friendly name")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -156,9 +158,6 @@ class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
         default=dict,
         help_text="Type-specific credential data (validated by spec_class)",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -171,9 +170,6 @@ class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
                 name="unique_active_credential_name_per_user",
             ),
         ]
-
-    def __str__(self):
-        return self.name
 
 
 class AgentConfig(FileAsset):

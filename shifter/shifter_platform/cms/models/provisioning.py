@@ -18,7 +18,7 @@ from django.db import models
 
 from cms.models.catalogs import AppType, InstanceType
 from cms.models.lifecycle import apply_terminal_soft_delete
-from cms.models.mixins import SoftDeleteMixin
+from shared.db import SoftDeleteMixin, SoftDeleteQuerySet
 from shared.enums import RequestType, ResourceStatus
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,8 @@ class EntityBase(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = SoftDeleteQuerySet.as_manager()
+
     class Meta:
         abstract = True
 
@@ -74,7 +76,7 @@ class Request(SoftDeleteMixin, models.Model):
     """Provisioning request container.
 
     Groups items requested together while allowing independent lifecycles.
-    Maps 1:1 with RequestSpec schema. The :class:`~cms.models.mixins.SoftDeleteMixin`
+    Maps 1:1 with RequestSpec schema. The :class:`~shared.db.SoftDeleteMixin`
     supplies ``is_deleted``.
 
     Attributes:
@@ -97,6 +99,8 @@ class Request(SoftDeleteMixin, models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at"]

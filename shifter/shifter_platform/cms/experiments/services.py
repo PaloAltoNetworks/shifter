@@ -103,7 +103,7 @@ def list_scripts(user: User) -> QuerySet[ScriptAsset]:
     _validate_user(user, "list_scripts")
     logger.debug("list_scripts called for user_id=%s", user.id)
     try:
-        return ScriptAsset.objects.filter(user=user, deleted_at__isnull=True).order_by("-created_at")
+        return ScriptAsset.objects.active().filter(user=user).order_by("-created_at")
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:
@@ -253,7 +253,7 @@ def delete_script(user: User, script_id: int) -> None:
     logger.debug("delete_script called for user_id=%s script_id=%s", user.id, script_id)
     try:
         try:
-            script = ScriptAsset.objects.get(pk=script_id, user=user, deleted_at__isnull=True)
+            script = ScriptAsset.objects.active().get(pk=script_id, user=user)
         except ScriptAsset.DoesNotExist:
             logger.warning("delete_script: not found script_id=%s user_id=%s", script_id, user.pk)
             raise ScriptUploadError("Script not found or you don't have access") from None
@@ -379,11 +379,12 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
         script_ids = [s.script_id for s in data.scripts if s.script_id]
         if script_ids:
             existing_scripts = set(
-                ScriptAsset.objects.filter(
+                ScriptAsset.objects.active()
+                .filter(
                     pk__in=script_ids,
                     user=user,
-                    deleted_at__isnull=True,
-                ).values_list("pk", flat=True)
+                )
+                .values_list("pk", flat=True)
             )
             missing = set(script_ids) - existing_scripts
             if missing:
@@ -395,7 +396,7 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
             from cms.models import AgentConfig
 
             try:
-                agent = AgentConfig.objects.get(pk=data.agent_id, user=user, deleted_at__isnull=True)
+                agent = AgentConfig.objects.active().get(pk=data.agent_id, user=user)
             except AgentConfig.DoesNotExist:
                 raise ExperimentValidationError(f"Agent not found: {data.agent_id}") from None
             _check_result_type(agent, AgentConfig, "create_experiment")

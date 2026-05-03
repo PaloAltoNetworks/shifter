@@ -96,7 +96,7 @@ class TestCmsHandlerBridgeIntegration:
     @patch("cms.handlers.range_events.notify_ctf_range_status")
     @patch("cms.handlers.range_events.RangeInstance")
     def test_process_range_event_calls_bridge_on_ready(self, mock_ri_model, mock_ctf, mock_bridge):
-        """process_range_event calls bridge when status transitions to READY."""
+        """process_range_event calls bridge with the resolved instance + provisioned_instances on READY."""
         request_id = str(uuid4())
 
         mock_instance = MagicMock()
@@ -107,19 +107,23 @@ class TestCmsHandlerBridgeIntegration:
         mock_ri_model.objects.get.return_value = mock_instance
         mock_ri_model.DoesNotExist = Exception
 
+        provisioned_instances = {"Workstation": {"instance_id": "i-abc123"}}
         event = {
             "event_type": "range.status.updated",
             "request_id": request_id,
             "range_id": 1,
             "user_id": 1,
             "new_status": ResourceStatus.READY.value,
+            "instances": provisioned_instances,
         }
 
         from cms.handlers import process_range_event
 
         process_range_event(event)
 
-        mock_bridge.assert_called_once()
+        # Pin both args so a regression that swapped arguments or dropped the
+        # instances payload is caught.
+        mock_bridge.assert_called_once_with(mock_instance, provisioned_instances)
 
     @patch("cms.handlers.range_events.notify_experiment_on_range_ready")
     @patch("cms.handlers.range_events.notify_ctf_range_status")

@@ -97,6 +97,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.5] - 2026-05-03
+
+### Fixed
+
+- **Lint failures surfaced by ruff 0.15 upgrade in 3.95.0.** Pre-commit
+  only lints staged files, so these pre-existing violations didn't
+  surface until CI ran ruff over the whole tree on the first
+  `aws-dev` deploy attempt.
+  - `UP042` × 18 across `shifter/shifter_platform/ctf/enums.py`,
+    `shifter/shifter_platform/cms/experiments/schemas.py`, and
+    `shifter/cyberscript/enums.py`: rewrote `class Foo(str, Enum)` to
+    `class Foo(StrEnum)`. Runtime semantics preserved on Python 3.12+
+    (StrEnum members are still `str` subclasses; `MyEnum.FOO == "foo"`
+    still evaluates True).
+  - `E501` × 1 in `shifter/engine/provisioner/plans/polaris_range_bootstrap.py:219`:
+    broke the inline `python3 -c '…'` invocation onto its own
+    multi-line shell variable so the surrounding `docker exec` line
+    stays under 120 chars without changing runtime behaviour.
+
 ## [3.95.4] - 2026-05-03
 
 ### Added

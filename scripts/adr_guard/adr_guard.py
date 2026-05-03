@@ -488,18 +488,11 @@ def check_cloud_factory_seam(repo_root: Path, files: list[str] | None) -> list[V
     return violations
 
 
-# Strip JS line comments (`// ...`) and block comments (`/* ... */`)
-# before scanning. Comments mentioning `execSync(` are not a security
-# risk and would otherwise produce false positives.
-_JS_LINE_COMMENT = re.compile(r"//[^\n]*")
-_JS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-# A real call site: `execSync(` (preceded by anything that isn't an
-# identifier character so we don't match e.g. `myExecSync(`). Matches
-# bare `execSync(`, `cp.execSync(`, `child_process.execSync(`, etc.
-_EXEC_SYNC_CALL = re.compile(r"(?<![A-Za-z0-9_$])execSync\s*\(")
-# child_process import shapes we care about. We match the import to
-# distinguish "calls Node's execSync" from a name collision with an
-# unrelated function called execSync.
+# child_process import shapes we care about (any form — named, default,
+# namespace, CJS destructure, bare CJS require — with or without the
+# `node:` prefix). We require the import as evidence that this file
+# really pulls Node's child_process; without it, an `execSync` token
+# could be an unrelated function with the same name.
 _CHILD_PROCESS_IMPORT = re.compile(
     r"""(?x)
     (
@@ -511,12 +504,96 @@ _CHILD_PROCESS_IMPORT = re.compile(
     )
     """,
 )
+# `execSync as <alias>` in an ESM named-import. Captures the alias
+# so we can search for `<alias>(` as a call site too.
+_EXEC_SYNC_ALIAS = re.compile(r"\bexecSync\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)")
 
 
-def _strip_js_comments(text: str) -> str:
-    text = _JS_BLOCK_COMMENT.sub("", text)
-    text = _JS_LINE_COMMENT.sub("", text)
-    return text
+def _strip_js_comments_and_strings(text: str) -> str:
+    """Replace string-literal contents and comments with whitespace.
+
+    A regex-only `//` strip is unsafe — `const x = "https://foo"`
+    would have its quoted half eaten and flip a real call site into a
+    comment. We walk the source as a tiny state machine instead, so
+    string literals (single-quote, double-quote, backtick template)
+    are recognised and their contents — and the `// ... \\n` /
+    `/* ... */` comment forms — are flattened to whitespace before
+    any pattern-matching runs. Newlines are preserved so error
+    positions stay sane and so any `^` / line-mode regexes still
+    work. Escape sequences inside strings consume two characters at
+    once so e.g. `"\\\""` does not close the string prematurely.
+    """
+    out: list[str] = []
+    n = len(text)
+    i = 0
+    state = "code"
+    quote = ""
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                state = "line_comment"
+                out.append("  ")
+                i += 2
+                continue
+            if ch == "/" and nxt == "*":
+                state = "block_comment"
+                out.append("  ")
+                i += 2
+                continue
+            if ch in ("'", '"', "`"):
+                state = "string"
+                quote = ch
+                out.append(" ")
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        if state == "line_comment":
+            if ch == "\n":
+                out.append("\n")
+                state = "code"
+                i += 1
+                continue
+            out.append(" ")
+            i += 1
+            continue
+        if state == "block_comment":
+            if ch == "*" and nxt == "/":
+                out.append("  ")
+                state = "code"
+                i += 2
+                continue
+            out.append("\n" if ch == "\n" else " ")
+            i += 1
+            continue
+        # state == "string"
+        if ch == "\\" and nxt:
+            out.append("  ")
+            i += 2
+            continue
+        if ch == quote:
+            out.append(" ")
+            state = "code"
+            quote = ""
+            i += 1
+            continue
+        out.append("\n" if ch == "\n" else " ")
+        i += 1
+    return "".join(out)
+
+
+def _build_call_site_pattern(aliases: list[str]) -> re.Pattern[str]:
+    """Pattern matching `execSync(` and any captured alias `(`.
+
+    Using `(?<![A-Za-z0-9_$])` rejects unrelated identifiers that
+    happen to contain `execSync` as a suffix (e.g. `myExecSync`).
+    """
+    names = ["execSync", *aliases]
+    alt = "|".join(re.escape(name) for name in names)
+    return re.compile(rf"(?<![A-Za-z0-9_$])(?:{alt})\s*\(")
 
 
 def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Violation]:
@@ -526,9 +603,16 @@ def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Vi
     if a file under mcp/ both imports `child_process` (in any form —
     named ESM, default ESM, namespace ESM, named CJS, or whole-module
     CJS — including the `node:` prefix) AND contains an `execSync(`
-    call site, flag it. Comments are stripped first to avoid false
-    positives. Exceptions (e.g. mcp/ngfw) are filtered through
+    or aliased call site (`import { execSync as run } ... run(...)`),
+    flag it. String literals and comments are flattened to whitespace
+    first so they cannot false-positive trip the check or hide a
+    real call site. Exceptions (e.g. mcp/ngfw) are filtered through
     docs/adr/exceptions.yaml.
+
+    Static analysis cannot catch every motivated bypass (e.g.
+    `const run = cp.execSync; run(...)`); ADR-010 is enforced at
+    multiple layers and the static check is the cheap pre-commit
+    backstop, not the only line of defence.
     """
     mcp_root = repo_root / "mcp"
     if not mcp_root.exists():
@@ -557,8 +641,19 @@ def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Vi
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        stripped = _strip_js_comments(text)
-        if _CHILD_PROCESS_IMPORT.search(stripped) and _EXEC_SYNC_CALL.search(stripped):
+        # Import detection runs on raw text so the matched
+        # `"child_process"` string literal is preserved.
+        if not _CHILD_PROCESS_IMPORT.search(text):
+            continue
+        # Alias and call-site detection run on the comment-and-string
+        # flattened form so that an `execSync(` token inside a comment
+        # or string cannot trigger the check, and so that a real
+        # `execSync(` call on a line containing a URL like
+        # `"https://..."` is not erased.
+        stripped = _strip_js_comments_and_strings(text)
+        aliases = _EXEC_SYNC_ALIAS.findall(text)
+        call_pattern = _build_call_site_pattern(aliases)
+        if call_pattern.search(stripped):
             rel = _repo_relative(path, repo_root)
             violations.append(
                 Violation(

@@ -42,9 +42,16 @@ Current mechanisms:
   flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that BOTH
   imports `child_process` (any shape — named, default, namespace,
   CommonJS destructure, or bare-`require` property access, with or
-  without the `node:` prefix) AND contains a non-comment
-  `execSync(...)` call site. Enforces ADR-010-R1; current exception
-  covers `mcp/ngfw/*` until the deferred migration lands.
+  without the `node:` prefix) AND contains an `execSync(...)` call
+  site (or an `execSync as <alias>` ESM rename used as `<alias>(`).
+  String literals and comments are flattened to whitespace before the
+  call-site scan so `"https://..."` URLs cannot accidentally erase a
+  real call site, and so commented-out call sites cannot false-
+  positive trip the check. The check is a cheap pre-commit backstop;
+  motivated bypasses such as `const run = cp.execSync; run(...)` are
+  outside its reach by design and rely on code review. Enforces
+  ADR-010-R1; current exception covers `mcp/ngfw/*` until the
+  deferred migration lands.
 
 ## Adding A Rule
 

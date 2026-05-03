@@ -342,17 +342,107 @@ class McpNoShellExecTests(unittest.TestCase):
             )
             self.assertEqual(self._run(repo_root), [])
 
-    def test_real_repo_passes_with_ngfw_exception(self) -> None:
-        """Live repo: ops is clean; ngfw violates but is excepted."""
-        raw = ADR_GUARD.check_mcp_no_shell_exec(ADR_GUARD.REPO_ROOT, None)
-        # ngfw is a real violator and should be in the raw list.
-        self.assertTrue(any(v.path.startswith("mcp/ngfw/") for v in raw))
-        # ops should never appear in the raw list.
-        self.assertFalse(any(v.path.startswith("mcp/ops/") for v in raw))
-        # After applying exceptions, the live repo passes ci-level.
-        exceptions = ADR_GUARD.load_adr_exceptions(ADR_GUARD.REPO_ROOT)
-        filtered = ADR_GUARD.filter_excepted_violations(raw, exceptions)
-        self.assertEqual(filtered, [])
+    def test_aliased_named_import_is_flagged(self) -> None:
+        """`import { execSync as run } ... run('aws ...')` is a bypass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { execSync as run } from "node:child_process";\n'
+                "run('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-010-R1")
+
+    def test_double_slashes_inside_a_string_do_not_eat_the_call_site(self) -> None:
+        """`https://...` URL must not flatten the call line into a comment."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { execSync } from "node:child_process";\n'
+                'const endpoint = "https://example.com/foo";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_block_comment_containing_call_text_does_not_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                "/*\n * old: execSync('aws s3 ls')\n */\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_template_string_containing_call_text_does_not_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                "const note = `we used to call execSync('aws ...') here`;\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_synthetic_repo_with_violator_and_exception(self) -> None:
+        """A violator in an excepted path is filtered; a violator outside is not.
+
+        Replaces the older live-repo regression test, which would have
+        broken when the deferred mcp/ngfw migration removed those
+        violations.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "docs/adr/index.yaml",
+                '[{"id":"ADR-010","title":"t","status":"accepted",'
+                '"scope":"repository","decision":"d",'
+                '"rules":[{"id":"ADR-010-R1","description":"x",'
+                '"checks":["mcp-no-shell-exec"]}],'
+                '"exceptions":[],"enforcement":["agent-policy"],'
+                '"evidence":["scripts/adr_guard/adr_guard.py"]}]',
+            )
+            self._write(
+                repo_root,
+                "docs/adr/exceptions.yaml",
+                '[{"rule_id":"ADR-010-R1","owner":"team",'
+                '"reason":"deferred migration","expires_on":"2099-01-01",'
+                '"checks":["mcp-no-shell-exec"],'
+                '"paths":["mcp/legacy/*"]}]',
+            )
+            self._write(
+                repo_root,
+                "mcp/legacy/index.js",
+                'import { execSync } from "child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            self._write(
+                repo_root,
+                "mcp/fresh/index.js",
+                'import { execSync } from "child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+
+            raw = ADR_GUARD.check_mcp_no_shell_exec(repo_root, None)
+            paths = sorted(v.path for v in raw)
+            self.assertEqual(paths, ["mcp/fresh/index.js", "mcp/legacy/index.js"])
+
+            exceptions = ADR_GUARD.load_adr_exceptions(repo_root)
+            filtered = ADR_GUARD.filter_excepted_violations(raw, exceptions)
+            self.assertEqual(
+                [v.path for v in filtered], ["mcp/fresh/index.js"]
+            )
 
 
 if __name__ == "__main__":

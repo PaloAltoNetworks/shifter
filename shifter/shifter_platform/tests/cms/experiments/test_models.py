@@ -153,18 +153,15 @@ class TestScriptAssetModel:
         assert script.is_deleted
 
     def test_active_for_user(self):
-        """active_for_user chains SoftDeleteQuerySet.active() and the user filter."""
+        """active_for_user filters ScriptAsset.objects (SoftDeleteManager, active-only)."""
         user = _make_user()
         first_item = _make_script_asset(name="Active")
         fake_qs = MagicMock()
         fake_qs.count.return_value = 1
         fake_qs.first.return_value = first_item
-        mock_active_qs = MagicMock()
-        mock_active_qs.filter.return_value = fake_qs
-        with patch.object(ScriptAsset.objects, "active", return_value=mock_active_qs) as mock_active:
+        with patch.object(ScriptAsset.objects, "filter", return_value=fake_qs) as mock_filter:
             result = ScriptAsset.active_for_user(user)
-            mock_active.assert_called_once_with()
-            mock_active_qs.filter.assert_called_once_with(user=user)
+            mock_filter.assert_called_once_with(user=user)
             assert result.count() == 1
             assert result.first().name == "Active"
 

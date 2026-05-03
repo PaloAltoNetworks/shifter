@@ -1,25 +1,33 @@
 """Soft-delete primitives shared across apps.
 
 Centralises the ``deleted_at`` pattern so every consumer model gets the
-same ``is_deleted`` accessor, the same ``active()`` / ``deleted()`` query
-filters, and the same expiry semantics. Re-implementing these locally is
-the failure mode that produces the "forgot to filter out soft-deleted
-rows" bug class — leaking soft-deleted records back into queries that
-should never see them.
+same ``is_deleted`` accessor, the same active-only default queryset, and
+the same expiry semantics. Re-implementing these locally is the failure
+mode that produces the "forgot to filter out soft-deleted rows" bug class
+— leaking soft-deleted records back into queries that should never see
+them.
+
+The defining design choice is that **the default manager pre-filters to
+non-soft-deleted rows.** ``Model.objects`` only ever returns active rows,
+so a call site cannot accidentally leak deleted records by writing the
+plain ``Model.objects.filter(...)`` they would write for any other
+model. Code that genuinely needs to read deleted rows (admin recovery
+flows, audit jobs, restore actions) must reach for the explicit
+``Model.all_objects`` manager — which makes the intent obvious to
+reviewers and to grep.
 
 A soft-delete-aware model:
 
 1. Declares ``deleted_at = models.DateTimeField(null=True, blank=True)``.
 2. Inherits :class:`SoftDeleteMixin` (or, transitively, ``Asset`` / etc).
-3. Sets ``objects = SoftDeleteQuerySet.as_manager()`` so callers can
-   write ``Model.objects.active()`` / ``Model.objects.deleted()`` instead
-   of re-typing ``deleted_at__isnull=True`` filters.
+3. Sets the canonical pair of managers::
 
-Models with both managers — e.g. a default manager that returns all rows
-and a separate ``active`` manager that pre-filters — should build the
-``active`` manager from this queryset via
-``models.Manager.from_queryset(SoftDeleteQuerySet)`` so the ``active()``
-method is also available on its querysets.
+       objects = SoftDeleteManager()        # default — active rows only
+       all_objects = models.Manager()       # explicit — full table
+
+   Callers can still chain ``.active()``, ``.deleted()``, or
+   ``.with_deleted()`` on either manager when explicit intent improves
+   readability.
 """
 
 from __future__ import annotations
@@ -68,12 +76,17 @@ class ExpiringStateMixin:
 
 
 class SoftDeleteQuerySet(models.QuerySet):
-    """Canonical queryset for models with a nullable ``deleted_at`` field.
+    """Queryset helpers for models with a nullable ``deleted_at`` field.
 
-    Use these helpers instead of inline ``deleted_at__isnull`` filters so
-    every soft-delete query goes through one well-known code path. Forgetting
-    the filter at a call site is the single most common way soft-deleted
-    rows leak back into application queries.
+    Provides ``active()`` / ``deleted()`` / ``with_deleted()`` so call
+    sites that need to be explicit about soft-delete state have one
+    canonical vocabulary across the codebase.
+
+    Most code does not need to call these directly — the default
+    ``objects`` manager (built via :class:`SoftDeleteManager`) already
+    pre-filters to active rows. Use these chainable helpers when you
+    start from a queryset that includes deleted rows (e.g. via
+    ``all_objects``) and want to narrow it.
     """
 
     def active(self) -> SoftDeleteQuerySet:
@@ -83,3 +96,31 @@ class SoftDeleteQuerySet(models.QuerySet):
     def deleted(self) -> SoftDeleteQuerySet:
         """Return only rows that have been soft-deleted."""
         return self.filter(deleted_at__isnull=False)
+
+    def with_deleted(self) -> SoftDeleteQuerySet:
+        """Return rows regardless of soft-delete state.
+
+        Identity helper that exists so call-site readers can recognise
+        the explicit "I want everything, including deleted" intent.
+        Equivalent to ``self`` when called on an unfiltered base queryset
+        (e.g. ``Model.all_objects.with_deleted()``); strips the active
+        filter when chained off an active-by-default manager.
+        """
+        return self.model._base_manager.get_queryset()  # type: ignore[return-value]
+
+
+class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):  # type: ignore[misc]
+    """Default manager for soft-delete-aware models.
+
+    Pre-filters every queryset to non-deleted rows. This is the manager
+    that closes the soft-delete bypass bug class: a normal
+    ``Model.objects.filter(...)`` cannot return a deleted row because
+    the manager never returns one to begin with.
+
+    Pair every model that uses this manager with an
+    ``all_objects = models.Manager()`` declaration so admin / restore /
+    audit code can still reach the full table when it needs to.
+    """
+
+    def get_queryset(self) -> SoftDeleteQuerySet:
+        return super().get_queryset().filter(deleted_at__isnull=True)

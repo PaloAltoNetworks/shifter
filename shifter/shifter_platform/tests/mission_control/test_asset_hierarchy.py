@@ -87,20 +87,17 @@ class TestAssetAbstractBase:
         assert agent.is_deleted is True
 
     def test_active_for_user_excludes_deleted(self):
-        """active_for_user chains SoftDeleteQuerySet.active() and the user filter."""
+        """active_for_user filters AgentConfig.objects (SoftDeleteManager, active-only)."""
         user = _make_user()
         active = _make_agent(name="Active", user=user)
 
-        mock_filtered = MagicMock()
-        mock_filtered.__iter__ = lambda self: iter([active])
-        mock_active_qs = MagicMock()
-        mock_active_qs.filter.return_value = mock_filtered
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([active])
 
-        with patch.object(AgentConfig.objects, "active", return_value=mock_active_qs) as mock_active:
+        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_active.assert_called_once_with()
-        mock_active_qs.filter.assert_called_once_with(user=user)
+        mock_filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0] == active
 
@@ -109,16 +106,13 @@ class TestAssetAbstractBase:
         user = _make_user()
         my_agent = _make_agent(name="My Agent", user=user)
 
-        mock_filtered = MagicMock()
-        mock_filtered.__iter__ = lambda self: iter([my_agent])
-        mock_active_qs = MagicMock()
-        mock_active_qs.filter.return_value = mock_filtered
+        mock_qs = MagicMock()
+        mock_qs.__iter__ = lambda self: iter([my_agent])
 
-        with patch.object(AgentConfig.objects, "active", return_value=mock_active_qs) as mock_active:
+        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_active.assert_called_once_with()
-        mock_active_qs.filter.assert_called_once_with(user=user)
+        mock_filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0].name == "My Agent"
 

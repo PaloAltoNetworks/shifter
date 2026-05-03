@@ -8,7 +8,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from shared.db import SoftDeleteMixin, SoftDeleteQuerySet
+from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
 
 class Severity(models.TextChoices):
@@ -67,7 +67,8 @@ class Risk(SoftDeleteMixin, models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = SoftDeleteQuerySet.as_manager()
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at"]
@@ -76,6 +77,7 @@ class Risk(SoftDeleteMixin, models.Model):
             models.Index(fields=["severity", "deleted_at"]),
             models.Index(fields=["created_at"]),
         ]
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.title} ({self.severity})"
@@ -90,12 +92,12 @@ class Risk(SoftDeleteMixin, models.Model):
     @property
     def comment_count(self) -> int:
         """Return count of non-deleted comments."""
-        return self.comments.active().count()
+        return Comment.objects.filter(risk=self).count()
 
     @classmethod
     def active(cls):
-        """Return queryset of non-deleted risks (delegates to SoftDeleteQuerySet)."""
-        return cls.objects.active()
+        """Return queryset of non-deleted risks (delegates to default manager)."""
+        return cls.objects.all()
 
     def soft_delete(self):
         """Mark risk as deleted without removing from database."""
@@ -142,13 +144,15 @@ class Comment(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = SoftDeleteQuerySet.as_manager()
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         ordering = ["created_at"]
         indexes = [
             models.Index(fields=["risk", "deleted_at", "created_at"]),
         ]
+        base_manager_name = "all_objects"
 
     def __str__(self):
         author = self.author_display

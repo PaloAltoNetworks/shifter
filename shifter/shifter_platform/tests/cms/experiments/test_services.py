@@ -101,17 +101,17 @@ class TestListScripts:
 
     @patch("cms.experiments.services.ScriptAsset")
     def test_returns_only_active_for_user(self, mock_script_model, user):
+        """list_scripts queries ScriptAsset.objects (SoftDeleteManager, active-only)."""
         active_script = _make_script(pk=1, user=user, name="Active")
         qs = MagicMock()
         qs.count.return_value = 1
         qs.first.return_value = active_script
-        mock_script_model.objects.active.return_value.filter.return_value.order_by.return_value = qs
+        mock_script_model.objects.filter.return_value.order_by.return_value = qs
 
         scripts = services.list_scripts(user)
         assert scripts.count() == 1
         assert scripts.first().name == "Active"
-        mock_script_model.objects.active.assert_called_once_with()
-        mock_script_model.objects.active.return_value.filter.assert_called_once_with(user=user)
+        mock_script_model.objects.filter.assert_called_once_with(user=user)
 
     @patch("cms.experiments.services.ScriptAsset")
     def test_other_user_sees_own(self, mock_script_model, other_user):
@@ -119,7 +119,7 @@ class TestListScripts:
         qs = MagicMock()
         qs.count.return_value = 1
         qs.first.return_value = other_script
-        mock_script_model.objects.active.return_value.filter.return_value.order_by.return_value = qs
+        mock_script_model.objects.filter.return_value.order_by.return_value = qs
 
         scripts = services.list_scripts(other_user)
         assert scripts.count() == 1
@@ -143,22 +143,22 @@ class TestDeleteScript:
     @patch("cms.experiments.services.audit_log")
     @patch("cms.experiments.services.ScriptAsset")
     def test_soft_deletes_own_script(self, mock_script_model, mock_audit, user):
+        """delete_script gets via ScriptAsset.objects (SoftDeleteManager)."""
         mock_script_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
         script = _make_script(pk=10, user=user, name="ToDelete")
         script.deleted_at = None
-        mock_script_model.objects.active.return_value.get.return_value = script
+        mock_script_model.objects.get.return_value = script
 
         services.delete_script(user, 10)
 
-        mock_script_model.objects.active.assert_called_once_with()
-        mock_script_model.objects.active.return_value.get.assert_called_once_with(pk=10, user=user)
+        mock_script_model.objects.get.assert_called_once_with(pk=10, user=user)
         assert script.deleted_at is not None
         script.save.assert_called_once()
 
     @patch("cms.experiments.services.ScriptAsset")
     def test_cannot_delete_other_users_script(self, mock_script_model, user):
         mock_script_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_script_model.objects.active.return_value.get.side_effect = mock_script_model.DoesNotExist
+        mock_script_model.objects.get.side_effect = mock_script_model.DoesNotExist
 
         with pytest.raises(ScriptUploadError, match="not found"):
             services.delete_script(user, 99)
@@ -229,7 +229,7 @@ class TestCreateExperiment:
         mock_load.return_value = mock_template
 
         # Script validation: pretend the script exists for the user
-        mock_script_model.objects.active.return_value.filter.return_value.values_list.return_value = {script.pk}
+        mock_script_model.objects.filter.return_value.values_list.return_value = {script.pk}
 
         mock_exp = _make_experiment(pk=43, user=user)
         mock_exp.scripts.count.return_value = 2

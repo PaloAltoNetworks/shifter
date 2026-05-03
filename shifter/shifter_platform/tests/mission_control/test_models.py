@@ -176,29 +176,27 @@ class TestAgentConfig:
         agent.deleted_at = timezone.now()
         assert agent.is_deleted is True
 
-    @patch.object(AgentConfig.objects, "active")
-    def test_active_for_user_excludes_deleted(self, mock_active, mock_user, agent):
-        """active_for_user chains SoftDeleteQuerySet.active() and the user filter."""
+    @patch.object(AgentConfig.objects, "filter")
+    def test_active_for_user_excludes_deleted(self, mock_filter, mock_user, agent):
+        """active_for_user filters AgentConfig.objects (SoftDeleteManager, active-only)."""
         agent.name = "Active Agent"
-        mock_active.return_value.filter.return_value = [agent]
+        mock_filter.return_value = [agent]
 
         result = list(AgentConfig.active_for_user(mock_user))
         assert len(result) == 1
         assert result[0] is agent
-        mock_active.assert_called_once_with()
-        mock_active.return_value.filter.assert_called_once_with(user=mock_user)
+        mock_filter.assert_called_once_with(user=mock_user)
 
-    @patch.object(AgentConfig.objects, "active")
-    def test_active_for_user_only_returns_user_agents(self, mock_active, mock_user, agent):
+    @patch.object(AgentConfig.objects, "filter")
+    def test_active_for_user_only_returns_user_agents(self, mock_filter, mock_user, agent):
         """active_for_user only returns agents for the specified user."""
         agent.name = "My Agent"
-        mock_active.return_value.filter.return_value = [agent]
+        mock_filter.return_value = [agent]
 
         result = list(AgentConfig.active_for_user(mock_user))
         assert len(result) == 1
         assert result[0].name == "My Agent"
-        mock_active.assert_called_once_with()
-        mock_active.return_value.filter.assert_called_once_with(user=mock_user)
+        mock_filter.assert_called_once_with(user=mock_user)
 
 
 # ---------------------------------------------------------------------------

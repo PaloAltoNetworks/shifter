@@ -61,13 +61,14 @@ class RiskViewSet(viewsets.ModelViewSet):
         return RiskSerializer
 
     def get_queryset(self):
-        """Return risks, optionally including deleted ones."""
-        queryset = Risk.objects.all()
+        """Return risks, optionally including deleted ones.
 
-        # Filter by deleted status
+        Default uses ``Risk.objects`` (SoftDeleteManager, active-only).
+        ``?include_deleted=true`` opts into the unfiltered ``all_objects``
+        manager.
+        """
         include_deleted = self.request.query_params.get("include_deleted", "").lower() == "true"
-        if not include_deleted:
-            queryset = queryset.active()
+        queryset = (Risk.all_objects if include_deleted else Risk.objects).all()
 
         # Filter by status
         status_filter = self.request.query_params.get("status")
@@ -166,8 +167,13 @@ class RiskViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def restore(self, request, pk=None):
-        """Restore a soft-deleted risk."""
-        instance = self.get_object()
+        """Restore a soft-deleted risk.
+
+        Bypasses ``self.get_object()`` (which uses the active-only
+        SoftDeleteManager and would 404 a deleted risk) and looks the
+        target up via ``Risk.all_objects`` directly.
+        """
+        instance = get_object_or_404(Risk.all_objects, pk=pk)
 
         if not instance.is_deleted:
             return Response(
@@ -205,10 +211,9 @@ class CommentViewSet(viewsets.ViewSet):
         risk = get_object_or_404(Risk, pk=risk_pk)
 
         include_deleted = request.query_params.get("include_deleted", "").lower() == "true"
-        comments = risk.comments.all().order_by("created_at")
-
-        if not include_deleted:
-            comments = comments.active()
+        # Comment.objects is active-only (SoftDeleteManager); all_objects is unfiltered.
+        manager = Comment.all_objects if include_deleted else Comment.objects
+        comments = manager.filter(risk=risk).order_by("created_at")
 
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)

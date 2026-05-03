@@ -18,7 +18,7 @@ from django.db import models
 
 from cms.models.catalogs import AppType, InstanceType
 from cms.models.lifecycle import apply_terminal_soft_delete
-from shared.db import SoftDeleteMixin, SoftDeleteQuerySet
+from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 from shared.enums import RequestType, ResourceStatus
 
 logger = logging.getLogger(__name__)
@@ -56,10 +56,12 @@ class EntityBase(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = SoftDeleteQuerySet.as_manager()
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         abstract = True
+        base_manager_name = "all_objects"
 
     def save(self, *args, **kwargs):
         """Save with terminal-status soft-delete invariant enforcement."""
@@ -100,12 +102,14 @@ class Request(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = SoftDeleteQuerySet.as_manager()
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "Request"
         verbose_name_plural = "Requests"
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"Request {self.request_id}"

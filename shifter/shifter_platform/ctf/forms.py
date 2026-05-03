@@ -282,7 +282,10 @@ class CTFChallengeForm(forms.ModelForm):
 
         # Filter next_challenge to same-event challenges, excluding self
         if event:
-            qs = CTFChallenge.objects.filter(event=event, deleted_at__isnull=True)
+            # CTFChallenge.objects is a SoftDeleteManager, so deleted rows
+            # are already excluded by default — no inline deleted_at filter
+            # needed.
+            qs = CTFChallenge.objects.filter(event=event)
             if self.instance.pk:
                 qs = qs.exclude(pk=self.instance.pk)
             self.fields["next_challenge"].queryset = qs

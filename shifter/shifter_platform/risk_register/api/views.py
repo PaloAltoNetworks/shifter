@@ -67,7 +67,7 @@ class RiskViewSet(viewsets.ModelViewSet):
         # Filter by deleted status
         include_deleted = self.request.query_params.get("include_deleted", "").lower() == "true"
         if not include_deleted:
-            queryset = queryset.filter(deleted_at__isnull=True)
+            queryset = queryset.active()
 
         # Filter by status
         status_filter = self.request.query_params.get("status")
@@ -208,7 +208,7 @@ class CommentViewSet(viewsets.ViewSet):
         comments = risk.comments.all().order_by("created_at")
 
         if not include_deleted:
-            comments = comments.filter(deleted_at__isnull=True)
+            comments = comments.active()
 
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)

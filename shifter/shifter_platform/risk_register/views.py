@@ -51,7 +51,7 @@ def risk_list(request: HttpRequest) -> HttpResponse:
     risks = Risk.objects.all()
 
     if not include_deleted:
-        risks = risks.filter(deleted_at__isnull=True)
+        risks = risks.active()
 
     if status_filter:
         risks = risks.filter(status=status_filter)
@@ -75,7 +75,7 @@ def risk_list(request: HttpRequest) -> HttpResponse:
 def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """Display risk details with comments."""
     risk = get_object_or_404(Risk, pk=pk)
-    comments = risk.comments.filter(deleted_at__isnull=True).order_by("created_at")
+    comments = risk.comments.active().order_by("created_at")
 
     context = {
         "risk": risk,

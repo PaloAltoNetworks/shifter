@@ -769,11 +769,12 @@ def _reschedule_challenge_release_tasks(event: CTFEvent) -> None:
     from ctf.models import CTFChallenge
     from ctf.services.challenge import _sync_release_task
 
+    # CTFChallenge.objects is a SoftDeleteManager, so deleted rows are
+    # already excluded by default — no inline deleted_at filter needed.
     challenges = CTFChallenge.objects.filter(
         event=event,
         visibility=ChallengeVisibility.HIDDEN.value,
         release_time__isnull=False,
-        deleted_at__isnull=True,
     )
     for challenge in challenges:
         _sync_release_task(challenge)

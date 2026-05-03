@@ -178,14 +178,14 @@ class TestAgentConfig:
 
     @patch.object(AgentConfig.objects, "filter")
     def test_active_for_user_excludes_deleted(self, mock_filter, mock_user, agent):
-        """active_for_user excludes soft-deleted agents."""
+        """active_for_user filters AgentConfig.objects (SoftDeleteManager, active-only)."""
         agent.name = "Active Agent"
         mock_filter.return_value = [agent]
 
         result = list(AgentConfig.active_for_user(mock_user))
         assert len(result) == 1
         assert result[0] is agent
-        mock_filter.assert_called_once_with(user=mock_user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=mock_user)
 
     @patch.object(AgentConfig.objects, "filter")
     def test_active_for_user_only_returns_user_agents(self, mock_filter, mock_user, agent):
@@ -196,7 +196,7 @@ class TestAgentConfig:
         result = list(AgentConfig.active_for_user(mock_user))
         assert len(result) == 1
         assert result[0].name == "My Agent"
-        mock_filter.assert_called_once_with(user=mock_user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=mock_user)
 
 
 # ---------------------------------------------------------------------------

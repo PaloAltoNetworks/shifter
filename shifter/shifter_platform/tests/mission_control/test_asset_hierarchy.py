@@ -87,7 +87,7 @@ class TestAssetAbstractBase:
         assert agent.is_deleted is True
 
     def test_active_for_user_excludes_deleted(self):
-        """active_for_user classmethod excludes soft-deleted records."""
+        """active_for_user filters AgentConfig.objects (SoftDeleteManager, active-only)."""
         user = _make_user()
         active = _make_agent(name="Active", user=user)
 
@@ -97,7 +97,7 @@ class TestAssetAbstractBase:
         with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0] == active
 
@@ -112,7 +112,7 @@ class TestAssetAbstractBase:
         with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0].name == "My Agent"
 

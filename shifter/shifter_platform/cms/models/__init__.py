@@ -35,14 +35,10 @@ from cms.models.provisioning import (
     Request,
     Subnet,
 )
-from cms.models.range import (
-    ActiveRangeInstanceManager,
-    RangeInstance,
-)
+from cms.models.range import RangeInstance
 from cms.models.scenarios import Scenario, ScenarioMetadata
 
 __all__ = [
-    "ActiveRangeInstanceManager",
     "AgentConfig",
     "AgentType",
     "App",

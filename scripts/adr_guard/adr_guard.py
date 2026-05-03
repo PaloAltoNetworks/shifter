@@ -488,16 +488,85 @@ def check_cloud_factory_seam(repo_root: Path, files: list[str] | None) -> list[V
     return violations
 
 
+MCP_EXEC_SYNC_IMPORT = re.compile(
+    r"""(?mx)
+    ^\s*
+    import\s*
+    \{[^}]*\bexecSync\b[^}]*\}\s*
+    from\s*["']child_process["']
+    """,
+)
+
+
+def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid execSync imports in mcp/ servers (ADR-010-R1).
+
+    Static lower bound for catching shell-string aws-cli invocations: if a
+    file under mcp/ imports execSync from child_process, it has the
+    machinery to build shell command strings. Exceptions (e.g. mcp/ngfw)
+    are filtered through docs/adr/exceptions.yaml.
+    """
+    mcp_root = repo_root / "mcp"
+    if not mcp_root.exists():
+        return []
+
+    if files is not None:
+        candidate_paths = [
+            repo_root / path
+            for path in files
+            if path.startswith("mcp/") and path.endswith((".js", ".mjs", ".cjs"))
+        ]
+    else:
+        candidate_paths = [
+            p for p in mcp_root.rglob("*.js")
+            if "node_modules" not in p.parts
+        ]
+
+    violations: list[Violation] = []
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if MCP_EXEC_SYNC_IMPORT.search(text):
+            rel = _repo_relative(path, repo_root)
+            violations.append(
+                Violation(
+                    "mcp-no-shell-exec",
+                    "ADR-010-R1",
+                    rel,
+                    "Imports execSync from child_process; MCP servers must invoke external CLIs via argv arrays (spawn/spawnSync/execFile)",
+                )
+            )
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
     "cross-layer-model-imports": check_cross_layer_model_imports,
     "guardrail-docs": check_guardrail_docs,
     "cloud-factory-seam": check_cloud_factory_seam,
+    "mcp-no-shell-exec": check_mcp_no_shell_exec,
 }
 CHECK_LEVELS = {
-    "fast": ["adr-registry", "layer-imports", "cross-layer-model-imports", "guardrail-docs", "cloud-factory-seam"],
-    "ci": ["adr-registry", "layer-imports", "cross-layer-model-imports", "cloud-factory-seam"],
+    "fast": [
+        "adr-registry",
+        "layer-imports",
+        "cross-layer-model-imports",
+        "guardrail-docs",
+        "cloud-factory-seam",
+        "mcp-no-shell-exec",
+    ],
+    "ci": [
+        "adr-registry",
+        "layer-imports",
+        "cross-layer-model-imports",
+        "cloud-factory-seam",
+        "mcp-no-shell-exec",
+    ],
     "all": list(CHECKS),
 }
 

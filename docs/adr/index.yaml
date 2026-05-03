@@ -256,8 +256,8 @@
     "rules": [
       {
         "id": "ADR-010-R1",
-        "description": "MCP servers must not pass externally-controlled values into a shell command string. AWS CLI invocations run through argv-array helpers (e.g. mcp/ops/lib.js buildAwsArgv/awsExec/awsJson/awsText).",
-        "checks": []
+        "description": "MCP servers must not import execSync from child_process; AWS CLI invocations run through argv-array helpers (e.g. mcp/ops/lib.js buildAwsArgv/awsExec/awsJson/awsText).",
+        "checks": ["mcp-no-shell-exec"]
       },
       {
         "id": "ADR-010-R2",
@@ -266,13 +266,14 @@
       }
     ],
     "exceptions": [],
-    "enforcement": ["agent-policy"],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
     "evidence": [
       "mcp/ops/SECURITY.md",
       "mcp/ops/lib.js",
       "mcp/ops/index.js",
       "mcp/ops/lib.test.js",
-      "mcp/ops/spawn-roundtrip.test.js"
+      "mcp/ops/spawn-roundtrip.test.js",
+      "scripts/adr_guard/adr_guard.py"
     ]
   },
   {

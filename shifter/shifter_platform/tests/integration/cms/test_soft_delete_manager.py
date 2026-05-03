@@ -155,6 +155,51 @@ class TestSoftDeleteCascadesAndAuditPaths:
 
     def test_base_manager_is_unfiltered(self):
         """Request._meta.base_manager must point at all_objects."""
-        # Class-level assertion; doesn't need DB but kept here for cohesion.
         assert Request._meta.base_manager_name == "all_objects"
         assert Request._meta.base_manager.model is Request
+
+    def test_reverse_related_manager_returns_deleted_children(self, request_user):
+        """``parent.children.all()`` returns deleted descendants too.
+
+        This is the actual behavioural guarantee: when
+        ``base_manager_name = 'all_objects'`` is set on the related
+        model, Django's reverse-FK ``RelatedManager`` reads from the
+        unfiltered manager, so cascade/integrity/audit code that walks
+        ``parent.children.all()`` sees the full history. Without this,
+        soft-deleted children silently disappear from cascade work.
+        """
+        from cms.models import Instance, InstanceType
+
+        # Use a parent (Request) and a soft-delete-aware child (Instance)
+        # connected by FK so the reverse relation is exercised end-to-end.
+        request = _make_request(request_user, "reverse-relation-parent")
+        instance_type = InstanceType.objects.create(
+            name="Reverse-Test Type",
+            slug="reverse-test-type",
+            spec_class="shared.schemas.SCMCredentialSpec",  # any importable spec
+        )
+
+        active_child = Instance.objects.create(
+            request=request,
+            name="active-child",
+            instance_type=instance_type,
+            data={},
+        )
+        deleted_child = Instance.objects.create(
+            request=request,
+            name="deleted-child",
+            instance_type=instance_type,
+            data={},
+        )
+        deleted_child.deleted_at = timezone.now()
+        deleted_child.save(update_fields=["deleted_at"])
+
+        # The reverse manager (request.instances) reads from
+        # Instance._meta.base_manager — which is all_objects (unfiltered).
+        # Both rows must be reachable.
+        reverse_pks = set(request.instances.values_list("pk", flat=True))
+        assert active_child.pk in reverse_pks
+        assert deleted_child.pk in reverse_pks, (
+            "Reverse-FK manager dropped a soft-deleted child — "
+            "Instance._meta.base_manager_name is not pointing at all_objects."
+        )

@@ -79,13 +79,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RiskViewSet.restore` now bypasses the active-only `get_object()` and
   looks up via `Risk.all_objects` directly so deleted risks are
   reachable for restore.
+- **Reverse-FK relations stay unfiltered** by setting
+  `Meta.default_manager_name = "all_objects"` (in addition to
+  `base_manager_name`) on every soft-delete-aware concrete model and
+  abstract base. Reverse-relation managers in Django are built from
+  `_default_manager`, not `_base_manager`, so without this `parent.children.all()`
+  silently dropped soft-deleted descendants — surfacing as missing rows
+  in cascade and audit walks. The two-name canonical pair makes both
+  `Model.objects.X` (active-only, via the named `objects` manager) and
+  `parent.children.all()` / Django internals (unfiltered, via
+  `_default_manager`) do the right thing.
 - **DB-backed integration tests** in
   `tests/integration/cms/test_soft_delete_manager.py` pin the canonical
   semantics: `Model.objects` excludes deleted rows even via explicit
   filter, `Model.all_objects` includes them, the chainable helpers
-  compose correctly, and `_meta.base_manager_name` points at
-  `all_objects` so reverse relations stay unfiltered. These pin
+  compose, `_meta.base_manager_name` points at `all_objects`, and
+  `parent.children.all()` returns deleted descendants too. These pin
   behaviour where the unit-test mocks pin call shape.
+- **Range lookup helpers** (`get_range_status_by_id`,
+  `get_range_spec_by_id`, `find_range_instance_id_by_request` in
+  `cms/services.py`) now use `RangeInstance.all_objects` so terminal /
+  destroyed ranges remain reachable for status lookups, audit reads,
+  and callback correlation.
+- **`risk_delete` is idempotent** — a re-delete attempt on an
+  already-soft-deleted risk short-circuits before re-mutating
+  `deleted_at` or writing a duplicate DELETE audit entry.
+- **`RiskViewSet.restore` enforces object-level permissions** explicitly
+  via `self.check_object_permissions()` after looking up via
+  `Risk.all_objects` (the lookup bypass would otherwise skip DRF's
+  permission check that `self.get_object()` would have run).
+- **`CommentViewSet.list` honours `?include_deleted=true` for the parent
+  risk too** — previously the parent lookup used active-only
+  `Risk.objects`, so comment history on a soft-deleted risk was
+  unreachable even with the include-deleted flag set.
+- **`SoftDeleteQuerySet.with_deleted()` removed.** Its semantics were
+  unsafe — it dropped any prior chained filters on the way back to the
+  full table. Callers wanting every row use `Model.all_objects`
+  directly: single canonical entry point keeps intent unambiguous.
 
 ## [3.95.0] - 2026-05-03
 

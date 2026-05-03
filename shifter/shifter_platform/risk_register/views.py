@@ -213,12 +213,20 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
     """Soft-delete a risk.
 
-    Uses ``Risk.all_objects`` so a re-delete of an already-deleted risk
-    is idempotent rather than 404-ing.
+    Uses ``Risk.all_objects`` so a re-delete attempt for an
+    already-deleted risk does not 404. The actual soft-delete is
+    idempotent: calling ``soft_delete()`` again would overwrite the
+    original ``deleted_at`` and write a duplicate DELETE audit entry,
+    so already-deleted risks are short-circuited with a no-op
+    confirmation message.
     """
     risk = get_object_or_404(Risk.all_objects, pk=pk)
 
     if request.method == "POST":
+        if risk.is_deleted:
+            messages.info(request, f"Risk '{risk.title}' was already deleted.")
+            return redirect("risk_register:risk_list")
+
         previous_state = _risk_to_dict(risk)
         risk.soft_delete()
 

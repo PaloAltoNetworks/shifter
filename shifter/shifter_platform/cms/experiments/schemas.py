@@ -5,7 +5,7 @@ These schemas validate user input before it reaches the database layer.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from cyberscript.template_vars import TemplateString
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # ---------------------------------------------------------------------------
 
 
-class ExperimentStatus(str, Enum):
+class ExperimentStatus(StrEnum):
     """Experiment lifecycle states."""
 
     DRAFT = "draft"
@@ -26,7 +26,7 @@ class ExperimentStatus(str, Enum):
     FAILED = "failed"
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     """Experiment run lifecycle states."""
 
     PENDING = "pending"
@@ -38,14 +38,14 @@ class RunStatus(str, Enum):
     FAILED = "failed"
 
 
-class ScriptType(str, Enum):
+class ScriptType(StrEnum):
     """Types of scripts that can be assigned to instances."""
 
     PYTHON = "python"
     CLAUDE_CODE = "claude_code"
 
 
-class ArtifactType(str, Enum):
+class ArtifactType(StrEnum):
     """Types of collected artifacts."""
 
     SCRIPT_OUTPUT = "script_output"

@@ -97,6 +97,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.9] - 2026-05-03
+
+### Fixed
+
+- **Ubuntu packer build failed on `apt-get update` with
+  `Splitting up ... InRelease into data and signature failed`.**
+  Reproduced across two consecutive runs on a fresh AMI launched from
+  the latest official Canonical Ubuntu 22.04 image — not transient.
+  Root cause: the base AMI sometimes ships with a corrupted `/var/lib/apt/lists`
+  cache that breaks GPG signature parsing on the first `apt-get update`.
+  Fix is in `shifter/packer/scripts/ubuntu/base.sh`: clear the apt list
+  cache + reinstall `ubuntu-keyring` before any apt operation, and add
+  `-o Acquire::Retries=3` to the first update for resilience against
+  flaky mirrors.
+
+## [3.95.8] - 2026-05-03
+
+### Fixed
+
+- **`AGENTS.md` and `.ground-control.yaml` pointed at the wrong GC project.**
+  Both said `aphelion` with `GC-` prefix; reality is the `shifter` GC
+  project (id `df4e718f-1f67-46f8-a375-3ba53fabc9c4`) with `CTF-*`,
+  `PLAT-*`, `GEN-*` prefixes by subsystem. (`aphelion` is a separate,
+  unrelated graph DB product project.) Surfaced while a backfill agent
+  was creating tracking GH issues for 57 of the 58 DRAFT shifter
+  requirements (#998–#1054); PLAT-001 was already covered by #802–#809.
+
+  Also documented a `gc_create_github_issue` quirk: its auto-link uses
+  `IMPLEMENTS`, which the API rejects on `DRAFT` requirements. Workaround
+  is a manual `gc_create_traceability_link` of type `DOCUMENTS`.
+
 ## [3.95.7] - 2026-05-03
 
 ### Changed

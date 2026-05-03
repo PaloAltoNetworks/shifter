@@ -21,6 +21,14 @@ import path from "node:path";
 
 let scriptPath;
 let workDir;
+// True iff this environment can actually spawn node and capture its
+// stdout. Set in before(); checked at the top of every test. Some
+// sandboxes (codex review runs, restricted CI) deny spawnSync with
+// EPERM; these tests are integration-style and there is nothing
+// meaningful to assert without a working spawn, so we skip rather
+// than report a false failure. Real CI and developer machines run
+// every case.
+let spawnAvailable = false;
 
 before(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "argv-roundtrip-"));
@@ -29,6 +37,14 @@ before(() => {
     scriptPath,
     "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n"
   );
+
+  const probe = spawnSync(
+    process.execPath,
+    [scriptPath, "probe"],
+    { encoding: "utf-8", timeout: 5000 }
+  );
+  spawnAvailable =
+    !probe.error && probe.status === 0 && probe.stdout === '["probe"]';
 });
 
 after(() => {
@@ -67,12 +83,20 @@ const LITERAL_PRESERVATION_CASES = new Map([
 
 describe("spawnSync argv round-trip (issue #763)", () => {
   for (const [label, payload] of LITERAL_PRESERVATION_CASES) {
-    it(`preserves ${label} literally`, () => {
+    it(`preserves ${label} literally`, (t) => {
+      if (!spawnAvailable) {
+        t.skip("spawn restricted in this environment");
+        return;
+      }
       assert.deepEqual(roundtrip(payload), payload);
     });
   }
 
-  it("preserves the SSM --parameters JSON shape with embedded shell metacharacters", () => {
+  it("preserves the SSM --parameters JSON shape with embedded shell metacharacters", (t) => {
+    if (!spawnAvailable) {
+      t.skip("spawn restricted in this environment");
+      return;
+    }
     const params = JSON.stringify({
       commands: ["echo $(whoami) && touch /tmp/pwn"],
     });

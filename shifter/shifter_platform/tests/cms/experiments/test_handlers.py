@@ -3,22 +3,22 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from cms.experiments.handlers import _parse_message, process_event
+from cms.experiments.handlers import parse_sns_message, process_event
 from cms.experiments.schemas import RunStatus
 
 
 class TestParseMessage:
     def test_direct_dict(self):
-        result = _parse_message({"event_type": "test"})
+        result = parse_sns_message({"event_type": "test"})
         assert result["event_type"] == "test"
 
     def test_json_string(self):
-        result = _parse_message('{"event_type": "test"}')
+        result = parse_sns_message('{"event_type": "test"}')
         assert result["event_type"] == "test"
 
     def test_sns_envelope(self):
         envelope = {"Message": json.dumps({"event_type": "test"})}
-        result = _parse_message(envelope)
+        result = parse_sns_message(envelope)
         assert result["event_type"] == "test"
 
 

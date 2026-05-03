@@ -7,11 +7,11 @@ Broadcasts status changes to WebSocket consumers via channel layer.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 
 from cms.experiments.orchestrator import ExperimentOrchestrator
+from shared.messages.envelope import parse_sns_message
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def process_event(message: str | dict) -> None:
     Args:
         message: SNS-wrapped message containing experiment event data.
     """
-    event = _parse_message(message)
+    event = parse_sns_message(message)
     event_type = event.get("event_type", "")
     event_id = event.get("event_id", "unknown")
 
@@ -111,14 +111,6 @@ def process_event(message: str | dict) -> None:
             event_type,
             event_id,
         )
-
-
-def _parse_message(message: str | dict) -> dict:
-    """Unwrap SNS envelope to get event payload."""
-    body = json.loads(message) if isinstance(message, str) else message
-    if "Message" in body:
-        return json.loads(body["Message"])
-    return body
 
 
 # ---------------------------------------------------------------------------

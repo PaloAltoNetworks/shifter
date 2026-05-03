@@ -6,6 +6,8 @@ import logging
 from typing import Any
 
 from cms.experiments.events import publish_range_provisioned_for_experiment
+from cms.experiments.models import ExperimentRun
+from cms.experiments.schemas import RunStatus
 from cms.models import RangeInstance
 
 logger = logging.getLogger(__name__)
@@ -26,8 +28,6 @@ def notify_experiment_on_range_ready(
         provisioned_instances: Dict of instance name -> instance details
             from the provisioning event payload.
     """
-    from cms.experiments.models import ExperimentRun
-
     request_id = range_instance.request.request_id if range_instance.request else None
     if request_id is None:
         return
@@ -64,8 +64,6 @@ def notify_experiment_on_range_ready(
             run.pk,
             request_id,
         )
-        from cms.experiments.schemas import RunStatus
-
         run.error_message = "Failed to publish range provisioning notification"
         run.save(update_fields=["error_message"])
         run.transition_to(RunStatus.FAILED)

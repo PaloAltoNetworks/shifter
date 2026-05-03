@@ -215,9 +215,9 @@ POLL_INTERVAL_S="${POLL_INTERVAL_S:-10}"
 
 poll_runaway_complete() {
   local body
-  body=$(docker exec "$A5_CONTAINER" python3 -c \
-    'import urllib.request;print(urllib.request.urlopen("http://127.0.0.1:8080/api/status", timeout=5).read().decode())' \
-    2>/dev/null) || return 1
+  local py_script='import urllib.request
+print(urllib.request.urlopen("http://127.0.0.1:8080/api/status", timeout=5).read().decode())'
+  body=$(docker exec "$A5_CONTAINER" python3 -c "$py_script" 2>/dev/null) || return 1
   [[ "$body" == *'"runaway_complete": true'* ]] || [[ "$body" == *'"runaway_complete":true'* ]]
 }
 

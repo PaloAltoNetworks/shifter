@@ -5,10 +5,10 @@ Defines status values, categories, and other constants for CTF operations.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class EventStatus(str, Enum):
+class EventStatus(StrEnum):
     """CTF event lifecycle status.
 
     Events progress through these states:
@@ -41,7 +41,7 @@ class EventStatus(str, Enum):
         return [(status.value, status.name.replace("_", " ").title()) for status in cls]
 
 
-class ParticipantStatus(str, Enum):
+class ParticipantStatus(StrEnum):
     """CTF participant lifecycle status.
 
     Participants progress through these states:
@@ -67,7 +67,7 @@ class ParticipantStatus(str, Enum):
         return [(status.value, status.name.replace("_", " ").title()) for status in cls]
 
 
-class ChallengeDifficulty(str, Enum):
+class ChallengeDifficulty(StrEnum):
     """Challenge difficulty levels."""
 
     EASY = "easy"
@@ -85,7 +85,7 @@ class ChallengeDifficulty(str, Enum):
         return [(diff.value, diff.name.title()) for diff in cls]
 
 
-class ChallengeVisibility(str, Enum):
+class ChallengeVisibility(StrEnum):
     """Challenge visibility states.
 
     Controls whether a challenge is shown to participants and whether
@@ -104,7 +104,7 @@ class ChallengeVisibility(str, Enum):
         return [(v.value, v.name.title()) for v in cls]
 
 
-class ChallengeCategory(str, Enum):
+class ChallengeCategory(StrEnum):
     """Fixed challenge categories.
 
     Standard CTF challenge categories as used in major CTF competitions.
@@ -141,7 +141,7 @@ class ChallengeCategory(str, Enum):
         return [(cat.value, labels.get(cat.value, cat.name.title())) for cat in cls]
 
 
-class NotificationType(str, Enum):
+class NotificationType(StrEnum):
     """Types of CTF notifications."""
 
     INVITE = "invite"
@@ -162,7 +162,7 @@ class NotificationType(str, Enum):
         return [(t.value, t.name.replace("_", " ").title()) for t in cls]
 
 
-class NotificationStatus(str, Enum):
+class NotificationStatus(StrEnum):
     """Status of a notification."""
 
     DRAFT = "draft"
@@ -181,7 +181,7 @@ class NotificationStatus(str, Enum):
         return [(s.value, s.name.title()) for s in cls]
 
 
-class ScheduledTaskType(str, Enum):
+class ScheduledTaskType(StrEnum):
     """Types of scheduled tasks."""
 
     SPIN_UP_RANGES = "spin_up_ranges"
@@ -201,7 +201,7 @@ class ScheduledTaskType(str, Enum):
         return [(t.value, t.name.replace("_", " ").title()) for t in cls]
 
 
-class ScheduledTaskStatus(str, Enum):
+class ScheduledTaskStatus(StrEnum):
     """Status of a scheduled task."""
 
     PENDING = "pending"
@@ -220,7 +220,7 @@ class ScheduledTaskStatus(str, Enum):
         return [(s.value, s.name.title()) for s in cls]
 
 
-class AttemptLimitMode(str, Enum):
+class AttemptLimitMode(StrEnum):
     """Behavior when a participant reaches the max submission attempts for a challenge.
 
     LOCKOUT: Permanently locked out of that challenge.
@@ -238,7 +238,7 @@ class AttemptLimitMode(str, Enum):
         return [(m.value, m.name.title()) for m in cls]
 
 
-class RatingVisibility(str, Enum):
+class RatingVisibility(StrEnum):
     """Controls whether challenge ratings are visible to participants.
 
     PUBLIC: All participants can see average ratings.
@@ -258,7 +258,7 @@ class RatingVisibility(str, Enum):
         return [(v.value, v.name.title()) for v in cls]
 
 
-class UserType(str, Enum):
+class UserType(StrEnum):
     """User types for the platform."""
 
     STANDARD = "standard"

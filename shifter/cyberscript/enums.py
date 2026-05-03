@@ -6,10 +6,10 @@ They are string enums for JSON serialization compatibility.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 
 
-class ResourceType(str, Enum):
+class ResourceType(StrEnum):
     """Top-level resource categories managed by the engine.
 
     RANGE and NGFW are independent resource types with separate lifecycles.
@@ -20,7 +20,7 @@ class ResourceType(str, Enum):
     NGFW = "ngfw"
 
 
-class RequestType(str, Enum):
+class RequestType(StrEnum):
     """Type of provisioning request.
 
     Used by Request models to categorize what is being requested.
@@ -30,7 +30,7 @@ class RequestType(str, Enum):
     NGFW = "ngfw"
 
 
-class ResourceStatus(str, Enum):
+class ResourceStatus(StrEnum):
     """Resource lifecycle status.
 
     Used by both CMS (Resource.status) and Engine (Resource.status)

@@ -509,80 +509,42 @@ _CHILD_PROCESS_IMPORT = re.compile(
 _EXEC_SYNC_ALIAS = re.compile(r"\bexecSync\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)")
 
 
-def _strip_js_comments_and_strings(text: str) -> str:
-    """Replace string-literal contents and comments with whitespace.
+# Combined matcher for JS comments and string literals. We replace
+# matches with whitespace (preserving newlines) so call-site / alias
+# regexes don't false-positive on tokens that live inside comments or
+# string literals, and a `//` inside `"https://..."` doesn't flip a
+# real call site into a comment. Template-literal substitutions
+# (`${...}`) are intentionally not parsed; an `execSync(` inside a
+# `` `${...}` `` substitution is a vanishingly rare bypass and falls
+# under code-review, not regex.
+_JS_LITERAL_OR_COMMENT = re.compile(
+    r"""(?xs)
+      ( //[^\n]* )                          # // line comment
+    | ( /\* .*? \*/ )                       # /* block comment */
+    | ( ' (?: \\. | [^'\\\n] )* ' )         # 'single-quote string'
+    | ( " (?: \\. | [^"\\\n] )* " )         # "double-quote string"
+    | ( ` (?: \\. | [^`\\] )* ` )           # `template string`
+    """,
+)
 
-    A regex-only `//` strip is unsafe — `const x = "https://foo"`
-    would have its quoted half eaten and flip a real call site into a
-    comment. We walk the source as a tiny state machine instead, so
-    string literals (single-quote, double-quote, backtick template)
-    are recognised and their contents — and the `// ... \\n` /
-    `/* ... */` comment forms — are flattened to whitespace before
-    any pattern-matching runs. Newlines are preserved so error
-    positions stay sane and so any `^` / line-mode regexes still
-    work. Escape sequences inside strings consume two characters at
-    once so e.g. `"\\\""` does not close the string prematurely.
+
+def _blank_keep_newlines(s: str) -> str:
+    """Replace every char in s with space, except newlines."""
+    return "".join("\n" if c == "\n" else " " for c in s)
+
+
+def _strip_js_comments_and_strings(text: str) -> str:
+    """Replace JS string-literal and comment contents with whitespace.
+
+    Newlines are preserved so error positions stay sane and so `^` /
+    line-mode regexes still work. Backslash escapes inside strings
+    are honoured by the regex's `\\.` alternation (so `"\\\""` does
+    not close the string prematurely).
     """
-    out: list[str] = []
-    n = len(text)
-    i = 0
-    state = "code"
-    quote = ""
-    while i < n:
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-        if state == "code":
-            if ch == "/" and nxt == "/":
-                state = "line_comment"
-                out.append("  ")
-                i += 2
-                continue
-            if ch == "/" and nxt == "*":
-                state = "block_comment"
-                out.append("  ")
-                i += 2
-                continue
-            if ch in ("'", '"', "`"):
-                state = "string"
-                quote = ch
-                out.append(" ")
-                i += 1
-                continue
-            out.append(ch)
-            i += 1
-            continue
-        if state == "line_comment":
-            if ch == "\n":
-                out.append("\n")
-                state = "code"
-                i += 1
-                continue
-            out.append(" ")
-            i += 1
-            continue
-        if state == "block_comment":
-            if ch == "*" and nxt == "/":
-                out.append("  ")
-                state = "code"
-                i += 2
-                continue
-            out.append("\n" if ch == "\n" else " ")
-            i += 1
-            continue
-        # state == "string"
-        if ch == "\\" and nxt:
-            out.append("  ")
-            i += 2
-            continue
-        if ch == quote:
-            out.append(" ")
-            state = "code"
-            quote = ""
-            i += 1
-            continue
-        out.append("\n" if ch == "\n" else " ")
-        i += 1
-    return "".join(out)
+    return _JS_LITERAL_OR_COMMENT.sub(
+        lambda m: _blank_keep_newlines(m.group(0)),
+        text,
+    )
 
 
 def _build_call_site_pattern(aliases: list[str]) -> re.Pattern[str]:

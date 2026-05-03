@@ -26,18 +26,25 @@ class CatalogBase(models.Model):
     Catalog entities are reference data that define available types,
     not user-owned instances. Examples: CredentialType, ScenarioType.
 
-    Subclasses should define a `spec_class` CharField pointing to
-    the Pydantic spec class for validation.
+    The ``spec_class`` field declares the dotted path to the Pydantic spec
+    class used to validate per-row payloads; it is owned by the abstract
+    base because every concrete catalog needs it (and ``get_spec_class`` /
+    ``validate_data`` here read it).
 
     Attributes:
         name: Human-readable name for display.
         slug: URL-safe identifier for lookups.
         created_at: When this catalog entry was created.
+        spec_class: Dotted path to the Pydantic spec class for validation.
     """
 
     name = models.CharField(max_length=100, help_text="Display name")
     slug = models.SlugField(max_length=50, unique=True, help_text="URL-safe identifier")
     created_at = models.DateTimeField(auto_now_add=True)
+    spec_class = models.CharField(
+        max_length=255,
+        help_text="Dotted path to Pydantic spec class",
+    )
 
     class Meta:
         abstract = True
@@ -157,24 +164,11 @@ class OperatingSystem(models.Model):
 class CredentialType(CatalogBase):
     """Catalog of credential types.
 
-    Type Object pattern: types are data rows, not code enums.
-    Each row defines a credential type and points to its Pydantic spec class.
-
-    Attributes (inherited from CatalogBase):
-        name: Display name (e.g., "SCM Registration").
-        slug: Lookup key (e.g., "scm").
-        created_at: When this type was added.
-        get_spec_class(): Load the Pydantic spec class.
-        validate_data(): Validate data against the spec.
-
-    Attributes:
-        spec_class: Dotted path to the Pydantic spec class for validation.
+    Type Object pattern: types are data rows, not code enums. Each row
+    defines a credential type; ``spec_class`` (inherited from
+    :class:`CatalogBase`) points at the Pydantic spec for per-credential
+    data validation, e.g. ``'shared.schemas.SCMCredentialSpec'``.
     """
-
-    spec_class = models.CharField(
-        max_length=255,
-        help_text="Dotted path to Pydantic spec class (e.g., 'shared.schemas.SCMCredentialSpec')",
-    )
 
     class Meta:
         verbose_name = "Credential Type"
@@ -184,24 +178,10 @@ class CredentialType(CatalogBase):
 class InstanceType(CatalogBase):
     """Catalog of instance types (container, vm, etc).
 
-    Type Object pattern: types are data rows, not code enums.
-    Each row defines an instance type and points to its Pydantic spec class.
-
-    Attributes (inherited from CatalogBase):
-        name: Display name (e.g., "Container").
-        slug: Lookup key (e.g., "container").
-        created_at: When this type was added.
-        get_spec_class(): Load the Pydantic spec class.
-        validate_data(): Validate data against the spec.
-
-    Attributes:
-        spec_class: Dotted path to the Pydantic spec class for validation.
+    Type Object pattern: types are data rows, not code enums. ``spec_class``
+    (inherited from :class:`CatalogBase`) points at the Pydantic spec for
+    per-instance data validation.
     """
-
-    spec_class = models.CharField(
-        max_length=255,
-        help_text="Dotted path to Pydantic spec class",
-    )
 
     class Meta:
         verbose_name = "Instance Type"
@@ -211,19 +191,10 @@ class InstanceType(CatalogBase):
 class AppType(CatalogBase):
     """Catalog of app types (os, ngfw, agent, other).
 
-    Type Object pattern: types are data rows, not code enums.
-    Each row defines an app type and points to its Pydantic spec class.
-
-    Attributes:
-        name: Display name (inherited from CatalogBase).
-        slug: URL-safe identifier (inherited from CatalogBase).
-        spec_class: Dotted path to Pydantic spec class.
+    Type Object pattern: types are data rows, not code enums. ``spec_class``
+    (inherited from :class:`CatalogBase`) points at the Pydantic spec for
+    per-app data validation.
     """
-
-    spec_class = models.CharField(
-        max_length=255,
-        help_text="Dotted path to Pydantic spec class",
-    )
 
     class Meta:
         verbose_name = "App Type"

@@ -689,10 +689,9 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
     try:
         # Get credential directly (verify ownership and not deleted)
         try:
-            credential = Credential.objects.get(
+            credential = Credential.objects.active().get(
                 id=credential_id,
                 user=user,
-                deleted_at__isnull=True,
             )
         except Credential.DoesNotExist:
             logger.error(
@@ -788,9 +787,9 @@ def list_credentials(user: User) -> list[CredentialContext]:
 
     try:
         credentials = (
-            Credential.objects.filter(
+            Credential.objects.active()
+            .filter(
                 user=user,
-                deleted_at__isnull=True,
             )
             .select_related("credential_type")
             .order_by("-created_at")
@@ -924,10 +923,13 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     )
 
     try:
-        cred = Credential.objects.select_related("credential_type").get(
-            id=credential_id,
-            user=user,
-            deleted_at__isnull=True,
+        cred = (
+            Credential.objects.active()
+            .select_related("credential_type")
+            .get(
+                id=credential_id,
+                user=user,
+            )
         )
     except Credential.DoesNotExist:
         logger.error(
@@ -3268,10 +3270,10 @@ def list_ngfws(user: User) -> list[NGFWAppContext]:
     logger.debug("list_ngfws called for user_id=%s", user.id)
 
     apps = (
-        App.objects.filter(
+        App.objects.active()
+        .filter(
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
         .select_related("instance")
         .order_by("-created_at")
@@ -3302,11 +3304,14 @@ def get_ngfw(user: User, app_id: UUID | str) -> NGFWAppContext:
     logger.debug("get_ngfw called for user_id=%s, app_id=%s", user.id, validated_app_id)
 
     try:
-        app = App.objects.select_related("instance", "instance__request").get(
-            id=validated_app_id,
-            instance__request__user=user,
-            app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
+        app = (
+            App.objects.active()
+            .select_related("instance", "instance__request")
+            .get(
+                id=validated_app_id,
+                instance__request__user=user,
+                app_type__slug="panw-ngfw",
+            )
         )
     except App.DoesNotExist:
         logger.error("get_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
@@ -3352,10 +3357,10 @@ def create_ngfw(
 
     # Check user doesn't already have an active NGFW
     existing_ngfw = (
-        App.objects.filter(
+        App.objects.active()
+        .filter(
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
         .exclude(status=ResourceStatus.DESTROYING.value)
         .first()
@@ -3377,10 +3382,13 @@ def create_ngfw(
     if not deployment_profile_id:
         raise ValueError("deployment_profile_id is required")
     try:
-        deployment_profile = Credential.objects.select_related("credential_type").get(
-            id=deployment_profile_id,
-            user=user,
-            deleted_at__isnull=True,
+        deployment_profile = (
+            Credential.objects.active()
+            .select_related("credential_type")
+            .get(
+                id=deployment_profile_id,
+                user=user,
+            )
         )
         if deployment_profile.credential_type.slug != "deployment_profile":
             raise CMSError("deployment_profile_id must reference a deployment profile credential")
@@ -3398,10 +3406,13 @@ def create_ngfw(
             raise ValueError("scm_credential_id is required for PIN registration")
         # Validate SCM credential exists and is owned by user
         try:
-            scm_credential = Credential.objects.select_related("credential_type").get(
-                id=scm_credential_id,
-                user=user,
-                deleted_at__isnull=True,
+            scm_credential = (
+                Credential.objects.active()
+                .select_related("credential_type")
+                .get(
+                    id=scm_credential_id,
+                    user=user,
+                )
             )
             if scm_credential.credential_type.slug != "scm":
                 raise CMSError("scm_credential_id must reference an SCM credential")
@@ -3545,11 +3556,14 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
     logger.debug("destroy_ngfw called for user_id=%s, app_id=%s", user.id, validated_app_id)
 
     try:
-        app = App.objects.select_related("instance", "instance__request").get(
-            id=validated_app_id,
-            instance__request__user=user,
-            app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
+        app = (
+            App.objects.active()
+            .select_related("instance", "instance__request")
+            .get(
+                id=validated_app_id,
+                instance__request__user=user,
+                app_type__slug="panw-ngfw",
+            )
         )
     except App.DoesNotExist:
         logger.error("destroy_ngfw: App id=%s not found for user_id=%s", app_id, user.id)

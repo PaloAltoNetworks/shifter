@@ -50,19 +50,22 @@ class TestAssetBehavior:
         assert agent.is_deleted is True
 
     def test_active_for_user_excludes_deleted_records(self):
-        """active_for_user should exclude soft-deleted records."""
+        """active_for_user should chain SoftDeleteQuerySet.active() then user filter."""
         from cms.models import AgentConfig
 
         user = MagicMock(id=1)
         active = self._make_agent(name="Active Agent")
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([active])
+        mock_filtered = MagicMock()
+        mock_filtered.__iter__ = lambda self: iter([active])
+        mock_active_qs = MagicMock()
+        mock_active_qs.filter.return_value = mock_filtered
 
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
+        with patch.object(AgentConfig.objects, "active", return_value=mock_active_qs) as mock_active:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_active.assert_called_once_with()
+        mock_active_qs.filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0] == active
 
@@ -73,12 +76,15 @@ class TestAssetBehavior:
         user = MagicMock(id=1)
         user_agent = self._make_agent(name="User Agent")
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([user_agent])
+        mock_filtered = MagicMock()
+        mock_filtered.__iter__ = lambda self: iter([user_agent])
+        mock_active_qs = MagicMock()
+        mock_active_qs.filter.return_value = mock_filtered
 
-        with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
+        with patch.object(AgentConfig.objects, "active", return_value=mock_active_qs) as mock_active:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_active.assert_called_once_with()
+        mock_active_qs.filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0].name == "User Agent"

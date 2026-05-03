@@ -97,6 +97,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.9] - 2026-05-03
+
+### Fixed
+
+- **Ubuntu packer build failed on `apt-get update` with
+  `Splitting up ... InRelease into data and signature failed`.**
+  Reproduced across two consecutive runs on a fresh AMI launched from
+  the latest official Canonical Ubuntu 22.04 image — not transient.
+  Root cause: the base AMI sometimes ships with a corrupted `/var/lib/apt/lists`
+  cache that breaks GPG signature parsing on the first `apt-get update`.
+  Fix is in `shifter/packer/scripts/ubuntu/base.sh`: clear the apt list
+  cache + reinstall `ubuntu-keyring` before any apt operation, and add
+  `-o Acquire::Retries=3` to the first update for resilience against
+  flaky mirrors.
+
 ## [3.95.8] - 2026-05-03
 
 ### Fixed

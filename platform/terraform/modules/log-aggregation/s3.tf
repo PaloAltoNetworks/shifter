@@ -18,8 +18,10 @@ locals {
 # ------------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "logs" {
-  count  = var.enable_log_aggregation ? 1 : 0
-  bucket = "${var.name_prefix}-logs-${var.environment}"
+  count = var.enable_log_aggregation ? 1 : 0
+  # Account-id suffix keeps the name globally unique (S3 namespace is shared
+  # across all AWS accounts) without sacrificing per-account determinism.
+  bucket = "${var.name_prefix}-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-logs-${var.environment}"

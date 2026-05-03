@@ -97,6 +97,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.6] - 2026-05-03
+
+### Fixed
+
+- **Range / Apply hit `BucketAlreadyExists` (409) on first deploy to the
+  fresh `aws-dev` account.** `engine-state` module hardcoded
+  `${var.name_prefix}-pulumi-state` (e.g., `dev-range-pulumi-state`)
+  and S3 bucket names live in one global namespace. Suffixed both
+  module bucket names with `${data.aws_caller_identity.current.account_id}`:
+  - `engine-state` → `dev-range-pulumi-state-<account_id>`
+  - `log-aggregation` → `dev-portal-logs-dev-<account_id>` (preemptive
+    fix; same naming pattern would have collided next).
+
+  The `tag.Name` keeps the account-less form so dashboards stay readable.
+  No state migration needed for fresh deploys; if `prod` ever needs to
+  carry over an existing bucket, it'll require a separate import +
+  rename plan (out of scope here).
+
 ## [3.95.5] - 2026-05-03
 
 ### Fixed

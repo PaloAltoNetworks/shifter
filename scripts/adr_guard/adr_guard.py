@@ -509,42 +509,84 @@ _CHILD_PROCESS_IMPORT = re.compile(
 _EXEC_SYNC_ALIAS = re.compile(r"\bexecSync\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)")
 
 
-# Combined matcher for JS comments and string literals. We replace
-# matches with whitespace (preserving newlines) so call-site / alias
-# regexes don't false-positive on tokens that live inside comments or
-# string literals, and a `//` inside `"https://..."` doesn't flip a
-# real call site into a comment. Template-literal substitutions
-# (`${...}`) are intentionally not parsed; an `execSync(` inside a
-# `` `${...}` `` substitution is a vanishingly rare bypass and falls
-# under code-review, not regex.
-_JS_LITERAL_OR_COMMENT = re.compile(
-    r"""(?xs)
-      ( //[^\n]* )                          # // line comment
-    | ( /\* .*? \*/ )                       # /* block comment */
-    | ( ' (?: \\. | [^'\\\n] )* ' )         # 'single-quote string'
-    | ( " (?: \\. | [^"\\\n] )* " )         # "double-quote string"
-    | ( ` (?: \\. | [^`\\] )* ` )           # `template string`
-    """,
-)
+# Tiny per-state helpers for _strip_js_comments_and_strings.
+# Splitting the state machine across these helpers keeps per-function
+# cognitive complexity low and avoids a single mega-regex whose
+# alternation complexity tripped SonarCloud. Each helper consumes one
+# or two characters and returns the next loop state.
+
+_BLANK_KEEP_NEWLINES = {"\n": "\n"}
 
 
-def _blank_keep_newlines(s: str) -> str:
-    """Replace every char in s with space, except newlines."""
-    return "".join("\n" if c == "\n" else " " for c in s)
+def _blank_for(ch: str) -> str:
+    return _BLANK_KEEP_NEWLINES.get(ch, " ")
+
+
+def _consume_code(text: str, i: int) -> tuple[int, str, str, str]:
+    """Code state. Detects start of comment / string / nothing."""
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    ch = text[i]
+    if ch == "/" and nxt == "/":
+        return i + 2, "  ", "line_comment", ""
+    if ch == "/" and nxt == "*":
+        return i + 2, "  ", "block_comment", ""
+    if ch in ("'", '"', "`"):
+        return i + 1, " ", "string", ch
+    return i + 1, ch, "code", ""
+
+
+def _consume_line_comment(text: str, i: int) -> tuple[int, str, str, str]:
+    ch = text[i]
+    if ch == "\n":
+        return i + 1, "\n", "code", ""
+    return i + 1, " ", "line_comment", ""
+
+
+def _consume_block_comment(text: str, i: int) -> tuple[int, str, str, str]:
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    ch = text[i]
+    if ch == "*" and nxt == "/":
+        return i + 2, "  ", "code", ""
+    return i + 1, _blank_for(ch), "block_comment", ""
+
+
+def _consume_string(text: str, i: int, quote: str) -> tuple[int, str, str, str]:
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    ch = text[i]
+    if ch == "\\" and nxt:
+        # Two-char escape consumed as whitespace; backslash never
+        # closes the string prematurely.
+        return i + 2, "  ", "string", quote
+    if ch == quote:
+        return i + 1, " ", "code", ""
+    return i + 1, _blank_for(ch), "string", quote
 
 
 def _strip_js_comments_and_strings(text: str) -> str:
-    """Replace JS string-literal and comment contents with whitespace.
+    """Flatten JS string-literal and comment contents to whitespace.
 
     Newlines are preserved so error positions stay sane and so `^` /
-    line-mode regexes still work. Backslash escapes inside strings
-    are honoured by the regex's `\\.` alternation (so `"\\\""` does
-    not close the string prematurely).
+    line-mode regexes still work. Template-literal substitutions
+    (`${...}`) are intentionally not parsed; an `execSync(` inside a
+    `` `${...}` `` substitution is a vanishingly rare bypass and falls
+    under code-review, not regex.
     """
-    return _JS_LITERAL_OR_COMMENT.sub(
-        lambda m: _blank_keep_newlines(m.group(0)),
-        text,
-    )
+    out: list[str] = []
+    n = len(text)
+    i = 0
+    state = "code"
+    quote = ""
+    while i < n:
+        if state == "code":
+            i, emit, state, quote = _consume_code(text, i)
+        elif state == "line_comment":
+            i, emit, state, quote = _consume_line_comment(text, i)
+        elif state == "block_comment":
+            i, emit, state, quote = _consume_block_comment(text, i)
+        else:  # state == "string"
+            i, emit, state, quote = _consume_string(text, i, quote)
+        out.append(emit)
+    return "".join(out)
 
 
 def _build_call_site_pattern(aliases: list[str]) -> re.Pattern[str]:

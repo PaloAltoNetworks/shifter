@@ -37,6 +37,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function and the iteration moved into a new
   `OperatingSystemQuerySet.for_extension()` queryset method;
   `get_for_extension()` is preserved as a thin compatibility wrapper.
+- **Promoted `spec_class` field to `CatalogBase`** — `CredentialType`,
+  `InstanceType`, and `AppType` no longer redeclare it. Cosmetic
+  `help_text` migration for `cms.CredentialType` (no schema change).
+- **`Credential` now extends `CredentialBase`** per the original design
+  intent. Adds `last_verified_at` and `last_used_at` columns to the
+  credentials table (cms migration `0025`), creating schema slots for
+  credential-rotation, staleness, and compromise-detection signals.
+- **Centralised the soft-delete bypass bug class.** Added
+  `shared/db/soft_delete.py` exposing `SoftDeleteMixin`,
+  `ExpiringStateMixin`, and `SoftDeleteQuerySet` (with `.active()` /
+  `.deleted()`) as the canonical primitives for any model with a
+  nullable `deleted_at` field. `Asset`, `EntityBase`, `Request`,
+  `Scenario`, `RangeInstance`, `Risk`, and `Comment` all use the shared
+  manager; `ActiveRangeInstanceManager` is built from the same queryset
+  via `Manager.from_queryset`. Replaced every inline
+  `deleted_at__isnull=True` filter across `cms/services.py` (9 sites),
+  `cms/experiments/services.py` (4), `cms/scenarios/registry.py` (3),
+  `cms/scenario_editor/services.py` (3), `risk_register/views.py` (2),
+  `risk_register/api/views.py` (2), `risk_register/models.py` (2),
+  `ctf/forms.py` (1), and `ctf/services/event.py` (1) with the
+  canonical `.objects.active()` chain. The shared mixins live in
+  `shared/db/` (not `shared/models/`) to satisfy ADR-001-R2's
+  cross-layer-model-imports check.
 
 ## [3.95.0] - 2026-05-03
 

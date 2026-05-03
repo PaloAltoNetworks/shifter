@@ -20,7 +20,15 @@
     "owner": "platform",
     "reason": "mcp/ngfw still uses execSync with shell-string aws-cli invocations. Migration tracked separately; #763 only landed mcp/ops.",
     "expires_on": "2026-08-01",
+    "checks": ["mcp-no-shell-exec"],
+    "paths": ["mcp/ngfw/*"]
+  },
+  {
+    "rule_id": "ADR-010-R2",
+    "owner": "platform",
+    "reason": "mcp/ngfw embeds aws-cli --parameters JSON inside shell strings; same migration as ADR-010-R1. R1 exception covers the static check; R2 explicitly captures the JSON-payload exception until ngfw moves to argv arrays.",
+    "expires_on": "2026-08-01",
     "checks": [],
-    "paths": ["mcp/ngfw/"]
+    "paths": ["mcp/ngfw/*"]
   }
 ]

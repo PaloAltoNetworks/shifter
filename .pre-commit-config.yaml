@@ -409,6 +409,13 @@ repos:
         files: ^mcp/aws/
         pass_filenames: false
 
+      - id: test-mcp-ops
+        name: test (mcp/ops)
+        entry: bash -c 'cd mcp/ops && npm test'
+        language: system
+        files: ^mcp/ops/
+        pass_filenames: false
+
   # Shifter Platform tests (largest test suite - run last)
   - repo: local
     hooks:

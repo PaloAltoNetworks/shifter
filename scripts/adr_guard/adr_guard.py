@@ -586,14 +586,37 @@ def _strip_js_comments_and_strings(text: str) -> str:
 
 
 def _build_call_site_pattern(aliases: list[str]) -> re.Pattern[str]:
-    """Pattern matching `execSync(` and any captured alias `(`.
+    """Pattern matching `execSync(` / `exec(` and any captured alias `(`.
+
+    `exec` and `execSync` are the two child_process call shapes that
+    take a shell command string. `spawnSync(... { shell: true })` is
+    handled by a separate matcher because it requires looking at the
+    options object as well as the function name.
 
     Using `(?<![A-Za-z0-9_$])` rejects unrelated identifiers that
-    happen to contain `execSync` as a suffix (e.g. `myExecSync`).
+    happen to end in `exec` or `execSync` (e.g. `myExecSync`,
+    `regexExec`).
     """
-    names = ["execSync", *aliases]
+    names = ["execSync", "exec", *aliases]
     alt = "|".join(re.escape(name) for name in names)
     return re.compile(rf"(?<![A-Za-z0-9_$])(?:{alt})\s*\(")
+
+
+# `spawn` / `spawnSync` / `execFile` / `execFileSync` with
+# `{ shell: true }` is just as bad as `exec` from a shell-string
+# point of view; the option re-routes the call through `/bin/sh -c`.
+# We match the function name immediately followed (eventually) by an
+# options object that contains `shell: true`. Because we cannot parse
+# JS in a regex, the matcher is intentionally generous: any `shell:
+# true` within ~400 characters of a `spawn`/`execFile` call counts.
+_SHELL_TRUE_SPAWN = re.compile(
+    r"""(?xs)
+    (?<![A-Za-z0-9_$])
+    (?:spawnSync|spawn|execFileSync|execFile)
+    \s*\([^)]{0,400}?
+    \bshell\s*:\s*true\b
+    """,
+)
 
 
 def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Violation]:
@@ -647,20 +670,31 @@ def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Vi
             continue
         # Alias and call-site detection run on the comment-and-string
         # flattened form so that an `execSync(` token inside a comment
-        # or string cannot trigger the check, and so that a real
-        # `execSync(` call on a line containing a URL like
-        # `"https://..."` is not erased.
+        # or string cannot trigger the check, a real `execSync(` call
+        # on a line containing a URL like `"https://..."` is not
+        # erased, and a comment like `// execSync as run` cannot
+        # synthesise a fake alias that turns innocent `run(` calls
+        # into false positives.
         stripped = _strip_js_comments_and_strings(text)
-        aliases = _EXEC_SYNC_ALIAS.findall(text)
+        aliases = _EXEC_SYNC_ALIAS.findall(stripped)
         call_pattern = _build_call_site_pattern(aliases)
+        rel = _repo_relative(path, repo_root)
         if call_pattern.search(stripped):
-            rel = _repo_relative(path, repo_root)
             violations.append(
                 Violation(
                     "mcp-no-shell-exec",
                     "ADR-010-R1",
                     rel,
-                    "Calls execSync from child_process; MCP servers must invoke external CLIs via argv arrays (spawn/spawnSync/execFile)",
+                    "Calls exec/execSync from child_process; MCP servers must invoke external CLIs via argv arrays (spawn/spawnSync/execFile)",
+                )
+            )
+        elif _SHELL_TRUE_SPAWN.search(stripped):
+            violations.append(
+                Violation(
+                    "mcp-no-shell-exec",
+                    "ADR-010-R1",
+                    rel,
+                    "Uses spawn/spawnSync/execFile/execFileSync with { shell: true }; MCP servers must invoke external CLIs via argv arrays without a shell",
                 )
             )
     return violations

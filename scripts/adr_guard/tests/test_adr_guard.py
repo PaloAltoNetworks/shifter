@@ -394,6 +394,82 @@ class McpNoShellExecTests(unittest.TestCase):
             )
             self.assertEqual(self._run(repo_root), [])
 
+    def test_bare_exec_is_flagged(self) -> None:
+        """`exec(shellString)` is shell-string execution, same as execSync."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { exec } from "node:child_process";\n'
+                "exec('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_namespace_exec_call_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import * as cp from "node:child_process";\n'
+                "cp.exec('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_spawn_with_shell_true_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawn } from "node:child_process";\n'
+                "spawn('aws s3 ls', { shell: true });\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+            self.assertIn("shell: true", violations[0].message)
+
+    def test_spawn_without_shell_option_is_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawn } from "node:child_process";\n'
+                "spawn('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_spawn_with_shell_false_is_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawn } from "node:child_process";\n'
+                "spawn('aws', ['s3', 'ls'], { shell: false });\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_string_containing_alias_pattern_does_not_force_a_false_positive(self) -> None:
+        """A comment or string with the literal `execSync as run` text
+        must not turn an unrelated `run(` call into a flagged call site."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                'const note = "we used to import { execSync as run } here";\n'
+                "function run(x) { return x; }\n"
+                "run('legacy');\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
     def test_synthetic_repo_with_violator_and_exception(self) -> None:
         """A violator in an excepted path is filtered; a violator outside is not.
 

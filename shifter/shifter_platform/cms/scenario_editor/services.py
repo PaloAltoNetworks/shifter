@@ -187,7 +187,7 @@ def create_scenario(
 
     try:
         with transaction.atomic():
-            if Scenario.objects.active().filter(scenario_id=scenario_id).exists():
+            if Scenario.objects.filter(scenario_id=scenario_id).exists():
                 logger.error(
                     "create_scenario: duplicate scenario_id=%s, user_id=%s",
                     scenario_id,
@@ -285,7 +285,7 @@ def update_scenario(
         )
 
     try:
-        scenario = Scenario.objects.active().get(scenario_id=scenario_id)
+        scenario = Scenario.objects.get(scenario_id=scenario_id)
     except Scenario.DoesNotExist as e:
         logger.error(
             "update_scenario: scenario not found, scenario_id=%s, user_id=%s",
@@ -384,7 +384,7 @@ def delete_scenario(user: User, scenario_id: str) -> None:
         )
 
     try:
-        scenario = Scenario.objects.active().get(scenario_id=scenario_id)
+        scenario = Scenario.objects.get(scenario_id=scenario_id)
     except Scenario.DoesNotExist as e:
         logger.error(
             "delete_scenario: scenario not found, scenario_id=%s, user_id=%s",

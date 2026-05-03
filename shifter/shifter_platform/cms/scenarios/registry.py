@@ -43,7 +43,7 @@ def _get_db_scenarios() -> list[ScenarioTemplate]:
     from cms.models import Scenario
 
     scenarios = []
-    for s in Scenario.objects.active():
+    for s in Scenario.objects.all():
         try:
             scenarios.append(s.to_template())
         except Exception:
@@ -166,7 +166,7 @@ def get_scenario_detail(scenario_id: str) -> dict[str, Any]:
     from cms.models import Scenario
 
     try:
-        db_scenario = Scenario.objects.active().get(scenario_id=scenario_id)
+        db_scenario = Scenario.objects.get(scenario_id=scenario_id)
         template = db_scenario.to_template()
         return _scenario_to_dict(template, is_default=False, metadata=meta)
     except Scenario.DoesNotExist:
@@ -221,7 +221,7 @@ def load_scenario_template(scenario_id: str) -> ScenarioTemplate:
     from cms.models import Scenario
 
     try:
-        db_scenario = Scenario.objects.active().get(scenario_id=scenario_id)
+        db_scenario = Scenario.objects.get(scenario_id=scenario_id)
         return db_scenario.to_template()
     except Scenario.DoesNotExist:
         pass

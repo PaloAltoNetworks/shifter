@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import models
 
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
-from shared.db import ExpiringStateMixin, SoftDeleteMixin, SoftDeleteQuerySet
+from shared.db import ExpiringStateMixin, SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +36,25 @@ class Asset(SoftDeleteMixin, models.Model):
 
     Subclasses must define a 'user' ForeignKey field.
 
-    The default manager is :class:`~shared.db.SoftDeleteQuerySet`-backed so
-    every concrete asset subclass exposes ``objects.active()`` /
-    ``objects.deleted()`` without restating the soft-delete filter.
+    Soft-delete semantics:
+
+    * ``Asset.objects`` is a :class:`~shared.db.SoftDeleteManager` and
+      pre-filters to non-deleted rows. A plain
+      ``Asset.objects.filter(user=user)`` cannot return deleted rows.
+    * ``Asset.all_objects`` is the unfiltered manager — use it explicitly
+      from admin / restore / audit code that needs to see deleted rows.
     """
 
     name = models.CharField(max_length=100, help_text="User-friendly name")
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = SoftDeleteQuerySet.as_manager()
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         abstract = True
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return self.name
@@ -57,13 +63,10 @@ class Asset(SoftDeleteMixin, models.Model):
     def active_for_user(cls, user):
         """Return non-deleted assets for a user.
 
-        Args:
-            user: The user to filter by
-
-        Returns:
-            QuerySet of active (non-deleted) assets for the user.
+        Thin wrapper around ``cls.objects.filter(user=user)`` — kept as a
+        named method for callers that prefer the explicit verb.
         """
-        return cls.objects.active().filter(user=user)
+        return cls.objects.filter(user=user)
 
 
 class FileAsset(Asset):

@@ -488,38 +488,47 @@ def check_cloud_factory_seam(repo_root: Path, files: list[str] | None) -> list[V
     return violations
 
 
-# Match every shape that lets a JS module pull execSync into scope.
-# Both spelled-out import forms accept the optional `node:` prefix.
-# Whitespace and quote style vary; the matcher is strict on intent
-# (the symbol `execSync` and the module `child_process`) and loose on
-# everything else.
-MCP_EXEC_SYNC_IMPORT = re.compile(
-    r"""(?mx)
+# Strip JS line comments (`// ...`) and block comments (`/* ... */`)
+# before scanning. Comments mentioning `execSync(` are not a security
+# risk and would otherwise produce false positives.
+_JS_LINE_COMMENT = re.compile(r"//[^\n]*")
+_JS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+# A real call site: `execSync(` (preceded by anything that isn't an
+# identifier character so we don't match e.g. `myExecSync(`). Matches
+# bare `execSync(`, `cp.execSync(`, `child_process.execSync(`, etc.
+_EXEC_SYNC_CALL = re.compile(r"(?<![A-Za-z0-9_$])execSync\s*\(")
+# child_process import shapes we care about. We match the import to
+# distinguish "calls Node's execSync" from a name collision with an
+# unrelated function called execSync.
+_CHILD_PROCESS_IMPORT = re.compile(
+    r"""(?x)
     (
-        # ESM: import { ..., execSync, ... } from "child_process"
-        ^\s*import\s*\{[^}]*\bexecSync\b[^}]*\}\s*
         from\s*["'](?:node:)?child_process["']
     )
     |
     (
-        # ESM default-namespace then property access elsewhere is rare
-        # enough to skip; CommonJS destructuring is the realistic
-        # second form.
-        # CJS: const { ..., execSync, ... } = require("child_process")
-        ^\s*(?:const|let|var)\s*\{[^}]*\bexecSync\b[^}]*\}\s*=\s*
         require\s*\(\s*["'](?:node:)?child_process["']\s*\)
     )
     """,
 )
 
 
-def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Violation]:
-    """Forbid execSync imports in mcp/ servers (ADR-010-R1).
+def _strip_js_comments(text: str) -> str:
+    text = _JS_BLOCK_COMMENT.sub("", text)
+    text = _JS_LINE_COMMENT.sub("", text)
+    return text
 
-    Static lower bound for catching shell-string aws-cli invocations: if a
-    file under mcp/ imports execSync from child_process, it has the
-    machinery to build shell command strings. Exceptions (e.g. mcp/ngfw)
-    are filtered through docs/adr/exceptions.yaml.
+
+def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid execSync call sites in mcp/ servers (ADR-010-R1).
+
+    Static lower bound for catching shell-string aws-cli invocations:
+    if a file under mcp/ both imports `child_process` (in any form —
+    named ESM, default ESM, namespace ESM, named CJS, or whole-module
+    CJS — including the `node:` prefix) AND contains an `execSync(`
+    call site, flag it. Comments are stripped first to avoid false
+    positives. Exceptions (e.g. mcp/ngfw) are filtered through
+    docs/adr/exceptions.yaml.
     """
     mcp_root = repo_root / "mcp"
     if not mcp_root.exists():
@@ -548,14 +557,15 @@ def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Vi
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if MCP_EXEC_SYNC_IMPORT.search(text):
+        stripped = _strip_js_comments(text)
+        if _CHILD_PROCESS_IMPORT.search(stripped) and _EXEC_SYNC_CALL.search(stripped):
             rel = _repo_relative(path, repo_root)
             violations.append(
                 Violation(
                     "mcp-no-shell-exec",
                     "ADR-010-R1",
                     rel,
-                    "Imports execSync from child_process; MCP servers must invoke external CLIs via argv arrays (spawn/spawnSync/execFile)",
+                    "Calls execSync from child_process; MCP servers must invoke external CLIs via argv arrays (spawn/spawnSync/execFile)",
                 )
             )
     return violations

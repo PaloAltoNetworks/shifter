@@ -5,11 +5,23 @@ These tests verify the OperatingSystem model is:
 - Has correct fields (slug, name, extensions)
 - Has proper methods (get_for_extension)
 - Has correct meta options (ordering, verbose_name)
+
+Lookup logic is now layered:
+- ``normalize_file_extension`` (pure) handles dot/case normalisation.
+- ``OperatingSystemQuerySet.for_extension`` does the iteration; tested
+  with a manually-constructed iterable so DB access isn't needed.
+- ``OperatingSystem.get_for_extension`` is a thin wrapper around the
+  queryset method and is verified via a delegation assertion.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.db import models
+
+from cms.models.catalogs import (
+    OperatingSystemQuerySet,
+    normalize_file_extension,
+)
 
 # -----------------------------------------------------------------------------
 # Test OperatingSystem Model Structure
@@ -87,15 +99,49 @@ class TestOperatingSystemProperties:
 
 
 # -----------------------------------------------------------------------------
-# Test OperatingSystem Behavior (mocked DB)
+# Pure normalization
 # -----------------------------------------------------------------------------
 
 
-class TestOperatingSystemBehavior:
-    """Tests for OperatingSystem model behavior with mocked database access."""
+class TestNormalizeFileExtension:
+    """``normalize_file_extension`` is pure; no DB or model setup needed."""
 
-    def test_get_for_extension_finds_os(self):
-        """get_for_extension should find OS by extension."""
+    def test_lowercases_uppercase(self):
+        assert normalize_file_extension(".MSI") == ".msi"
+
+    def test_adds_leading_dot_when_missing(self):
+        assert normalize_file_extension("msi") == ".msi"
+
+    def test_already_normalized_is_idempotent(self):
+        assert normalize_file_extension(".msi") == ".msi"
+
+    def test_uppercase_without_dot(self):
+        assert normalize_file_extension("EXE") == ".exe"
+
+
+# -----------------------------------------------------------------------------
+# Queryset lookup (no DB; iterates a fake queryset)
+# -----------------------------------------------------------------------------
+
+
+class _FakeOperatingSystemQuerySet(OperatingSystemQuerySet):
+    """Concrete queryset stand-in that iterates over a supplied list.
+
+    Lets us exercise ``for_extension`` without standing up the database
+    and without relying on Django's lazy queryset machinery.
+    """
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+class TestOperatingSystemQuerySetForExtension:
+    """Behavior of ``OperatingSystemQuerySet.for_extension``."""
+
+    def test_finds_matching_extension(self):
         from cms.models import OperatingSystem
 
         test_os = OperatingSystem(
@@ -103,16 +149,11 @@ class TestOperatingSystemBehavior:
             name="Test OS",
             extensions=[".testmsi", ".testexe"],
         )
+        qs = _FakeOperatingSystemQuerySet([test_os])
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([test_os])
+        assert qs.for_extension(".testmsi") is test_os
 
-        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
-            result = OperatingSystem.get_for_extension(".testmsi")
-            assert result == test_os
-
-    def test_get_for_extension_handles_missing_dot(self):
-        """get_for_extension should work with or without leading dot."""
+    def test_handles_missing_leading_dot(self):
         from cms.models import OperatingSystem
 
         test_os = OperatingSystem(
@@ -120,16 +161,11 @@ class TestOperatingSystemBehavior:
             name="Test OS",
             extensions=[".nodot"],
         )
+        qs = _FakeOperatingSystemQuerySet([test_os])
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([test_os])
+        assert qs.for_extension("nodot") is test_os
 
-        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
-            result = OperatingSystem.get_for_extension("nodot")
-            assert result == test_os
-
-    def test_get_for_extension_case_insensitive(self):
-        """get_for_extension should be case-insensitive."""
+    def test_is_case_insensitive(self):
         from cms.models import OperatingSystem
 
         test_os = OperatingSystem(
@@ -137,16 +173,11 @@ class TestOperatingSystemBehavior:
             name="Test OS",
             extensions=[".casemsi"],
         )
+        qs = _FakeOperatingSystemQuerySet([test_os])
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([test_os])
+        assert qs.for_extension(".CASEMSI") is test_os
 
-        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
-            result = OperatingSystem.get_for_extension(".CASEMSI")
-            assert result == test_os
-
-    def test_get_for_extension_returns_none_for_unknown(self):
-        """get_for_extension should return None for unknown extensions."""
+    def test_returns_none_for_unknown_extension(self):
         from cms.models import OperatingSystem
 
         test_os = OperatingSystem(
@@ -154,13 +185,37 @@ class TestOperatingSystemBehavior:
             name="Test OS",
             extensions=[".msi", ".exe"],
         )
+        qs = _FakeOperatingSystemQuerySet([test_os])
 
-        mock_qs = MagicMock()
-        mock_qs.__iter__ = lambda self: iter([test_os])
+        assert qs.for_extension(".unknown") is None
 
-        with patch.object(OperatingSystem.objects, "all", return_value=mock_qs):
-            result = OperatingSystem.get_for_extension(".unknown")
-            assert result is None
+
+# -----------------------------------------------------------------------------
+# get_for_extension wrapper delegates to the queryset method
+# -----------------------------------------------------------------------------
+
+
+class TestGetForExtensionWrapper:
+    """``OperatingSystem.get_for_extension`` delegates to the queryset method."""
+
+    def test_delegates_to_objects_for_extension(self):
+        from cms.models import OperatingSystem
+
+        sentinel = object()
+        with patch.object(OperatingSystem.objects, "for_extension", return_value=sentinel) as mock_method:
+            result = OperatingSystem.get_for_extension(".testmsi")
+
+            assert result is sentinel
+            mock_method.assert_called_once_with(".testmsi")
+
+
+# -----------------------------------------------------------------------------
+# Other model behavior
+# -----------------------------------------------------------------------------
+
+
+class TestOperatingSystemDefaults:
+    """Misc. defaults verified without DB access."""
 
     def test_extensions_defaults_to_empty_list(self):
         """extensions field should default to empty list."""

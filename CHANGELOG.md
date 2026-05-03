@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.11] - 2026-05-03
+
+### Changed
+
+- **Refactored `cms.models` into a bounded-context package.** The 978-LOC
+  `shifter/shifter_platform/cms/models.py` god module is replaced by a
+  `cms/models/` package split by domain: `catalogs`, `assets`,
+  `provisioning`, `scenarios`, `range`. Public import paths are preserved
+  via re-exports — every existing `from cms.models import X` keeps working
+  with no consumer changes. Database table names, migrations, and runtime
+  behavior are unchanged; verified by a new
+  `tests/cms/test_models_no_migration_drift.py` that fails the suite if
+  `makemigrations --check` ever detects pending model changes. New layout
+  is the foundation for subsequent `cms` god-object decompositions tracked
+  under #1055.
+- **Deduplicated CMS soft-delete and expiry logic.** Added
+  `cms/models/mixins.py` with `SoftDeleteMixin` (provides `is_deleted` for
+  any model with a nullable `deleted_at` field) and `ExpiringStateMixin`
+  (provides `is_expired` / `expires_soon` for any model with a nullable
+  `expires_at` field). `Asset`, `EntityBase`, `Request`, `Scenario`, and
+  `Credential` now inherit from `SoftDeleteMixin`; `CredentialBase` and
+  `Credential` inherit from `ExpiringStateMixin`. Same property semantics,
+  no schema changes.
+- **Centralised CMS terminal-status soft-delete invariant** in
+  `cms/models/lifecycle.apply_terminal_soft_delete`. `EntityBase.save()`
+  and `RangeInstance.save()` both delegate to it instead of re-implementing
+  the `TERMINAL_STATUSES → deleted_at + update_fields` logic locally.
+- **Decoupled extension-normalisation from DB lookup** on
+  `cms.models.OperatingSystem`. `normalize_file_extension()` is now a pure
+  function and the iteration moved into a new
+  `OperatingSystemQuerySet.for_extension()` queryset method;
+  `get_for_extension()` is preserved as a thin compatibility wrapper.
+
 ## [3.95.0] - 2026-05-03
 
 ### Fixed

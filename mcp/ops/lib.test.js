@@ -715,7 +715,7 @@ describe("awsJson", () => {
     assert.equal(argv[last + 1], "json");
   });
 
-  it("forwards user-supplied extraFlags before the json output flags", () => {
+  it("places --output json AFTER caller-supplied extraFlags so it always wins", () => {
     const runner = makeRecordingRunner({ stdout: "[]" });
     awsJson("p", ["s3api", "list-buckets"], {
       runner,
@@ -728,11 +728,22 @@ describe("awsJson", () => {
       "p",
       "--region",
       REGION,
-      "--output",
-      "json",
       "--max-items",
       "10",
+      "--output",
+      "json",
     ]);
+  });
+
+  it("overrides extraFlags --output text with --output json", () => {
+    const runner = makeRecordingRunner({ stdout: "[]" });
+    awsJson("p", ["s3api", "list-buckets"], {
+      runner,
+      extraFlags: ["--output", "text"],
+    });
+    const { argv } = runner.calls[0];
+    const last = argv.lastIndexOf("--output");
+    assert.equal(argv[last + 1], "json");
   });
 });
 

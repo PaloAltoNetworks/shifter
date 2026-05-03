@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.14] - 2026-05-03
+
+### Changed
+
+- **`deploy.yml` cancels in-flight runs on new push to the same ref**
+  (`concurrency.cancel-in-progress: true`). Previous setting (`false`)
+  queued each new push behind the prior run's full duration, so a
+  rapid sequence of pushes to `dev` or `aws-dev` stacked up indefinitely
+  (saw 5 active runs after two back-to-back pushes today). Env
+  branches never go backwards, so a newer SHA always supersedes the
+  older queued one — cancelling is correct.
+
 ## [3.95.13] - 2026-05-03
 
 ### Changed

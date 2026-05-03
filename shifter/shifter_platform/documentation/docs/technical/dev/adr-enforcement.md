@@ -36,7 +36,7 @@ There is also agent-specific wiring:
 - `.claude/hooks/adr_guard_hook.py` runs the ADR guard after Claude edits files.
 - `.claude/skills/adr-check/SKILL.md` provides a default workflow for ADR conformance work.
 - `.claude/skills/architecture-review/SKILL.md` provides a repo-specific architecture review checklist.
-- `AGENTS.md` gives Codex a repo-local policy file, including Ground Control project context for the `/implement` workflow.
+- `AGENTS.md` gives Codex a repo-local policy file, including Ground Control project context for the `/implement` workflow. The GC project pointer (and matching `.ground-control.yaml` `project:` field) names the `shifter` project (id `df4e718f-1f67-46f8-a375-3ba53fabc9c4`) with `CTF-*`, `PLAT-*`, `GEN-*` UID prefixes by subsystem; an earlier draft incorrectly pointed both at `aphelion` (a separate, unrelated project).
 
 Review controls:
 

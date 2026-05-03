@@ -4,12 +4,13 @@ This repo has repo-local architecture enforcement. Use it.
 
 ## Ground Control Context
 
-This repo's Ground Control project id (`aphelion` — shifter shares the
-aphelion project, using the `GC-` UID prefix), workflow commands, and
-plan rules live in `.ground-control.yaml` at repo root, with the full
-plan rules set in `.gc/plan-rules.md`. Agents read it via the
-`gc_get_repo_ground_control_context` MCP tool, which returns the full
-workflow config in a single call.
+This repo's Ground Control project is `shifter` (id
+`df4e718f-1f67-46f8-a375-3ba53fabc9c4`). Requirement UIDs use the
+prefixes `CTF-`, `PLAT-`, and `GEN-` depending on subsystem. The
+workflow config and plan rules live in `.ground-control.yaml` at repo
+root, with the full plan rules set in `.gc/plan-rules.md`. Agents read
+it via the `gc_get_repo_ground_control_context` MCP tool, which
+returns the full workflow config in a single call.
 
 The authoritative list of "plans MUST..." constraints for the
 `/implement` skill planning phase lives in `.gc/plan-rules.md`.
@@ -67,12 +68,17 @@ Changes to these files are architecture work and must stay documented:
 
 ## Ground Control
 
-All requirements management uses the Ground Control MCP server against the `aphelion` project.
+All requirements management uses the Ground Control MCP server against the `shifter` project (id `df4e718f-1f67-46f8-a375-3ba53fabc9c4`).
 
-- **Requirement UIDs** use the `GC-` prefix (e.g., `GC-42`).
-- **Traceability link types**: `IMPLEMENTS` (requirement → code), `TESTS` (requirement → test), `GITHUB_ISSUE` (requirement → issue).
-- **Requirement statuses**: `DRAFT` → `ACTIVE`. Transition to `ACTIVE` once implemented.
+- **Requirement UIDs** use subsystem prefixes:
+  - `CTF-*` — capture-the-flag platform requirements
+  - `PLAT-*` — platform / cloud / portal infrastructure requirements
+  - `GEN-*` — general / cross-cutting requirements
+- **Traceability link types**: `IMPLEMENTS` (requirement → code; only valid on `ACTIVE` requirements), `TESTS` (requirement → test), `DOCUMENTS` (requirement → tracking GH issue; works on `DRAFT`), `GITHUB_ISSUE` (alternative for issue references).
+- **Requirement statuses**: `DRAFT` → `ACTIVE` → `ARCHIVED` / `DEPRECATED`. Transition to `ACTIVE` once implementation starts; only `ACTIVE` requirements accept `IMPLEMENTS` links.
 - **MCP tools**: `gc_get_requirement`, `gc_get_traceability`, `gc_create_github_issue`, `gc_create_traceability_link`, `gc_transition_status`.
+
+**Caveat** — `gc_create_github_issue`'s auto-link uses `IMPLEMENTS`, which the API rejects on `DRAFT` requirements. If you're filing a tracking issue against a `DRAFT` requirement, follow up with a manual `gc_create_traceability_link` of type `DOCUMENTS`.
 
 ## Architectural Defaults
 

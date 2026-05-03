@@ -145,38 +145,49 @@ class TestSoftDeleteQuerySetHelpers:
 
 @pytest.mark.django_db
 class TestSoftDeleteCascadesAndAuditPaths:
-    """Reverse relations and audit reads use the unfiltered manager.
+    """Two-tier manager semantics for reverse relations and audit code.
 
-    The base_manager_name = "all_objects" declaration is critical: without
-    it, Django's reverse-FK descriptors and migration introspection would
-    only see active rows, which can break cascade behaviour, integrity
-    queries, and admin views that need to inspect deleted descendants.
+    The split is deliberate:
+
+    * ``_default_manager`` is left as ``objects`` (the SoftDeleteManager,
+      active-only). This is what every implicit Django integration uses —
+      ``get_object_or_404(Model, ...)``, ModelForm, admin, DRF
+      serializers, generic CBVs, AND reverse-FK traversal
+      (``parent.children.all()``). Defaulting these to active is what
+      closes the bug class for application code; making it unfiltered
+      would re-open the bypass for every implicit lookup.
+    * ``_base_manager`` is ``all_objects`` (via ``base_manager_name``).
+      Django uses ``_base_manager`` for cascade collection and migration
+      introspection, so cascade still walks soft-deleted descendants
+      and integrity stays correct.
+
+    Audit / restore / admin code that needs to walk reverse relations
+    while including deleted rows must do so explicitly via
+    ``Child.all_objects.filter(parent=parent)``. The verbosity is the
+    point — it makes the intent visible to reviewers and grep.
     """
 
     def test_base_manager_is_unfiltered(self):
-        """Request._meta.base_manager must point at all_objects."""
+        """Request._meta.base_manager must point at all_objects (cascade target)."""
         assert Request._meta.base_manager_name == "all_objects"
         assert Request._meta.base_manager.model is Request
 
-    def test_reverse_related_manager_returns_deleted_children(self, request_user):
-        """``parent.children.all()`` returns deleted descendants too.
+    def test_reverse_related_manager_is_active_only(self, request_user):
+        """``parent.children.all()`` returns only active children.
 
-        This is the actual behavioural guarantee: when
-        ``base_manager_name = 'all_objects'`` is set on the related
-        model, Django's reverse-FK ``RelatedManager`` reads from the
-        unfiltered manager, so cascade/integrity/audit code that walks
-        ``parent.children.all()`` sees the full history. Without this,
-        soft-deleted children silently disappear from cascade work.
+        Reverse-FK traversal goes through ``_default_manager`` which is
+        the active-only SoftDeleteManager. Every Django integration that
+        receives a model class works the same way — ``get_object_or_404``,
+        ModelForm, admin, DRF serializers — so reverse traversal staying
+        active-only keeps the default consistent with the bug-class fix.
         """
         from cms.models import Instance, InstanceType
 
-        # Use a parent (Request) and a soft-delete-aware child (Instance)
-        # connected by FK so the reverse relation is exercised end-to-end.
         request = _make_request(request_user, "reverse-relation-parent")
         instance_type = InstanceType.objects.create(
             name="Reverse-Test Type",
             slug="reverse-test-type",
-            spec_class="shared.schemas.SCMCredentialSpec",  # any importable spec
+            spec_class="shared.schemas.SCMCredentialSpec",
         )
 
         active_child = Instance.objects.create(
@@ -194,12 +205,15 @@ class TestSoftDeleteCascadesAndAuditPaths:
         deleted_child.deleted_at = timezone.now()
         deleted_child.save(update_fields=["deleted_at"])
 
-        # The reverse manager (request.instances) reads from
-        # Instance._meta.base_manager — which is all_objects (unfiltered).
-        # Both rows must be reachable.
+        # Reverse-FK access (parent.children) uses _default_manager which
+        # is the active-only SoftDeleteManager — deleted child is excluded.
         reverse_pks = set(request.instances.values_list("pk", flat=True))
         assert active_child.pk in reverse_pks
-        assert deleted_child.pk in reverse_pks, (
-            "Reverse-FK manager dropped a soft-deleted child — "
-            "Instance._meta.base_manager_name is not pointing at all_objects."
-        )
+        assert deleted_child.pk not in reverse_pks
+
+        # Audit code that wants the full child history goes through
+        # Instance.all_objects with an explicit parent filter. The
+        # explicitness is the point — intent is grep-able.
+        all_pks = set(Instance.all_objects.filter(request=request).values_list("pk", flat=True))
+        assert active_child.pk in all_pks
+        assert deleted_child.pk in all_pks

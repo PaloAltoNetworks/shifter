@@ -54,7 +54,6 @@ class Asset(SoftDeleteMixin, models.Model):
 
     class Meta:
         abstract = True
-        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):
@@ -170,7 +169,6 @@ class Credential(CredentialBase):
         # Concrete Meta does not inherit Meta from the abstract base in
         # Django; restate base_manager_name so reverse-FK descriptors and
         # admin introspection stay on the unfiltered manager.
-        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
         constraints = [
             models.UniqueConstraint(
@@ -216,7 +214,6 @@ class AgentConfig(FileAsset):
         verbose_name = "Agent Config"
         verbose_name_plural = "Agent Configs"
         # See Credential.Meta.base_manager_name for rationale.
-        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):

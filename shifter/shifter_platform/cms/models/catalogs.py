@@ -85,6 +85,34 @@ class CatalogBase(models.Model):
 # -----------------------------------------------------------------------------
 
 
+def normalize_file_extension(extension: str) -> str:
+    """Lowercase ``extension`` and prefix it with a leading dot if missing.
+
+    Pure function — no I/O. Lets callers (and tests) normalise extensions
+    without touching the database.
+    """
+    ext = extension.lower()
+    if not ext.startswith("."):
+        ext = f".{ext}"
+    return ext
+
+
+class OperatingSystemQuerySet(models.QuerySet["OperatingSystem"]):
+    """Custom queryset for :class:`OperatingSystem` lookups."""
+
+    def for_extension(self, extension: str) -> OperatingSystem | None:
+        """Return the first OperatingSystem whose ``extensions`` list contains ``extension``.
+
+        Accepts the extension with or without a leading dot; case is normalised
+        via :func:`normalize_file_extension`. Returns ``None`` when no row matches.
+        """
+        normalized = normalize_file_extension(extension)
+        for os in self:
+            if normalized in os.extensions:
+                return os
+        return None
+
+
 class OperatingSystem(models.Model):
     """Reference table for supported operating systems.
 
@@ -94,6 +122,8 @@ class OperatingSystem(models.Model):
     slug = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=100)
     extensions = models.JSONField(default=list, help_text="File extensions that map to this OS (e.g., ['.msi'])")
+
+    objects = OperatingSystemQuerySet.as_manager()
 
     class Meta:
         ordering = ["name"]
@@ -107,19 +137,16 @@ class OperatingSystem(models.Model):
     def get_for_extension(cls, extension: str):
         """Find the OS that matches a given file extension.
 
+        Thin wrapper around :meth:`OperatingSystemQuerySet.for_extension`,
+        kept for callers that previously used the classmethod entry point.
+
         Args:
             extension: File extension with or without leading dot (e.g., '.msi' or 'msi')
 
         Returns:
             OperatingSystem instance if found, None otherwise
         """
-        ext = extension.lower()
-        if not ext.startswith("."):
-            ext = f".{ext}"
-        for os in cls.objects.all():
-            if ext in os.extensions:
-                return os
-        return None
+        return cls.objects.for_extension(extension)
 
 
 # -----------------------------------------------------------------------------

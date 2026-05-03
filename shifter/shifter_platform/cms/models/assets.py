@@ -14,9 +14,9 @@ import logging
 
 from django.conf import settings
 from django.db import models
-from django.utils import timezone
 
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
+from cms.models.mixins import ExpiringStateMixin, SoftDeleteMixin
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 
 
-class Asset(models.Model):
+class Asset(SoftDeleteMixin, models.Model):
     """Abstract base for user-owned assets with soft delete.
 
     Provides common fields and behavior for all asset types:
@@ -46,11 +46,6 @@ class Asset(models.Model):
 
     def __str__(self):
         return self.name
-
-    @property
-    def is_deleted(self):
-        """Return True if this asset has been soft-deleted."""
-        return self.deleted_at is not None
 
     @classmethod
     def active_for_user(cls, user):
@@ -89,13 +84,16 @@ class FileAsset(Asset):
         return round(self.file_size_bytes / (1024 * 1024), 1)
 
 
-class CredentialBase(Asset):
+class CredentialBase(ExpiringStateMixin, Asset):
     """Abstract base for credential assets with expiration tracking.
 
     Extends Asset with credential-specific fields:
     - expires_at: Optional expiration timestamp
     - last_verified_at: Last external validation timestamp
     - last_used_at: Last provisioning use timestamp
+
+    The :class:`~cms.models.mixins.ExpiringStateMixin` supplies
+    ``is_expired`` and ``expires_soon``.
     """
 
     expires_at = models.DateTimeField(
@@ -117,33 +115,21 @@ class CredentialBase(Asset):
     class Meta:
         abstract = True
 
-    @property
-    def is_expired(self):
-        """Return True if this credential has expired."""
-        if not self.expires_at:
-            return False
-        return timezone.now() > self.expires_at
-
-    @property
-    def expires_soon(self):
-        """Return True if this credential expires within 30 days."""
-        if not self.expires_at:
-            return False
-        if self.is_expired:
-            return False
-        return self.expires_at <= timezone.now() + timezone.timedelta(days=30)
-
 
 # -----------------------------------------------------------------------------
 # Concrete Asset Models
 # -----------------------------------------------------------------------------
 
 
-class Credential(models.Model):
+class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
     """User's credential instance.
 
     Stores user credentials with type-specific data in a JSON field.
     Validation is delegated to Pydantic spec classes referenced by CredentialType.
+
+    The :class:`~cms.models.mixins.SoftDeleteMixin` supplies ``is_deleted``;
+    :class:`~cms.models.mixins.ExpiringStateMixin` supplies ``is_expired``
+    and ``expires_soon``.
 
     Attributes:
         name: User-friendly name for this credential.
@@ -188,27 +174,6 @@ class Credential(models.Model):
 
     def __str__(self):
         return self.name
-
-    @property
-    def is_deleted(self):
-        """Return True if this credential has been soft-deleted."""
-        return self.deleted_at is not None
-
-    @property
-    def is_expired(self):
-        """Return True if this credential has expired."""
-        if not self.expires_at:
-            return False
-        return timezone.now() > self.expires_at
-
-    @property
-    def expires_soon(self):
-        """Return True if this credential expires within 30 days."""
-        if not self.expires_at:
-            return False
-        if self.is_expired:
-            return False
-        return self.expires_at <= timezone.now() + timezone.timedelta(days=30)
 
 
 class AgentConfig(FileAsset):

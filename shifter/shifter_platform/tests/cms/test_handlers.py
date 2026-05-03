@@ -23,7 +23,7 @@ class TestProcessEvent:
             )
         }
 
-        with patch("cms.handlers.process_range_event") as mock_range_handler:
+        with patch("cms.handlers.range_events.process_range_event") as mock_range_handler:
             process_event(message)
             mock_range_handler.assert_called_once_with(message)
 
@@ -41,9 +41,26 @@ class TestProcessEvent:
             )
         }
 
-        with patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler:
+        with patch("cms.handlers.ngfw_events.process_ngfw_event") as mock_ngfw_handler:
             process_event(message)
             mock_ngfw_handler.assert_called_once_with(message)
+
+    def test_routes_experiment_events_to_experiments_handler(self):
+        """Dispatcher routes experiment.* events to cms.experiments.handlers."""
+        from cms.handlers import process_event
+
+        message = {
+            "Message": json.dumps(
+                {
+                    "event_type": "experiment.run.started",
+                    "experiment_id": 7,
+                }
+            )
+        }
+
+        with patch("cms.experiments.handlers.process_event") as mock_exp_handler:
+            process_event(message)
+            mock_exp_handler.assert_called_once_with(message)
 
     def test_ignores_unknown_event_types(self):
         """Dispatcher ignores events with unknown event_type prefix."""
@@ -59,12 +76,14 @@ class TestProcessEvent:
         }
 
         with (
-            patch("cms.handlers.process_range_event") as mock_range_handler,
-            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
+            patch("cms.handlers.range_events.process_range_event") as mock_range_handler,
+            patch("cms.handlers.ngfw_events.process_ngfw_event") as mock_ngfw_handler,
+            patch("cms.experiments.handlers.process_event") as mock_exp_handler,
         ):
             process_event(message)
             mock_range_handler.assert_not_called()
             mock_ngfw_handler.assert_not_called()
+            mock_exp_handler.assert_not_called()
 
     def test_handles_missing_event_type(self):
         """Dispatcher handles messages without event_type gracefully."""
@@ -73,12 +92,14 @@ class TestProcessEvent:
         message = {"Message": json.dumps({"range_id": 1})}
 
         with (
-            patch("cms.handlers.process_range_event") as mock_range_handler,
-            patch("cms.handlers.process_ngfw_event") as mock_ngfw_handler,
+            patch("cms.handlers.range_events.process_range_event") as mock_range_handler,
+            patch("cms.handlers.ngfw_events.process_ngfw_event") as mock_ngfw_handler,
+            patch("cms.experiments.handlers.process_event") as mock_exp_handler,
         ):
             process_event(message)
             mock_range_handler.assert_not_called()
             mock_ngfw_handler.assert_not_called()
+            mock_exp_handler.assert_not_called()
 
     def test_dispatcher_is_callable(self):
         """Dispatcher is a callable function."""
@@ -178,8 +199,8 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
@@ -214,9 +235,9 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
-            patch("cms.handlers.notify_experiment_on_range_ready"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
+            patch("cms.handlers.range_events.notify_experiment_on_range_ready"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
@@ -255,8 +276,8 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
@@ -284,7 +305,7 @@ class TestProcessRangeEvent:
             )
         }
 
-        with patch("cms.handlers.RangeInstance") as MockRI:
+        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
             process_range_event(message)
 
             # Should return early without any DB lookup
@@ -309,7 +330,7 @@ class TestProcessRangeEvent:
             )
         }
 
-        with patch("cms.handlers.RangeInstance") as MockRI:
+        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
             MockRI.DoesNotExist = Exception
             MockRI.objects.get.side_effect = MockRI.DoesNotExist("not found")
 
@@ -338,7 +359,7 @@ class TestProcessRangeEvent:
             )
         }
 
-        with patch("cms.handlers.RangeInstance") as MockRI:
+        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
 
@@ -363,7 +384,7 @@ class TestProcessRangeEvent:
             )
         }
 
-        with patch("cms.handlers.RangeInstance") as MockRI:
+        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
             # Should return early before any DB lookup
             process_range_event(message)
 
@@ -408,8 +429,8 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
@@ -457,8 +478,8 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
@@ -502,8 +523,8 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception
@@ -549,9 +570,9 @@ class TestProcessRangeEvent:
         }
 
         with (
-            patch("cms.handlers.RangeInstance") as MockRI,
-            patch("cms.handlers._notify_ctf_range_status"),
-            patch("cms.handlers.notify_experiment_on_range_ready"),
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status"),
+            patch("cms.handlers.range_events.notify_experiment_on_range_ready"),
         ):
             MockRI.objects.get.return_value = mock_instance
             MockRI.DoesNotExist = Exception

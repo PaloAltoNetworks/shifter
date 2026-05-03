@@ -59,8 +59,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -80,8 +80,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -104,8 +104,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -128,8 +128,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -153,8 +153,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.App.objects.get") as mock_get_app,
+            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
+            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
         ):
             from cms.handlers import process_ngfw_event
 
@@ -177,10 +177,10 @@ class TestProcessNgfwEvent:
 
         with (
             patch(
-                "cms.handlers.Instance.objects.get",
+                "cms.handlers.ngfw_events.Instance.objects.get",
                 side_effect=Instance.DoesNotExist,
             ),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -198,8 +198,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", side_effect=App.DoesNotExist),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", side_effect=App.DoesNotExist),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -208,8 +208,8 @@ class TestProcessNgfwEvent:
     def test_handles_missing_required_ids(self, mock_instance, mock_app):
         """process_ngfw_event handles events missing instance_id or app_id."""
         with (
-            patch("cms.handlers.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.App.objects.get") as mock_get_app,
+            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
+            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
         ):
             from cms.handlers import process_ngfw_event
 
@@ -243,8 +243,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.App.objects.get") as mock_get_app,
+            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
+            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
         ):
             from cms.handlers import process_ngfw_event
 
@@ -271,8 +271,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -303,8 +303,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -324,8 +324,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -346,8 +346,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -369,8 +369,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 

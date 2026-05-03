@@ -11,6 +11,11 @@ from shared.messages.events import EVENT_TYPE_NGFW
 
 logger = logging.getLogger(__name__)
 
+# Sentinel returned by per-entity helpers to distinguish "skip the rest of the
+# event" (DB error or invalid input we already logged) from "row missing, but
+# carry on" (None) and "row found, here's the prior status" (str).
+_ABORT = object()
+
 
 def process_ngfw_event(message: str | dict) -> None:
     """Process unified NGFW event from SNS/SQS.
@@ -51,68 +56,17 @@ def _handle_ngfw_event(event: dict) -> None:
     status = event.get("status")
     serial_number = event.get("serial_number")
 
-    # Validate required fields
-    if not instance_id or not app_id:
-        logger.warning(
-            "NGFW event missing required fields: instance_id=%s app_id=%s event_id=%s",
-            instance_id,
-            app_id,
-            event_id,
-        )
+    if not _validate_required_fields(event_id, instance_id, app_id):
+        return
+    if not _validate_status(event_id, status):
         return
 
-    # Validate status if provided
-    if status:
-        try:
-            ResourceStatus(status)
-        except ValueError:
-            logger.error("Invalid status value: %s event_id=%s", status, event_id)
-            return
-
-    # Look up and update Instance
-    try:
-        instance = Instance.objects.get(id=instance_id)
-        previous_instance_status = instance.status
-        if status:
-            instance.status = status
-            instance.save(update_fields=["status"])
-    except Instance.DoesNotExist:
-        logger.warning(
-            "CMS Instance not found: instance_id=%s event_id=%s",
-            instance_id,
-            event_id,
-        )
-        previous_instance_status = None
-    except Exception:
-        logger.exception(
-            "DB error saving CMS Instance: instance_id=%s event_id=%s",
-            instance_id,
-            event_id,
-        )
+    previous_instance_status = _update_instance(event_id, instance_id, status)
+    if previous_instance_status is _ABORT:
         return
 
-    # Look up and update App
-    try:
-        app = App.objects.get(id=app_id)
-        previous_app_status = app.status
-        update_fields = []
-
-        if status:
-            app.status = status
-            update_fields.append("status")
-
-        # Store serial_number in App.data when provided (typically on ready events)
-        if serial_number:
-            app.data = {**app.data, "serial_number": serial_number}
-            update_fields.append("data")
-
-        if update_fields:
-            app.save(update_fields=update_fields)
-    except App.DoesNotExist:
-        logger.warning("CMS App not found: app_id=%s event_id=%s", app_id, event_id)
-        previous_app_status = None
-    except Exception:
-        logger.exception("DB error saving CMS App: app_id=%s event_id=%s", app_id, event_id)
+    previous_app_status = _update_app(event_id, app_id, status, serial_number)
+    if previous_app_status is _ABORT:
         return
 
     logger.info(
@@ -126,3 +80,97 @@ def _handle_ngfw_event(event: dict) -> None:
         serial_number or "N/A",
         event_id,
     )
+
+
+def _validate_required_fields(event_id: str, instance_id, app_id) -> bool:
+    if instance_id and app_id:
+        return True
+    logger.warning(
+        "NGFW event missing required fields: instance_id=%s app_id=%s event_id=%s",
+        instance_id,
+        app_id,
+        event_id,
+    )
+    return False
+
+
+def _validate_status(event_id: str, status) -> bool:
+    if not status:
+        return True
+    try:
+        ResourceStatus(status)
+    except ValueError:
+        logger.error("Invalid status value: %s event_id=%s", status, event_id)
+        return False
+    return True
+
+
+def _update_instance(event_id: str, instance_id, status):
+    """Look up Instance and apply status. Returns previous status, None if
+    missing, or the _ABORT sentinel on DB error."""
+    try:
+        instance = Instance.objects.get(id=instance_id)
+    except Instance.DoesNotExist:
+        logger.warning(
+            "CMS Instance not found: instance_id=%s event_id=%s",
+            instance_id,
+            event_id,
+        )
+        return None
+    except Exception:
+        logger.exception(
+            "DB error loading CMS Instance: instance_id=%s event_id=%s",
+            instance_id,
+            event_id,
+        )
+        return _ABORT
+
+    previous = instance.status
+    if not status:
+        return previous
+
+    instance.status = status
+    try:
+        instance.save(update_fields=["status"])
+    except Exception:
+        logger.exception(
+            "DB error saving CMS Instance: instance_id=%s event_id=%s",
+            instance_id,
+            event_id,
+        )
+        return _ABORT
+    return previous
+
+
+def _update_app(event_id: str, app_id, status, serial_number):
+    """Look up App and apply status / serial_number. Returns previous status,
+    None if missing, or the _ABORT sentinel on DB error."""
+    try:
+        app = App.objects.get(id=app_id)
+    except App.DoesNotExist:
+        logger.warning("CMS App not found: app_id=%s event_id=%s", app_id, event_id)
+        return None
+    except Exception:
+        logger.exception("DB error loading CMS App: app_id=%s event_id=%s", app_id, event_id)
+        return _ABORT
+
+    previous = app.status
+    update_fields: list[str] = []
+
+    if status:
+        app.status = status
+        update_fields.append("status")
+
+    if serial_number:
+        app.data = {**app.data, "serial_number": serial_number}
+        update_fields.append("data")
+
+    if not update_fields:
+        return previous
+
+    try:
+        app.save(update_fields=update_fields)
+    except Exception:
+        logger.exception("DB error saving CMS App: app_id=%s event_id=%s", app_id, event_id)
+        return _ABORT
+    return previous

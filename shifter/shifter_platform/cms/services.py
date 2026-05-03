@@ -3618,7 +3618,9 @@ def get_range_status_by_id(range_instance_id: int) -> str:
         Status string, or ``"unknown"`` if not found.
     """
     try:
-        return str(RangeInstance.objects.values_list("status", flat=True).get(pk=range_instance_id))
+        # all_objects: status lookups must see soft-deleted (terminal/destroyed)
+        # ranges so callers can report the final lifecycle state of a torn-down range.
+        return str(RangeInstance.all_objects.values_list("status", flat=True).get(pk=range_instance_id))
     except RangeInstance.DoesNotExist:
         return "unknown"
 
@@ -3630,7 +3632,9 @@ def get_range_spec_by_id(range_instance_id: int) -> dict | None:
         The range_spec dict, or ``None`` if not found.
     """
     try:
-        spec = RangeInstance.objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
+        # all_objects: range_spec lookups must see soft-deleted (terminal)
+        # ranges so callers can correlate audit events to a torn-down range.
+        spec = RangeInstance.all_objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
         return spec if spec is None or isinstance(spec, dict) else None
     except RangeInstance.DoesNotExist:
         return None
@@ -3642,8 +3646,10 @@ def find_range_instance_id_by_request(request_id: Any) -> int | None:
     Returns:
         The RangeInstance PK, or ``None`` if not found.
     """
+    # all_objects: callback correlation needs to find ranges by request even
+    # after the range has reached a terminal soft-deleted state.
     pk = (
-        RangeInstance.objects.filter(
+        RangeInstance.all_objects.filter(
             request__request_id=request_id,
         )
         .values_list("pk", flat=True)

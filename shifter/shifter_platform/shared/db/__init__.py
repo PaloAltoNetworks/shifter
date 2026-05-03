@@ -10,8 +10,10 @@ Currently exposes:
                                  a nullable ``deleted_at`` field.
 * :class:`ExpiringStateMixin`  — ``is_expired`` / ``expires_soon`` properties
                                  for any model with a nullable ``expires_at`` field.
-* :class:`SoftDeleteQuerySet`  — chainable ``active()`` / ``deleted()`` /
-                                 ``with_deleted()`` query helpers.
+* :class:`SoftDeleteQuerySet`  — chainable ``active()`` / ``deleted()``
+                                 query helpers (use ``Model.all_objects``
+                                 directly when you want every row regardless
+                                 of soft-delete state).
 * :class:`SoftDeleteManager`   — default manager that pre-filters every
                                  queryset to non-deleted rows. Pair with an
                                  explicit ``all_objects = models.Manager()``

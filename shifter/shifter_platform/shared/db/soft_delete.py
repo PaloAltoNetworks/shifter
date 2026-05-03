@@ -22,12 +22,11 @@ A soft-delete-aware model:
 2. Inherits :class:`SoftDeleteMixin` (or, transitively, ``Asset`` / etc).
 3. Sets the canonical pair of managers::
 
-       objects = SoftDeleteManager()        # default — active rows only
-       all_objects = models.Manager()       # explicit — full table
+       objects = SoftDeleteManager()                  # default — active rows only
+       all_objects = SoftDeleteQuerySet.as_manager()  # explicit — full table
 
-   Callers can still chain ``.active()``, ``.deleted()``, or
-   ``.with_deleted()`` on either manager when explicit intent improves
-   readability.
+   Callers can still chain ``.active()`` or ``.deleted()`` on either
+   manager when explicit intent improves readability.
 """
 
 from __future__ import annotations
@@ -96,17 +95,6 @@ class SoftDeleteQuerySet(models.QuerySet):
     def deleted(self) -> SoftDeleteQuerySet:
         """Return only rows that have been soft-deleted."""
         return self.filter(deleted_at__isnull=False)
-
-    def with_deleted(self) -> SoftDeleteQuerySet:
-        """Return rows regardless of soft-delete state.
-
-        Identity helper that exists so call-site readers can recognise
-        the explicit "I want everything, including deleted" intent.
-        Equivalent to ``self`` when called on an unfiltered base queryset
-        (e.g. ``Model.all_objects.with_deleted()``); strips the active
-        filter when chained off an active-by-default manager.
-        """
-        return self.model._base_manager.get_queryset()  # type: ignore[return-value]
 
 
 class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):  # type: ignore[misc]

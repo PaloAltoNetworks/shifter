@@ -171,9 +171,13 @@ class RiskViewSet(viewsets.ModelViewSet):
 
         Bypasses ``self.get_object()`` (which uses the active-only
         SoftDeleteManager and would 404 a deleted risk) and looks the
-        target up via ``Risk.all_objects`` directly.
+        target up via ``Risk.all_objects`` directly. Object-level
+        permission checks are still enforced explicitly because we lose
+        the ``check_object_permissions()`` call that ``self.get_object()``
+        would have run on our behalf.
         """
         instance = get_object_or_404(Risk.all_objects, pk=pk)
+        self.check_object_permissions(request, instance)
 
         if not instance.is_deleted:
             return Response(
@@ -207,13 +211,19 @@ class CommentViewSet(viewsets.ViewSet):
     permission_classes = [IsAdminUser]
 
     def list(self, request, risk_pk=None):
-        """List comments for a risk."""
-        risk = get_object_or_404(Risk, pk=risk_pk)
+        """List comments for a risk.
 
+        With ``?include_deleted=true`` the parent ``Risk`` is also looked
+        up via ``all_objects`` so comment history on a soft-deleted risk
+        is reachable; default-active for both parent and children
+        otherwise.
+        """
         include_deleted = request.query_params.get("include_deleted", "").lower() == "true"
-        # Comment.objects is active-only (SoftDeleteManager); all_objects is unfiltered.
-        manager = Comment.all_objects if include_deleted else Comment.objects
-        comments = manager.filter(risk=risk).order_by("created_at")
+        risk_manager = Risk.all_objects if include_deleted else Risk.objects
+        risk = get_object_or_404(risk_manager, pk=risk_pk)
+
+        comment_manager = Comment.all_objects if include_deleted else Comment.objects
+        comments = comment_manager.filter(risk=risk).order_by("created_at")
 
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)

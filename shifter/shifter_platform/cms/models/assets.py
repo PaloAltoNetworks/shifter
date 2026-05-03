@@ -166,6 +166,10 @@ class Credential(CredentialBase):
         ordering = ["-created_at"]
         verbose_name = "Credential"
         verbose_name_plural = "Credentials"
+        # Concrete Meta does not inherit Meta from the abstract base in
+        # Django; restate base_manager_name so reverse-FK descriptors and
+        # admin introspection stay on the unfiltered manager.
+        base_manager_name = "all_objects"
         constraints = [
             models.UniqueConstraint(
                 fields=["user", "name"],
@@ -209,6 +213,8 @@ class AgentConfig(FileAsset):
         ordering = ["-created_at"]
         verbose_name = "Agent Config"
         verbose_name_plural = "Agent Configs"
+        # See Credential.Meta.base_manager_name for rationale.
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.name} ({self.os.name})"

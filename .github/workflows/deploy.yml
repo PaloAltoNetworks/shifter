@@ -9,7 +9,12 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: false
+  # Cancel an in-flight run when a newer push to the same ref arrives. Old
+  # behaviour (cancel-in-progress: false) queued every new push behind the
+  # previous run's full duration — fine if the older run was apply-bound to
+  # a different SHA, but for env-branch pushes the newer SHA always
+  # supersedes the old one (env branches never go backwards).
+  cancel-in-progress: true
 
 jobs:
   # ============================================================================
@@ -183,7 +188,16 @@ jobs:
   quality:
     name: Quality
     needs: changes
+    # Run Quality on PRs and direct pushes to `dev` only.
+    # Pushes to env branches (aws-dev, gcp-dev, main) only happen via merge
+    # from `dev` (per repo rule: env branches must never be ahead of dev),
+    # so the same SHA already passed Quality on its dev push and re-running
+    # here is pure duplicate work. Deploy jobs already tolerate skipped
+    # Quality via `(needs.quality.result == 'success' || ... == 'skipped')`.
     if: |
+      (github.event_name == 'pull_request' ||
+       github.event_name == 'workflow_dispatch' ||
+       github.ref == 'refs/heads/dev') &&
       needs.changes.outputs.fast_gcp_deploy != 'true' &&
       (needs.changes.outputs.core == 'true' ||
        needs.changes.outputs.range == 'true' ||

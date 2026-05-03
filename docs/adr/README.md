@@ -38,6 +38,11 @@ Current mechanisms:
 - `.gitleaks.toml`: secret scanning configuration
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
+- `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
+  flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
+  `execSync` from `child_process` or `node:child_process`, including
+  the CommonJS `require` form. Enforces ADR-010-R1; current
+  exception covers `mcp/ngfw/*` until the deferred migration lands.
 
 ## Adding A Rule
 

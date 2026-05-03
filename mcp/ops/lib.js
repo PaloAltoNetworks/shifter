@@ -301,6 +301,71 @@ export function awsText(profile, args, options = {}) {
   return awsExec(profile, args, options).trim();
 }
 
+// --- Per-tool argv builders for the named-vulnerable paths in #763 ---
+//
+// These exist as pure functions so tests can assert that
+// user-controlled values land as literal argv elements without ever
+// spawning aws. The handlers in index.js call these and pass the
+// result straight to aws()/awsText(). Adding a new
+// metacharacter-containing payload to a regression test means
+// extending the per-tool test cases in lib.test.js, not editing
+// index.js.
+
+/**
+ * CloudWatch `logs filter-log-events` argv. The user-supplied
+ * `filterPattern` becomes a single argv element; no JSON.stringify
+ * wrapping is needed because there is no shell to interpret it.
+ */
+export function buildFilterLogEventsArgs({ logGroup, filterPattern, limit }) {
+  return [
+    "logs",
+    "filter-log-events",
+    "--log-group-name",
+    logGroup,
+    "--filter-pattern",
+    filterPattern,
+    "--limit",
+    String(limit),
+  ];
+}
+
+/**
+ * SSM `send-command` argv. The `commands` payload is JSON.stringify'd
+ * into a single `--parameters` argv element. The aws CLI parses that
+ * JSON itself; the local shell never sees it.
+ */
+export function buildSsmSendCommandArgs({ instanceId, docName, commands }) {
+  const params = JSON.stringify({ commands });
+  return [
+    "ssm",
+    "send-command",
+    "--instance-ids",
+    instanceId,
+    "--document-name",
+    docName,
+    "--parameters",
+    params,
+  ];
+}
+
+/**
+ * SSM `send-command` argv for the Django manage.py wrapper. The user's
+ * `command` is concatenated into the docker-exec invocation that runs
+ * inside the remote shell on the EC2 host. That remote shell IS
+ * intentional (the tool's contract is to forward a command for remote
+ * execution); the security boundary protected here is the LOCAL host
+ * shell, which never sees the payload because the wrapped string
+ * lands inside the JSON parameters argv element.
+ */
+export function buildRunManageArgs({ targetId, command }) {
+  const dockerCmd = `docker exec portal python manage.py ${command}`;
+  return buildSsmSendCommandArgs({
+    instanceId: targetId,
+    docName: "AWS-RunShellScript",
+    commands: [dockerCmd],
+  });
+}
+
 // --- Shared ---
 
 export function getProfile(profiles, env) {

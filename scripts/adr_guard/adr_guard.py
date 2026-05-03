@@ -488,12 +488,27 @@ def check_cloud_factory_seam(repo_root: Path, files: list[str] | None) -> list[V
     return violations
 
 
+# Match every shape that lets a JS module pull execSync into scope.
+# Both spelled-out import forms accept the optional `node:` prefix.
+# Whitespace and quote style vary; the matcher is strict on intent
+# (the symbol `execSync` and the module `child_process`) and loose on
+# everything else.
 MCP_EXEC_SYNC_IMPORT = re.compile(
     r"""(?mx)
-    ^\s*
-    import\s*
-    \{[^}]*\bexecSync\b[^}]*\}\s*
-    from\s*["']child_process["']
+    (
+        # ESM: import { ..., execSync, ... } from "child_process"
+        ^\s*import\s*\{[^}]*\bexecSync\b[^}]*\}\s*
+        from\s*["'](?:node:)?child_process["']
+    )
+    |
+    (
+        # ESM default-namespace then property access elsewhere is rare
+        # enough to skip; CommonJS destructuring is the realistic
+        # second form.
+        # CJS: const { ..., execSync, ... } = require("child_process")
+        ^\s*(?:const|let|var)\s*\{[^}]*\bexecSync\b[^}]*\}\s*=\s*
+        require\s*\(\s*["'](?:node:)?child_process["']\s*\)
+    )
     """,
 )
 
@@ -518,8 +533,11 @@ def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Vi
         ]
     else:
         candidate_paths = [
-            p for p in mcp_root.rglob("*.js")
-            if "node_modules" not in p.parts
+            p
+            for p in mcp_root.rglob("*")
+            if p.is_file()
+            and p.suffix in (".js", ".mjs", ".cjs")
+            and "node_modules" not in p.parts
         ]
 
     violations: list[Violation] = []

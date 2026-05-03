@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.13] - 2026-05-03
+
+### Changed
+
+- **`deploy.yml` skips Quality on env-branch pushes** to dedupe runs.
+  Pushing to `aws-dev`/`gcp-dev`/`main` previously re-ran the entire
+  Quality phase even though the same SHA had just passed Quality on
+  its `dev` push (per the repo rule: env branches never get commits
+  except via merge from `dev`). That doubled CI runner-minutes per
+  change. Quality now runs on PRs, `workflow_dispatch`, or direct
+  `dev` pushes only. Deploy jobs already tolerate
+  `needs.quality.result == 'skipped'`, so no downstream changes
+  needed.
+
+  Trust assumption: any SHA reaching an env branch must have green
+  Quality on its dev run. If you ever push directly to an env branch
+  bypassing dev, Quality won't gate it — keep the rule.
+
+## [3.95.12] - 2026-05-03
+
+### Fixed
+
+- **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
+  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  `shifter/engine/provisioner/terraform_base.py` derives the lock
+  table name from the state bucket: it stripped `-pulumi-state` and
+  replaced with `-pulumi-locks`, otherwise fell through to
+  `<bucket>-locks`. The 3.95.6 bucket-name fix added a
+  `-<account_id>` suffix, breaking the `endswith("-pulumi-state")`
+  check, so the fallback computed
+  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  (the actual table from the engine-state module is still
+  `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
+  regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
+  account-id-suffixed forms; lock table name resolves to
+  `<prefix>-pulumi-locks` either way. Added a test case for the new
+  pattern. (Commit message tagged this 3.95.11 but 3.95.11 was taken
+  by the cms refactor PR landing concurrently; bumped here for
+  correctness.)
+
 ## [3.95.11] - 2026-05-03
 
 ### Changed

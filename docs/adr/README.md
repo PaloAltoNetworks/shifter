@@ -46,15 +46,16 @@ Current mechanisms:
   `execSync(...)`, `exec(...)`, an `execSync as <alias>` rename
   used as `<alias>(`, or `spawn`/`spawnSync`/`execFile`/
   `execFileSync` invoked with `{ shell: true }`. String literals
-  and comments are flattened to whitespace before the call-site
-  scan so `"https://..."` URLs do not accidentally erase a real
-  call site, and so commented-out call sites or strings containing
-  `execSync as run` do not trip the check or synthesise fake
-  aliases. The check is a cheap pre-commit backstop; motivated
-  bypasses such as `const run = cp.execSync; run(...)` are outside
-  its reach by design and rely on code review. Enforces
-  ADR-010-R1; current exception covers `mcp/ngfw/*` until the
-  deferred migration lands.
+  and comments are flattened to whitespace via a single combined
+  regex (one alternation match per literal/comment, replaced with
+  whitespace and preserved newlines) so `"https://..."` URLs do not
+  accidentally erase a real call site, and so commented-out call
+  sites or strings containing `execSync as run` do not trip the
+  check or synthesise fake aliases. The check is a cheap pre-commit
+  backstop; motivated bypasses such as `const run = cp.execSync;
+  run(...)` are outside its reach by design and rely on code
+  review. Enforces ADR-010-R1; current exception covers
+  `mcp/ngfw/*` until the deferred migration lands.
 
 ## Adding A Rule
 

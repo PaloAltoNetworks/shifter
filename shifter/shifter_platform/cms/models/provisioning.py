@@ -61,6 +61,7 @@ class EntityBase(SoftDeleteMixin, models.Model):
 
     class Meta:
         abstract = True
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def save(self, *args, **kwargs):
@@ -109,6 +110,7 @@ class Request(SoftDeleteMixin, models.Model):
         ordering = ["-created_at"]
         verbose_name = "Request"
         verbose_name_plural = "Requests"
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):
@@ -157,6 +159,7 @@ class Instance(EntityBase):
         # Concrete Meta does not inherit Meta from the abstract EntityBase
         # in Django; restate base_manager_name so reverse-FK descriptors and
         # admin introspection stay on the unfiltered manager.
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):
@@ -206,6 +209,7 @@ class App(EntityBase):
         verbose_name = "App"
         verbose_name_plural = "Apps"
         # See Instance.Meta.base_manager_name for rationale.
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):
@@ -246,6 +250,7 @@ class Subnet(EntityBase):
         verbose_name = "Subnet"
         verbose_name_plural = "Subnets"
         # See Instance.Meta.base_manager_name for rationale.
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self) -> str:

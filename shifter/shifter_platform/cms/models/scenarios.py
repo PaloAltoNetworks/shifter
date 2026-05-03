@@ -76,6 +76,7 @@ class Scenario(SoftDeleteMixin, models.Model):
         ordering = ["name"]
         verbose_name = "Scenario"
         verbose_name_plural = "Scenarios"
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
         constraints = [
             models.UniqueConstraint(

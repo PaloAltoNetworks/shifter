@@ -82,6 +82,7 @@ class RangeInstance(SoftDeleteMixin, models.Model):
     class Meta:
         verbose_name = "Range Instance"
         verbose_name_plural = "Range Instances"
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):

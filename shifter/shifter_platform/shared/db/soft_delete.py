@@ -77,15 +77,18 @@ class ExpiringStateMixin:
 class SoftDeleteQuerySet(models.QuerySet):
     """Queryset helpers for models with a nullable ``deleted_at`` field.
 
-    Provides ``active()`` / ``deleted()`` / ``with_deleted()`` so call
-    sites that need to be explicit about soft-delete state have one
-    canonical vocabulary across the codebase.
+    Provides ``active()`` and ``deleted()`` so call sites that need to be
+    explicit about soft-delete state have one canonical vocabulary across
+    the codebase.
 
     Most code does not need to call these directly — the default
     ``objects`` manager (built via :class:`SoftDeleteManager`) already
     pre-filters to active rows. Use these chainable helpers when you
     start from a queryset that includes deleted rows (e.g. via
-    ``all_objects``) and want to narrow it.
+    ``all_objects``) and want to narrow it. To get every row regardless
+    of soft-delete state, use ``Model.all_objects`` directly — it is
+    the single canonical entry point for the full table, so there is no
+    chainable ``.with_deleted()`` to keep call-site intent unambiguous.
     """
 
     def active(self) -> SoftDeleteQuerySet:

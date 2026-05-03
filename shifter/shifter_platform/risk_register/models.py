@@ -77,6 +77,7 @@ class Risk(SoftDeleteMixin, models.Model):
             models.Index(fields=["severity", "deleted_at"]),
             models.Index(fields=["created_at"]),
         ]
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):
@@ -152,6 +153,7 @@ class Comment(SoftDeleteMixin, models.Model):
         indexes = [
             models.Index(fields=["risk", "deleted_at", "created_at"]),
         ]
+        default_manager_name = "all_objects"
         base_manager_name = "all_objects"
 
     def __str__(self):

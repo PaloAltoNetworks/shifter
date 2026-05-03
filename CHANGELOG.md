@@ -97,6 +97,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
   corresponding live infrastructure).
 
+## [3.95.4] - 2026-05-03
+
+### Added
+
+- **`platform/terraform/global/github-runner/README.md`** documenting
+  the actual setup (manual EC2 + SSM registration), the registration
+  token semantics (single-use registration, long-lived runner
+  credentials after — no per-job re-auth), the AL2023 dependency
+  gotcha, and a clean removal procedure.
+
+### Fixed
+
+- **Runner `user_data` now installs libicu + .NET 6 runtime libs
+  directly via `dnf`** (`libicu krb5-libs zlib lttng-ust openssl-libs`),
+  so a freshly provisioned runner can register on the first
+  `./config.sh` call. The bundled `./bin/installdependencies.sh`
+  doesn't recognise Amazon Linux 2023 (matches `ID="amzn"` /
+  `ID_LIKE="fedora"` and aborts with `Can't detect current OS type`),
+  so without these packages registration fails with
+  `Libicu's dependencies is missing for Dotnet Core 6.0`. Future
+  runner replacements no longer need a manual second SSM pass.
+
 ## [3.95.3] - 2026-05-03
 
 ### Changed

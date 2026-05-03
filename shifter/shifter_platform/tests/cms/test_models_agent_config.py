@@ -178,7 +178,7 @@ class TestAgentConfigBehavior:
     """Tests for AgentConfig model behavior with mocked database access."""
 
     def test_active_for_user_excludes_deleted(self):
-        """active_for_user should exclude soft-deleted agents."""
+        """active_for_user filters AgentConfig.objects (SoftDeleteManager, active-only)."""
         from cms.models import AgentConfig
 
         user = MagicMock(id=1, username="testuser-active")
@@ -191,7 +191,7 @@ class TestAgentConfigBehavior:
         with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=user)
         assert result == [active_agent]
 
     def test_os_foreign_key_protects_on_delete(self):

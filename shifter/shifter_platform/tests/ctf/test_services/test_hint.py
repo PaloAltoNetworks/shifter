@@ -104,7 +104,8 @@ class TestHintCRUD:
     def test_remove_hint(self, challenge):
         hint = add_hint(challenge.id, {"text": "Remove me", "penalty": 5})
         remove_hint(hint.id)
-        assert CTFHint.objects.filter(pk=hint.id, deleted_at__isnull=True).count() == 0
+        # CTFHint.objects (SoftDeleteManager) excludes deleted rows by default.
+        assert CTFHint.objects.filter(pk=hint.id).count() == 0
 
     def test_get_hints_ordered(self, challenge):
         add_hint(challenge.id, {"text": "Second", "penalty": 10, "order": 1})

@@ -50,7 +50,7 @@ class TestAssetBehavior:
         assert agent.is_deleted is True
 
     def test_active_for_user_excludes_deleted_records(self):
-        """active_for_user should exclude soft-deleted records."""
+        """active_for_user filters AgentConfig.objects (a SoftDeleteManager, active-only)."""
         from cms.models import AgentConfig
 
         user = MagicMock(id=1)
@@ -62,12 +62,12 @@ class TestAssetBehavior:
         with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0] == active
 
     def test_active_for_user_filters_by_user(self):
-        """active_for_user should only return records for the specified user."""
+        """active_for_user only returns records for the specified user."""
         from cms.models import AgentConfig
 
         user = MagicMock(id=1)
@@ -79,6 +79,6 @@ class TestAssetBehavior:
         with patch.object(AgentConfig.objects, "filter", return_value=mock_qs) as mock_filter:
             result = list(AgentConfig.active_for_user(user))
 
-        mock_filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_filter.assert_called_once_with(user=user)
         assert len(result) == 1
         assert result[0].name == "User Agent"

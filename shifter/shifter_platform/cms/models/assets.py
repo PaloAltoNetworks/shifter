@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import models
 
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
-from cms.models.mixins import ExpiringStateMixin, SoftDeleteMixin
+from shared.db import ExpiringStateMixin, SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +35,26 @@ class Asset(SoftDeleteMixin, models.Model):
     - deleted_at: Soft delete timestamp (None = active)
 
     Subclasses must define a 'user' ForeignKey field.
+
+    Soft-delete semantics:
+
+    * ``Asset.objects`` is a :class:`~shared.db.SoftDeleteManager` and
+      pre-filters to non-deleted rows. A plain
+      ``Asset.objects.filter(user=user)`` cannot return deleted rows.
+    * ``Asset.all_objects`` is the unfiltered manager — use it explicitly
+      from admin / restore / audit code that needs to see deleted rows.
     """
 
     name = models.CharField(max_length=100, help_text="User-friendly name")
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
+
     class Meta:
         abstract = True
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return self.name
@@ -51,13 +63,10 @@ class Asset(SoftDeleteMixin, models.Model):
     def active_for_user(cls, user):
         """Return non-deleted assets for a user.
 
-        Args:
-            user: The user to filter by
-
-        Returns:
-            QuerySet of active (non-deleted) assets for the user
+        Thin wrapper around ``cls.objects.filter(user=user)`` — kept as a
+        named method for callers that prefer the explicit verb.
         """
-        return cls.objects.filter(user=user, deleted_at__isnull=True)
+        return cls.objects.filter(user=user)
 
 
 class FileAsset(Asset):
@@ -92,7 +101,7 @@ class CredentialBase(ExpiringStateMixin, Asset):
     - last_verified_at: Last external validation timestamp
     - last_used_at: Last provisioning use timestamp
 
-    The :class:`~cms.models.mixins.ExpiringStateMixin` supplies
+    The :class:`~shared.db.ExpiringStateMixin` supplies
     ``is_expired`` and ``expires_soon``.
     """
 
@@ -121,27 +130,23 @@ class CredentialBase(ExpiringStateMixin, Asset):
 # -----------------------------------------------------------------------------
 
 
-class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
+class Credential(CredentialBase):
     """User's credential instance.
 
-    Stores user credentials with type-specific data in a JSON field.
-    Validation is delegated to Pydantic spec classes referenced by CredentialType.
+    Concrete credential model. Inherits the asset shape from
+    :class:`CredentialBase` (which extends :class:`Asset`):
+    ``name``, ``created_at``, ``deleted_at`` from Asset; ``expires_at``,
+    ``last_verified_at``, ``last_used_at`` from CredentialBase. The
+    :class:`~shared.db.SoftDeleteMixin` and
+    :class:`~shared.db.ExpiringStateMixin` properties (``is_deleted``,
+    ``is_expired``, ``expires_soon``) are inherited via the base chain.
 
-    The :class:`~cms.models.mixins.SoftDeleteMixin` supplies ``is_deleted``;
-    :class:`~cms.models.mixins.ExpiringStateMixin` supplies ``is_expired``
-    and ``expires_soon``.
-
-    Attributes:
-        name: User-friendly name for this credential.
+    Adds the credential-specific fields:
         user: Owner of this credential.
         credential_type: FK to CredentialType catalog.
         data: Type-specific fields as JSON (validated by spec_class).
-        created_at: When this credential was created.
-        expires_at: When this credential expires (optional).
-        deleted_at: Soft delete timestamp (None = active).
     """
 
-    name = models.CharField(max_length=100, help_text="User-friendly name")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -156,14 +161,15 @@ class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
         default=dict,
         help_text="Type-specific credential data (validated by spec_class)",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "Credential"
         verbose_name_plural = "Credentials"
+        # Concrete Meta does not inherit Meta from the abstract base in
+        # Django; restate base_manager_name so reverse-FK descriptors and
+        # admin introspection stay on the unfiltered manager.
+        base_manager_name = "all_objects"
         constraints = [
             models.UniqueConstraint(
                 fields=["user", "name"],
@@ -171,9 +177,6 @@ class Credential(ExpiringStateMixin, SoftDeleteMixin, models.Model):
                 name="unique_active_credential_name_per_user",
             ),
         ]
-
-    def __str__(self):
-        return self.name
 
 
 class AgentConfig(FileAsset):
@@ -210,6 +213,8 @@ class AgentConfig(FileAsset):
         ordering = ["-created_at"]
         verbose_name = "Agent Config"
         verbose_name_plural = "Agent Configs"
+        # See Credential.Meta.base_manager_name for rationale.
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.name} ({self.os.name})"

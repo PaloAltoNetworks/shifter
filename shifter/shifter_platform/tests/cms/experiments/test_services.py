@@ -101,6 +101,7 @@ class TestListScripts:
 
     @patch("cms.experiments.services.ScriptAsset")
     def test_returns_only_active_for_user(self, mock_script_model, user):
+        """list_scripts queries ScriptAsset.objects (SoftDeleteManager, active-only)."""
         active_script = _make_script(pk=1, user=user, name="Active")
         qs = MagicMock()
         qs.count.return_value = 1
@@ -110,7 +111,7 @@ class TestListScripts:
         scripts = services.list_scripts(user)
         assert scripts.count() == 1
         assert scripts.first().name == "Active"
-        mock_script_model.objects.filter.assert_called_once_with(user=user, deleted_at__isnull=True)
+        mock_script_model.objects.filter.assert_called_once_with(user=user)
 
     @patch("cms.experiments.services.ScriptAsset")
     def test_other_user_sees_own(self, mock_script_model, other_user):
@@ -142,6 +143,7 @@ class TestDeleteScript:
     @patch("cms.experiments.services.audit_log")
     @patch("cms.experiments.services.ScriptAsset")
     def test_soft_deletes_own_script(self, mock_script_model, mock_audit, user):
+        """delete_script gets via ScriptAsset.objects (SoftDeleteManager)."""
         mock_script_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
         script = _make_script(pk=10, user=user, name="ToDelete")
         script.deleted_at = None
@@ -149,7 +151,7 @@ class TestDeleteScript:
 
         services.delete_script(user, 10)
 
-        mock_script_model.objects.get.assert_called_once_with(pk=10, user=user, deleted_at__isnull=True)
+        mock_script_model.objects.get.assert_called_once_with(pk=10, user=user)
         assert script.deleted_at is not None
         script.save.assert_called_once()
 

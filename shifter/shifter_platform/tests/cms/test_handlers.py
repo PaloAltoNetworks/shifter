@@ -101,12 +101,6 @@ class TestProcessEvent:
             mock_ngfw_handler.assert_not_called()
             mock_exp_handler.assert_not_called()
 
-    def test_dispatcher_is_callable(self):
-        """Dispatcher is a callable function."""
-        from cms.handlers import process_event
-
-        assert callable(process_event)
-
 
 class TestParseSnsMessage:
     """Tests for parse_sns_message helper."""
@@ -316,7 +310,7 @@ class TestProcessRangeEvent:
     # ---------------------------------------------------------------------
 
     def test_handles_missing_range_instance(self):
-        """Handler handles missing RangeInstance gracefully (no exception)."""
+        """Handler returns early when RangeInstance lookup fails — no save, no bridge."""
         from cms.handlers import process_range_event
 
         message = {
@@ -330,12 +324,22 @@ class TestProcessRangeEvent:
             )
         }
 
-        with patch("cms.handlers.range_events.RangeInstance") as MockRI:
+        with (
+            patch("cms.handlers.range_events.RangeInstance") as MockRI,
+            patch("cms.handlers.range_events.notify_ctf_range_status") as mock_ctf,
+            patch("cms.handlers.range_events.notify_experiment_on_range_ready") as mock_exp,
+        ):
             MockRI.DoesNotExist = Exception
             MockRI.objects.get.side_effect = MockRI.DoesNotExist("not found")
 
-            # Should not raise - handler returns early
             process_range_event(message)
+
+            # Lookup attempted exactly once with the event's range_id.
+            MockRI.objects.get.assert_called_once_with(range_id=999)
+            # On miss, no save and no downstream bridge calls.
+            assert not MockRI.return_value.save.called
+            mock_ctf.assert_not_called()
+            mock_exp.assert_not_called()
 
     def test_handles_user_id_mismatch(self):
         """Handler rejects events when user_id doesn't match instance."""
@@ -389,16 +393,6 @@ class TestProcessRangeEvent:
             process_range_event(message)
 
             MockRI.objects.get.assert_not_called()
-
-    # ---------------------------------------------------------------------
-    # Handler is callable
-    # ---------------------------------------------------------------------
-
-    def test_handler_is_callable(self):
-        """Handler is a callable function."""
-        from cms.handlers import process_range_event
-
-        assert callable(process_range_event)
 
     # ---------------------------------------------------------------------
     # Minimum required input

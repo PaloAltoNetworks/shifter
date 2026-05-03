@@ -165,7 +165,7 @@ class TestProcessNgfwEvent:
         mock_get_app.assert_not_called()
 
     def test_handles_missing_instance_gracefully(self, mock_instance, mock_app):
-        """process_ngfw_event handles missing Instance gracefully."""
+        """Missing Instance does not stop processing — App is still updated."""
         from cms.models import Instance
 
         event = {
@@ -184,10 +184,16 @@ class TestProcessNgfwEvent:
         ):
             from cms.handlers import process_ngfw_event
 
-            process_ngfw_event(make_sns_message(event))  # Should not raise
+            process_ngfw_event(make_sns_message(event))
+
+        # Instance lookup failed, so its save must NOT have run.
+        mock_instance.save.assert_not_called()
+        # App processing must still have happened — that's the documented behavior.
+        assert mock_app.status == ResourceStatus.READY.value
+        mock_app.save.assert_called_once_with(update_fields=["status"])
 
     def test_handles_missing_app_gracefully(self, mock_instance, mock_app):
-        """process_ngfw_event handles missing App gracefully."""
+        """Missing App does not stop processing — Instance is still updated."""
         from cms.models import App
 
         event = {
@@ -203,7 +209,13 @@ class TestProcessNgfwEvent:
         ):
             from cms.handlers import process_ngfw_event
 
-            process_ngfw_event(make_sns_message(event))  # Should not raise
+            process_ngfw_event(make_sns_message(event))
+
+        # Instance was updated even though App is gone.
+        assert mock_instance.status == ResourceStatus.READY.value
+        mock_instance.save.assert_called_once_with(update_fields=["status"])
+        # App lookup raised, so its save must NOT have run.
+        mock_app.save.assert_not_called()
 
     def test_handles_missing_required_ids(self, mock_instance, mock_app):
         """process_ngfw_event handles events missing instance_id or app_id."""

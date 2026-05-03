@@ -23,9 +23,11 @@ class TestParseMessage:
 
 
 class TestProcessEvent:
-    def test_ignores_unknown_event(self):
-        # Should not raise
+    @patch("cms.experiments.handlers.ExperimentOrchestrator")
+    def test_ignores_unknown_event(self, mock_orch_cls):
+        """Unknown event_type → no orchestrator constructed, no handler dispatched."""
         process_event({"event_type": "unknown.event", "event_id": "123"})
+        mock_orch_cls.assert_not_called()
 
     @patch("cms.experiments.handlers.ExperimentOrchestrator")
     def test_experiment_start_schedules_runs(self, mock_orch_cls):
@@ -73,15 +75,16 @@ class TestProcessEvent:
         mock_orch_cls.assert_called_once_with(10)
         mock_orch.handle_run_failed.assert_called_once_with(5, "SSM timeout")
 
-    def test_string_experiment_id_ignored(self):
-        """String experiment_id should be silently ignored (not crash)."""
+    @patch("cms.experiments.handlers.ExperimentOrchestrator")
+    def test_string_experiment_id_ignored(self, mock_orch_cls):
+        """String experiment_id fails int validation → orchestrator never built."""
         process_event(
             {
                 "event_type": "experiment.start",
                 "experiment_id": "not-an-int",
             }
         )
-        # No exception raised -- event was silently dropped
+        mock_orch_cls.assert_not_called()
 
     @patch("cms.experiments.handlers.ExperimentOrchestrator")
     def test_string_run_id_ignored(self, mock_orch_cls):

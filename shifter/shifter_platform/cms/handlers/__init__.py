@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 
 from cms.experiments import handlers as experiment_handlers
-from cms.handlers import ngfw_events, range_events
 from cms.handlers.envelope import parse_sns_message
 from cms.handlers.experiment_bridge import notify_experiment_on_range_ready
 from cms.handlers.ngfw_events import process_ngfw_event
@@ -44,12 +43,16 @@ def process_event(message: str | dict) -> None:
     event_type = event.get("event_type", "")
     event_id = event.get("event_id", "unknown")
 
+    # Dispatch via the package-level globals so that monkeypatches /
+    # instrumentation attached to the documented public names
+    # (`cms.handlers.process_range_event`, `cms.handlers.process_ngfw_event`)
+    # still intercept worker dispatch — same behavior as the pre-split module.
     if event_type.startswith("range."):
         logger.debug("Routing to range handler: event_type=%s event_id=%s", event_type, event_id)
-        range_events.process_range_event(message)
+        process_range_event(message)
     elif event_type.startswith("ngfw."):
         logger.debug("Routing to NGFW handler: event_type=%s event_id=%s", event_type, event_id)
-        ngfw_events.process_ngfw_event(message)
+        process_ngfw_event(message)
     elif event_type.startswith("experiment."):
         logger.debug("Routing to experiment handler: event_type=%s event_id=%s", event_type, event_id)
         experiment_handlers.process_event(message)

@@ -21,6 +21,10 @@ import {
   MAX_S3_READ_SIZE,
   isBinaryContentType,
   validateManageCommand,
+  buildAwsArgv,
+  awsExec,
+  awsJson,
+  awsText,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -466,6 +470,290 @@ describe("validateManageCommand", () => {
   it("rejects unknown commands", () => {
     assert.throws(() => validateManageCommand("custom_thing"), /Unknown/);
     assert.throws(() => validateManageCommand("makemigrations"), /Unknown/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AWS CLI argv-builder and execution helpers (issue #763)
+// ---------------------------------------------------------------------------
+
+describe("buildAwsArgv", () => {
+  it("appends --profile, --region, and extra flags after caller args", () => {
+    const argv = buildAwsArgv(
+      ["logs", "describe-log-streams", "--log-group-name", "/portal/dev"],
+      "dev-profile",
+      "us-east-2",
+      ["--output", "json"]
+    );
+    assert.deepEqual(argv, [
+      "logs",
+      "describe-log-streams",
+      "--log-group-name",
+      "/portal/dev",
+      "--profile",
+      "dev-profile",
+      "--region",
+      "us-east-2",
+      "--output",
+      "json",
+    ]);
+  });
+
+  it("works with no extra flags", () => {
+    const argv = buildAwsArgv(
+      ["s3", "ls"],
+      "p",
+      "us-east-2"
+    );
+    assert.deepEqual(argv, [
+      "s3",
+      "ls",
+      "--profile",
+      "p",
+      "--region",
+      "us-east-2",
+    ]);
+  });
+
+  it("rejects shell-string args with TypeError", () => {
+    assert.throws(
+      () => buildAwsArgv("logs describe-log-streams", "p", "r"),
+      (e) =>
+        e instanceof TypeError &&
+        /argv array/.test(e.message) &&
+        /#763/.test(e.message)
+    );
+  });
+
+  it("rejects null args with TypeError", () => {
+    assert.throws(
+      () => buildAwsArgv(null, "p", "r"),
+      (e) => e instanceof TypeError
+    );
+  });
+
+  it("rejects undefined args with TypeError", () => {
+    assert.throws(
+      () => buildAwsArgv(undefined, "p", "r"),
+      (e) => e instanceof TypeError
+    );
+  });
+
+  it("preserves $() command-substitution payloads literally", () => {
+    const argv = buildAwsArgv(
+      ["logs", "filter-log-events", "--filter-pattern", "$(rm -rf /)"],
+      "p",
+      "r"
+    );
+    assert.equal(argv[3], "$(rm -rf /)");
+  });
+
+  it("preserves backtick payloads literally", () => {
+    const argv = buildAwsArgv(
+      ["logs", "filter-log-events", "--filter-pattern", "`id`"],
+      "p",
+      "r"
+    );
+    assert.equal(argv[3], "`id`");
+  });
+
+  it("preserves single quotes literally", () => {
+    const argv = buildAwsArgv(
+      ["ssm", "send-command", "--parameters", "'; touch /tmp/pwn; echo '"],
+      "p",
+      "r"
+    );
+    assert.equal(argv[3], "'; touch /tmp/pwn; echo '");
+  });
+
+  it("preserves double quotes, semicolons, ampersands, pipes, newlines literally", () => {
+    const payload = `";|&\n$(whoami)`;
+    const argv = buildAwsArgv(
+      ["logs", "filter-log-events", "--filter-pattern", payload],
+      "p",
+      "r"
+    );
+    assert.equal(argv[3], payload);
+  });
+
+  it("preserves the SSM --parameters JSON shape with embedded shell metacharacters", () => {
+    const params = JSON.stringify({
+      commands: [`echo $(rm -rf /)`],
+    });
+    const argv = buildAwsArgv(
+      ["ssm", "send-command", "--instance-ids", "i-0123456789abcdef0", "--parameters", params],
+      "p",
+      "r"
+    );
+    assert.equal(argv[5], params);
+    assert.ok(argv[5].includes("$(rm -rf /)"));
+  });
+});
+
+describe("awsExec", () => {
+  function fakeRunner({ status = 0, stdout = "", stderr = "", error = null } = {}) {
+    const calls = [];
+    const fn = (cmd, argv, options) => {
+      calls.push({ cmd, argv, options });
+      return { status, stdout, stderr, error };
+    };
+    fn.calls = calls;
+    return fn;
+  }
+
+  it("invokes the runner with cmd='aws' and the built argv", () => {
+    const runner = fakeRunner({ stdout: "ok\n" });
+    awsExec("p", ["s3", "ls"], { runner });
+    assert.equal(runner.calls.length, 1);
+    assert.equal(runner.calls[0].cmd, "aws");
+    assert.deepEqual(runner.calls[0].argv, [
+      "s3",
+      "ls",
+      "--profile",
+      "p",
+      "--region",
+      REGION,
+    ]);
+  });
+
+  it("forwards extraFlags and region overrides through buildAwsArgv ordering", () => {
+    const runner = fakeRunner({ stdout: "x" });
+    awsExec("p", ["logs"], {
+      runner,
+      region: "eu-west-1",
+      extraFlags: ["--output", "text"],
+    });
+    assert.deepEqual(runner.calls[0].argv, [
+      "logs",
+      "--profile",
+      "p",
+      "--region",
+      "eu-west-1",
+      "--output",
+      "text",
+    ]);
+  });
+
+  it("returns stdout untrimmed", () => {
+    const runner = fakeRunner({ stdout: "  hello\n" });
+    assert.equal(awsExec("p", ["s3", "ls"], { runner }), "  hello\n");
+  });
+
+  it("rethrows runner.error", () => {
+    const boom = new Error("boom");
+    const runner = fakeRunner({ error: boom });
+    assert.throws(() => awsExec("p", ["s3", "ls"], { runner }), /boom/);
+  });
+
+  it("throws with trimmed stderr on non-zero status", () => {
+    const runner = fakeRunner({
+      status: 1,
+      stderr: "  AccessDenied: bad creds\n",
+    });
+    assert.throws(
+      () => awsExec("p", ["s3", "ls"], { runner }),
+      /AccessDenied: bad creds/
+    );
+  });
+
+  it("falls back to a generic message when stderr is empty and status is non-zero", () => {
+    const runner = fakeRunner({ status: 2 });
+    assert.throws(
+      () => awsExec("p", ["s3", "ls"], { runner }),
+      /aws exited with status 2/
+    );
+  });
+
+  it("propagates timeout option to the runner", () => {
+    const runner = fakeRunner({ stdout: "x" });
+    awsExec("p", ["s3", "ls"], { runner, timeoutMs: 500 });
+    assert.equal(runner.calls[0].options.timeout, 500);
+  });
+
+  it("requires args to be an array (rejects shell strings)", () => {
+    const runner = fakeRunner({ stdout: "x" });
+    assert.throws(
+      () => awsExec("p", "s3 ls", { runner }),
+      (e) => e instanceof TypeError
+    );
+    assert.equal(runner.calls.length, 0);
+  });
+});
+
+describe("awsJson", () => {
+  function fakeRunner(stdout) {
+    return (cmd, argv) => {
+      fakeRunner.lastArgv = argv;
+      return { status: 0, stdout, stderr: "", error: null };
+    };
+  }
+
+  it("appends --output json after caller args and parses stdout", () => {
+    const runner = fakeRunner('{"a":1}');
+    const out = awsJson("p", ["ec2", "describe-instances"], { runner });
+    assert.deepEqual(out, { a: 1 });
+    assert.deepEqual(fakeRunner.lastArgv, [
+      "ec2",
+      "describe-instances",
+      "--profile",
+      "p",
+      "--region",
+      REGION,
+      "--output",
+      "json",
+    ]);
+  });
+
+  it("places --output json AFTER caller-supplied --output flags so it wins", () => {
+    const runner = fakeRunner('{"a":1}');
+    awsJson("p", ["ec2", "describe-instances", "--output", "text"], {
+      runner,
+    });
+    const argv = fakeRunner.lastArgv;
+    const last = argv.lastIndexOf("--output");
+    assert.equal(argv[last + 1], "json");
+  });
+
+  it("forwards user-supplied extraFlags before the json output flags", () => {
+    const runner = fakeRunner('[]');
+    awsJson("p", ["s3api", "list-buckets"], {
+      runner,
+      extraFlags: ["--max-items", "10"],
+    });
+    assert.deepEqual(fakeRunner.lastArgv, [
+      "s3api",
+      "list-buckets",
+      "--profile",
+      "p",
+      "--region",
+      REGION,
+      "--output",
+      "json",
+      "--max-items",
+      "10",
+    ]);
+  });
+});
+
+describe("awsText", () => {
+  it("returns trimmed stdout", () => {
+    const runner = () => ({
+      status: 0,
+      stdout: "  i-0123\n",
+      stderr: "",
+      error: null,
+    });
+    assert.equal(awsText("p", ["ec2", "describe-instances"], { runner }), "i-0123");
+  });
+
+  it("does not append --output text automatically", () => {
+    let captured;
+    const runner = (cmd, argv) => {
+      captured = argv;
+      return { status: 0, stdout: "x", stderr: "", error: null };
+    };
+    awsText("p", ["s3", "cp", "s3://b/k", "-"], { runner });
+    assert.ok(!captured.includes("--output"));
   });
 });
 

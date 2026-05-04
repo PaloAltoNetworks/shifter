@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.16] - 2026-05-04
+
+### Security
+
+- **Closed shell-injection paths in `mcp/ops` (#763).** The shared
+  `aws()` and `awsText()` helpers, `getInstancePlatform`,
+  `fetchCredentials`, `ensureTunnel`, and `start_portal_test_tunnel`
+  previously interpolated user-controlled strings into shell command
+  strings and ran them via `execSync()`. Three documented payload
+  paths reached the host shell — `filter_log_events` (CloudWatch
+  filter pattern), `ssm_send_command` (SSM `--parameters` JSON), and
+  `run_manage_command` (Django management commands wrapped in JSON) —
+  with several other tools sharing the same unsafe abstraction.
+  Every aws-cli invocation in `mcp/ops/index.js` now goes through
+  argv-array helpers in `mcp/ops/lib.js` (`buildAwsArgv`, `awsExec`,
+  `awsJson`, `awsText`) backed by `spawnSync`, so payloads containing
+  `$()`, backticks, single and double quotes, semicolons, ampersands,
+  pipes, spaces, and newlines are forwarded as literal argv elements
+  rather than evaluated by the local shell. `child_process.execSync`
+  is no longer imported from `mcp/ops/index.js`. Regression coverage
+  in `mcp/ops/lib.test.js` (argv-builder and runner-injected
+  `awsExec`) and `mcp/ops/spawn-roundtrip.test.js` (proves Node's
+  `spawnSync` preserves literal argv across all metacharacters)
+  guards the new boundary. Component-local guardrails recorded in
+  `mcp/ops/SECURITY.md`.
+
 ## [3.95.15] - 2026-05-03
 
 ### Changed

@@ -248,6 +248,35 @@
     ]
   },
   {
+    "id": "ADR-010",
+    "title": "MCP servers invoke external CLIs via argv arrays, never shell strings",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Every MCP server (mcp/*) that shells out to an external CLI (aws, kubectl, gcloud, docker, etc.) executes the binary via spawn/spawnSync/execFile with an argv array. Shell strings concatenated into execSync are forbidden. Tool-argument values that must be interpreted as remote shell content (e.g. ssm send-command --parameters) ride as a single argv element, not as a quoted shell substring.",
+    "rules": [
+      {
+        "id": "ADR-010-R1",
+        "description": "MCP servers must not import execSync from child_process; AWS CLI invocations run through argv-array helpers (e.g. mcp/ops/lib.js buildAwsArgv/awsExec/awsJson/awsText).",
+        "checks": ["mcp-no-shell-exec"]
+      },
+      {
+        "id": "ADR-010-R2",
+        "description": "JSON payloads for CLI parameters (e.g. ssm send-command --parameters) are JSON.stringify'd into a single argv element. Shell escaping is not an acceptable remediation strategy for command-execution boundaries.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "mcp/ops/SECURITY.md",
+      "mcp/ops/lib.js",
+      "mcp/ops/index.js",
+      "mcp/ops/lib.test.js",
+      "mcp/ops/spawn-roundtrip.test.js",
+      "scripts/adr_guard/adr_guard.py"
+    ]
+  },
+  {
     "id": "ADR-009",
     "title": "AWS and GCP keep provider-specific identity stacks behind a shared auth seam",
     "status": "accepted",

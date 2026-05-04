@@ -69,32 +69,22 @@ remediation strategy. Base64 is the boundary.
   shell-string execution safe; `run_command` is by design an arbitrary
   PAN-OS CLI helper.
 
-## Helper-set duplication with `mcp/ops`
+## Shared helper module at `mcp/shared/aws-helpers.js`
 
-`buildAwsArgv`/`awsExec`/`awsJson`/`awsText`/`buildSsmSendCommandArgs`
-mirror the implementations in `mcp/ops/lib.js`. Each MCP server is its
-own npm package with its own `node_modules`; there is no shared
-workspace, and creating a shared helper package would expand blast
-radius beyond this fix.
+`buildAwsArgv`/`awsExec`/`awsJson`/`awsText`/`buildSsmSendCommandArgs`,
+plus `REGION` and `getProfile`, live in `mcp/shared/aws-helpers.js` and
+are re-exported by both `mcp/ngfw/lib.js` and `mcp/ops/lib.js`. Each
+MCP server keeps its own npm package and `node_modules`; the shared
+module imports only `node:`-prefixed built-ins so there is no
+cross-package npm dependency.
 
-The two copies share a contract, not source. Both MUST guarantee:
-
-- argv-array enforcement: shell-string `args` throw `TypeError` before
-  any process spawn.
-- spawn-only execution: `aws` is invoked through `spawnSync` with no
-  `shell: true`.
-- `--output json` is appended LAST in `awsJson` so it overrides any
-  caller-supplied `--output` flag.
-- `--output text` is never auto-appended in `awsText`.
-
-The ngfw copy diverges in operationally specific ways — for example,
-`awsExec` here wraps thrown errors with an operation label
-(`aws ec2 describe-instances: <stderr>`) so the polling and SSM
-sequence in `runNgfwCommand` reports localized failures to the MCP
-client. The mcp/ops copy currently throws bare stderr; aligning that
-behavior across both packages is a follow-up. Any change that touches
-the contract above MUST be applied in both packages and reflected in
-the ADR-010 evidence list.
+Because the helper code lives at one site, the argv-array contract
+that ADR-010 enforces — TypeError on shell-string args, spawn-only
+execution, `--output json` appended last in `awsJson`,
+operation-labeled errors (`aws <service> <op>: <stderr>`) — is
+guaranteed identical across MCP servers. Any future MCP server in
+this repo MUST import from `mcp/shared/aws-helpers.js`; do not
+re-implement the helpers locally.
 
 ## Regression coverage
 

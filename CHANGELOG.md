@@ -19,24 +19,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jump host. `JSON.stringify` only produces a double-quoted shell
   string, so payloads containing `$(...)` or backticks were evaluated
   by the portal shell before reaching SSH. Both boundaries are now
-  closed: `mcp/ngfw/lib.js` carries argv-array helpers
-  (`buildAwsArgv`, `awsExec`, `awsJson`, `awsText`,
-  `buildSsmSendCommandArgs`) parallel to `mcp/ops/lib.js`, and
-  `buildNgfwSshCommands` base64-encodes the user's PAN-OS command into
-  the SSM payload so the portal decodes it (`base64 -d`) and pipes the
-  bytes into `ssh`'s stdin instead of evaluating them. The portal
-  shell never sees the raw command. `child_process.execSync` is no
-  longer imported from `mcp/ngfw/index.js`. `validateNgfwIp` adds a
-  strict IPv4 check on the SSH target as defense in depth. Regression
-  coverage in `mcp/ngfw/lib.test.js` (argv builders, `awsExec` runner
-  injection, SSM JSON payload shape, base64 round-trip across `$()`,
-  backticks, quotes, semicolons, ampersands, pipes, newlines, and the
-  heredoc terminator) and `mcp/ngfw/spawn-roundtrip.test.js` (proves
-  Node's `spawnSync` preserves literal argv across all metacharacters)
-  guards the new boundaries. Component-local guardrails recorded in
-  `mcp/ngfw/SECURITY.md`. The `ADR-010-R1` and `ADR-010-R2` exceptions
-  for `mcp/ngfw/*` are removed from `docs/adr/exceptions.yaml`;
-  ADR-010 evidence now lists the ngfw artifacts.
+  closed: AWS-CLI argv-array helpers (`buildAwsArgv`, `awsExec`,
+  `awsJson`, `awsText`, `buildSsmSendCommandArgs`) now live in a
+  shared `mcp/shared/aws-helpers.js` module re-exported by both
+  `mcp/ngfw/lib.js` and `mcp/ops/lib.js`, so a single change-site
+  governs the argv-array contract across MCP servers. Errors carry an
+  `aws <service> <op>: <stderr>` operation label so MCP handlers
+  surface localized failures. `buildNgfwSshCommands` base64-encodes
+  the PAN-OS command (with a trailing newline so the line-oriented
+  appliance gets Enter) into the SSM payload; the portal decodes it
+  (`base64 -d`) and pipes the bytes into `ssh`'s stdin instead of
+  evaluating them. Per-invocation `/tmp/ngfw-<uuid>.pem` paths prevent
+  concurrent calls from clobbering each other's key material. `set
+  -e` plus `trap 'rc=$?; rm -f <path>; exit $rc' EXIT` preserves the
+  SSH/PAN-OS exit code through cleanup so SSM reports failed PAN-OS
+  calls as failed. `child_process.execSync` is no longer imported
+  from `mcp/ngfw/index.js`. `validateNgfwIp` adds a strict IPv4 check
+  on the SSH target as defense in depth. `runNgfwCommand` throws an
+  explicit timeout error after 60s and only retries the genuine
+  `InvocationDoesNotExist` transient during polling — other AWS
+  errors propagate immediately. Regression coverage:
+  `mcp/ngfw/lib.test.js` covers argv builders, `awsExec` runner
+  injection with operation-labeled errors, SSM JSON payload shape,
+  base64 round-trip across `$()`, backticks, quotes, semicolons,
+  ampersands, pipes, newlines, and the heredoc terminator;
+  `mcp/ngfw/spawn-roundtrip.test.js` proves Node's `spawnSync`
+  preserves literal argv across all metacharacters; and
+  `mcp/ngfw/script-execution.test.js` runs the generated SSM command
+  list under `/bin/sh` with a stub `ssh` and asserts the EXIT trap
+  preserves the failing exit code (42 round-trips end-to-end) and
+  removes the temporary key file in both success and failure paths.
+  Component-local guardrails recorded in `mcp/ngfw/SECURITY.md`. The
+  `ADR-010-R1` and `ADR-010-R2` exceptions for `mcp/ngfw/*` are
+  removed from `docs/adr/exceptions.yaml`; ADR-010 evidence now lists
+  the shared module and ngfw artifacts.
 
 ## [3.95.16] - 2026-05-04
 

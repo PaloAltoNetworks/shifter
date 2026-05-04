@@ -198,7 +198,9 @@ class TestUpdateScenario:
 class TestDeleteScenario:
     def test_delete_custom(self, staff_user, custom_scenario):
         delete_scenario(staff_user, "custom-test")
-        scenario = Scenario.objects.get(pk=custom_scenario.pk)
+        # Scenario.objects (SoftDeleteManager) excludes deleted rows; use
+        # all_objects to verify the soft-delete actually landed.
+        scenario = Scenario.all_objects.get(pk=custom_scenario.pk)
         assert scenario.deleted_at is not None
 
     def test_cannot_delete_default(self, staff_user):

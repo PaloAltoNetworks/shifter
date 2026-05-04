@@ -32,13 +32,17 @@ def mock_range_instance():
 
 
 def _patch_active_queryset(return_value):
-    """Create a patch context that mocks the RangeInstance.active queryset chain.
+    """Create a patch context that mocks the RangeInstance.objects queryset chain.
 
-    Returns (patch_context, mock_active) so callers can further inspect the mock.
+    ``RangeInstance.objects`` is a SoftDeleteManager so it already returns
+    only non-deleted rows; the production code chains
+    ``.filter(...).exclude(...).order_by(...).first()`` on it.
+
+    Returns (patch_context, mock_objects) so callers can further inspect the mock.
     """
-    mock_active = MagicMock()
-    mock_active.filter.return_value.exclude.return_value.order_by.return_value.first.return_value = return_value
-    return patch("cms.services.RangeInstance.active", mock_active), mock_active
+    mock_objects = MagicMock()
+    mock_objects.filter.return_value.exclude.return_value.order_by.return_value.first.return_value = return_value
+    return patch("cms.services.RangeInstance.objects", mock_objects), mock_objects
 
 
 class TestGetActiveRange:
@@ -178,10 +182,10 @@ class TestGetActiveRange:
         from cms.services import get_active_range
 
         with (
-            patch("cms.services.RangeInstance.active") as mock_active,
+            patch("cms.services.RangeInstance.objects") as mock_objects,
             pytest.raises(DatabaseError, match="DB connection failed"),
         ):
-            mock_active.filter.side_effect = DatabaseError("DB connection failed")
+            mock_objects.filter.side_effect = DatabaseError("DB connection failed")
             get_active_range(mock_user)
 
     # ---------------------------------------------------------------------

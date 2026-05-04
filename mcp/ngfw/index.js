@@ -248,6 +248,13 @@ function resolveNgfw(env, instanceId) {
 
 // --- MCP Server ---
 
+// Format the optional stderr suffix as a separate helper so the
+// per-tool response template literal stays flat (avoids the
+// nested-template-literal anti-pattern).
+function formatStderrSuffix(stderr) {
+  return stderr ? `\nErrors:\n${stderr}` : "";
+}
+
 const server = new McpServer({
   name: "shifter-ngfw",
   version: "1.0.0",
@@ -309,7 +316,8 @@ server.tool(
         sshKey,
         "show system info"
       );
-      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`;
+      const stderrSuffix = formatStderrSuffix(result.stderr);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${stderrSuffix}`;
       return {
         content: [{ type: "text", text }],
         // Surface non-Success SSM status (Failed, Cancelled,
@@ -348,7 +356,8 @@ server.tool(
         sshKey,
         "show routing route"
       );
-      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`;
+      const stderrSuffix = formatStderrSuffix(result.stderr);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${stderrSuffix}`;
       return {
         content: [{ type: "text", text }],
         isError: result.status !== "Success",
@@ -380,7 +389,8 @@ server.tool(
     try {
       const { instance, sshKey } = resolveNgfw(env, instance_id);
       const result = await runNgfwCommand(env, instance.PrivateIp, sshKey, command);
-      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nCommand: ${command}\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`;
+      const stderrSuffix = formatStderrSuffix(result.stderr);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nCommand: ${command}\nStatus: ${result.status}\n\n${result.stdout}${stderrSuffix}`;
       return {
         content: [{ type: "text", text }],
         isError: result.status !== "Success",

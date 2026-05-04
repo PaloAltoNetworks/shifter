@@ -59,8 +59,14 @@ export function buildAwsArgv(args, profile, region, extraFlags = []) {
   ];
 }
 
-function defaultRunner(cmd, argv, options) {
-  return spawnSync(cmd, argv, options);
+// The spawned binary is hardcoded to "aws" so no caller-supplied
+// command name reaches `spawnSync`. The injectable `runner` only sees
+// the argv array and process options; this both keeps the test seam
+// (tests pass a recording runner to inspect argv) and removes any
+// theoretical command-injection surface that an attacker-controlled
+// command name could expose.
+function defaultRunner(argv, options) {
+  return spawnSync("aws", argv, options);
 }
 
 function operationLabel(args) {
@@ -78,7 +84,7 @@ export function awsExec(profile, args, options = {}) {
   } = options;
   const argv = buildAwsArgv(args, profile, region, extraFlags);
   const label = operationLabel(args);
-  const result = runner("aws", argv, {
+  const result = runner(argv, {
     encoding: "utf-8",
     timeout: timeoutMs,
   });

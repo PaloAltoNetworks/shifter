@@ -126,6 +126,9 @@ describe("buildAwsArgv", () => {
 // awsExec / awsJson / awsText (runner-injected)
 // ---------------------------------------------------------------------------
 
+// Recording runner. The shared `awsExec` hardcodes the binary to
+// "aws" inside `defaultRunner` so the runner only ever sees argv +
+// options; tests inspect those.
 function makeRecordingRunner({
   status = 0,
   stdout = "",
@@ -133,8 +136,8 @@ function makeRecordingRunner({
   error = null,
 } = {}) {
   const calls = [];
-  const fn = (cmd, argv, options) => {
-    calls.push({ cmd, argv, options });
+  const fn = (argv, options) => {
+    calls.push({ argv, options });
     return { status, stdout, stderr, error };
   };
   fn.calls = calls;
@@ -142,11 +145,10 @@ function makeRecordingRunner({
 }
 
 describe("awsExec", () => {
-  it("invokes the runner with cmd='aws' and the built argv", () => {
+  it("invokes the runner with the built argv (binary is hardcoded to 'aws')", () => {
     const runner = makeRecordingRunner({ stdout: "ok\n" });
     awsExec("p", ["s3", "ls"], { runner });
     assert.equal(runner.calls.length, 1);
-    assert.equal(runner.calls[0].cmd, "aws");
     assert.deepEqual(runner.calls[0].argv, [
       "s3",
       "ls",
@@ -283,7 +285,7 @@ describe("awsText", () => {
 
   it("does not append --output text automatically", () => {
     let captured;
-    const runner = (cmd, argv) => {
+    const runner = (argv) => {
       captured = argv;
       return { status: 0, stdout: "x", stderr: "", error: null };
     };

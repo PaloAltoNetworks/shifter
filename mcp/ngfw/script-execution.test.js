@@ -12,14 +12,13 @@
 // status) wins over the system one. `base64 -d` is a real binary on
 // the SSM portal host; we reuse the system one here too.
 
-/* eslint-disable security/detect-non-literal-fs-filename, security/detect-non-literal-regexp */
+/* eslint-disable security/detect-non-literal-fs-filename */
 //
 // All `fs.*Sync` paths in this file come from a freshly minted tmpdir,
 // hardcoded `/tmp/ngfw-test-*` paths under our own control, or
 // directly-constructed `path.join` calls — never user input. The
-// dynamic RegExp uses an interpolated `realKeyPath` that we just
-// generated locally. The eslint-plugin-security warnings here are
-// false positives in the test context.
+// eslint-plugin-security warnings here are false positives in the
+// test context.
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -96,10 +95,8 @@ describe("buildNgfwSshCommands script execution (issue #759)", () => {
       t.skip("/bin/sh or base64 not available in this environment");
       return;
     }
-    const keyPath = path.join(workDir, "ngfw-success.pem");
-    // The key path validator only allows /tmp/ngfw-... paths, so
-    // override the helper's default by using its keyPath argument
-    // with a /tmp value that is unique to this run.
+    // The key path validator only allows /tmp/ngfw-... paths, so use a
+    // /tmp value that is unique to this run.
     const realKeyPath = `/tmp/ngfw-test-success-${process.pid}.pem`;
     const markerPath = path.join(workDir, "marker-success.txt");
     writeSshStub(0, markerPath);
@@ -121,12 +118,11 @@ describe("buildNgfwSshCommands script execution (issue #759)", () => {
       assert.ok(existsSync(markerPath), "ssh stub did not run");
       const marker = readFileSync(markerPath, "utf-8");
       assert.match(marker, /ssh stub invoked/);
-      assert.match(marker, new RegExp(`-i ${realKeyPath}`));
+      assert.ok(marker.includes(`-i ${realKeyPath}`), "marker missing key path");
     } finally {
       rmSync(realKeyPath, { force: true });
       rmSync(markerPath, { force: true });
     }
-    void keyPath;
   });
 
   it("script propagates a non-zero ssh exit code through the EXIT trap and still cleans up", (t) => {

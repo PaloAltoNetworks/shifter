@@ -3,9 +3,9 @@
 // Two boundaries must stay shell-free in this server (issue #759):
 //
 //   1. Local host shell: every aws-cli invocation goes through the
-//      argv-array helpers below (`buildAwsArgv`, `awsExec`, `awsJson`,
-//      `awsText`, `buildSsmSendCommandArgs`). Callers MUST pass argv
-//      arrays. Shell strings are rejected with TypeError.
+//      argv-array helpers re-exported below from
+//      `../shared/aws-helpers.js`. Callers MUST pass argv arrays;
+//      shell strings throw `TypeError`.
 //
 //   2. Remote portal shell: when an SSM `AWS-RunShellScript` payload
 //      forwards a PAN-OS command to the NGFW via SSH, the user-supplied
@@ -13,120 +13,21 @@
 //      portal shell never evaluates the raw bytes. The portal decodes
 //      the base64 and pipes the result into `ssh`'s stdin.
 //
-// These helpers mirror the ones in `mcp/ops/lib.js` (issue #763).
-// Each MCP server is its own npm package, so the helpers are kept as
-// a local copy here rather than pulled in across packages. See
-// `SECURITY.md` for the rule that the two copies stay aligned.
+// AWS-CLI helpers live under `mcp/shared/aws-helpers.js` and are
+// shared with `mcp/ops` so a single change-site governs the
+// argv-array contract across MCP servers.
 
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
-export const REGION = "us-east-2";
-
-export function getProfile(profiles, env) {
-  const profile = profiles[env];
-  if (!profile) {
-    throw new Error(
-      `AWS profile not set for ${env}. Export PANW_SHIFTER_${env.toUpperCase()}_PROFILE`
-    );
-  }
-  return profile;
-}
-
-// --- AWS CLI execution ----------------------------------------------------
-//
-// Every aws-cli invocation in this MCP server runs through these
-// helpers. `buildAwsArgv` enforces the argv-array contract via
-// TypeError so a stray shell string cannot silently re-introduce the
-// command-injection path that issue #759 closes.
-
-export function buildAwsArgv(args, profile, region, extraFlags = []) {
-  if (!Array.isArray(args)) {
-    throw new TypeError(
-      "AWS CLI args must be an argv array, not a shell string. " +
-        "Passing a shell string would re-introduce the command-injection " +
-        "path that issue #759 closed."
-    );
-  }
-  return [
-    ...args,
-    "--profile",
-    profile,
-    "--region",
-    region,
-    ...extraFlags,
-  ];
-}
-
-function defaultRunner(cmd, argv, options) {
-  return spawnSync(cmd, argv, options);
-}
-
-// Builds an `aws <service> <op>: ...` operation label from the argv,
-// or falls back to a generic "aws" prefix. The label is included in
-// thrown errors so MCP handlers (which surface `err.message` directly
-// to users) can localize which AWS call failed.
-function operationLabel(args) {
-  if (!Array.isArray(args) || args.length === 0) return "aws";
-  const verb = args.slice(0, 2).filter((v) => typeof v === "string" && !v.startsWith("-"));
-  return verb.length > 0 ? `aws ${verb.join(" ")}` : "aws";
-}
-
-export function awsExec(profile, args, options = {}) {
-  const {
-    extraFlags = [],
-    region = REGION,
-    runner = defaultRunner,
-    timeoutMs = 60000,
-  } = options;
-  const argv = buildAwsArgv(args, profile, region, extraFlags);
-  const label = operationLabel(args);
-  const result = runner("aws", argv, {
-    encoding: "utf-8",
-    timeout: timeoutMs,
-  });
-  if (result.error) {
-    const wrapped = new Error(`${label}: ${result.error.message}`);
-    wrapped.cause = result.error;
-    throw wrapped;
-  }
-  if (result.status !== 0) {
-    const stderr = (result.stderr || "").trim();
-    const detail = stderr || `exited with status ${result.status}`;
-    throw new Error(`${label}: ${detail}`);
-  }
-  return result.stdout;
-}
-
-export function awsJson(profile, args, options = {}) {
-  const extraFlags = [
-    ...(options.extraFlags || []),
-    "--output",
-    "json",
-  ];
-  const stdout = awsExec(profile, args, { ...options, extraFlags });
-  return JSON.parse(stdout);
-}
-
-export function awsText(profile, args, options = {}) {
-  return awsExec(profile, args, options).trim();
-}
-
-// --- SSM argv builder -----------------------------------------------------
-
-export function buildSsmSendCommandArgs({ instanceId, docName, commands }) {
-  const params = JSON.stringify({ commands });
-  return [
-    "ssm",
-    "send-command",
-    "--instance-ids",
-    instanceId,
-    "--document-name",
-    docName,
-    "--parameters",
-    params,
-  ];
-}
+export {
+  REGION,
+  getProfile,
+  buildAwsArgv,
+  awsExec,
+  awsJson,
+  awsText,
+  buildSsmSendCommandArgs,
+} from "../shared/aws-helpers.js";
 
 // --- NGFW remote-shell payload --------------------------------------------
 //
@@ -141,7 +42,7 @@ export function buildSsmSendCommandArgs({ instanceId, docName, commands }) {
 // heredoc (`'EOFKEY'`), which suppresses expansion of any `$`/`` ` ``
 // characters that might appear inside a key.
 
-const IPV4_OCTET = /^(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/;
+const IPV4_OCTET = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
 
 export function validateNgfwIp(ngfwIp) {
   if (typeof ngfwIp !== "string") {

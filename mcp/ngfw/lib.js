@@ -96,13 +96,19 @@ export function buildNgfwSshCommands({ sshKey, ngfwIp, command, keyPath }) {
   // `... ; rm -f ...` ordering, the rm would always run last (exit 0)
   // and mask the SSH failure. `set -e` plus an EXIT trap that captures
   // `$?` before cleanup propagates the real exit code to SSM.
+  //
+  // The trap is installed BEFORE the cat/chmod that creates the key
+  // file. Otherwise a failure during `cat > path` or `chmod` would
+  // leave `/tmp/ngfw-<uuid>.pem` behind because `set -e` would exit
+  // before the trap was registered. `rm -f` is a no-op if the file
+  // does not exist yet, so installing the trap up front is safe.
   return [
     `set -e`,
+    `trap 'rc=$?; rm -f ${path}; exit $rc' EXIT`,
     `cat > ${path} << 'EOFKEY'`,
     sshKey,
     `EOFKEY`,
     `chmod 600 ${path}`,
-    `trap 'rc=$?; rm -f ${path}; exit $rc' EXIT`,
     `printf %s '${encoded}' | base64 -d | ssh -i ${path} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 admin@${ngfwIp} 2>&1`,
   ];
 }

@@ -100,5 +100,8 @@ shell-command list, that arbitrary metacharacter payloads (including
 the heredoc terminator itself) round-trip via base64 to PAN-OS, and
 that the `printf '...'` segment contains only base64-class characters.
 
-`spawn-roundtrip.test.js` proves that Node's `spawnSync` forwards argv
-elements byte-for-byte for every metacharacter shape that matters.
+`mcp/ops/spawn-roundtrip.test.js` proves that Node's `spawnSync`
+forwards argv elements byte-for-byte for every metacharacter shape
+that matters. Because both packages now share `spawnSync` through
+`mcp/shared/aws-helpers.js`, that single suite covers the boundary
+for every Shifter MCP server.

@@ -24,7 +24,7 @@
       "command": "node",
       "args": ["${GROUND_CONTROL_DIR}/mcp/ground-control/index.js"],
       "env": {
-        "GC_BASE_URL": "http://gc-dev:8000",
+        "GC_BASE_URL": "http://red-dragon:8000",
         "GH_REPO": "Brad-Edwards/shifter"
       }
     }

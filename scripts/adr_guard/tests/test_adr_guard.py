@@ -197,5 +197,329 @@ class CloudFactorySeamTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
 
+class McpNoShellExecTests(unittest.TestCase):
+    """Tests for the mcp-no-shell-exec ADR-010-R1 check."""
+
+    def _write(self, repo_root: Path, rel: str, body: str) -> None:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def _run(self, repo_root: Path) -> list:
+        return ADR_GUARD.check_mcp_no_shell_exec(repo_root, None)
+
+    def test_clean_file_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_named_esm_import_with_node_prefix_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { execSync } from "node:child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-010-R1")
+
+    def test_named_esm_import_without_node_prefix_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                "import { execSync } from 'child_process';\n"
+                "execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_namespace_esm_import_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import * as cp from "node:child_process";\n'
+                "cp.execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_default_esm_import_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import cp from "node:child_process";\n'
+                "cp.execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_destructured_cjs_require_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.cjs",
+                'const { execSync } = require("child_process");\n'
+                "execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_bare_cjs_require_with_property_access_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.cjs",
+                'const cp = require("node:child_process");\n'
+                "cp.execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_mjs_extension_is_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.mjs",
+                'import { execSync } from "child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_execSync_in_a_comment_does_not_trip_the_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                "// We used to call execSync('aws s3 ls') here.\n"
+                "/* execSync('legacy') */\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_execSync_without_child_process_import_is_not_flagged(self) -> None:
+        # An unrelated function happens to be named execSync but is
+        # not Node's child_process.execSync; the check requires both
+        # the import and the call site.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                "function execSync(query) { return query; }\n"
+                "execSync('select 1');\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_node_modules_is_not_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/node_modules/something/dist.js",
+                'import { execSync } from "child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_aliased_named_import_is_flagged(self) -> None:
+        """`import { execSync as run } ... run('aws ...')` is a bypass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { execSync as run } from "node:child_process";\n'
+                "run('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-010-R1")
+
+    def test_double_slashes_inside_a_string_do_not_eat_the_call_site(self) -> None:
+        """`https://...` URL must not flatten the call line into a comment."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { execSync } from "node:child_process";\n'
+                'const endpoint = "https://example.com/foo";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_block_comment_containing_call_text_does_not_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                "/*\n * old: execSync('aws s3 ls')\n */\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_template_string_containing_call_text_does_not_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                "const note = `we used to call execSync('aws ...') here`;\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_bare_exec_is_flagged(self) -> None:
+        """`exec(shellString)` is shell-string execution, same as execSync."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { exec } from "node:child_process";\n'
+                "exec('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_namespace_exec_call_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import * as cp from "node:child_process";\n'
+                "cp.exec('aws s3 ls');\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+
+    def test_spawn_with_shell_true_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawn } from "node:child_process";\n'
+                "spawn('aws s3 ls', { shell: true });\n",
+            )
+            violations = self._run(repo_root)
+            self.assertEqual(len(violations), 1)
+            self.assertIn("shell: true", violations[0].message)
+
+    def test_spawn_without_shell_option_is_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawn } from "node:child_process";\n'
+                "spawn('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_spawn_with_shell_false_is_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawn } from "node:child_process";\n'
+                "spawn('aws', ['s3', 'ls'], { shell: false });\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_string_containing_alias_pattern_does_not_force_a_false_positive(self) -> None:
+        """A comment or string with the literal `execSync as run` text
+        must not turn an unrelated `run(` call into a flagged call site."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "mcp/foo/index.js",
+                'import { spawnSync } from "node:child_process";\n'
+                'const note = "we used to import { execSync as run } here";\n'
+                "function run(x) { return x; }\n"
+                "run('legacy');\n"
+                "spawnSync('aws', ['s3', 'ls']);\n",
+            )
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_synthetic_repo_with_violator_and_exception(self) -> None:
+        """A violator in an excepted path is filtered; a violator outside is not.
+
+        Replaces the older live-repo regression test, which would have
+        broken when the deferred mcp/ngfw migration removed those
+        violations.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "docs/adr/index.yaml",
+                '[{"id":"ADR-010","title":"t","status":"accepted",'
+                '"scope":"repository","decision":"d",'
+                '"rules":[{"id":"ADR-010-R1","description":"x",'
+                '"checks":["mcp-no-shell-exec"]}],'
+                '"exceptions":[],"enforcement":["agent-policy"],'
+                '"evidence":["scripts/adr_guard/adr_guard.py"]}]',
+            )
+            self._write(
+                repo_root,
+                "docs/adr/exceptions.yaml",
+                '[{"rule_id":"ADR-010-R1","owner":"team",'
+                '"reason":"deferred migration","expires_on":"2099-01-01",'
+                '"checks":["mcp-no-shell-exec"],'
+                '"paths":["mcp/legacy/*"]}]',
+            )
+            self._write(
+                repo_root,
+                "mcp/legacy/index.js",
+                'import { execSync } from "child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+            self._write(
+                repo_root,
+                "mcp/fresh/index.js",
+                'import { execSync } from "child_process";\n'
+                "execSync('aws s3 ls');\n",
+            )
+
+            raw = ADR_GUARD.check_mcp_no_shell_exec(repo_root, None)
+            paths = sorted(v.path for v in raw)
+            self.assertEqual(paths, ["mcp/fresh/index.js", "mcp/legacy/index.js"])
+
+            exceptions = ADR_GUARD.load_adr_exceptions(repo_root)
+            filtered = ADR_GUARD.filter_excepted_violations(raw, exceptions)
+            self.assertEqual(
+                [v.path for v in filtered], ["mcp/fresh/index.js"]
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

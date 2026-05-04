@@ -488,16 +488,246 @@ def check_cloud_factory_seam(repo_root: Path, files: list[str] | None) -> list[V
     return violations
 
 
+# child_process import shapes we care about (any form — named, default,
+# namespace, CJS destructure, bare CJS require — with or without the
+# `node:` prefix). We require the import as evidence that this file
+# really pulls Node's child_process; without it, an `execSync` token
+# could be an unrelated function with the same name.
+_CHILD_PROCESS_IMPORT = re.compile(
+    r"""(?x)
+    (
+        from\s*["'](?:node:)?child_process["']
+    )
+    |
+    (
+        require\s*\(\s*["'](?:node:)?child_process["']\s*\)
+    )
+    """,
+)
+# `execSync as <alias>` in an ESM named-import. Captures the alias
+# so we can search for `<alias>(` as a call site too.
+_EXEC_SYNC_ALIAS = re.compile(r"\bexecSync\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+
+
+# Tiny per-state helpers for _strip_js_comments_and_strings.
+# Splitting the state machine across these helpers keeps per-function
+# cognitive complexity low and avoids a single mega-regex whose
+# alternation complexity tripped SonarCloud. Each helper consumes one
+# or two characters and returns the next loop state.
+
+_BLANK_KEEP_NEWLINES = {"\n": "\n"}
+
+
+def _blank_for(ch: str) -> str:
+    return _BLANK_KEEP_NEWLINES.get(ch, " ")
+
+
+def _consume_code(text: str, i: int) -> tuple[int, str, str, str]:
+    """Code state. Detects start of comment / string / nothing."""
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    ch = text[i]
+    if ch == "/" and nxt == "/":
+        return i + 2, "  ", "line_comment", ""
+    if ch == "/" and nxt == "*":
+        return i + 2, "  ", "block_comment", ""
+    if ch in ("'", '"', "`"):
+        return i + 1, " ", "string", ch
+    return i + 1, ch, "code", ""
+
+
+def _consume_line_comment(text: str, i: int) -> tuple[int, str, str, str]:
+    ch = text[i]
+    if ch == "\n":
+        return i + 1, "\n", "code", ""
+    return i + 1, " ", "line_comment", ""
+
+
+def _consume_block_comment(text: str, i: int) -> tuple[int, str, str, str]:
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    ch = text[i]
+    if ch == "*" and nxt == "/":
+        return i + 2, "  ", "code", ""
+    return i + 1, _blank_for(ch), "block_comment", ""
+
+
+def _consume_string(text: str, i: int, quote: str) -> tuple[int, str, str, str]:
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    ch = text[i]
+    if ch == "\\" and nxt:
+        # Two-char escape consumed as whitespace; backslash never
+        # closes the string prematurely.
+        return i + 2, "  ", "string", quote
+    if ch == quote:
+        return i + 1, " ", "code", ""
+    return i + 1, _blank_for(ch), "string", quote
+
+
+def _strip_js_comments_and_strings(text: str) -> str:
+    """Flatten JS string-literal and comment contents to whitespace.
+
+    Newlines are preserved so error positions stay sane and so `^` /
+    line-mode regexes still work. Template-literal substitutions
+    (`${...}`) are intentionally not parsed; an `execSync(` inside a
+    `` `${...}` `` substitution is a vanishingly rare bypass and falls
+    under code-review, not regex.
+    """
+    out: list[str] = []
+    n = len(text)
+    i = 0
+    state = "code"
+    quote = ""
+    while i < n:
+        if state == "code":
+            i, emit, state, quote = _consume_code(text, i)
+        elif state == "line_comment":
+            i, emit, state, quote = _consume_line_comment(text, i)
+        elif state == "block_comment":
+            i, emit, state, quote = _consume_block_comment(text, i)
+        else:  # state == "string"
+            i, emit, state, quote = _consume_string(text, i, quote)
+        out.append(emit)
+    return "".join(out)
+
+
+def _build_call_site_pattern(aliases: list[str]) -> re.Pattern[str]:
+    """Pattern matching `execSync(` / `exec(` and any captured alias `(`.
+
+    `exec` and `execSync` are the two child_process call shapes that
+    take a shell command string. `spawnSync(... { shell: true })` is
+    handled by a separate matcher because it requires looking at the
+    options object as well as the function name.
+
+    Using `(?<![A-Za-z0-9_$])` rejects unrelated identifiers that
+    happen to end in `exec` or `execSync` (e.g. `myExecSync`,
+    `regexExec`).
+    """
+    names = ["execSync", "exec", *aliases]
+    alt = "|".join(re.escape(name) for name in names)
+    return re.compile(rf"(?<![A-Za-z0-9_$])(?:{alt})\s*\(")
+
+
+# `spawn` / `spawnSync` / `execFile` / `execFileSync` with
+# `{ shell: true }` is just as bad as `exec` from a shell-string
+# point of view; the option re-routes the call through `/bin/sh -c`.
+# We match the function name immediately followed (eventually) by an
+# options object that contains `shell: true`. Because we cannot parse
+# JS in a regex, the matcher is intentionally generous: any `shell:
+# true` within ~400 characters of a `spawn`/`execFile` call counts.
+_SHELL_TRUE_SPAWN = re.compile(
+    r"""(?xs)
+    (?<![A-Za-z0-9_$])
+    (?:spawnSync|spawn|execFileSync|execFile)
+    \s*\([^)]{0,400}?
+    \bshell\s*:\s*true\b
+    """,
+)
+
+
+def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid execSync call sites in mcp/ servers (ADR-010-R1).
+
+    Static lower bound for catching shell-string aws-cli invocations:
+    if a file under mcp/ both imports `child_process` (in any form —
+    named ESM, default ESM, namespace ESM, named CJS, or whole-module
+    CJS — including the `node:` prefix) AND contains an `execSync(`
+    or aliased call site (`import { execSync as run } ... run(...)`),
+    flag it. String literals and comments are flattened to whitespace
+    first so they cannot false-positive trip the check or hide a
+    real call site. Exceptions (e.g. mcp/ngfw) are filtered through
+    docs/adr/exceptions.yaml.
+
+    Static analysis cannot catch every motivated bypass (e.g.
+    `const run = cp.execSync; run(...)`); ADR-010 is enforced at
+    multiple layers and the static check is the cheap pre-commit
+    backstop, not the only line of defence.
+    """
+    mcp_root = repo_root / "mcp"
+    if not mcp_root.exists():
+        return []
+
+    if files is not None:
+        candidate_paths = [
+            repo_root / path
+            for path in files
+            if path.startswith("mcp/") and path.endswith((".js", ".mjs", ".cjs"))
+        ]
+    else:
+        candidate_paths = [
+            p
+            for p in mcp_root.rglob("*")
+            if p.is_file()
+            and p.suffix in (".js", ".mjs", ".cjs")
+            and "node_modules" not in p.parts
+        ]
+
+    violations: list[Violation] = []
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        # Import detection runs on raw text so the matched
+        # `"child_process"` string literal is preserved.
+        if not _CHILD_PROCESS_IMPORT.search(text):
+            continue
+        # Alias and call-site detection run on the comment-and-string
+        # flattened form so that an `execSync(` token inside a comment
+        # or string cannot trigger the check, a real `execSync(` call
+        # on a line containing a URL like `"https://..."` is not
+        # erased, and a comment like `// execSync as run` cannot
+        # synthesise a fake alias that turns innocent `run(` calls
+        # into false positives.
+        stripped = _strip_js_comments_and_strings(text)
+        aliases = _EXEC_SYNC_ALIAS.findall(stripped)
+        call_pattern = _build_call_site_pattern(aliases)
+        rel = _repo_relative(path, repo_root)
+        if call_pattern.search(stripped):
+            violations.append(
+                Violation(
+                    "mcp-no-shell-exec",
+                    "ADR-010-R1",
+                    rel,
+                    "Calls exec/execSync from child_process; MCP servers must invoke external CLIs via argv arrays (spawn/spawnSync/execFile)",
+                )
+            )
+        elif _SHELL_TRUE_SPAWN.search(stripped):
+            violations.append(
+                Violation(
+                    "mcp-no-shell-exec",
+                    "ADR-010-R1",
+                    rel,
+                    "Uses spawn/spawnSync/execFile/execFileSync with { shell: true }; MCP servers must invoke external CLIs via argv arrays without a shell",
+                )
+            )
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
     "cross-layer-model-imports": check_cross_layer_model_imports,
     "guardrail-docs": check_guardrail_docs,
     "cloud-factory-seam": check_cloud_factory_seam,
+    "mcp-no-shell-exec": check_mcp_no_shell_exec,
 }
 CHECK_LEVELS = {
-    "fast": ["adr-registry", "layer-imports", "cross-layer-model-imports", "guardrail-docs", "cloud-factory-seam"],
-    "ci": ["adr-registry", "layer-imports", "cross-layer-model-imports", "cloud-factory-seam"],
+    "fast": [
+        "adr-registry",
+        "layer-imports",
+        "cross-layer-model-imports",
+        "guardrail-docs",
+        "cloud-factory-seam",
+        "mcp-no-shell-exec",
+    ],
+    "ci": [
+        "adr-registry",
+        "layer-imports",
+        "cross-layer-model-imports",
+        "cloud-factory-seam",
+        "mcp-no-shell-exec",
+    ],
     "all": list(CHECKS),
 }
 

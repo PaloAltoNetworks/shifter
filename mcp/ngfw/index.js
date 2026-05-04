@@ -309,13 +309,13 @@ server.tool(
         sshKey,
         "show system info"
       );
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`,
-          },
-        ],
+        content: [{ type: "text", text }],
+        // Surface non-Success SSM status (Failed, Cancelled,
+        // TimedOut, Incomplete) as an MCP error so callers do not
+        // see a "successful" tool response for a failed PAN-OS call.
+        isError: result.status !== "Success",
       };
     } catch (err) {
       return {
@@ -348,13 +348,10 @@ server.tool(
         sshKey,
         "show routing route"
       );
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`,
-          },
-        ],
+        content: [{ type: "text", text }],
+        isError: result.status !== "Success",
       };
     } catch (err) {
       return {
@@ -383,13 +380,10 @@ server.tool(
     try {
       const { instance, sshKey } = resolveNgfw(env, instance_id);
       const result = await runNgfwCommand(env, instance.PrivateIp, sshKey, command);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nCommand: ${command}\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `NGFW: ${instance.Name} (${instance.InstanceId})\nCommand: ${command}\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`,
-          },
-        ],
+        content: [{ type: "text", text }],
+        isError: result.status !== "Success",
       };
     } catch (err) {
       return {

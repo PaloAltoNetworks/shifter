@@ -568,11 +568,43 @@ jobs:
         working-directory: shifter/shifter_platform
         run: npm test
 
+  mcp-lint:
+    # Lint always runs, even when [skip tests] is set on the workflow
+    # input, because lint is a static check independent of the test
+    # gate. Matches the shifter-platform pattern (lint-js / js-tests
+    # are separate jobs).
+    permissions:
+      contents: read
+    name: Lint JavaScript (mcp/${{ matrix.package }})
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ngfw, ops, shared]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mcp/${{ matrix.package }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mcp/${{ matrix.package }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: mcp/${{ matrix.package }}
+        run: npm run lint
+
   mcp-tests:
     permissions:
       contents: read
     name: Tests JavaScript (mcp/${{ matrix.package }})
     if: ${{ !inputs.skip_tests }}
+    needs: [mcp-lint]
     runs-on: self-hosted
     strategy:
       fail-fast: false
@@ -591,10 +623,6 @@ jobs:
       - name: Install dependencies
         working-directory: mcp/${{ matrix.package }}
         run: npm ci
-
-      - name: Lint
-        working-directory: mcp/${{ matrix.package }}
-        run: npm run lint --if-present
 
       - name: Test
         working-directory: mcp/${{ matrix.package }}

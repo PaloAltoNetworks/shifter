@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.17] - 2026-05-04
+
+### Security
+
+- **Closed shell-injection paths in `mcp/ngfw` (#759).** `run_command`,
+  `show_system_info`, and `show_routes` previously interpolated
+  user-controlled command strings into shell pipelines on two
+  boundaries — every aws-cli invocation in `mcp/ngfw/index.js` ran
+  through `execSync()` shell strings on the local host, and the SSM
+  `AWS-RunShellScript` payload that ferried PAN-OS commands to the
+  NGFW used `echo ${JSON.stringify(command)} | ssh ...` on the portal
+  jump host. `JSON.stringify` only produces a double-quoted shell
+  string, so payloads containing `$(...)` or backticks were evaluated
+  by the portal shell before reaching SSH. Both boundaries are now
+  closed: `mcp/ngfw/lib.js` carries argv-array helpers
+  (`buildAwsArgv`, `awsExec`, `awsJson`, `awsText`,
+  `buildSsmSendCommandArgs`) parallel to `mcp/ops/lib.js`, and
+  `buildNgfwSshCommands` base64-encodes the user's PAN-OS command into
+  the SSM payload so the portal decodes it (`base64 -d`) and pipes the
+  bytes into `ssh`'s stdin instead of evaluating them. The portal
+  shell never sees the raw command. `child_process.execSync` is no
+  longer imported from `mcp/ngfw/index.js`. `validateNgfwIp` adds a
+  strict IPv4 check on the SSH target as defense in depth. Regression
+  coverage in `mcp/ngfw/lib.test.js` (argv builders, `awsExec` runner
+  injection, SSM JSON payload shape, base64 round-trip across `$()`,
+  backticks, quotes, semicolons, ampersands, pipes, newlines, and the
+  heredoc terminator) and `mcp/ngfw/spawn-roundtrip.test.js` (proves
+  Node's `spawnSync` preserves literal argv across all metacharacters)
+  guards the new boundaries. Component-local guardrails recorded in
+  `mcp/ngfw/SECURITY.md`. The `ADR-010-R1` and `ADR-010-R2` exceptions
+  for `mcp/ngfw/*` are removed from `docs/adr/exceptions.yaml`;
+  ADR-010 evidence now lists the ngfw artifacts.
+
 ## [3.95.16] - 2026-05-04
 
 ### Security

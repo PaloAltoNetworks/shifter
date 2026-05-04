@@ -60,8 +60,14 @@ after(() => {
   if (workDir) rmSync(workDir, { recursive: true, force: true });
 });
 
-function writeSshStub(exitStatus, markerPath) {
-  const stubPath = path.join(stubDir, "ssh");
+function writeSshStub(testName, exitStatus, markerPath) {
+  // Per-test stub directory keeps tests from clobbering each other's
+  // stub binary. Each call gets its own dir; PATH for the spawn is
+  // built per-call from the returned dir so test 2 can never
+  // overwrite the stub test 1 is about to run.
+  const ownDir = path.join(stubDir, testName);
+  spawnSync("mkdir", ["-p", ownDir]);
+  const stubPath = path.join(ownDir, "ssh");
   // The stub writes its argv to the marker so the test can confirm
   // it was invoked, then exits with the configured status. ssh's
   // stdin (the decoded PAN-OS command) is intentionally not consumed
@@ -72,7 +78,7 @@ function writeSshStub(exitStatus, markerPath) {
     `#!/bin/sh\necho "ssh stub invoked with: $*" > "${markerPath}"\nexit ${exitStatus}\n`
   );
   chmodSync(stubPath, 0o755);
-  return stubPath;
+  return ownDir;
 }
 
 function runScript(commands, env = {}) {
@@ -99,7 +105,7 @@ describe("buildNgfwSshCommands script execution (issue #759)", () => {
     // /tmp value that is unique to this run.
     const realKeyPath = `/tmp/ngfw-test-success-${process.pid}.pem`;
     const markerPath = path.join(workDir, "marker-success.txt");
-    writeSshStub(0, markerPath);
+    const stubBin = writeSshStub("success", 0, markerPath);
 
     const cmds = buildNgfwSshCommands({
       sshKey,
@@ -108,7 +114,7 @@ describe("buildNgfwSshCommands script execution (issue #759)", () => {
       keyPath: realKeyPath,
     });
 
-    const result = runScript(cmds, { PATH: `${stubDir}:${process.env.PATH}` });
+    const result = runScript(cmds, { PATH: `${stubBin}:${process.env.PATH}` });
 
     try {
       assert.equal(result.status, 0, `stderr: ${result.stderr}`);
@@ -132,7 +138,7 @@ describe("buildNgfwSshCommands script execution (issue #759)", () => {
     }
     const realKeyPath = `/tmp/ngfw-test-failure-${process.pid}.pem`;
     const markerPath = path.join(workDir, "marker-failure.txt");
-    writeSshStub(42, markerPath);
+    const stubBin = writeSshStub("failure", 42, markerPath);
 
     const cmds = buildNgfwSshCommands({
       sshKey,
@@ -141,7 +147,7 @@ describe("buildNgfwSshCommands script execution (issue #759)", () => {
       keyPath: realKeyPath,
     });
 
-    const result = runScript(cmds, { PATH: `${stubDir}:${process.env.PATH}` });
+    const result = runScript(cmds, { PATH: `${stubBin}:${process.env.PATH}` });
 
     try {
       // Without the EXIT trap, the trailing rm would set the exit

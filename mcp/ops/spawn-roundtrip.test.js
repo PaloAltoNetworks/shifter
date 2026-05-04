@@ -33,6 +33,8 @@ let spawnAvailable = false;
 before(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "argv-roundtrip-"));
   scriptPath = path.join(workDir, "argv-echo.mjs");
+  // scriptPath is a freshly minted tmpdir entry, never user input.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   writeFileSync(
     scriptPath,
     "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n"

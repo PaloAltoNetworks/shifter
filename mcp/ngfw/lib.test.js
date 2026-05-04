@@ -103,18 +103,19 @@ describe("buildNgfwSshCommands", () => {
     const cmds = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show system info" });
     assert.equal(cmds.length, 7);
     assert.equal(cmds[0], `set -e`);
-    const catMatch = /^cat > (\/tmp\/ngfw-[A-Za-z0-9._-]+\.pem) << 'EOFKEY'$/.exec(cmds[1]);
-    assert.ok(catMatch, `cat line shape: ${cmds[1]}`);
-    const path = catMatch[1];
+    // The EXIT trap is installed BEFORE the cat that creates the key
+    // file, so a failure during cat/chmod cannot leave the key
+    // behind on disk.
+    const trapMatch = /^trap 'rc=\$\?; rm -f (\/tmp\/ngfw-[A-Za-z0-9._-]+\.pem); exit \$rc' EXIT$/.exec(cmds[1]);
+    assert.ok(trapMatch, `trap line shape: ${cmds[1]}`);
+    const path = trapMatch[1];
     assert.match(path, KEY_PATH_RE);
-    assert.equal(cmds[2], sshKey);
-    assert.equal(cmds[3], `EOFKEY`);
-    assert.equal(cmds[4], `chmod 600 ${path}`);
-    // EXIT trap captures the SSH exit code BEFORE running cleanup so SSM
-    // reports the real PAN-OS failure status instead of the rm exit code.
-    assert.equal(cmds[5], `trap 'rc=$?; rm -f ${path}; exit $rc' EXIT`);
-    // The ssh pipeline is the LAST command so its exit code (preserved
-    // by the EXIT trap) propagates to SSM.
+    assert.equal(cmds[2], `cat > ${path} << 'EOFKEY'`);
+    assert.equal(cmds[3], sshKey);
+    assert.equal(cmds[4], `EOFKEY`);
+    assert.equal(cmds[5], `chmod 600 ${path}`);
+    // The ssh pipeline is the LAST command so its exit code
+    // propagates to SSM (set -e + trap).
     const sshLine = cmds[6];
     assert.ok(sshLine.startsWith("printf %s '"));
     assert.ok(sshLine.includes(`' | base64 -d | ssh -i ${path} `));
@@ -125,8 +126,8 @@ describe("buildNgfwSshCommands", () => {
   it("uses a unique key path per invocation so concurrent calls do not clobber each other", () => {
     const a = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show" });
     const b = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show" });
-    const pathA = /^cat > (\S+) /.exec(a[1])[1];
-    const pathB = /^cat > (\S+) /.exec(b[1])[1];
+    const pathA = /rm -f (\S+);/.exec(a[1])[1];
+    const pathB = /rm -f (\S+);/.exec(b[1])[1];
     assert.notEqual(pathA, pathB);
   });
 
@@ -137,9 +138,21 @@ describe("buildNgfwSshCommands", () => {
       command: "show",
       keyPath: "/tmp/ngfw-fixed.pem",
     });
-    assert.ok(cmds[1].startsWith("cat > /tmp/ngfw-fixed.pem"));
-    assert.equal(cmds[4], "chmod 600 /tmp/ngfw-fixed.pem");
-    assert.equal(cmds[5], "trap 'rc=$?; rm -f /tmp/ngfw-fixed.pem; exit $rc' EXIT");
+    assert.equal(cmds[1], "trap 'rc=$?; rm -f /tmp/ngfw-fixed.pem; exit $rc' EXIT");
+    assert.equal(cmds[2], "cat > /tmp/ngfw-fixed.pem << 'EOFKEY'");
+    assert.equal(cmds[5], "chmod 600 /tmp/ngfw-fixed.pem");
+  });
+
+  it("installs the EXIT trap BEFORE the file-creating commands", () => {
+    // Without this ordering, a failure in cat/chmod would exit (via
+    // set -e) before the trap was registered, leaking the key file.
+    const cmds = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show" });
+    const trapIdx = cmds.findIndex((c) => c.startsWith("trap "));
+    const catIdx = cmds.findIndex((c) => c.startsWith("cat > "));
+    const chmodIdx = cmds.findIndex((c) => c.startsWith("chmod "));
+    assert.ok(trapIdx >= 0 && catIdx >= 0 && chmodIdx >= 0, "missing required commands");
+    assert.ok(trapIdx < catIdx, "trap must come before cat");
+    assert.ok(trapIdx < chmodIdx, "trap must come before chmod");
   });
 
   it("preserves the SSH exit code through cleanup", () => {
@@ -178,7 +191,9 @@ describe("buildNgfwSshCommands", () => {
     const cmds = buildNgfwSshCommands({ sshKey, ngfwIp, command: "show system info" });
     // 'EOFKEY' (single-quoted) tells the shell not to expand $vars, $(), or backticks
     // inside the heredoc body. Plain EOFKEY would expand them.
-    assert.match(cmds[1], /^cat > \/tmp\/ngfw-[A-Za-z0-9._-]+\.pem << 'EOFKEY'$/);
+    const catLine = cmds.find((c) => c.startsWith("cat > "));
+    assert.ok(catLine, "missing cat line");
+    assert.match(catLine, /^cat > \/tmp\/ngfw-[A-Za-z0-9._-]+\.pem << 'EOFKEY'$/);
   });
 
   it("appends a trailing newline so PAN-OS receives a complete line", () => {

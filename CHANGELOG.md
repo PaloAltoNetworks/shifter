@@ -43,12 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   injection with operation-labeled errors, SSM JSON payload shape,
   base64 round-trip across `$()`, backticks, quotes, semicolons,
   ampersands, pipes, newlines, and the heredoc terminator;
-  `mcp/ngfw/spawn-roundtrip.test.js` proves Node's `spawnSync`
-  preserves literal argv across all metacharacters; and
-  `mcp/ngfw/script-execution.test.js` runs the generated SSM command
-  list under `/bin/sh` with a stub `ssh` and asserts the EXIT trap
-  preserves the failing exit code (42 round-trips end-to-end) and
-  removes the temporary key file in both success and failure paths.
+  `mcp/ops/spawn-roundtrip.test.js` (now covering both packages
+  through the shared `spawnSync` boundary) proves Node forwards argv
+  elements byte-for-byte; and `mcp/ngfw/script-execution.test.js`
+  runs the generated SSM command list under `/bin/sh` with a stub
+  `ssh` and asserts the EXIT trap preserves the failing exit code
+  (42 round-trips end-to-end) and removes the temporary key file in
+  both success and failure paths.
   Component-local guardrails recorded in `mcp/ngfw/SECURITY.md`. The
   `ADR-010-R1` and `ADR-010-R2` exceptions for `mcp/ngfw/*` are
   removed from `docs/adr/exceptions.yaml`; ADR-010 evidence now lists

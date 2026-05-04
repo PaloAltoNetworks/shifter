@@ -14,18 +14,12 @@ from django.db import models
 
 from cms.models.assets import AgentConfig
 from cms.models.lifecycle import apply_terminal_soft_delete
+from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
 logger = logging.getLogger(__name__)
 
 
-class ActiveRangeInstanceManager(models.Manager):
-    """Manager that filters out soft-deleted RangeInstances."""
-
-    def get_queryset(self):
-        return super().get_queryset().filter(deleted_at__isnull=True)
-
-
-class RangeInstance(models.Model):
+class RangeInstance(SoftDeleteMixin, models.Model):
     """Tracks hydrated scenario configs sent to engine.
 
     After GH issue #446:
@@ -79,13 +73,16 @@ class RangeInstance(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    # Managers
-    objects = models.Manager()
-    active = ActiveRangeInstanceManager()
+    # ``objects`` is a SoftDeleteManager: every queryset pre-filters to
+    # non-deleted rows. ``all_objects`` is the unfiltered manager, for
+    # admin / restore / audit code that needs to see deleted rows.
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
         verbose_name = "Range Instance"
         verbose_name_plural = "Range Instances"
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"Range {self.range_id}: {self.scenario_id}"

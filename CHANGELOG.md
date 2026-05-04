@@ -5,6 +5,169 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.95.16] - 2026-05-04
+
+### Security
+
+- **Closed shell-injection paths in `mcp/ops` (#763).** The shared
+  `aws()` and `awsText()` helpers, `getInstancePlatform`,
+  `fetchCredentials`, `ensureTunnel`, and `start_portal_test_tunnel`
+  previously interpolated user-controlled strings into shell command
+  strings and ran them via `execSync()`. Three documented payload
+  paths reached the host shell — `filter_log_events` (CloudWatch
+  filter pattern), `ssm_send_command` (SSM `--parameters` JSON), and
+  `run_manage_command` (Django management commands wrapped in JSON) —
+  with several other tools sharing the same unsafe abstraction.
+  Every aws-cli invocation in `mcp/ops/index.js` now goes through
+  argv-array helpers in `mcp/ops/lib.js` (`buildAwsArgv`, `awsExec`,
+  `awsJson`, `awsText`) backed by `spawnSync`, so payloads containing
+  `$()`, backticks, single and double quotes, semicolons, ampersands,
+  pipes, spaces, and newlines are forwarded as literal argv elements
+  rather than evaluated by the local shell. `child_process.execSync`
+  is no longer imported from `mcp/ops/index.js`. Regression coverage
+  in `mcp/ops/lib.test.js` (argv-builder and runner-injected
+  `awsExec`) and `mcp/ops/spawn-roundtrip.test.js` (proves Node's
+  `spawnSync` preserves literal argv across all metacharacters)
+  guards the new boundary. Component-local guardrails recorded in
+  `mcp/ops/SECURITY.md`.
+
+## [3.95.15] - 2026-05-03
+
+### Changed
+
+- **Split `cms.handlers` into per-domain handler modules.** The 389-LOC
+  `shifter/shifter_platform/cms/handlers.py` god module is replaced by a
+  `cms/handlers/` package: `range_events`, `experiment_bridge`, `ctf_bridge`
+  (signal fire), `ngfw_events`, with the package `__init__` owning the
+  prefix dispatcher. Public surface preserved via re-exports —
+  `cms.handlers.process_event` (referenced as a string in
+  `config/settings.py` for the SQS worker), `parse_sns_message`,
+  `process_range_event`, `process_ngfw_event`, and
+  `notify_experiment_on_range_ready` all keep their existing import paths.
+  Runtime routing, signal wiring (`cms.signals.range_status_changed`), and
+  experiment-failure semantics are unchanged. New `TestProcessEvent` cases
+  cover the previously-untested experiment route. Tracked under #1055 (#1068).
+- **Consolidated SNS envelope unwrapping at `shared.messages.envelope.parse_sns_message`.**
+  Four near-identical copies — in `cms/handlers/envelope.py`,
+  `engine/handlers.py`, `mission_control/handlers.py`, and
+  `cms/experiments/handlers.py` (as `_parse_message`) — are replaced by a
+  single shared helper. The CMS, Engine, and Mission Control handlers
+  re-export `parse_sns_message` so existing
+  `from <module>.handlers import parse_sns_message` imports keep working;
+  `cms.experiments.handlers._parse_message` was renamed to
+  `parse_sns_message` (private name had only the one local consumer).
+- **Refactored `cms.models` into a bounded-context package.** The 978-LOC
+  `shifter/shifter_platform/cms/models.py` god module is replaced by a
+  `cms/models/` package split by domain: `catalogs`, `assets`,
+  `provisioning`, `scenarios`, `range`. Public import paths are preserved
+  via re-exports — every existing `from cms.models import X` keeps working
+  with no consumer changes. Database table names, migrations, and runtime
+  behavior are unchanged; verified by a new
+  `tests/cms/test_models_no_migration_drift.py` that fails the suite if
+  `makemigrations --check` ever detects pending model changes. New layout
+  is the foundation for subsequent `cms` god-object decompositions tracked
+  under #1055.
+- **Deduplicated CMS soft-delete and expiry logic.** Added
+  `cms/models/mixins.py` with `SoftDeleteMixin` (provides `is_deleted` for
+  any model with a nullable `deleted_at` field) and `ExpiringStateMixin`
+  (provides `is_expired` / `expires_soon` for any model with a nullable
+  `expires_at` field). `Asset`, `EntityBase`, `Request`, `Scenario`, and
+  `Credential` now inherit from `SoftDeleteMixin`; `CredentialBase` and
+  `Credential` inherit from `ExpiringStateMixin`. Same property semantics,
+  no schema changes.
+- **Centralised CMS terminal-status soft-delete invariant** in
+  `cms/models/lifecycle.apply_terminal_soft_delete`. `EntityBase.save()`
+  and `RangeInstance.save()` both delegate to it instead of re-implementing
+  the `TERMINAL_STATUSES → deleted_at + update_fields` logic locally.
+- **Decoupled extension-normalisation from DB lookup** on
+  `cms.models.OperatingSystem`. `normalize_file_extension()` is now a pure
+  function and the iteration moved into a new
+  `OperatingSystemQuerySet.for_extension()` queryset method;
+  `get_for_extension()` is preserved as a thin compatibility wrapper.
+- **Promoted `spec_class` field to `CatalogBase`** — `CredentialType`,
+  `InstanceType`, and `AppType` no longer redeclare it. Cosmetic
+  `help_text` migration for `cms.CredentialType` (no schema change).
+- **`Credential` now extends `CredentialBase`** per the original design
+  intent. Adds `last_verified_at` and `last_used_at` columns to the
+  credentials table (cms migration `0025`), creating schema slots for
+  credential-rotation, staleness, and compromise-detection signals.
+- **Closed the soft-delete bypass bug class.** Added
+  `shared/db/soft_delete.py` exposing the canonical primitives for any
+  model with a nullable `deleted_at` field:
+  - `SoftDeleteMixin` — `is_deleted` property.
+  - `ExpiringStateMixin` — `is_expired` / `expires_soon`.
+  - `SoftDeleteQuerySet` — chainable `.active()` / `.deleted()` /
+    `.with_deleted()`.
+  - `SoftDeleteManager` — **default manager that pre-filters every
+    queryset to non-deleted rows.** A plain `Model.objects.filter(...)`
+    cannot return deleted rows. Code that needs deleted rows must
+    explicitly use `Model.all_objects` — making the intent obvious to
+    reviewers and grep.
+
+  `Asset`, `EntityBase`, `Request`, `Scenario`, `RangeInstance`, `Risk`,
+  and `Comment` all declare the canonical pair (`objects =
+  SoftDeleteManager()`, `all_objects = SoftDeleteQuerySet.as_manager()`)
+  with `Meta.base_manager_name = "all_objects"` so reverse relations
+  and admin introspection still see the full table. Removed the legacy
+  `cms.models.ActiveRangeInstanceManager` (now redundant: the default
+  `RangeInstance.objects` already pre-filters active).
+- **Replaced every inline `deleted_at__isnull=True` filter** across
+  `cms/services.py` (9 sites), `cms/experiments/services.py` (4),
+  `cms/scenarios/registry.py` (3), `cms/scenario_editor/services.py`
+  (3), `risk_register/views.py` (2), `risk_register/api/views.py` (2),
+  `risk_register/models.py` (2), `ctf/forms.py` (1), and
+  `ctf/services/event.py` (1) with default-manager calls — and dropped
+  the now-redundant `.active()` chains. Helpers live in `shared/db/`
+  (not `shared/models/`) to satisfy ADR-001-R2's
+  cross-layer-model-imports check.
+- **Fixed risk_register reachability bugs surfaced by the manager
+  flip.** `risk_detail` and `risk_delete` now use `Risk.all_objects`
+  (preserves view-deleted-risks behavior; makes re-delete idempotent).
+  `RiskViewSet.restore` now bypasses the active-only `get_object()` and
+  looks up via `Risk.all_objects` directly so deleted risks are
+  reachable for restore.
+- **Reverse-FK traversal is intentionally active-only.** The split
+  between `_default_manager` (active) and `_base_manager` (unfiltered) is
+  load-bearing: every implicit Django integration (`get_object_or_404`,
+  ModelForm, admin, DRF serializers, generic CBVs) reaches for
+  `_default_manager` and must default to active to keep the soft-delete
+  bypass closed. Reverse-FK access (`parent.children.all()`) goes
+  through the same `_default_manager`, so it is also active-only by
+  design. Cascade delete and migration introspection use
+  `_base_manager`, which `Meta.base_manager_name = "all_objects"` points
+  at the unfiltered manager — so cascades still walk soft-deleted
+  descendants and integrity stays correct. Audit / restore / admin code
+  that needs to walk reverse relations *including* deleted rows must
+  use the explicit `Child.all_objects.filter(parent=parent)` pattern.
+  The verbosity is the contract: it makes the intent grep-able.
+- **DB-backed integration tests** in
+  `tests/integration/cms/test_soft_delete_manager.py` pin the canonical
+  semantics: `Model.objects` excludes deleted rows even via explicit
+  filter, `Model.all_objects` includes them, the chainable helpers
+  compose, `_meta.base_manager_name` points at `all_objects`, and
+  `parent.children.all()` returns deleted descendants too. These pin
+  behaviour where the unit-test mocks pin call shape.
+- **Range lookup helpers** (`get_range_status_by_id`,
+  `get_range_spec_by_id`, `find_range_instance_id_by_request` in
+  `cms/services.py`) now use `RangeInstance.all_objects` so terminal /
+  destroyed ranges remain reachable for status lookups, audit reads,
+  and callback correlation.
+- **`risk_delete` is idempotent** — a re-delete attempt on an
+  already-soft-deleted risk short-circuits before re-mutating
+  `deleted_at` or writing a duplicate DELETE audit entry.
+- **`RiskViewSet.restore` enforces object-level permissions** explicitly
+  via `self.check_object_permissions()` after looking up via
+  `Risk.all_objects` (the lookup bypass would otherwise skip DRF's
+  permission check that `self.get_object()` would have run).
+- **`CommentViewSet.list` honours `?include_deleted=true` for the parent
+  risk too** — previously the parent lookup used active-only
+  `Risk.objects`, so comment history on a soft-deleted risk was
+  unreachable even with the include-deleted flag set.
+- **`SoftDeleteQuerySet.with_deleted()` removed.** Its semantics were
+  unsafe — it dropped any prior chained filters on the way back to the
+  full table. Callers wanting every row use `Model.all_objects`
+  directly: single canonical entry point keeps intent unambiguous.
+
 ## [3.95.14] - 2026-05-03
 
 ### Changed
@@ -56,131 +219,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern. (Commit message tagged this 3.95.11 but 3.95.11 was taken
   by the cms refactor PR landing concurrently; bumped here for
   correctness.)
-
-## [3.95.11] - 2026-05-03
-
-### Changed
-
-- **Refactored `cms.models` into a bounded-context package.** The 978-LOC
-  `shifter/shifter_platform/cms/models.py` god module is replaced by a
-  `cms/models/` package split by domain: `catalogs`, `assets`,
-  `provisioning`, `scenarios`, `range`. Public import paths are preserved
-  via re-exports — every existing `from cms.models import X` keeps working
-  with no consumer changes. Database table names, migrations, and runtime
-  behavior are unchanged; verified by a new
-  `tests/cms/test_models_no_migration_drift.py` that fails the suite if
-  `makemigrations --check` ever detects pending model changes. New layout
-  is the foundation for subsequent `cms` god-object decompositions tracked
-  under #1055.
-- **Deduplicated CMS soft-delete and expiry logic.** Added
-  `cms/models/mixins.py` with `SoftDeleteMixin` (provides `is_deleted` for
-  any model with a nullable `deleted_at` field) and `ExpiringStateMixin`
-  (provides `is_expired` / `expires_soon` for any model with a nullable
-  `expires_at` field). `Asset`, `EntityBase`, `Request`, `Scenario`, and
-  `Credential` now inherit from `SoftDeleteMixin`; `CredentialBase` and
-  `Credential` inherit from `ExpiringStateMixin`. Same property semantics,
-  no schema changes.
-- **Centralised CMS terminal-status soft-delete invariant** in
-  `cms/models/lifecycle.apply_terminal_soft_delete`. `EntityBase.save()`
-  and `RangeInstance.save()` both delegate to it instead of re-implementing
-  the `TERMINAL_STATUSES → deleted_at + update_fields` logic locally.
-- **Decoupled extension-normalisation from DB lookup** on
-  `cms.models.OperatingSystem`. `normalize_file_extension()` is now a pure
-  function and the iteration moved into a new
-  `OperatingSystemQuerySet.for_extension()` queryset method;
-  `get_for_extension()` is preserved as a thin compatibility wrapper.
-
-## [3.95.0] - 2026-05-03
-
-### Fixed
-
-- **80+ Dependabot security alerts cleared** across every package manager
-  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
-  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
-  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
-  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
-  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
-  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
-  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
-  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
-  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
-  in `shifter/engine/provisioner/requirements.txt`.
-
-### Changed
-
-- **Full dependency refresh on every uv- and npm-managed manifest**
-  beyond the security bumps above. `uv lock --upgrade` ran on
-  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
-  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
-  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
-  patch/minor versions of ~40 transitive packages including pydantic
-  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
-  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
-  `npm update --package-lock-only` ran on the four MCP servers
-  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
-  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
-- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
-  17 root configurations and provisioner modules. The 16 `modules/*`
-  subdirectories had already moved to aws 6.x via looser constraints;
-  this aligns the consumers (`environments/{dev,prod}`,
-  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
-  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
-  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
-- **Terraform `required_version` standardized to `>= 1.5.0`** across all
-  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
-- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
-  `_range.yml`, and `_shifter-platform.yml` — required by the
-  `use_lockfile` migration below (S3 native locking landed in 1.10).
-- **Terraform S3 backend state locking migrated from DynamoDB to S3
-  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
-  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
-  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
-  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
-  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
-  is unrelated to terraform state locking and was left intact (it
-  serves the Shifter engine application).
-- **Environment backend.tf files converted to partial-backend pattern.**
-  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
-  used to hard-code the bucket UUID inline; they now ship with
-  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
-  from `<env>.s3.tfbackend` at init time, matching the existing
-  `global/iam/` convention. Single source of truth for the bucket
-  name; backend.tf is never modified by automation.
-- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
-  `terraform init` (was bare `terraform init`). Required by the
-  partial-backend conversion above.
-- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
-  walkthrough now writes `.s3.tfbackend` files for env, portal, and
-  range (instead of overwriting `backend.tf`), emits
-  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
-  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
-  creation is gone. The unused `dynamodb_table_exists` and
-  `create_dynamodb_table` helpers are kept for now in case someone
-  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
-  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
-  templated `.tfbackend` files get filled in at bootstrap time.
-- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
-  the root `.gitignore` plus two nested `.gitignore` files in
-  `platform/terraform/global/dev-box/` and
-  `scripts/polaris-aws-range/`). All 30 lock files committed at
-  aws 6.43.0; the `temp/` tree remains intentionally excluded.
-- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
-  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
-  configs without leaving stale UUIDs in the repo. Three new
-  `dev.s3.tfbackend` files added under `environments/dev/`,
-  `environments/dev/portal/`, and `environments/dev/range/` (those
-  three previously had no `.tfbackend` and relied entirely on inline
-  config).
-
-### Removed
-
-- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
-  and `platform/terraform/modules/pulumi-state/` — they contained only
-  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
-  from a deleted module.
-- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
-  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
-  corresponding live infrastructure).
 
 ## [3.95.11] - 2026-05-03
 
@@ -387,6 +425,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REPLACE_AT_BOOTSTRAP` placeholder. Also dropped the `*.tf` walker
   since every `*.tf` backend block is now partial (placeholder bucket,
   real value supplied via `-backend-config` at init).
+
+## [3.95.0] - 2026-05-03
+
+### Fixed
+
+- **80+ Dependabot security alerts cleared** across every package manager
+  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
+  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
+  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
+  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
+  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
+  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
+  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
+  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
+  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
+  in `shifter/engine/provisioner/requirements.txt`.
+
+### Changed
+
+- **Full dependency refresh on every uv- and npm-managed manifest**
+  beyond the security bumps above. `uv lock --upgrade` ran on
+  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
+  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
+  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
+  patch/minor versions of ~40 transitive packages including pydantic
+  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
+  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
+  `npm update --package-lock-only` ran on the four MCP servers
+  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
+  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
+- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
+  17 root configurations and provisioner modules. The 16 `modules/*`
+  subdirectories had already moved to aws 6.x via looser constraints;
+  this aligns the consumers (`environments/{dev,prod}`,
+  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
+  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
+  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
+- **Terraform `required_version` standardized to `>= 1.5.0`** across all
+  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
+- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
+  `_range.yml`, and `_shifter-platform.yml` — required by the
+  `use_lockfile` migration below (S3 native locking landed in 1.10).
+- **Terraform S3 backend state locking migrated from DynamoDB to S3
+  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
+  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
+  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
+  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
+  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
+  is unrelated to terraform state locking and was left intact (it
+  serves the Shifter engine application).
+- **Environment backend.tf files converted to partial-backend pattern.**
+  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
+  used to hard-code the bucket UUID inline; they now ship with
+  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
+  from `<env>.s3.tfbackend` at init time, matching the existing
+  `global/iam/` convention. Single source of truth for the bucket
+  name; backend.tf is never modified by automation.
+- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
+  `terraform init` (was bare `terraform init`). Required by the
+  partial-backend conversion above.
+- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
+  walkthrough now writes `.s3.tfbackend` files for env, portal, and
+  range (instead of overwriting `backend.tf`), emits
+  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
+  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
+  creation is gone. The unused `dynamodb_table_exists` and
+  `create_dynamodb_table` helpers are kept for now in case someone
+  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
+  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
+  templated `.tfbackend` files get filled in at bootstrap time.
+- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
+  the root `.gitignore` plus two nested `.gitignore` files in
+  `platform/terraform/global/dev-box/` and
+  `scripts/polaris-aws-range/`). All 30 lock files committed at
+  aws 6.43.0; the `temp/` tree remains intentionally excluded.
+- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
+  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
+  configs without leaving stale UUIDs in the repo. Three new
+  `dev.s3.tfbackend` files added under `environments/dev/`,
+  `environments/dev/portal/`, and `environments/dev/range/` (those
+  three previously had no `.tfbackend` and relied entirely on inline
+  config).
+
+### Removed
+
+- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
+  and `platform/terraform/modules/pulumi-state/` — they contained only
+  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
+  from a deleted module.
+- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
+  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
+  corresponding live infrastructure).
 
 ## [3.94.0] - 2026-04-14
 

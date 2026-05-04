@@ -47,7 +47,6 @@ EXPECTED_LAYOUT: dict[str, set[str]] = {
         "ScenarioMetadata",
     },
     "range": {
-        "ActiveRangeInstanceManager",
         "RangeInstance",
     },
 }
@@ -129,7 +128,6 @@ def test_django_models_keep_cms_app_label():
         "FileAsset",
         "CredentialBase",
         "AgentType",  # TextChoices, not a Model
-        "ActiveRangeInstanceManager",  # Manager, not a Model
     }
     concrete_models = ALL_PUBLIC_SYMBOLS - abstract_or_non_django
     for symbol in sorted(concrete_models):

@@ -692,7 +692,6 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
             credential = Credential.objects.get(
                 id=credential_id,
                 user=user,
-                deleted_at__isnull=True,
             )
         except Credential.DoesNotExist:
             logger.error(
@@ -790,7 +789,6 @@ def list_credentials(user: User) -> list[CredentialContext]:
         credentials = (
             Credential.objects.filter(
                 user=user,
-                deleted_at__isnull=True,
             )
             .select_related("credential_type")
             .order_by("-created_at")
@@ -927,7 +925,6 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
         cred = Credential.objects.select_related("credential_type").get(
             id=credential_id,
             user=user,
-            deleted_at__isnull=True,
         )
     except Credential.DoesNotExist:
         logger.error(
@@ -1236,7 +1233,7 @@ def get_active_range(user: User) -> RangeContext | None:
         from shared.enums import ResourceStatus
 
         instance = (
-            RangeInstance.active.filter(user_id=user.id)
+            RangeInstance.objects.filter(user_id=user.id)
             .exclude(status=ResourceStatus.DESTROYING.value)
             .order_by("-created_at")
             .first()
@@ -3271,7 +3268,6 @@ def list_ngfws(user: User) -> list[NGFWAppContext]:
         App.objects.filter(
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
         .select_related("instance")
         .order_by("-created_at")
@@ -3306,7 +3302,6 @@ def get_ngfw(user: User, app_id: UUID | str) -> NGFWAppContext:
             id=validated_app_id,
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
     except App.DoesNotExist:
         logger.error("get_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
@@ -3355,7 +3350,6 @@ def create_ngfw(
         App.objects.filter(
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
         .exclude(status=ResourceStatus.DESTROYING.value)
         .first()
@@ -3380,7 +3374,6 @@ def create_ngfw(
         deployment_profile = Credential.objects.select_related("credential_type").get(
             id=deployment_profile_id,
             user=user,
-            deleted_at__isnull=True,
         )
         if deployment_profile.credential_type.slug != "deployment_profile":
             raise CMSError("deployment_profile_id must reference a deployment profile credential")
@@ -3401,7 +3394,6 @@ def create_ngfw(
             scm_credential = Credential.objects.select_related("credential_type").get(
                 id=scm_credential_id,
                 user=user,
-                deleted_at__isnull=True,
             )
             if scm_credential.credential_type.slug != "scm":
                 raise CMSError("scm_credential_id must reference an SCM credential")
@@ -3549,7 +3541,6 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
             id=validated_app_id,
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
     except App.DoesNotExist:
         logger.error("destroy_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
@@ -3627,7 +3618,9 @@ def get_range_status_by_id(range_instance_id: int) -> str:
         Status string, or ``"unknown"`` if not found.
     """
     try:
-        return RangeInstance.objects.values_list("status", flat=True).get(pk=range_instance_id)
+        # all_objects: status lookups must see soft-deleted (terminal/destroyed)
+        # ranges so callers can report the final lifecycle state of a torn-down range.
+        return str(RangeInstance.all_objects.values_list("status", flat=True).get(pk=range_instance_id))
     except RangeInstance.DoesNotExist:
         return "unknown"
 
@@ -3639,7 +3632,10 @@ def get_range_spec_by_id(range_instance_id: int) -> dict | None:
         The range_spec dict, or ``None`` if not found.
     """
     try:
-        return RangeInstance.objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
+        # all_objects: range_spec lookups must see soft-deleted (terminal)
+        # ranges so callers can correlate audit events to a torn-down range.
+        spec = RangeInstance.all_objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
+        return spec if spec is None or isinstance(spec, dict) else None
     except RangeInstance.DoesNotExist:
         return None
 
@@ -3650,13 +3646,16 @@ def find_range_instance_id_by_request(request_id: Any) -> int | None:
     Returns:
         The RangeInstance PK, or ``None`` if not found.
     """
-    return (
-        RangeInstance.objects.filter(
+    # all_objects: callback correlation needs to find ranges by request even
+    # after the range has reached a terminal soft-deleted state.
+    pk = (
+        RangeInstance.all_objects.filter(
             request__request_id=request_id,
         )
         .values_list("pk", flat=True)
         .first()
     )
+    return int(pk) if pk is not None else None
 
 
 def get_range_target_instances(user_id: int) -> list[dict[str, str]]:

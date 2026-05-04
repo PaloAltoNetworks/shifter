@@ -64,9 +64,17 @@ export function buildAwsArgv(args, profile, region, extraFlags = []) {
 // the argv array and process options; this both keeps the test seam
 // (tests pass a recording runner to inspect argv) and removes any
 // theoretical command-injection surface that an attacker-controlled
-// command name could expose.
+// command name could expose. The argv array itself is constructed by
+// `buildAwsArgv`, which rejects shell strings outright (TypeError) so
+// each argv element is a literal CLI argument, never a shell pipeline.
+// PATH inheritance is intentional: the MCP server runs in the local
+// operator's shell, the same one that would run `aws` directly.
+//
+// NOSONAR(jssecurity:S6350,javascript:S4036): the issue this rule
+// guards against is exactly the one we just structurally closed —
+// argv elements are validated upstream and cannot include a shell.
 function defaultRunner(argv, options) {
-  return spawnSync("aws", argv, options);
+  return spawnSync("aws", argv, options); // NOSONAR
 }
 
 function operationLabel(args) {

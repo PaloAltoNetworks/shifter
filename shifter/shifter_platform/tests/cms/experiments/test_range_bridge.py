@@ -18,16 +18,16 @@ from uuid import uuid4
 from cms.experiments.schemas import RunStatus
 from shared.enums import ResourceStatus
 
-# notify_experiment_on_range_ready does a local import:
-#   from cms.experiments.models import ExperimentRun
-# We patch at the source module so the local import picks up the mock.
-PATCH_EXP_RUN = "cms.experiments.models.ExperimentRun"
+# experiment_bridge imports ExperimentRun at its module top, so patches must
+# target the bridge module's binding (where the name is looked up at call time)
+# rather than the source module.
+PATCH_EXP_RUN = "cms.handlers.experiment_bridge.ExperimentRun"
 
 
 class TestRangeToExperimentBridge:
     """Tests for notify_experiment_on_range_ready bridge function."""
 
-    @patch("cms.handlers.publish_range_provisioned_for_experiment")
+    @patch("cms.handlers.experiment_bridge.publish_range_provisioned_for_experiment")
     @patch(PATCH_EXP_RUN)
     def test_publishes_event_when_range_ready_for_experiment(self, mock_run_model, mock_publish):
         """When range status becomes READY and linked to experiment, publishes event."""
@@ -56,7 +56,7 @@ class TestRangeToExperimentBridge:
             provisioned_instances=provisioned_instances,
         )
 
-    @patch("cms.handlers.publish_range_provisioned_for_experiment")
+    @patch("cms.handlers.experiment_bridge.publish_range_provisioned_for_experiment")
     @patch(PATCH_EXP_RUN)
     def test_does_nothing_for_range_without_experiment(self, mock_run_model, mock_publish):
         """Range not linked to any experiment run -> no event published."""
@@ -75,7 +75,7 @@ class TestRangeToExperimentBridge:
 
         mock_publish.assert_not_called()
 
-    @patch("cms.handlers.publish_range_provisioned_for_experiment")
+    @patch("cms.handlers.experiment_bridge.publish_range_provisioned_for_experiment")
     @patch(PATCH_EXP_RUN)
     def test_handles_deleted_request_gracefully(self, mock_run_model, mock_publish):
         """If range_instance has no request, no crash."""
@@ -92,11 +92,11 @@ class TestRangeToExperimentBridge:
 class TestCmsHandlerBridgeIntegration:
     """Tests for process_range_event calling the bridge on READY status."""
 
-    @patch("cms.handlers.notify_experiment_on_range_ready")
-    @patch("cms.handlers._notify_ctf_range_status")
-    @patch("cms.handlers.RangeInstance")
+    @patch("cms.handlers.range_events.notify_experiment_on_range_ready")
+    @patch("cms.handlers.range_events.notify_ctf_range_status")
+    @patch("cms.handlers.range_events.RangeInstance")
     def test_process_range_event_calls_bridge_on_ready(self, mock_ri_model, mock_ctf, mock_bridge):
-        """process_range_event calls bridge when status transitions to READY."""
+        """process_range_event calls bridge with the resolved instance + provisioned_instances on READY."""
         request_id = str(uuid4())
 
         mock_instance = MagicMock()
@@ -107,23 +107,27 @@ class TestCmsHandlerBridgeIntegration:
         mock_ri_model.objects.get.return_value = mock_instance
         mock_ri_model.DoesNotExist = Exception
 
+        provisioned_instances = {"Workstation": {"instance_id": "i-abc123"}}
         event = {
             "event_type": "range.status.updated",
             "request_id": request_id,
             "range_id": 1,
             "user_id": 1,
             "new_status": ResourceStatus.READY.value,
+            "instances": provisioned_instances,
         }
 
         from cms.handlers import process_range_event
 
         process_range_event(event)
 
-        mock_bridge.assert_called_once()
+        # Pin both args so a regression that swapped arguments or dropped the
+        # instances payload is caught.
+        mock_bridge.assert_called_once_with(mock_instance, provisioned_instances)
 
-    @patch("cms.handlers.notify_experiment_on_range_ready")
-    @patch("cms.handlers._notify_ctf_range_status")
-    @patch("cms.handlers.RangeInstance")
+    @patch("cms.handlers.range_events.notify_experiment_on_range_ready")
+    @patch("cms.handlers.range_events.notify_ctf_range_status")
+    @patch("cms.handlers.range_events.RangeInstance")
     def test_process_range_event_no_bridge_on_non_ready(self, mock_ri_model, mock_ctf, mock_bridge):
         """Bridge is NOT called for non-READY status transitions."""
         request_id = str(uuid4())
@@ -150,7 +154,7 @@ class TestCmsHandlerBridgeIntegration:
 
         mock_bridge.assert_not_called()
 
-    @patch("cms.handlers.publish_range_provisioned_for_experiment")
+    @patch("cms.handlers.experiment_bridge.publish_range_provisioned_for_experiment")
     @patch(PATCH_EXP_RUN)
     def test_bridge_marks_run_failed_on_sqs_error(self, mock_run_model, mock_publish):
         """When SQS publish fails, the experiment run is marked FAILED."""

@@ -35,6 +35,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Split `cms.handlers` into per-domain handler modules.** The 389-LOC
+  `shifter/shifter_platform/cms/handlers.py` god module is replaced by a
+  `cms/handlers/` package: `range_events`, `experiment_bridge`, `ctf_bridge`
+  (signal fire), `ngfw_events`, with the package `__init__` owning the
+  prefix dispatcher. Public surface preserved via re-exports —
+  `cms.handlers.process_event` (referenced as a string in
+  `config/settings.py` for the SQS worker), `parse_sns_message`,
+  `process_range_event`, `process_ngfw_event`, and
+  `notify_experiment_on_range_ready` all keep their existing import paths.
+  Runtime routing, signal wiring (`cms.signals.range_status_changed`), and
+  experiment-failure semantics are unchanged. New `TestProcessEvent` cases
+  cover the previously-untested experiment route. Tracked under #1055 (#1068).
+- **Consolidated SNS envelope unwrapping at `shared.messages.envelope.parse_sns_message`.**
+  Four near-identical copies — in `cms/handlers/envelope.py`,
+  `engine/handlers.py`, `mission_control/handlers.py`, and
+  `cms/experiments/handlers.py` (as `_parse_message`) — are replaced by a
+  single shared helper. The CMS, Engine, and Mission Control handlers
+  re-export `parse_sns_message` so existing
+  `from <module>.handlers import parse_sns_message` imports keep working;
+  `cms.experiments.handlers._parse_message` was renamed to
+  `parse_sns_message` (private name had only the one local consumer).
 - **Refactored `cms.models` into a bounded-context package.** The 978-LOC
   `shifter/shifter_platform/cms/models.py` god module is replaced by a
   `cms/models/` package split by domain: `catalogs`, `assets`,

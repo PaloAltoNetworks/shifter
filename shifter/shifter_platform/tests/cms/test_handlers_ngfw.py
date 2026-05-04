@@ -59,8 +59,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -80,8 +80,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -104,8 +104,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -128,8 +128,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -153,8 +153,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.App.objects.get") as mock_get_app,
+            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
+            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
         ):
             from cms.handlers import process_ngfw_event
 
@@ -165,7 +165,7 @@ class TestProcessNgfwEvent:
         mock_get_app.assert_not_called()
 
     def test_handles_missing_instance_gracefully(self, mock_instance, mock_app):
-        """process_ngfw_event handles missing Instance gracefully."""
+        """Missing Instance does not stop processing — App is still updated."""
         from cms.models import Instance
 
         event = {
@@ -177,17 +177,23 @@ class TestProcessNgfwEvent:
 
         with (
             patch(
-                "cms.handlers.Instance.objects.get",
+                "cms.handlers.ngfw_events.Instance.objects.get",
                 side_effect=Instance.DoesNotExist,
             ),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
-            process_ngfw_event(make_sns_message(event))  # Should not raise
+            process_ngfw_event(make_sns_message(event))
+
+        # Instance lookup failed, so its save must NOT have run.
+        mock_instance.save.assert_not_called()
+        # App processing must still have happened — that's the documented behavior.
+        assert mock_app.status == ResourceStatus.READY.value
+        mock_app.save.assert_called_once_with(update_fields=["status"])
 
     def test_handles_missing_app_gracefully(self, mock_instance, mock_app):
-        """process_ngfw_event handles missing App gracefully."""
+        """Missing App does not stop processing — Instance is still updated."""
         from cms.models import App
 
         event = {
@@ -198,18 +204,24 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", side_effect=App.DoesNotExist),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", side_effect=App.DoesNotExist),
         ):
             from cms.handlers import process_ngfw_event
 
-            process_ngfw_event(make_sns_message(event))  # Should not raise
+            process_ngfw_event(make_sns_message(event))
+
+        # Instance was updated even though App is gone.
+        assert mock_instance.status == ResourceStatus.READY.value
+        mock_instance.save.assert_called_once_with(update_fields=["status"])
+        # App lookup raised, so its save must NOT have run.
+        mock_app.save.assert_not_called()
 
     def test_handles_missing_required_ids(self, mock_instance, mock_app):
         """process_ngfw_event handles events missing instance_id or app_id."""
         with (
-            patch("cms.handlers.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.App.objects.get") as mock_get_app,
+            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
+            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
         ):
             from cms.handlers import process_ngfw_event
 
@@ -243,8 +255,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get") as mock_get_instance,
-            patch("cms.handlers.App.objects.get") as mock_get_app,
+            patch("cms.handlers.ngfw_events.Instance.objects.get") as mock_get_instance,
+            patch("cms.handlers.ngfw_events.App.objects.get") as mock_get_app,
         ):
             from cms.handlers import process_ngfw_event
 
@@ -271,8 +283,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -303,8 +315,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -324,8 +336,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -346,8 +358,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 
@@ -369,8 +381,8 @@ class TestProcessNgfwEvent:
         }
 
         with (
-            patch("cms.handlers.Instance.objects.get", return_value=mock_instance),
-            patch("cms.handlers.App.objects.get", return_value=mock_app),
+            patch("cms.handlers.ngfw_events.Instance.objects.get", return_value=mock_instance),
+            patch("cms.handlers.ngfw_events.App.objects.get", return_value=mock_app),
         ):
             from cms.handlers import process_ngfw_event
 

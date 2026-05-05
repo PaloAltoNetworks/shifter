@@ -268,11 +268,17 @@
     "exceptions": [],
     "enforcement": ["agent-policy", "pre-commit", "ci"],
     "evidence": [
+      "mcp/shared/aws-helpers.js",
       "mcp/ops/SECURITY.md",
       "mcp/ops/lib.js",
       "mcp/ops/index.js",
       "mcp/ops/lib.test.js",
       "mcp/ops/spawn-roundtrip.test.js",
+      "mcp/ngfw/SECURITY.md",
+      "mcp/ngfw/lib.js",
+      "mcp/ngfw/index.js",
+      "mcp/ngfw/lib.test.js",
+      "mcp/ngfw/script-execution.test.js",
       "scripts/adr_guard/adr_guard.py"
     ]
   },

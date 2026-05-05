@@ -1,8 +1,24 @@
 // Shared constants and helpers for the shifter-ops MCP server.
+//
+// AWS-CLI argv-array helpers (`buildAwsArgv`, `awsExec`, `awsJson`,
+// `awsText`, `buildSsmSendCommandArgs`, plus `REGION` and
+// `getProfile`) live in `mcp/shared/aws-helpers.js` and are
+// re-exported here so existing call sites in this package — and the
+// per-tool argv builders below — keep working unchanged. The shared
+// module governs the argv-array contract that ADR-010 enforces;
+// see `mcp/ngfw/lib.js` and `mcp/ops/SECURITY.md` for context.
 
-import { spawnSync } from "node:child_process";
+import { buildSsmSendCommandArgs } from "../shared/aws-helpers.js";
 
-export const REGION = "us-east-2";
+export {
+  REGION,
+  getProfile,
+  buildAwsArgv,
+  awsExec,
+  awsJson,
+  awsText,
+  buildSsmSendCommandArgs,
+} from "../shared/aws-helpers.js";
 
 // --- AWS ---
 
@@ -208,99 +224,6 @@ export function validateManageCommand(command) {
   return parts;
 }
 
-// --- AWS CLI execution ---
-//
-// All aws-cli invocations run through these helpers. Callers MUST pass
-// args as an argv array, not a shell string — buildAwsArgv enforces it
-// via TypeError. The argv is handed to spawnSync, so values containing
-// `$()`, backticks, quotes, etc. are forwarded literally to the aws
-// binary instead of being interpreted by the local host shell. Shell
-// escaping is not a remediation strategy for this component; see
-// mcp/ops/SECURITY.md.
-
-/**
- * Build the argv array passed to spawnSync("aws", ...).
- * Preserves caller args byte-for-byte and appends profile, region, and
- * any extra flags last so the helper's flags override anything the
- * caller supplied (matches the prior shell-string ordering).
- */
-export function buildAwsArgv(args, profile, region, extraFlags = []) {
-  if (!Array.isArray(args)) {
-    throw new TypeError(
-      "AWS CLI args must be an argv array, not a shell string. " +
-        "Passing a shell string would re-introduce the command-injection " +
-        "path that issue #763 closed."
-    );
-  }
-  return [
-    ...args,
-    "--profile",
-    profile,
-    "--region",
-    region,
-    ...extraFlags,
-  ];
-}
-
-function defaultRunner(cmd, argv, options) {
-  return spawnSync(cmd, argv, options);
-}
-
-/**
- * Run `aws` with an argv array. Returns stdout. Throws on non-zero exit
- * with the trimmed stderr (or a generic message). The runner is
- * injectable so tests can capture the argv without spawning a real
- * process.
- */
-export function awsExec(profile, args, options = {}) {
-  const {
-    extraFlags = [],
-    region = REGION,
-    runner = defaultRunner,
-    timeoutMs = 60000,
-  } = options;
-  const argv = buildAwsArgv(args, profile, region, extraFlags);
-  const result = runner("aws", argv, {
-    encoding: "utf-8",
-    timeout: timeoutMs,
-  });
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    const stderr = (result.stderr || "").trim();
-    throw new Error(
-      stderr || `aws exited with status ${result.status}`
-    );
-  }
-  return result.stdout;
-}
-
-/**
- * Run `aws` with `--output json` appended and parse the result.
- * `--output json` is the LAST flag in the final argv so it always
- * overrides any `--output` flag the caller supplied via either `args`
- * or `options.extraFlags` (matches the prior shell-string behavior of
- * `aws()`, where `--output json` was tacked on at the end).
- */
-export function awsJson(profile, args, options = {}) {
-  const extraFlags = [
-    ...(options.extraFlags || []),
-    "--output",
-    "json",
-  ];
-  const stdout = awsExec(profile, args, { ...options, extraFlags });
-  return JSON.parse(stdout);
-}
-
-/**
- * Run `aws` and return trimmed stdout. Does NOT append `--output text`;
- * callers that need text output must include it in their args.
- */
-export function awsText(profile, args, options = {}) {
-  return awsExec(profile, args, options).trim();
-}
-
 // --- Per-tool argv builders for the named-vulnerable paths in #763 ---
 //
 // These exist as pure functions so tests can assert that
@@ -330,25 +253,6 @@ export function buildFilterLogEventsArgs({ logGroup, filterPattern, limit }) {
 }
 
 /**
- * SSM `send-command` argv. The `commands` payload is JSON.stringify'd
- * into a single `--parameters` argv element. The aws CLI parses that
- * JSON itself; the local shell never sees it.
- */
-export function buildSsmSendCommandArgs({ instanceId, docName, commands }) {
-  const params = JSON.stringify({ commands });
-  return [
-    "ssm",
-    "send-command",
-    "--instance-ids",
-    instanceId,
-    "--document-name",
-    docName,
-    "--parameters",
-    params,
-  ];
-}
-
-/**
  * SSM `send-command` argv for the Django manage.py wrapper. The user's
  * `command` is concatenated into the docker-exec invocation that runs
  * inside the remote shell on the EC2 host. That remote shell IS
@@ -364,16 +268,4 @@ export function buildRunManageArgs({ targetId, command }) {
     docName: "AWS-RunShellScript",
     commands: [dockerCmd],
   });
-}
-
-// --- Shared ---
-
-export function getProfile(profiles, env) {
-  const profile = profiles[env];
-  if (!profile) {
-    throw new Error(
-      `AWS profile not set for ${env}. Export PANW_SHIFTER_${env.toUpperCase()}_PROFILE`
-    );
-  }
-  return profile;
 }

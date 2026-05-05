@@ -1,17 +1,11 @@
 {
-  "name": "shifter-ngfw-mcp",
+  "name": "shifter-mcp-shared",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "node --test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1"
   },
   "devDependencies": {
     "eslint": "^9.39.2",

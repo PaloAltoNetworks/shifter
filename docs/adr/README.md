@@ -55,8 +55,10 @@ Current mechanisms:
   aliases. The check is a cheap pre-commit
   backstop; motivated bypasses such as `const run = cp.execSync;
   run(...)` are outside its reach by design and rely on code
-  review. Enforces ADR-010-R1; current exception covers
-  `mcp/ngfw/*` until the deferred migration lands.
+  review. Enforces ADR-010-R1 with no current exceptions —
+  `mcp/ngfw/*` migrated to argv-array helpers via the shared
+  `mcp/shared/aws-helpers.js` module in #759, alongside the
+  original `mcp/ops/*` migration in #763.
 
 ## Adding A Rule
 

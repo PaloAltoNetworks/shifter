@@ -105,7 +105,13 @@ cat > "$WATCHER" <<'WATCHER_EOF'
 # splice-link docker network so the participant can reach a9-splice.
 set -euo pipefail
 
-A5_CONTAINER="${A5_CONTAINER:-a5-scada-generator}"
+# A5 container_name in scenario-dev/polaris/build/docker-compose.yml is
+# "a5-scada" — verified empirically. Earlier "a5-scada-generator" default
+# was the source of a silent failure at BSides Ottawa (2026-04): the
+# watcher polled a non-existent container, never observed
+# runaway_complete=true, never attached A14 to splice-link, and
+# operators had to manually `docker network connect` per participant.
+A5_CONTAINER="${A5_CONTAINER:-a5-scada}"
 KALI_CONTAINER="${KALI_CONTAINER:-a14-kali}"
 SPLICE_NETWORK="${SPLICE_NETWORK:-build_splice-link}"
 SPLICE_IP="${SPLICE_IP:-172.20.60.140}"

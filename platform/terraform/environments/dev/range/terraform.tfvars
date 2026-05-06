@@ -28,7 +28,16 @@ enable_flow_logs = true
 # Range Instance IAM
 # ------------------------------------------------------------------------------
 
-agent_s3_bucket = "shifter-dev-user-storage-e3462f0c"
+# Per-account suffix on the user-storage bucket. The dev account is
+# 788327019743 (verified via `aws sts get-caller-identity` 2026-05-05).
+# The earlier `e3462f0c` suffix was from a previous dev account; the
+# `dev-range-range-instance` IAM role's `s3-agent-read` policy was
+# pointing at a bucket the current account doesn't own, so any range
+# instance trying to fetch from S3 via the instance profile got 403.
+# Found while debugging the polaris-vm bake (the bake exemplar uses a
+# dedicated `polaris-bake-instance` role to side-step this; production
+# range path needs the value here to be right).
+agent_s3_bucket = "shifter-dev-user-storage-788327019743"
 
 # ------------------------------------------------------------------------------
 # VM-Series NGFW (optional)

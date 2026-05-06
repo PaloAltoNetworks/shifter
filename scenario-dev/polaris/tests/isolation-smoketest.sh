@@ -17,6 +17,23 @@
 
 set -u
 
+# A2 DC IP. Default to the production range-VPC pinned address (`.11` in
+# the polaris /28 carved by `scripts/polaris-aws-range/`), but resolve
+# `dc01.boreas.local` from inside the dns container if available so the
+# test works in any account / VPC layout where the DC isn't pinned to
+# 10.1.100.11. Earlier this was hardcoded to 10.1.100.11 which made the
+# test fail in any non-production VPC bake even when the DC was
+# perfectly healthy.
+A2_DC_IP="${A2_DC_IP:-}"
+if [[ -z "$A2_DC_IP" ]]; then
+    A2_DC_IP="$(docker exec dns dig +short @127.0.0.1 dc01.boreas.local 2>/dev/null | head -n1)"
+fi
+if [[ -z "$A2_DC_IP" ]]; then
+    A2_DC_IP="10.1.100.11"  # production fallback
+    echo "[isolation] WARN: dc01.boreas.local did not resolve via dns container — falling back to $A2_DC_IP" >&2
+fi
+echo "[isolation] A2 DC IP: $A2_DC_IP"
+
 FAIL=0
 PASS_COUNT=0
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); echo "  [PASS] $1"; }
@@ -71,7 +88,7 @@ must_reach a14-kali 172.20.0.2   53   "DNS"
 must_reach a14-kali 172.20.10.20 143  "A1 mail IMAP"
 must_reach a14-kali 172.20.10.30 80   "A3 intranet"
 must_reach a14-kali 172.20.10.40 445  "A4 SMB"
-must_reach a14-kali 10.1.100.11  389  "A2 LDAP (Windows DC in range VPC)"
+must_reach a14-kali "$A2_DC_IP" 389  "A2 LDAP (Windows DC in range VPC)"
 
 echo
 echo "--- permitted: A15 (new) and A16 (new) pivot hosts reachable from corporate ---"

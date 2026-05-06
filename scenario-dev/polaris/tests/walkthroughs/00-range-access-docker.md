@@ -80,12 +80,15 @@ bash /home/atomik/range/tests/run-all-smoketests.sh
 # before handing to a new participant
 bash /home/atomik/range/tests/reset.sh
 
-# Raw docker compose commands — always use -p range so network names
-# stay stable across layout moves, and point at the compose file under
-# build/
-docker compose -p range -f /home/atomik/range/build/docker-compose.yml ps
-docker compose -p range -f /home/atomik/range/build/docker-compose.yml down
-docker compose -p range -f /home/atomik/range/build/docker-compose.yml build a12-arms
-docker compose -p range -f /home/atomik/range/build/docker-compose.yml up -d a12-arms
+# Raw docker compose commands. Project name defaults to "build" (the
+# parent dir of docker-compose.yml) which matches the production
+# user_data path and the polaris-splice-watcher's default
+# SPLICE_NETWORK=build_splice-link. Always cd into build/ first or pass
+# `-f` and let docker derive project=build from the file's parent dir.
+cd /home/atomik/range/build
+docker compose ps
+docker compose down
+docker compose build a12-arms
+docker compose up -d a12-arms
 docker logs a13-brain
 ```

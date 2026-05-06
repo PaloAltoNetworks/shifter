@@ -131,9 +131,13 @@ doesn't re-learn them.
 
 - A5's Flask HMI already exposes state at `/api/status` — no new
   endpoint needed to detect flag 19. Poll via
-  `docker exec a5-scada-generator python3 -c 'import urllib.request; ...'`
+  `docker exec a5-scada python3 -c 'import urllib.request; ...'`
   so the watcher doesn't need a route into the scada network from the
-  host.
+  host. (The `container_name:` in `build/docker-compose.yml` is
+  `a5-scada`, not `a5-scada-generator` as an earlier draft claimed —
+  that wrong default was the source of the silent watcher failure at
+  BSides Ottawa where operators had to manually `docker network connect`
+  per participant.)
 - The watcher must be long-running (systemd `Type=simple`,
   `Restart=on-failure`). A one-shot doesn't work — runaway state can
   flip after participants finish the exploit chain.

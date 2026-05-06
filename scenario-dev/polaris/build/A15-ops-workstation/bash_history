@@ -1,0 +1,9 @@
+ls
+cat ops_runbook.txt
+sudo /opt/ops/scada_diag.sh --host scada-gw.boreas.local
+curl -sS http://scada-gw.boreas.local:8080/
+sudo /opt/ops/scada_diag.sh --host scada-gw.boreas.local
+tail /var/log/ops_diag.log
+cat notes.txt
+sudo /opt/ops/scada_diag.sh --host scada-gw.boreas.local
+exit

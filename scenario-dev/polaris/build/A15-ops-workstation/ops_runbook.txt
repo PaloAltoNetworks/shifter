@@ -1,0 +1,33 @@
+NV-3200 GENERATOR — OPS RUNBOOK (Internal Use Only)
+===================================================
+Maintained by: S. Ivanov <s.ivanov@boreas-systems.ctf>
+Last updated:  2026-03-18
+
+This runbook is the quick-reference for routine generator operations.
+For full procedures see the vendor maintenance manual on the IT file
+share (//fileserv/IT/generator_maintenance_manual.pdf).
+
+STARTUP
+-------
+1. Pre-flight: verify thermal safety interlock ENABLED on HMI.
+2. Confirm coolant flow >= 70 % and coolant temp <= 90 C.
+3. Bring fuel injection up in 10 % increments, 30 s between steps.
+4. Monitor output (target 4.2 MW nominal).
+
+SHUTDOWN
+--------
+1. Fuel injection -> 0 in 10 % steps, 30 s between steps.
+2. Let coolant circulate for at least 5 minutes after last step.
+3. Verify HMI reports OFFLINE.
+
+MAINTENANCE PROCEDURE (interlock bypass)
+----------------------------------------
+See vendor manual (section 3). Do NOT attempt to bypass the hardware
+interlock without a scheduled maintenance window on the calendar.
+Vendor key is rotated annually; current key is cached in root's HMI
+session file -- ask Dariusz (IT) if you forget again.
+
+ESCALATION
+----------
+Plant emergencies:  IT on-call via Webb (m.webb)
+Vendor issues:      Novikov Energy Systems field service

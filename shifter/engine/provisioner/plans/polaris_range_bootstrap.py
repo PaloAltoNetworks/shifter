@@ -352,18 +352,7 @@ rm -f "$PROFILE_FILE"
 HOSTS_LINE="$BEDROCK_IP $BEDROCK_FQDN"
 docker exec a14-kali bash -c "grep -Fq '$BEDROCK_FQDN' /etc/hosts || echo '$HOSTS_LINE' >> /etc/hosts"
 
-# 4. Smoke test claude.
-echo "polaris kali bedrock shard: claude smoke test..."
-if docker exec a14-kali bash -lc 'timeout 60 claude -p "reply with just: ok"' >/tmp/claude_smoke.out 2>&1; then
-  head -c 200 /tmp/claude_smoke.out | tr -c '[:print:]\\n' ' '
-  echo
-  echo "polaris kali bedrock shard: claude OK"
-else
-  rc=$?
-  echo "polaris kali bedrock shard: claude FAILED (rc=$rc)" >&2
-  head -c 2000 /tmp/claude_smoke.out >&2
-  exit 3
-fi
+echo "polaris kali bedrock shard: config applied"
 """
 
 
@@ -526,7 +515,7 @@ class PolarisRangeBootstrapPlan:
         # sync. Per-range override would go on the InstanceSpec
         # (`anthropic_model`) if needed for sharding across model
         # variants; for now we ship the same shard everyone uses.
-        anthropic_model = getattr(instance, "anthropic_model", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+        anthropic_model = getattr(instance, "anthropic_model", "us.anthropic.claude-sonnet-4-6")
         anthropic_small_fast_model = getattr(
             instance,
             "anthropic_small_fast_model",

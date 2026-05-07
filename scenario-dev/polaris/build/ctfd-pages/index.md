@@ -75,7 +75,7 @@ You are a POLARIS operator. AURORA COLLECTIVE is building something underground.
 
 ## First Moves
 
-1. Solve **Start Here — Kali Warm-Up** for a quick first submit.
+1. Solve [**Start Here — Kali Warm-Up**](/challenges) for a quick first submit.
 2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
 3. Pick an opening: recon the front company (**M1**) or jump straight to a parallel objective (**M6–M9**).
 

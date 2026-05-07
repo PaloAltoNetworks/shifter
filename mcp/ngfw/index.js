@@ -3,8 +3,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { execSync } from "child_process";
-import { REGION, getProfile as _getProfile } from "./lib.js";
+import {
+  getProfile as _getProfile,
+  awsJson,
+  awsText,
+  buildSsmSendCommandArgs,
+  buildNgfwSshCommands,
+} from "./lib.js";
 
 const PROFILES = {
   dev: process.env.PANW_SHIFTER_DEV_PROFILE,
@@ -15,23 +20,28 @@ function getProfile(env) {
   return _getProfile(PROFILES, env);
 }
 
+const AWS_TIMEOUT_MS = 30000;
+
 // --- AWS Helpers ---
 
 /**
  * List all EC2 instances with "ngfw" in their Name tag.
- * Returns array of { instanceId, name, state, privateIp, keyName }.
+ * Returns array of { InstanceId, Name, State, PrivateIp, KeyName }.
  */
 function listNgfwInstances(env) {
   const profile = getProfile(env);
-  const raw = execSync(
-    `aws ec2 describe-instances ` +
-      `--profile "${profile}" --region "${REGION}" ` +
-      `--filters "Name=tag:Name,Values=*ngfw*" ` +
-      `--query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,PrivateIp:PrivateIpAddress,KeyName:KeyName,Name:Tags[?Key==\`Name\`].Value|[0]}' ` +
-      `--output json`,
-    { encoding: "utf-8", timeout: 30000 }
+  return awsJson(
+    profile,
+    [
+      "ec2",
+      "describe-instances",
+      "--filters",
+      "Name=tag:Name,Values=*ngfw*",
+      "--query",
+      "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,PrivateIp:PrivateIpAddress,KeyName:KeyName,Name:Tags[?Key==`Name`].Value|[0]}",
+    ],
+    { timeoutMs: AWS_TIMEOUT_MS }
   );
-  return JSON.parse(raw.trim());
 }
 
 /**
@@ -39,14 +49,21 @@ function listNgfwInstances(env) {
  */
 function findPortalInstance(env) {
   const profile = getProfile(env);
-  const instanceId = execSync(
-    `aws ec2 describe-instances ` +
-      `--profile "${profile}" --region "${REGION}" ` +
-      `--filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" ` +
-      `--query 'Reservations[0].Instances[0].InstanceId' ` +
-      `--output text`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const instanceId = awsText(
+    profile,
+    [
+      "ec2",
+      "describe-instances",
+      "--filters",
+      "Name=tag:Name,Values=*portal*",
+      "Name=instance-state-name,Values=running",
+      "--query",
+      "Reservations[0].Instances[0].InstanceId",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: AWS_TIMEOUT_MS }
+  );
 
   if (!instanceId || instanceId === "None") {
     throw new Error(`No running portal instance found in ${env}`);
@@ -62,14 +79,10 @@ function getNgfwSshKey(env, keyName) {
   const profile = getProfile(env);
   const uuidPrefix = keyName.replace(/^ngfw-/, "");
 
-  const secretArn = execSync(
-    `aws secretsmanager list-secrets ` +
-      `--profile "${profile}" --region "${REGION}" ` +
-      `--output json`,
-    { encoding: "utf-8", timeout: 30000 }
-  );
+  const secrets = awsJson(profile, ["secretsmanager", "list-secrets"], {
+    timeoutMs: AWS_TIMEOUT_MS,
+  });
 
-  const secrets = JSON.parse(secretArn.trim());
   const match = secrets.SecretList.find((s) =>
     s.Name.includes(`ngfw/${uuidPrefix}`)
   );
@@ -79,13 +92,20 @@ function getNgfwSshKey(env, keyName) {
     );
   }
 
-  const keyContent = execSync(
-    `aws secretsmanager get-secret-value ` +
-      `--profile "${profile}" --region "${REGION}" ` +
-      `--secret-id "${match.ARN}" ` +
-      `--query 'SecretString' --output text`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const keyContent = awsText(
+    profile,
+    [
+      "secretsmanager",
+      "get-secret-value",
+      "--secret-id",
+      match.ARN,
+      "--query",
+      "SecretString",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: AWS_TIMEOUT_MS }
+  );
 
   if (!keyContent) {
     throw new Error("Could not retrieve SSH key content");
@@ -95,76 +115,104 @@ function getNgfwSshKey(env, keyName) {
 
 /**
  * Run a PAN-OS CLI command on an NGFW by piping through SSH via the portal
- * instance using SSM send-command.
+ * instance using SSM send-command. The user-supplied `command` is
+ * base64-encoded into the SSM payload by `buildNgfwSshCommands`, so the
+ * portal shell never evaluates it (issue #759).
  */
-function runNgfwCommand(env, ngfwIp, sshKey, command) {
+async function runNgfwCommand(env, ngfwIp, sshKey, command) {
   const portalId = findPortalInstance(env);
   const profile = getProfile(env);
 
-  // Build the shell commands to run on the portal via SSM
-  const sshKeyJson = JSON.stringify(sshKey);
-  const commands = [
-    `cat > /tmp/ngfw.pem << 'EOFKEY'`,
-    sshKey,
-    `EOFKEY`,
-    `chmod 600 /tmp/ngfw.pem`,
-    `echo ${JSON.stringify(command)} | ssh -i /tmp/ngfw.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 admin@${ngfwIp} 2>&1`,
-    `rm -f /tmp/ngfw.pem`,
-  ];
+  const commands = buildNgfwSshCommands({ sshKey, ngfwIp, command });
 
-  // Send command via SSM
-  const sendResult = execSync(
-    `aws ssm send-command ` +
-      `--profile "${profile}" --region "${REGION}" ` +
-      `--instance-ids "${portalId}" ` +
-      `--document-name AWS-RunShellScript ` +
-      `--parameters '${JSON.stringify({ commands })}' ` +
-      `--query 'Command.CommandId' --output text`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const sendArgs = buildSsmSendCommandArgs({
+    instanceId: portalId,
+    docName: "AWS-RunShellScript",
+    commands,
+  });
+  const cmdId = awsText(
+    profile,
+    [...sendArgs, "--query", "Command.CommandId", "--output", "text"],
+    { timeoutMs: AWS_TIMEOUT_MS }
+  );
 
-  const cmdId = sendResult;
-
-  // Poll for completion (up to 60 seconds)
+  // Poll for completion (up to ~60 seconds). Sleep is pure JS;
+  // ADR-010-R1 forbids `execSync("sleep ...")`.
   let status = "Pending";
   for (let i = 0; i < 30; i++) {
-    execSync("sleep 2");
+    await new Promise((r) => setTimeout(r, 2000));
     try {
-      status = execSync(
-        `aws ssm get-command-invocation ` +
-          `--profile "${profile}" --region "${REGION}" ` +
-          `--command-id "${cmdId}" ` +
-          `--instance-id "${portalId}" ` +
-          `--query 'Status' --output text`,
-        { encoding: "utf-8", timeout: 30000 }
-      ).trim();
-    } catch {
-      // invocation may not be ready yet
-      continue;
+      status = awsText(
+        profile,
+        [
+          "ssm",
+          "get-command-invocation",
+          "--command-id",
+          cmdId,
+          "--instance-id",
+          portalId,
+          "--query",
+          "Status",
+          "--output",
+          "text",
+        ],
+        { timeoutMs: AWS_TIMEOUT_MS }
+      );
+    } catch (e) {
+      // SSM returns InvocationDoesNotExist while the command id is
+      // still propagating to the target. Retry that one transient
+      // condition; everything else (AccessDenied, throttling, expired
+      // creds, timeouts) propagates so the user sees the labeled error
+      // from awsExec instead of a generic 60s timeout.
+      if (/InvocationDoesNotExist/.test(e.message)) {
+        continue;
+      }
+      throw e;
     }
     if (status !== "Pending" && status !== "InProgress") break;
   }
 
-  // Get output
-  const stdout = execSync(
-    `aws ssm get-command-invocation ` +
-      `--profile "${profile}" --region "${REGION}" ` +
-      `--command-id "${cmdId}" ` +
-      `--instance-id "${portalId}" ` +
-      `--query 'StandardOutputContent' --output text`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  if (status === "Pending" || status === "InProgress") {
+    throw new Error(
+      `SSM command ${cmdId} did not complete within 60s (last status: ${status}). The PAN-OS command may still be running on portal ${portalId}.`
+    );
+  }
+
+  const stdout = awsText(
+    profile,
+    [
+      "ssm",
+      "get-command-invocation",
+      "--command-id",
+      cmdId,
+      "--instance-id",
+      portalId,
+      "--query",
+      "StandardOutputContent",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: AWS_TIMEOUT_MS }
+  );
 
   let stderr = "";
   if (status !== "Success") {
-    stderr = execSync(
-      `aws ssm get-command-invocation ` +
-        `--profile "${profile}" --region "${REGION}" ` +
-        `--command-id "${cmdId}" ` +
-        `--instance-id "${portalId}" ` +
-        `--query 'StandardErrorContent' --output text`,
-      { encoding: "utf-8", timeout: 30000 }
-    ).trim();
+    stderr = awsText(
+      profile,
+      [
+        "ssm",
+        "get-command-invocation",
+        "--command-id",
+        cmdId,
+        "--instance-id",
+        portalId,
+        "--query",
+        "StandardErrorContent",
+        "--output",
+        "text",
+      ],
+      { timeoutMs: AWS_TIMEOUT_MS }
+    );
   }
 
   return { status, stdout, stderr };
@@ -199,6 +247,13 @@ function resolveNgfw(env, instanceId) {
 }
 
 // --- MCP Server ---
+
+// Format the optional stderr suffix as a separate helper so the
+// per-tool response template literal stays flat (avoids the
+// nested-template-literal anti-pattern).
+function formatStderrSuffix(stderr) {
+  return stderr ? `\nErrors:\n${stderr}` : "";
+}
 
 const server = new McpServer({
   name: "shifter-ngfw",
@@ -255,19 +310,20 @@ server.tool(
   async ({ env, instance_id }) => {
     try {
       const { instance, sshKey } = resolveNgfw(env, instance_id);
-      const result = runNgfwCommand(
+      const result = await runNgfwCommand(
         env,
         instance.PrivateIp,
         sshKey,
         "show system info"
       );
+      const stderrSuffix = formatStderrSuffix(result.stderr);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${stderrSuffix}`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`,
-          },
-        ],
+        content: [{ type: "text", text }],
+        // Surface non-Success SSM status (Failed, Cancelled,
+        // TimedOut, Incomplete) as an MCP error so callers do not
+        // see a "successful" tool response for a failed PAN-OS call.
+        isError: result.status !== "Success",
       };
     } catch (err) {
       return {
@@ -294,19 +350,17 @@ server.tool(
   async ({ env, instance_id }) => {
     try {
       const { instance, sshKey } = resolveNgfw(env, instance_id);
-      const result = runNgfwCommand(
+      const result = await runNgfwCommand(
         env,
         instance.PrivateIp,
         sshKey,
         "show routing route"
       );
+      const stderrSuffix = formatStderrSuffix(result.stderr);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${stderrSuffix}`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `NGFW: ${instance.Name} (${instance.InstanceId})\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`,
-          },
-        ],
+        content: [{ type: "text", text }],
+        isError: result.status !== "Success",
       };
     } catch (err) {
       return {
@@ -334,14 +388,12 @@ server.tool(
   async ({ env, command, instance_id }) => {
     try {
       const { instance, sshKey } = resolveNgfw(env, instance_id);
-      const result = runNgfwCommand(env, instance.PrivateIp, sshKey, command);
+      const result = await runNgfwCommand(env, instance.PrivateIp, sshKey, command);
+      const stderrSuffix = formatStderrSuffix(result.stderr);
+      const text = `NGFW: ${instance.Name} (${instance.InstanceId})\nCommand: ${command}\nStatus: ${result.status}\n\n${result.stdout}${stderrSuffix}`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `NGFW: ${instance.Name} (${instance.InstanceId})\nCommand: ${command}\nStatus: ${result.status}\n\n${result.stdout}${result.stderr ? `\nErrors:\n${result.stderr}` : ""}`,
-          },
-        ],
+        content: [{ type: "text", text }],
+        isError: result.status !== "Success",
       };
     } catch (err) {
       return {

@@ -102,7 +102,7 @@ A hint point is cheap compared to an hour of wrong-direction work.
 <li>Switch targets. If a mission is stalled, move to a different one. Come back with fresh eyes.</li>
 <li>Read the second hint. Decide whether you're missing a technique or a piece of data.</li>
 <li>Ask Claude on the Kali box — hand it the file or context you're working with and what you tried.</li>
-<li>Drop a message in the Palo + Ottawa BSides Discord — <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a> — if you suspect the range itself, or just want to ask the room.</li>
+<li>Flag a runner if you suspect the range itself, or just want to ask the room.</li>
 </ol>
 
 ## Common Pitfalls
@@ -121,8 +121,6 @@ Switch missions if:
 - You've been on one objective for more than 30 minutes with no new data.
 - You've bought the first hint and it didn't narrow anything.
 - You're about to ask Claude "just solve it for me."
-
-Missions 6–9 are independent. Moving sideways into a parallel objective refreshes your momentum.
 
 ## Every Token Counts
 

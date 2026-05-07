@@ -80,11 +80,9 @@ auth_required: true
 
 <div class="brief-tag">§ 05 — MISSION LOG</div>
 
-# NINE OBJECTIVES
+# FIVE OBJECTIVES
 
-All nine are live from mission start. Main-operation missions are chained by pivots; the rest are independent and reachable from the starting environment. Pursue in any order. Every token you pull counts.
-
-## Main Operation
+The main operation is chained by pivots — work them in order. Every token you pull counts.
 
 <div class="mission">
   <div class="mission__head">
@@ -148,60 +146,6 @@ All nine are live from mission start. Main-operation missions are chained by piv
     <div>Surface</div><div>Underground entry point · OT controllers · command node</div>
     <div>Posture</div><div>Opens after the blackout window lands</div>
     <div>Chain</div><div>Main operation · 05 / 05</div>
-  </div>
-</div>
-
-## Reachable Immediately
-
-<div class="mission">
-  <div class="mission__head">
-    <span><span class="mission__code">M 6</span> &nbsp; <span class="mission__name">EXPOSURE</span></span>
-    <span class="mission__status ok">reachable immediately</span>
-  </div>
-  <div class="mission__obj">Assemble proof the public can hold. Push the dossier through the press channel.</div>
-  <div class="mission__meta">
-    <div>Surface</div><div>Board portal · sanitized minutes · public repo · press drop</div>
-    <div>Posture</div><div>Documentary work</div>
-    <div>Chain</div><div>Parallel objective · independent</div>
-  </div>
-</div>
-
-<div class="mission">
-  <div class="mission__head">
-    <span><span class="mission__code">M 7</span> &nbsp; <span class="mission__name">COUNTERINTEL</span></span>
-    <span class="mission__status ok">reachable immediately</span>
-  </div>
-  <div class="mission__obj">Somebody inside Boreas is reporting out. Find them. Name them. Close the channel.</div>
-  <div class="mission__meta">
-    <div>Surface</div><div>Badge logs · mailbox rules · browser artifacts · report form</div>
-    <div>Posture</div><div>Forensic analysis</div>
-    <div>Chain</div><div>Parallel objective · independent</div>
-  </div>
-</div>
-
-<div class="mission">
-  <div class="mission__head">
-    <span><span class="mission__code">M 8</span> &nbsp; <span class="mission__name">DELIVERY DENIED</span></span>
-    <span class="mission__status ok">reachable immediately</span>
-  </div>
-  <div class="mission__obj">A reactor convoy is scheduled to roll. Stop it at dispatch. Freeze it cleanly — emergency hold, paperwork perfect.</div>
-  <div class="mission__meta">
-    <div>Surface</div><div>Logistics tracker · approval workflow · freeze template</div>
-    <div>Posture</div><div>Paper-trail work</div>
-    <div>Chain</div><div>Parallel objective · independent</div>
-  </div>
-</div>
-
-<div class="mission">
-  <div class="mission__head">
-    <span><span class="mission__code">M 9</span> &nbsp; <span class="mission__name">SAFETY CASE</span></span>
-    <span class="mission__status ok">reachable immediately</span>
-  </div>
-  <div class="mission__obj">Rehearse cold-shutdown on the training twin. If we get one shot at the real reactor, we don't get to practice.</div>
-  <div class="mission__meta">
-    <div>Surface</div><div>Training HMI · Modbus PLC · maintainer guide</div>
-    <div>Posture</div><div>ICS procedure under safe conditions</div>
-    <div>Chain</div><div>Parallel objective · independent</div>
   </div>
 </div>
 

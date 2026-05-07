@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.96.0] - 2026-05-07
+
+### Added
+
+- **`polaris_kali_bedrock_shard` step in `PolarisRangeBootstrapPlan`**
+  (`shifter/engine/provisioner/plans/polaris_range_bootstrap.py`).
+  Per-range step that resolves the bedrock-runtime VPC endpoint's
+  private IP, writes `/etc/profile.d/claude-bedrock.sh` inside the
+  a14-kali container with `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`,
+  `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, drops a
+  `/etc/hosts` override pointing the bedrock-runtime FQDN at the VPCE
+  IP, and runs a `claude -p "reply ok"` smoke test. Without this step
+  the kali container had no AWS credentials and `claude` failed with
+  "Not logged in" because the container ships with no creds and on a
+  default docker bridge network can't reach IMDS at `169.254.169.254`
+  through the host. At BSides Ottawa this was a manual post-provision
+  step (`scripts/polaris-aws-range/apply_kali_bedrock_shard.py`)
+  operators ran by hand for every participant; integrating it into
+  the bootstrap plan makes provisioning self-sufficient.
+- **IMDS hop-limit bump in `_run_polaris_range_bootstrap`**
+  (`shifter/engine/provisioner/main.py`). Calls
+  `ec2.modify_instance_metadata_options(HttpPutResponseHopLimit=2)`
+  on the polaris-vm before running the bootstrap plan. Default IMDS
+  hop limit is 1, which blocks docker-bridge containers from reaching
+  the link-local IMDS endpoint and makes the kali container unable to
+  pick up the EC2 instance role's credentials. Hop limit 2 lets the
+  container hop through the host network namespace to IMDS. Idempotent.
+- **`Set-DnsServerForwarder 169.254.169.253` in
+  `scripts/polaris-aws-range/a2_setup.ps1`.** Future polaris-dc bakes
+  pick up the DNS forwarder at bake time so a fresh DC AMI launched
+  into a non-default VPC can resolve external names (specifically
+  `ssm.us-east-2.amazonaws.com`) without needing a post-launch fixup.
+  Without this the DC's local DNS server has no upstream and the SSM
+  agent never registers, so the engine provisioner times out waiting
+  for SSM and tears the range down.
+
+### Fixed
+
+- **Engine DC SSM-wait timeout 600s → 1800s** (`_run_dc_setup` in
+  `shifter/engine/provisioner/main.py`). The Packer-built shifter-dc
+  AMI runs through 2-3 sysprep reboot cycles on first boot before
+  SSM agent is reliably online — empirically 13-15 minutes between
+  launch and stable SSM. The 600s ceiling caused the provisioner to
+  give up early and tear ranges down. 1800s gives sysprep room; on
+  a warm DC AMI the wait still returns in seconds.
+- **Bucket name mismatch in `polaris_range_bootstrap.py`'s
+  `polaris_fetch_tests` step.** `BUCKET="shifter-dev-user-storage-e3462f0c"`
+  is the dev bucket from a previous AWS account. This account uses
+  `shifter-dev-user-storage-788327019743`, so range provisioning got
+  403 on `s3://shifter-dev-user-storage-e3462f0c/polaris/tests/...`
+  and the engine marked the range failed even though everything else
+  had succeeded. Updated to the correct bucket; matches the
+  `agent_s3_bucket` value already corrected in
+  `platform/terraform/environments/dev/range/terraform.tfvars`.
+- **`ec2:ModifyInstanceMetadataOptions` added to the engine
+  provisioner ECS task role** (`platform/terraform/modules/engine-provisioner/iam.tf`).
+  Required for the new IMDS hop-limit bump above. Granted alongside
+  the existing `ec2:RunInstances`, `ec2:ModifyInstanceAttribute` etc.
+  in the `EC2InstanceOperations` statement.
+
+## [3.95.17] - 2026-05-04
+
+### Security
+
+- **Closed shell-injection paths in `mcp/ngfw` (#759).** `run_command`,
+  `show_system_info`, and `show_routes` previously interpolated
+  user-controlled command strings into shell pipelines on two
+  boundaries — every aws-cli invocation in `mcp/ngfw/index.js` ran
+  through `execSync()` shell strings on the local host, and the SSM
+  `AWS-RunShellScript` payload that ferried PAN-OS commands to the
+  NGFW used `echo ${JSON.stringify(command)} | ssh ...` on the portal
+  jump host. `JSON.stringify` only produces a double-quoted shell
+  string, so payloads containing `$(...)` or backticks were evaluated
+  by the portal shell before reaching SSH. Both boundaries are now
+  closed: AWS-CLI argv-array helpers (`buildAwsArgv`, `awsExec`,
+  `awsJson`, `awsText`, `buildSsmSendCommandArgs`) now live in a
+  shared `mcp/shared/aws-helpers.js` module re-exported by both
+  `mcp/ngfw/lib.js` and `mcp/ops/lib.js`, so a single change-site
+  governs the argv-array contract across MCP servers. Errors carry an
+  `aws <service> <op>: <stderr>` operation label so MCP handlers
+  surface localized failures. `buildNgfwSshCommands` base64-encodes
+  the PAN-OS command (with a trailing newline so the line-oriented
+  appliance gets Enter) into the SSM payload; the portal decodes it
+  (`base64 -d`) and pipes the bytes into `ssh`'s stdin instead of
+  evaluating them. Per-invocation `/tmp/ngfw-<uuid>.pem` paths prevent
+  concurrent calls from clobbering each other's key material. `set
+  -e` plus `trap 'rc=$?; rm -f <path>; exit $rc' EXIT` preserves the
+  SSH/PAN-OS exit code through cleanup so SSM reports failed PAN-OS
+  calls as failed. `child_process.execSync` is no longer imported
+  from `mcp/ngfw/index.js`. `validateNgfwIp` adds a strict IPv4 check
+  on the SSH target as defense in depth. `runNgfwCommand` throws an
+  explicit timeout error after 60s and only retries the genuine
+  `InvocationDoesNotExist` transient during polling — other AWS
+  errors propagate immediately. Regression coverage:
+  `mcp/ngfw/lib.test.js` covers argv builders, `awsExec` runner
+  injection with operation-labeled errors, SSM JSON payload shape,
+  base64 round-trip across `$()`, backticks, quotes, semicolons,
+  ampersands, pipes, newlines, and the heredoc terminator;
+  `mcp/ops/spawn-roundtrip.test.js` (now covering both packages
+  through the shared `spawnSync` boundary) proves Node forwards argv
+  elements byte-for-byte; and `mcp/ngfw/script-execution.test.js`
+  runs the generated SSM command list under `/bin/sh` with a stub
+  `ssh` and asserts the EXIT trap preserves the failing exit code
+  (42 round-trips end-to-end) and removes the temporary key file in
+  both success and failure paths.
+  Component-local guardrails recorded in `mcp/ngfw/SECURITY.md`. The
+  `ADR-010-R1` and `ADR-010-R2` exceptions for `mcp/ngfw/*` are
+  removed from `docs/adr/exceptions.yaml`; ADR-010 evidence now lists
+  the shared module and ngfw artifacts.
+
 ## [3.95.16] - 2026-05-04
 
 ### Security

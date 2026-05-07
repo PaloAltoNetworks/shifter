@@ -162,7 +162,7 @@ guacd_desired_count            = 4
 guacamole_client_desired_count = 3
 
 # Database
-guacamole_db_instance_class        = "db.t3.small"
+guacamole_db_instance_class        = "db.m5.xlarge"
 guacamole_db_allocated_storage     = 20
 guacamole_db_max_allocated_storage = 50
 guacamole_db_engine_version        = "16"

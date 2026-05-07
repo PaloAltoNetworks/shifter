@@ -603,8 +603,8 @@ function makeRecordingRunner({
   error = null,
 } = {}) {
   const calls = [];
-  const fn = (cmd, argv, options) => {
-    calls.push({ cmd, argv, options });
+  const fn = (argv, options) => {
+    calls.push({ argv, options });
     return { status, stdout, stderr, error };
   };
   fn.calls = calls;
@@ -612,11 +612,10 @@ function makeRecordingRunner({
 }
 
 describe("awsExec", () => {
-  it("invokes the runner with cmd='aws' and the built argv", () => {
+  it("invokes the runner with the built argv (binary is hardcoded to 'aws')", () => {
     const runner = makeRecordingRunner({ stdout: "ok\n" });
     awsExec("p", ["s3", "ls"], { runner });
     assert.equal(runner.calls.length, 1);
-    assert.equal(runner.calls[0].cmd, "aws");
     assert.deepEqual(runner.calls[0].argv, [
       "s3",
       "ls",
@@ -667,11 +666,15 @@ describe("awsExec", () => {
     );
   });
 
-  it("falls back to a generic message when stderr is empty and status is non-zero", () => {
+  it("falls back to a labeled generic message when stderr is empty and status is non-zero", () => {
+    // The shared awsExec helper labels every error with the AWS
+    // service+operation extracted from the argv (e.g.
+    // `aws s3 ls: exited with status 2`) so MCP handlers can
+    // localize which call failed.
     const runner = makeRecordingRunner({ status: 2 });
     assert.throws(
       () => awsExec("p", ["s3", "ls"], { runner }),
-      /aws exited with status 2/
+      /aws s3 ls: exited with status 2/
     );
   });
 
@@ -920,7 +923,7 @@ describe("awsText", () => {
 
   it("does not append --output text automatically", () => {
     let captured;
-    const runner = (cmd, argv) => {
+    const runner = (argv) => {
       captured = argv;
       return { status: 0, stdout: "x", stderr: "", error: null };
     };

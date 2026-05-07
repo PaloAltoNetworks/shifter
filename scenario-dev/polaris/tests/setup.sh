@@ -18,11 +18,19 @@ COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
 if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then
     COMPOSE_FILE="$RANGE_DIR/docker-compose.yml"
 fi
-# -p range keeps the project (and therefore network) names stable across
-# layout moves. Without this, docker compose uses the parent dir of the
-# compose file as the project name: "build" for the new layout, "range"
-# for the old, which creates divergent container/network names.
-COMPOSE="docker compose -p range -f $COMPOSE_FILE"
+# Compose project name. Defaults to "build" because the production
+# user_data path (`scripts/polaris-aws-range/user_data.sh.tpl`) does
+# `cd /opt/polaris/scenario-dev/polaris/build && docker compose up -d`,
+# yielding project=build (the parent dir of the compose file).
+# `polaris-splice-watcher.service` also assumes the network is
+# "build_splice-link" by default. Smoketest scripts (this file +
+# reset.sh + run-all-smoketests.sh) honour COMPOSE_PROJECT_NAME so they
+# can be pointed at any other project name set by the operator.
+#
+# Earlier this defaulted to "range" which diverged from production and
+# made every helper script ship with a hardcoded mismatch.
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-build}"
+COMPOSE="docker compose -p $COMPOSE_PROJECT_NAME -f $COMPOSE_FILE"
 
 log() { echo "[setup] $*"; }
 

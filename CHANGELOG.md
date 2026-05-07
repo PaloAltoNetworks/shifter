@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.96.0] - 2026-05-07
+
+### Added
+
+- **`polaris_kali_bedrock_shard` step in `PolarisRangeBootstrapPlan`**
+  (`shifter/engine/provisioner/plans/polaris_range_bootstrap.py`).
+  Per-range step that resolves the bedrock-runtime VPC endpoint's
+  private IP, writes `/etc/profile.d/claude-bedrock.sh` inside the
+  a14-kali container with `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`,
+  `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, drops a
+  `/etc/hosts` override pointing the bedrock-runtime FQDN at the VPCE
+  IP, and runs a `claude -p "reply ok"` smoke test. Without this step
+  the kali container had no AWS credentials and `claude` failed with
+  "Not logged in" because the container ships with no creds and on a
+  default docker bridge network can't reach IMDS at `169.254.169.254`
+  through the host. At BSides Ottawa this was a manual post-provision
+  step (`scripts/polaris-aws-range/apply_kali_bedrock_shard.py`)
+  operators ran by hand for every participant; integrating it into
+  the bootstrap plan makes provisioning self-sufficient.
+- **IMDS hop-limit bump in `_run_polaris_range_bootstrap`**
+  (`shifter/engine/provisioner/main.py`). Calls
+  `ec2.modify_instance_metadata_options(HttpPutResponseHopLimit=2)`
+  on the polaris-vm before running the bootstrap plan. Default IMDS
+  hop limit is 1, which blocks docker-bridge containers from reaching
+  the link-local IMDS endpoint and makes the kali container unable to
+  pick up the EC2 instance role's credentials. Hop limit 2 lets the
+  container hop through the host network namespace to IMDS. Idempotent.
+- **`Set-DnsServerForwarder 169.254.169.253` in
+  `scripts/polaris-aws-range/a2_setup.ps1`.** Future polaris-dc bakes
+  pick up the DNS forwarder at bake time so a fresh DC AMI launched
+  into a non-default VPC can resolve external names (specifically
+  `ssm.us-east-2.amazonaws.com`) without needing a post-launch fixup.
+  Without this the DC's local DNS server has no upstream and the SSM
+  agent never registers, so the engine provisioner times out waiting
+  for SSM and tears the range down.
+
+### Fixed
+
+- **Engine DC SSM-wait timeout 600s → 1800s** (`_run_dc_setup` in
+  `shifter/engine/provisioner/main.py`). The Packer-built shifter-dc
+  AMI runs through 2-3 sysprep reboot cycles on first boot before
+  SSM agent is reliably online — empirically 13-15 minutes between
+  launch and stable SSM. The 600s ceiling caused the provisioner to
+  give up early and tear ranges down. 1800s gives sysprep room; on
+  a warm DC AMI the wait still returns in seconds.
+- **Bucket name mismatch in `polaris_range_bootstrap.py`'s
+  `polaris_fetch_tests` step.** `BUCKET="shifter-dev-user-storage-e3462f0c"`
+  is the dev bucket from a previous AWS account. This account uses
+  `shifter-dev-user-storage-788327019743`, so range provisioning got
+  403 on `s3://shifter-dev-user-storage-e3462f0c/polaris/tests/...`
+  and the engine marked the range failed even though everything else
+  had succeeded. Updated to the correct bucket; matches the
+  `agent_s3_bucket` value already corrected in
+  `platform/terraform/environments/dev/range/terraform.tfvars`.
+- **`ec2:ModifyInstanceMetadataOptions` added to the engine
+  provisioner ECS task role** (`platform/terraform/modules/engine-provisioner/iam.tf`).
+  Required for the new IMDS hop-limit bump above. Granted alongside
+  the existing `ec2:RunInstances`, `ec2:ModifyInstanceAttribute` etc.
+  in the `EC2InstanceOperations` statement.
+
 ## [3.95.17] - 2026-05-04
 
 ### Security

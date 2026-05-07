@@ -1865,6 +1865,30 @@ def _run_polaris_range_bootstrap(
         len(public_key),
     )
 
+    # Set IMDSv2 PutResponseHopLimit to 2 on the polaris-vm so the
+    # a14-kali container (one extra hop from the EC2 host's network
+    # namespace through the docker bridge) can reach IMDS at
+    # 169.254.169.254 and pick up the EC2 instance role's credentials.
+    # Without this the kali container has no AWS creds, so the
+    # polaris_kali_bedrock_shard step's claude smoke test fails and the
+    # range is reported failed. Default IMDS hop limit is 1.
+    # Idempotent: re-running on an already-2 instance is a no-op.
+    try:
+        import boto3 as _boto3
+
+        _ec2 = _boto3.client("ec2", region_name=os.environ.get("AWS_REGION", "us-east-2"))
+        _ec2.modify_instance_metadata_options(
+            InstanceId=instance_id,
+            HttpPutResponseHopLimit=2,
+            HttpTokens="required",
+            HttpEndpoint="enabled",
+        )
+        logger.info("Set IMDSv2 hop limit=2 on %s for kali container reachability", instance_id)
+    except Exception as e:
+        # Don't hard-fail here — the bedrock shard step's smoke test will
+        # surface the real symptom (claude failing) with a clearer error.
+        logger.warning("failed to set IMDS hop limit on %s: %s", instance_id, e)
+
     executor = SSMExecutor()
     orchestrator = SetupOrchestrator(executor=executor)
     plan = PolarisRangeBootstrapPlan()
@@ -1919,8 +1943,15 @@ def _run_dc_setup(
     executor = execution.executor
     orchestrator = SetupOrchestrator(executor=executor)
 
+    # The Packer-built shifter-dc AMI runs through 2-3 sysprep reboot cycles
+    # on first boot before SSM agent is reliably online. Empirically observed
+    # 13-15 minutes between launch and stable SSM on the polaris-dc bake
+    # exemplar (2026-05-06). The previous 600s (10 min) timeout caused the
+    # provisioner to give up early and tear the range down. 1800s (30 min)
+    # gives plenty of headroom for any sysprep variation, and on a normal
+    # already-warm DC AMI the wait returns in seconds anyway.
     logger.info("Waiting for %s connectivity on DC %s...", execution.transport_name, execution.target)
-    execution.wait_for_ready(timeout_seconds=600)
+    execution.wait_for_ready(timeout_seconds=1800)
     logger.info("DC %s ready via %s", instance_id, execution.transport_name)
 
     try:

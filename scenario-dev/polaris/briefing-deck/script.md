@@ -81,9 +81,9 @@ Speaker notes for driving the deck at kickoff.
 
 ## 09 — Mission Log
 
-*This is the pivot from exposition to objectives. Let participants see the nine-mission shape for 5s before talking.*
+*This is the pivot from exposition to objectives. Let participants see the five-mission shape for 5s before talking.*
 
-> You have nine missions. Five are the main campaign — a chain where you recon, breach, explore, disrupt, and take control, in that order. The other four are independent objectives you can take on anytime. I'll walk each one, fast.
+> You have five missions. They form a chain — recon, breach, explore, disrupt, and take control, in that order. I'll walk each one, fast.
 
 ---
 
@@ -114,30 +114,6 @@ Speaker notes for driving the deck at kickoff.
 ## 14 — M5 Bunker
 
 > Mission Five — The Bunker. Whatever's coordinating Leviathan is underground. The blackout in Four is what opens your route in. Reach the control path. Turn it.
-
----
-
-## 15 — M6 Exposure
-
-> Mission Six — Exposure. Assemble a verified dossier and push it through the press channel. Boreas thought they sanitized their material. Not well enough.
-
----
-
-## 16 — M7 Counterintel
-
-> Mission Seven — Counterintel. Somebody inside Boreas is feeding an outside handler. Find them. Name them. Close the leak.
-
----
-
-## 17 — M8 Delivery Denied
-
-> Mission Eight — Delivery Denied. A reactor convoy is scheduled to roll. Freeze it at dispatch. Paperwork perfect — emergency hold procedure.
-
----
-
-## 18 — M9 Safety Case
-
-> Mission Nine — Safety Case. Rehearse cold-shutdown on a training reactor twin. If we get one shot at the real thing, we don't get to practice.
 
 ---
 

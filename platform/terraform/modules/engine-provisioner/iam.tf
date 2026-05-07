@@ -130,6 +130,12 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
           "ec2:StopInstances",
           "ec2:StartInstances",
           "ec2:ModifyInstanceAttribute",
+          # ModifyInstanceMetadataOptions is required so the polaris
+          # range bootstrap can set HttpPutResponseHopLimit=2 on the
+          # polaris-vm — without that the a14-kali docker container
+          # can't reach IMDS for instance-profile credentials and the
+          # claude/Bedrock smoke test fails.
+          "ec2:ModifyInstanceMetadataOptions",
           "ec2:CreateTags",
           "ec2:DeleteTags",
           "ec2:Describe*",

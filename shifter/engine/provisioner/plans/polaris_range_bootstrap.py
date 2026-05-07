@@ -126,14 +126,14 @@ exit 0
 # works out-of-the-box without any per-range manual upload.
 #
 # The bucket + prefix is the one the dev-range-range-instance IAM role
-# already whitelists for GetObject (shifter-dev-user-storage-e3462f0c).
+# already whitelists for GetObject (shifter-dev-user-storage-788327019743).
 # A new tarball is uploaded by the operator whenever the test harness or
 # an individual smoketest is fixed; the download is idempotent so re-runs
 # pick up the latest.
 FETCH_POLARIS_TESTS_SCRIPT = """#!/bin/bash
 set -euo pipefail
 
-BUCKET="shifter-dev-user-storage-e3462f0c"
+BUCKET="shifter-dev-user-storage-788327019743"
 KEY="polaris/tests/polaris-tests.tar.gz"
 DEST_ROOT="/opt/polaris/scenario-dev/polaris"
 TARBALL="/tmp/polaris-tests.tar.gz"
@@ -282,6 +282,91 @@ exit 0
 """
 
 # Verification: prove a14-kali is up and dns resolves dc01 to this range's
+# Configures Claude Code on the a14-kali container to talk to Bedrock.
+# The image already has CLAUDE_CODE_USE_BEDROCK=1 + the model env vars
+# baked into /etc/profile.d/, but the kali container ships with no AWS
+# credentials and on a default-VPC bridge network can't reach IMDS at
+# 169.254.169.254. This step fixes both:
+#   1. Resolves the bedrock-runtime VPC endpoint's private IP (via the
+#      Amazon resolver at 169.254.169.253) and writes /etc/hosts inside
+#      the a14-kali container so `bedrock-runtime.us-east-2.amazonaws.com`
+#      resolves to a privately-reachable address from inside the container.
+#   2. Writes /etc/profile.d/claude-bedrock.sh with CLAUDE_CODE_USE_BEDROCK,
+#      AWS_REGION, ANTHROPIC_MODEL, and ANTHROPIC_SMALL_FAST_MODEL.
+# Credential delivery: the polaris-vm EC2's instance profile carries the
+# bedrock-claude-code policy. Containers reach IMDS through the host's
+# bridge network, which requires HttpPutResponseHopLimit >= 2 on the
+# instance — set by main.py before this step runs.
+#
+# Smoke test: invoke `claude -p "reply ok"` from inside a14-kali. If
+# Bedrock isn't reachable or creds aren't flowing, the smoke test fails
+# and the engine reports the range as failed instead of marking it ready
+# and handing a broken environment to a participant. Earlier (BSides
+# Ottawa) this was a manual post-provision step run by the operator
+# (apply_kali_bedrock_shard.py); integrating it here makes provisioning
+# self-sufficient.
+KALI_BEDROCK_SHARD_SCRIPT = """#!/bin/bash
+set -euo pipefail
+
+ANTHROPIC_MODEL="{{ anthropic_model }}"
+ANTHROPIC_SMALL_FAST_MODEL="{{ anthropic_small_fast_model }}"
+BEDROCK_FQDN="bedrock-runtime.us-east-2.amazonaws.com"
+
+# 1. Resolve VPCE private IP. Try host resolver first (VPC resolver may
+# already serve VPCE IPs), fall back to direct query against the Amazon
+# resolver to bypass the scenario's custom dns container.
+BEDROCK_IP="$(getent hosts "$BEDROCK_FQDN" | awk '{print $1; exit}')"
+case "$BEDROCK_IP" in
+  10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*) : ;;
+  *)
+    if command -v dig >/dev/null 2>&1; then
+      BEDROCK_IP="$(dig +short @169.254.169.253 "$BEDROCK_FQDN" | grep -E '^10\\.' | head -n1 || true)"
+    fi
+    ;;
+esac
+if [[ -z "$BEDROCK_IP" ]]; then
+  echo "polaris kali bedrock shard: could not resolve $BEDROCK_FQDN to a private IP" >&2
+  exit 2
+fi
+echo "polaris kali bedrock shard: bedrock VPCE IP = $BEDROCK_IP"
+
+# 2. Write /etc/profile.d/claude-bedrock.sh inside a14-kali. Same-account
+# mode: no static AWS creds; claude inherits the EC2 instance profile via
+# IMDSv2 through the docker bridge (requires hop limit >= 2 on the
+# instance, set in main.py).
+PROFILE_FILE="$(mktemp)"
+chmod 600 "$PROFILE_FILE"
+cat > "$PROFILE_FILE" <<PROFILE_EOF
+# Managed by polaris_range_bootstrap KaliBedrockShard step - do not edit manually.
+export CLAUDE_CODE_USE_BEDROCK=1
+export AWS_REGION=us-east-2
+export ANTHROPIC_MODEL=$ANTHROPIC_MODEL
+export ANTHROPIC_SMALL_FAST_MODEL=$ANTHROPIC_SMALL_FAST_MODEL
+PROFILE_EOF
+
+docker cp "$PROFILE_FILE" a14-kali:/etc/profile.d/claude-bedrock.sh
+docker exec a14-kali chmod 644 /etc/profile.d/claude-bedrock.sh
+rm -f "$PROFILE_FILE"
+
+# 3. /etc/hosts override (idempotent).
+HOSTS_LINE="$BEDROCK_IP $BEDROCK_FQDN"
+docker exec a14-kali bash -c "grep -Fq '$BEDROCK_FQDN' /etc/hosts || echo '$HOSTS_LINE' >> /etc/hosts"
+
+# 4. Smoke test claude.
+echo "polaris kali bedrock shard: claude smoke test..."
+if docker exec a14-kali bash -lc 'timeout 60 claude -p "reply with just: ok"' >/tmp/claude_smoke.out 2>&1; then
+  head -c 200 /tmp/claude_smoke.out | tr -c '[:print:]\\n' ' '
+  echo
+  echo "polaris kali bedrock shard: claude OK"
+else
+  rc=$?
+  echo "polaris kali bedrock shard: claude FAILED (rc=$rc)" >&2
+  head -c 2000 /tmp/claude_smoke.out >&2
+  exit 3
+fi
+"""
+
+
 # DC. If any check fails, the plan is reported as failed and the range
 # provisioner aborts. The dig query runs from inside a14-kali because
 # the alpine `bind` package on the dns container ships only the daemon
@@ -391,6 +476,12 @@ class PolarisRangeBootstrapPlan:
             timeout_seconds=60,
             requires_reboot=False,
         ),
+        SetupStep(
+            name="polaris_kali_bedrock_shard",
+            script=KALI_BEDROCK_SHARD_SCRIPT,
+            timeout_seconds=180,
+            requires_reboot=False,
+        ),
     ]
 
     verify_step: ClassVar[SetupStep] = SetupStep(
@@ -429,7 +520,22 @@ class PolarisRangeBootstrapPlan:
                 "(per-instance kali pubkey from tls_private_key.instance)"
             )
 
+        # Bedrock model identifiers for the kali-bedrock-shard step.
+        # Match the same defaults the kali AMI bake set in
+        # shifter/packer/scripts/kali/claude-code.sh — keep these in
+        # sync. Per-range override would go on the InstanceSpec
+        # (`anthropic_model`) if needed for sharding across model
+        # variants; for now we ship the same shard everyone uses.
+        anthropic_model = getattr(instance, "anthropic_model", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+        anthropic_small_fast_model = getattr(
+            instance,
+            "anthropic_small_fast_model",
+            "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        )
+
         return {
             "dc_ip": dc_ip,
             "public_key": public_key,
+            "anthropic_model": anthropic_model,
+            "anthropic_small_fast_model": anthropic_small_fast_model,
         }

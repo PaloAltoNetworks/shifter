@@ -17,14 +17,35 @@ RUN apt-get update && apt-get install -y curl openssh-client unzip && \
     rm pulumi.tar.gz && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user matching shifter_platform's appuser:1000 / appgroup:1000.
+# --create-home gives Terraform/Pulumi a writable HOME for plugin caches.
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --create-home --shell /bin/bash appuser && \
+    mkdir -p /home/appuser/.terraform.d/plugin-cache /home/appuser/.pulumi && \
+    chown -R appuser:appgroup /home/appuser
+
 # Install Python dependencies
 WORKDIR /app
+RUN chown appuser:appgroup /app
 COPY requirements.txt requirements-gcp.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-gcp.txt
 
-# Copy Pulumi program
-COPY . .
+# Copy provisioner code, owned by the non-root runtime user so Terraform can
+# write .terraform/ and terraform.tfvars.json inside module working directories
+# (see terraform_base.apply / destroy in this package).
+COPY --chown=appuser:appgroup . .
+
+# Set HOME explicitly so Terraform/Pulumi find the writable cache/config
+# directories created above (Docker's USER directive does not adjust HOME).
+ENV HOME=/home/appuser \
+    PULUMI_HOME=/home/appuser/.pulumi \
+    TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache
+
+# Drop privileges before invoking Terraform/Pulumi. Numeric UID:GID is used
+# (instead of `USER appuser`) so Kubernetes admission controllers running with
+# `runAsNonRoot: true` can verify the user is non-root without resolving names.
+USER 1000:1000
 
 # Entrypoint receives operation as argument
 ENTRYPOINT ["python", "main.py"]

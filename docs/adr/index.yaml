@@ -165,8 +165,8 @@
       },
       {
         "id": "ADR-006-R2",
-        "description": "Containers must define securityContext with non-root and read-only root filesystem.",
-        "checks": []
+        "description": "Pod, container, and init-container securityContext on every Deployment (in base manifests under platform/k8s/gcp/base/ AND in helm-template-rendered output of platform/charts/shifter for each supported values file) must enforce the restricted PSS profile: pod-level seccompProfile RuntimeDefault; per container/initContainer allowPrivilegeEscalation false, capabilities drop ALL with no capabilities.add, readOnlyRootFilesystem true, runAsNonRoot true, privileged not true, container-level seccompProfile (when set) equal to RuntimeDefault, and positive runAsUser/runAsGroup integers (booleans rejected). Pod-level inheritance for runAsNonRoot/runAsUser/runAsGroup is honored.",
+        "checks": ["k8s-deployment-security-context"]
       },
       {
         "id": "ADR-006-R3",
@@ -179,7 +179,8 @@
     "evidence": [
       "platform/k8s/gcp/base/namespaces.yaml",
       ".kube-linter.yaml",
-      ".pre-commit-config.yaml"
+      ".pre-commit-config.yaml",
+      "scripts/adr_guard/adr_guard.py"
     ]
   },
   {

@@ -112,6 +112,60 @@ The first slice intentionally stays small:
   Architecture check ensuring namespace manifests carry Pod Security Standards
   `pod-security.kubernetes.io/enforce` labels. Enforces ADR-006-R1.
 
+- `k8s-deployment-security-context`
+  Enforces ADR-006-R2 against two enforcement sources: (1) every YAML
+  document under `platform/k8s/gcp/base/` (recursive) whose `kind` is
+  `Deployment`, and (2) the rendered output of
+  `helm template platform/charts/shifter -f <values>` for each entry
+  in `HELM_VALUES_FILES` (`values-gcp-dev.yaml`, `values-gcp-prod.yaml`).
+  Per ADR-007 the chart is the authoritative deployment contract;
+  base manifests are supporting snapshots. Validating both sources
+  catches regressions where a chart template or values file removes
+  a required securityContext field even when the base snapshots
+  remain compliant. Kind-based filtering, not filename-based — a
+  Deployment shipped under any filename or extension is scanned.
+  Multi-document files (`---` separator) and indentless YAML
+  sequences are supported.
+  Per pod template: `securityContext.seccompProfile.type` must be
+  `RuntimeDefault`. Per container AND init container: the *effective*
+  context (after pod-level inheritance for `runAsNonRoot`,
+  `runAsUser`, `runAsGroup`) must satisfy
+  `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` with
+  no `capabilities.add`, `readOnlyRootFilesystem: true`,
+  `runAsNonRoot: true`, `securityContext.privileged` not `true`, an
+  optional container-level `seccompProfile.type` (when set) equal to
+  `RuntimeDefault`, and `runAsUser`/`runAsGroup` set to positive
+  integers (booleans are rejected since Python treats `bool` as a
+  subclass of `int`). Runs in the `ci` level (`--all --level ci`,
+  including CI) and in a dedicated pre-commit hook `adr-guard-k8s`
+  (separate from `adr-guard-fast`) that triggers on
+  `platform/k8s/gcp/base/*.{yaml,yml}` and
+  `platform/charts/shifter/` changes. Not in the `fast` level, so
+  unrelated `--level fast` invocations and the system-Python
+  `adr-guard-fast` hook do not pull in the YAML or helm dependencies.
+  **Runtime dependencies:** PyYAML (`pyyaml>=6.0`) and Helm
+  (`v3.15.4`). The `adr-conformance` job in
+  `.github/workflows/_quality.yml` installs PyYAML hermetically via
+  `python3 -m pip install --target ${RUNNER_TEMP}/py-deps` (with
+  `PYTHONPATH=${RUNNER_TEMP}/py-deps` on the run step) and Helm via
+  the official `get.helm.sh` release tarball extracted to
+  `${RUNNER_TEMP}/helm-bin/` and added to `$GITHUB_PATH`. No
+  `pip install --user` and no system-path installs, so neither
+  dependency leaks into mutable host state on the self-hosted
+  runner. The `adr-guard-tests` job installs PyYAML the same way —
+  the chart-rendering test uses a fake helm shim, so CI tests don't
+  need real helm. The `adr-guard-k8s` pre-commit hook
+  uses `language: python` with `additional_dependencies:
+  pyyaml>=6.0` so PyYAML is provisioned in an isolated pre-commit
+  virtualenv; helm is a developer prerequisite shared with the
+  existing `helm-lint-shifter-chart` hook. Complements existing
+  kube-linter checks (`run-as-non-root`, `no-read-only-root-fs`,
+  `privilege-escalation-container`) which cover the subset
+  PSS-restricted enforces directly; this check fills the gaps for
+  `seccompProfile`, `capabilities.drop`/`add`, container-level
+  seccomp overrides, `privileged: true`, pod-level inheritance, and
+  initContainer coverage.
+
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal
   Terraform outputs, then calls `aws rds describe-db-instances` for each

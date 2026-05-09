@@ -145,18 +145,19 @@ The first slice intentionally stays small:
   `adr-guard-fast` hook do not pull in the YAML or helm dependencies.
   **Runtime dependencies:** PyYAML (`pyyaml>=6.0`) and Helm
   (`v3.15.4`). The `adr-conformance` job in
-  `.github/workflows/_quality.yml` provisions a hermetic Python via
-  `actions/setup-python@v5` (the self-hosted runner's system
-  Python does not include `pip`), installs PyYAML via
-  `python -m pip install --target ${RUNNER_TEMP}/py-deps` with
-  `PYTHONPATH=${RUNNER_TEMP}/py-deps` on the run step, and Helm via
-  the official `get.helm.sh` release tarball extracted to
-  `${RUNNER_TEMP}/helm-bin/` and added to `$GITHUB_PATH`. No
-  `pip install --user` and no system-path installs, so neither
-  dependency leaks into mutable host state on the self-hosted
-  runner. The `adr-guard-tests` job uses the same setup-python +
-  PyYAML pattern — the chart-rendering test uses a fake helm shim,
-  so CI tests don't need real helm. The `adr-guard-k8s` pre-commit hook
+  `.github/workflows/_quality.yml` bootstraps pip via the stdlib
+  `ensurepip` module (the self-hosted Amazon Linux runner's system
+  Python ships without pip; `actions/setup-python` cannot fetch
+  Python 3.12 for the runner's architecture), then installs PyYAML
+  via `python3 -m pip install --no-deps --target
+  ${RUNNER_TEMP}/py-deps` with `PYTHONPATH=${RUNNER_TEMP}/py-deps`
+  on the run step, and Helm via the official `get.helm.sh` release
+  tarball extracted to `${RUNNER_TEMP}/helm-bin/` and added to
+  `$GITHUB_PATH`. The `--user` site PyPI install of pip itself is
+  job-scoped on the self-hosted runner; PyYAML lands under
+  `${RUNNER_TEMP}/py-deps` which is ephemeral. The `adr-guard-tests`
+  job uses the same ensurepip + PyYAML pattern; the chart-rendering
+  test uses a fake helm shim, so CI tests don't need real helm. The `adr-guard-k8s` pre-commit hook
   uses `language: python` with `additional_dependencies:
   pyyaml>=6.0` so PyYAML is provisioned in an isolated pre-commit
   virtualenv; helm is a developer prerequisite shared with the

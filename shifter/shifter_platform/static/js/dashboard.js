@@ -355,13 +355,13 @@ class DashboardManager {
      */
     _resetDropdownDisplay(dropdown, placeholder) {
         if (!dropdown) return;
-        const trigger = dropdown.querySelector('.xdr-dropdown-value');
+        const trigger = dropdown.querySelector('.shifter-dropdown-value');
         if (trigger) {
             trigger.textContent = placeholder;
             trigger.classList.add('placeholder');
         }
         // Clear selected state
-        const items = dropdown.querySelectorAll('.xdr-dropdown-item');
+        const items = dropdown.querySelectorAll('.shifter-dropdown-item');
         items.forEach(item => item.classList.remove('selected'));
     }
 
@@ -415,7 +415,7 @@ class DashboardManager {
 
                 // Create dropdown item - NAME ONLY (no description)
                 const li = document.createElement('li');
-                li.className = 'xdr-dropdown-item';
+                li.className = 'shifter-dropdown-item';
                 li.dataset.value = scenario.id;
                 li.textContent = scenario.name;
 
@@ -427,13 +427,13 @@ class DashboardManager {
             if (firstScenario && this.scenarioSelect) {
                 this.scenarioSelect.value = firstScenario.id;
                 // Update dropdown display
-                const trigger = this.scenarioDropdown?.querySelector('.xdr-dropdown-value');
+                const trigger = this.scenarioDropdown?.querySelector('.shifter-dropdown-value');
                 if (trigger) {
                     trigger.textContent = firstScenario.name;
                     trigger.classList.remove('placeholder');
                 }
                 // Mark first item as selected
-                const firstItem = scenarioItems.querySelector('.xdr-dropdown-item');
+                const firstItem = scenarioItems.querySelector('.shifter-dropdown-item');
                 if (firstItem) {
                     firstItem.classList.add('selected');
                 }
@@ -453,7 +453,7 @@ class DashboardManager {
     }
 
     _initScenarioDropdown() {
-        // Initialize the scenario dropdown with XdrDropdown if available
+        // Initialize the scenario dropdown with Dropdown if available
         this._initDropdown(this.scenarioDropdown);
     }
 
@@ -1134,15 +1134,15 @@ class DashboardManager {
     }
 
     _initDropdown(dropdown) {
-        if (!dropdown || !globalThis.XdrDropdown) {
+        if (!dropdown || !globalThis.ShifterDropdown) {
             return null;
         }
 
-        if (typeof globalThis.XdrDropdown.init === 'function') {
-            return globalThis.XdrDropdown.init(dropdown);
+        if (typeof globalThis.ShifterDropdown.init === 'function') {
+            return globalThis.ShifterDropdown.init(dropdown);
         }
 
-        return new globalThis.XdrDropdown(dropdown);
+        return new globalThis.ShifterDropdown(dropdown);
     }
 
     _populateWindowsAgentDropdown(agents) {
@@ -1188,7 +1188,7 @@ class DashboardManager {
 
         for (const agent of agents) {
             const li = document.createElement('li');
-            li.className = 'xdr-dropdown-item';
+            li.className = 'shifter-dropdown-item';
             li.dataset.value = agent.id;
             li.textContent = `${agent.name} (${agent.os_name})`;
             container.appendChild(li);
@@ -1198,7 +1198,7 @@ class DashboardManager {
     _renderEmptyDropdown(container, message) {
         container.innerHTML = '';
         const li = document.createElement('li');
-        li.className = 'xdr-dropdown-item disabled';
+        li.className = 'shifter-dropdown-item disabled';
         li.textContent = message;
         container.appendChild(li);
     }

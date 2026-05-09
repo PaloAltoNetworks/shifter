@@ -2,77 +2,7 @@
 {% load static %}
 
 {% block extra_css %}
-<style>
-    /* Upload progress UI - specific to this page */
-    .upload-progress {
-        display: none;
-        margin-top: 1rem;
-    }
-
-    .upload-progress.active {
-        display: block;
-    }
-
-    .progress-bar-container {
-        background: var(--xdr-border);
-        border-radius: 4px;
-        height: 8px;
-        overflow: hidden;
-        margin-bottom: 0.5rem;
-    }
-
-    .progress-bar {
-        background: var(--xdr-primary);
-        height: 100%;
-        width: 0%;
-        transition: width 0.3s ease;
-    }
-
-    .progress-bar.error {
-        background: var(--xdr-error);
-    }
-
-    .progress-status {
-        font-size: 0.875rem;
-        color: var(--xdr-secondary-text);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .btn-cancel-upload {
-        background: transparent;
-        border: 1px solid var(--xdr-error);
-        color: var(--xdr-error);
-        padding: 0.25rem 0.75rem;
-        font-size: 0.75rem;
-        border-radius: 20px;
-        cursor: pointer;
-        font-family: inherit;
-    }
-
-    .btn-cancel-upload:hover {
-        background: rgba(255, 68, 68, 0.15);
-    }
-
-    .upload-error {
-        color: var(--xdr-error);
-        font-size: 0.875rem;
-        margin-top: 0.5rem;
-        display: none;
-    }
-
-    .upload-error.visible {
-        display: block;
-    }
-
-    /* Disable form during upload */
-    .upload-form.uploading input,
-    .upload-form.uploading button[type="submit"] {
-        pointer-events: none;
-        opacity: 0.5;
-    }
-</style>
+<link rel="stylesheet" href="{% static 'css/upload-ui.css' %}">
 {% endblock %}
 
 {% block content %}

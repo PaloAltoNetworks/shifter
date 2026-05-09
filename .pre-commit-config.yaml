@@ -78,6 +78,13 @@ repos:
       - id: ruff-format
         name: ruff-format (check_layer_imports)
         files: ^scripts/check_layer_imports/
+      - id: ruff
+        name: ruff (check_rds_pending_modifications)
+        args: [--fix]
+        files: ^scripts/check_rds_pending_modifications/
+      - id: ruff-format
+        name: ruff-format (check_rds_pending_modifications)
+        files: ^scripts/check_rds_pending_modifications/
 
   # JavaScript/CSS linting
   - repo: local
@@ -373,6 +380,14 @@ repos:
           --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/check_layer_imports/
+        pass_filenames: false
+
+      - id: pytest-check-rds-pending-modifications
+        name: pytest (check_rds_pending_modifications)
+        entry: >-
+          bash -c 'cd scripts/check_rds_pending_modifications && uv run pytest tests/ -q'
+        language: system
+        files: ^scripts/check_rds_pending_modifications/
         pass_filenames: false
 
   # Jest tests (JS)

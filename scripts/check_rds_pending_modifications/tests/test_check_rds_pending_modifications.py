@@ -1,7 +1,7 @@
 """Tests for check_rds_pending_modifications.py.
 
-Run from the repo root:
-    python3 -m pytest scripts/check_rds_pending_modifications/test_check_rds_pending_modifications.py -v
+Run via the package's uv environment from the repo root:
+    cd scripts/check_rds_pending_modifications && uv run pytest tests/ -v
 """
 
 from __future__ import annotations
@@ -11,11 +11,9 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-import pytest
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from check_rds_pending_modifications import (  # noqa: E402
+from check_rds_pending_modifications import (
     InstanceCheck,
     check_instance,
     collect_instance_ids_from_tf_outputs,
@@ -70,14 +68,8 @@ def test_pending_class_change_on_terminal_status_fails() -> None:
     `available` is terminal, so we do not wait — the modify has either landed
     or been queued for the maintenance window.
     """
-    aws = mock.Mock(
-        return_value=_aws_response(
-            {"DBInstanceClass": "db.m5.xlarge"}, db_instance_status="available"
-        )
-    )
-    result = check_instance(
-        "dev-portal-guacamole-db", aws_describe=aws, sleep=_no_sleep
-    )
+    aws = mock.Mock(return_value=_aws_response({"DBInstanceClass": "db.m5.xlarge"}, db_instance_status="available"))
+    result = check_instance("dev-portal-guacamole-db", aws_describe=aws, sleep=_no_sleep)
     assert result.is_clean is False
     assert result.pending == {"DBInstanceClass": "db.m5.xlarge"}
     assert aws.call_count == 1
@@ -116,11 +108,7 @@ def test_modifying_then_available_clears_to_pass() -> None:
 
 def test_stuck_modifying_times_out_as_failure() -> None:
     """If the instance never leaves the transitional state, fail with timeout."""
-    aws = mock.Mock(
-        return_value=_aws_response(
-            {"DBInstanceClass": "db.m5.xlarge"}, db_instance_status="modifying"
-        )
-    )
+    aws = mock.Mock(return_value=_aws_response({"DBInstanceClass": "db.m5.xlarge"}, db_instance_status="modifying"))
 
     result = check_instance(
         "dev-portal-db",
@@ -192,9 +180,7 @@ def test_collect_instance_ids_from_tf_outputs_empty_when_none() -> None:
 def test_collect_instance_ids_from_tf_outputs_path_wrapper(tmp_path: Path) -> None:
     """The Path wrapper preserves the in-memory parser's behavior."""
     out_file = tmp_path / "outputs.json"
-    out_file.write_text(
-        json.dumps({"db_instance_id": {"value": "dev-portal-db", "type": "string"}})
-    )
+    out_file.write_text(json.dumps({"db_instance_id": {"value": "dev-portal-db", "type": "string"}}))
     assert collect_instance_ids_from_tf_outputs(out_file) == ["dev-portal-db"]
 
 
@@ -260,9 +246,7 @@ def test_pending_reboot_parameter_group_fails() -> None:
     )
     result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
     assert result.is_clean is False
-    assert result.pending == {
-        "DBParameterGroup[shifter-dev-portal-pg16]": "pending-reboot"
-    }
+    assert result.pending == {"DBParameterGroup[shifter-dev-portal-pg16]": "pending-reboot"}
 
 
 def test_parameter_group_in_sync_passes() -> None:
@@ -312,10 +296,7 @@ def test_parameter_group_failed_to_apply_fails() -> None:
     )
     result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
     assert result.is_clean is False
-    assert (
-        result.pending["DBParameterGroup[shifter-dev-portal-pg16]"]
-        == "failed-to-apply"
-    )
+    assert result.pending["DBParameterGroup[shifter-dev-portal-pg16]"] == "failed-to-apply"
 
 
 def test_main_redacts_master_user_password_from_log_output() -> None:

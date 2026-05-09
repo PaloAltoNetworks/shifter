@@ -81,6 +81,11 @@ variable "prevent_destroy" {
   default     = false
 }
 
+variable "apply_immediately" {
+  description = "Apply RDS modifications during the deploy instead of queueing them for the maintenance window. Required input — environments must choose explicitly."
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # Log Exports
 # ------------------------------------------------------------------------------

@@ -112,6 +112,7 @@ module "rds" {
   backup_retention_days = var.db_backup_retention_days
   deletion_protection   = var.db_deletion_protection
   skip_final_snapshot   = var.db_skip_final_snapshot
+  apply_immediately     = var.db_apply_immediately
 
   # Phase 5: RDS Log Exports
   enable_log_exports = var.enable_rds_log_exports
@@ -610,6 +611,7 @@ module "guacamole" {
   db_backup_retention_days = var.guacamole_db_backup_retention_days
   db_deletion_protection   = var.guacamole_db_deletion_protection
   db_skip_final_snapshot   = var.guacamole_db_skip_final_snapshot
+  db_apply_immediately     = var.guacamole_db_apply_immediately
 
   # Autoscaling
   enable_autoscaling       = var.guacamole_enable_autoscaling

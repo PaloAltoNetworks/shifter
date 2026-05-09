@@ -198,6 +198,19 @@ jobs:
 
           rm -f tfplan
       - run: terraform apply -auto-approve
+      - name: Verify RDS pending modifications applied (dev only)
+        # Dev opts into apply_immediately=true so any post-apply
+        # PendingModifiedValues means the deploy is incomplete. Prod
+        # deliberately keeps apply_immediately=false so RDS changes flow
+        # through the configured maintenance window — running the check
+        # there would fail every legitimate prod deploy.
+        # See scripts/check_rds_pending_modifications/check_rds_pending_modifications.py
+        # and dev/terraform.md "RDS Change Application".
+        if: inputs.is_dev
+        working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/check_rds_pending_modifications/check_rds_pending_modifications.py" \
+            --tf-outputs-from .
       - name: Wait for Guacamole ECS services to stabilize
         env:
           ENV: ${{ inputs.environment }}

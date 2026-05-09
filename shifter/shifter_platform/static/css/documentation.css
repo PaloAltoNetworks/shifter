@@ -13,8 +13,8 @@
 .docs-nav {
     width: 280px;
     min-width: 280px;
-    background: var(--xdr-surface);
-    border-right: 1px solid var(--xdr-border);
+    background: var(--theme-surface);
+    border-right: 1px solid var(--theme-border);
     overflow-y: auto;
     position: sticky;
     top: 0;
@@ -23,13 +23,13 @@
 
 .docs-nav-header {
     padding: 16px 20px;
-    border-bottom: 1px solid var(--xdr-border);
+    border-bottom: 1px solid var(--theme-border);
 }
 
 .docs-nav-header h2 {
     font-size: 14px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 0;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -57,7 +57,7 @@
     width: 100%;
     padding: 8px 20px;
     font-size: 14px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     background: none;
     border: none;
     text-align: left;
@@ -69,13 +69,13 @@
 
 .nav-tree-toggle:hover,
 .nav-tree-link:hover {
-    background: var(--xdr-hover);
-    color: var(--xdr-text);
+    background: var(--theme-hover);
+    color: var(--theme-text);
 }
 
 .nav-tree-link.active {
-    color: #0c6;
-    background: rgb(0, 204, 102, 0.08);
+    color: var(--theme-primary);
+    background: var(--theme-selected);
 }
 
 .nav-tree-arrow {
@@ -112,7 +112,7 @@
 
 /* Markdown Content Styling */
 .markdown-body {
-    color: var(--xdr-text);
+    color: var(--theme-text);
     font-size: 14px;
     line-height: 1.7;
 }
@@ -120,30 +120,30 @@
 .markdown-body h1 {
     font-size: 28px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 0 0 24px;
     padding-bottom: 12px;
-    border-bottom: 1px solid var(--xdr-border);
+    border-bottom: 1px solid var(--theme-border);
 }
 
 .markdown-body h2 {
     font-size: 20px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 32px 0 16px;
 }
 
 .markdown-body h3 {
     font-size: 16px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 24px 0 12px;
 }
 
 .markdown-body h4 {
     font-size: 14px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 20px 0 8px;
 }
 
@@ -152,7 +152,7 @@
 }
 
 .markdown-body a {
-    color: #128df3;
+    color: #94a3b8;
     text-decoration: none;
 }
 
@@ -182,7 +182,7 @@
 
 .markdown-body pre {
     background: #0d0d0d;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
     padding: 16px;
     overflow-x: auto;
@@ -199,7 +199,7 @@
 /* Syntax highlighting classes from codehilite */
 .markdown-body .codehilite {
     background: #0d0d0d;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
     padding: 16px;
     overflow-x: auto;
@@ -224,32 +224,32 @@
 .markdown-body td {
     padding: 10px 12px;
     text-align: left;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
 }
 
 .markdown-body th {
     font-weight: 600;
-    background: var(--xdr-surface);
-    color: var(--xdr-text-secondary);
+    background: var(--theme-surface);
+    color: var(--theme-text-secondary);
     font-size: 12px;
     text-transform: uppercase;
 }
 
 .markdown-body td {
-    background: var(--xdr-background);
+    background: var(--theme-background);
 }
 
 .markdown-body tbody tr:hover td {
-    background: var(--xdr-hover);
+    background: var(--theme-hover);
 }
 
 /* Blockquotes */
 .markdown-body blockquote {
     margin: 0 0 16px;
     padding: 12px 16px;
-    border-left: 4px solid #0c6;
-    background: var(--xdr-surface);
-    color: var(--xdr-text-secondary);
+    border-left: 4px solid #94a3b8;
+    background: var(--theme-surface);
+    color: var(--theme-text-secondary);
 }
 
 .markdown-body blockquote p:last-child {
@@ -258,7 +258,7 @@
 
 /* Mermaid diagrams */
 .markdown-body .mermaid {
-    background: var(--xdr-surface);
+    background: var(--theme-surface);
     padding: 24px;
     border-radius: 4px;
     margin: 16px 0;
@@ -269,7 +269,7 @@
 /* Horizontal rules */
 .markdown-body hr {
     border: none;
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
     margin: 24px 0;
 }
 

@@ -12,8 +12,8 @@
 }
 
 .range-tile {
-    background: var(--xdr-surface);
-    border: 1px solid var(--xdr-border);
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
     padding: 16px;
     min-height: 200px;
@@ -34,7 +34,7 @@
 .range-tile .tile-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 0 0 12px;
 }
 
@@ -51,7 +51,7 @@
 
 .launch-tile-info {
     /* Scenario info column */
-    border-left: 1px solid var(--xdr-border);
+    border-left: 1px solid var(--theme-border);
     padding-left: 24px;
 }
 
@@ -66,13 +66,13 @@
 .scenario-info-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 0 0 8px;
 }
 
 .scenario-info-description {
     font-size: 12px;
-    color: var(--xdr-text-muted);
+    color: var(--theme-text-muted);
     line-height: 1.5;
 }
 
@@ -102,14 +102,14 @@
             <div class="launch-tile-form">
                 <div class="form-group">
                     <label class="form-label">Scenario</label>
-                    <div class="xdr-dropdown full-width" id="scenario-dropdown">
+                    <div class="shifter-dropdown full-width" id="scenario-dropdown">
                         <input type="hidden" name="scenario" id="scenario-select-value" value="">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">Loading scenarios...</span>
-                            <span class="xdr-dropdown-chevron"></span>
+                        <button type="button" class="shifter-dropdown-trigger">
+                            <span class="shifter-dropdown-value placeholder">Loading scenarios...</span>
+                            <span class="shifter-dropdown-chevron"></span>
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="scenario-items">
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="scenario-items">
                                 <!-- Populated dynamically by dashboard.js -->
                             </ul>
                         </div>
@@ -119,19 +119,19 @@
                 <!-- OS Selection - shown when scenario has from_agent instances -->
                 <div class="form-group" id="os-selection-section" style="display: none;">
                     <label class="form-label">Victim OS</label>
-                    <div class="xdr-dropdown full-width" id="os-dropdown">
+                    <div class="shifter-dropdown full-width" id="os-dropdown">
                         <input type="hidden" name="os_type" id="os-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select OS type --</span>
-                            <span class="xdr-dropdown-chevron"></span>
+                        <button type="button" class="shifter-dropdown-trigger">
+                            <span class="shifter-dropdown-value placeholder">-- Select OS type --</span>
+                            <span class="shifter-dropdown-chevron"></span>
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="os-items">
-                                <li class="xdr-dropdown-item" data-value="windows">
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="os-items">
+                                <li class="shifter-dropdown-item" data-value="windows">
                                     <span class="item-label">Windows</span>
                                     <span class="item-description">Windows 10/11</span>
                                 </li>
-                                <li class="xdr-dropdown-item" data-value="linux">
+                                <li class="shifter-dropdown-item" data-value="linux">
                                     <span class="item-label">Linux</span>
                                     <span class="item-description">Ubuntu</span>
                                 </li>
@@ -143,14 +143,14 @@
                 <!-- Agent dropdown - filtered by selected OS for from_agent scenarios -->
                 <div class="form-group" id="agent-section" style="display: none;">
                     <label class="form-label">Agent</label>
-                    <div class="xdr-dropdown full-width" id="agent-dropdown">
+                    <div class="shifter-dropdown full-width" id="agent-dropdown">
                         <input type="hidden" name="agent" id="agent-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select an agent --</span>
-                            <span class="xdr-dropdown-chevron"></span>
+                        <button type="button" class="shifter-dropdown-trigger">
+                            <span class="shifter-dropdown-value placeholder">-- Select an agent --</span>
+                            <span class="shifter-dropdown-chevron"></span>
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="agent-items">
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="agent-items">
                                 <!-- Will be populated dynamically -->
                             </ul>
                         </div>
@@ -160,14 +160,14 @@
                 <!-- Windows Agent dropdown - shown when scenario requires Windows agents -->
                 <div class="form-group" id="windows-agent-section" style="display: none;">
                     <label class="form-label">Windows Agent</label>
-                    <div class="xdr-dropdown full-width" id="windows-agent-dropdown">
+                    <div class="shifter-dropdown full-width" id="windows-agent-dropdown">
                         <input type="hidden" name="windows_agent" id="windows-agent-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select a Windows agent --</span>
-                            <span class="xdr-dropdown-chevron"></span>
+                        <button type="button" class="shifter-dropdown-trigger">
+                            <span class="shifter-dropdown-value placeholder">-- Select a Windows agent --</span>
+                            <span class="shifter-dropdown-chevron"></span>
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="windows-agent-items">
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="windows-agent-items">
                                 <!-- Will be populated dynamically with Windows agents only -->
                             </ul>
                         </div>
@@ -177,14 +177,14 @@
                 <!-- Linux Agent dropdown - shown when scenario requires Linux agents -->
                 <div class="form-group" id="linux-agent-section" style="display: none;">
                     <label class="form-label">Linux Agent</label>
-                    <div class="xdr-dropdown full-width" id="linux-agent-dropdown">
+                    <div class="shifter-dropdown full-width" id="linux-agent-dropdown">
                         <input type="hidden" name="linux_agent" id="linux-agent-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select a Linux agent --</span>
-                            <span class="xdr-dropdown-chevron"></span>
+                        <button type="button" class="shifter-dropdown-trigger">
+                            <span class="shifter-dropdown-value placeholder">-- Select a Linux agent --</span>
+                            <span class="shifter-dropdown-chevron"></span>
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="linux-agent-items">
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="linux-agent-items">
                                 <!-- Will be populated dynamically with Linux agents only -->
                             </ul>
                         </div>

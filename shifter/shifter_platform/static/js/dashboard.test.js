@@ -56,17 +56,17 @@ describe('DashboardManager destroyRange', () => {
 
 describe('DashboardManager dropdown initialization', () => {
     const buildScenarioMarkup = () => `
-        <div class="xdr-dropdown" id="scenario-dropdown">
+        <div class="shifter-dropdown" id="scenario-dropdown">
             <input type="hidden" id="scenario-select-value" value="basic">
         </div>
     `;
 
     beforeEach(() => {
         document.body.innerHTML = buildScenarioMarkup();
-        globalThis.XdrDropdown = { init: jest.fn() };
+        globalThis.ShifterDropdown = { init: jest.fn() };
     });
 
-    test('uses XdrDropdown.init for explicit init', () => {
+    test('uses ShifterDropdown.init for explicit init', () => {
         const dashboard = new globalThis.DashboardManager({
             csrfToken: 'csrf',
             statusUrl: '/status',
@@ -78,7 +78,7 @@ describe('DashboardManager dropdown initialization', () => {
 
         dashboard._initScenarioDropdown();
 
-        expect(globalThis.XdrDropdown.init).toHaveBeenCalledWith(dashboard.scenarioDropdown);
+        expect(globalThis.ShifterDropdown.init).toHaveBeenCalledWith(dashboard.scenarioDropdown);
     });
 });
 

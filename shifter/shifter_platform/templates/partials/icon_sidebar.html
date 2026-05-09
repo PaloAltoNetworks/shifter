@@ -1,5 +1,5 @@
 {% load static user_extras %}
-{# Cortex XDR Left Navigation - Direct port from Cortex XDR #}
+{# Left navigation chrome — minimized + submenu panel layout. #}
 
 <nav class="left-nav minimized" id="leftNav" data-active-submenu="{% if active_nav == 'agents' or active_nav == 'ngfw' or active_nav == 'credentials' or active_nav == 'files' %}assets{% endif %}">
     <div class="left-nav-body">
@@ -14,33 +14,12 @@
             </svg>
         </button>
 
-        {# Header with logo #}
+        {# Header with wordmark — interim text wordmark; final identity tracked under UX-002. #}
         <div class="nav-header nav-header-main" id="navHeaderMain">
-            <a href="{% url 'mission_control:dashboard' %}" class="header-link" aria-label="Cortex Shifter home">
-                {# Cortex logo SVG - exact from Cortex XDR #}
-                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">
-                    <title>Cortex Shifter</title>
-                    <path fill-rule="evenodd" clip-rule="evenodd" d="M30 19.8102C30 15.8425 26.9583 12.6155 23.1917 12.6155L23.1917 27.0049C26.9583 27.0049 30 23.7905 30 19.8102Z" fill="url(#paint0_linear_logo)"></path>
-                    <mask id="mask0_logo" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="10" y="8" width="14" height="24">
-                        <path fill-rule="evenodd" clip-rule="evenodd" d="M10 32L23.0519 32L23.0519 8L10 8L10 32Z" fill="white"></path>
-                    </mask>
-                    <g mask="url(#mask0_logo)">
-                        <path fill-rule="evenodd" clip-rule="evenodd" d="M15.5955 20.0239C15.5955 16.2433 18.9268 13.1685 23.0519 13.1685V7.99998C15.8428 7.99998 10 13.3719 10 20C10 26.6281 15.8428 32 23.0519 32V26.8554C18.9268 26.8794 15.5955 23.8165 15.5955 20.0239Z" fill="url(#paint1_linear_logo)"></path>
-                    </g>
-                    <defs>
-                        <linearGradient id="paint0_linear_logo" x1="23.1917" y1="27.0049" x2="23.1917" y2="12.6155" gradientUnits="userSpaceOnUse">
-                            <stop stop-color="#5BFFA5"></stop>
-                            <stop offset="1" stop-color="#03833D"></stop>
-                        </linearGradient>
-                        <linearGradient id="paint1_linear_logo" x1="16.526" y1="32" x2="16.526" y2="7.99998" gradientUnits="userSpaceOnUse">
-                            <stop stop-color="#03833D"></stop>
-                            <stop offset="1" stop-color="#5BFFA5"></stop>
-                        </linearGradient>
-                    </defs>
-                </svg>
+            <a href="{% url 'mission_control:dashboard' %}" class="header-link" aria-label="Shifter home">
+                <span class="logo-mark" aria-hidden="true">S</span>
                 <span class="logo-text hide-when-minimized hide-when-submenu">
-                    <span class="logo-text-main">CORTEX <span class="logo-text-sub">SHIFTER</span></span>
-                    <span class="logo-text-tagline">by palo alto networks</span>
+                    <span class="logo-text-main">SHIFTER</span>
                 </span>
             </a>
         </div>
@@ -218,7 +197,7 @@
         {# Footer with settings, help, and user profile #}
         <div class="nav-footer">
             {% if not is_ctf_participant_only %}
-            {# Settings - exact Cortex XDR icon #}
+            {# Settings #}
             <div>
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">
                     <span class="nav-icon">
@@ -231,7 +210,7 @@
                 </a>
             </div>
 
-            {# Help - exact Cortex XDR icon #}
+            {# Help #}
             <div>
                 <a href="#" class="nav-menu-item nav-menu-item-level-0">
                     <span class="nav-icon">

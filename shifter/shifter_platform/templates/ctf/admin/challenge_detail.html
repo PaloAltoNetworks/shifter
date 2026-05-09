@@ -14,7 +14,7 @@
     display: flex;
     gap: 4px;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
     list-style: none;
     padding: 0;
@@ -22,13 +22,13 @@
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .challenge-badges {
@@ -47,13 +47,13 @@
 }
 
 .badge-category {
-    background: rgba(18, 141, 243, 0.15);
-    color: #128df3;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
 }
 
 .badge-easy {
-    background: rgba(0, 210, 106, 0.15);
-    color: #00d26a;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
 }
 
 .badge-medium {
@@ -77,8 +77,8 @@
 }
 
 .badge-correct {
-    background: rgba(0, 210, 106, 0.15);
-    color: #00d26a;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
 }
 
 .badge-incorrect {
@@ -100,22 +100,22 @@
 }
 
 .detail-row + .detail-row {
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
 }
 
 .detail-label {
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .detail-value {
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .challenge-description {
     font-size: 14px;
     line-height: 1.6;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .challenge-description p {
@@ -125,7 +125,7 @@
 .empty-message {
     padding: 24px;
     text-align: center;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     font-size: 13px;
 }
 
@@ -193,7 +193,7 @@
             {% if challenge.hints.count > 0 %}
             <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
                 <thead>
-                    <tr style="border-bottom: 1px solid var(--xdr-border);">
+                    <tr style="border-bottom: 1px solid var(--theme-border);">
                         <th style="padding: 6px; text-align: left;">#</th>
                         <th style="padding: 6px; text-align: left;">Text</th>
                         <th style="padding: 6px; text-align: left;">Penalty</th>
@@ -202,7 +202,7 @@
                 </thead>
                 <tbody>
                     {% for hint in challenge.hints.all %}
-                    <tr style="border-bottom: 1px solid var(--xdr-border);">
+                    <tr style="border-bottom: 1px solid var(--theme-border);">
                         <td style="padding: 6px;">{{ hint.order }}</td>
                         <td style="padding: 6px;">{{ hint.text|truncatechars:80 }}</td>
                         <td style="padding: 6px;">{{ hint.penalty }}%</td>
@@ -219,7 +219,7 @@
             <p class="text-muted" style="font-size: 13px; margin: 0;">No hints added yet.</p>
             {% endif %}
             {% if event.is_content_modifiable %}
-            <div id="add-hint-form" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--xdr-border);">
+            <div id="add-hint-form" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--theme-border);">
                 <div style="margin-bottom: 8px;">
                     <label style="font-size: 12px; font-weight: 600;">Hint Text</label>
                     <textarea id="new-hint-text" class="form-input" rows="2" style="width: 100%;"></textarea>
@@ -292,7 +292,7 @@
             {% endif %}
 
             {% if event.is_content_modifiable %}
-            <div id="add-flag-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
+            <div id="add-flag-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
                 <div style="margin-bottom: 8px;">
                     <label style="font-size: 13px; display: block; margin-bottom: 4px;">Flag Value</label>
                     <input type="text" id="new-flag-value" class="form-control" placeholder="Enter flag value or regex pattern">
@@ -364,7 +364,7 @@
             {% endif %}
 
             {% if event.is_content_modifiable %}
-            <div id="upload-file-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
+            <div id="upload-file-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
                 <form method="post" enctype="multipart/form-data" action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
                     {% csrf_token %}
                     <div style="margin-bottom: 8px;">
@@ -426,7 +426,7 @@
             {% endif %}
 
             {% if event.is_content_modifiable %}
-            <div id="add-prereq-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
+            <div id="add-prereq-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
                 <div style="margin-bottom: 8px;">
                     <label style="font-size: 13px; display: block; margin-bottom: 4px;">Required Challenge</label>
                     <select id="prereq-challenge-select" class="form-control">

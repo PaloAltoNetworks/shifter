@@ -27,6 +27,7 @@ from check_rds_pending_modifications import (  # noqa: E402
 def _aws_response(
     pending_modified_values: dict | None = None,
     db_instance_status: str = "available",
+    parameter_groups: list[dict] | None = None,
 ) -> dict:
     return {
         "DBInstances": [
@@ -34,6 +35,14 @@ def _aws_response(
                 "DBInstanceIdentifier": "ignored",
                 "DBInstanceStatus": db_instance_status,
                 "PendingModifiedValues": pending_modified_values or {},
+                "DBParameterGroups": parameter_groups
+                if parameter_groups is not None
+                else [
+                    {
+                        "DBParameterGroupName": "default.postgres16",
+                        "ParameterApplyStatus": "in-sync",
+                    }
+                ],
             }
         ]
     }
@@ -228,6 +237,85 @@ def test_main_with_no_instance_ids_is_a_clear_error() -> None:
     """Calling main with an empty ID list is a misuse — should fail noisily."""
     rc = main([], aws_describe=mock.Mock(), out_stream=mock.Mock(), sleep=_no_sleep)
     assert rc != 0
+
+
+def test_pending_reboot_parameter_group_fails() -> None:
+    """A static parameter-group change settles into ParameterApplyStatus=pending-reboot.
+
+    This is NOT exposed via PendingModifiedValues — only via the per-DBInstance
+    DBParameterGroups list. The check must inspect both surfaces, otherwise the
+    documented contract ("post-apply check will surface that residual state")
+    is a lie and dev deploys will quietly leave static param changes unapplied.
+    """
+    aws = mock.Mock(
+        return_value=_aws_response(
+            pending_modified_values={},
+            parameter_groups=[
+                {
+                    "DBParameterGroupName": "shifter-dev-portal-pg16",
+                    "ParameterApplyStatus": "pending-reboot",
+                }
+            ],
+        )
+    )
+    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
+    assert result.is_clean is False
+    assert result.pending == {
+        "DBParameterGroup[shifter-dev-portal-pg16]": "pending-reboot"
+    }
+
+
+def test_parameter_group_in_sync_passes() -> None:
+    """`in-sync` parameter group is the steady state — no reason to fail."""
+    aws = mock.Mock(
+        return_value=_aws_response(
+            pending_modified_values={},
+            parameter_groups=[
+                {
+                    "DBParameterGroupName": "shifter-dev-portal-pg16",
+                    "ParameterApplyStatus": "in-sync",
+                }
+            ],
+        )
+    )
+    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
+    assert result.is_clean is True
+
+
+def test_parameter_group_applying_is_not_a_failure() -> None:
+    """`applying` is a transient mid-flight state; not a deploy-blocking signal."""
+    aws = mock.Mock(
+        return_value=_aws_response(
+            parameter_groups=[
+                {
+                    "DBParameterGroupName": "shifter-dev-portal-pg16",
+                    "ParameterApplyStatus": "applying",
+                }
+            ],
+        )
+    )
+    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
+    assert result.is_clean is True
+
+
+def test_parameter_group_failed_to_apply_fails() -> None:
+    """`failed-to-apply` is a hard failure state — surface it loudly."""
+    aws = mock.Mock(
+        return_value=_aws_response(
+            parameter_groups=[
+                {
+                    "DBParameterGroupName": "shifter-dev-portal-pg16",
+                    "ParameterApplyStatus": "failed-to-apply",
+                }
+            ],
+        )
+    )
+    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
+    assert result.is_clean is False
+    assert (
+        result.pending["DBParameterGroup[shifter-dev-portal-pg16]"]
+        == "failed-to-apply"
+    )
 
 
 def test_main_redacts_master_user_password_from_log_output() -> None:

@@ -140,9 +140,33 @@ def _default_aws_describe(instance_id: str) -> dict:
     return json.loads(proc.stdout)
 
 
+# Parameter-group apply states that mean the change is settled or in flight. Any
+# other state (pending-reboot, failed-to-apply, error, pending-database-upgrade,
+# removing) means a static parameter change was accepted but not yet applied —
+# the deploy is incomplete in the same sense as a populated PendingModifiedValues.
+_PARAMETER_GROUP_OK_STATUSES = frozenset({"in-sync", "applying"})
+
+
 def _filtered_pending(instance_payload: dict) -> dict:
-    pending = instance_payload.get("PendingModifiedValues") or {}
-    return {k: v for k, v in pending.items() if v not in (None, [], {}, "")}
+    """Build the pending-changes view for one DBInstance payload.
+
+    Combines two AWS surfaces: `PendingModifiedValues` for instance-level
+    fields (class, storage, engine version, dynamic params), and
+    `DBParameterGroups[].ParameterApplyStatus` for static parameter-group
+    fields. Both produce keys in the returned dict so downstream reporting and
+    the `is_clean` check treat them uniformly.
+    """
+    pending = {
+        k: v
+        for k, v in (instance_payload.get("PendingModifiedValues") or {}).items()
+        if v not in (None, [], {}, "")
+    }
+    for group in instance_payload.get("DBParameterGroups") or []:
+        status = group.get("ParameterApplyStatus")
+        if status and status not in _PARAMETER_GROUP_OK_STATUSES:
+            name = group.get("DBParameterGroupName") or "<unknown>"
+            pending[f"DBParameterGroup[{name}]"] = status
+    return pending
 
 
 def check_instance(

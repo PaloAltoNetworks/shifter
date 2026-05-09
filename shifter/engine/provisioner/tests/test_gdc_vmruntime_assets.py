@@ -64,6 +64,24 @@ class TestRenderUserData:
 
         assert "DomainPass123!" in result
 
+    def test_dc_render_raises_when_dc_domain_password_unset(self, monkeypatch):
+        # The DC role's password must come from DC_DOMAIN_PASSWORD only.
+        # No fallback to GDC_WINDOWS_ADMIN_PASSWORD or a literal — the
+        # vulnerability class #760 closed.
+        monkeypatch.delenv("DC_DOMAIN_PASSWORD", raising=False)
+        monkeypatch.setenv("GDC_WINDOWS_ADMIN_PASSWORD", "GenericWinAdminPass!")
+
+        try:
+            _render_user_data(
+                {"role": "dc", "os_type": "windows"},
+                hostname="dc-01",
+                public_key="ssh-rsa AAAA",
+            )
+        except RuntimeError as exc:
+            assert "DC_DOMAIN_PASSWORD" in str(exc)
+        else:
+            raise AssertionError("GDC DC render must raise when DC_DOMAIN_PASSWORD is unset")
+
 
 class TestApplyRangeAssets:
     @patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())

@@ -45,6 +45,7 @@ DB_SECRET_ID="${DB_SECRET_ID:-${DB_SECRET_ARN:-}}"
 APP_SECRET_ID="${APP_SECRET_ID:-${APP_SECRET_ARN:-}}"
 OIDC_SECRET_ID="${OIDC_SECRET_ID:-${OIDC_SECRET_ARN:-${COGNITO_SECRET_ARN:-}}}"
 GUACAMOLE_SECRET_ID="${GUACAMOLE_SECRET_ID:-${GUACAMOLE_SECRET_ARN:-}}"
+DC_DOMAIN_PASSWORD_SECRET_ID="${DC_DOMAIN_PASSWORD_SECRET_ID:-${DC_DOMAIN_PASSWORD_SECRET_ARN:-}}"
 
 if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
     echo "Fetching runtime secrets from ${CLOUD_PROVIDER:-aws} secret manager..."
@@ -92,6 +93,16 @@ print(key + '=' * padding)
     fi
 
     echo "Secrets loaded successfully"
+fi
+
+# Fetch the prebaked DC Administrator password if provided. Guarded
+# independently of the DB/app outer block so deployments that supply
+# DC_DOMAIN_PASSWORD_SECRET_ARN without DB_SECRET_ID / APP_SECRET_ID
+# (direct env-var configurations, non-portal entrypoint commands)
+# still hydrate the value. The Windows-DC RDP credential lookup in
+# engine.services depends on this env var being exported.
+if [[ -n "${DC_DOMAIN_PASSWORD_SECRET_ID:-}" ]]; then
+    export DC_DOMAIN_PASSWORD=$(fetch_runtime_secret "$DC_DOMAIN_PASSWORD_SECRET_ID")
 fi
 
 # ------------------------------------------------------------------------------

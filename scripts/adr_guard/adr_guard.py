@@ -1206,6 +1206,321 @@ def check_k8s_deployment_security_context(
     return violations
 
 
+_TFVARS_SCOPE = ("platform/terraform/environments",)
+_SECRET_NAME_GROUP = (
+    r'([A-Za-z_][A-Za-z0-9_]*'
+    r'(?:_passwords?|_secrets?|_tokens?|_keys?|_credentials?))'
+)
+_SECRET_VAR_PATTERN = re.compile(
+    r'^\s*' + _SECRET_NAME_GROUP + r'\s*=\s*"[^"]+"',
+)
+# HCL also supports heredoc string literals (`name = <<EOF` /
+# `name = <<-EOF`), which would otherwise bypass the line regex above.
+_SECRET_HEREDOC_PATTERN = re.compile(
+    r'^\s*' + _SECRET_NAME_GROUP + r'\s*=\s*<<-?[A-Za-z_][A-Za-z0-9_]*\s*$',
+)
+# Object / array assignments to secret-bearing variables. These are
+# walked forward to the matching brace/bracket and flagged when any
+# string literal appears inside.
+_SECRET_BLOCK_OPEN_PATTERN = re.compile(
+    r'^\s*' + _SECRET_NAME_GROUP + r'\s*=\s*([\{\[])',
+)
+# Generic single-line assignment to a secret-bearing variable. Used to
+# catch function-wrapped string literals like
+# `db_password = trimspace("...")` or `api_token = sensitive("...")`
+# that the bare-string and block-open patterns above don't cover. The
+# RHS is whatever follows `=` on the same line; the violation walker
+# then scans for a string literal in that RHS (after stripping trailing
+# # / // comments) and flags when present.
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r'^\s*' + _SECRET_NAME_GROUP + r'\s*=\s*(.+)$',
+)
+_STRING_LITERAL_PATTERN = re.compile(r'"[^"]+"')
+_BLOCK_COMMENT_PATTERN = re.compile(r'/\*.*?\*/', re.DOTALL)
+# Variable-name suffixes that mark share-only material (SSH/JWT public
+# keys, authorized_keys files, public certificates) so the suffix-based
+# regex doesn't over-flag them. Matched against `var_name.endswith(...)`
+# so a variable like `public_key_password` is NOT exempted (the secret
+# suffix `_password` still wins, even though `public_key` appears in
+# the name).
+_NON_SECRET_NAME_SUFFIXES = (
+    "_public_key",
+    "_public_keys",
+    "_public_cert",
+    "_public_certs",
+    "_pub_key",
+    "_pub_keys",
+    "_pubkey",
+    "_pubkeys",
+    "_authorized_keys",
+    "public_key",
+    "public_keys",
+    "public_cert",
+    "public_certs",
+    "pub_key",
+    "pub_keys",
+    "pubkey",
+    "pubkeys",
+    "authorized_keys",
+)
+
+
+def _strip_hcl_comments(text: str) -> str:
+    """Replace HCL block comments with whitespace (preserving newlines).
+
+    Line comments (`#`, `//`) are handled per-line by the caller so it can
+    keep line numbers aligned for violation reporting. Block comments are
+    stripped here because they can span lines; we replace each character
+    with whitespace except newlines so subsequent regexes still see the
+    same line numbers.
+    """
+
+    def _blank(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    return _BLOCK_COMMENT_PATTERN.sub(_blank, text)
+
+
+def _is_line_commented(line: str) -> bool:
+    stripped = line.lstrip()
+    return stripped.startswith("#") or stripped.startswith("//")
+
+
+def _strip_trailing_line_comment(line: str) -> str:
+    """Drop trailing `#` or `//` line-comment tail from an HCL line.
+
+    Walks the line keeping track of whether we're inside a `"..."`
+    string so a `#` or `//` inside a string is preserved.
+    """
+    in_string = False
+    escape = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch == "#":
+                return line[:i]
+            elif ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+                return line[:i]
+        i += 1
+    return line
+
+
+def _find_balanced_close_index(
+    lines: list[str], start_idx: int, start_pos: int
+) -> int | None:
+    """Walk forward from `lines[start_idx][start_pos:]` tracking the
+    running depth of `()`/`[]`/`{}` (string-literal- and line-comment-aware)
+    until the depth returns to zero. Returns the line index containing
+    the closing delimiter, or None if no balance by end-of-file.
+
+    Used by the wrapped-expression arm of the secrets check so multi-line
+    wrappers like `db_password = jsonencode({\\n  password = "leak"\\n})`
+    are walked across newlines and scanned for inner string literals.
+    """
+    pairs_open = "([{"
+    pairs_close = ")]}"
+    depth = 0
+    started = False
+    for idx in range(start_idx, len(lines)):
+        line = lines[idx]
+        if _is_line_commented(line):
+            continue
+        scrubbed = _STRING_LITERAL_PATTERN.sub('""', line)
+        scrubbed = _strip_trailing_line_comment(scrubbed)
+        offset = start_pos if idx == start_idx else 0
+        for ch in scrubbed[offset:]:
+            if ch in pairs_open:
+                depth += 1
+                started = True
+            elif ch in pairs_close:
+                depth -= 1
+                started = True
+                if depth <= 0:
+                    return idx
+        if not started:
+            return idx  # no opener at all on the start line
+    return None
+
+
+def _find_block_close_index(
+    lines: list[str], start_idx: int, opener: str
+) -> int | None:
+    """Return the line index containing the brace/bracket that closes the block.
+
+    `opener` is `"{"` or `"["`; matched closer is `"}"` / `"]"`. The walk
+    treats string literals and `#` / `//` line comments as inert (their
+    contents don't change the brace count). Returns the matching line
+    index, or None if no close is found by end-of-file.
+    """
+    closer = "}" if opener == "{" else "]"
+    depth = 0
+    for idx in range(start_idx, len(lines)):
+        line = lines[idx]
+        if _is_line_commented(line):
+            continue
+        # Drop string-literal contents so braces inside strings don't count.
+        scrubbed = _STRING_LITERAL_PATTERN.sub('""', line)
+        # Drop trailing line comments.
+        for marker in ("#", "//"):
+            pos = scrubbed.find(marker)
+            if pos != -1:
+                scrubbed = scrubbed[:pos]
+        for ch in scrubbed:
+            if ch == opener:
+                depth += 1
+            elif ch == closer:
+                depth -= 1
+                if depth == 0:
+                    return idx
+    return None
+
+
+def check_no_plaintext_secrets_in_tfvars(
+    repo_root: Path, files: list[str] | None
+) -> list[Violation]:
+    """Forbid string literals on secret-bearing tfvars assignments (ADR-004-R7).
+
+    Scans `*.tfvars` files committed under `platform/terraform/environments/`
+    and flags any line that assigns a quoted string to a variable whose name
+    ends in `_password`, `_secret`, `_token`, `_key`, `_credentials`, or
+    `_credential`. Var/local/data references and empty strings are allowed
+    (they don't materialize a credential in source). `*.tfvars.example`
+    files and full-line comments are skipped.
+
+    gitleaks catches high-entropy random strings; this is the
+    complementary backstop for low-entropy committed credentials that
+    gitleaks ignores (e.g. human-typed passwords with mixed case and
+    a single digit suffix).
+    """
+    if files is not None:
+        candidate_paths = [
+            repo_root / path
+            for path in files
+            if path.startswith(_TFVARS_SCOPE)
+            and path.endswith(".tfvars")
+        ]
+    else:
+        candidate_paths = []
+        for scope in _TFVARS_SCOPE:
+            base = repo_root / scope
+            if not base.exists():
+                continue
+            for p in base.rglob("*.tfvars"):
+                if p.is_file():
+                    candidate_paths.append(p)
+
+    violations: list[Violation] = []
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            raw_text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        # Block comments are spanned BEFORE line splitting so their
+        # contents (including any `password = "..."` examples) cannot
+        # trigger the regex. Line numbers are preserved.
+        text = _strip_hcl_comments(raw_text)
+        rel = _repo_relative(path, repo_root)
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            lineno = idx + 1
+            if _is_line_commented(line):
+                continue
+            match = _SECRET_VAR_PATTERN.match(line) or _SECRET_HEREDOC_PATTERN.match(line)
+            block_match = None
+            wrapped_match = None
+            if match is None:
+                block_match = _SECRET_BLOCK_OPEN_PATTERN.match(line)
+                if block_match is None:
+                    # Last-resort scan: a secret-bearing variable
+                    # whose RHS is a function call or other expression
+                    # containing a string literal (e.g.
+                    # `db_password = trimspace("...")`,
+                    # `api_token = sensitive("...")`,
+                    # `db_credentials = jsonencode({password = "..."})`).
+                    # When the RHS opens a balanced expression (`(`,
+                    # `[`, `{`) that doesn't close on the same line,
+                    # walk forward to the matching close and scan the
+                    # full multi-line expression for string literals.
+                    wrapped_match = _SECRET_ASSIGNMENT_PATTERN.match(line)
+                    if wrapped_match is None:
+                        continue
+                    rhs = wrapped_match.group(2)
+                    rhs_no_comment = _strip_trailing_line_comment(rhs)
+                    contains_literal = bool(
+                        _STRING_LITERAL_PATTERN.search(rhs_no_comment)
+                    )
+                    if not contains_literal:
+                        rhs_start = line.find("=") + 1
+                        balanced_close = _find_balanced_close_index(
+                            lines, idx, rhs_start
+                        )
+                        if balanced_close is not None and balanced_close > idx:
+                            for inner_idx in range(idx + 1, balanced_close + 1):
+                                inner = lines[inner_idx]
+                                if _is_line_commented(inner):
+                                    continue
+                                stripped_inner = _strip_trailing_line_comment(inner)
+                                if _STRING_LITERAL_PATTERN.search(stripped_inner):
+                                    contains_literal = True
+                                    break
+                    if not contains_literal:
+                        continue
+                    var_name = wrapped_match.group(1)
+                else:
+                    var_name = block_match.group(1)
+            else:
+                var_name = match.group(1)
+            if any(var_name.endswith(suffix) for suffix in _NON_SECRET_NAME_SUFFIXES):
+                continue
+            if block_match is not None:
+                # Object/array assignment to a secret-bearing variable.
+                # Walk forward to the matching close; only flag if any
+                # nested line carries a string literal (an empty object,
+                # or one composed solely of var/local/data references,
+                # is acceptable).
+                close_idx = _find_block_close_index(lines, idx, block_match.group(2))
+                end_idx = close_idx if close_idx is not None else len(lines) - 1
+                contains_string_literal = False
+                for inner_idx in range(idx, end_idx + 1):
+                    inner = lines[inner_idx]
+                    if _is_line_commented(inner):
+                        continue
+                    # Strip trailing # / // comments so a comment that
+                    # contains a "quoted example" is not treated as a
+                    # secret value. The block-open line itself contains
+                    # no value (it ends with `{`/`[`), so stripping its
+                    # trailing comment is also safe.
+                    stripped_inner = _strip_trailing_line_comment(inner)
+                    if _STRING_LITERAL_PATTERN.search(stripped_inner):
+                        contains_string_literal = True
+                        break
+                if not contains_string_literal:
+                    continue
+            violations.append(
+                Violation(
+                    "no-plaintext-secrets-in-tfvars",
+                    "ADR-004-R7",
+                    rel,
+                    f"Line {lineno}: {var_name!r} is assigned a "
+                    f"plaintext string literal; reference an out-of-band "
+                    f"secret store (Secrets Manager, SSM, environment) instead",
+                )
+            )
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
@@ -1214,6 +1529,7 @@ CHECKS = {
     "cloud-factory-seam": check_cloud_factory_seam,
     "mcp-no-shell-exec": check_mcp_no_shell_exec,
     "k8s-deployment-security-context": check_k8s_deployment_security_context,
+    "no-plaintext-secrets-in-tfvars": check_no_plaintext_secrets_in_tfvars,
 }
 CHECK_LEVELS = {
     "fast": [
@@ -1223,6 +1539,7 @@ CHECK_LEVELS = {
         "guardrail-docs",
         "cloud-factory-seam",
         "mcp-no-shell-exec",
+        "no-plaintext-secrets-in-tfvars",
     ],
     "ci": [
         "adr-registry",
@@ -1231,6 +1548,7 @@ CHECK_LEVELS = {
         "cloud-factory-seam",
         "mcp-no-shell-exec",
         "k8s-deployment-security-context",
+        "no-plaintext-secrets-in-tfvars",
     ],
     "all": list(CHECKS),
 }

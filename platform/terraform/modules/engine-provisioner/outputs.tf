@@ -46,6 +46,15 @@ output "ecs_task_role_arn" {
 }
 
 # ------------------------------------------------------------------------------
+# Secrets Manager Outputs
+# ------------------------------------------------------------------------------
+
+output "dc_domain_password_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the prebaked DC Administrator password (created and managed out-of-band; resolved via data source)"
+  value       = data.aws_secretsmanager_secret.dc_domain_password.arn
+}
+
+# ------------------------------------------------------------------------------
 # CloudWatch Outputs
 # ------------------------------------------------------------------------------
 

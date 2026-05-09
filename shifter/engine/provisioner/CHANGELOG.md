@@ -5,6 +5,25 @@ All notable changes to the Shifter Engine Provisioner will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- Provisioner container now runs as non-root `appuser:1000 / appgroup:1000`
+  (numeric `USER 1000:1000` so Kubernetes `runAsNonRoot` admission can
+  verify it) instead of root (#950). Terraform/Pulumi installs and
+  `pip install` still run as root during build, then the runtime drops
+  privileges before `ENTRYPOINT`. `HOME` / `TF_PLUGIN_CACHE_DIR` /
+  `PULUMI_HOME` are set explicitly and the matching cache directories
+  under `/home/appuser` are pre-created so Terraform/Pulumi can write
+  under the non-root identity. `/app` is chowned to `appuser:appgroup`
+  so Terraform can write `.terraform/` and `terraform.tfvars.json`
+  inside module working directories. This reduces the blast radius of a
+  container compromise but does not eliminate the risk of host root via
+  a kernel-level container escape. Added `tests/test_dockerfile.py` as
+  a structural regression gate plus an opt-in (`RUN_DOCKER_TESTS=1`)
+  Docker smoke test that verifies the running container's UID, HOME,
+  and writable cache paths.
+
 ## [3.31.0] - 2026-03-22
 
 ### Removed

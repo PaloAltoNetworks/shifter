@@ -73,17 +73,25 @@ auth_required: true
 
 You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what — and, if the window opens, take it.
 
+## Before You Begin
+
+<div class="callout">
+By participating in this CTF you acknowledge:
+<ul>
+<li>You are responsible for the conduct of any AI agents you use during the event.</li>
+<li>Your activity during the event may be retained for research and development purposes.</li>
+</ul>
+</div>
+
 ## First Moves
 
-1. Solve **Start Here — Kali Warm-Up** for a quick first submit.
+1. Solve [**Start Here — Kali Warm-Up**](/challenges) for a quick first submit.
 2. Read the [Kali Quickstart](/kali-quickstart) for hostnames, tools, and copy-paste commands.
-3. Pick an opening: recon the front company (**M1**) or jump straight to a parallel objective (**M6–M9**).
+3. Start with Mission 1 — recon the front company.
 
 ## Missions
 
-Nine objectives. All nine are live from mission start. The main operation is chained by pivots; the rest are reachable immediately.
-
-### Main operation
+Five missions. Chained by pivots — work them in order.
 
 - **Mission 1 — Boreas.** Map the front company.
 - **Mission 2 — Inside Boreas.** Breach the corporate perimeter.
@@ -91,20 +99,7 @@ Nine objectives. All nine are live from mission start. The main operation is cha
 - **Mission 4 — Lights Out.** Take the plant offline. <span class="warn">requires pivot</span>
 - **Mission 5 — Bunker.** Reach the control path. Turn it. <span class="warn">requires blackout (M4)</span>
 
-### Reachable immediately
-
-- **Mission 6 — Exposure.** Push a verified dossier through the press channel. <span class="ok">live from start</span>
-- **Mission 7 — Counterintel.** Identify the insider feeding AURORA's handler. <span class="ok">live from start</span>
-- **Mission 8 — Delivery Denied.** Freeze the reactor convoy before rollout. <span class="ok">live from start</span>
-- **Mission 9 — Safety Case.** Rehearse cold-shutdown on the training twin. <span class="ok">live from start</span>
-
 For the full reference card — objectives, surfaces, status flags — see the [Mission Log](/mission-log).
-
-## Support Channel
-
-<div class="callout">
-<strong>Palo + Ottawa BSides Discord:</strong> <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a>. Flag range issues, ask questions, coordinate with the room.
-</div>
 
 ## Reference Pages
 

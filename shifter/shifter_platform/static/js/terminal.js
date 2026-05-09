@@ -161,6 +161,27 @@ class TerminalManager {
             terminal.loadAddon(webLinksAddon);
             terminal.open(container);
 
+            // Wire clipboard: Ctrl+Shift+C copies selection, Ctrl+Shift+V pastes.
+            // Without this xterm.js shows highlighting but never reaches the
+            // system clipboard, so participants can't copy command output.
+            terminal.attachCustomKeyEventHandler((ev) => {
+                if (ev.type !== 'keydown') return true;
+                if (ev.ctrlKey && ev.shiftKey && (ev.key === 'C' || ev.key === 'c')) {
+                    const sel = terminal.getSelection();
+                    if (sel) {
+                        navigator.clipboard.writeText(sel).catch(() => {});
+                    }
+                    return false;
+                }
+                if (ev.ctrlKey && ev.shiftKey && (ev.key === 'V' || ev.key === 'v')) {
+                    navigator.clipboard.readText().then((txt) => {
+                        if (txt) this.sendInput(instance.uuid, txt);
+                    }).catch(() => {});
+                    return false;
+                }
+                return true;
+            });
+
             // Store terminal data
             this.terminals.set(instance.uuid, {
                 terminal,

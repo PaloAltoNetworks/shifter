@@ -1869,9 +1869,8 @@ def _run_polaris_range_bootstrap(
     # a14-kali container (one extra hop from the EC2 host's network
     # namespace through the docker bridge) can reach IMDS at
     # 169.254.169.254 and pick up the EC2 instance role's credentials.
-    # Without this the kali container has no AWS creds, so the
-    # polaris_kali_bedrock_shard step's claude smoke test fails and the
-    # range is reported failed. Default IMDS hop limit is 1.
+    # Default IMDS hop limit is 1. Without this, claude inside the kali
+    # container has no AWS creds at runtime.
     # Idempotent: re-running on an already-2 instance is a no-op.
     try:
         import boto3 as _boto3
@@ -1885,8 +1884,8 @@ def _run_polaris_range_bootstrap(
         )
         logger.info("Set IMDSv2 hop limit=2 on %s for kali container reachability", instance_id)
     except Exception as e:
-        # Don't hard-fail here — the bedrock shard step's smoke test will
-        # surface the real symptom (claude failing) with a clearer error.
+        # Warn rather than fail provisioning — claude inside kali will surface
+        # the loss of creds at runtime if this slip propagates that far.
         logger.warning("failed to set IMDS hop limit on %s: %s", instance_id, e)
 
     executor = SSMExecutor()

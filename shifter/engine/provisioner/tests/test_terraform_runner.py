@@ -3,72 +3,81 @@
 Covers destroy_ngfw variable passing and _build_tf_variables helper.
 """
 
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+import os
+from unittest.mock import patch
 
 import pytest
 
 
 class TestDestroyNgfw:
-    """Test destroy_ngfw passes variables correctly."""
+    """Test destroy_ngfw passes variables correctly.
 
+    Issue #1103: destroy() stages a writable workspace under TERRAFORM_WORKSPACE_DIR,
+    runs terraform from the staged path, and cleans the staged tree up on success and
+    failure. NGFW Terraform shares the same image as range Terraform — the staging
+    contract MUST cover both paths or NGFW provision/deprovision breaks under
+    readOnlyRootFilesystem.
+    """
+
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
     @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_with_variables_writes_tfvars(self, mock_init, mock_run, tmp_path):
+    def test_destroy_with_variables_writes_tfvars(self, mock_run, tmp_path, monkeypatch):
         """When variables are provided, destroy should write tfvars and pass -var-file."""
         from terraform_runner import destroy_ngfw
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
+        source = tmp_path / "src" / "modules" / "ngfw"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
+
         variables = {"name_prefix": "ngfw-user-1", "user_id": 1}
+        destroy_ngfw("req-123", source, variables=variables)
 
-        with patch("builtins.open", mock_open()) as mocked_file, patch.object(Path, "unlink"):
-            destroy_ngfw("req-123", working_dir, variables=variables)
-
-        # Verify tfvars file was written
-        mocked_file.assert_called_once_with(working_dir / "terraform.tfvars.json", "w")
-        written_data = mocked_file().write.call_args_list
-        # json.dump writes in chunks; just verify it was called
-        assert len(written_data) > 0
-
-        # Verify -var-file was passed to terraform
         destroy_args = mock_run.call_args[0][0]
         assert any("-var-file=" in arg for arg in destroy_args)
+        assert not (workspace_root / "req-123").exists()
 
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
     @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_without_variables_no_var_file(self, mock_init, mock_run, tmp_path):
+    def test_destroy_without_variables_no_var_file(self, mock_run, tmp_path, monkeypatch):
         """When no variables provided, destroy should not pass -var-file."""
         from terraform_runner import destroy_ngfw
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
+        source = tmp_path / "src" / "modules" / "ngfw"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
 
-        destroy_ngfw("req-123", working_dir)
+        destroy_ngfw("req-123", source)
 
         destroy_args = mock_run.call_args[0][0]
         assert not any("-var-file=" in arg for arg in destroy_args)
         assert "-auto-approve" in destroy_args
+        assert not (workspace_root / "req-123").exists()
 
-    @patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed"))
-    @patch("terraform_base.init_workspace")
-    def test_destroy_cleans_up_tfvars_on_failure(self, mock_init, mock_run, tmp_path):
-        """Tfvars file should be cleaned up even if destroy fails."""
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    def test_destroy_cleans_up_workspace_on_failure(self, tmp_path, monkeypatch):
+        """Staged workspace must be removed even when terraform destroy fails."""
         from terraform_runner import destroy_ngfw
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
-        variables = {"name_prefix": "ngfw-user-1"}
-        mock_unlink = MagicMock()
+        source = tmp_path / "src" / "modules" / "ngfw"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
 
         with (
-            patch("builtins.open", mock_open()),
-            patch.object(Path, "unlink", mock_unlink),
+            patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed")),
             pytest.raises(RuntimeError, match="destroy failed"),
         ):
-            destroy_ngfw("req-123", working_dir, variables=variables)
+            destroy_ngfw("req-123", source, variables={"name_prefix": "ngfw-user-1"})
 
-        mock_unlink.assert_called_once_with(missing_ok=True)
+        assert not (workspace_root / "req-123").exists()
 
 
 class TestBuildTfVariables:

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Provisioner container now runs with read-only root filesystem and a dedicated
+  writable workspace volume (#1103, follow-up to #950).** `shifter/engine/provisioner/Dockerfile`
+  no longer chowns `/app` or copies source with `--chown=appuser`; application code
+  stays root-owned and immutable. Terraform writes are redirected to
+  `${TERRAFORM_WORKSPACE_DIR}` (default `/var/run/provisioner/workspace`):
+  `shifter/engine/provisioner/terraform_base.py` adds `_stage_workspace()` /
+  `_cleanup_workspace()` so each Terraform apply/destroy call copies the read-only
+  module source from `/app/terraform/modules/<name>` into a per-request workspace,
+  runs `terraform init`/`apply`/`destroy` from the staged path, and removes the
+  staged tree (with any `terraform.tfvars.json` that may carry secrets) on both
+  success and failure paths. The dynamic GCP Job factory at
+  `shifter/shifter_platform/shared/cloud/gcp/task_runner.py` now sets
+  `securityContext.readOnlyRootFilesystem=true`, `runAsNonRoot=true`,
+  `runAsUser=runAsGroup=1000`, `allowPrivilegeEscalation=false`,
+  `capabilities.drop=["ALL"]`, and `seccompProfile=RuntimeDefault`, plus four
+  explicit `emptyDir` volumes (the workspace memory-backed) for
+  `/var/run/provisioner/workspace`, `/tmp`,
+  `/home/appuser/.terraform.d/plugin-cache`, and `/home/appuser/.pulumi`. The ECS
+  task definition under `platform/terraform/modules/engine-provisioner/`
+  enables `readonlyRootFilesystem` and adds matching ephemeral `volume`/`mountPoints`
+  entries. Tests under `shifter/engine/provisioner/tests/test_dockerfile.py` and
+  `shifter/engine/provisioner/tests/test_terraform_base.py` lock in the structural
+  contract; the opt-in (`RUN_DOCKER_TESTS=1`) Docker smoke test now launches the
+  container with `--read-only` and tmpfs mounts and asserts `/app` is not writable
+  while the workspace path is. Dead `_get_working_dir()` helper in
+  `shifter/engine/provisioner/main.py` (never called, misleading) removed.
+  Source: codex review of #950 (cycle 2).
 - **Provisioner container now runs as non-root (#950).** `shifter/engine/provisioner/Dockerfile`
   creates `appuser:1000 / appgroup:1000` (matching the existing pattern in
   `shifter/shifter_platform/Dockerfile`) and drops privileges via

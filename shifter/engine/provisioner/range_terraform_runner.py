@@ -49,13 +49,6 @@ def has_terraform_state(request_uuid: str) -> bool:
     return terraform_base.has_terraform_state(get_range_state_key_prefix(), request_uuid)
 
 
-def init_range_workspace(request_uuid: str, working_dir: Path) -> None:
-    """Initialize Terraform workspace for Range."""
-    if _uses_active_gdc_range_plane():
-        return
-    terraform_base.init_workspace(get_range_state_key_prefix(), request_uuid, working_dir, _LABEL)
-
-
 def apply_range(
     request_uuid: str,
     variables: dict[str, Any],

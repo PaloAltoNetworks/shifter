@@ -96,6 +96,8 @@ describe('TerminalManager', () => {
             dispose: jest.fn(),
             onData: jest.fn(),
             onResize: jest.fn(),
+            attachCustomKeyEventHandler: jest.fn(),
+            getSelection: jest.fn(() => ''),
             cols: 80,
             rows: 24,
         };

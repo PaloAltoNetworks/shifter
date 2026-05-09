@@ -134,6 +134,10 @@ resource "aws_db_instance" "guacamole" {
   # CloudWatch Log Exports
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 
+  # Whether class/storage/parameter changes apply during the deploy or wait
+  # for the maintenance window. Set true in dev, false in prod.
+  apply_immediately = var.db_apply_immediately
+
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-guacamole-db"
   })

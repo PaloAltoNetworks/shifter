@@ -144,6 +144,10 @@ resource "aws_db_instance" "this" {
   # CloudWatch Log Exports
   enabled_cloudwatch_logs_exports = var.enable_log_exports ? ["postgresql", "upgrade"] : []
 
+  # Whether class/storage/parameter changes apply during the deploy or wait
+  # for the maintenance window. Set true in dev, false in prod.
+  apply_immediately = var.apply_immediately
+
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-db"
     Module = "rds"

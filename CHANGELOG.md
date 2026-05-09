@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Dev RDS class/storage/engine changes now apply during the deploy.** Both
+  the portal RDS module (`platform/terraform/modules/portal/rds/`) and the
+  Guacamole RDS module (`platform/terraform/modules/guacamole/`) now expose
+  an `apply_immediately` input. Dev environments set it to `true`; prod
+  keeps it `false` so prod RDS changes continue to land through the
+  configured maintenance window. The May 2026 `db.t3.small → db.m5.xlarge`
+  bump for `dev-portal-guacamole-db` was accepted by `terraform apply` but
+  queued in `PendingModifiedValues` for the maintenance window — the live
+  class never changed during the event (#1085). Note: `apply_immediately`
+  covers changes AWS can perform during the apply (class, storage, engine
+  version, dynamic parameter-group fields). Static parameter changes and
+  major version upgrades still require an explicit reboot.
+- **Post-apply RDS gate in CI (dev only).** A new check
+  (`scripts/check_rds_pending_modifications/`) runs after `terraform apply`
+  in the dev branch of `_shifter-platform.yml`. It reads the portal env's
+  Terraform outputs (every `*_db_instance_id` output), calls
+  `aws rds describe-db-instances`, and fails the deploy job if any managed
+  RDS instance still has non-empty `PendingModifiedValues`. A successful
+  apply that leaves pending mods is treated as an incomplete deploy. Prod
+  is exempt by design.
+
 ## [3.97.0] - 2026-05-07
 
 ### Changed

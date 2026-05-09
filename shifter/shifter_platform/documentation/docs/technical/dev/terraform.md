@@ -128,6 +128,34 @@ AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
 
 **Never apply to prod locally** - use the CI/CD pipeline.
 
+### RDS Change Application
+
+RDS changes that AWS can apply during a deploy — instance class, storage
+size, engine version, and dynamic parameter-group fields — must not be
+treated as complete until AWS reports no pending modifications for the
+affected instance. For dev-only RDS resources, prefer explicit
+`apply_immediately` module inputs that default to applying intended changes
+during the current deploy. Production must keep change timing deliberate:
+either pass an explicit maintenance-window choice through the same module
+surface or use a separate reviewed change flow.
+
+`apply_immediately` does NOT remediate every RDS change. Static
+parameter-group fields and major version upgrades still require an instance
+reboot to take effect, and modify-class operations can still leave
+`PendingModifiedValues` populated until the underlying maintenance action
+completes. The post-apply check will surface that residual state, but it does
+not by itself drive a reboot. When you change one of those fields, plan a
+follow-up reboot (or a maintenance-window-gated path) explicitly.
+
+Post-apply checks belong at the Terraform workflow boundary, after
+`terraform apply`, where the existing AWS credentials and environment context
+are already present. Reuse Terraform outputs or module outputs to identify
+the managed DB instances; do not hardcode names such as `dev-portal-db`
+inside a generic checker. For dev portal deploys, a successful apply that
+leaves non-empty `PendingModifiedValues` is treated as an incomplete deploy
+and fails the job loudly. Prod intentionally skips the check because prod
+relies on the maintenance-window path.
+
 ## Configuration vs Secrets
 
 ### In terraform.tfvars (Committed)

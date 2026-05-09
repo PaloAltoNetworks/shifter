@@ -34,6 +34,7 @@ db_multi_az              = true
 db_backup_retention_days = 7
 db_deletion_protection   = true
 db_skip_final_snapshot   = false
+db_apply_immediately     = false
 
 # ------------------------------------------------------------------------------
 # EC2
@@ -151,6 +152,7 @@ guacamole_db_multi_az              = true
 guacamole_db_backup_retention_days = 14
 guacamole_db_deletion_protection   = true
 guacamole_db_skip_final_snapshot   = false
+guacamole_db_apply_immediately     = false
 
 # Autoscaling (disabled for initial testing)
 guacamole_enable_autoscaling       = false

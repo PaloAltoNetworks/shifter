@@ -22,11 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
         env:
           PYYAML_VERSION: "6.0.2"
         run: |
-          python3 -m pip install --quiet --no-deps \
+          python -m pip install --quiet --no-deps \
             --target "${RUNNER_TEMP}/py-deps" \
             "pyyaml==${PYYAML_VERSION}"
 
@@ -54,7 +58,7 @@ jobs:
       - name: Run ADR guard
         env:
           PYTHONPATH: ${{ runner.temp }}/py-deps
-        run: python3 scripts/adr_guard/adr_guard.py --all --level ci
+        run: python scripts/adr_guard/adr_guard.py --all --level ci
 
   workflow-lint:
     permissions:
@@ -606,18 +610,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
         env:
           PYYAML_VERSION: "6.0.2"
         run: |
-          python3 -m pip install --quiet --no-deps \
+          python -m pip install --quiet --no-deps \
             --target "${RUNNER_TEMP}/py-deps" \
             "pyyaml==${PYYAML_VERSION}"
 
       - name: Run tests
         env:
           PYTHONPATH: ${{ runner.temp }}/py-deps
-        run: python3 -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
+        run: python -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
 
   # ===========================================================================
   # JavaScript Tests

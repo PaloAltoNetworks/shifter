@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from check_rds_pending_modifications import (
@@ -225,78 +227,39 @@ def test_main_with_no_instance_ids_is_a_clear_error() -> None:
     assert rc != 0
 
 
-def test_pending_reboot_parameter_group_fails() -> None:
-    """A static parameter-group change settles into ParameterApplyStatus=pending-reboot.
-
-    This is NOT exposed via PendingModifiedValues — only via the per-DBInstance
-    DBParameterGroups list. The check must inspect both surfaces, otherwise the
-    documented contract ("post-apply check will surface that residual state")
-    is a lie and dev deploys will quietly leave static param changes unapplied.
-    """
+@pytest.mark.parametrize(
+    ("apply_status", "expected_clean"),
+    [
+        # Settled or in-flight states — not deploy-blocking.
+        ("in-sync", True),
+        ("applying", True),
+        # Failure states — must surface as deploy-blocking. Static parameter
+        # changes only show up here, never in PendingModifiedValues, so any
+        # gap in this set is a silent-incomplete-deploy bug
+        # (per the dev/terraform.md "RDS Change Application" contract).
+        ("pending-reboot", False),
+        ("failed-to-apply", False),
+        ("error", False),
+        ("pending-database-upgrade", False),
+        ("removing", False),
+    ],
+)
+def test_parameter_group_status_classification(apply_status: str, expected_clean: bool) -> None:
     aws = mock.Mock(
         return_value=_aws_response(
             pending_modified_values={},
             parameter_groups=[
                 {
                     "DBParameterGroupName": "shifter-dev-portal-pg16",
-                    "ParameterApplyStatus": "pending-reboot",
+                    "ParameterApplyStatus": apply_status,
                 }
             ],
         )
     )
     result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
-    assert result.is_clean is False
-    assert result.pending == {"DBParameterGroup[shifter-dev-portal-pg16]": "pending-reboot"}
-
-
-def test_parameter_group_in_sync_passes() -> None:
-    """`in-sync` parameter group is the steady state — no reason to fail."""
-    aws = mock.Mock(
-        return_value=_aws_response(
-            pending_modified_values={},
-            parameter_groups=[
-                {
-                    "DBParameterGroupName": "shifter-dev-portal-pg16",
-                    "ParameterApplyStatus": "in-sync",
-                }
-            ],
-        )
-    )
-    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
-    assert result.is_clean is True
-
-
-def test_parameter_group_applying_is_not_a_failure() -> None:
-    """`applying` is a transient mid-flight state; not a deploy-blocking signal."""
-    aws = mock.Mock(
-        return_value=_aws_response(
-            parameter_groups=[
-                {
-                    "DBParameterGroupName": "shifter-dev-portal-pg16",
-                    "ParameterApplyStatus": "applying",
-                }
-            ],
-        )
-    )
-    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
-    assert result.is_clean is True
-
-
-def test_parameter_group_failed_to_apply_fails() -> None:
-    """`failed-to-apply` is a hard failure state — surface it loudly."""
-    aws = mock.Mock(
-        return_value=_aws_response(
-            parameter_groups=[
-                {
-                    "DBParameterGroupName": "shifter-dev-portal-pg16",
-                    "ParameterApplyStatus": "failed-to-apply",
-                }
-            ],
-        )
-    )
-    result = check_instance("dev-portal-db", aws_describe=aws, sleep=_no_sleep)
-    assert result.is_clean is False
-    assert result.pending["DBParameterGroup[shifter-dev-portal-pg16]"] == "failed-to-apply"
+    assert result.is_clean is expected_clean
+    if not expected_clean:
+        assert result.pending["DBParameterGroup[shifter-dev-portal-pg16]"] == apply_status
 
 
 def test_main_redacts_master_user_password_from_log_output() -> None:

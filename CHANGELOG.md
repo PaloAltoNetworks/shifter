@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Stripped Cortex/Palo branding from UI surfaces (#1101).** Renamed
+  `static/css/xdr-theme.css` / `xdr-sidebar.css` / `xdr-dropdown.css` to
+  neutral `theme.css` / `sidebar.css` / `dropdown.css`; renamed
+  `static/js/xdr-dropdown.js` to `dropdown.js`, the `XdrDropdown` class
+  to `ShifterDropdown` (with `globalThis.ShifterDropdown` and
+  `_shifterDropdown` element marker), and the `.xdr-dropdown*` selectors
+  to `.shifter-dropdown*`; renamed `--xdr-*` CSS custom properties and
+  `.xdr-dark-theme` to `--theme-*` and `.theme-dark`; replaced Cortex
+  green (`#00d26a` / `#0c6`) and Palo blue (`#128df3`) accents with
+  desaturated slate (`#94a3b8`) on a dark neutral palette (WCAG AA on
+  dark) — system-state indicators (active/online dot, success metrics)
+  use neutral system green `#22c55e` rather than Cortex green; replaced
+  the Cortex-derived logo SVGs and the "CORTEX SHIFTER / by palo alto
+  networks" wordmark in `partials/icon_sidebar.html` and
+  `partials/ctf_participant_sidebar.html` with a plain text "SHIFTER"
+  wordmark + interim slate "S" mark; replaced the Cortex-style green
+  favicon PNG with a neutral SVG favicon; rebuilt `coming_soon.html`
+  with CSS-styled text instead of the cyberpunk-green Shifter PNG
+  marks. Functional product references (XDR/XSIAM in instructional
+  copy, the `xdr_agent` scenario schema field, VM-Series authcode flow,
+  "Cortex BYOT" scenario name, NGFW-to-XDR/XSIAM data source setup) are
+  preserved per #1101 scope. Final visual identity remains tracked under
+  #1097 / UX-002 (still DRAFT).
+
 ### Fixed
 
 - **Dev RDS class/storage/engine changes now apply during the deploy.** Both

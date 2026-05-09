@@ -15,7 +15,7 @@
     display: flex;
     gap: 4px;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
     list-style: none;
     padding: 0;
@@ -23,18 +23,18 @@
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .form-help {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
@@ -58,14 +58,14 @@
     display: flex;
     gap: 8px;
     padding-top: 16px;
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
     margin-top: 8px;
 }
 
 .btn-cancel {
     background: transparent;
-    color: var(--xdr-text-secondary);
-    border: 1px solid var(--xdr-border);
+    color: var(--theme-text-secondary);
+    border: 1px solid var(--theme-border);
 }
 
 .info-list {
@@ -78,7 +78,7 @@
     position: relative;
     padding-left: 16px;
     font-size: 13px;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin-bottom: 4px;
 }
 
@@ -86,14 +86,14 @@
     content: "\2022";
     position: absolute;
     left: 0;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .info-note {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     padding-top: 12px;
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
     margin-top: 12px;
 }
 
@@ -173,7 +173,7 @@
         <div class="card">
             <div class="card-title">Information</div>
             {% if is_add %}
-            <p style="margin: 0; font-size: 13px; color: var(--xdr-text);">Adding a participant will:</p>
+            <p style="margin: 0; font-size: 13px; color: var(--theme-text);">Adding a participant will:</p>
             <ul class="info-list">
                 <li>Create a participant record</li>
                 <li>Generate an invitation token</li>
@@ -183,14 +183,14 @@
                 To actually send the invitation email, you will need to use the notification system after adding participants.
             </div>
             {% else %}
-            <p style="margin: 0; font-size: 13px; color: var(--xdr-text);">Update the participant's profile information.</p>
+            <p style="margin: 0; font-size: 13px; color: var(--theme-text);">Update the participant's profile information.</p>
             {% endif %}
         </div>
 
         {% if is_add %}
         <div class="card">
             <div class="card-title">Bulk Import</div>
-            <p style="margin: 0 0 12px; font-size: 13px; color: var(--xdr-text-secondary);">Need to add many participants at once?</p>
+            <p style="margin: 0 0 12px; font-size: 13px; color: var(--theme-text-secondary);">Need to add many participants at once?</p>
             <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-secondary" style="font-size: 11px; height: 24px; min-width: 70px; padding: 0 16px;">
                 Import from CSV
             </a>

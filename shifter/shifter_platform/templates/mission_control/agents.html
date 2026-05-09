@@ -14,7 +14,7 @@
     }
 
     .progress-bar-container {
-        background: var(--xdr-border);
+        background: var(--theme-border);
         border-radius: 4px;
         height: 8px;
         overflow: hidden;
@@ -22,19 +22,19 @@
     }
 
     .progress-bar {
-        background: var(--xdr-primary);
+        background: var(--theme-primary);
         height: 100%;
         width: 0%;
         transition: width 0.3s ease;
     }
 
     .progress-bar.error {
-        background: var(--xdr-error);
+        background: var(--theme-error);
     }
 
     .progress-status {
         font-size: 0.875rem;
-        color: var(--xdr-secondary-text);
+        color: var(--theme-secondary-text);
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -42,8 +42,8 @@
 
     .btn-cancel-upload {
         background: transparent;
-        border: 1px solid var(--xdr-error);
-        color: var(--xdr-error);
+        border: 1px solid var(--theme-error);
+        color: var(--theme-error);
         padding: 0.25rem 0.75rem;
         font-size: 0.75rem;
         border-radius: 20px;
@@ -56,7 +56,7 @@
     }
 
     .upload-error {
-        color: var(--xdr-error);
+        color: var(--theme-error);
         font-size: 0.875rem;
         margin-top: 0.5rem;
         display: none;

@@ -19,7 +19,7 @@
 
     /* Status colors */
     .status-ready .status-dot,
-    .status-active .status-dot { background: #00d26a; }
+    .status-active .status-dot { background: #22c55e; }
     .status-provisioning .status-dot,
     .status-starting .status-dot,
     .status-stopping .status-dot,
@@ -41,8 +41,8 @@
     }
 
     .ngfw-card {
-        background: var(--xdr-surface);
-        border: 1px solid var(--xdr-border);
+        background: var(--theme-surface);
+        border: 1px solid var(--theme-border);
         border-radius: 4px;
         padding: 16px;
         transition: border-color 0.2s ease;
@@ -62,13 +62,13 @@
     .ngfw-card-title {
         font-size: 14px;
         font-weight: 600;
-        color: var(--xdr-text);
+        color: var(--theme-text);
         margin: 0;
     }
 
     .ngfw-card-meta {
         font-size: 12px;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         margin-top: 4px;
     }
 
@@ -92,7 +92,7 @@
 
     .page-subtitle {
         font-size: 14px;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         margin: 4px 0 0;
     }
 
@@ -101,12 +101,12 @@
         background: transparent !important;
         border: none !important;
         cursor: pointer;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         transition: color 0.2s ease;
     }
 
     .ngfw-refresh-btn:hover {
-        color: var(--xdr-text);
+        color: var(--theme-text);
     }
 
     .ngfw-refresh-btn svg {
@@ -159,7 +159,7 @@
                     <span class="status-dot"></span>
                     <span>{{ ngfw.get_status_display }}</span>
                 </div>
-                <button class="xdr-button default-hover no-content has-icon tertiary-clear ngfw-refresh-btn"
+                <button class="ngfw-refresh-btn"
                         data-ngfw-id="{{ ngfw.app_id }}"
                         aria-label="Refresh NGFW Status"
                         style="padding: 4px;">

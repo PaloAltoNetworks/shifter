@@ -1,0 +1,189 @@
+/* Custom dropdown component
+ * Lightweight accessible dropdown styling.
+ */
+
+/* Dropdown container */
+.shifter-dropdown {
+    position: relative;
+    display: inline-block;
+    font-family: Lato, Assistant, sans-serif;
+    font-size: 14px;
+    color: var(--theme-text, #eaebeb);
+}
+
+.shifter-dropdown.full-width {
+    display: block;
+    width: 100%;
+}
+
+/* Trigger button */
+.shifter-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 2px 0 4px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--theme-border-medium, #484848);
+    color: var(--theme-text, #eaebeb);
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease;
+}
+
+.shifter-dropdown-trigger:hover {
+    border-bottom-color: var(--theme-text-secondary, #b8b8b8);
+}
+
+.shifter-dropdown-trigger:focus {
+    outline: none;
+    border-bottom-color: var(--theme-primary, #94a3b8);
+}
+
+.shifter-dropdown.open .shifter-dropdown-trigger {
+    border-bottom-color: var(--theme-primary, #94a3b8);
+}
+
+/* Selected value display */
+.shifter-dropdown-value {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shifter-dropdown-value.placeholder {
+    color: var(--theme-text-secondary, #b8b8b8);
+}
+
+/* Chevron icon */
+.shifter-dropdown-chevron {
+    width: 0;
+    height: 0;
+    margin-left: 8px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 4px solid currentcolor;
+    transition: transform 0.2s ease;
+}
+
+.shifter-dropdown.open .shifter-dropdown-chevron {
+    transform: rotate(180deg);
+}
+
+/* Dropdown panel */
+.shifter-dropdown-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: none;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--theme-surface, #151515);
+    border: 1px solid var(--theme-border-medium, #484848);
+    margin-top: 2px;
+}
+
+.shifter-dropdown.open .shifter-dropdown-panel {
+    display: block;
+}
+
+/* Filter input */
+.shifter-dropdown-filter {
+    position: sticky;
+    top: 0;
+    padding: 8px 14px;
+    background: var(--theme-surface, #151515);
+    border-bottom: 1px solid var(--theme-border, #333);
+}
+
+.shifter-dropdown-filter input {
+    width: 100%;
+    padding: 4px 0;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--theme-border-medium, #484848);
+    color: var(--theme-text, #eaebeb);
+    font-family: inherit;
+    font-size: 14px;
+}
+
+.shifter-dropdown-filter input::placeholder {
+    color: var(--theme-text-secondary, #707070);
+}
+
+.shifter-dropdown-filter input:focus {
+    outline: none;
+    border-bottom-color: var(--theme-primary, #94a3b8);
+}
+
+/* Dropdown items */
+.shifter-dropdown-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.shifter-dropdown-item {
+    padding: 0 14px;
+    line-height: 32px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background-color 0.15s ease;
+}
+
+.shifter-dropdown-item:hover {
+    background: var(--theme-hover, #333);
+}
+
+.shifter-dropdown-item.selected {
+    background: var(--theme-selected, rgb(148, 163, 184, 0.15));
+    color: var(--theme-primary, #94a3b8);
+}
+
+.shifter-dropdown-item.highlighted {
+    background: var(--theme-hover, #333);
+}
+
+/* No results message */
+.shifter-dropdown-empty {
+    padding: 14px;
+    text-align: center;
+    color: var(--theme-text-secondary, #707070);
+    font-style: italic;
+}
+
+/* Scrollbar styling */
+.shifter-dropdown-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.shifter-dropdown-panel::-webkit-scrollbar-track {
+    background: var(--theme-surface, #151515);
+}
+
+.shifter-dropdown-panel::-webkit-scrollbar-thumb {
+    background: var(--theme-border-medium, #484848);
+    border-radius: 3px;
+}
+
+.shifter-dropdown-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--theme-text-secondary, #707070);
+}
+
+/* Disabled state */
+.shifter-dropdown.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.shifter-dropdown.disabled .shifter-dropdown-trigger {
+    cursor: not-allowed;
+}

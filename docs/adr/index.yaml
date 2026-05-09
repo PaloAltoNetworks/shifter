@@ -179,7 +179,11 @@
     "evidence": [
       "platform/k8s/gcp/base/namespaces.yaml",
       ".kube-linter.yaml",
-      ".pre-commit-config.yaml"
+      ".pre-commit-config.yaml",
+      "shifter/shifter_platform/shared/cloud/gcp/task_runner.py",
+      "shifter/engine/provisioner/Dockerfile",
+      "shifter/engine/provisioner/terraform_base.py",
+      "platform/terraform/modules/engine-provisioner/task_definition.tf"
     ]
   },
   {

@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.97.0] - 2026-05-07
+
+### Changed
+
+- **Polaris bedrock model** switched from `us.anthropic.claude-sonnet-4-5-20250929-v1:0`
+  (deprecated, unsubscribable) to `us.anthropic.claude-sonnet-4-6` across the engine,
+  packer scripts, and local-dev `config-claude.sh`. Sonnet 4.5 was returning
+  `AccessDeniedException` on every invoke for the dev account.
+- **Removed claude smoke-test gate from `polaris_kali_bedrock_shard`**. The step
+  still writes `/etc/profile.d/claude-bedrock.sh`, the `/etc/hosts` VPCE override,
+  and resolves the bedrock-runtime private IP — but no longer runs
+  `claude -p "ok"` as a 60s provisioning gate. Aligns with how every other
+  scenario handles claude (no per-range smoke test).
+- **In-browser terminal copy/paste**. xterm.js shows selection highlighting but
+  never wired the system clipboard. Added a custom key handler:
+  Ctrl+Shift+C copies the current selection via `navigator.clipboard.writeText`,
+  Ctrl+Shift+V pastes via the existing `sendInput`. Both fall through silently
+  on permission denial.
+- **Polaris CTFd content trimmed to 5-mission event scope.** Index, mission-log,
+  surfaces, and getting-unstuck pages no longer reference Missions 6–9 (Exposure,
+  Counterintel, Delivery Denied, Safety Case) — those are CTFd-board-only and
+  have no compose backing. Also removed Palo + Ottawa BSides Discord references
+  (`discord.gg/N7S2ChA9`); event uses in-room support instead. The "Start Here"
+  bullet on the orientation page is now a real link to `/challenges`.
+- **Polaris briefing deck (`scenario-dev/polaris/briefing-deck/`)** trimmed
+  to 5 missions; Board Access slide updated to reflect the per-cohort
+  credential pattern (username = email, single shared password) instead of
+  the BSides `meetup+N` convention; range-access slide replaced with a
+  Mission-Control-flow instruction set instead of a stale 110-token grid.
+- **Dev guacamole DB instance class** bumped from `db.t3.small` to
+  `db.m5.xlarge` (`platform/terraform/environments/dev/portal/terraform.tfvars`).
+  The t3.small was undersized at BSides Ottawa — sessions took 4–5 retries
+  under sustained load. m5.xlarge gives 4 vCPU / 16 GiB and no burst-credit
+  cliff. Note: rds module's `apply_immediately` defaults to false, so the
+  class change is queued behind RDS's next maintenance window.
+
 ## [3.96.0] - 2026-05-07
 
 ### Added

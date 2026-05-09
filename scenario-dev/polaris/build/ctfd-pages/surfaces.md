@@ -88,19 +88,6 @@ Everything listed here is reachable from the Kali workstation from mission start
 | File share | `fileserv.boreas.local` |
 | Domain controller | `dc01.boreas.local` |
 
-## Parallel Objectives (live from start)
-
-| Surface | Endpoint | Mission |
-|---|---|---|
-| Board portal | `http://board.boreas.local` | M6 Exposure |
-| Public repo | `http://git-public.boreas.local` | M6 Exposure |
-| Press drop | `http://pressdrop.boreas.local` | M6 Exposure |
-| Casefiles | `http://casefiles.boreas.local` | M7 Counterintel |
-| Dispatch | `http://dispatch.boreas.local` | M8 Delivery Denied |
-| Approvals | `http://approvals.boreas.local` | M8 Delivery Denied |
-| Training HMI | `http://twin-hmi.boreas.local:8080` | M9 Safety Case |
-| Training PLC | `twin-plc.boreas.local` | M9 Safety Case |
-
 <div class="callout">
 Further targets — SCADA, lab, bunker — are gated. Each objective's <strong>connection_info</strong> names what you need once it unlocks. If an objective is not visible yet, you have not met its prerequisites.
 </div>
@@ -110,12 +97,6 @@ Further targets — SCADA, lab, bunker — are gated. Each objective's <strong>c
 - Write down every username/password you recover. Polaris chains matter.
 - Password reuse across accounts is a feature of this range, not a bug.
 - Service accounts are on the board. Human accounts are in the directory.
-
-## Support Channel
-
-<div class="callout">
-<strong>Palo + Ottawa BSides Discord:</strong> <a href="https://discord.gg/N7S2ChA9">discord.gg/N7S2ChA9</a>. Flag range issues, ask questions, coordinate with the room.
-</div>
 
 <div class="footer-nav">
 <a href="/">Start Here</a>

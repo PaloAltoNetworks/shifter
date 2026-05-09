@@ -49,8 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RuntimeDefault`. PyYAML (`pyyaml>=6.0`) and Helm (`v3.15.4`) are
   the new ADR-guard runtime dependencies: the `adr-conformance` job
   in `.github/workflows/_quality.yml` installs both **hermetically
-  per job** — PyYAML via
-  `pip install --target ${RUNNER_TEMP}/py-deps` with
+  per job** — Python 3.12 via `actions/setup-python@v5` (the
+  self-hosted runner's system Python lacks `pip`), then PyYAML via
+  `pip install --no-deps --target ${RUNNER_TEMP}/py-deps` with
   `PYTHONPATH=${RUNNER_TEMP}/py-deps` on the run step, and Helm via
   the official `get.helm.sh` release tarball extracted to
   `${RUNNER_TEMP}/helm-bin/` and added to `$GITHUB_PATH` (no

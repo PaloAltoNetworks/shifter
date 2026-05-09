@@ -48,9 +48,10 @@ import shutil
 import subprocess  # nosec B404 - aws CLI is the deploy-job interface
 import sys
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, TextIO
+from typing import TextIO
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,7 @@ _TRANSITIONAL_STATUSES = frozenset(
     }
 )
 
-DEFAULT_MAX_ATTEMPTS = 20  # 20 × 30 s = 10 min — fits well under the CI cap.
+DEFAULT_MAX_ATTEMPTS = 20  # 20 x 30 s = 10 min — fits well under the CI cap.
 DEFAULT_POLL_INTERVAL = 30.0
 
 
@@ -134,9 +135,7 @@ def _default_aws_describe(instance_id: str) -> dict:
     if proc.returncode != 0:
         if "DBInstanceNotFound" in proc.stderr:
             return {"DBInstances": []}
-        raise RuntimeError(
-            f"aws rds describe-db-instances failed for {instance_id!r}: {proc.stderr.strip()}"
-        )
+        raise RuntimeError(f"aws rds describe-db-instances failed for {instance_id!r}: {proc.stderr.strip()}")
     return json.loads(proc.stdout)
 
 
@@ -157,9 +156,7 @@ def _filtered_pending(instance_payload: dict) -> dict:
     the `is_clean` check treat them uniformly.
     """
     pending = {
-        k: v
-        for k, v in (instance_payload.get("PendingModifiedValues") or {}).items()
-        if v not in (None, [], {}, "")
+        k: v for k, v in (instance_payload.get("PendingModifiedValues") or {}).items() if v not in (None, [], {}, "")
     }
     for group in instance_payload.get("DBParameterGroups") or []:
         status = group.get("ParameterApplyStatus")
@@ -212,9 +209,7 @@ def check_instance(
             break
         sleep(poll_interval)
 
-    status_msg = (
-        last_payload.get("DBInstanceStatus") if last_payload is not None else "unknown"
-    )
+    status_msg = last_payload.get("DBInstanceStatus") if last_payload is not None else "unknown"
     return InstanceCheck(
         instance_id=instance_id,
         pending=last_pending,
@@ -267,9 +262,7 @@ def _terraform_outputs_payload(working_dir: Path) -> dict:
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"terraform output -json failed in {working_dir}: {proc.stderr.strip()}"
-        )
+        raise RuntimeError(f"terraform output -json failed in {working_dir}: {proc.stderr.strip()}")
     return json.loads(proc.stdout)
 
 
@@ -284,8 +277,7 @@ def main(
     ids = [i for i in instance_ids if i]
     if not ids:
         out_stream.write(
-            "ERROR: no RDS instance IDs supplied. "
-            "Pass IDs as positional args or use --tf-outputs-from <dir>.\n"
+            "ERROR: no RDS instance IDs supplied. Pass IDs as positional args or use --tf-outputs-from <dir>.\n"
         )
         return 2
 

@@ -1,13 +1,5 @@
 [
   {
-    "rule_id": "ADR-006-R2",
-    "owner": "platform",
-    "reason": "Existing base manifests need securityContext additions; tracked for remediation.",
-    "expires_on": "2026-07-08",
-    "checks": [],
-    "paths": ["platform/k8s/gcp/base/*-deployment.yaml"]
-  },
-  {
     "rule_id": "ADR-006-R3",
     "owner": "platform",
     "reason": "NetworkPolicies not yet authored; deferred until network segmentation design is complete.",

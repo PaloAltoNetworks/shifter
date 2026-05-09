@@ -53,20 +53,20 @@
                 <label class="form-label">
                     Deployment Profile <span class="required">*</span>
                 </label>
-                <div class="xdr-dropdown full-width" id="profile-dropdown">
+                <div class="shifter-dropdown full-width" id="profile-dropdown">
                     <input type="hidden" name="deployment_profile" id="profile-select-value">
-                    <button type="button" class="xdr-dropdown-trigger">
-                        <span class="xdr-dropdown-value placeholder">-- Select a deployment profile --</span>
-                        <span class="xdr-dropdown-chevron"></span>
+                    <button type="button" class="shifter-dropdown-trigger">
+                        <span class="shifter-dropdown-value placeholder">-- Select a deployment profile --</span>
+                        <span class="shifter-dropdown-chevron"></span>
                     </button>
-                    <div class="xdr-dropdown-panel">
-                        <ul class="xdr-dropdown-items" id="profile-items">
+                    <div class="shifter-dropdown-panel">
+                        <ul class="shifter-dropdown-items" id="profile-items">
                             {% for profile in deployment_profiles %}
-                            <li class="xdr-dropdown-item" data-value="{{ profile.credential_id }}" data-name="{{ profile.name }}">
+                            <li class="shifter-dropdown-item" data-value="{{ profile.credential_id }}" data-name="{{ profile.name }}">
                                 <span class="item-label">{{ profile.name }}</span>
                             </li>
                             {% empty %}
-                            <li class="xdr-dropdown-empty">No deployment profiles available</li>
+                            <li class="shifter-dropdown-empty">No deployment profiles available</li>
                             {% endfor %}
                         </ul>
                     </div>
@@ -95,7 +95,7 @@
         <!-- Step 2: Registration Method -->
         <div class="wizard-panel" id="step-2">
             <div class="card-title">Registration Method</div>
-            <p style="color: var(--xdr-text-secondary); margin: 0 0 20px; font-size: 13px;">
+            <p style="color: var(--theme-text-secondary); margin: 0 0 20px; font-size: 13px;">
                 Choose how to register this NGFW with Strata Cloud Manager for device certificate and XDR integration.
             </p>
 
@@ -119,21 +119,21 @@
                     <label class="form-label">
                         SCM Credential <span class="required">*</span>
                     </label>
-                    <div class="xdr-dropdown full-width" id="scm-dropdown">
+                    <div class="shifter-dropdown full-width" id="scm-dropdown">
                         <input type="hidden" name="scm_credential" id="scm-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select an SCM credential --</span>
-                            <span class="xdr-dropdown-chevron"></span>
+                        <button type="button" class="shifter-dropdown-trigger">
+                            <span class="shifter-dropdown-value placeholder">-- Select an SCM credential --</span>
+                            <span class="shifter-dropdown-chevron"></span>
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="scm-items">
+                        <div class="shifter-dropdown-panel">
+                            <ul class="shifter-dropdown-items" id="scm-items">
                                 {% for cred in scm_credentials %}
-                                <li class="xdr-dropdown-item" data-value="{{ cred.credential_id }}" data-name="{{ cred.name }}" data-folder="{{ cred.scm_folder_name }}" data-region="{{ cred.sls_region }}">
+                                <li class="shifter-dropdown-item" data-value="{{ cred.credential_id }}" data-name="{{ cred.name }}" data-folder="{{ cred.scm_folder_name }}" data-region="{{ cred.sls_region }}">
                                     <span class="item-label">{{ cred.name }}</span>
                                     <span class="item-description">{{ cred.scm_folder_name }}</span>
                                 </li>
                                 {% empty %}
-                                <li class="xdr-dropdown-empty">No SCM credentials available</li>
+                                <li class="shifter-dropdown-empty">No SCM credentials available</li>
                                 {% endfor %}
                             </ul>
                         </div>
@@ -161,7 +161,7 @@
         <!-- Step 3: Confirm -->
         <div class="wizard-panel" id="step-3">
             <div class="card-title">Confirm Setup</div>
-            <p style="color: var(--xdr-text-secondary); margin: 0 0 20px; font-size: 13px;">
+            <p style="color: var(--theme-text-secondary); margin: 0 0 20px; font-size: 13px;">
                 Review your configuration before provisioning.
             </p>
 

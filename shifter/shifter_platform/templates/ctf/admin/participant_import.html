@@ -15,7 +15,7 @@
     display: flex;
     gap: 4px;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
     list-style: none;
     padding: 0;
@@ -23,18 +23,18 @@
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .form-help {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
@@ -67,14 +67,14 @@
     display: flex;
     gap: 8px;
     padding-top: 16px;
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
     margin-top: 8px;
 }
 
 .btn-cancel {
     background: transparent;
-    color: var(--xdr-text-secondary);
-    border: 1px solid var(--xdr-border);
+    color: var(--theme-text-secondary);
+    border: 1px solid var(--theme-border);
 }
 
 /* File input styled for dark theme */
@@ -84,12 +84,12 @@ input[type="file"] {
 
 .csv-example {
     background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
     padding: 8px 12px;
     font-family: monospace;
     font-size: 12px;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 8px 0;
     white-space: pre;
     overflow-x: auto;
@@ -97,11 +97,11 @@ input[type="file"] {
 
 .info-note {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     padding: 8px 12px;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
-    background: rgba(18, 141, 243, 0.05);
+    background: rgba(148, 163, 184, 0.05);
 }
 
 .detail-row {
@@ -113,16 +113,16 @@ input[type="file"] {
 }
 
 .detail-row + .detail-row {
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
 }
 
 .detail-label {
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .detail-value {
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 @media (max-width: 800px) {
@@ -196,13 +196,13 @@ input[type="file"] {
         <!-- CSV Format Instructions -->
         <div class="card">
             <div class="card-title">CSV Format</div>
-            <p style="margin: 0 0 8px; font-size: 13px; color: var(--xdr-text);">Upload a CSV file with participant data. The file should have two columns:</p>
-            <ol style="margin: 0 0 12px; padding-left: 20px; font-size: 13px; color: var(--xdr-text);">
+            <p style="margin: 0 0 8px; font-size: 13px; color: var(--theme-text);">Upload a CSV file with participant data. The file should have two columns:</p>
+            <ol style="margin: 0 0 12px; padding-left: 20px; font-size: 13px; color: var(--theme-text);">
                 <li><strong>Name</strong> - Participant display name</li>
                 <li><strong>Email</strong> - Participant email address</li>
             </ol>
 
-            <div style="font-size: 13px; font-weight: 600; color: var(--xdr-text); margin-bottom: 4px;">Example:</div>
+            <div style="font-size: 13px; font-weight: 600; color: var(--theme-text); margin-bottom: 4px;">Example:</div>
             <div class="csv-example">Alice Smith,alice@example.com
 Bob Jones,bob@example.com
 Carol Wilson,carol@example.com</div>

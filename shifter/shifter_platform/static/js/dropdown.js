@@ -1,30 +1,30 @@
 /**
- * XDR Custom Dropdown Component
- * Matches Cortex XDR dropdown styling and behavior
+ * Custom Dropdown Component
+ * Lightweight accessible dropdown used across the platform.
  */
 
-class XdrDropdown {
+class ShifterDropdown {
     constructor(element) {
         this.element = element;
-        this.trigger = element.querySelector('.xdr-dropdown-trigger');
-        this.valueDisplay = element.querySelector('.xdr-dropdown-value');
-        this.panel = element.querySelector('.xdr-dropdown-panel');
-        this.itemsContainer = element.querySelector('.xdr-dropdown-items');
-        this.filterInput = element.querySelector('.xdr-dropdown-filter input');
+        this.trigger = element.querySelector('.shifter-dropdown-trigger');
+        this.valueDisplay = element.querySelector('.shifter-dropdown-value');
+        this.panel = element.querySelector('.shifter-dropdown-panel');
+        this.itemsContainer = element.querySelector('.shifter-dropdown-items');
+        this.filterInput = element.querySelector('.shifter-dropdown-filter input');
         this.hiddenInput = element.querySelector('input[type="hidden"]');
 
         // Defensive: ensure required elements exist
         if (!this.trigger || !this.itemsContainer) {
-            console.warn('XdrDropdown: Missing required elements, skipping init');
+            console.warn('Dropdown: Missing required elements, skipping init');
             return;
         }
 
-        this.items = Array.from(this.itemsContainer.querySelectorAll('.xdr-dropdown-item'));
+        this.items = Array.from(this.itemsContainer.querySelectorAll('.shifter-dropdown-item'));
         this.boundItems = new WeakSet();
         this.highlightedIndex = -1;
         this.isOpen = false;
 
-        this.element._xdrDropdown = this;
+        this.element._shifterDropdown = this;
         this.init();
     }
 
@@ -159,11 +159,11 @@ class XdrDropdown {
         });
 
         // Show/hide empty message
-        let emptyMsg = this.panel.querySelector('.xdr-dropdown-empty');
+        let emptyMsg = this.panel.querySelector('.shifter-dropdown-empty');
         if (!hasVisible) {
             if (!emptyMsg) {
                 emptyMsg = document.createElement('div');
-                emptyMsg.className = 'xdr-dropdown-empty';
+                emptyMsg.className = 'shifter-dropdown-empty';
                 emptyMsg.textContent = 'No matches found';
                 this.itemsContainer.parentNode.appendChild(emptyMsg);
             }
@@ -221,7 +221,7 @@ class XdrDropdown {
     }
 
     refreshItems() {
-        this.items = Array.from(this.itemsContainer.querySelectorAll('.xdr-dropdown-item'));
+        this.items = Array.from(this.itemsContainer.querySelectorAll('.shifter-dropdown-item'));
         this._bindItems();
         this._syncSelectedState();
     }
@@ -261,12 +261,12 @@ class XdrDropdown {
             return null;
         }
 
-        if (element._xdrDropdown) {
-            element._xdrDropdown.refreshItems();
-            return element._xdrDropdown;
+        if (element._shifterDropdown) {
+            element._shifterDropdown.refreshItems();
+            return element._shifterDropdown;
         }
 
-        return new XdrDropdown(element);
+        return new ShifterDropdown(element);
     }
 
     // Public API
@@ -293,4 +293,4 @@ class XdrDropdown {
 }
 
 // Export for manual initialization
-globalThis.XdrDropdown = XdrDropdown;
+globalThis.ShifterDropdown = ShifterDropdown;

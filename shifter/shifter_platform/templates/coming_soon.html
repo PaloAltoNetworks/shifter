@@ -5,22 +5,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SHIFTER // Coming Soon</title>
-    <!-- T044: Load Lato font from Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
-    <!-- T043: Link xdr-theme.css for CSS variables -->
-    <link rel="stylesheet" href="{% static 'css/xdr-theme.css' %}">
-    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
     <style>
-        /* T045-T047: Cortex XDR color palette */
         :root {
-            --accent: #128df3;        /* T046: Cortex blue instead of neon green */
-            --accent-glow: rgba(18, 141, 243, 0.4);
-            --accent-soft: rgba(18, 141, 243, 0.6);
-            --background: #1f1f1f;    /* T045: Cortex background */
+            --accent: #94a3b8;
+            --accent-glow: rgba(148, 163, 184, 0.4);
+            --accent-soft: rgba(148, 163, 184, 0.6);
+            --background: #1f1f1f;
             --surface: #151515;
-            --text-primary: #eaebeb;  /* T047: Cortex text colors */
+            --text-primary: #eaebeb;
             --text-secondary: #b8b8b8;
             --text-muted: #707070;
         }
@@ -48,7 +45,6 @@
             position: relative;
         }
 
-        /* Subtle gradient with vignette - more professional */
         .bg-gradient {
             position: fixed;
             top: 0;
@@ -57,15 +53,11 @@
             height: 100%;
             background:
                 radial-gradient(ellipse at center, transparent 0%, var(--background) 70%),
-                radial-gradient(ellipse at 30% 70%, rgba(18, 141, 243, 0.03) 0%, transparent 50%),
-                radial-gradient(ellipse at 70% 30%, rgba(18, 141, 243, 0.02) 0%, transparent 50%);
+                radial-gradient(ellipse at 30% 70%, rgba(148, 163, 184, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 30%, rgba(148, 163, 184, 0.02) 0%, transparent 50%);
             pointer-events: none;
             z-index: 0;
         }
-
-        /* T048: Removed noise texture - too busy for professional look */
-
-        /* T048: Removed scanlines - too retro for Cortex aesthetic */
 
         .container {
             position: relative;
@@ -78,11 +70,21 @@
             max-width: 600px;
         }
 
-        /* Logo with subtle glow - T048: more subtle animation */
         .logo {
-            width: 160px;
-            height: auto;
+            width: 96px;
+            height: 96px;
             margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--surface);
+            border: 1px solid #2e2e2e;
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-family: Lato, sans-serif;
+            font-weight: 700;
+            font-size: 56px;
+            letter-spacing: 0.02em;
             animation: logoPulse 6s ease-in-out infinite;
             filter: drop-shadow(0 0 15px var(--accent-glow));
         }
@@ -97,12 +99,15 @@
             }
         }
 
-        /* Wordmark - T049: clean styling without glitch */
         .wordmark {
-            width: 320px;
-            height: auto;
+            font-family: Lato, sans-serif;
+            font-weight: 700;
+            font-size: 64px;
+            letter-spacing: 0.08em;
+            color: var(--text-primary);
             margin-bottom: 1.5rem;
             position: relative;
+            line-height: 1;
         }
 
         .wordmark-container {
@@ -110,7 +115,6 @@
             display: inline-block;
         }
 
-        /* T048: Subtle hover glow instead of glitch effect */
         .wordmark-container::before {
             content: '';
             position: absolute;
@@ -148,7 +152,6 @@
             letter-spacing: 0.1em;
         }
 
-        /* Terminal blink cursor - T046: Cortex blue */
         .cursor {
             display: inline-block;
             width: 8px;
@@ -164,7 +167,6 @@
             51%, 100% { opacity: 0; }
         }
 
-        /* Footer */
         .footer {
             position: fixed;
             bottom: 1.5rem;
@@ -174,14 +176,15 @@
             z-index: 10;
         }
 
-        /* Mobile responsive */
         @media (max-width: 600px) {
             .logo {
-                width: 120px;
+                width: 80px;
+                height: 80px;
+                font-size: 44px;
             }
 
             .wordmark {
-                width: 240px;
+                font-size: 48px;
             }
 
             .tagline {
@@ -192,11 +195,13 @@
 
         @media (max-width: 400px) {
             .logo {
-                width: 100px;
+                width: 64px;
+                height: 64px;
+                font-size: 36px;
             }
 
             .wordmark {
-                width: 200px;
+                font-size: 40px;
             }
 
             .tagline {
@@ -209,11 +214,10 @@
     <div class="bg-gradient"></div>
 
     <div class="container">
-        <!-- T049: Logo and wordmark remain visible -->
-        <img src="{% static 'images/logo-transparent.png' %}" alt="Shifter" class="logo">
+        <div class="logo" aria-label="Shifter logo">S</div>
 
         <div class="wordmark-container">
-            <img src="{% static 'images/wordmark-transparent.png' %}" alt="SHIFTER" class="wordmark">
+            <div class="wordmark">SHIFTER</div>
         </div>
 
         <p class="tagline">
@@ -224,7 +228,5 @@
     </div>
 
     <footer class="footer">&copy; 2025 Brad Edwards</footer>
-
-    <!-- T048: Removed glitch JavaScript - using subtle CSS hover effect instead -->
 </body>
 </html>

@@ -9,12 +9,12 @@
         align-items: center;
         gap: 4px;
         font-size: 13px;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         margin-bottom: 16px;
     }
 
     .back-link:hover {
-        color: var(--xdr-text);
+        color: var(--theme-text);
         text-decoration: none;
     }
 
@@ -33,7 +33,7 @@
     }
 
     .status-ready .status-dot,
-    .status-active .status-dot { background: #00d26a; }
+    .status-active .status-dot { background: #22c55e; }
     .status-provisioning .status-dot,
     .status-starting .status-dot,
     .status-stopping .status-dot,
@@ -66,7 +66,7 @@
 
     .page-subtitle {
         font-size: 14px;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         margin: 8px 0 0;
     }
 
@@ -74,7 +74,7 @@
     .section-title {
         font-size: 12px;
         font-weight: 600;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         text-transform: uppercase;
         margin: 0 0 16px;
     }
@@ -94,13 +94,13 @@
 
     .detail-label {
         font-size: 11px;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         text-transform: uppercase;
     }
 
     .detail-value {
         font-size: 14px;
-        color: var(--xdr-text);
+        color: var(--theme-text);
     }
 
     .detail-value.mono {
@@ -108,12 +108,12 @@
     }
 
     .detail-value.placeholder {
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         font-style: italic;
     }
 
     .detail-value.success {
-        color: #00d26a;
+        color: #22c55e;
     }
 
     .detail-value.warning {
@@ -134,23 +134,23 @@
     .ranges-table td {
         padding: 10px 12px;
         text-align: left;
-        border-bottom: 1px solid var(--xdr-border);
+        border-bottom: 1px solid var(--theme-border);
     }
 
     .ranges-table th {
         font-size: 11px;
         font-weight: 600;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         text-transform: uppercase;
     }
 
     .ranges-table td {
         font-size: 13px;
-        color: var(--xdr-text);
+        color: var(--theme-text);
     }
 
     .ranges-table tbody tr:hover {
-        background: var(--xdr-hover);
+        background: var(--theme-hover);
     }
 
     /* Danger zone */
@@ -167,12 +167,12 @@
         background: transparent !important;
         border: none !important;
         cursor: pointer;
-        color: var(--xdr-text-secondary);
+        color: var(--theme-text-secondary);
         transition: color 0.2s ease;
     }
 
     .ngfw-refresh-btn:hover {
-        color: var(--xdr-text);
+        color: var(--theme-text);
     }
 
     .ngfw-refresh-btn svg {
@@ -199,7 +199,7 @@
         </div>
     </div>
     <div class="page-header-actions">
-        <button class="xdr-button default-hover no-content has-icon tertiary-clear ngfw-refresh-btn"
+        <button class="ngfw-refresh-btn"
                 data-ngfw-id="{{ ngfw.app_id }}"
                 aria-label="Refresh NGFW Status"
                 style="padding: 8px;">
@@ -243,15 +243,15 @@
 
 {% if ngfw.status == 'ready' or ngfw.status == 'paused' %}
 <!-- Data Source Instruction - shown when NGFW is ready -->
-<div class="card" style="border-color: #00d26a;">
-    <h2 class="section-title" style="color: #00d26a;">Next Step</h2>
-    <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
+<div class="card" style="border-color: #22c55e;">
+    <h2 class="section-title" style="color: #22c55e;">Next Step</h2>
+    <p style="color: var(--theme-text-secondary); margin: 0 0 12px; font-size: 13px;">
         Add this NGFW as a data source in your XDR/XSIAM tenant.
     </p>
-    <p style="color: var(--xdr-text-secondary); margin: 0; font-size: 13px;">
+    <p style="color: var(--theme-text-secondary); margin: 0; font-size: 13px;">
         Go to <strong>XDR/XSIAM &rarr; Settings &rarr; Data Sources &rarr; Add Data Source</strong> and select this firewall.
         {% if ngfw.serial_number %}
-        <br>Serial Number: <code style="background: var(--xdr-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw.serial_number }}</code>
+        <br>Serial Number: <code style="background: var(--theme-bg-tertiary); padding: 2px 6px; border-radius: 3px;">{{ ngfw.serial_number }}</code>
         {% endif %}
     </p>
 </div>
@@ -261,7 +261,7 @@
 <!-- CLI Access -->
 <div class="card">
     <h2 class="section-title">CLI Access</h2>
-    <p style="color: var(--xdr-text-secondary); margin: 0 0 12px; font-size: 13px;">
+    <p style="color: var(--theme-text-secondary); margin: 0 0 12px; font-size: 13px;">
         Open PAN-OS command line interface via SSH
     </p>
     <button
@@ -305,7 +305,7 @@
         </tbody>
     </table>
     {% else %}
-    <p style="color: var(--xdr-text-secondary); margin: 0;">
+    <p style="color: var(--theme-text-secondary); margin: 0;">
         No ranges are currently using this NGFW.
     </p>
     {% endif %}
@@ -314,7 +314,7 @@
 <!-- Danger Zone -->
 <div class="card danger-zone">
     <h2 class="card-title">Danger Zone</h2>
-    <p style="color: var(--xdr-text-secondary); margin: 0 0 16px; font-size: 13px;">
+    <p style="color: var(--theme-text-secondary); margin: 0 0 16px; font-size: 13px;">
         Deprovisioning will destroy this NGFW and deactivate its license. Credits will be returned to your pool.
         {% if linked_ranges %}
         <strong style="color: #ff4d4f;">Warning: {{ linked_ranges|length }} range(s) are currently using this NGFW.</strong>

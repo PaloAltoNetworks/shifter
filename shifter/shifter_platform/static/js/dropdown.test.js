@@ -1,26 +1,26 @@
-describe('XdrDropdown explicit init', () => {
+describe('ShifterDropdown explicit init', () => {
     const buildDropdownMarkup = () => `
-        <div class="xdr-dropdown" id="test-dropdown">
+        <div class="shifter-dropdown" id="test-dropdown">
             <input type="hidden" name="value">
-            <button type="button" class="xdr-dropdown-trigger">
-                <span class="xdr-dropdown-value placeholder">Select</span>
+            <button type="button" class="shifter-dropdown-trigger">
+                <span class="shifter-dropdown-value placeholder">Select</span>
             </button>
-            <div class="xdr-dropdown-panel">
-                <ul class="xdr-dropdown-items">
-                    <li class="xdr-dropdown-item" data-value="1">One</li>
+            <div class="shifter-dropdown-panel">
+                <ul class="shifter-dropdown-items">
+                    <li class="shifter-dropdown-item" data-value="1">One</li>
                 </ul>
             </div>
         </div>
     `;
 
     const loadModule = () => {
-        require('./xdr-dropdown.js');
-        return globalThis.XdrDropdown;
+        require('./dropdown.js');
+        return globalThis.ShifterDropdown;
     };
 
     beforeEach(() => {
         jest.resetModules();
-        delete globalThis.XdrDropdown;
+        delete globalThis.ShifterDropdown;
         document.body.innerHTML = '';
     });
 
@@ -35,19 +35,19 @@ describe('XdrDropdown explicit init', () => {
 
     test('init caches instance and refreshes items', () => {
         document.body.innerHTML = buildDropdownMarkup();
-        const XdrDropdown = loadModule();
+        const ShifterDropdown = loadModule();
 
-        expect(XdrDropdown.init).toBeDefined();
+        expect(ShifterDropdown.init).toBeDefined();
 
         const dropdown = document.getElementById('test-dropdown');
-        const instance = XdrDropdown.init(dropdown);
+        const instance = ShifterDropdown.init(dropdown);
 
-        expect(dropdown._xdrDropdown).toBe(instance);
+        expect(dropdown._shifterDropdown).toBe(instance);
         expect(instance.items).toHaveLength(1);
 
-        const itemsContainer = dropdown.querySelector('.xdr-dropdown-items');
+        const itemsContainer = dropdown.querySelector('.shifter-dropdown-items');
         const newItem = document.createElement('li');
-        newItem.className = 'xdr-dropdown-item';
+        newItem.className = 'shifter-dropdown-item';
         newItem.dataset.value = '2';
         newItem.textContent = 'Two';
         itemsContainer.appendChild(newItem);
@@ -61,11 +61,11 @@ describe('XdrDropdown explicit init', () => {
 
     test('init returns the same instance on repeated calls', () => {
         document.body.innerHTML = buildDropdownMarkup();
-        const XdrDropdown = loadModule();
+        const ShifterDropdown = loadModule();
 
         const dropdown = document.getElementById('test-dropdown');
-        const first = XdrDropdown.init(dropdown);
-        const second = XdrDropdown.init(dropdown);
+        const first = ShifterDropdown.init(dropdown);
+        const second = ShifterDropdown.init(dropdown);
 
         expect(second).toBe(first);
     });

@@ -19,23 +19,23 @@ describe('NGFWWizardManager', () => {
         <div id="otp-fields"></div>
         <div id="pin-fields"></div>
         <div id="profile-dropdown">
-            <button class="xdr-dropdown-trigger"><span class="xdr-dropdown-value placeholder">Select</span></button>
-            <div class="xdr-dropdown-panel">
-                <div class="xdr-dropdown-item" data-value="1" data-name="Profile 1"><span class="item-label">Profile 1</span></div>
+            <button class="shifter-dropdown-trigger"><span class="shifter-dropdown-value placeholder">Select</span></button>
+            <div class="shifter-dropdown-panel">
+                <div class="shifter-dropdown-item" data-value="1" data-name="Profile 1"><span class="item-label">Profile 1</span></div>
             </div>
             <input type="hidden">
         </div>
         <div id="scm-dropdown">
-            <button class="xdr-dropdown-trigger"><span class="xdr-dropdown-value placeholder">Select</span></button>
-            <div class="xdr-dropdown-panel">
-                <div class="xdr-dropdown-item" data-value="1" data-name="Cred 1" data-region="americas"><span class="item-label">Cred 1</span></div>
+            <button class="shifter-dropdown-trigger"><span class="shifter-dropdown-value placeholder">Select</span></button>
+            <div class="shifter-dropdown-panel">
+                <div class="shifter-dropdown-item" data-value="1" data-name="Cred 1" data-region="americas"><span class="item-label">Cred 1</span></div>
             </div>
             <input type="hidden">
         </div>
         <div id="region-dropdown">
-            <button class="xdr-dropdown-trigger"><span class="xdr-dropdown-value placeholder">Select</span></button>
-            <div class="xdr-dropdown-panel">
-                <div class="xdr-dropdown-item" data-value="americas"><span class="item-label">Americas</span></div>
+            <button class="shifter-dropdown-trigger"><span class="shifter-dropdown-value placeholder">Select</span></button>
+            <div class="shifter-dropdown-panel">
+                <div class="shifter-dropdown-item" data-value="americas"><span class="item-label">Americas</span></div>
             </div>
             <input type="hidden">
         </div>

@@ -1,10 +1,10 @@
 /* =============================================================================
-   CORTEX XDR SIDEBAR - Direct port from Cortex XDR
+   Sidebar component — left navigation chrome.
    ============================================================================= */
 
 /* CSS Variables - Dark theme (default) */
 :root {
-  --xdr-left-nav-width: 56px;
+  --theme-left-nav-width: 56px;
   --spacing-2: 8px;
   --spacing-3: 12px;
   --spacing-8: 32px;
@@ -13,7 +13,7 @@
 
 :root.open-left-nav,
 body.nav-lock {
-  --xdr-left-nav-width: 270px;
+  --theme-left-nav-width: 270px;
 }
 
 /* Nav component host styles */
@@ -22,12 +22,12 @@ body.nav-lock {
   --nav-bg: #000;
   --nav-lock-button-color: #333;
   --nav-lock-button-color-hover: #929191;
-  --nav-lock-button-bg-color-hover: rgb(6 35 20 / 0.698);
+  --nav-lock-button-bg-color-hover: rgb(31 36 43 / 0.7);
   --nav-lock-button-color-active: #fefefe;
   --nav-footer-modal-border: #333;
-  --nav-item-hover-bg-color: #05180f;
-  --nav-item-active-bg-color: #062314;
-  --nav-item-active-icon-color: var(--xdr-brand, #0c6);
+  --nav-item-hover-bg-color: #171a1f;
+  --nav-item-active-bg-color: #1f242b;
+  --nav-item-active-icon-color: var(--theme-brand, #94a3b8);
   --nav-item-text-color: #fefefe;
   --nav-sub-item-text-color: #b8b8b8;
   --nav-sub-item-text-active-color: #eaebeb;
@@ -35,13 +35,13 @@ body.nav-lock {
   --nav-item-favorite-active-color: #fefefe;
   --nav-profile-text-color: #eaebeb;
   --nav-profile-bg: #333;
-  --nav-profile-hover-bg: rgb(6 35 20 / 0.698);
-  --nav-profile-active-bg: #062314;
+  --nav-profile-hover-bg: rgb(31 36 43 / 0.7);
+  --nav-profile-active-bg: #1f242b;
   --nav-dialog-bg: #151515;
   --nav-dialog-border: #333;
   --nav-theme-bg: #151515;
   --nav-theme-color: #b8b8b8;
-  --nav-theme-selected-color: var(--xdr-brand, #0c6);
+  --nav-theme-selected-color: var(--theme-brand, #94a3b8);
   --nav-theme-selected-bg: #333;
 
   position: fixed;
@@ -76,7 +76,7 @@ body.nav-lock .left-nav .left-nav-body,
   max-width: 270px;
 }
 
-/* Tailwind utility classes used by Cortex */
+/* Tailwind utility classes used by the sidebar */
 .tw-mx-3 {
   margin-left: var(--spacing-3);
   margin-right: var(--spacing-3);
@@ -131,7 +131,7 @@ body.nav-lock .left-nav .left-nav-body,
 }
 
 .header-link:focus-visible {
-  outline: 1px solid var(--xdr-border, #484848) !important;
+  outline: 1px solid var(--theme-border, #484848) !important;
 }
 
 /* Lock button - main sidebar (hidden when submenu is open) */
@@ -351,13 +351,32 @@ body.nav-lock .left-nav .left-nav-body,
   text-overflow: ellipsis;
 }
 
-/* Logo SVG styling */
+/* Logo styling */
 .header-link svg {
   width: 40px;
   height: 40px;
   min-width: 40px;
   min-height: 40px;
   flex-shrink: 0;
+}
+
+.header-link .logo-mark {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--theme-surface, #151515);
+  border: 1px solid var(--theme-border-medium, #484848);
+  border-radius: 6px;
+  color: var(--theme-text, #eaebeb);
+  font-family: Lato, sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.5px;
 }
 
 .header-link .logo-text {
@@ -394,7 +413,7 @@ body.nav-lock .left-nav .left-nav-body,
   opacity: 1;
 }
 
-.xdr-dark-theme .tooltip.main-side-nav-menu-item-tooltip {
+.theme-dark .tooltip.main-side-nav-menu-item-tooltip {
   --nav-tooltip-bg: #1f1f1f;
   --nav-tooltip-color: #fefefe;
   --nav-tooltip-shadow: 0 0 8px 2px rgb(0 0 0 / 0.5);

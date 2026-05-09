@@ -5,17 +5,17 @@
 <style>
 .breadcrumb {
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb .separator {
     margin: 0 6px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .template-grid {
@@ -25,10 +25,10 @@
 }
 
 .template-card {
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 6px;
     padding: 16px;
-    background: var(--xdr-bg-secondary);
+    background: var(--theme-bg-secondary);
 }
 
 .template-card .type-label {
@@ -46,8 +46,8 @@
     display: inline-block;
     padding: 2px 8px;
     border-radius: 3px;
-    background: var(--xdr-bg-tertiary);
-    color: var(--xdr-text-secondary);
+    background: var(--theme-bg-tertiary);
+    color: var(--theme-text-secondary);
     font-size: 12px;
 }
 
@@ -74,7 +74,7 @@
             <span>Email Templates</span>
         </div>
         <h1 class="page-title">Email Templates</h1>
-        <p style="color: var(--xdr-text-secondary); font-size: 13px; margin-top: 4px;">
+        <p style="color: var(--theme-text-secondary); font-size: 13px; margin-top: 4px;">
             Customise email templates for this event. Types using the default template can be overridden via the API.
         </p>
     </div>
@@ -88,7 +88,7 @@
             {% if item.custom %}
             <span class="badge-custom">Custom</span>
             {% if item.custom.subject %}
-            <div style="margin-top: 6px; font-size: 13px; color: var(--xdr-text-secondary);">
+            <div style="margin-top: 6px; font-size: 13px; color: var(--theme-text-secondary);">
                 Subject: {{ item.custom.subject }}
             </div>
             {% endif %}

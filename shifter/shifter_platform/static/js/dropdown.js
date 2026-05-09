@@ -181,12 +181,12 @@ class ShifterDropdown {
         switch (e.key) {
             case 'ArrowDown':
                 e.preventDefault();
-                if (!this.isOpen) {
-                    this.open();
-                } else {
+                if (this.isOpen) {
                     const nextIndex = Math.min(this.highlightedIndex + 1, visibleItems.length - 1);
                     this.highlightItem(nextIndex);
                     this.scrollToItem(nextIndex);
+                } else {
+                    this.open();
                 }
                 break;
 

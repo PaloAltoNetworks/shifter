@@ -54,6 +54,11 @@ output "rds_security_group_id" {
 # Database Outputs
 # ------------------------------------------------------------------------------
 
+output "db_instance_id" {
+  description = "DBInstanceIdentifier of the Guacamole RDS instance"
+  value       = aws_db_instance.guacamole.id
+}
+
 output "db_instance_address" {
   description = "Address of the Guacamole RDS instance"
   value       = aws_db_instance.guacamole.address

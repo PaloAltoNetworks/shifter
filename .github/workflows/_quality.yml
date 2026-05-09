@@ -172,6 +172,24 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  check-rds-pending-modifications-lint:
+    permissions:
+      contents: read
+    name: Lint (check_rds_pending_modifications)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: scripts/check_rds_pending_modifications
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   k8s-lint:
     permissions:
       contents: read
@@ -524,6 +542,27 @@ jobs:
 
       - name: Run tests
         working-directory: scripts/check_layer_imports
+        run: uv run pytest tests/
+
+  check-rds-pending-modifications-tests:
+    permissions:
+      contents: read
+    name: Tests (check_rds_pending_modifications)
+    if: ${{ !inputs.skip_tests }}
+    needs: [check-rds-pending-modifications-lint]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/check_rds_pending_modifications
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: scripts/check_rds_pending_modifications
         run: uv run pytest tests/
 
   adr-guard-tests:

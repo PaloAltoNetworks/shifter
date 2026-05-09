@@ -112,6 +112,20 @@ The first slice intentionally stays small:
   Architecture check ensuring namespace manifests carry Pod Security Standards
   `pod-security.kubernetes.io/enforce` labels. Enforces ADR-006-R1.
 
+- `rds-pending-modifications`
+  Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal
+  Terraform outputs, then calls `aws rds describe-db-instances` for each
+  `*_db_instance_id` output and fails the deploy job if any RDS instance
+  still has non-empty `PendingModifiedValues` or non-`in-sync`/`applying`
+  `DBParameterGroups[].ParameterApplyStatus`. Catches the failure mode
+  documented in `dev/terraform.md` ("RDS Change Application") where a
+  successful apply silently queues class/parameter changes for the
+  maintenance window. Implementation: `scripts/check_rds_pending_modifications/`,
+  with its own uv-managed dev environment, dedicated CI lint+test jobs
+  (`check-rds-pending-modifications-lint` / `-tests` in `_quality.yml`),
+  and matching pre-commit hooks (ruff + pytest). Same pattern as
+  `scripts/check_layer_imports/`.
+
 ## Local Usage
 
 Run the fast profile on the full repo:

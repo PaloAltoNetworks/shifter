@@ -97,6 +97,11 @@ variable "db_skip_final_snapshot" {
   type        = bool
 }
 
+variable "db_apply_immediately" {
+  description = "Apply portal RDS modifications during the deploy instead of queueing them for the maintenance window."
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
@@ -451,6 +456,11 @@ variable "guacamole_db_deletion_protection" {
 
 variable "guacamole_db_skip_final_snapshot" {
   description = "Skip final snapshot for Guacamole RDS"
+  type        = bool
+}
+
+variable "guacamole_db_apply_immediately" {
+  description = "Apply Guacamole RDS modifications during the deploy instead of queueing them for the maintenance window."
   type        = bool
 }
 

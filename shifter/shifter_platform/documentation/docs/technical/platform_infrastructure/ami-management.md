@@ -40,12 +40,14 @@ Domain Controller uses a manually-created AMI with AD DS already promoted.
 | Hostname | Fixed from AMI (typically `DC01`) |
 | AMI IDs | `shifter/packer/dc-amis.json` |
 
-**Critical:** The prebaked DC's Administrator password must match `dc_domain_password` in `terraform.tfvars`. Victims use this password for domain join.
+**Critical:** The prebaked DC's Administrator password must match the
+environment's domain password in AWS Secrets Manager. Victims use this password
+for domain join, but the value must never be committed to `terraform.tfvars`.
 
 DC AMI is prebaked because runtime promotion adds 15-20 minutes to provisioning. Tradeoffs:
 - Fixed domain name across all ranges
 - Fixed hostname (no per-range DC naming)
-- Password must be coordinated between AMI and Terraform config
+- Password rotation must be coordinated between the AMI and the runtime secret
 
 ## Workflows
 
@@ -88,11 +90,14 @@ To create a new DC AMI:
 1. Launch Windows Server 2022 base AMI
 2. Install AD DS feature
 3. Promote to DC with domain `internal.shifter`, NetBIOS `INTSHIFTER`
-4. Set Administrator password to match `dc_domain_password` in terraform.tfvars
+4. Set Administrator password to match the environment's Secrets Manager domain password
 5. Sysprep and create AMI
 6. Update `dc-amis.json`
 
-**Important:** The Administrator password set during promotion must match the `dc_domain_password` value in `platform/terraform/environments/{env}/portal/terraform.tfvars` for domain join to work.
+**Important:** The Administrator password set during promotion must match the
+runtime secret referenced by the portal/engine Terraform stack for domain join
+to work. Keep only non-secret identifiers in Terraform configuration; do not
+store the password value in environment tfvars.
 
 ## Related Files (AWS)
 

@@ -41,6 +41,45 @@ Runtime secrets accessed by the portal at startup.
 | `shifter-{env}-portal-db-credentials` | RDS connection (host, port, user, password, dbname) |
 | `shifter-{env}-portal-app` | Django SECRET_KEY, other app secrets |
 | `shifter-{env}-portal-cognito` | OIDC client ID, client secret, domain |
+| `shifter-{env}-portal-dc-domain` | Prebaked domain-controller Administrator password for Windows domain join |
+
+The domain-controller password is a live credential. Terraform may reference
+the secret identifier needed for runtime injection, but the password value must
+not live in committed tfvars, workflow YAML, Terraform plan comments, or command
+logs.
+
+#### Bootstrap (fresh environment)
+
+The DC domain password secret is **created out-of-band before
+`terraform apply`**, not by Terraform. The engine-provisioner module
+references the secret via a `data "aws_secretsmanager_secret"` block,
+so the secret (and its `AWSCURRENT` value) must exist before any
+plan/apply that touches the engine-provisioner or portal stacks. This
+avoids the chicken-and-egg case where the same apply would create the
+empty secret AND stand up an ASG whose launch hook needs the value.
+
+The bootstrap order on a fresh environment is:
+
+1. Create and populate the secret via AWS CLI:
+   ```bash
+   aws secretsmanager create-secret \
+     --name "shifter-${ENV}-portal-dc-domain" \
+     --description "Prebaked DC Administrator password" \
+     --secret-string "$DC_DOMAIN_PASSWORD"
+   ```
+   The value must match the prebaked DC AMI's Administrator password (see
+   `platform_infrastructure/ami-management.md`).
+2. Run `terraform apply` for the portal stack. The data source resolves the
+   existing secret ARN and wires it into the engine ECS task definition
+   (`secrets = [...]`) and the portal SSM parameter
+   (`${ps_prefix}/dc-domain-password-secret-arn`). The engine task and
+   portal container read it at runtime.
+3. Subsequent rotations or value changes use
+   `aws secretsmanager put-secret-value` (Terraform never touches the
+   value, so it never lands in state). Restart the portal containers to
+   pick up the new value (see "Domain Controller Administrator Password"
+   in the rotation runbook below); future engine ECS task launches read
+   the rotated value automatically.
 
 ### Dev Box
 
@@ -132,6 +171,27 @@ aws secretsmanager create-secret \
 1. Rotate in Cognito console
 2. Update in Secrets Manager
 3. Restart portal
+
+### Domain Controller Administrator Password
+
+The portal Django container reads `DC_DOMAIN_PASSWORD` once at startup
+(`entrypoint.sh`) and caches it in the process environment, so a Secrets
+Manager update does not refresh a running portal. The engine provisioner ECS
+task, by contrast, has the value injected by ECS at each task launch via the
+task definition's `secrets = [...]` block, so future range joins pick up the
+rotated value without a task-definition redeploy.
+
+1. Rotate the domain credential and rebuild any prebaked DC AMI that embeds
+   it; both must agree on the new value
+2. Update `shifter-{env}-portal-dc-domain` in Secrets Manager
+   (`aws secretsmanager put-secret-value`)
+3. Restart the portal containers so the new value is loaded:
+   ```bash
+   docker restart portal worker-engine worker-cms worker-mc ctf-scheduler
+   ```
+   (or terminate the portal EC2 and let the ASG relaunch)
+4. No engine provisioner task-definition redeploy is required; the next ECS
+   task launch reads the rotated value
 
 ### GitHub OIDC Role
 Role ARN doesn't change. Trust policy updates are in `platform/terraform/global/iam/`.

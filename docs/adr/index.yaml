@@ -100,6 +100,11 @@
         "id": "ADR-004-R6",
         "description": "GCP Terraform is linted with the tflint-ruleset-google plugin.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R7",
+        "description": "Committed Terraform variable files under platform/terraform/environments/ must not assign string literals to *_password / *_secret / *_token / *_key / *_credentials variables; reference an out-of-band secret store (Secrets Manager, SSM, environment) instead. Backstops gitleaks for low-entropy committed credentials it ignores.",
+        "checks": ["no-plaintext-secrets-in-tfvars"]
       }
     ],
     "exceptions": [],
@@ -110,7 +115,8 @@
       ".gitleaks.toml",
       ".kube-linter.yaml",
       ".pre-commit-config.yaml",
-      ".github/workflows/_quality.yml"
+      ".github/workflows/_quality.yml",
+      "scripts/adr_guard/adr_guard.py"
     ]
   },
   {

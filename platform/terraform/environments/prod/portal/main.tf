@@ -249,12 +249,13 @@ module "ssm" {
   ecr_repository_name = split("/", data.terraform_remote_state.foundation.outputs.portal_ecr_url)[1]
 
   # Secrets Manager ARNs
-  db_secret_arn          = module.rds.db_credentials_secret_arn
-  app_secret_arn         = aws_secretsmanager_secret.app.arn
-  cognito_secret_arn     = module.cognito.cognito_secret_arn
-  guacamole_secret_arn   = module.guacamole.json_auth_secret_arn
-  guacamole_base_url     = "https://${var.domain_name}/guacamole"
-  guacamole_api_base_url = module.guacamole.guacamole_client_internal_url
+  db_secret_arn                 = module.rds.db_credentials_secret_arn
+  app_secret_arn                = aws_secretsmanager_secret.app.arn
+  cognito_secret_arn            = module.cognito.cognito_secret_arn
+  guacamole_secret_arn          = module.guacamole.json_auth_secret_arn
+  guacamole_base_url            = "https://${var.domain_name}/guacamole"
+  guacamole_api_base_url        = module.guacamole.guacamole_client_internal_url
+  dc_domain_password_secret_arn = module.engine_provisioner.dc_domain_password_secret_arn
 
   # Application configuration
   domain_name    = var.domain_name
@@ -306,6 +307,7 @@ module "ec2" {
     aws_secretsmanager_secret.app.arn,
     module.cognito.cognito_secret_arn,
     module.guacamole.json_auth_secret_arn,
+    module.engine_provisioner.dc_domain_password_secret_arn,
   ]
   s3_bucket_arn    = module.s3.bucket_arn
   app_port         = var.app_port
@@ -486,9 +488,10 @@ module "engine_provisioner" {
   windows_ami_id = data.aws_ssm_parameter.windows_ami.value
   dc_ami_id      = data.aws_ssm_parameter.dc_ami.value
 
-  # Prebaked DC configuration
-  dc_domain_name     = var.dc_domain_name
-  dc_domain_password = var.dc_domain_password
+  # Prebaked DC configuration. dc_domain_password is sourced from
+  # aws_secretsmanager_secret.dc_domain_password inside the
+  # engine-provisioner module; no plaintext input from this stack.
+  dc_domain_name = var.dc_domain_name
 
   # Instance types
   kali_instance_type   = var.kali_instance_type

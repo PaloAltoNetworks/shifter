@@ -417,6 +417,7 @@ jobs:
           APP_SECRET_ARN=$(get_param "$PS_PREFIX/app-secret-arn")
           COGNITO_SECRET_ARN=$(get_param "$PS_PREFIX/cognito-secret-arn")
           GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
+          DC_DOMAIN_PASSWORD_SECRET_ARN=$(get_param "$PS_PREFIX/dc-domain-password-secret-arn" || echo "")
           GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
           GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" || echo "")
           ENGINE_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/engine-ecs-cluster-arn")
@@ -438,6 +439,7 @@ jobs:
           [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
           [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
           [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
+          [ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e DC_DOMAIN_PASSWORD_SECRET_ARN=$DC_DOMAIN_PASSWORD_SECRET_ARN"
           # Add localhost to ALLOWED_HOSTS for dev (enables SSM tunnel testing)
           # PS_PREFIX comes from Parameter Store, not user input - safe to use
           if [[ "$PS_PREFIX" == *"/dev/"* ]]; then
@@ -456,6 +458,23 @@ jobs:
           [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
 
           docker pull "$IMAGE"
+          # Preflight: confirm the DC domain password secret is populated
+          # before tearing down running containers. The Terraform-managed
+          # secret container exists with no AWSCURRENT until an operator
+          # seeds the value out-of-band (see secrets.md "Bootstrap (fresh
+          # environment)"); deploying without a value would leave the
+          # entrypoint unable to resolve DC_DOMAIN_PASSWORD and the
+          # restarted portal in a crash-restart loop.
+          if [ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ]; then
+            if ! aws secretsmanager get-secret-value \
+                  --secret-id "$DC_DOMAIN_PASSWORD_SECRET_ARN" \
+                  --region "$AWS_REGION" \
+                  --query SecretString --output text >/dev/null 2>&1; then
+              echo "ERROR: DC domain password secret has no AWSCURRENT value." >&2
+              echo "Seed the value via 'aws secretsmanager put-secret-value' before deploying." >&2
+              exit 1
+            fi
+          fi
           docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"

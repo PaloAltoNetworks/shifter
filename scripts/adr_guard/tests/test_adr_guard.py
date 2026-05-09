@@ -520,6 +520,410 @@ class McpNoShellExecTests(unittest.TestCase):
                 [v.path for v in filtered], ["mcp/fresh/index.js"]
             )
 
+    def test_no_plaintext_secrets_flags_literal_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'dc_domain_name = "internal.example"\n'
+                'dc_domain_password = "P@ssw0rd!"  # pragma: allowlist secret\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertEqual(
+                violations[0].path,
+                "platform/terraform/environments/prod/portal/terraform.tfvars",
+            )
+            self.assertIn("dc_domain_password", violations[0].message)
+
+    def test_no_plaintext_secrets_allows_var_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "dev" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "dc_domain_password = var.dc_domain_password\n"
+                "db_password         = local.db_password\n"
+                'app_secret_arn      = data.aws_secretsmanager_secret.app.arn\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_allows_empty_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "dev" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'dc_domain_password = ""\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_ignores_non_secret_vars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'dc_domain_name = "internal.example"\n'
+                'environment    = "prod"\n'
+                'aws_region     = "us-east-2"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_flags_heredoc_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'dc_domain_password = <<EOF\n'
+                "P@ssw0rd!\n"
+                "EOF\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("dc_domain_password", violations[0].message)
+
+    def test_no_plaintext_secrets_flags_indented_heredoc_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_password = <<-MARKER\n"
+                "  hunter2\n"
+                "  MARKER\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("db_password", violations[0].message)
+
+    def test_no_plaintext_secrets_allows_public_key_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "dev" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'ctfd_ssh_public_key  = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ== user@host"\n'
+                'jwt_public_cert      = "-----BEGIN PUBLIC KEY-----..."\n'
+                'authorized_keys      = "ssh-ed25519 AAAA..."\n'
+                'pubkey               = "ssh-rsa AAAA..."\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_flags_multiline_jsonencode_with_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_credentials = jsonencode({\n"
+                '  password = "leak"\n'
+                "})\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("db_credentials", violations[0].message)
+
+    def test_no_plaintext_secrets_allows_multiline_jsonencode_with_var(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_credentials = jsonencode({\n"
+                "  password = var.db_password\n"
+                "  username = var.db_username\n"
+                "})\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_flags_multiline_function_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "api_token = sensitive(\n"
+                '  trimspace("ghp_AAAAAAAAAAAA")\n'
+                ")\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("api_token", violations[0].message)
+
+    def test_no_plaintext_secrets_does_not_exempt_secret_after_public_key(self) -> None:
+        # Regression: the public-key exemption used to be a substring
+        # match, which let `public_key_password = "..."` and
+        # `authorized_keys_token = "..."` slip through even though the
+        # secret-suffix regex matched. The exemption is now suffix-based
+        # so these names stay flagged.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'public_key_password   = "leak1"\n'
+                'authorized_keys_token = "leak2"\n'
+                'pubkey_secret         = "leak3"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 3)
+            for violation in violations:
+                self.assertEqual(violation.rule_id, "ADR-004-R7")
+
+    def test_no_plaintext_secrets_excludes_example_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars.example").write_text(
+                'dc_domain_password = "REPLACE_ME"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_ignores_commented_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                '# dc_domain_password = "old-value"\n'
+                '#   db_password = "another-old"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_ignores_double_slash_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                '// dc_domain_password = "old-value"\n'
+                '//   db_password         = "another-old"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_ignores_block_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "/* historical example:\n"
+                'dc_domain_password = "obsolete-literal"\n'
+                "*/\n"
+                'dc_domain_name = "internal.shifter"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_flags_object_with_string_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_credentials = {\n"
+                '  username = "admin"\n'
+                '  password = "hunter2"\n'
+                "}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("db_credentials", violations[0].message)
+
+    def test_no_plaintext_secrets_allows_object_with_only_var_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_credentials = {\n"
+                "  username = var.db_username\n"
+                "  password = data.aws_secretsmanager_secret_version.db.secret_string\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_flags_list_with_string_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "api_tokens = [\n"
+                '  "token-one",\n'
+                '  "token-two",\n'
+                "]\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("api_tokens", violations[0].message)
+
+    def test_no_plaintext_secrets_flags_function_wrapped_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'db_password = trimspace("hunter2")\n'
+                'api_token   = sensitive("ghp_AAAA")\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 2)
+            for violation in violations:
+                self.assertEqual(violation.rule_id, "ADR-004-R7")
+
+    def test_no_plaintext_secrets_flags_jsonencode_with_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                'db_credentials = jsonencode({ password = "hunter2" })\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R7")
+            self.assertIn("db_credentials", violations[0].message)
+
+    def test_no_plaintext_secrets_allows_function_with_var_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_password = trimspace(var.db_password_raw)\n"
+                "api_token   = sensitive(local.token)\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_ignores_inline_comment_in_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            tfvars_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            tfvars_dir.mkdir(parents=True)
+            (tfvars_dir / "terraform.tfvars").write_text(
+                "db_credentials = {\n"
+                '  username = var.db_username  # "old example"\n'
+                "  password = var.db_password  // legacy: was a literal once\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_no_plaintext_secrets_honors_explicit_file_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            scoped_dir = repo_root / "platform" / "terraform" / "environments" / "prod" / "portal"
+            scoped_dir.mkdir(parents=True)
+            (scoped_dir / "terraform.tfvars").write_text(
+                'dc_domain_password = "leak"\n',
+                encoding="utf-8",
+            )
+            other_dir = repo_root / "platform" / "terraform" / "environments" / "dev" / "portal"
+            other_dir.mkdir(parents=True)
+            (other_dir / "terraform.tfvars").write_text(
+                'dc_domain_password = "also-leak"\n',
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_plaintext_secrets_in_tfvars(
+                repo_root,
+                ["platform/terraform/environments/prod/portal/terraform.tfvars"],
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(
+                violations[0].path,
+                "platform/terraform/environments/prod/portal/terraform.tfvars",
+            )
+
 
 class K8sDeploymentSecurityContextTests(unittest.TestCase):
     """Tests for the k8s-deployment-security-context ADR-006-R2 check."""

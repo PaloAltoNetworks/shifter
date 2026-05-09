@@ -135,8 +135,39 @@ def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
     return "ubuntu"
 
 
-def _get_windows_rdp_fallback(role: str) -> str:
-    return "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"
+def _get_windows_rdp_fallback(role: str) -> str | None:
+    # The DC role's password is a real domain credential and must come from
+    # the runtime environment (DC_DOMAIN_PASSWORD, sourced from Secrets
+    # Manager via entrypoint.sh). No literal fallback — fail-closed when
+    # unset rather than leaking a credential through committed source.
+    if role == "dc":
+        return None
+    return "CortexSavesTheDay!"  # nosec B105 - non-DC Windows victim fallback (separate follow-up)
+
+
+def _resolve_dc_password(instance_provider: str) -> str | None:
+    """Return the DC Administrator password for a Windows DC instance.
+
+    DC_DOMAIN_PASSWORD is the env var contract shared with the engine
+    provisioner (`shifter/engine/provisioner/main.py` for AWS,
+    `shifter/engine/provisioner/gdc_vmruntime_assets.py` for GCP), so
+    the portal display side reads the same env var. The credential is
+    deployment-scoped: the portal's own CLOUD_PROVIDER env identifies
+    which provider's DC password lives in DC_DOMAIN_PASSWORD. Returning
+    that value for an instance from a different provider would leak the
+    portal-deployment provider's credential to the requesting provider's
+    user — refuse with None instead. A multi-provider portal would need
+    provider-specific secrets (separate workstream, see secrets.md).
+
+    An empty `instance_provider` (older payloads with no `cloud_provider`
+    field) is treated as `"aws"`, matching the default elsewhere in the
+    engine state handling.
+    """
+    instance_provider = instance_provider or "aws"
+    portal_provider = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+    if instance_provider != portal_provider:
+        return None
+    return os.environ.get("DC_DOMAIN_PASSWORD")
 
 
 def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -146,13 +177,17 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
     provider = _first_connection_value(instance.get("cloud_provider")).lower()
 
     if os_type == "windows":
+        # DC role: read DC_DOMAIN_PASSWORD only when the requested
+        # instance's provider matches the portal deployment's
+        # CLOUD_PROVIDER. Same env var as the engine provisioner so the
+        # DC password used for promote/domain-join matches what the
+        # portal hands Guacamole. Cross-provider DC requests return
+        # None and are turned into an explicit ValueError below
+        # (`get_rdp_connection_info`) rather than a silent
+        # passwordless RDP URL.
+        if role == "dc":
+            return ("Administrator", _resolve_dc_password(provider))
         if provider == "gcp":
-            if role == "dc":
-                return (
-                    "Administrator",
-                    os.environ.get("DC_DOMAIN_PASSWORD")
-                    or os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", _get_windows_rdp_fallback(role)),
-                )
             return (
                 "Administrator",
                 os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", _get_windows_rdp_fallback(role)),
@@ -803,6 +838,25 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     connection_name = _resolve_instance_connection_name(instance)
     rdp_username, rdp_password = _resolve_rdp_credentials(instance)
+
+    # Fail-loud when a Windows DC has no password — minting a
+    # passwordless Guacamole RDP URL would produce an unusable session
+    # and obscure the misconfiguration. The mission_control RDP view
+    # already maps ValueError → HTTP 400, so the operator sees the
+    # specific reason instead of a silent broken connection.
+    role = _first_connection_value(instance.get("role"), "instance").lower()
+    if os_type == "windows" and role == "dc" and not rdp_password:
+        provider_label = _first_connection_value(instance.get("cloud_provider")).lower() or "aws"
+        portal_provider = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+        if provider_label != portal_provider:
+            raise ValueError(
+                f"DC password unavailable: instance provider {provider_label!r} "
+                f"does not match portal deployment provider {portal_provider!r}; "
+                f"DC_DOMAIN_PASSWORD is scoped to the portal's own provider"
+            )
+        raise ValueError(
+            "DC_DOMAIN_PASSWORD is not configured; seed the DC domain password secret and restart the portal"
+        )
 
     # Get SSH key for SFTP file transfers
     # Windows uses key-based auth; Linux uses password auth for simplicity

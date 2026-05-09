@@ -146,8 +146,11 @@ engine_container_tag = "latest"
 # Windows/DC AMIs also managed via SSM Parameter Store
 
 dc_domain_name = "internal.shifter"
-# nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
+# Domain Controller Administrator password is sourced from
+# aws_secretsmanager_secret.dc_domain_password (engine-provisioner module)
+# at runtime; the value is managed out-of-band and is intentionally not
+# present in Terraform configuration. See
+# shifter/shifter_platform/documentation/docs/technical/dev/secrets.md.
 
 # ------------------------------------------------------------------------------
 # Guacamole

@@ -204,11 +204,14 @@ class TestDockerfileRuntimeSmoke:
         )
         return result.stdout
 
-    def test_runs_as_uid_1000(self, built_image):
-        assert self._docker_run(built_image, ["id", "-u"]).strip() == "1000"
-
-    def test_runs_as_gid_1000(self, built_image):
-        assert self._docker_run(built_image, ["id", "-g"]).strip() == "1000"
+    @pytest.mark.parametrize(
+        ("flag", "expected"),
+        [("-u", "1000"), ("-g", "1000")],
+    )
+    def test_runs_with_correct_id(self, built_image, flag, expected):
+        # Both UID and GID must be 1000 so Kubernetes runAsNonRoot admission
+        # accepts the pod and the runtime can chown into appuser-owned dirs.
+        assert self._docker_run(built_image, ["id", flag]).strip() == expected
 
     def test_home_is_writable(self, built_image):
         # Ensure $HOME is set to /home/appuser AND is writable under the
@@ -218,30 +221,28 @@ class TestDockerfileRuntimeSmoke:
         # If this fails, the runtime user cannot write to its own HOME.
         self._docker_run(built_image, ["sh", "-c", "touch $HOME/.write-probe && rm $HOME/.write-probe"])
 
-    def test_terraform_plugin_cache_writable(self, built_image):
-        cache_dir = "/home/appuser/.terraform.d/plugin-cache"
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/appuser/.terraform.d/plugin-cache",
+            "/home/appuser/.pulumi",
+            "/app",
+        ],
+        ids=["terraform_plugin_cache", "pulumi_home", "app_workspace"],
+    )
+    def test_runtime_path_writable(self, built_image, path):
+        # Each path must be writable by the non-root runtime user:
+        # - terraform plugin cache: Terraform downloads providers here
+        # - pulumi home: Pulumi state/config
+        # - /app: Terraform writes terraform.tfvars.json + .terraform/ into
+        #   module working dirs under /app (per terraform_base.apply).
+        # The helper's internal assert raises if the touch/rm fails.
         self._docker_run(
             built_image,
-            ["sh", "-c", f"touch {cache_dir}/.write-probe && rm {cache_dir}/.write-probe"],
-        )
-
-    def test_pulumi_home_writable(self, built_image):
-        pulumi_home = "/home/appuser/.pulumi"
-        self._docker_run(
-            built_image,
-            ["sh", "-c", f"touch {pulumi_home}/.write-probe && rm {pulumi_home}/.write-probe"],
+            ["sh", "-c", f"touch {path}/.write-probe && rm {path}/.write-probe"],
         )
 
     def test_tool_env_vars_set(self, built_image):
         env_dump = self._docker_run(built_image, ["env"])
         assert "TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache" in env_dump
         assert "PULUMI_HOME=/home/appuser/.pulumi" in env_dump
-
-    def test_app_writable_for_terraform_workspace(self, built_image):
-        # Terraform writes terraform.tfvars.json + .terraform/ inside its
-        # working_dir, which lives under /app. The runtime user must be
-        # able to create files there.
-        self._docker_run(
-            built_image,
-            ["sh", "-c", "touch /app/.write-probe && rm /app/.write-probe"],
-        )

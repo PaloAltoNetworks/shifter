@@ -73,6 +73,16 @@ auth_required: true
 
 You are a POLARIS operator. AURORA COLLECTIVE is building something underground. Your range has everything you need to find out what — and, if the window opens, take it.
 
+## Before You Begin
+
+<div class="callout">
+By participating in this CTF you acknowledge:
+<ul>
+<li>You are responsible for the conduct of any AI agents you use during the event.</li>
+<li>Your activity during the event may be retained for research and development purposes.</li>
+</ul>
+</div>
+
 ## First Moves
 
 1. Solve [**Start Here — Kali Warm-Up**](/challenges) for a quick first submit.

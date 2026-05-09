@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.98.0] - 2026-05-10
 
 ### Security
 
@@ -91,6 +91,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `privilege-escalation-container`) continue to run as
   defense-in-depth. The unrelated ADR-006-R3 NetworkPolicy exception
   remains.
+- **Provisioner container now runs as non-root (#950).** `shifter/engine/provisioner/Dockerfile`
+  creates `appuser:1000 / appgroup:1000` (matching the existing pattern in
+  `shifter/shifter_platform/Dockerfile`) and drops privileges via
+  `USER 1000:1000` before `ENTRYPOINT` (numeric form so Kubernetes
+  `runAsNonRoot` admission can verify it). Terraform/Pulumi binary installs
+  and `pip install` still run as root during build. This reduces the blast
+  radius of a container compromise — an attacker who exploits the running
+  process no longer has root inside the container — but does not eliminate
+  the risk of host root via a kernel-level container escape. `/app` is
+  chowned to the runtime user, `HOME` / `TF_PLUGIN_CACHE_DIR` /
+  `PULUMI_HOME` are set explicitly, and the corresponding cache
+  directories under `/home/appuser` are pre-created so Terraform/Pulumi
+  can write under the non-root identity. Added
+  `shifter/engine/provisioner/tests/test_dockerfile.py` as a structural
+  regression gate plus an opt-in (`RUN_DOCKER_TESTS=1`) Docker smoke
+  test that verifies the running container's UID, HOME, and writable
+  cache paths. Source: GCP Red Team Report (CRITICAL-01).
 
 ### Changed
 

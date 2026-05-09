@@ -84,20 +84,53 @@ class TestDockerfileNonRootUser:
             f"k8s runAsNonRoot admission); got `{last_directive}` at line {last_index + 1}"
         )
 
-    def test_chowns_app_directory_to_appuser(self):
-        # COPY --chown only sets ownership of files copied INTO /app — the
-        # /app directory itself, created by WORKDIR, stays root-owned unless
-        # we explicitly chown it. Both must be in place: the directory is
-        # writable for the runtime user, AND copied content is owned by it.
+    def test_app_stays_immutable_image_content(self):
+        # Issue #1103: /app must NOT be writable by the runtime user. The
+        # provisioner Job mounts the runtime root read-only, and Terraform
+        # writes go to a dedicated workspace volume (TERRAFORM_WORKSPACE_DIR)
+        # — not into /app. Chowning /app to appuser or copying source with
+        # --chown=appuser would re-introduce the writable-application-code
+        # surface that #950's review (cycle 2) flagged.
         content = _read_dockerfile()
-        assert re.search(
+        assert not re.search(
             r"chown\s+(-R\s+)?appuser:appgroup\s+/app\b",
             content,
-        ), "Dockerfile must explicitly chown /app to appuser:appgroup (WORKDIR creates it root-owned)"
-        assert re.search(
+        ), "Dockerfile MUST NOT chown /app to appuser:appgroup (issue #1103 — /app stays root-owned + immutable)"
+        assert not re.search(
             r"COPY\s+--chown=appuser:appgroup",
             content,
-        ), "Dockerfile must use COPY --chown=appuser:appgroup so copied files belong to the runtime user"
+        ), (
+            "Dockerfile MUST NOT use COPY --chown=appuser:appgroup (issue #1103 — application code under "
+            "/app stays root-owned so a compromised runtime cannot tamper with it)"
+        )
+
+    def test_declares_default_terraform_workspace_dir(self):
+        # The runtime resolves the writable Terraform workspace path from
+        # TERRAFORM_WORKSPACE_DIR (terraform_base._stage_workspace). Setting
+        # the env var in the image documents the mount contract: any deployer
+        # mounting an emptyDir / Fargate ephemeral volume must put it at this
+        # path. The default matches terraform_base._DEFAULT_TERRAFORM_WORKSPACE_DIR.
+        content = _read_dockerfile()
+        assert re.search(
+            r"\bTERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace\b",
+            content,
+        ), "Dockerfile must set TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace"
+
+    def test_creates_writable_workspace_mount_point(self):
+        # The image must pre-create the workspace mount point and chown it to
+        # appuser. When the runtime mounts an emptyDir there, the mount keeps
+        # parent-directory ownership unless overridden — pre-chowning means
+        # the runtime user can write the staging tree the moment the mount
+        # is in place, even before the first Terraform run.
+        content = _read_dockerfile()
+        assert re.search(
+            r"mkdir[^\n]*/var/run/provisioner/workspace\b",
+            content,
+        ), "Dockerfile must pre-create /var/run/provisioner/workspace"
+        assert re.search(
+            r"chown\s+(-R\s+)?appuser:appgroup\s+/var/run/provisioner\b",
+            content,
+        ), "Dockerfile must chown /var/run/provisioner to appuser:appgroup"
 
     def test_sets_home_for_non_root_user(self):
         # Docker's USER directive does NOT change HOME; Terraform/Pulumi
@@ -226,23 +259,87 @@ class TestDockerfileRuntimeSmoke:
         [
             "/home/appuser/.terraform.d/plugin-cache",
             "/home/appuser/.pulumi",
-            "/app",
+            "/var/run/provisioner/workspace",
         ],
-        ids=["terraform_plugin_cache", "pulumi_home", "app_workspace"],
+        ids=["terraform_plugin_cache", "pulumi_home", "terraform_workspace"],
     )
     def test_runtime_path_writable(self, built_image, path):
         # Each path must be writable by the non-root runtime user:
         # - terraform plugin cache: Terraform downloads providers here
         # - pulumi home: Pulumi state/config
-        # - /app: Terraform writes terraform.tfvars.json + .terraform/ into
-        #   module working dirs under /app (per terraform_base.apply).
+        # - terraform workspace: terraform_base._stage_workspace copies the
+        #   read-only module source from /app/terraform/modules/<name> here
+        #   per request, then runs terraform init/apply/destroy from the
+        #   staged path so /app stays read-only (issue #1103).
         # The helper's internal assert raises if the touch/rm fails.
         self._docker_run(
             built_image,
             ["sh", "-c", f"touch {path}/.write-probe && rm {path}/.write-probe"],
         )
 
+    def test_app_is_not_writable_when_root_filesystem_is_readonly(self, built_image):
+        # Simulates the production runtime contract: --read-only on the
+        # container root, with explicit tmpfs volumes for the workspace,
+        # /tmp, and the tool caches under HOME. Under that contract /app
+        # MUST refuse writes (it is image content) while the workspace
+        # path MUST accept them. This is the live counterpart of the
+        # structural test_app_stays_immutable_image_content gate.
+        docker = self._docker_bin()
+        workspace_path = "/var/run/provisioner/workspace"
+        tmp_path = "/tmp"  # noqa: S108 — Docker tmpfs mount target, not a tempfile API call
+        tf_cache_path = "/home/appuser/.terraform.d/plugin-cache"
+        pulumi_path = "/home/appuser/.pulumi"
+        tmpfs_args = [
+            "--tmpfs",
+            f"{workspace_path}:rw,uid=1000,gid=1000",
+            "--tmpfs",
+            f"{tmp_path}:rw,uid=1000,gid=1000",
+            "--tmpfs",
+            f"{tf_cache_path}:rw,uid=1000,gid=1000",
+            "--tmpfs",
+            f"{pulumi_path}:rw,uid=1000,gid=1000",
+        ]
+
+        # 1) Writes to /app fail under --read-only (expected non-zero exit).
+        result = subprocess.run(  # noqa: S603 — absolute docker path, list args, no shell
+            [
+                docker,
+                "run",
+                "--rm",
+                "--read-only",
+                *tmpfs_args,
+                "--entrypoint",
+                "sh",
+                built_image,
+                "-c",
+                "touch /app/.write-probe",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode != 0, (
+            f"/app should be read-only under --read-only, but write succeeded: "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+        # 2) Writes to the workspace path succeed under the same contract.
+        probe_cmd = f"touch {workspace_path}/.write-probe && rm {workspace_path}/.write-probe"
+        result = subprocess.run(  # noqa: S603 — absolute docker path, list args, no shell
+            [docker, "run", "--rm", "--read-only", *tmpfs_args, "--entrypoint", "sh", built_image, "-c", probe_cmd],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"workspace path must be writable under --read-only with tmpfs mount: "
+            f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
     def test_tool_env_vars_set(self, built_image):
         env_dump = self._docker_run(built_image, ["env"])
         assert "TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache" in env_dump
         assert "PULUMI_HOME=/home/appuser/.pulumi" in env_dump
+        assert "TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace" in env_dump

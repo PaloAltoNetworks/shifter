@@ -4,8 +4,7 @@ Covers destroy_range variable passing (mirrors test_terraform_runner.py for NGFW
 """
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -99,74 +98,74 @@ class TestProviderRouting:
 
 
 class TestDestroyRange:
-    """Test destroy_range passes variables correctly."""
+    """Test destroy_range passes variables correctly.
 
+    Issue #1103: destroy() stages a writable workspace under TERRAFORM_WORKSPACE_DIR,
+    runs terraform from the staged path, and cleans the staged tree up on success and
+    failure. These tests cover the public destroy_range contract: var-file is passed
+    iff variables are supplied, and the staged workspace is removed when the call
+    returns.
+    """
+
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
     @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_with_variables_writes_tfvars(self, mock_init, mock_run, tmp_path):
+    def test_destroy_with_variables_writes_tfvars(self, mock_run, tmp_path, monkeypatch):
         """When variables are provided, destroy should write tfvars and pass -var-file."""
         from range_terraform_runner import destroy_range
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
+        source = tmp_path / "src" / "modules" / "range"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
+
         variables = {"range_id": 42, "user_id": 1, "request_uuid": "req-123"}
+        destroy_range("req-123", source, variables=variables)
 
-        with patch("builtins.open", mock_open()) as mocked_file, patch.object(Path, "unlink"):
-            destroy_range("req-123", working_dir, variables=variables)
-
-        mocked_file.assert_called_once_with(working_dir / "terraform.tfvars.json", "w")
-        written_data = mocked_file().write.call_args_list
-        assert len(written_data) > 0
-
+        # Last call to run_terraform was the destroy command; assert -var-file present.
         destroy_args = mock_run.call_args[0][0]
         assert any("-var-file=" in arg for arg in destroy_args)
+        # The staged workspace must be cleaned up.
+        assert not (workspace_root / "req-123").exists()
 
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
     @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_without_variables_no_var_file(self, mock_init, mock_run, tmp_path):
+    def test_destroy_without_variables_no_var_file(self, mock_run, tmp_path, monkeypatch):
         """When no variables provided, destroy should not pass -var-file."""
         from range_terraform_runner import destroy_range
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
+        source = tmp_path / "src" / "modules" / "range"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
 
-        destroy_range("req-123", working_dir)
+        destroy_range("req-123", source)
 
         destroy_args = mock_run.call_args[0][0]
         assert not any("-var-file=" in arg for arg in destroy_args)
         assert "-auto-approve" in destroy_args
+        assert not (workspace_root / "req-123").exists()
 
-    @patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed"))
-    @patch("terraform_base.init_workspace")
-    def test_destroy_cleans_up_tfvars_on_failure(self, mock_init, mock_run, tmp_path):
-        """Tfvars file should be cleaned up even if destroy fails."""
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    def test_destroy_cleans_up_workspace_on_failure(self, tmp_path, monkeypatch):
+        """Staged workspace must be removed even when terraform destroy fails — otherwise
+        terraform.tfvars.json (which can carry secrets) would persist on the volume."""
         from range_terraform_runner import destroy_range
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
-        variables = {"range_id": 42}
-        mock_unlink = MagicMock()
+        source = tmp_path / "src" / "modules" / "range"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
 
         with (
-            patch("builtins.open", mock_open()),
-            patch.object(Path, "unlink", mock_unlink),
+            patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed")),
             pytest.raises(RuntimeError, match="destroy failed"),
         ):
-            destroy_range("req-123", working_dir, variables=variables)
+            destroy_range("req-123", source, variables={"range_id": 42})
 
-        mock_unlink.assert_called_once_with(missing_ok=True)
-
-    @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_without_variables_does_not_create_tfvars(self, mock_init, mock_run, tmp_path):
-        """When no variables provided, no tfvars file should be created or cleaned up."""
-        from range_terraform_runner import destroy_range
-
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
-        mock_unlink = MagicMock()
-
-        with patch.object(Path, "unlink", mock_unlink):
-            destroy_range("req-123", working_dir)
-
-        mock_unlink.assert_not_called()
+        assert not (workspace_root / "req-123").exists()

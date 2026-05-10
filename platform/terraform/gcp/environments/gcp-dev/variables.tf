@@ -146,15 +146,23 @@ variable "redis_memory_size_gb" {
 }
 
 variable "public_hostname" {
-  description = "Optional public hostname for the GKE ingress."
+  description = "Public hostname for the GKE ingress. Required: the portal runtime renders SITE_URL=https://<public_hostname> and fails closed without one."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = length(trimspace(var.public_hostname)) > 0
+    error_message = "public_hostname must be non-empty for the gcp-dev environment."
+  }
 }
 
 variable "enable_managed_tls" {
-  description = "Whether the GKE ingress should use a Google-managed certificate when a hostname is configured."
+  description = "Whether the GKE ingress uses a Google-managed certificate for the hostname. Required true: the portal serves over HTTPS only."
   type        = bool
-  default     = false
+
+  validation {
+    condition     = var.enable_managed_tls
+    error_message = "enable_managed_tls must be true for the gcp-dev environment; the portal serves over HTTPS only and the runtime renderer fails closed without managed TLS."
+  }
 }
 
 variable "create_dns_managed_zone" {

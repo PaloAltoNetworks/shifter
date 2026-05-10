@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.101.4] - 2026-05-10
+
+### Security
+
+- **GCP portal runtime no longer derives its Django security posture from
+  managed-TLS readiness, and now fails closed (#966).**
+  `scripts/gcp/render_runtime_env.py` previously used a single
+  `secure_portal_mode` flag — set by the `gcp-dev` deploy workflow only
+  once the GKE `ManagedCertificate` was `Active` — to switch
+  `DJANGO_DEBUG`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, and
+  `AUTH_PROVIDER` together, so until the certificate activated the portal
+  ran with `DJANGO_DEBUG=true` (full Django debug pages) and session/CSRF
+  cookies sent over plaintext HTTP. The renderer now:
+  - emits the production runtime security profile unconditionally —
+    `DJANGO_DEBUG=false`, `SESSION_COOKIE_SECURE=true`,
+    `CSRF_COOKIE_SECURE=true`, `AUTH_PROVIDER=identity_platform`;
+  - **fails closed**: a configured public hostname and managed TLS are
+    mandatory; the renderer raises rather than emitting an
+    `http://<ingress-ip>` runtime, so `SITE_URL` is always
+    `https://<public_hostname>` (`ADR-008-R1`, `ADR-008-R3`). The
+    `secure_portal_mode` / `--secure-portal-mode` switch and the
+    re-render-on-promote step in `_gcp-dev.yml` are removed; the deploy
+    renders once, rolls out the production-secure workload (new runtime
+    ConfigMap + restart) first so the public Ingress never routes to pods
+    on an older runtime, then (re-)applies the edge manifest and hard-gates
+    on a load-balancer IP and on the `ManagedCertificate` becoming `Active`
+    for the hostname (verifying `.spec.domains` so a stale `Active`
+    certificate for a previous hostname is not trusted). The certificate
+    gate can be relaxed to a warning only via a manual `workflow_dispatch`
+    input (`gcp_require_active_certificate=false`) for first-time bootstrap
+    before DNS is pointed at the ingress IP, and in that mode the deploy
+    does a short readiness check instead of the full 60-minute Active wait;
+  - drops the ingress IP from `DJANGO_ALLOWED_HOSTS` — the public hostname
+    is the only externally addressable host and health-check probes hit
+    `/health/`, which bypasses host validation;
+  - renders the Identity Platform allow-list (`IDENTITY_ALLOWED_EMAIL_DOMAIN`,
+    `IDENTITY_ALLOWED_EMAILS`) from new Terraform outputs
+    (`identity_allowed_email_domain` / `identity_allowed_emails` on the
+    `platform-core` module and the `gcp-dev` environment) — the same
+    source the provider-side blocking function uses — instead of a literal
+    and the runner environment, so both enforce one policy.
+
+  The `gcp-dev` Terraform environment now `validation`-checks `public_hostname`
+  (non-empty) and `enable_managed_tls` (`true`), so bad security inputs fail at
+  `terraform apply` variable evaluation, before any infrastructure side effects.
+  `scripts/gcp/` gained its own `pyproject.toml` plus `Lint (gcp scripts)`,
+  `Tests (gcp scripts)`, and `SAST (gcp scripts)` CI jobs and matching
+  pre-commit hooks, so `scripts/gcp/tests/` (previously run in no CI job)
+  is now a real gate. The committed
+  `platform/k8s/gcp/overlays/gcp-dev/platform-runtime.generated.env`
+  snapshot was regenerated to match.
+
 ## [3.101.3] - 2026-05-10
 
 ### Security

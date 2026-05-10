@@ -49,8 +49,13 @@ line-length = 120
 exclude = [".venv", "__pycache__"]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "T20", "SIM", "RUF"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "T20", "SIM", "RUF", "C901"]
 ignore = ["S101"]
+
+# Per-function McCabe complexity limit (ADR-012). Existing offenders carry
+# `# noqa: C901`; threshold ratchets down as the backlog shrinks.
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
 # S101: assert, S105/S106: hardcoded passwords in tests, S701: jinja2 autoescape (templates are shell scripts, not HTML)

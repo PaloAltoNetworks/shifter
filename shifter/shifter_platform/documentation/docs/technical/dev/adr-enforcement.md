@@ -63,6 +63,27 @@ The first slice intentionally stays small:
 - `cross-layer-model-imports`
   Fails on direct cross-layer model imports inside service layers. The current tree already satisfies this rule, so it is part of the default guard.
 
+- `python-complexity-gate`
+  Enforces ADR-012-R1: every canonical Python package `pyproject.toml`
+  must enable Ruff's `C901` rule in `[tool.ruff.lint].select`, set
+  `[tool.ruff.lint.mccabe].max-complexity` to the repo-wide threshold
+  (`PYTHON_COMPLEXITY_THRESHOLD` in `scripts/adr_guard/adr_guard.py`,
+  currently `15`, matching SonarCloud's default cognitive-complexity
+  threshold), AND must not silently disable the rule by listing it in
+  `ignore`, `extend-ignore`, or `per-file-ignores`. The check also
+  cross-verifies that `PYTHON_COMPLEXITY_GATE_PYPROJECTS` matches the
+  `id: ruff` hook working directories in `.pre-commit-config.yaml`, so
+  a new lint surface cannot be added in one place without the other.
+  The complexity computation itself is Ruff's job; this check is the
+  config-shape backstop against silent gate removal. Existing
+  high-complexity functions carry per-function `# noqa: C901`
+  exemptions; the function-level backlog (one row per exemption with
+  current complexity) lives at `docs/adr/complexity-backlog.md`. The
+  threshold ratchets down as that backlog shrinks; a ratchet edit
+  updates `PYTHON_COMPLEXITY_THRESHOLD`, every canonical
+  `pyproject.toml`, and the backlog rows in a single PR. Runs in both
+  `fast` and `ci` levels.
+
 - `import-linter`
   Adds package-level forbidden-import contracts across the main Django app layers.
 

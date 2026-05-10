@@ -1653,7 +1653,7 @@ def configure_ngfw_subnets(
     )
 
 
-def _run_single_instance_setup(
+def _run_single_instance_setup(  # noqa: C901
     instance_data: dict[str, Any],
     instance_id: str,
     role: str,
@@ -1975,7 +1975,7 @@ def _run_dc_setup(
         execution.close()
 
 
-def run_instance_setup(
+def run_instance_setup(  # noqa: C901
     instances_output: list[dict],
     range_spec: dict,
     dc_ip: str | None = None,
@@ -2100,7 +2100,7 @@ def run_instance_setup(
     logger.info("All instance setup complete")
 
 
-def run_range_terraform(operation: str, request_id: str) -> None:
+def run_range_terraform(operation: str, request_id: str) -> None:  # noqa: C901
     """Run Range Terraform operation (provision or destroy).
 
     Uses range_terraform_runner for infrastructure and the existing instance
@@ -2627,7 +2627,7 @@ def _run_terraform_destroy(
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 
 
-def _build_range_terraform_variables(
+def _build_range_terraform_variables(  # noqa: C901
     request_id: str,
     range_id: int,
     user_id: int,

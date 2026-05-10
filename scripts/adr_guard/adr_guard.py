@@ -10,6 +10,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1782,6 +1783,442 @@ def check_no_plaintext_secrets_in_tfvars(
     return violations
 
 
+# Canonical Python packages whose pyproject.toml must enforce the per-function
+# complexity gate. Keyed off `.pre-commit-config.yaml` ruff hooks. Adding a new
+# Python package with a ruff-pre-commit hook means adding it here too.
+PYTHON_COMPLEXITY_GATE_PYPROJECTS = (
+    "shifter/shifter_platform",
+    "shifter/engine/provisioner",
+    "shifter/packer",
+    "shifter/installation",
+    "scripts/bootstrap",
+    "scripts/gcp",
+    "scripts/check_layer_imports",
+    "scripts/check_rds_pending_modifications",
+)
+
+# Single repo-wide threshold for ruff's McCabe (C901) check. Equality, not <=.
+# Ratchet edits update this constant and the production pyprojects in one PR;
+# the constant exists so the ratchet point is searchable.
+PYTHON_COMPLEXITY_THRESHOLD = 15
+
+
+# `- id: ruff` block in `.pre-commit-config.yaml` followed (within the same
+# hook entry) by a `files: ^<path>/` regex. The trailing `(?!-)` excludes
+# `id: ruff-format`. The intermediate `(?:[^\n]+\n)*?` lazily consumes the
+# hook's other attribute lines until the first `files:` line. The capture
+# uses a lazy `\S+?` plus required trailing `/\s*$` (with re.MULTILINE) so it
+# matches the entire path before the trailing slash, not just the first
+# directory component.
+_RUFF_HOOK_FILES_PATTERN = re.compile(
+    r"-\s+id:\s+ruff\b(?!-)[^\n]*\n(?:[^\n]+\n)*?\s*files:\s*\^(\S+?)/\s*$",
+    re.MULTILINE,
+)
+
+# A line carrying a `# noqa: ...` exemption that includes C901 anywhere in
+# the rules list (e.g. `# noqa: C901`, `# noqa: E501, C901`, `# noqa:C901`).
+_NOQA_C901_PATTERN = re.compile(r"#\s*noqa\s*:\s*([A-Z0-9, ]+)")
+# A bare `# noqa` with no code list. Ruff treats this as line-level
+# suppression of ALL rules, which silently covers C901 on a def line — the
+# scanner must detect this even though there is no explicit C901 code.
+_NOQA_BARE_PATTERN = re.compile(r"#\s*noqa\b(?!\s*:)")
+# `def NAME(` on the same line as a `# noqa: C901` is the repo convention
+# (see docs/adr/complexity-backlog.md). Methods (`    def NAME(`) match too.
+_DEF_NAME_PATTERN = re.compile(r"\bdef\s+(\w+)\s*\(")
+
+
+def _selector_covers_c901(selector: str) -> bool:
+    """Return True if a Ruff selector string would cover the ``C901`` rule.
+
+    Ruff supports both exact codes (``C901``) and category prefixes
+    (``C``, ``C9``, ``C90``) plus the wildcard ``ALL``. A selector covers
+    ``C901`` whenever ``C901`` starts with it (after upper-casing). This is the
+    same semantic ruff uses when expanding selectors against the rule set.
+    """
+    s = selector.strip().upper()
+    if not s:
+        return False
+    if s == "ALL":
+        return True
+    return "C901".startswith(s)
+
+
+def _any_selector_covers_c901(selectors: list[str]) -> bool:
+    """Convenience: True iff any selector in ``selectors`` covers C901."""
+    return any(_selector_covers_c901(s) for s in selectors)
+# A row in `docs/adr/complexity-backlog.md`: `| pkg | \`file\` | \`fn\` | N |`.
+# The third capture (complexity) is required so prose lines, the header row,
+# and the markdown separator (`|---|---|---|---|`) cannot match.
+_BACKLOG_ROW_PATTERN = re.compile(
+    r"^\s*\|\s*[^|]+\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|\s*(\d+)\s*\|\s*$",
+    re.MULTILINE,
+)
+# Source-file directories we never scan for noqa sites.
+_NOQA_SCAN_SKIP_PARTS = frozenset(
+    {".venv", "venv", "__pycache__", "node_modules", "staticfiles", "migrations"}
+)
+
+
+def _scan_noqa_c901_sites(repo_root: Path) -> dict[tuple[str, str], tuple[str, int]]:
+    """Walk canonical packages for noqa lines that suppress C901.
+
+    Returns a mapping ``(file_relpath, function_name) -> (line_text, line_no)``.
+    The line text/number are surfaced so violations can cite the source.
+
+    Recognized exemption shapes on a ``def NAME(`` line:
+    - ``# noqa: ..., C901, ...`` — explicit C901 code list (the repo convention).
+    - ``# noqa`` (bare, no code list) — ruff suppresses every rule on the line,
+      including C901. The scanner records this under the sentinel function name
+      ``"<bare-noqa>"`` so the caller can emit a "use explicit codes" violation.
+
+    Lines that carry ``# noqa: C901`` but no same-line ``def NAME(`` are recorded
+    under ``"<noqa-without-def>"`` so the caller can emit a wrong-placement
+    violation.
+    """
+    sites: dict[tuple[str, str], tuple[str, int]] = {}
+    for pkg in PYTHON_COMPLEXITY_GATE_PYPROJECTS:
+        root = repo_root / pkg
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            if any(part in _NOQA_SCAN_SKIP_PARTS for part in path.parts):
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            relpath = path.resolve().relative_to(repo_root.resolve()).as_posix()
+            for lineno, line in enumerate(lines, start=1):
+                coded_match = _NOQA_C901_PATTERN.search(line)
+                bare_match = _NOQA_BARE_PATTERN.search(line)
+                def_match = _DEF_NAME_PATTERN.search(line)
+                if coded_match:
+                    codes = {c.strip() for c in coded_match.group(1).split(",")}
+                    if "C901" not in codes:
+                        continue
+                    if def_match:
+                        sites[(relpath, def_match.group(1))] = (line.strip(), lineno)
+                    else:
+                        sites[(relpath, "<noqa-without-def>")] = (line.strip(), lineno)
+                elif bare_match and def_match:
+                    # Bare noqa on a def line silently suppresses C901; flag it
+                    # so the author replaces it with an explicit code list.
+                    sites[(relpath, "<bare-noqa>")] = (line.strip(), lineno)
+    return sites
+
+
+def _parse_complexity_backlog(repo_root: Path) -> set[tuple[str, str]] | None:
+    """Parse the ADR-012 backlog doc into a set of ``(file, function)`` pairs.
+
+    Returns ``None`` if the doc is missing (the caller emits a dedicated
+    "missing backlog" violation). Empty backlog returns an empty set.
+    """
+    path = repo_root / "docs" / "adr" / "complexity-backlog.md"
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8")
+    return {
+        (m.group(1), m.group(2))
+        for m in _BACKLOG_ROW_PATTERN.finditer(text)
+    }
+
+
+def _ruff_hook_paths_from_precommit(repo_root: Path) -> set[str] | None:
+    """Return package paths covered by `id: ruff` hooks in .pre-commit-config.yaml.
+
+    Returns ``None`` if the file is missing (synthetic test fixtures may omit
+    it). Returns a set of path strings without leading ``^`` or trailing ``/``.
+    """
+    config_path = repo_root / ".pre-commit-config.yaml"
+    if not config_path.exists():
+        return None
+    text = config_path.read_text(encoding="utf-8")
+    return set(_RUFF_HOOK_FILES_PATTERN.findall(text))
+
+
+def check_python_complexity_gate(
+    repo_root: Path, files: list[str] | None
+) -> list[Violation]:
+    """Enforce ADR-012-R1: per-package Ruff config must enable C901 + max-complexity.
+
+    Reads each canonical package's ``pyproject.toml`` and verifies:
+
+    - ``[tool.ruff.lint].select`` contains ``"C901"`` (McCabe complexity).
+    - ``[tool.ruff.lint].ignore`` does NOT contain ``"C901"``.
+    - ``[tool.ruff.lint].extend-ignore`` does NOT contain ``"C901"``.
+    - ``[tool.ruff.lint.per-file-ignores]`` values do NOT contain ``"C901"``
+      (broad glob exemptions widen the gate; the backlog uses per-function
+      ``# noqa: C901`` instead).
+    - ``[tool.ruff.lint.mccabe].max-complexity`` equals
+      :data:`PYTHON_COMPLEXITY_THRESHOLD`.
+
+    Then cross-checks ``PYTHON_COMPLEXITY_GATE_PYPROJECTS`` against the ruff
+    hook working directories declared in ``.pre-commit-config.yaml``: the two
+    sets must match so a new lint surface cannot be added in one place without
+    the other.
+
+    This is a config-shape validator only. Computing per-function complexity is
+    Ruff's job; this check is the structural backstop against silent gate
+    removal (deleting ``"C901"`` from ``select``, adding it to ``ignore`` /
+    ``extend-ignore``, exempting it through ``per-file-ignores``, or extending
+    the Python lint surface without an accompanying threshold entry).
+
+    When ``files`` is supplied, the check is a no-op unless one of the
+    canonical pyprojects or ``.pre-commit-config.yaml`` is in the change set.
+    """
+    canonical_paths = {
+        f"{pkg}/pyproject.toml" for pkg in PYTHON_COMPLEXITY_GATE_PYPROJECTS
+    }
+    fixed_relevant = canonical_paths | {
+        ".pre-commit-config.yaml",
+        "docs/adr/complexity-backlog.md",
+        # The constants `PYTHON_COMPLEXITY_GATE_PYPROJECTS` and
+        # `PYTHON_COMPLEXITY_THRESHOLD` live here; a PR editing only one of
+        # them in --files / --changed mode must still re-run the consistency
+        # checks (cycle-3 finding 3).
+        "scripts/adr_guard/adr_guard.py",
+    }
+    if files is not None:
+        touched = set(files)
+        canonical_py_touched = any(
+            f.endswith(".py")
+            and any(f.startswith(f"{pkg}/") for pkg in PYTHON_COMPLEXITY_GATE_PYPROJECTS)
+            for f in touched
+        )
+        if not (touched & fixed_relevant) and not canonical_py_touched:
+            return []
+
+    violations: list[Violation] = []
+    for pkg in PYTHON_COMPLEXITY_GATE_PYPROJECTS:
+        relative = f"{pkg}/pyproject.toml"
+        path = repo_root / pkg / "pyproject.toml"
+        if not path.exists():
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    f"missing pyproject.toml for canonical Python package {pkg}",
+                )
+            )
+            continue
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    f"pyproject.toml is not valid TOML: {exc}",
+                )
+            )
+            continue
+
+        lint = data.get("tool", {}).get("ruff", {}).get("lint", {})
+        # Both `select` and `extend-select` enable a rule; either one (or
+        # a prefix selector that covers C901) satisfies the gate.
+        select = lint.get("select", [])
+        extend_select = lint.get("extend-select", [])
+        if not (
+            _any_selector_covers_c901(select) or _any_selector_covers_c901(extend_select)
+        ):
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    "[tool.ruff.lint].select must enable \"C901\" (per-function complexity gate)",
+                )
+            )
+
+        ignore = lint.get("ignore", [])
+        ignore_covers = [s for s in ignore if _selector_covers_c901(s)]
+        if ignore_covers:
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    (
+                        "[tool.ruff.lint].ignore must not suppress \"C901\" "
+                        f"(selectors that cover it: {sorted(ignore_covers)})"
+                    ),
+                )
+            )
+
+        extend_ignore = lint.get("extend-ignore", [])
+        extend_ignore_covers = [s for s in extend_ignore if _selector_covers_c901(s)]
+        if extend_ignore_covers:
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    (
+                        "[tool.ruff.lint].extend-ignore must not suppress \"C901\" "
+                        f"(selectors that cover it: {sorted(extend_ignore_covers)})"
+                    ),
+                )
+            )
+
+        per_file_ignores = lint.get("per-file-ignores", {})
+        broad_pfi = sorted(
+            glob
+            for glob, rules in per_file_ignores.items()
+            if any(_selector_covers_c901(r) for r in rules)
+        )
+        if broad_pfi:
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    (
+                        "[tool.ruff.lint.per-file-ignores] must not suppress \"C901\" "
+                        f"(globs with covering selectors: {broad_pfi}); use per-function "
+                        "`# noqa: C901` instead"
+                    ),
+                )
+            )
+
+        mccabe = lint.get("mccabe", {})
+        if "max-complexity" not in mccabe:
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    f"[tool.ruff.lint.mccabe].max-complexity must be set to {PYTHON_COMPLEXITY_THRESHOLD}",
+                )
+            )
+        elif mccabe["max-complexity"] != PYTHON_COMPLEXITY_THRESHOLD:
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    relative,
+                    (
+                        "[tool.ruff.lint.mccabe].max-complexity must equal "
+                        f"{PYTHON_COMPLEXITY_THRESHOLD} (got {mccabe['max-complexity']})"
+                    ),
+                )
+            )
+
+    # Cross-check the constant against `.pre-commit-config.yaml`'s ruff hooks.
+    # If the config file is missing (synthetic test fixtures without one), skip
+    # the consistency pass — the test is responsible for declaring the lint
+    # surface, and we should not flag empty-config scenarios.
+    hook_paths = _ruff_hook_paths_from_precommit(repo_root)
+    if hook_paths is not None:
+        constant = set(PYTHON_COMPLEXITY_GATE_PYPROJECTS)
+        for missing in sorted(hook_paths - constant):
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    ".pre-commit-config.yaml",
+                    (
+                        f"ruff pre-commit hook covers {missing!r} but it is not in "
+                        "PYTHON_COMPLEXITY_GATE_PYPROJECTS; add it or remove the hook"
+                    ),
+                )
+            )
+        for stale in sorted(constant - hook_paths):
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R1",
+                    "scripts/adr_guard/adr_guard.py",
+                    (
+                        f"PYTHON_COMPLEXITY_GATE_PYPROJECTS includes {stale!r} but no "
+                        "matching `id: ruff` hook exists in .pre-commit-config.yaml"
+                    ),
+                )
+            )
+
+    # Reconcile in-source `# noqa: C901` sites against the ADR-012 backlog so
+    # the exemption list stays machine-verifiable (ADR-012-R2). A new
+    # exemption without a backlog row is unauthorized; a backlog row without
+    # a matching source noqa is stale debt that has already been refactored
+    # away (or was never wired up).
+    backlog = _parse_complexity_backlog(repo_root)
+    if backlog is None:
+        violations.append(
+            Violation(
+                "python-complexity-gate",
+                "ADR-012-R2",
+                "docs/adr/complexity-backlog.md",
+                "ADR-012 backlog doc is missing; the reconciliation gate cannot operate without it",
+            )
+        )
+    else:
+        noqa_sites = _scan_noqa_c901_sites(repo_root)
+        # Sentinel entries first — surface them before set diffs so authors
+        # get the clearer "fix placement" / "use explicit codes" hint rather
+        # than the "unauthorized exemption" one.
+        for (file_, func), (line_text, lineno) in sorted(noqa_sites.items()):
+            if func == "<noqa-without-def>":
+                violations.append(
+                    Violation(
+                        "python-complexity-gate",
+                        "ADR-012-R2",
+                        f"{file_}:{lineno}",
+                        (
+                            "`# noqa: C901` must be on the `def NAME(` line, not "
+                            f"{line_text!r}"
+                        ),
+                    )
+                )
+            elif func == "<bare-noqa>":
+                violations.append(
+                    Violation(
+                        "python-complexity-gate",
+                        "ADR-012-R2",
+                        f"{file_}:{lineno}",
+                        (
+                            "bare `# noqa` on a `def` line is forbidden — it "
+                            "silently suppresses C901; use an explicit code "
+                            "list (e.g. `# noqa: C901`) and add a backlog row"
+                        ),
+                    )
+                )
+        noqa_pairs = {
+            (file_, func)
+            for (file_, func) in noqa_sites
+            if not func.startswith("<")
+        }
+
+        for file_, func in sorted(noqa_pairs - backlog):
+            line_text, lineno = noqa_sites[(file_, func)]
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R2",
+                    f"{file_}:{lineno}",
+                    (
+                        f"unauthorized `# noqa: C901` exemption on `{func}` — "
+                        "add a row to docs/adr/complexity-backlog.md or refactor "
+                        "the function below the threshold"
+                    ),
+                )
+            )
+        for file_, func in sorted(backlog - noqa_pairs):
+            violations.append(
+                Violation(
+                    "python-complexity-gate",
+                    "ADR-012-R2",
+                    "docs/adr/complexity-backlog.md",
+                    (
+                        f"stale backlog row for `{file_}::{func}` — no matching "
+                        "`# noqa: C901` exists in source; remove the row"
+                    ),
+                )
+            )
+
+    return violations
+
+
 CHECKS = {
     "adr-registry": check_adr_registry,
     "layer-imports": check_layer_imports,
@@ -1792,6 +2229,7 @@ CHECKS = {
     "k8s-deployment-security-context": check_k8s_deployment_security_context,
     "k8s-network-policy-coverage": check_k8s_network_policy_coverage,
     "no-plaintext-secrets-in-tfvars": check_no_plaintext_secrets_in_tfvars,
+    "python-complexity-gate": check_python_complexity_gate,
 }
 CHECK_LEVELS = {
     "fast": [
@@ -1802,6 +2240,7 @@ CHECK_LEVELS = {
         "cloud-factory-seam",
         "mcp-no-shell-exec",
         "no-plaintext-secrets-in-tfvars",
+        "python-complexity-gate",
     ],
     "ci": [
         "adr-registry",
@@ -1812,6 +2251,7 @@ CHECK_LEVELS = {
         "k8s-deployment-security-context",
         "k8s-network-policy-coverage",
         "no-plaintext-secrets-in-tfvars",
+        "python-complexity-gate",
     ],
     "all": list(CHECKS),
 }

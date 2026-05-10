@@ -209,7 +209,7 @@ def delete_agent(user: User, agent_id: int) -> None:
         raise
 
 
-def list_agents(user: User) -> list[dict[str, Any]]:
+def list_agents(user: User) -> list[dict[str, Any]]:  # noqa: C901
     """Get user's agents as projection dicts.
 
     Args:
@@ -1419,7 +1419,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     )
 
 
-def create_range(
+def create_range(  # noqa: C901
     user: User,
     scenario: str,
     agents_by_os: dict[str, int],
@@ -2563,7 +2563,7 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
-def initiate_upload(
+def initiate_upload(  # noqa: C901
     user: User,
     name: str,
     filename: str,

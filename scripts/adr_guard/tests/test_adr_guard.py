@@ -1848,5 +1848,678 @@ class K8sDeploymentSecurityContextRobustnessTests(unittest.TestCase):
             self.assertTrue(any("allowPrivilegeEscalation" in v.message for v in violations))
 
 
+class PythonComplexityGateTests(unittest.TestCase):
+    """Tests for the python-complexity-gate adr_guard check (ADR-012-R1)."""
+
+    PYPROJECT_OK = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F", "C901"]\n'
+        "\n"
+        "[tool.ruff.lint.mccabe]\n"
+        "max-complexity = 15\n"
+    )
+
+    PYPROJECT_MISSING_C901 = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F"]\n'
+        "\n"
+        "[tool.ruff.lint.mccabe]\n"
+        "max-complexity = 15\n"
+    )
+
+    PYPROJECT_MISSING_MCCABE = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F", "C901"]\n'
+    )
+
+    PYPROJECT_WRONG_THRESHOLD = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F", "C901"]\n'
+        "\n"
+        "[tool.ruff.lint.mccabe]\n"
+        "max-complexity = 20\n"
+    )
+
+    def _write_packages(self, repo_root: Path, packages: dict[str, str]) -> None:
+        """Create a temp repo's pyproject.toml files + empty backlog doc.
+
+        The backlog doc is a precondition for the reconciliation pass; writing
+        an empty one keeps older synthetic fixtures focused on config-shape
+        violations without tripping the missing-backlog check. Tests that
+        specifically exercise the missing-backlog path override this.
+        """
+        for package_path, body in packages.items():
+            target = repo_root / package_path / "pyproject.toml"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+        backlog = repo_root / "docs" / "adr" / "complexity-backlog.md"
+        if not backlog.exists():
+            backlog.parent.mkdir(parents=True, exist_ok=True)
+            backlog.write_text(
+                "# Python Complexity Backlog\n\n"
+                "| Package | File | Function | Complexity |\n"
+                "|---|---|---|---|\n",
+                encoding="utf-8",
+            )
+
+    def test_clean_pyprojects_pass(self) -> None:
+        """All canonical pyprojects with C901 + max-complexity=15 produce no violations."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_missing_c901_in_select_violates(self) -> None:
+        """A canonical pyproject without C901 in select fails ADR-012-R1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_MISSING_C901
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].check, "python-complexity-gate")
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("C901", violations[0].message)
+            self.assertEqual(violations[0].path, f"{target_pkg}/pyproject.toml")
+
+    def test_missing_mccabe_block_violates(self) -> None:
+        """A canonical pyproject without [tool.ruff.lint.mccabe] fails ADR-012-R1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_MISSING_MCCABE
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("max-complexity", violations[0].message)
+
+    def test_wrong_threshold_violates(self) -> None:
+        """A threshold value that does not match the repo target fails ADR-012-R1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_WRONG_THRESHOLD
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("max-complexity", violations[0].message)
+            self.assertIn(str(ADR_GUARD.PYTHON_COMPLEXITY_THRESHOLD), violations[0].message)
+
+    def test_missing_pyproject_violates(self) -> None:
+        """A canonical package missing its pyproject.toml fails ADR-012-R1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            # Skip the first canonical package entirely.
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[1:]}
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("missing", violations[0].message.lower())
+
+    def test_files_filter_skips_when_no_canonical_pyproject_touched(self) -> None:
+        """When `files` is given but no canonical pyproject is touched, the check is a no-op."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            # Even with a bad pyproject, the file filter should skip the check.
+            packages[target_pkg] = self.PYPROJECT_MISSING_C901
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(
+                repo_root, ["docs/unrelated.md"]
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_files_filter_runs_when_canonical_pyproject_touched(self) -> None:
+        """When `files` includes a canonical pyproject, the check runs and reports violations."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_MISSING_C901
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(
+                repo_root, [f"{target_pkg}/pyproject.toml"]
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("C901", violations[0].message)
+
+    def test_real_repo_passes(self) -> None:
+        """Run against the real repo: every canonical pyproject must satisfy ADR-012-R1."""
+        violations = ADR_GUARD.check_python_complexity_gate(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(
+            violations,
+            [],
+            msg="Real repo has python-complexity-gate violations: " + str(violations),
+        )
+
+    def test_check_registered_in_check_levels(self) -> None:
+        """The new check is wired into the `fast`, `ci`, and `all` profiles."""
+        for level in ("fast", "ci", "all"):
+            self.assertIn(
+                "python-complexity-gate",
+                ADR_GUARD.CHECK_LEVELS[level],
+                msg=f"python-complexity-gate missing from level={level}",
+            )
+
+    def test_check_registered_in_checks_registry(self) -> None:
+        """The new check has a CHECKS entry pointing at the implementation."""
+        self.assertIn("python-complexity-gate", ADR_GUARD.CHECKS)
+        self.assertIs(
+            ADR_GUARD.CHECKS["python-complexity-gate"], ADR_GUARD.check_python_complexity_gate
+        )
+
+    # ----- Findings 1: silent gate bypass through ignore / per-file-ignores -----
+
+    PYPROJECT_C901_IN_IGNORE = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F", "C901"]\n'
+        'ignore = ["C901"]\n'
+        "\n"
+        "[tool.ruff.lint.mccabe]\n"
+        "max-complexity = 15\n"
+    )
+
+    PYPROJECT_C901_IN_EXTEND_IGNORE = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F", "C901"]\n'
+        'extend-ignore = ["C901"]\n'
+        "\n"
+        "[tool.ruff.lint.mccabe]\n"
+        "max-complexity = 15\n"
+    )
+
+    PYPROJECT_C901_IN_PER_FILE_IGNORES = (
+        "[project]\n"
+        'name = "pkg-a"\n'
+        "\n"
+        "[tool.ruff.lint]\n"
+        'select = ["E", "F", "C901"]\n'
+        "\n"
+        "[tool.ruff.lint.mccabe]\n"
+        "max-complexity = 15\n"
+        "\n"
+        "[tool.ruff.lint.per-file-ignores]\n"
+        '"**/*.py" = ["C901"]\n'
+    )
+
+    def test_c901_in_ignore_violates(self) -> None:
+        """`C901` listed in [tool.ruff.lint].ignore disables the gate; must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_C901_IN_IGNORE
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("ignore", violations[0].message)
+            self.assertIn("C901", violations[0].message)
+
+    def test_c901_in_extend_ignore_violates(self) -> None:
+        """`C901` listed in [tool.ruff.lint].extend-ignore disables the gate; must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_C901_IN_EXTEND_IGNORE
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("extend-ignore", violations[0].message)
+            self.assertIn("C901", violations[0].message)
+
+    def test_c901_in_per_file_ignores_violates(self) -> None:
+        """`C901` in [tool.ruff.lint.per-file-ignores] silently exempts whole globs; must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_C901_IN_PER_FILE_IGNORES
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
+            self.assertIn("per-file-ignores", violations[0].message)
+            self.assertIn("C901", violations[0].message)
+
+    # ----- Finding 2: package inventory must match pre-commit ruff hooks -----
+
+    def _write_precommit(self, repo_root: Path, hook_paths: list[str]) -> None:
+        """Write a minimal .pre-commit-config.yaml whose ruff hooks target the given paths."""
+        lines = ["repos:", "  - repo: https://github.com/astral-sh/ruff-pre-commit", "    rev: v0.14.10", "    hooks:"]
+        for path in hook_paths:
+            lines.extend(
+                [
+                    "      - id: ruff",
+                    f"        name: ruff ({path})",
+                    "        args: [--fix]",
+                    f"        files: ^{path}/",
+                    "      - id: ruff-format",
+                    f"        name: ruff-format ({path})",
+                    f"        files: ^{path}/",
+                ]
+            )
+        (repo_root / ".pre-commit-config.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_precommit_ruff_hook_without_constant_entry_violates(self) -> None:
+        """A ruff hook for a package missing from PYTHON_COMPLEXITY_GATE_PYPROJECTS must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            self._write_packages(repo_root, packages)
+            # Pre-commit has a hook for a new package not in the constant.
+            extra_pkg = "scripts/new_uncovered_pkg"
+            (repo_root / extra_pkg).mkdir(parents=True, exist_ok=True)
+            self._write_precommit(
+                repo_root,
+                list(ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS) + [extra_pkg],
+            )
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(extra_pkg in v.message for v in violations),
+                msg=f"Expected violation mentioning {extra_pkg}: {violations}",
+            )
+
+    def test_constant_entry_without_precommit_ruff_hook_violates(self) -> None:
+        """A constant entry not backed by a ruff hook indicates stale config; must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            self._write_packages(repo_root, packages)
+            # Pre-commit covers only the first N-1 packages; the last constant entry is stale.
+            covered = list(ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS)[:-1]
+            stale = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[-1]
+            self._write_precommit(repo_root, covered)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(stale in v.message for v in violations),
+                msg=f"Expected violation mentioning {stale}: {violations}",
+            )
+
+    def test_precommit_consistency_clean(self) -> None:
+        """Constant + ruff hooks in agreement → no consistency violation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            self._write_packages(repo_root, packages)
+            self._write_precommit(repo_root, list(ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS))
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    # ----- Reconciliation: in-source `# noqa: C901` ↔ backlog rows -----
+
+    def _write_backlog(self, repo_root: Path, rows: list[tuple[str, str, str, int]]) -> None:
+        """Write a synthetic docs/adr/complexity-backlog.md with the given rows.
+
+        Each row is (package, file, function, complexity).
+        """
+        lines = [
+            "# Python Complexity Backlog",
+            "",
+            "| Package | File | Function | Complexity |",
+            "|---|---|---|---|",
+        ]
+        for pkg, file_, func, complexity in rows:
+            lines.append(f"| {pkg} | `{file_}` | `{func}` | {complexity} |")
+        target = repo_root / "docs" / "adr" / "complexity-backlog.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _write_source(self, repo_root: Path, relpath: str, body: str) -> None:
+        target = repo_root / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+
+    def _full_synthetic_repo(self, repo_root: Path) -> None:
+        """Build a minimal repo with all canonical pyprojects + precommit + empty backlog."""
+        packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+        self._write_packages(repo_root, packages)
+        self._write_precommit(repo_root, list(ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS))
+        self._write_backlog(repo_root, [])
+
+    def test_noqa_with_matching_backlog_row_passes(self) -> None:
+        """A noqa whose file+function appear in the backlog is approved exemption."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._full_synthetic_repo(repo_root)
+            pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            source_rel = f"{pkg}/svc.py"
+            self._write_source(
+                repo_root,
+                source_rel,
+                "def foo(x):  # noqa: C901\n    pass\n",
+            )
+            self._write_backlog(repo_root, [("pkg", source_rel, "foo", 17)])
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_noqa_without_backlog_row_violates(self) -> None:
+        """A `# noqa: C901` with no matching backlog row is an unauthorized exemption."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._full_synthetic_repo(repo_root)
+            pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            source_rel = f"{pkg}/svc.py"
+            self._write_source(
+                repo_root,
+                source_rel,
+                "def foo(x):  # noqa: C901\n    pass\n",
+            )
+            # Backlog has no row for foo.
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(
+                    "foo" in v.message and v.path.startswith(source_rel)
+                    for v in violations
+                ),
+                msg=f"Expected unauthorized-exemption violation: {violations}",
+            )
+
+    def test_backlog_row_without_noqa_violates(self) -> None:
+        """A backlog row with no matching `# noqa: C901` in code is stale and must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._full_synthetic_repo(repo_root)
+            pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            source_rel = f"{pkg}/svc.py"
+            # No source file with a noqa.
+            self._write_backlog(repo_root, [("pkg", source_rel, "ghost", 17)])
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any("ghost" in v.message for v in violations),
+                msg=f"Expected stale-backlog-row violation: {violations}",
+            )
+
+    def test_backlog_doc_missing_violates(self) -> None:
+        """If the backlog doc is absent, the reconciliation gate cannot operate; fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            self._write_packages(repo_root, packages)
+            self._write_precommit(repo_root, list(ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS))
+            # `_write_packages` writes an empty backlog by default; delete it
+            # to exercise the missing-backlog path.
+            (repo_root / "docs" / "adr" / "complexity-backlog.md").unlink()
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(
+                    v.path == "docs/adr/complexity-backlog.md" and "missing" in v.message
+                    for v in violations
+                ),
+                msg=f"Expected missing-backlog violation: {violations}",
+            )
+
+    def test_noqa_with_other_codes_alongside_c901_is_detected(self) -> None:
+        """`# noqa: E501, C901` is still a C901 exemption and needs a backlog row."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._full_synthetic_repo(repo_root)
+            pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            source_rel = f"{pkg}/svc.py"
+            self._write_source(
+                repo_root,
+                source_rel,
+                "def foo(x):  # noqa: E501, C901\n    pass\n",
+            )
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any("foo" in v.message for v in violations),
+                msg=f"Expected multi-code noqa detected: {violations}",
+            )
+
+    # ----- Cycle-3 finding 1: bare `# noqa` on def line bypasses scanner -----
+
+    def test_bare_noqa_on_def_line_violates(self) -> None:
+        """`def foo(...):  # noqa` (no code list) suppresses C901 too; must fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._full_synthetic_repo(repo_root)
+            pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            source_rel = f"{pkg}/svc.py"
+            self._write_source(
+                repo_root,
+                source_rel,
+                "def foo(x):  # noqa\n    pass\n",
+            )
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(
+                    "bare" in v.message.lower() and v.path.startswith(source_rel)
+                    for v in violations
+                ),
+                msg=f"Expected bare-noqa violation: {violations}",
+            )
+
+    def test_bare_noqa_off_def_line_does_not_violate(self) -> None:
+        """A bare `# noqa` inside a function body is unrelated to C901; do not flag."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._full_synthetic_repo(repo_root)
+            pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            source_rel = f"{pkg}/svc.py"
+            self._write_source(
+                repo_root,
+                source_rel,
+                "def foo(x):\n    return x  # noqa\n",
+            )
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertFalse(
+                any("bare" in v.message.lower() for v in violations),
+                msg=f"Did not expect bare-noqa violation on non-def line: {violations}",
+            )
+
+    # ----- Cycle-3 finding 2: prefix selectors that cover C901 -----
+
+    def test_c_prefix_in_ignore_violates(self) -> None:
+        """`ignore = ["C"]` is a prefix selector that covers C901; must fail."""
+        body = (
+            "[project]\n"
+            'name = "pkg-a"\n'
+            "\n"
+            "[tool.ruff.lint]\n"
+            'select = ["E", "F", "C901"]\n'
+            'ignore = ["C"]\n'
+            "\n"
+            "[tool.ruff.lint.mccabe]\n"
+            "max-complexity = 15\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = body
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(
+                    "ignore" in v.message and "C901" in v.message
+                    for v in violations
+                ),
+                msg=f"Expected prefix-ignore violation: {violations}",
+            )
+
+    def test_all_selector_in_extend_ignore_violates(self) -> None:
+        """`extend-ignore = ["ALL"]` covers C901; must fail."""
+        body = (
+            "[project]\n"
+            'name = "pkg-a"\n'
+            "\n"
+            "[tool.ruff.lint]\n"
+            'select = ["E", "F", "C901"]\n'
+            'extend-ignore = ["ALL"]\n'
+            "\n"
+            "[tool.ruff.lint.mccabe]\n"
+            "max-complexity = 15\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = body
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(
+                    "extend-ignore" in v.message and "C901" in v.message
+                    for v in violations
+                ),
+                msg=f"Expected ALL-extend-ignore violation: {violations}",
+            )
+
+    def test_c90_prefix_in_per_file_ignores_violates(self) -> None:
+        """`per-file-ignores` with `C90` (prefix) covers C901; must fail."""
+        body = (
+            "[project]\n"
+            'name = "pkg-a"\n'
+            "\n"
+            "[tool.ruff.lint]\n"
+            'select = ["E", "F", "C901"]\n'
+            "\n"
+            "[tool.ruff.lint.mccabe]\n"
+            "max-complexity = 15\n"
+            "\n"
+            "[tool.ruff.lint.per-file-ignores]\n"
+            '"**/*.py" = ["C90"]\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = body
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertTrue(
+                any(
+                    "per-file-ignores" in v.message and "C901" in v.message
+                    for v in violations
+                ),
+                msg=f"Expected prefix-per-file-ignores violation: {violations}",
+            )
+
+    def test_select_with_c_prefix_satisfies_gate(self) -> None:
+        """`select = ["C"]` enables C901 by prefix; the gate accepts it."""
+        body = (
+            "[project]\n"
+            'name = "pkg-a"\n'
+            "\n"
+            "[tool.ruff.lint]\n"
+            'select = ["E", "F", "C"]\n'
+            "\n"
+            "[tool.ruff.lint.mccabe]\n"
+            "max-complexity = 15\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = body
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+
+            self.assertFalse(
+                any("select" in v.message and "C901" in v.message for v in violations),
+                msg=f"Did not expect select violation when prefix covers C901: {violations}",
+            )
+
+    # ----- Cycle-3 finding 3: targeted mode must consider adr_guard.py relevant -----
+
+    def test_targeted_files_include_adr_guard_py_runs_check(self) -> None:
+        """Changes to `scripts/adr_guard/adr_guard.py` (where the constants live) trigger the check."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            # Introduce a config-shape problem so the check has something to report.
+            packages[target_pkg] = self.PYPROJECT_MISSING_C901
+            self._write_packages(repo_root, packages)
+
+            # Pass only adr_guard.py in --files mode.
+            violations = ADR_GUARD.check_python_complexity_gate(
+                repo_root, ["scripts/adr_guard/adr_guard.py"]
+            )
+
+            self.assertTrue(
+                any("C901" in v.message for v in violations),
+                msg=f"Expected check to run on adr_guard.py change: {violations}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

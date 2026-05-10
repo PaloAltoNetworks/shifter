@@ -164,18 +164,6 @@ def get_ami_id(ami_type: str) -> str:
 NGFW_SSH_WAIT_TIMEOUT_DEFAULT = 1500  # 25 minutes
 
 
-def _get_working_dir() -> str:
-    """Get the working directory for provisioner commands.
-
-    In ECS container: /app
-    In local dev: the provisioner directory (where this script lives)
-    """
-    # If DB_PASSWORD is set, we're running locally
-    if os.environ.get("DB_PASSWORD"):
-        return os.path.dirname(os.path.abspath(__file__))
-    return "/app"
-
-
 def get_db_connection() -> psycopg.Connection:
     """Get database connection.
 

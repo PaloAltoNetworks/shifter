@@ -176,6 +176,43 @@ The first slice intentionally stays small:
   stays under SonarCloud's cognitive-complexity threshold and tests
   can target each clause independently.
 
+- `no-plaintext-secrets-in-tfvars`
+  Architecture check that scans `*.tfvars` files committed under
+  `platform/terraform/environments/` and flags any line that assigns a
+  quoted string literal to a variable whose name ends in `_password`,
+  `_passwords`, `_secret`, `_secrets`, `_token`, `_tokens`, `_key`,
+  `_keys`, `_credential`, or `_credentials`. Heredoc string literals
+  (`name = <<EOF` / `<<-EOF`) are flagged equivalently. Object/array
+  assignments to a secret-bearing variable are walked forward to the
+  matching brace/bracket and flagged when any string literal appears
+  inside (so `db_credentials = { password = "..." }` is caught while
+  `db_credentials = { password = var.x }` is allowed). Function-wrapped
+  string literals (`db_password = trimspace("...")`,
+  `api_token = sensitive("...")`,
+  `db_credentials = jsonencode({ password = "..." })`) are caught via
+  a same-line RHS scan; multi-line wrapper expressions (jsonencode
+  spanning lines, nested function calls across lines) are walked via
+  balanced-delimiter matching of `()`/`[]`/`{}` until the expression
+  closes, and any inner string literal flags the assignment.
+  Var/local/data references and empty strings
+  are allowed. Variables whose name ENDS WITH a public-material suffix
+  (`public_key`, `public_keys`, `public_cert`, `pub_key`, `pubkey`,
+  `authorized_keys`, etc.) are exempted because that material is
+  share-only by design; the match is suffix-based so a name like
+  `public_key_password` (which has the public-key fragment AND a
+  secret suffix) stays flagged. `*.tfvars.example` files are skipped. Both `#` and `//` line comments and `/* ... */`
+  block comments are stripped before matching, matching Terraform's
+  HCL grammar. Enforces ADR-004-R7. Complements gitleaks, which
+  matches high-entropy random strings; this catches low-entropy
+  committed credentials gitleaks ignores. Implementation note: the
+  check is decomposed into focused helpers (`_collect_tfvars_candidates`,
+  `_scan_tfvars_file`, `_flagged_secret_var`, `_block_assignment_has_literal`,
+  `_wrapped_rhs_has_literal`, `_lines_have_string_literal`,
+  `_find_balanced_close_index`, `_find_block_close_index`, `_balance_scan`,
+  `_block_depth_scan`, `_scrub_line`) so each piece stays under SonarCloud's
+  cognitive-complexity threshold and tests can target each clause
+  independently.
+
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal
   Terraform outputs, then calls `aws rds describe-db-instances` for each

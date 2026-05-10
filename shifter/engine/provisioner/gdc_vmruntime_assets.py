@@ -143,11 +143,21 @@ def _get_linux_access_password(os_type: str) -> str:
 
 def _get_windows_admin_password(role: str) -> str:
     if role == "dc":
-        return os.environ.get("DC_DOMAIN_PASSWORD") or os.environ.get(
-            "GDC_WINDOWS_ADMIN_PASSWORD",
-            "CortexSavesTheDay!",
-        )
-    return os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!")
+        # DC role: read DC_DOMAIN_PASSWORD only. Same env var contract
+        # as the AWS provisioner (`main.py`) and the portal RDP
+        # credential lookup (`shifter_platform/engine/services.py`).
+        # Fail-loud when unset (matches `main.py:1816`'s SetupError on
+        # the AWS path) instead of falling back to a literal credential
+        # — committing the DC admin password as a default is the
+        # vulnerability class #760 closed.
+        password = os.environ.get("DC_DOMAIN_PASSWORD")
+        if not password:
+            raise RuntimeError(
+                "DC_DOMAIN_PASSWORD is not configured for the GDC VM Runtime DC; "
+                "seed the DC domain password secret before provisioning"
+            )
+        return password
+    return os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!")  # nosec B105 - non-DC fallback (separate follow-up)
 
 
 def _render_user_data(instance: dict[str, Any], hostname: str, public_key: str) -> str:

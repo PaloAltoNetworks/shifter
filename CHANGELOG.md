@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.99.1] - 2026-05-10
+
+### Security
+
+- **Removed hardcoded prebaked Domain Controller Administrator password
+  from committed sources (#760).** The literal `dc_domain_password`
+  value previously committed in
+  `platform/terraform/environments/{prod,dev}/portal/terraform.tfvars`,
+  the matching Python fallback in
+  `shifter/shifter_platform/engine/services._get_windows_rdp_fallback`,
+  and the GDC VM Runtime DC fallback in
+  `shifter/engine/provisioner/gdc_vmruntime_assets._get_windows_admin_password`
+  have been removed. The engine-provisioner Terraform module now
+  references an out-of-band-managed `aws_secretsmanager_secret` named
+  `shifter-{env}-portal-dc-domain` via a `data` source; operators
+  create AND populate the secret with `aws secretsmanager create-secret`
+  before the first `terraform apply` (see `secrets.md` "Bootstrap (fresh
+  environment)"). The engine ECS task injects the value via the task
+  definition's `secrets = [...]` block; the portal Django container
+  reads the same secret at startup through `entrypoint.sh` and the
+  `DC_DOMAIN_PASSWORD_SECRET_ARN` env var plumbed through the
+  `portal/ssm` and `portal/ec2` modules. The Windows-DC RDP credential
+  lookup in `engine.services` is provider-scoped via the portal's
+  `CLOUD_PROVIDER` env, fail-loud (raises `ValueError` mapped to HTTP
+  400 by mission_control) when the secret is unconfigured or when an
+  instance's provider does not match the portal's deployment provider
+  (closes the cross-provider leak). The GDC VM Runtime DC provisioner
+  requires the same `DC_DOMAIN_PASSWORD` env (no literal fallback for
+  the DC role; non-DC Windows victim fallback remains pending separate
+  follow-up). Adds an `adr_guard` check `no-plaintext-secrets-in-tfvars`
+  (ADR-004-R7) that scans
+  `platform/terraform/environments/**/*.tfvars` for string-literal
+  assignments to `*_password` / `*_secret` / `*_token` / `*_key` /
+  `*_credentials` variables (with multi-line wrapper, HCL `#`/`//`/`/* */`
+  comment, and object/array detection) and fails the architecture gate
+  if any re-appear; complements gitleaks (which catches high-entropy
+  random strings) by catching low-entropy committed credentials
+  gitleaks ignores. Variables whose name ENDS WITH a public-material
+  suffix (`public_key`, `public_cert`, `pubkey`, `authorized_keys`,
+  etc.) are exempt; `public_key_password` and similar names that mix
+  a public-material fragment with a secret suffix stay flagged.
+  `*.tfvars.example` files are skipped. The previously exposed value
+  must be rotated operationally; the prebaked DC AMI Administrator
+  password and the Secrets Manager value must match.
+
 ## [3.99.0] - 2026-05-10
 
 ### Added

@@ -133,6 +133,7 @@ SQS_ENGINE_URL=$(get_param "$PS_PREFIX/sqs-engine-url")
 SQS_MC_URL=$(get_param "$PS_PREFIX/sqs-mc-url")
 REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
 GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" 2>/dev/null || echo "")
+DC_DOMAIN_PASSWORD_SECRET_ARN=$(get_param "$PS_PREFIX/dc-domain-password-secret-arn" 2>/dev/null || echo "")
 GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" 2>/dev/null || echo "")
 GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" 2>/dev/null || echo "")
 DB_HOST_OVERRIDE=$(get_param "$PS_PREFIX/db-host-override" 2>/dev/null || echo "")
@@ -176,6 +177,28 @@ if [[ -n "$GUACAMOLE_BASE_URL" ]]; then
 fi
 if [[ -n "$GUACAMOLE_API_BASE_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
+fi
+
+# Pass the DC domain password secret ARN through; the container's
+# entrypoint resolves it to the DC_DOMAIN_PASSWORD env var used by the
+# portal's Windows-DC RDP credential lookup.
+if [[ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ]]; then
+  # Preflight: refuse to start containers if the Terraform-managed
+  # secret has no AWSCURRENT value yet (a fresh environment requires
+  # an out-of-band `aws secretsmanager put-secret-value` step before
+  # the portal will start; see secrets.md "Bootstrap (fresh
+  # environment)"). Without this guard, docker run -d returns 0 and
+  # the lifecycle hook continues while the containers crash-loop.
+  if ! aws secretsmanager get-secret-value \
+        --secret-id "$DC_DOMAIN_PASSWORD_SECRET_ARN" \
+        --region "$AWS_REGION" \
+        --query SecretString --output text >/dev/null 2>&1; then
+    echo "ERROR: DC domain password secret has no AWSCURRENT value." >&2
+    echo "Seed the value via 'aws secretsmanager put-secret-value' before bootstrap." >&2
+    complete_lifecycle_action ABANDON
+    exit 1
+  fi
+  COMMON_ENV="$COMMON_ENV -e DC_DOMAIN_PASSWORD_SECRET_ARN=$DC_DOMAIN_PASSWORD_SECRET_ARN"
 fi
 
 # Add DB host override if configured

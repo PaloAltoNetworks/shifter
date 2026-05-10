@@ -82,7 +82,6 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "WINDOWS_AMI_ID", value = var.windows_ami_id },
       { name = "DC_AMI_ID", value = var.dc_ami_id },
       { name = "DC_DOMAIN_NAME", value = var.dc_domain_name },
-      { name = "DC_DOMAIN_PASSWORD", value = var.dc_domain_password },
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "S3_ENDPOINT_ID", value = var.s3_endpoint_id },
       { name = "FIREWALL_ENDPOINT_ID", value = var.firewall_endpoint_id },
@@ -103,6 +102,13 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
       # Messaging (SNS for range events)
       { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
+    ]
+
+    secrets = [
+      {
+        name      = "DC_DOMAIN_PASSWORD"
+        valueFrom = data.aws_secretsmanager_secret.dc_domain_password.arn
+      }
     ]
 
     logConfiguration = {

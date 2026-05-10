@@ -177,14 +177,16 @@
       },
       {
         "id": "ADR-006-R3",
-        "description": "Each namespace must have at least one NetworkPolicy (deferred until policies are authored).",
-        "checks": []
+        "description": "Each Shifter Kubernetes namespace must have a default-deny NetworkPolicy covering both ingress and egress, and Shifter NetworkPolicies must use explicit service CIDRs instead of broad internet egress ranges.",
+        "checks": ["k8s-network-policy-coverage"]
       }
     ],
     "exceptions": [],
     "enforcement": ["pre-commit", "ci"],
     "evidence": [
       "platform/k8s/gcp/base/namespaces.yaml",
+      "platform/k8s/gcp/base/networkpolicies.yaml",
+      "platform/charts/shifter/templates/networkpolicies.yaml",
       ".kube-linter.yaml",
       ".pre-commit-config.yaml",
       "scripts/adr_guard/adr_guard.py",

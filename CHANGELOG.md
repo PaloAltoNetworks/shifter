@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.101.3] - 2026-05-10
+
+### Security
+
+- **Added default-deny Kubernetes NetworkPolicies for the GCP control plane
+  (#958).** The Helm chart and static GCP base manifests now isolate
+  `shifter-platform` and `shifter-jobs` by default, with explicit allow rules
+  for GCLB ingress, DNS, Guacamole-to-guacd traffic, Google APIs, and generated
+  private service CIDRs.
+
 ## [3.101.2] - 2026-05-10
 
 ### Security

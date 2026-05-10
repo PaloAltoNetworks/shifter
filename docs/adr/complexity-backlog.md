@@ -11,19 +11,19 @@ line and **(2)** delete its row from the table below in the same PR. Ratchet
 edits (lowering the constant) update `PYTHON_COMPLEXITY_THRESHOLD`, every
 canonical `pyproject.toml`, and the relevant table rows in one PR.
 
-| Package | File | Function | Complexity at introduction |
-|---|---|---|---|
-| shifter_platform | `shifter/shifter_platform/cms/services.py` | `list_agents` | 16 |
-| shifter_platform | `shifter/shifter_platform/cms/services.py` | `create_range` | 16 |
-| shifter_platform | `shifter/shifter_platform/cms/services.py` | `initiate_upload` | 16 |
-| shifter_platform | `shifter/shifter_platform/ctf/services/participant.py` | `bulk_import_participants` | 16 |
-| shifter_platform | `shifter/shifter_platform/ctf/services/submission.py` | `submit_flag` | 19 |
-| shifter_platform | `shifter/shifter_platform/ctf/views.py` | `challenge_detail` | 17 |
-| provisioner | `shifter/engine/provisioner/main.py` | `_run_single_instance_setup` | 18 |
-| provisioner | `shifter/engine/provisioner/main.py` | `run_instance_setup` | 16 |
-| provisioner | `shifter/engine/provisioner/main.py` | `run_range_terraform` | 18 |
-| provisioner | `shifter/engine/provisioner/main.py` | `_build_range_terraform_variables` | 16 |
-| provisioner | `shifter/engine/provisioner/orchestrators/setup_orchestrator.py` | `_execute_step` | 22 |
+| Package | File | Function | Complexity at introduction | Tracking issue |
+|---|---|---|---|---|
+| shifter_platform | `shifter/shifter_platform/cms/services.py` | `list_agents` | 16 | #1142 |
+| shifter_platform | `shifter/shifter_platform/cms/services.py` | `create_range` | 16 | #1143 |
+| shifter_platform | `shifter/shifter_platform/cms/services.py` | `initiate_upload` | 16 | #1144 |
+| shifter_platform | `shifter/shifter_platform/ctf/services/participant.py` | `bulk_import_participants` | 16 | #1145 |
+| shifter_platform | `shifter/shifter_platform/ctf/services/submission.py` | `submit_flag` | 19 | #1146 |
+| shifter_platform | `shifter/shifter_platform/ctf/views.py` | `challenge_detail` | 17 | #1147 |
+| provisioner | `shifter/engine/provisioner/main.py` | `_run_single_instance_setup` | 18 | #1148 |
+| provisioner | `shifter/engine/provisioner/main.py` | `run_instance_setup` | 16 | #1149 |
+| provisioner | `shifter/engine/provisioner/main.py` | `run_range_terraform` | 18 | #1150 |
+| provisioner | `shifter/engine/provisioner/main.py` | `_build_range_terraform_variables` | 16 | #1151 |
+| provisioner | `shifter/engine/provisioner/orchestrators/setup_orchestrator.py` | `_execute_step` | 22 | #1152 |
 
 Total: 11 functions across 2 packages (6 in `shifter_platform`, 5 in
 `provisioner`). The remaining 6 lint-scoped Python packages
@@ -35,6 +35,14 @@ New `C901` violations are not added to this list by default. The expectation
 is "refactor or the gate fails"; a new exemption requires explicit reviewer
 agreement and a same-PR row added here.
 
-Per-function GitHub tracking issues for each backlog entry are linked from
-issue #1135 (the ADR-012 introduction issue); refactor PRs may close the
-matching tracking issue in addition to deleting the row above.
+Each row has a `tech-debt`-labeled GitHub tracking issue. The refactor PR
+deletes the `# noqa: C901` on the `def` line, deletes the row above, and
+closes the matching tracking issue in the same change.
+
+The `python-complexity-gate` adr_guard check parses this table cell-by-cell
+(no multi-quantifier regex), keying off the leading four columns:
+`<package> | <file> | <function> | <complexity>`. Trailing columns
+(tracking issue, owner, etc.) are accepted as long as that leading shape
+is intact, so the table can grow new columns without code edits to the
+parser. The file and function cells must be backtick-fenced; the
+complexity cell must be a positive integer.

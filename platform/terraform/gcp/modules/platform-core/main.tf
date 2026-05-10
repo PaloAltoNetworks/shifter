@@ -547,6 +547,11 @@ resource "google_sql_database_instance" "platform" {
       ipv4_enabled                                  = false
       private_network                               = google_compute_network.platform.id
       enable_private_path_for_google_cloud_services = true
+      # Require TLS for every Cloud SQL connection. The google provider (>= 6.0) removed
+      # the legacy ``require_ssl`` argument in favor of ``ssl_mode``; ``ENCRYPTED_ONLY``
+      # is the server-TLS-required mode (client uses ``sslmode=verify-ca`` against the
+      # Cloud SQL server CA — no mTLS).
+      ssl_mode = "ENCRYPTED_ONLY"
     }
 
     database_flags {

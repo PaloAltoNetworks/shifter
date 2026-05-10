@@ -72,6 +72,13 @@ repos:
         name: ruff-format (bootstrap)
         files: ^scripts/bootstrap/
       - id: ruff
+        name: ruff (gcp scripts)
+        args: [--fix]
+        files: ^scripts/gcp/
+      - id: ruff-format
+        name: ruff-format (gcp scripts)
+        files: ^scripts/gcp/
+      - id: ruff
         name: ruff (check_layer_imports)
         args: [--fix]
         files: ^scripts/check_layer_imports/
@@ -217,6 +224,12 @@ repos:
         args: [-r, --skip, "B101,B404,B603,B607"]
         files: ^scripts/bootstrap/
         exclude: ^scripts/bootstrap/(tests|\.venv)/
+      - id: bandit
+        name: bandit (gcp scripts)
+        # B101: assert. B108: fixed /tmp path the deploy workflow writes/reads.
+        args: [-r, --skip, "B101,B108"]
+        files: ^scripts/gcp/
+        exclude: ^scripts/gcp/(tests|\.venv)/
       - id: bandit
         name: bandit (check_layer_imports)
         args: [-r, --skip, "B101,B112"]
@@ -388,6 +401,16 @@ repos:
           --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/bootstrap/
+        pass_filenames: false
+
+  # GCP deploy-time rendering script tests
+  - repo: local
+    hooks:
+      - id: pytest-gcp-scripts
+        name: pytest (gcp scripts)
+        entry: bash -c 'cd scripts/gcp && uv run pytest tests/ -q'
+        language: system
+        files: ^scripts/gcp/
         pass_filenames: false
 
   # Check layer imports tests

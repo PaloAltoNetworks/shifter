@@ -67,6 +67,8 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
         },
         "identity_platform_api_key": {"value": "identity-platform-api-key"},
         "identity_platform_project_id": {"value": project_id},
+        "identity_allowed_email_domain": {"value": "paloaltonetworks.com"},
+        "identity_allowed_emails": {"value": []},
         "control_plane_database": {
             "value": {
                 "private_ip": "10.40.0.10",

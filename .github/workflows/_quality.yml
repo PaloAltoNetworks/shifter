@@ -190,6 +190,24 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  gcp-scripts-lint:
+    permissions:
+      contents: read
+    name: Lint (gcp scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: scripts/gcp
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   check-layer-imports-lint:
     permissions:
       contents: read
@@ -447,6 +465,23 @@ jobs:
           uv tool install bandit
           bandit -r scripts/bootstrap/ --skip B101 --exclude scripts/bootstrap/tests,scripts/bootstrap/.venv
 
+  gcp-scripts-sast:
+    permissions:
+      contents: read
+    name: SAST (gcp scripts)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Run Bandit
+        run: |
+          uv tool install bandit
+          bandit -r scripts/gcp/ --skip B101,B108 --exclude scripts/gcp/tests,scripts/gcp/.venv
+
   check-layer-imports-sast:
     permissions:
       contents: read
@@ -596,6 +631,27 @@ jobs:
 
       - name: Run tests
         working-directory: scripts/bootstrap
+        run: uv run pytest tests/
+
+  gcp-scripts-tests:
+    permissions:
+      contents: read
+    name: Tests (gcp scripts)
+    if: ${{ !inputs.skip_tests }}
+    needs: [gcp-scripts-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/gcp
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: scripts/gcp
         run: uv run pytest tests/
 
   check-layer-imports-tests:

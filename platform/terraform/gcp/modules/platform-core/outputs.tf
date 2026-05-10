@@ -100,6 +100,16 @@ output "identity_platform_project_id" {
   value       = var.project_id
 }
 
+output "identity_allowed_email_domain" {
+  description = "Email domain enforced by the Identity Platform blocking function and the portal allow-list."
+  value       = var.identity_allowed_email_domain
+}
+
+output "identity_allowed_emails" {
+  description = "Explicit allow-listed emails (beyond the domain) enforced by the Identity Platform blocking function and the portal."
+  value       = var.identity_allowed_emails
+}
+
 output "public_hostname" {
   description = "Optional public hostname configured for the ingress."
   value       = local.normalized_public_hostname

@@ -50,8 +50,8 @@ output "ecs_task_role_arn" {
 # ------------------------------------------------------------------------------
 
 output "dc_domain_password_secret_arn" {
-  description = "ARN of the Secrets Manager secret holding the prebaked DC Administrator password (created and managed out-of-band; resolved via data source)"
-  value       = data.aws_secretsmanager_secret.dc_domain_password.arn
+  description = "ARN of the Terraform-managed Secrets Manager secret holding the DC domain Administrator password (DC_DOMAIN_PASSWORD)"
+  value       = aws_secretsmanager_secret.dc_domain_password.arn
 }
 
 # ------------------------------------------------------------------------------

@@ -458,23 +458,10 @@ jobs:
           [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
 
           docker pull "$IMAGE"
-          # Preflight: confirm the DC domain password secret is populated
-          # before tearing down running containers. The Terraform-managed
-          # secret container exists with no AWSCURRENT until an operator
-          # seeds the value out-of-band (see secrets.md "Bootstrap (fresh
-          # environment)"); deploying without a value would leave the
-          # entrypoint unable to resolve DC_DOMAIN_PASSWORD and the
-          # restarted portal in a crash-restart loop.
-          if [ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ]; then
-            if ! aws secretsmanager get-secret-value \
-                  --secret-id "$DC_DOMAIN_PASSWORD_SECRET_ARN" \
-                  --region "$AWS_REGION" \
-                  --query SecretString --output text >/dev/null 2>&1; then
-              echo "ERROR: DC domain password secret has no AWSCURRENT value." >&2
-              echo "Seed the value via 'aws secretsmanager put-secret-value' before deploying." >&2
-              exit 1
-            fi
-          fi
+          # The DC domain password secret is Terraform-managed (created and
+          # seeded by the engine-provisioner module), so it always carries an
+          # AWSCURRENT value — no pre-deploy populate check needed, same as the
+          # DB / app / Cognito secret ARNs above.
           docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"

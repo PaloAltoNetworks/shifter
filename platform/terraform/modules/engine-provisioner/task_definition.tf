@@ -107,7 +107,7 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
     secrets = [
       {
         name      = "DC_DOMAIN_PASSWORD"
-        valueFrom = data.aws_secretsmanager_secret.dc_domain_password.arn
+        valueFrom = aws_secretsmanager_secret.dc_domain_password.arn
       }
     ]
 

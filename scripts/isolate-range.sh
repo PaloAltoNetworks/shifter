@@ -3,6 +3,7 @@
 # Usage:
 #   ./scripts/isolate-range.sh <dev|prod> [range-id] [--confirm] [--detach-igw] [--deny-nacl]
 
+set -e
 set -u
 set -o pipefail
 
@@ -19,10 +20,14 @@ Flags:
   --confirm     Required when environment is prod.
   --detach-igw  Also detach internet gateways from affected VPCs.
   --deny-nacl   Also force deny-all entries into affected network ACLs.
+
+Exit codes:
+  0  Isolation completed successfully.
+  1  Validation/setup failure.
+  2  Isolation ran but one or more AWS actions failed.
 EOF
 }
 
-LOG_FILE="/tmp/isolate-range-$(date -u +%Y%m%dT%H%M%SZ).log"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 ENVIRONMENT=""
 RANGE_ID=""
@@ -30,6 +35,21 @@ CONFIRM=false
 DETACH_IGW=false
 DENY_NACL=false
 FAILED_ACTIONS=0
+declare -A VPC_ID_SET=()
+if [[ -n "${SHIFTER_ISOLATION_LOG_DIR:-}" ]]; then
+    LOG_DIR="$SHIFTER_ISOLATION_LOG_DIR"
+elif [[ -n "${HOME:-}" ]]; then
+    LOG_DIR="$HOME/.shifter/logs"
+else
+    echo "ERROR: Set SHIFTER_ISOLATION_LOG_DIR when HOME is unavailable" >&2
+    exit 1
+fi
+mkdir -p "$LOG_DIR"
+if ! chmod 700 "$LOG_DIR" 2>/dev/null; then
+    echo "ERROR: Could not set 700 permissions on $LOG_DIR" >&2
+    exit 1
+fi
+LOG_FILE="${LOG_DIR}/isolate-range-$(date -u +%Y%m%dT%H%M%SZ).log"
 
 log() {
     local message="$1"
@@ -63,10 +83,8 @@ while [[ $# -gt 0 ]]; do
         dev|prod)
             if [[ -z "$ENVIRONMENT" ]]; then
                 ENVIRONMENT="$1"
-            elif [[ -z "$RANGE_ID" ]]; then
-                RANGE_ID="$1"
             else
-                fail "Unexpected positional argument: $1"
+                fail "Environment already specified; only one environment is allowed"
             fi
             shift
             ;;
@@ -116,6 +134,11 @@ else
     AWS_PROFILE="${PANW_SHIFTER_PROD_PROFILE:?PANW_SHIFTER_PROD_PROFILE not set. Check .env file.}"
 fi
 
+log "Validating AWS credentials for profile ${AWS_PROFILE} in ${AWS_REGION}"
+if ! aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" sts get-caller-identity --query 'Account' --output text >>"$LOG_FILE" 2>&1; then
+    fail "AWS credential validation failed for profile ${AWS_PROFILE}"
+fi
+
 COMMON_FILTERS=("Name=tag:shifter:environment,Values=${ENVIRONMENT}" "Name=tag-key,Values=shifter:range_id")
 if [[ -n "$RANGE_ID" ]]; then
     COMMON_FILTERS+=("Name=tag:shifter:range_id,Values=${RANGE_ID}")
@@ -133,12 +156,19 @@ read_ids() {
     tr '\t' '\n' | sed '/^[[:space:]]*$/d'
 }
 
-mapfile -t SECURITY_GROUP_IDS < <(
+security_groups_output="$(
     aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-security-groups \
         --filters "${COMMON_FILTERS[@]}" \
-        --query 'SecurityGroups[].GroupId' \
-        --output text 2>>"$LOG_FILE" | read_ids
-)
+        --query 'SecurityGroups[].[GroupId,VpcId]' \
+        --output text 2>>"$LOG_FILE"
+)" || fail "Failed to list security groups for isolation scope"
+
+SECURITY_GROUP_IDS=()
+while read -r sg_id vpc_id; do
+    [[ -z "$sg_id" ]] && continue
+    SECURITY_GROUP_IDS+=("$sg_id")
+    [[ -n "$vpc_id" && "$vpc_id" != "None" ]] && VPC_ID_SET["$vpc_id"]=1
+done <<<"$security_groups_output"
 
 if [[ "${#SECURITY_GROUP_IDS[@]}" -eq 0 ]]; then
     fail "No matching range security groups found"
@@ -153,22 +183,36 @@ isolate_security_group() {
 
     log "Isolating security group ${sg_id}"
 
-    ingress_text="$(aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-security-group-rules \
+    if ! ingress_text="$(aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-security-group-rules \
         --filters "Name=group-id,Values=${sg_id}" "Name=is-egress,Values=false" \
-        --query 'SecurityGroupRules[].SecurityGroupRuleId' --output text 2>>"$LOG_FILE" || true)"
+        --query 'SecurityGroupRules[].SecurityGroupRuleId' --output text 2>>"$LOG_FILE")"; then
+        log "FAILED: List ingress rules on ${sg_id}"
+        FAILED_ACTIONS=$((FAILED_ACTIONS + 1))
+        # Continue best-effort isolation across other security groups.
+        return 0
+    fi
     if [[ -n "$ingress_text" && "$ingress_text" != "None" ]]; then
-        read -r -a ingress_rules <<<"$ingress_text"
-        run_aws_action "Revoke ingress rules on ${sg_id}" ec2 revoke-security-group-ingress --group-id "$sg_id" --security-group-rule-ids "${ingress_rules[@]}"
+        mapfile -t ingress_rules < <(printf '%s\n' "$ingress_text" | read_ids)
+        if [[ "${#ingress_rules[@]}" -gt 0 ]]; then
+            run_aws_action "Revoke ingress rules on ${sg_id}" ec2 revoke-security-group-ingress --group-id "$sg_id" --security-group-rule-ids "${ingress_rules[@]}"
+        fi
     else
         log "No ingress rules to revoke on ${sg_id}"
     fi
 
-    egress_text="$(aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-security-group-rules \
+    if ! egress_text="$(aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-security-group-rules \
         --filters "Name=group-id,Values=${sg_id}" "Name=is-egress,Values=true" \
-        --query 'SecurityGroupRules[].SecurityGroupRuleId' --output text 2>>"$LOG_FILE" || true)"
+        --query 'SecurityGroupRules[].SecurityGroupRuleId' --output text 2>>"$LOG_FILE")"; then
+        log "FAILED: List egress rules on ${sg_id}"
+        FAILED_ACTIONS=$((FAILED_ACTIONS + 1))
+        # Continue best-effort isolation across other security groups.
+        return 0
+    fi
     if [[ -n "$egress_text" && "$egress_text" != "None" ]]; then
-        read -r -a egress_rules <<<"$egress_text"
-        run_aws_action "Revoke egress rules on ${sg_id}" ec2 revoke-security-group-egress --group-id "$sg_id" --security-group-rule-ids "${egress_rules[@]}"
+        mapfile -t egress_rules < <(printf '%s\n' "$egress_text" | read_ids)
+        if [[ "${#egress_rules[@]}" -gt 0 ]]; then
+            run_aws_action "Revoke egress rules on ${sg_id}" ec2 revoke-security-group-egress --group-id "$sg_id" --security-group-rule-ids "${egress_rules[@]}"
+        fi
     else
         log "No egress rules to revoke on ${sg_id}"
     fi
@@ -176,15 +220,6 @@ isolate_security_group() {
 
 for sg_id in "${SECURITY_GROUP_IDS[@]}"; do
     isolate_security_group "$sg_id"
-done
-
-declare -A VPC_ID_SET=()
-for sg_id in "${SECURITY_GROUP_IDS[@]}"; do
-    vpc_id="$(aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-security-groups \
-        --group-ids "$sg_id" --query 'SecurityGroups[0].VpcId' --output text 2>>"$LOG_FILE" || true)"
-    if [[ -n "$vpc_id" && "$vpc_id" != "None" ]]; then
-        VPC_ID_SET["$vpc_id"]=1
-    fi
 done
 
 if [[ "$DETACH_IGW" == "true" ]]; then
@@ -210,15 +245,18 @@ if [[ "$DENY_NACL" == "true" ]]; then
     )
 
     declare -A nacl_id_set=()
-    for subnet_id in "${subnet_ids[@]}"; do
-        nacl_id="$(aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-network-acls \
-            --filters "Name=association.subnet-id,Values=${subnet_id}" \
-            --query 'NetworkAcls[0].NetworkAclId' \
-            --output text 2>>"$LOG_FILE" || true)"
-        if [[ -n "$nacl_id" && "$nacl_id" != "None" ]]; then
+    if [[ "${#subnet_ids[@]}" -gt 0 ]]; then
+        subnet_ids_csv="$(IFS=,; echo "${subnet_ids[*]}")"
+        mapfile -t nacl_ids < <(
+            aws --no-cli-pager --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-network-acls \
+                --filters "Name=association.subnet-id,Values=${subnet_ids_csv}" \
+                --query 'NetworkAcls[].NetworkAclId' \
+                --output text 2>>"$LOG_FILE" | read_ids
+        )
+        for nacl_id in "${nacl_ids[@]}"; do
             nacl_id_set["$nacl_id"]=1
-        fi
-    done
+        done
+    fi
 
     for nacl_id in "${!nacl_id_set[@]}"; do
         run_aws_action "NACL ${nacl_id} ingress deny-all IPv4" ec2 replace-network-acl-entry --network-acl-id "$nacl_id" --ingress --rule-number 1 --protocol -1 --rule-action deny --cidr-block 0.0.0.0/0

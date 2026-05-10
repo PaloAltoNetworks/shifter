@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.98.1] - 2026-05-10
+
+### Fixed
+
+- **Git worktrees now symlink the repo-root `.env`.**
+  `scripts/setup-worktree.sh` only linked the platform `.env` and the
+  venvs, so a worktree had no repo-root `.env`. The `ground-control` MCP
+  server forwards `GROUND_CONTROL_API_TOKEN` from that file as a bearer
+  token, so every Ground Control backend call returned `401` in any
+  worktree. The setup script now also links `$MAIN_REPO/.env` to the
+  worktree root.
+
 ## [3.98.0] - 2026-05-10
 
 ### Security

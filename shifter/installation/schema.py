@@ -6,10 +6,12 @@ model for that file — setup, doctor, CI, and (later) runtime derivation must v
 against it rather than re-parsing the YAML by hand or maintaining a parallel schema.
 
 Scope: this module owns the *root* keys (``version``, ``backend``, ``deployment``,
-``secrets``, ``settings``). Backend-specific settings live under ``settings`` and are
-opaque here — the backend bundle contract (#1113) validates their contents. The set of
-known backends and the profiles each supports come from :mod:`installation.backends`,
-which a real backend registry supersedes in #1113.
+``secrets``, ``settings``) — including that ``settings`` is a mapping, but not its
+contents: validating the per-backend ``settings`` keys (and the per-backend secret
+reference grammar) belongs to the selected backend bundle's contract, and the loader
+(:mod:`installation.loader`) runs those checks against the bundle from
+:mod:`installation.registry`, which is also where the known backends and the profiles
+each supports come from.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import backends
+from . import registry
 
 # A DNS-label-safe identifier: lowercase letters/digits with internal hyphens, 1-40 chars.
 _DEPLOYMENT_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
@@ -30,7 +32,8 @@ _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _SECRET_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 # The root schema treats ``secrets`` values as opaque references and cannot fully
 # distinguish a short secret value from a secret *name* — the selected backend bundle
-# (#1113) owns the precise per-provider reference grammar, and gitleaks scans for raw
+# owns the precise per-provider reference grammar (``RequiredSecret.reference_grammar`` /
+# ``reference_pattern`` in ``installation.contract``), and gitleaks scans for raw
 # secrets independently. This package only rejects values that are *clearly* raw key
 # material: multi-line, PEM-headered, or implausibly long. The cap sits well above the
 # longest realistic reference (an AWS Secrets Manager name is up to 512 chars, plus
@@ -175,8 +178,8 @@ class DeploymentConfig(BaseModel):
     @field_validator("profile")
     @classmethod
     def _check_profile(cls, v: str) -> str:
-        if v not in backends.KNOWN_PROFILES:
-            valid = ", ".join(sorted(backends.KNOWN_PROFILES))
+        if v not in registry.KNOWN_PROFILES:
+            valid = ", ".join(sorted(registry.KNOWN_PROFILES))
             raise ValueError(f"unknown deployment profile {v!r}; must be one of {valid}")
         return v
 
@@ -205,8 +208,8 @@ class RootConfig(BaseModel):
     @field_validator("backend")
     @classmethod
     def _check_backend(cls, v: str) -> str:
-        if v not in backends.KNOWN_BACKENDS:
-            valid = ", ".join(sorted(backends.KNOWN_BACKENDS))
+        if v not in registry.KNOWN_BACKENDS:
+            valid = ", ".join(sorted(registry.KNOWN_BACKENDS))
             raise ValueError(f"unknown backend {v!r}; must be one of {valid}")
         return v
 
@@ -222,7 +225,7 @@ class RootConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_profile_backend_combination(self) -> RootConfig:
-        allowed = backends.ALLOWED_PROFILES.get(self.backend, frozenset())
+        allowed = registry.ALLOWED_PROFILES.get(self.backend, frozenset())
         if self.deployment.profile not in allowed:
             allowed_text = ", ".join(sorted(allowed)) or "(none)"
             raise ValueError(

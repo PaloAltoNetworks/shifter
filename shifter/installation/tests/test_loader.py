@@ -10,13 +10,13 @@ from installation.schema import RootConfig
 
 
 class TestLoadRootConfig:
-    def test_valid_file_returns_root_config(self, write_config, minimal_config):
-        cfg = load_root_config(write_config(minimal_config))
+    def test_valid_file_returns_root_config(self, write_config, aws_config):
+        cfg = load_root_config(write_config(aws_config))
         assert isinstance(cfg, RootConfig)
         assert cfg.backend == "aws"
 
-    def test_accepts_str_path(self, write_config, minimal_config):
-        cfg = load_root_config(str(write_config(minimal_config)))
+    def test_accepts_str_path(self, write_config, aws_config):
+        cfg = load_root_config(str(write_config(aws_config)))
         assert cfg.backend == "aws"
 
     def test_missing_file_raises(self, tmp_path):
@@ -97,7 +97,7 @@ class TestLoadRootConfig:
         bad = {
             "backend": "aws",
             "deployment": {"name": "shifter", "domain": "shifter.example.com"},
-            "secrets": {"db_password": raw_value},
+            "secrets": {"db_password": raw_value, "django_secret_key": "prompt"},
         }
         with pytest.raises(InstallationConfigError) as exc:
             load_root_config(write_config(bad))
@@ -110,9 +110,204 @@ class TestLoadRootConfig:
             assert "SUPERSECRETMARKER" not in issue.message
 
 
+class TestBackendSpecificValidation:
+    """The loader runs the *selected backend bundle's* settings / secret-reference checks."""
+
+    @pytest.fixture
+    def strict_aws(self, monkeypatch):
+        """Replace the registry's ``aws`` bundle with one that strictly validates settings
+        and one secret reference, so the dispatch path is exercised. It keeps both secrets
+        the real ``aws`` bundle requires (``django_secret_key``, with a pattern, and
+        ``db_password``, without one)."""
+        from pydantic import BaseModel, ConfigDict
+
+        from installation import registry as registry_mod
+        from installation.contract import RequiredSecret
+
+        class _StrictAwsSettings(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            region: str
+
+        base = registry_mod.BACKEND_BUNDLES["aws"]
+        strict = base.model_copy(
+            update={
+                "settings_model": _StrictAwsSettings,
+                "required_secrets": (
+                    RequiredSecret(
+                        logical_name="django_secret_key",
+                        purpose="p",
+                        reference_grammar="a projects/<project>/secrets/<name> resource path",
+                        reference_pattern=r"projects/[^/]+/secrets/[^/]+",
+                    ),
+                    RequiredSecret(logical_name="db_password", purpose="p", reference_grammar="a reference"),
+                ),
+            }
+        )
+        monkeypatch.setitem(registry_mod.BACKEND_BUNDLES, "aws", strict)
+        return strict
+
+    def _aws_config(self, **extra):
+        # A complete aws config that satisfies both the real aws bundle and ``strict_aws``:
+        # ``django_secret_key`` uses a ``projects/...`` reference (matching strict_aws's
+        # pattern), ``db_password`` uses ``prompt``, and ``settings`` carries the ``region``
+        # strict_aws's settings model requires. Tests override ``secrets`` / ``settings``
+        # via ``extra`` to exercise the failure paths.
+        base = {
+            "backend": "aws",
+            "deployment": {"name": "shifter", "domain": "shifter.example.com"},
+            "secrets": {"django_secret_key": "projects/acme/secrets/django", "db_password": "prompt"},
+            "settings": {"region": "us-east-2"},
+        }
+        base.update(extra)
+        return base
+
+    def test_provisional_backend_accepts_any_settings(self, write_config):
+        # The shipped (un-monkeypatched) aws bundle has no settings_model, so any mapping
+        # is fine; this is the default behavior the loader must keep for #1112 configs.
+        cfg = load_root_config(write_config(self._aws_config(settings={"region": "us-east-2", "anything": True})))
+        assert cfg.settings == {"region": "us-east-2", "anything": True}
+
+    def test_backend_settings_problem_is_reported_at_its_settings_path(self, write_config, strict_aws):
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(self._aws_config(settings={"region": "us-east-2", "bogus": True})))
+        paths = {issue.path for issue in exc.value.issues}
+        assert "settings.bogus" in paths
+
+    def test_missing_required_backend_setting_is_reported(self, write_config, strict_aws):
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(self._aws_config(settings={})))
+        assert {issue.path for issue in exc.value.issues} == {"settings.region"}
+
+    def test_backend_settings_error_does_not_echo_the_rejected_value(self, write_config, strict_aws):
+        sensitive = "AKIAEXAMPLEdefinitely-not-a-region"
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(self._aws_config(settings={"region": "us-east-2", "leaked": sensitive})))
+        rendered = str(exc.value)
+        assert sensitive not in rendered
+        for issue in exc.value.issues:
+            assert sensitive not in issue.render()
+
+    def test_bad_secret_reference_for_backend_is_reported(self, write_config, strict_aws):
+        bad = self._aws_config(secrets={"django_secret_key": "not-a-resource-path", "db_password": "prompt"})
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(bad))
+        paths = {issue.path for issue in exc.value.issues}
+        assert "secrets.django_secret_key" in paths
+        # The rejected reference value must not be echoed (it could be sensitive).
+        for issue in exc.value.issues:
+            assert "not-a-resource-path" not in issue.render()
+
+    def test_prompt_secret_reference_is_always_accepted(self, write_config, strict_aws):
+        # ``prompt`` declares the secret while deferring the concrete reference to deploy
+        # time — accepted even when the backend has a strict reference pattern.
+        cfg = load_root_config(
+            write_config(self._aws_config(secrets={"django_secret_key": "prompt", "db_password": "prompt"}))
+        )
+        assert cfg.secrets["django_secret_key"] == "prompt"
+
+    def test_missing_required_secret_is_reported(self, write_config):
+        # The real aws bundle requires django_secret_key and db_password.
+        bad = self._aws_config(secrets={"django_secret_key": "prompt"})  # db_password missing
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(bad))
+        assert "secrets.db_password" in {issue.path for issue in exc.value.issues}
+
+    def test_unknown_supplied_secret_is_reported(self, write_config):
+        # A typo'd secret key must be caught here, not silently fail at render/deploy time.
+        bad = self._aws_config(secrets={"django_secret_key": "prompt", "db_password": "prompt", "django_secret": "x"})
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(bad))
+        assert "secrets.django_secret" in {issue.path for issue in exc.value.issues}
+
+    def test_settings_and_secret_problems_are_reported_together(self, write_config, strict_aws):
+        bad = self._aws_config(
+            settings={"region": "us-east-2", "bogus": True},
+            secrets={"django_secret_key": "not-a-resource-path", "db_password": "prompt"},
+        )
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(bad))
+        paths = {issue.path for issue in exc.value.issues}
+        assert {"settings.bogus", "secrets.django_secret_key"} <= paths
+
+    def test_root_schema_and_backend_problems_are_reported_together(self, write_config, strict_aws):
+        # A bad root field plus backend settings/secret problems: all surface in one error
+        # so the user fixes everything at once.
+        bad = {
+            "backend": "aws",
+            "deployment": {"name": "shifter", "domain": "localhost"},  # invalid domain (root schema)
+            "settings": {"bogus": True},  # invalid backend setting + missing required 'region'
+            # no secrets: -> both required secrets are missing
+        }
+        with pytest.raises(InstallationConfigError) as exc:
+            load_root_config(write_config(bad))
+        paths = {issue.path for issue in exc.value.issues}
+        assert "deployment.domain" in paths  # root-schema problem
+        assert {"settings.bogus", "settings.region", "secrets.django_secret_key", "secrets.db_password"} <= paths
+
+    def test_good_secret_reference_for_backend_passes(self, write_config, strict_aws):
+        cfg = load_root_config(write_config(self._aws_config()))
+        assert cfg.secrets["django_secret_key"] == "projects/acme/secrets/django"
+
+    def test_loader_returns_the_backend_normalized_settings(self, write_config, monkeypatch):
+        # When a backend supplies a settings_model, load_root_config returns the model's
+        # normalized output (defaults filled in), so downstream consumers see one parsed
+        # shape rather than raw user input.
+        from pydantic import BaseModel, ConfigDict
+
+        from installation import registry as registry_mod
+
+        class _AwsSettingsWithDefault(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            region: str = "us-east-2"
+
+        strict = registry_mod.BACKEND_BUNDLES["aws"].model_copy(update={"settings_model": _AwsSettingsWithDefault})
+        monkeypatch.setitem(registry_mod.BACKEND_BUNDLES, "aws", strict)
+
+        cfg = load_root_config(write_config(self._aws_config(settings={})))
+        assert cfg.settings == {"region": "us-east-2"}
+
+    def test_provisional_backend_settings_are_returned_unchanged(self, write_config):
+        # With no settings_model the loader leaves the settings as the user wrote them
+        # (a shallow copy) — important for #1112 configs that pass arbitrary settings.
+        original = {"region": "us-central1", "project_id": "acme"}
+        cfg = load_root_config(
+            write_config(
+                {
+                    "backend": "gcp",
+                    "deployment": {"name": "shifter", "domain": "shifter.example.com"},
+                    "secrets": {"django_secret_key": "prompt"},
+                    "settings": original,
+                }
+            )
+        )
+        assert cfg.settings == original
+
+
 class TestValidateRootConfigFile:
-    def test_valid_file_returns_empty_list(self, write_config, minimal_config):
-        assert validate_root_config_file(write_config(minimal_config)) == []
+    def test_valid_file_returns_empty_list(self, write_config, aws_config):
+        assert validate_root_config_file(write_config(aws_config)) == []
+
+    def test_backend_settings_problem_surfaces_through_validate_without_raising(
+        self, write_config, aws_config, monkeypatch
+    ):
+        from pydantic import BaseModel, ConfigDict
+
+        from installation import registry as registry_mod
+
+        class _StrictAwsSettings(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            region: str
+
+        strict = registry_mod.BACKEND_BUNDLES["aws"].model_copy(update={"settings_model": _StrictAwsSettings})
+        monkeypatch.setitem(registry_mod.BACKEND_BUNDLES, "aws", strict)
+
+        # aws_config declares the required secrets, so the only problem is the missing
+        # ``region`` the strict settings model requires.
+        issues = validate_root_config_file(write_config(aws_config))
+        assert {issue.path for issue in issues} == {"settings.region"}
 
     def test_invalid_file_returns_issue_list_without_raising(self, write_config):
         issues = validate_root_config_file(write_config({"deployment": {"name": "x"}}))

@@ -15,14 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   privileges before `ENTRYPOINT`. `HOME` / `TF_PLUGIN_CACHE_DIR` /
   `PULUMI_HOME` are set explicitly and the matching cache directories
   under `/home/appuser` are pre-created so Terraform/Pulumi can write
-  under the non-root identity. `/app` is chowned to `appuser:appgroup`
-  so Terraform can write `.terraform/` and `terraform.tfvars.json`
-  inside module working directories. This reduces the blast radius of a
-  container compromise but does not eliminate the risk of host root via
-  a kernel-level container escape. Added `tests/test_dockerfile.py` as
-  a structural regression gate plus an opt-in (`RUN_DOCKER_TESTS=1`)
+  under the non-root identity. Application code under `/app` remains
+  root-owned image content; Terraform writes are staged under
+  `TERRAFORM_WORKSPACE_DIR` so a process compromise cannot mutate the
+  running application tree. This reduces the blast radius of a container
+  compromise but does not eliminate the risk of host root via a
+  kernel-level container escape. Added `tests/test_dockerfile.py` as a
+  structural regression gate plus an opt-in (`RUN_DOCKER_TESTS=1`)
   Docker smoke test that verifies the running container's UID, HOME,
-  and writable cache paths.
+  writable cache paths, and read-only `/app` contract.
 
 ## [3.31.0] - 2026-03-22
 

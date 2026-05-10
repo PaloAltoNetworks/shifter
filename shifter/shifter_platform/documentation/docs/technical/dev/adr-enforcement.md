@@ -43,6 +43,7 @@ Review controls:
 - `.github/CODEOWNERS` requires review on guardrail files and shared/public architecture seams.
 - `.github/pull_request_template.md` requires an ADR impact section on PRs.
 - `.github/copilot-instructions.md` now points GitHub Copilot toward the same ADR enforcement model.
+- `.github/workflows/_gcp-dev.yml` now pins `platform/k8s/gcp/overlays/gcp-dev/kustomization.yaml` image `newTag` values to `${SHORT_SHA}` before `kubectl apply -k`, preventing mutable `:latest` restarts from drifting to a different image than the commit being deployed.
 
 ## Current Checks
 
@@ -67,6 +68,8 @@ The first slice intentionally stays small:
 
 - `actionlint`
   Lints GitHub Actions workflows beyond plain YAML validation.
+  This includes the GCP deploy workflow's Terraform state-backend hardening
+  (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
 
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.99.3] - 2026-05-10
+## [3.100.5] - 2026-05-10
 
 ### Security
 
@@ -14,6 +14,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now sets `special = true` for `random_password.db_password`,
   `random_password.django_secret_key`, and `random_password.guacamole_db_password`
   to avoid alphanumeric-only generated secrets.
+## [3.100.4] - 2026-05-10
+
+### Changed
+
+- **GCP Cloud SQL availability is now configurable with regional HA as
+  the module default.** The GCP platform-core Terraform module exposes
+  `cloud_sql_availability_type`, defaults it to `REGIONAL`, validates
+  accepted Cloud SQL values, and keeps the `gcp-dev` environment on
+  `ZONAL` for lower-cost development deployments.
+
+## [3.100.3] - 2026-05-10
+
+### Security
+
+- **Hardened GCP Terraform state bucket bootstrap in CI.** The
+  `.github/workflows/_gcp-dev.yml` deploy path now sets a 30-day GCS retention
+  policy for the Terraform backend bucket, enforces public access prevention on
+  creation, and configures bucket IAM so the configured CI service account gets
+  the required backend roles while broad/public bucket bindings are removed.
+
+## [3.99.3] - 2026-05-10
+
+### Changed
+
+- **Quality workflows now use GitHub-hosted runner capacity instead of
+  queueing entirely on the custom EC2 runner pool.** Portable lint,
+  architecture, SAST, security, and test jobs in
+  `.github/workflows/_quality.yml` now run on `ubuntu-latest`; deploy,
+  image-build, Packer, and environment-mutating workflows remain on
+  `self-hosted`. Runner docs now record the GitHub Actions limitation
+  that `ubuntu-latest` and self-hosted runners cannot be combined into a
+  native priority/fallback pool, so Shifter balances capacity by routing
+  job classes to different runner pools.
 
 ## [3.99.2] - 2026-05-10
 

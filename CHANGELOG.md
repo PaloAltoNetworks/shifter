@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.101.2] - 2026-05-10
+
+### Security
+
+- **Expanded Terraform-generated credential character sets in GCP platform-core
+  module (MEDIUM-08).** `platform/terraform/gcp/modules/platform-core/main.tf`
+  now sets `special = true` for `random_password.db_password`,
+  `random_password.django_secret_key`, and `random_password.guacamole_db_password`
+  to avoid alphanumeric-only generated secrets.
+
 ## [3.101.1] - 2026-05-10
 
 ### Security
@@ -16,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "PROJECT_SINGLETON_POLICY_ENFORCE"`, preventing unrestricted image admission
   and requiring cluster image verification to follow the project's Binary
   Authorization policy.
+
 ## [3.101.0] - 2026-05-10
 
 ### Added

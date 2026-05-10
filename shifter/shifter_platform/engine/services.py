@@ -135,8 +135,39 @@ def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
     return "ubuntu"
 
 
-def _get_windows_rdp_fallback(role: str) -> str:
-    return "Sh1fterDC2026" if role == "dc" else "CortexSavesTheDay!"
+def _get_windows_rdp_fallback(role: str) -> str | None:
+    # The DC role's password is a real domain credential and must come from
+    # the runtime environment (DC_DOMAIN_PASSWORD, sourced from Secrets
+    # Manager via entrypoint.sh). No literal fallback — fail-closed when
+    # unset rather than leaking a credential through committed source.
+    if role == "dc":
+        return None
+    return "CortexSavesTheDay!"  # nosec B105 - non-DC Windows victim fallback (separate follow-up)
+
+
+def _resolve_dc_password(instance_provider: str) -> str | None:
+    """Return the DC Administrator password for a Windows DC instance.
+
+    DC_DOMAIN_PASSWORD is the env var contract shared with the engine
+    provisioner (`shifter/engine/provisioner/main.py` for AWS,
+    `shifter/engine/provisioner/gdc_vmruntime_assets.py` for GCP), so
+    the portal display side reads the same env var. The credential is
+    deployment-scoped: the portal's own CLOUD_PROVIDER env identifies
+    which provider's DC password lives in DC_DOMAIN_PASSWORD. Returning
+    that value for an instance from a different provider would leak the
+    portal-deployment provider's credential to the requesting provider's
+    user — refuse with None instead. A multi-provider portal would need
+    provider-specific secrets (separate workstream, see secrets.md).
+
+    An empty `instance_provider` (older payloads with no `cloud_provider`
+    field) is treated as `"aws"`, matching the default elsewhere in the
+    engine state handling.
+    """
+    instance_provider = instance_provider or "aws"
+    portal_provider = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+    if instance_provider != portal_provider:
+        return None
+    return os.environ.get("DC_DOMAIN_PASSWORD")
 
 
 def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -146,13 +177,17 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
     provider = _first_connection_value(instance.get("cloud_provider")).lower()
 
     if os_type == "windows":
+        # DC role: read DC_DOMAIN_PASSWORD only when the requested
+        # instance's provider matches the portal deployment's
+        # CLOUD_PROVIDER. Same env var as the engine provisioner so the
+        # DC password used for promote/domain-join matches what the
+        # portal hands Guacamole. Cross-provider DC requests return
+        # None and are turned into an explicit ValueError below
+        # (`get_rdp_connection_info`) rather than a silent
+        # passwordless RDP URL.
+        if role == "dc":
+            return ("Administrator", _resolve_dc_password(provider))
         if provider == "gcp":
-            if role == "dc":
-                return (
-                    "Administrator",
-                    os.environ.get("DC_DOMAIN_PASSWORD")
-                    or os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", _get_windows_rdp_fallback(role)),
-                )
             return (
                 "Administrator",
                 os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", _get_windows_rdp_fallback(role)),
@@ -754,6 +789,51 @@ def resume_range(request_id: UUID) -> bool:
         return False
 
 
+def _require_dc_rdp_password(instance: dict[str, Any], os_type: str, rdp_password: str | None) -> None:
+    """Fail loud when a Windows Domain Controller has no RDP password.
+
+    Minting a passwordless Guacamole RDP URL would produce an unusable
+    session and obscure the misconfiguration; the mission_control RDP view
+    maps ``ValueError`` -> HTTP 400 so the operator sees the specific reason
+    instead of a silent broken connection. ``DC_DOMAIN_PASSWORD`` is scoped
+    to the portal's own deployment provider, so a request for a DC on a
+    different provider is rejected rather than handed the wrong credential.
+    """
+    role = _first_connection_value(instance.get("role"), "instance").lower()
+    if not (os_type == "windows" and role == "dc" and not rdp_password):
+        return
+    provider_label = _first_connection_value(instance.get("cloud_provider")).lower() or "aws"
+    portal_provider = os.environ.get("CLOUD_PROVIDER", "aws").lower()
+    if provider_label != portal_provider:
+        raise ValueError(
+            f"DC password unavailable: instance provider {provider_label!r} "
+            f"does not match portal deployment provider {portal_provider!r}; "
+            f"DC_DOMAIN_PASSWORD is scoped to the portal's own provider"
+        )
+    raise ValueError("DC_DOMAIN_PASSWORD is not configured; seed the DC domain password secret and restart the portal")
+
+
+def _fetch_sftp_ssh_key(instance: dict[str, Any], os_type: str) -> str | None:
+    """SSH key used for SFTP file transfers to a Windows instance.
+
+    Windows uses key-based auth; Linux instances use password auth, so this
+    returns ``None`` for them. A lookup failure is logged and swallowed —
+    SFTP is best-effort and must not block the RDP session.
+    """
+    if os_type != "windows":
+        return None
+    ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
+    if not ssh_key_ref:
+        return None
+    from engine.secrets import get_ssh_key
+
+    try:
+        return get_ssh_key(ssh_key_ref)
+    except Exception as e:
+        logger.warning("Failed to get SSH key for SFTP: %s", e)
+        return None
+
+
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     """Get connection info for RDP access to a range instance.
 
@@ -766,7 +846,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     Raises:
         ValueError: If no active range, range not READY, instance not found,
-            or instance has no GUI (ubuntu)
+            instance has no GUI, or a Windows DC has no RDP password
         PermissionError: If user doesn't own the range
     """
     from engine.models import Range
@@ -778,44 +858,27 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
 
     logger.debug("get_rdp_connection_info: user=%s instance_uuid=%s", user.id, instance_uuid)
 
-    # Get user's active range
     range_obj = Range.get_active_for_user(user)
     if not range_obj:
         raise ValueError("No active range found")
-
-    # Verify range is ready
     if range_obj.status != Range.Status.READY:
         raise ValueError(f"Range is not ready (status: {range_obj.status})")
 
-    # Find instance by UUID
     instance = range_obj.get_instance_by_uuid(instance_uuid)
     if not instance:
         raise ValueError(f"Instance {instance_uuid} not found in range")
-    # Check if instance has GUI
+
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
     if os_type not in ("kali", "ubuntu", "windows"):
         raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
 
-    # Get IP
     host = _resolve_instance_host(instance)
     if not host:
         raise ValueError(f"Instance {instance_uuid} has no IP address")
 
     connection_name = _resolve_instance_connection_name(instance)
     rdp_username, rdp_password = _resolve_rdp_credentials(instance)
-
-    # Get SSH key for SFTP file transfers
-    # Windows uses key-based auth; Linux uses password auth for simplicity
-    from engine.secrets import get_ssh_key
-
-    ssh_key = None
-    if os_type == "windows":
-        ssh_key_ref = _resolve_instance_ssh_key_secret_ref(instance)
-        if ssh_key_ref:
-            try:
-                ssh_key = get_ssh_key(ssh_key_ref)
-            except Exception as e:
-                logger.warning("Failed to get SSH key for SFTP: %s", e)
+    _require_dc_rdp_password(instance, os_type, rdp_password)
 
     return {
         "private_ip": host,
@@ -824,7 +887,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         "connection_name": connection_name,
         "rdp_username": rdp_username,
         "rdp_password": rdp_password,
-        "ssh_key": ssh_key,
+        "ssh_key": _fetch_sftp_ssh_key(instance, os_type),
     }
 
 

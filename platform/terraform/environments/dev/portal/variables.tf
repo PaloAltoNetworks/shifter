@@ -368,12 +368,12 @@ variable "dc_domain_name" {
   default     = "internal.shifter"
 }
 
-variable "dc_domain_password" {
-  description = "Domain admin password for prebaked DC"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
+# The DC Administrator password is intentionally not a Terraform variable.
+# It lives in aws_secretsmanager_secret.dc_domain_password (created by
+# the engine-provisioner module) with the value managed out-of-band, and
+# is plumbed to the engine task via ECS `secrets = [...]` and to the
+# portal Django container via the portal/ssm + ec2 modules and
+# entrypoint.sh.
 
 # ------------------------------------------------------------------------------
 # Guacamole

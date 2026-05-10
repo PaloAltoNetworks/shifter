@@ -44,6 +44,27 @@ resource "aws_iam_role_policy" "ecs_execution_ecr" {
   })
 }
 
+# Allow the ECS execution role to fetch the DC domain password secret so
+# ECS can hydrate the DC_DOMAIN_PASSWORD container env var via the
+# `secrets = [...]` block in task_definition.tf.
+resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  name = "secrets-read"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "secretsmanager:GetSecretValue"
+      ]
+      Resource = [
+        data.aws_secretsmanager_secret.dc_domain_password.arn
+      ]
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role
 # ------------------------------------------------------------------------------

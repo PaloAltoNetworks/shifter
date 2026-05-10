@@ -124,14 +124,18 @@ jobs:
               --public-access-prevention
           fi
           gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
-          if ! CURRENT_RETENTION_SECONDS=$(gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --format='value(retentionPolicy.retentionPeriod)'); then
-            echo "::error::Failed to read Terraform state bucket retention policy for ${TF_STATE_BUCKET}"
+          RETENTION_DESCRIBE_ERR_FILE=$(mktemp)
+          if ! CURRENT_RETENTION_SECONDS=$(gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --format='value(retentionPolicy.retentionPeriod)' 2>"${RETENTION_DESCRIBE_ERR_FILE}"); then
+            echo "::error::Failed to read Terraform state bucket retention policy for ${TF_STATE_BUCKET}: $(cat "${RETENTION_DESCRIBE_ERR_FILE}")"
+            rm -f "${RETENTION_DESCRIBE_ERR_FILE}"
             exit 1
           fi
+          rm -f "${RETENTION_DESCRIBE_ERR_FILE}"
           # Keep stricter existing retention policies; only raise retention when needed.
           if [ -z "${CURRENT_RETENTION_SECONDS}" ] || [ "${CURRENT_RETENTION_SECONDS}" -lt "${TF_STATE_RETENTION_PERIOD_SECONDS}" ]; then
             gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --retention-period="${TF_STATE_RETENTION_PERIOD_SECONDS}s"
           fi
+          # Remove broad/public bucket bindings only when present so real IAM errors still fail the workflow.
           remove_bucket_binding_if_present() {
             local member="$1"
             local role="$2"

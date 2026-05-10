@@ -263,7 +263,8 @@
       "platform/charts/shifter/templates/guacamole-backendconfig.yaml",
       "platform/terraform/gcp/README.md",
       "platform/k8s/gcp/README.md",
-      "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/networking.md"
+      "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/networking.md",
+      "docs/architecture/gke-control-plane-access-preflight.md"
     ]
   },
   {

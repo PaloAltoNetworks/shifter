@@ -241,6 +241,31 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
       - name: Set short SHA
         run: echo "SHORT_SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_ENV"
+      - name: Pin overlay image tags to short SHA
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          short_sha = os.environ["SHORT_SHA"]
+          path = Path(os.environ["K8S_OVERLAY_DIR"]) / "kustomization.yaml"
+          content = path.read_text(encoding="utf-8")
+
+          updated, replacements = re.subn(
+            r"(?m)^(\s*newTag:\s*)latest\s*$",
+            lambda match: f"{match.group(1)}{short_sha}",
+            content,
+          )
+          if replacements == 0:
+            if re.search(r"(?m)^\s*newTag:\s*\S+\s*$", content):
+              print(f"No latest tags found in {path}; image tags are already pinned.")
+            else:
+              raise SystemExit(f"::error file={str(path)}::No image newTag entries found to pin")
+          else:
+            path.write_text(updated, encoding="utf-8")
+            print(f"Pinned {replacements} image tags in {path} to {short_sha}")
+          PY
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25

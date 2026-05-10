@@ -22,10 +22,7 @@ class TestSignAndEncryptPayload:
         "secret_key",
         [
             "0123456789abcdef0123456789abcdef",  # 128-bit
-            (
-                "0123456789abcdef0123456789abcdef"
-                "0123456789abcdef0123456789abcdef"
-            ),  # 256-bit
+            ("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),  # 256-bit
         ],
     )
     def test_accepts_valid_aes_key_lengths(self, secret_key):

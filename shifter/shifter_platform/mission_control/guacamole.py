@@ -79,9 +79,7 @@ def sign_and_encrypt_payload(payload: dict[str, Any], secret_key: str) -> str:
     # Convert secret key from hex string to bytes
     key_bytes = bytes.fromhex(secret_key)
     if len(key_bytes) not in {16, 24, 32}:
-        raise ValueError(
-            "Secret key must be 32, 48, or 64 hex characters (128, 192, or 256 bits)"
-        )
+        raise ValueError("Secret key must be 32, 48, or 64 hex characters (128, 192, or 256 bits)")
 
     # Convert payload to JSON bytes
     json_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")

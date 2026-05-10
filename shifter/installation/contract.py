@@ -39,8 +39,9 @@ _SECRET_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 # A bare executable name resolved on PATH (no path separators, no spaces): the argv[0] of
 # a command spec and the name of a ``RequiredTool`` — e.g. ``terraform``, ``uv``,
 # ``python3``. A consumer must be able to tell a structured argv from a shell fragment, so
-# the executable element is held to this grammar rather than free-form text.
-_EXECUTABLE_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
+# the executable element is held to this grammar rather than free-form text. ``\w`` is the
+# ASCII word-character class here (``re.ASCII``), then word characters plus ``.`` / ``-``.
+_EXECUTABLE_NAME_RE = re.compile(r"^\w[\w.-]*$", re.ASCII)
 # Characters that would let an argv element be (mis)interpreted as a shell fragment if
 # anyone ever ``str.join``'d the argv array and handed it to a shell. Registry command
 # specs are argv arrays executed *without* a shell; rejecting these (and any internal
@@ -191,13 +192,14 @@ def _safe_pydantic_message(err: dict[str, Any]) -> str:
 def _config_issues_from_validation_error(exc: ValidationError, *, prefix: str) -> list[ConfigIssue]:
     """Convert a Pydantic ``ValidationError`` to sanitized, path-anchored issues.
 
-    Locations are prefixed (e.g. ``settings.region``). Messages are taken from Pydantic's
-    own type-derived text, falling back to a generic message for custom validator errors;
-    the rejected input value is never included.
+    Each issue carries only the prefixed location (e.g. ``settings.region``) and a message
+    drawn from Pydantic's own type-derived text — falling back to a generic message for
+    custom validator errors. The error's ``input`` value (which may be sensitive) is in
+    the raw ``errors()`` records but is never read, so it cannot reach a :class:`ConfigIssue`.
     """
     return [
         ConfigIssue(prefix + "".join(f".{part}" for part in err["loc"]), _safe_pydantic_message(err))
-        for err in exc.errors(include_url=False, include_input=False)
+        for err in exc.errors()
     ]
 
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.100.4] - 2026-05-10
+
+### Changed
+
+- **GCP Cloud SQL availability is now configurable with regional HA as
+  the module default.** The GCP platform-core Terraform module exposes
+  `cloud_sql_availability_type`, defaults it to `REGIONAL`, validates
+  accepted Cloud SQL values, and keeps the `gcp-dev` environment on
+  `ZONAL` for lower-cost development deployments.
+
 ## [3.100.3] - 2026-05-10
 
 ### Security

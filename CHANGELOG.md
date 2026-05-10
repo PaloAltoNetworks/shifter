@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.99.3] - 2026-05-10
+## [3.100.3] - 2026-05-10
 
 ### Security
 
@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy for the Terraform backend bucket, enforces public access prevention on
   creation, and configures bucket IAM so the configured CI service account gets
   the required backend roles while broad/public bucket bindings are removed.
+
+## [3.99.3] - 2026-05-10
+
+### Changed
+
+- **Quality workflows now use GitHub-hosted runner capacity instead of
+  queueing entirely on the custom EC2 runner pool.** Portable lint,
+  architecture, SAST, security, and test jobs in
+  `.github/workflows/_quality.yml` now run on `ubuntu-latest`; deploy,
+  image-build, Packer, and environment-mutating workflows remain on
+  `self-hosted`. Runner docs now record the GitHub Actions limitation
+  that `ubuntu-latest` and self-hosted runners cannot be combined into a
+  native priority/fallback pool, so Shifter balances capacity by routing
+  job classes to different runner pools.
 
 ## [3.99.2] - 2026-05-10
 

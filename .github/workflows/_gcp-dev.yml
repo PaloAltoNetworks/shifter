@@ -205,12 +205,15 @@ jobs:
           path = Path(os.environ["K8S_OVERLAY_DIR"]) / "kustomization.yaml"
           content = path.read_text(encoding="utf-8")
 
-          def repl(match: re.Match[str]) -> str:
+          def pin_to_sha(match: re.Match[str]) -> str:
             return f"{match.group(1)}{short_sha}"
 
-          updated, replacements = re.subn(r"(?m)^(\s*newTag:\s*)latest\s*$", repl, content)
+          updated, replacements = re.subn(r"(?m)^(\s*newTag:\s*)latest\s*$", pin_to_sha, content)
           if replacements == 0:
-            raise SystemExit(f"::error file={path}::No newTag: latest entries found to pin")
+            raise SystemExit(
+              f"::error file={path}::No newTag: latest entries found to pin. "
+              "Verify that the overlay kustomization still defines images with newTag: latest."
+            )
 
           path.write_text(updated, encoding="utf-8")
           print(f"Pinned {replacements} image tags in {path} to {short_sha}")

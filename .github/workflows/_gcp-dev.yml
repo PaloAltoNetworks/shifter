@@ -213,11 +213,11 @@ jobs:
           if replacements == 0:
             if re.search(r"(?m)^\s*newTag:\s*\S+\s*$", content):
               print(f"No latest tags found in {path}; image tags are already pinned.")
-              raise SystemExit(0)
-            raise SystemExit(f"::error file={path}::No image newTag entries found to pin")
-
-          path.write_text(updated, encoding="utf-8")
-          print(f"Pinned {replacements} image tags in {path} to {short_sha}")
+            else:
+              raise SystemExit(f"::error file={str(path)}::No image newTag entries found to pin")
+          else:
+            path.write_text(updated, encoding="utf-8")
+            print(f"Pinned {replacements} image tags in {path} to {short_sha}")
           PY
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image

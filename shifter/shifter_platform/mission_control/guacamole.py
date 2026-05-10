@@ -71,15 +71,17 @@ def sign_and_encrypt_payload(payload: dict[str, Any], secret_key: str) -> str:
 
     Args:
         payload: The JSON auth payload dictionary
-        secret_key: 32-character hex string (128-bit key)
+        secret_key: Hex string key (64 characters / 256-bit preferred)
 
     Returns:
         Base64-encoded encrypted payload for use as 'data' parameter
     """
     # Convert secret key from hex string to bytes
     key_bytes = bytes.fromhex(secret_key)
-    if len(key_bytes) != 16:
-        raise ValueError("Secret key must be 32 hex characters (128 bits)")
+    if len(key_bytes) not in {16, 24, 32}:
+        raise ValueError(
+            "Secret key must be 32, 48, or 64 hex characters (128, 192, or 256 bits)"
+        )
 
     # Convert payload to JSON bytes
     json_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -234,7 +236,7 @@ def create_guacamole_rdp_url(
 
     Args:
         base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
-        secret_key: 32-character hex string (128-bit key)
+        secret_key: Hex string key (64 characters / 256-bit preferred)
         username: User's email/username for Guacamole session
         connection_name: Identifier for this connection
         hostname: Target host IP for RDP
@@ -340,7 +342,7 @@ def create_guacamole_ssh_url(
 
     Args:
         base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
-        secret_key: 32-character hex string (128-bit key)
+        secret_key: Hex string key (64 characters / 256-bit preferred)
         username: User's email/username for Guacamole session
         connection_name: Identifier for this connection
         hostname: Target host IP for SSH

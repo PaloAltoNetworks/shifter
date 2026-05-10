@@ -124,11 +124,31 @@ jobs:
               --public-access-prevention
           fi
           gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
-          CURRENT_RETENTION_SECONDS=$(gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --format='value(retentionPolicy.retentionPeriod)')
+          if ! CURRENT_RETENTION_SECONDS=$(gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --format='value(retentionPolicy.retentionPeriod)'); then
+            echo "::error::Failed to read Terraform state bucket retention policy for ${TF_STATE_BUCKET}"
+            exit 1
+          fi
           # Keep stricter existing retention policies; only raise retention when needed.
           if [ -z "${CURRENT_RETENTION_SECONDS}" ] || [ "${CURRENT_RETENTION_SECONDS}" -lt "${TF_STATE_RETENTION_PERIOD_SECONDS}" ]; then
             gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --retention-period="${TF_STATE_RETENTION_PERIOD_SECONDS}s"
           fi
+          remove_bucket_binding_if_present() {
+            local member="$1"
+            local role="$2"
+            local has_binding
+            has_binding=$(gcloud storage buckets get-iam-policy "gs://${TF_STATE_BUCKET}" \
+              --project="${PROJECT_ID}" \
+              --flatten="bindings[].members" \
+              --filter="bindings.role=${role} AND bindings.members=${member}" \
+              --format='value(bindings.members)')
+            if [ -n "${has_binding}" ]; then
+              gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+                --project="${PROJECT_ID}" \
+                --member="${member}" \
+                --role="${role}" >/dev/null
+              echo "Removed ${member} from ${role} on ${TF_STATE_BUCKET}"
+            fi
+          }
           gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
             --project="${PROJECT_ID}" \
             --member="serviceAccount:${GCP_SERVICE_ACCOUNT}" \
@@ -137,26 +157,11 @@ jobs:
             --project="${PROJECT_ID}" \
             --member="serviceAccount:${GCP_SERVICE_ACCOUNT}" \
             --role="roles/storage.objectAdmin" >/dev/null
-          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="allUsers" \
-            --role="roles/storage.objectViewer" >/dev/null 2>&1 || true
-          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="allAuthenticatedUsers" \
-            --role="roles/storage.objectViewer" >/dev/null 2>&1 || true
-          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="projectOwner:${PROJECT_ID}" \
-            --role="roles/storage.legacyBucketOwner" >/dev/null 2>&1 || true
-          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="projectEditor:${PROJECT_ID}" \
-            --role="roles/storage.legacyBucketOwner" >/dev/null 2>&1 || true
-          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="projectViewer:${PROJECT_ID}" \
-            --role="roles/storage.legacyBucketReader" >/dev/null 2>&1 || true
+          remove_bucket_binding_if_present "allUsers" "roles/storage.objectViewer"
+          remove_bucket_binding_if_present "allAuthenticatedUsers" "roles/storage.objectViewer"
+          remove_bucket_binding_if_present "projectOwner:${PROJECT_ID}" "roles/storage.legacyBucketOwner"
+          remove_bucket_binding_if_present "projectEditor:${PROJECT_ID}" "roles/storage.legacyBucketOwner"
+          remove_bucket_binding_if_present "projectViewer:${PROJECT_ID}" "roles/storage.legacyBucketReader"
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
         run: |

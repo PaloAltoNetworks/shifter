@@ -158,6 +158,16 @@ services:
       name: guacamole-client
       securityPolicyName: ""
 
+networkPolicy:
+  enabled: true
+  gclbSourceRanges:
+    - 35.191.0.0/16 # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+    - 130.211.0.0/22 # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+  googleApiCidrs:
+    - 199.36.153.4/30 # NOSONAR - restricted.googleapis.com VIP range.
+    - 199.36.153.8/30 # NOSONAR - private.googleapis.com VIP range.
+  privateServiceCidrs: []
+
 ingress:
   enabled: true
   class: gce

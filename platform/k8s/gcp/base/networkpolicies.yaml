@@ -1,0 +1,203 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-platform
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-jobs
+  namespace: shifter-jobs
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-dns-egress
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-jobs-dns-egress
+  namespace: shifter-jobs
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-public-ingress-to-platform-backends
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - portal
+          - guacamole-client
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 35.191.0.0/16 # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+        - ipBlock:
+            cidr: 130.211.0.0/22 # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-guacamole-client-to-guacd
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: guacd
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: guacamole-client
+      ports:
+        - protocol: TCP
+          port: 4822
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-guacamole-client-egress-to-guacd
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: guacamole-client
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: guacd
+      ports:
+        - protocol: TCP
+          port: 4822
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-google-apis-egress
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 199.36.153.4/30 # NOSONAR - restricted.googleapis.com VIP range.
+        - ipBlock:
+            cidr: 199.36.153.8/30 # NOSONAR - private.googleapis.com VIP range.
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-jobs-google-apis-egress
+  namespace: shifter-jobs
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 199.36.153.4/30 # NOSONAR - restricted.googleapis.com VIP range.
+        - ipBlock:
+            cidr: 199.36.153.8/30 # NOSONAR - private.googleapis.com VIP range.
+      ports:
+        - protocol: TCP
+          port: 443

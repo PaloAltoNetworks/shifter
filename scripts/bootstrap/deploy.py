@@ -20,6 +20,7 @@ Usage:
 import argparse
 import getpass
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -1726,6 +1727,36 @@ def _merge_csv_env_values(*groups: list[str]) -> str:
     return ",".join(ordered)
 
 
+def _unique_nonempty_strings(values: list[str | None]) -> list[str]:
+    """Return non-empty strings in first-seen order."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        value = (raw_value or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _host_as_single_address_cidr(value: object) -> str | None:
+    """Convert a Terraform host/IP output into a /32 or /128 CIDR."""
+    if value is None:
+        return None
+    host = str(value).strip()
+    if not host:
+        return None
+    if "/" in host:
+        return host
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise ValueError(f"Expected IP address Terraform output, got {host!r}") from exc
+    prefix = 32 if address.version == 4 else 128
+    return f"{address}/{prefix}"
+
+
 def render_gcp_platform_runtime_env(
     config: GDCBootstrapConfig,
     *,
@@ -1995,6 +2026,17 @@ def render_gcp_helm_values(
         **parse_env_contract(runtime_renderer.render_env(outputs, secure_portal_mode=True)),
     }
     edge_policy_name = str(_get_output_value(outputs, "cloud_armor_security_policy_name")).strip()
+    control_plane_database = _get_output_value(outputs, "control_plane_database")
+    control_plane_cache = _get_output_value(outputs, "control_plane_cache")
+    guacamole_database = _get_output_value(outputs, "guacamole_database")
+    private_service_cidrs = _unique_nonempty_strings(
+        [
+            _host_as_single_address_cidr(control_plane_database.get("private_ip")),
+            _host_as_single_address_cidr(control_plane_cache.get("host")),
+            _host_as_single_address_cidr(guacamole_database.get("host")),
+            str(_get_output_value(outputs, "gke_services_cidr")).strip(),
+        ]
+    )
 
     return {
         "releaseNamespace": "shifter-system",
@@ -2068,6 +2110,18 @@ def render_gcp_helm_values(
                     "securityPolicyName": edge_policy_name,
                 }
             },
+        },
+        "networkPolicy": {
+            "enabled": True,
+            "gclbSourceRanges": [
+                "35.191.0.0/16",  # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+                "130.211.0.0/22",  # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+            ],
+            "googleApiCidrs": [
+                "199.36.153.4/30",  # NOSONAR - restricted.googleapis.com VIP range.
+                "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP range.
+            ],
+            "privateServiceCidrs": private_service_cidrs,
         },
     }
 

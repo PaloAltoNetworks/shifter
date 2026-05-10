@@ -179,6 +179,18 @@ The first slice intentionally stays small:
   stays under SonarCloud's cognitive-complexity threshold and tests
   can target each clause independently.
 
+- `k8s-network-policy-coverage`
+  Enforces ADR-006-R3 against the base manifest snapshots under
+  `platform/k8s/gcp/base/` and the rendered Helm chart output for
+  each supported values file. Every Shifter namespace discovered in
+  those manifests must have a default-deny `NetworkPolicy` with an
+  empty pod selector and both `Ingress` and `Egress` policy types.
+  The check also rejects broad egress `ipBlock` CIDRs (`0.0.0.0/0`
+  and `::/0`) in Shifter NetworkPolicies, forcing policies to use
+  explicit GCLB, Google API, private service, and in-cluster service
+  ranges. Runs in the `ci` level and shares the Helm-rendered
+  validation boundary with `k8s-deployment-security-context`.
+
 - `no-plaintext-secrets-in-tfvars`
   Architecture check that scans `*.tfvars` files committed under
   `platform/terraform/environments/` and flags any line that assigns a

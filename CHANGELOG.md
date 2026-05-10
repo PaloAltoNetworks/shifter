@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.101.5] - 2026-05-10
+
+### Security
+
+- **Cloud SQL SSL enforcement enabled (MEDIUM-03).** Added
+  `ssl_mode = "ENCRYPTED_ONLY"` to the `ip_configuration` block of
+  `google_sql_database_instance.platform` in
+  `platform/terraform/gcp/modules/platform-core/main.tf`. Database connections
+  over the private network that do not negotiate TLS are now rejected by Cloud
+  SQL, preventing cleartext capture via compromised pods or VPC flow logs. The
+  google provider (>= 6.0) removed the legacy `require_ssl` argument in favor
+  of `ssl_mode`; `ENCRYPTED_ONLY` is the server-TLS-required mode that pairs
+  with client `sslmode=verify-ca` against the Cloud SQL server CA (no mTLS).
+
 ## [3.101.4] - 2026-05-10
 
 ### Security

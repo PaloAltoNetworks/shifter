@@ -293,16 +293,16 @@
     "title": "AWS and GCP keep provider-specific identity stacks behind a shared auth seam",
     "status": "accepted",
     "scope": "repository",
-    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with FirebaseUI/browser-side Google auth flows, domain allowlisting, required email verification, required TOTP MFA before app-session creation, and bootstrap-owned first-operator seeding. The Django app selects the provider through configuration without changing shared business workflows.",
+    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with FirebaseUI/browser-side Google auth flows, domain allowlisting, required email verification, required TOTP MFA before app-session creation, and bootstrap-owned first-operator seeding. The selected backend bundle chooses the provider-specific identity implementation through validated configuration without changing shared business workflows.",
     "rules": [
       {
         "id": "ADR-009-R1",
-        "description": "AWS deployments continue to use the existing OIDC redirect flow and must not depend on GCP identity configuration.",
+        "description": "AWS backend deployments continue to use the existing OIDC redirect flow and must not depend on GCP identity configuration.",
         "checks": []
       },
       {
         "id": "ADR-009-R2",
-        "description": "GCP bootstrap must provision Identity Platform and seed the first corporate operator instead of relying on a manually managed OIDC runtime secret.",
+        "description": "GCP backend bootstrap must provision Identity Platform and seed the first corporate operator instead of relying on a manually managed OIDC runtime secret.",
         "checks": []
       },
       {
@@ -330,6 +330,7 @@
       "platform/terraform/gcp/modules/platform-core/main.tf",
       "platform/terraform/gcp/modules/platform-core/outputs.tf",
       ".github/workflows/_gcp-dev.yml",
+      "docs/architecture/root-configured-backend-bundles.md",
       "shifter/shifter_platform/documentation/docs/technical/architecture.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/secrets.md"
     ]

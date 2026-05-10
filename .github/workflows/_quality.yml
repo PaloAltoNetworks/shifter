@@ -228,6 +228,27 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  installation-lint:
+    permissions:
+      contents: read
+    name: Lint (installation)
+    # GitHub-hosted ephemeral runner: this job runs PR-controlled Python from a
+    # standalone package with no special infra needs, so keep it off the persistent
+    # self-hosted pool.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: shifter/installation
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   k8s-lint:
     permissions:
       contents: read
@@ -446,6 +467,24 @@ jobs:
           uv tool install 'bandit[toml]'
           bandit -r . -c pyproject.toml
 
+  installation-sast:
+    permissions:
+      contents: read
+    name: SAST (installation)
+    # GitHub-hosted ephemeral runner (see installation-lint).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Run Bandit
+        run: |
+          uv tool install bandit
+          bandit -r shifter/installation/ --skip B101 --exclude shifter/installation/tests,shifter/installation/.venv
+
   # ===========================================================================
   # Python Tests
   # ===========================================================================
@@ -601,6 +640,28 @@ jobs:
 
       - name: Run tests
         working-directory: scripts/check_rds_pending_modifications
+        run: uv run pytest tests/
+
+  installation-tests:
+    permissions:
+      contents: read
+    name: Tests (installation)
+    if: ${{ !inputs.skip_tests }}
+    needs: [installation-lint]
+    # GitHub-hosted ephemeral runner (see installation-lint).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/installation
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: shifter/installation
         run: uv run pytest tests/
 
   adr-guard-tests:

@@ -105,11 +105,13 @@ jobs:
           PROJECT_ID=$(awk -F'"' '/^project_id/ {print $2}' "$TFVARS_FILE")
           REGION=$(awk -F'"' '/^region/ {print $2}' "$TFVARS_FILE")
           TF_STATE_BUCKET="${PROJECT_ID}-terraform-state"
-          TF_STATE_RETENTION_PERIOD_SECONDS=2592000
+          TF_STATE_RETENTION_DAYS=30
+          TF_STATE_RETENTION_PERIOD_SECONDS=$((TF_STATE_RETENTION_DAYS * 24 * 60 * 60))
           {
             echo "PROJECT_ID=${PROJECT_ID}"
             echo "REGION=${REGION}"
             echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}"
+            echo "TF_STATE_RETENTION_DAYS=${TF_STATE_RETENTION_DAYS}"
             echo "TF_STATE_RETENTION_PERIOD_SECONDS=${TF_STATE_RETENTION_PERIOD_SECONDS}"
           } >> "$GITHUB_ENV"
       - name: Bootstrap Terraform state bucket
@@ -123,6 +125,7 @@ jobs:
           fi
           gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
           CURRENT_RETENTION_SECONDS=$(gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --format='value(retentionPolicy.retentionPeriod)')
+          # Keep stricter existing retention policies; only raise retention when needed.
           if [ -z "${CURRENT_RETENTION_SECONDS}" ] || [ "${CURRENT_RETENTION_SECONDS}" -lt "${TF_STATE_RETENTION_PERIOD_SECONDS}" ]; then
             gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --retention-period="${TF_STATE_RETENTION_PERIOD_SECONDS}s"
           fi

@@ -75,6 +75,7 @@ locals {
 
   required_services = toset([
     "artifactregistry.googleapis.com",
+    "binaryauthorization.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "identitytoolkit.googleapis.com",
@@ -678,6 +679,10 @@ resource "google_container_cluster" "platform" {
 
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  binary_authorization {
+    evaluation_mode = "PROJECT_SINGLETON_POLICY_ENFORCE"
   }
 
   logging_config {

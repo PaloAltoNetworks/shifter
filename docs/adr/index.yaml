@@ -118,7 +118,7 @@
     "title": "Cloud expansion must preserve provider seams and AWS continuity",
     "status": "accepted",
     "scope": "repository",
-    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths. Deploy-branch behavior may be provider-specific when the integration branch still carries the full validation burden.",
+    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths. The original deploy-branch routing rules are superseded by ADR-011; provider selection for new OSS architecture work is driven by root configuration and backend bundles.",
     "rules": [
       {
         "id": "ADR-005-R1",
@@ -127,12 +127,12 @@
       },
       {
         "id": "ADR-005-R2",
-        "description": "Deployment branch routing must keep deploy branches provider-specific (`aws-dev`, `gcp-dev`) while reserving `dev` for validation-only integration and preserving AWS prod behavior on `main`.",
+        "description": "Superseded by ADR-011: branch names are no longer the architectural source of deployment target selection for OSS Shifter.",
         "checks": []
       },
       {
         "id": "ADR-005-R3",
-        "description": "Non-production deploy branches may use provider-local fast paths only when the shared integration branch still runs the broad validation matrix before promotion.",
+        "description": "Superseded by ADR-011: backend validation should move to explicit backend-bundle checks rather than provider-local deploy-branch fast paths.",
         "checks": []
       }
     ],
@@ -146,6 +146,7 @@
       ".github/workflows/deploy.yml",
       ".github/workflows/_gcp-dev.yml",
       "platform/terraform/gcp/modules/platform-core/main.tf",
+      "docs/architecture/root-configured-backend-bundles.md",
       "platform/terraform/gcp/README.md",
       "platform/k8s/gcp/README.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
@@ -331,6 +332,57 @@
       ".github/workflows/_gcp-dev.yml",
       "shifter/shifter_platform/documentation/docs/technical/architecture.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/secrets.md"
+    ]
+  },
+  {
+    "id": "ADR-011",
+    "title": "OSS deployments use root-configured backend bundles",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "OSS Shifter deployment intent is selected by a root installation configuration and a backend bundle. A backend bundle is the public OSS unit of backend selection and owns its runtime settings, infrastructure entrypoints, validation checks, required secrets, health checks, and setup documentation. Branch names must not be the architectural source of deployment target selection.",
+    "rules": [
+      {
+        "id": "ADR-011-R1",
+        "description": "One root installation config is the authoritative source for backend selection and deployment-level settings.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R2",
+        "description": "Backend bundles are the default OSS selection unit; low-level provider capability composition remains an internal implementation detail unless a later ADR introduces an advanced public mode.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R3",
+        "description": "Branch names must not determine deployment targets. CI may validate backend bundles, but deployment behavior is selected by explicit config or invocation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R4",
+        "description": "Runtime provider and capability adapter selection must be derived from validated backend configuration while preserving shared service boundaries and adapter protocols.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R5",
+        "description": "AWS and GCP backend migrations must preserve existing security controls, identity boundaries, network isolation, and architecture guardrails unless a later ADR records an intentional change.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R6",
+        "description": "This repository models one standalone OSS Shifter deployment; cross-install orchestration concepts are outside the OSS app model.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/root-configured-backend-bundles.md",
+      "docs/adr/index.yaml",
+      "shifter/shifter_platform/shared/cloud/__init__.py",
+      "shifter/engine/provisioner/cloud/__init__.py",
+      ".github/workflows/deploy.yml",
+      ".github/workflows/_gcp-dev.yml",
+      "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md",
+      "shifter/shifter_platform/documentation/docs/technical/architecture.md"
     ]
   }
 ]

@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
     name: Architecture (adr conformance)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 --version
-          # The self-hosted runner's system Python ships without pip by default
-          # (Amazon Linux). Bootstrap pip via stdlib ensurepip into the user
-          # site, then install PyYAML into a job-scoped target dir. No system
-          # paths are written.
-          python3 -m ensurepip --upgrade --user
+          python3 -m pip --version
+          # Install PyYAML into a job-scoped target dir. No system paths are
+          # written.
           python3 -m pip install --quiet --no-deps \
             --target "${RUNNER_TEMP}/py-deps" \
             "pyyaml==${PYYAML_VERSION}"
@@ -67,7 +65,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (GitHub Actions)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
@@ -76,7 +74,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (terraform)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -94,7 +92,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (shifter_platform)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -115,7 +113,7 @@ jobs:
     permissions:
       contents: read
     name: Lint JavaScript/CSS (shifter_platform)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -142,7 +140,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (provisioner)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -160,7 +158,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (packer)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -178,7 +176,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (bootstrap)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -196,7 +194,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (check_layer_imports)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -214,7 +212,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (check_rds_pending_modifications)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -253,7 +251,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (k8s manifests)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -270,7 +268,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (k8s schemas)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -294,7 +292,7 @@ jobs:
       contents: read
     name: Type Check (shifter_platform)
     if: ${{ !inputs.skip_tests }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
       - uses: actions/checkout@v4
@@ -317,7 +315,7 @@ jobs:
       contents: read
     name: Type Check (provisioner)
     if: ${{ !inputs.skip_tests }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
       - uses: actions/checkout@v4
@@ -343,7 +341,7 @@ jobs:
     permissions:
       contents: read
     name: Architecture (layer imports)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -362,7 +360,7 @@ jobs:
     permissions:
       contents: read
     name: Architecture (import linter)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -385,7 +383,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (shifter_platform)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -401,7 +399,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (provisioner)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -419,7 +417,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (packer)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -436,7 +434,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (bootstrap)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -453,7 +451,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (check_layer_imports)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -495,7 +493,7 @@ jobs:
     name: Tests (shifter_platform)
     if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16
@@ -541,7 +539,7 @@ jobs:
     name: Tests (provisioner)
     if: ${{ !inputs.skip_tests }}
     needs: [provisioner-lint, provisioner-sast]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -564,7 +562,7 @@ jobs:
     name: Tests (packer)
     if: ${{ !inputs.skip_tests }}
     needs: [packer-lint]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -585,7 +583,7 @@ jobs:
     name: Tests (bootstrap)
     if: ${{ !inputs.skip_tests }}
     needs: [bootstrap-lint]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -606,7 +604,7 @@ jobs:
     name: Tests (check_layer_imports)
     if: ${{ !inputs.skip_tests }}
     needs: [check-layer-imports-lint]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -627,7 +625,7 @@ jobs:
     name: Tests (check_rds_pending_modifications)
     if: ${{ !inputs.skip_tests }}
     needs: [check-rds-pending-modifications-lint]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -670,7 +668,7 @@ jobs:
     name: Tests (adr_guard)
     if: ${{ !inputs.skip_tests }}
     needs: [adr-conformance]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -680,7 +678,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 --version
-          python3 -m ensurepip --upgrade --user
+          python3 -m pip --version
           python3 -m pip install --quiet --no-deps \
             --target "${RUNNER_TEMP}/py-deps" \
             "pyyaml==${PYYAML_VERSION}"
@@ -700,7 +698,7 @@ jobs:
     name: Tests JavaScript (shifter_platform)
     if: ${{ !inputs.skip_tests }}
     needs: [shifter-platform-lint-js]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -727,7 +725,7 @@ jobs:
     permissions:
       contents: read
     name: Lint JavaScript (mcp/${{ matrix.package }})
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -756,7 +754,7 @@ jobs:
     name: Tests JavaScript (mcp/${{ matrix.package }})
     if: ${{ !inputs.skip_tests }}
     needs: [mcp-lint]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -787,7 +785,7 @@ jobs:
     permissions:
       contents: read
     name: Security (IaC)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -813,7 +811,7 @@ jobs:
     permissions:
       contents: read
     name: Security (k8s)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     continue-on-error: true  # Soft-fail until manifest remediation complete
     steps:
       - uses: actions/checkout@v4
@@ -839,7 +837,7 @@ jobs:
     permissions:
       contents: read
     name: Security (gitleaks)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -869,7 +867,7 @@ jobs:
     permissions:
       contents: read
     name: Architecture (model FKs)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16

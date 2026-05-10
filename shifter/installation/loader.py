@@ -5,10 +5,12 @@
 :class:`~installation.schema.RootConfig` or raises
 :class:`~installation.errors.InstallationConfigError` with *all* problems aggregated, so
 a malformed root config (unknown/missing/conflicting key, bad backend, bad
-deployment identity, duplicate YAML key, raw key material in ``secrets``) is rejected
-before Terraform, Helm, Django startup, workers, or deployment scripts run. This is
-root-config *shape* validation; the contents of ``settings`` and the per-backend
-required-settings set are validated by the selected backend bundle's contract (#1113).
+deployment identity, duplicate YAML key, raw key material in ``secrets``, a
+backend-specific ``settings`` problem, or a secret reference the selected backend
+recognizes as malformed) is rejected before Terraform, Helm, Django startup, workers, or
+deployment scripts run. It first validates the root *shape* (:mod:`installation.schema`),
+then runs the selected backend bundle's ``settings`` and secret-reference checks
+(:mod:`installation.registry` / :mod:`installation.contract`).
 :func:`validate_root_config_file` is the non-raising variant for "check, then report"
 callers.
 """
@@ -21,6 +23,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from . import registry
 from .errors import ConfigIssue, InstallationConfigError
 from .schema import RootConfig
 
@@ -150,19 +153,63 @@ def _issues_from_validation_error(exc: ValidationError) -> list[ConfigIssue]:
     return issues
 
 
+def _backend_issues_from_raw(data: dict[str, Any]) -> list[ConfigIssue]:
+    """Best-effort backend checks against the raw parsed mapping, used when the root
+    schema already failed: if the ``backend`` is recognized and ``settings`` / ``secrets``
+    are mappings, surface the selected bundle's problems so the user sees everything at
+    once. Returns ``[]`` when the backend cannot be determined."""
+    backend = data.get("backend")
+    if not isinstance(backend, str):
+        return []
+    bundle = registry.get_backend_bundle(backend)
+    if bundle is None:
+        return []
+    issues: list[ConfigIssue] = []
+    settings = data.get("settings", {})
+    if isinstance(settings, dict):
+        issues.extend(bundle.settings_issues(settings))
+    secrets = data.get("secrets", {})
+    if isinstance(secrets, dict):
+        issues.extend(bundle.secret_reference_issues(secrets))
+    return issues
+
+
 def load_root_config(path: str | Path) -> RootConfig:
     """Parse and validate a root installation config file.
 
     Raises:
-        InstallationConfigError: if the file is missing, unparseable, or fails schema
-            validation. All problems are aggregated on the exception's ``issues``.
+        InstallationConfigError: if the file is missing, unparseable, fails the root
+            schema, or fails the selected backend bundle's ``settings`` / secret-reference
+            checks. All problems — root-shape and backend-specific — are aggregated on the
+            exception's ``issues``.
     """
     config_path = Path(path)
     data = _read_yaml_mapping(config_path)
     try:
-        return RootConfig.model_validate(data)
+        config = RootConfig.model_validate(data)
     except ValidationError as exc:
-        raise InstallationConfigError(_issues_from_validation_error(exc)) from exc
+        issues = _issues_from_validation_error(exc)
+        issues.extend(_backend_issues_from_raw(data))
+        raise InstallationConfigError(issues) from exc
+
+    # The root schema validated the *shape*; the selected backend bundle owns the
+    # contents of ``settings`` and the per-provider secret reference grammar.
+    bundle = registry.get_backend_bundle(config.backend)
+    if bundle is None:  # pragma: no cover - an unknown backend already failed the root schema
+        return config
+    try:
+        normalized_settings = bundle.validate_settings(config.settings)
+    except InstallationConfigError as exc:
+        # Aggregate the settings *and* secret-reference problems before raising.
+        raise InstallationConfigError([*exc.issues, *bundle.secret_reference_issues(config.secrets)]) from exc
+    secret_issues = bundle.secret_reference_issues(config.secrets)
+    if secret_issues:
+        raise InstallationConfigError(secret_issues)
+    # Store the bundle's normalized settings (defaults, coercions) so callers of
+    # ``load_root_config`` see the same parsed shape the backend uses; for a bundle with
+    # no ``settings_model`` this is a shallow copy of the user's mapping.
+    config.settings = normalized_settings
+    return config
 
 
 def validate_root_config_file(path: str | Path) -> list[ConfigIssue]:

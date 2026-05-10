@@ -186,10 +186,10 @@ class TestProfile:
     def test_profile_not_allowed_for_backend_rejected(self, monkeypatch, minimal_config):
         # Cross-field: an otherwise-valid profile that the selected backend does not
         # allow must fail (the "unsupported profile/backend combination" case).
-        from installation import backends as backends_mod
+        from installation import registry as registry_mod
 
         monkeypatch.setattr(
-            backends_mod, "ALLOWED_PROFILES", {"aws": frozenset({"prod"}), "gcp": frozenset({"prod", "dev"})}
+            registry_mod, "ALLOWED_PROFILES", {"aws": frozenset({"prod"}), "gcp": frozenset({"prod", "dev"})}
         )
         bad = {**_with_deployment(minimal_config, profile="dev"), "backend": "aws"}
         with pytest.raises(ValidationError) as exc:
@@ -302,3 +302,15 @@ class TestAggregatedErrors:
         assert ("backend",) in locs
         assert ("deployment", "name") in locs
         assert ("deployment", "domain") in locs
+
+
+class TestBackendSettingsAreOpaqueToTheRootSchema:
+    def test_root_schema_accepts_any_settings_mapping_regardless_of_backend(self, minimal_config):
+        # The root schema only validates that ``settings`` is a mapping; the *contents*
+        # are dispatched to the selected backend bundle by the loader, not by RootConfig.
+        cfg = RootConfig.model_validate(
+            {**minimal_config, "backend": "aws", "settings": {"anything": 1, "n": {"k": 2}}}
+        )
+        assert cfg.settings == {"anything": 1, "n": {"k": 2}}
+        cfg = RootConfig.model_validate({**minimal_config, "backend": "gcp", "settings": {"x": "y"}})
+        assert cfg.settings == {"x": "y"}

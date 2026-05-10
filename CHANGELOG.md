@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.99.0] - 2026-05-10
+
+### Added
+
+- **Root installation config schema (#1112, PLAT-2001 / GEN-2001 /
+  GEN-2002).** New `installation` package (`shifter/installation/`)
+  defining `shifter.yaml` — the single authoritative root file an OSS
+  deployment edits to choose and configure a backend bundle. It ships:
+  - Typed Pydantic v2 models (`installation.schema.RootConfig`,
+    `DeploymentConfig`) for the root keys `version`, `backend`,
+    `deployment` (`name`, `domain`, `profile`), `secrets`, and
+    `settings`. The schema validates the *shape* of the root config:
+    unknown top-level keys, unknown `deployment` keys, missing required
+    keys, an unknown backend, an unsupported profile/backend
+    combination, a malformed deployment name or domain, duplicate YAML
+    mapping keys at any level (which PyYAML would otherwise silently
+    collapse), and `secrets` values that are clearly raw key material
+    (multi-line, PEM-headered, or implausibly long — capped at 1024
+    characters, well above the longest realistic provider reference) are
+    all rejected — and every problem is reported together — *before*
+    Terraform, Helm, Django startup, workers, or deployment scripts run.
+    `secrets` holds *references* (a provider secret name, a GitHub
+    Actions secret name, an env var, or `prompt`), never values; the
+    schema cannot tell a short secret value from a secret *name*, so the
+    precise per-provider reference grammar — and the contents of
+    `settings`, and which settings each backend requires — are validated
+    by the selected backend bundle's contract (#1113), not by the root
+    schema. The schema models exactly one standalone deployment (no
+    fleet / install registry / cross-install orchestration keys). The
+    known backends and the profiles each allows live in
+    `installation.backends` as a provisional registry that #1113
+    supersedes; the `local` backend is #1119.
+  - `installation.loader.load_root_config` /
+    `validate_root_config_file` — load and fail-fast validate a config
+    file, aggregating all problems on `InstallationConfigError.issues`.
+    The error model (`installation.errors.ConfigIssue` /
+    `InstallationConfigError`) never carries the rejected input, so a
+    mistyped secret cannot leak through an error message; YAML parse
+    errors are reported from the parser's own position/description only,
+    not from the file content.
+  - The `shifter-config validate [PATH]` CLI (also `python -m
+    installation validate`), run from the repo root via `uv run
+    --project shifter/installation`: exits `0` with `OK — root config
+    shape is valid (backend=…, profile=…)` for a valid config, or `1`
+    with each problem on stderr; defaults to `./shifter.yaml`.
+  - Worked, machine-validated example configs for the AWS and GCP
+    backends under `shifter/installation/examples/` (the test suite
+    loads every file there through the same parser, so an example cannot
+    drift from the schema).
+
+  Wired into the standard per-package CI jobs (`installation-lint`,
+  `installation-sast`, `installation-tests` in
+  `.github/workflows/_quality.yml` — on GitHub-hosted ephemeral runners,
+  since they execute PR-controlled Python), pre-commit (ruff /
+  ruff-format / bandit / pytest hooks scoped to `shifter/installation/`),
+  SonarCloud (`sonar.sources` / `sonar.tests` / coverage report path),
+  and recorded as ADR-011 evidence in `docs/adr/index.yaml`. The package
+  is built into the Shifter Platform Docker image alongside `cyberscript`
+  (so the Django app, workers, and provisioner can `import installation`
+  when #1114 derives runtime config from the root config). The
+  architecture note `docs/architecture/root-configured-backend-bundles.md`
+  records the resolved root-config filename. Django-free (pydantic v2 +
+  PyYAML only) so scripts, CI, and the Django app can all use it.
+
 ## [3.98.1] - 2026-05-10
 
 ### Fixed

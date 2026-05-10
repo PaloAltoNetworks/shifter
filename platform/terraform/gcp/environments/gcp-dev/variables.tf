@@ -165,7 +165,7 @@ variable "dns_zone_dns_name" {
 }
 
 variable "dns_record_ttl" {
-  description = "TTL in seconds for the optional ingress A record."
+  description = "TTL in seconds for the optional ingress A record. 300s is acceptable for dev; use 60s for production to enable fast failover."
   type        = number
   default     = 300
 }

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+PRs do **not** edit this file directly — they drop a tiny fragment under
+[`changelog.d/`](changelog.d/) (named `<issue>.<type>.md`, where `<type>` is one of
+`security`, `added`, `changed`, `deprecated`, `removed`, `fixed`). At release
+time, `towncrier build` collates the fragments into a new release block just
+under the marker below and removes the consumed fragments. See
+[`changelog.d/README.md`](changelog.d/README.md). This file's history above
+the marker is the historical hand-written record and stays as-is.
+
+<!-- towncrier release notes start -->
+
 ## [3.101.5] - 2026-05-10
 
 ### Security

@@ -504,12 +504,12 @@ resource "google_secret_manager_secret" "runtime" {
 
 resource "random_password" "db_password" {
   length  = 32
-  special = false
+  special = true
 }
 
 resource "random_password" "django_secret_key" {
   length  = 64
-  special = false
+  special = true
 }
 
 resource "random_id" "field_encryption_key" {
@@ -518,7 +518,7 @@ resource "random_id" "field_encryption_key" {
 
 resource "random_password" "guacamole_db_password" {
   length  = 32
-  special = false
+  special = true
 }
 
 resource "random_id" "guacamole_json_auth_secret" {

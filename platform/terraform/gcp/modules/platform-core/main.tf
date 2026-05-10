@@ -148,12 +148,20 @@ resource "google_compute_router" "nat" {
   network = google_compute_network.platform.id
 }
 
+resource "google_compute_address" "nat" {
+  name         = "${local.name_prefix}-nat-egress"
+  project      = var.project_id
+  region       = var.region
+  address_type = "EXTERNAL"
+}
+
 resource "google_compute_router_nat" "nat" {
   name                               = "${local.name_prefix}-nat"
   project                            = var.project_id
   region                             = var.region
   router                             = google_compute_router.nat.name
-  nat_ip_allocate_option             = "AUTO_ONLY"
+  nat_ip_allocate_option             = "MANUAL_ONLY"
+  nat_ips                            = [google_compute_address.nat.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
@@ -164,12 +172,20 @@ resource "google_compute_router" "range_nat" {
   network = google_compute_network.range.id
 }
 
+resource "google_compute_address" "range_nat" {
+  name         = "${local.name_prefix}-range-nat-egress"
+  project      = var.project_id
+  region       = var.region
+  address_type = "EXTERNAL"
+}
+
 resource "google_compute_router_nat" "range_nat" {
   name                               = "${local.name_prefix}-range-nat"
   project                            = var.project_id
   region                             = var.region
   router                             = google_compute_router.range_nat.name
-  nat_ip_allocate_option             = "AUTO_ONLY"
+  nat_ip_allocate_option             = "MANUAL_ONLY"
+  nat_ips                            = [google_compute_address.range_nat.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 

@@ -167,7 +167,14 @@ The first slice intentionally stays small:
   PSS-restricted enforces directly; this check fills the gaps for
   `seccompProfile`, `capabilities.drop`/`add`, container-level
   seccomp overrides, `privileged: true`, pod-level inheritance, and
-  initContainer coverage.
+  initContainer coverage. Implementation note: the validator is
+  decomposed into focused helpers (`_check_container_basic_fields`,
+  `_check_container_capabilities`, `_check_container_seccomp`,
+  `_check_container_identity`, `_resolve_pod_spec`,
+  `_resolve_pod_sc`, `_validate_containers_list`, `_scan_targets`,
+  `_validate_base_files`, `_validate_chart_renders`) so each piece
+  stays under SonarCloud's cognitive-complexity threshold and tests
+  can target each clause independently.
 
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal

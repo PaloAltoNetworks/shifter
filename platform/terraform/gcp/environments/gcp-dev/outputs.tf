@@ -28,6 +28,11 @@ output "portal_network_cidrs" {
   value       = module.platform_core.portal_network_cidrs
 }
 
+output "gke_services_cidr" {
+  description = "GKE service CIDR used by in-cluster clients to reach Kubernetes service IPs."
+  value       = module.platform_core.gke_services_cidr
+}
+
 output "gke_cluster_name" {
   description = "Name of the GKE cluster."
   value       = module.platform_core.gke_cluster_name

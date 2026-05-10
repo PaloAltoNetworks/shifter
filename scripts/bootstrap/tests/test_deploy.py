@@ -93,6 +93,7 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
         "range_network_cidr": {"value": "10.50.0.0/16"},
         "range_network_region": {"value": "us-central1"},
         "portal_network_cidrs": {"value": ["10.40.0.0/20", "10.44.0.0/16"]},
+        "gke_services_cidr": {"value": "10.48.0.0/20"},
         "workload_service_accounts": {
             "value": {
                 "portal": f"shiftergcpdev-portal@{project_id}.iam.gserviceaccount.com",
@@ -1496,6 +1497,18 @@ class TestGdcControlPlaneHelmValues:
         assert values["services"]["guacamoleClient"]["backendConfig"]["enabled"] is True
         assert values["services"]["guacamoleClient"]["backendConfig"]["name"] == "guacamole-client"
         assert values["services"]["guacamoleClient"]["backendConfig"]["securityPolicyName"] == "shifter-gcp-dev-edge"
+        assert values["networkPolicy"] == {
+            "enabled": True,
+            "gclbSourceRanges": [
+                "35.191.0.0/16",  # NOSONAR - Google Cloud Load Balancer range.
+                "130.211.0.0/22",  # NOSONAR - Google Cloud Load Balancer range.
+            ],
+            "googleApiCidrs": [
+                "199.36.153.4/30",  # NOSONAR - restricted.googleapis.com VIP.
+                "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP.
+            ],
+            "privateServiceCidrs": ["10.40.0.10/32", "10.40.0.20/32", "10.48.0.0/20"],
+        }
 
     def test_rejects_insecure_public_bootstrap_values(self):
         """The Helm values renderer must refuse public bare-IP debug deployments on GCP."""
@@ -1570,6 +1583,11 @@ class TestGdcControlPlaneHelmChart:
         assert "runAsGroup: 1001" in output
         assert "kind: Namespace" not in output
         assert "kind: BackendConfig" in output
+        assert "kind: NetworkPolicy" in output
+        assert "name: default-deny-platform" in output
+        assert "name: default-deny-jobs" in output
+        assert "199.36.153.4/30" in output
+        assert "10.40.0.10/32" in output
         assert 'requestPath: "/health/"' in output
         assert "securityPolicy:" in output
         assert "name: shifter-gcp-dev-edge" in output

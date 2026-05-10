@@ -28,6 +28,11 @@ output "portal_network_cidrs" {
   value       = local.portal_network_cidrs
 }
 
+output "gke_services_cidr" {
+  description = "GKE service CIDR used by in-cluster clients to reach Kubernetes service IPs."
+  value       = var.gke_services_cidr
+}
+
 output "gke_subnetwork_name" {
   description = "Name of the GKE subnetwork."
   value       = google_compute_subnetwork.gke.name

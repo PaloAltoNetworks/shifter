@@ -52,6 +52,7 @@ module "platform_core" {
   provisioner_node_count        = var.provisioner_node_count
   cloud_sql_database_version    = var.cloud_sql_database_version
   cloud_sql_tier                = var.cloud_sql_tier
+  cloud_sql_availability_type   = var.cloud_sql_availability_type
   cloud_sql_disk_size_gb        = var.cloud_sql_disk_size_gb
   cloud_sql_database_name       = var.cloud_sql_database_name
   cloud_sql_user_name           = var.cloud_sql_user_name

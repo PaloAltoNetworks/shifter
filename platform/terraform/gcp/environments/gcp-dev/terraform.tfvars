@@ -23,11 +23,12 @@ web_node_count         = 1
 worker_node_count      = 1
 provisioner_node_count = 1
 
-cloud_sql_database_version = "POSTGRES_15"
-cloud_sql_tier             = "db-custom-1-3840"
-cloud_sql_disk_size_gb     = 20
-cloud_sql_database_name    = "shifter"
-cloud_sql_user_name        = "shifter"
+cloud_sql_database_version  = "POSTGRES_15"
+cloud_sql_tier              = "db-custom-1-3840"
+cloud_sql_availability_type = "ZONAL"
+cloud_sql_disk_size_gb      = 20
+cloud_sql_database_name     = "shifter"
+cloud_sql_user_name         = "shifter"
 
 redis_tier           = "BASIC"
 redis_memory_size_gb = 1

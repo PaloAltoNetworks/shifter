@@ -204,7 +204,14 @@ The first slice intentionally stays small:
   block comments are stripped before matching, matching Terraform's
   HCL grammar. Enforces ADR-004-R7. Complements gitleaks, which
   matches high-entropy random strings; this catches low-entropy
-  committed credentials gitleaks ignores.
+  committed credentials gitleaks ignores. Implementation note: the
+  check is decomposed into focused helpers (`_collect_tfvars_candidates`,
+  `_scan_tfvars_file`, `_flagged_secret_var`, `_wrapped_rhs_has_literal`,
+  `_lines_have_string_literal`, `_find_balanced_close_index`,
+  `_find_block_close_index`, `_balance_scan`, `_block_depth_scan`,
+  `_scrub_line`) so each piece stays under SonarCloud's
+  cognitive-complexity threshold and tests can target each clause
+  independently.
 
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal

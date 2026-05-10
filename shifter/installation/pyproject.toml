@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "installation"
-version = "0.1.0"
-description = "Root installation configuration contract for Shifter OSS deployments"
+version = "0.2.0"
+description = "Root installation config and backend bundle contract for Shifter OSS deployments"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",

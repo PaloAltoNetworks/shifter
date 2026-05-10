@@ -16,9 +16,9 @@ def _write_yaml(path, data):
 
 
 class TestValidateCommand:
-    def test_valid_file_exits_zero_and_reports_ok(self, tmp_path, capsys, minimal_config):
+    def test_valid_file_exits_zero_and_reports_ok(self, tmp_path, capsys, aws_config):
         cfg_path = tmp_path / "shifter.yaml"
-        _write_yaml(cfg_path, minimal_config)
+        _write_yaml(cfg_path, aws_config)
         rc = main(["validate", str(cfg_path)])
         assert rc == 0
         out = capsys.readouterr().out
@@ -39,8 +39,8 @@ class TestValidateCommand:
         assert rc == 1
         assert "does-not-exist.yaml" in capsys.readouterr().err
 
-    def test_default_path_is_shifter_yaml_in_cwd(self, tmp_path, monkeypatch, capsys, minimal_config):
-        _write_yaml(tmp_path / "shifter.yaml", minimal_config)
+    def test_default_path_is_shifter_yaml_in_cwd(self, tmp_path, monkeypatch, capsys, aws_config):
+        _write_yaml(tmp_path / "shifter.yaml", aws_config)
         monkeypatch.chdir(tmp_path)
         assert main(["validate"]) == 0
         assert "shifter.yaml" in capsys.readouterr().out

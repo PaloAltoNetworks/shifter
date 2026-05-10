@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now sets `special = true` for `random_password.db_password`,
   `random_password.django_secret_key`, and `random_password.guacamole_db_password`
   to avoid alphanumeric-only generated secrets.
+
+## [3.101.1] - 2026-05-10
+
+### Security
+
+- **Enabled Binary Authorization enforcement on the GKE control-plane cluster
+  (MEDIUM-07).** `platform/terraform/gcp/modules/platform-core/main.tf` now
+  enables the Binary Authorization API and sets
+  `google_container_cluster.platform.binary_authorization.evaluation_mode =
+  "PROJECT_SINGLETON_POLICY_ENFORCE"`, preventing unrestricted image admission
+  and requiring cluster image verification to follow the project's Binary
+  Authorization policy.
+
 ## [3.101.0] - 2026-05-10
 
 ### Added

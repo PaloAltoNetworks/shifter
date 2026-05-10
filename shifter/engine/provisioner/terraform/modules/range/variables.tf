@@ -104,14 +104,14 @@ variable "subnets" {
     cidr         = string # Pre-allocated CIDR from allocate_subnets()
     connected_to = list(string)
     instances = list(object({
-      uuid              = string
-      name              = string # Instance name from scenario template (e.g., "webdev01", "kali")
-      role              = string # attacker, victim, dc
-      os_type           = string # kali, ubuntu, windows
-      instance_type     = string
+      uuid                = string
+      name                = string # Instance name from scenario template (e.g., "webdev01", "kali")
+      role                = string # attacker, victim, dc
+      os_type             = string # kali, ubuntu, windows
+      instance_type       = string
       agent_presigned_url = string
-      join_domain       = bool
-      ami_id            = string # Per-instance AMI override; empty = use os_type lookup
+      join_domain         = bool
+      ami_id              = string # Per-instance AMI override; empty = use os_type lookup
     }))
   }))
 }

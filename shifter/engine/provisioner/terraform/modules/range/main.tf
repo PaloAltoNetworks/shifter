@@ -70,9 +70,9 @@ resource "aws_subnet" "range" {
   availability_zone = var.availability_zone
 
   tags = merge(local.common_tags, {
-    Name                   = "shifter-${each.key}-${var.user_id}"
-    "shifter:subnet_name"  = each.key
-    "shifter:subnet_uuid"  = each.value.uuid
+    Name                  = "shifter-${each.key}-${var.user_id}"
+    "shifter:subnet_name" = each.key
+    "shifter:subnet_uuid" = each.value.uuid
   })
 }
 
@@ -120,10 +120,10 @@ resource "aws_security_group_rule" "connected_subnet" {
     for pair in flatten([
       for subnet in var.subnets : [
         for connected_name in subnet.connected_to : {
-          key             = "${connected_name}-from-${subnet.name}"
-          security_group  = connected_name
-          source_cidr     = subnet.cidr
-          source_name     = subnet.name
+          key            = "${connected_name}-from-${subnet.name}"
+          security_group = connected_name
+          source_cidr    = subnet.cidr
+          source_name    = subnet.name
         } if contains(keys(local.subnet_map), connected_name)
       ]
     ]) : pair.key => pair
@@ -281,7 +281,7 @@ resource "aws_ssm_parameter" "dc_config" {
 resource "aws_instance" "range" {
   for_each = local.instance_map
 
-  ami           = each.value.ami_id != "" ? each.value.ami_id : lookup({
+  ami = each.value.ami_id != "" ? each.value.ami_id : lookup({
     "kali"    = var.kali_ami_id
     "ubuntu"  = var.victim_ami_id
     "windows" = each.value.role == "dc" ? var.dc_ami_id : var.windows_ami_id

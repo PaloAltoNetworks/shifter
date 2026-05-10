@@ -444,7 +444,7 @@ EXPERIMENT_MAX_PARALLEL_RUNS = 5
 # ------------------------------------------------------------------------------
 # JSON auth secret key for signing RDP session URLs
 # Must match the JSON_SECRET_KEY configured in Guacamole's ECS task definition
-# This is a 32-character hex string (128-bit key) stored in Secrets Manager
+# This is a hex string key (64-character/256-bit preferred) stored in Secrets Manager
 GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
 # Public URL for browser (returned to client)
 GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")

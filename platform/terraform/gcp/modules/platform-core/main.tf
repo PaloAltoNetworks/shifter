@@ -523,7 +523,7 @@ resource "random_password" "guacamole_db_password" {
 }
 
 resource "random_id" "guacamole_json_auth_secret" {
-  byte_length = 16
+  byte_length = 32
 }
 
 resource "google_sql_database_instance" "platform" {

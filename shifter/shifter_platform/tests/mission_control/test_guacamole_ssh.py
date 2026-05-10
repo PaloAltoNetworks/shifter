@@ -15,6 +15,48 @@ def fake_private_key():
     return f"{header}\n{'x' * 64}\n{footer}"
 
 
+class TestSignAndEncryptPayload:
+    """Tests for sign_and_encrypt_payload()."""
+
+    @pytest.mark.parametrize(
+        "secret_key",
+        [
+            "0123456789abcdef0123456789abcdef",  # 128-bit
+            (
+                "0123456789abcdef0123456789abcdef"
+                "0123456789abcdef0123456789abcdef"
+            ),  # 256-bit
+        ],
+    )
+    def test_accepts_valid_aes_key_lengths(self, secret_key):
+        """Function accepts valid hex key lengths used for AES keys."""
+        from mission_control.guacamole import sign_and_encrypt_payload
+
+        payload = {
+            "username": "user@example.com",
+            "expires": 1234567890,
+            "connections": {},
+        }
+
+        result = sign_and_encrypt_payload(payload, secret_key)
+
+        assert isinstance(result, str)
+        assert result
+
+    def test_raises_for_invalid_key_length(self):
+        """Function raises clear error for unsupported key length."""
+        from mission_control.guacamole import sign_and_encrypt_payload
+
+        payload = {
+            "username": "user@example.com",
+            "expires": 1234567890,
+            "connections": {},
+        }
+
+        with pytest.raises(ValueError, match="32, 48, or 64 hex characters"):
+            sign_and_encrypt_payload(payload, "0123456789abcdef0123456789ab")
+
+
 class TestCreateSSHConnectionParams:
     """Tests for create_ssh_connection_params()."""
 

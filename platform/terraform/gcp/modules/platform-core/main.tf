@@ -535,7 +535,7 @@ resource "google_sql_database_instance" "platform" {
 
   settings {
     tier              = var.cloud_sql_tier
-    availability_type = "ZONAL"
+    availability_type = var.cloud_sql_availability_type
     disk_size         = var.cloud_sql_disk_size_gb
     disk_type         = "PD_SSD"
 

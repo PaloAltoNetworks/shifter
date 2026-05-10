@@ -104,6 +104,17 @@ variable "cloud_sql_tier" {
   default     = "db-custom-1-3840"
 }
 
+variable "cloud_sql_availability_type" {
+  description = "Cloud SQL availability type. Keep ZONAL in dev to reduce cost."
+  type        = string
+  default     = "ZONAL"
+
+  validation {
+    condition     = contains(["REGIONAL", "ZONAL"], var.cloud_sql_availability_type)
+    error_message = "cloud_sql_availability_type must be either REGIONAL or ZONAL."
+  }
+}
+
 variable "cloud_sql_disk_size_gb" {
   description = "Cloud SQL disk size in GiB."
   type        = number

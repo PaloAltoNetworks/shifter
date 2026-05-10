@@ -27,6 +27,33 @@ from .schema import RootConfig
 _YAML_MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
+def _check_mapping_key(key_node: yaml.Node, value_node: yaml.Node, seen: set[object]) -> None:
+    """Reject a ``<<`` merge key or a key already present in ``seen``; otherwise record it.
+
+    Raises a :class:`yaml.constructor.ConstructorError` (a :class:`yaml.YAMLError`) with the
+    offending key's position so the loader can report it like any other parse error.
+    """
+    is_merge = getattr(key_node, "tag", "") == _YAML_MERGE_TAG or (
+        isinstance(key_node, yaml.ScalarNode) and key_node.value == "<<"
+    )
+    if is_merge:
+        raise yaml.constructor.ConstructorError(
+            "while constructing a mapping",
+            value_node.start_mark,
+            "YAML merge keys ('<<') are not supported in the root installation config",
+            key_node.start_mark,
+        )
+    key = key_node.value if isinstance(key_node, yaml.ScalarNode) else repr(key_node.value)
+    if key in seen:
+        raise yaml.constructor.ConstructorError(
+            "while constructing a mapping",
+            value_node.start_mark,
+            f"found duplicate key {key!r}",
+            key_node.start_mark,
+        )
+    seen.add(key)
+
+
 def _reject_duplicate_keys(node: yaml.Node, _visited: set[int] | None = None) -> None:
     """Walk a parsed YAML node graph and reject duplicated mapping keys and merge keys.
 
@@ -48,24 +75,7 @@ def _reject_duplicate_keys(node: yaml.Node, _visited: set[int] | None = None) ->
     if isinstance(node, yaml.MappingNode):
         seen: set[object] = set()
         for key_node, value_node in node.value:
-            if getattr(key_node, "tag", "") == _YAML_MERGE_TAG or (
-                isinstance(key_node, yaml.ScalarNode) and key_node.value == "<<"
-            ):
-                raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    "YAML merge keys ('<<') are not supported in the root installation config",
-                    key_node.start_mark,
-                )
-            key = key_node.value if isinstance(key_node, yaml.ScalarNode) else repr(key_node.value)
-            if key in seen:
-                raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    f"found duplicate key {key!r}",
-                    key_node.start_mark,
-                )
-            seen.add(key)
+            _check_mapping_key(key_node, value_node, seen)
             _reject_duplicate_keys(value_node, _visited)
     elif isinstance(node, yaml.SequenceNode):
         for item in node.value:

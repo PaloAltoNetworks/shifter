@@ -339,7 +339,7 @@ def _create_scenario_pod_asset(
         "subnet_name": subnet_name,
         "instance_id": pod_name,
         "private_ip": static_ip,
-        "ssh_key_secret_arn": "",
+        "ssh_key_secret_arn": "",  # nosec B105 - scenario pods are not SSH-backed assets.
         "ssh_username": "",
         "gdc_pod_name": pod_name,
         "gdc_namespace": namespace,

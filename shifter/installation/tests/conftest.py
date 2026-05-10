@@ -14,7 +14,12 @@ EXAMPLES_DIR = PACKAGE_ROOT / "examples"
 
 
 def _minimal_config() -> dict[str, Any]:
-    """The smallest valid root config, matching the architecture doc example."""
+    """The smallest *schema-valid* root config (no ``secrets`` / ``settings``).
+
+    This is enough for the root-schema tests, but it is not a complete config that
+    :func:`installation.loader.load_root_config` accepts for ``aws`` — that backend
+    requires secret entries (see :func:`aws_config`).
+    """
     return {
         "backend": "aws",
         "deployment": {
@@ -27,6 +32,26 @@ def _minimal_config() -> dict[str, Any]:
 @pytest.fixture
 def minimal_config() -> dict[str, Any]:
     return _minimal_config()
+
+
+@pytest.fixture
+def aws_config() -> dict[str, Any]:
+    """A complete root config for the ``aws`` backend (declares the secrets aws requires)."""
+    return {
+        "backend": "aws",
+        "deployment": {"name": "shifter", "domain": "shifter.example.com"},
+        "secrets": {"django_secret_key": "prompt", "db_password": "prompt"},
+    }
+
+
+@pytest.fixture
+def gcp_config() -> dict[str, Any]:
+    """A complete root config for the ``gcp`` backend (declares the secret gcp requires)."""
+    return {
+        "backend": "gcp",
+        "deployment": {"name": "shifter", "domain": "shifter.example.com"},
+        "secrets": {"django_secret_key": "prompt"},
+    }
 
 
 @pytest.fixture

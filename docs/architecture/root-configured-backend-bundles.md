@@ -177,6 +177,300 @@ root file or branch convention.
   schema definition unless a dedicated migration issue owns the state, workflow,
   tests, and documentation impact.
 
+## Backend Bundle Contract And Registry Preflight
+
+Scope for `PLAT-2002`, `PLAT-2003`, `PLAT-2005`, and #1113: define the
+machine-readable backend bundle contract and the registry that replaces the
+provisional backend list in `shifter/installation/backends.py`. Do not migrate
+AWS, GCP, local, runtime adapter selection, CI branch routing, or setup/doctor
+orchestration as part of the contract definition. The contract should make those
+later changes lower-risk by naming the backend-owned inputs, outputs, checks, and
+adapter capabilities in one place.
+
+### Contract Boundary
+
+- A backend bundle is the default OSS unit of selection. Public setup chooses one
+  bundle such as `aws`, `gcp`, or `local`; it must not expose identity, storage,
+  queueing, task execution, secrets, infrastructure, or range execution as
+  independently user-composable capabilities.
+- The registry owns backend identity, display metadata, maturity, supported
+  profiles, required tools, required secret references, required root
+  `settings` shape, generated output descriptors, validation checks, health
+  checks, docs links, backend-owned file roots, and capability declarations.
+- The registry is not a deployment orchestrator, plugin runtime, Terraform
+  wrapper, Django settings module, workflow router, or provider credential
+  store. It should describe and dispatch to existing implementation entrypoints.
+- The registry is checked-in contract data/code, not a database-backed runtime
+  registry. Do not add persistence, migrations, tenant scoping, or dynamic
+  backend install state for #1113.
+- The contract belongs in the Django-free installation layer unless an ADR
+  records a different owner. Django, workflows, bootstrap scripts, and CI should
+  import or invoke that same contract instead of maintaining their own backend
+  tables.
+- Registry command/check entries must resolve to typed repo-owned entrypoints or
+  argv-array command specs. Do not store raw shell strings, user-controlled
+  Python import strings, or absolute host paths in backend metadata.
+- Backend-specific root `settings` validation belongs to the selected backend
+  bundle. The root schema continues to own root keys only: `version`, `backend`,
+  `deployment`, `secrets`, and that `settings` is a mapping.
+- Capability declarations may map to existing adapter protocols, but domain code
+  must continue to call `shared.cloud` and `engine/provisioner/cloud` service
+  seams. The bundle contract must not teach domain code to import provider
+  packages directly.
+- Generated runtime, infrastructure, Helm, Kubernetes, and CI values are derived
+  outputs. They are not alternate authoritative config files and must not accept
+  low-level capability overrides that disagree with the selected backend.
+
+### Contract Fields
+
+The initial registry should be small but structured enough that setup, doctor,
+CI, docs generation, and runtime derivation can share it:
+
+| Field | Owner | Guardrail |
+| --- | --- | --- |
+| `contract_version` | Registry | Version the backend contract shape independently of root `shifter.yaml` so future metadata fields can be added compatibly. Unknown major versions fail closed. |
+| `name`, `title`, `maturity`, `description` | Registry | Stable backend identity for selection and documentation. Do not infer backend from branch names, Terraform directories, or `CLOUD_PROVIDER`. |
+| `supported_profiles` | Registry | Replaces the hard-coded `ALLOWED_PROFILES` data in `installation.backends`; adding a profile is data, not a new root schema. |
+| `settings_schema` | Backend bundle | Validates `RootConfig.settings` for the selected backend only. Use typed Pydantic-style validation and aggregated sanitized errors. |
+| `required_tools` | Backend bundle | Feeds setup/doctor dependency checks; extend the command-specific model in `scripts/bootstrap/deploy.py::check_dependencies` instead of scattering `shutil.which`. |
+| `required_secrets` | Backend bundle | Declares logical secret references and provider reference grammar. Secret values remain in provider stores, GitHub secrets, Kubernetes Secrets, or interactive prompts, never in `shifter.yaml`. |
+| `generated_outputs` | Backend bundle | Names runtime env keys, Terraform variables/outputs, Helm values, Kubernetes artifacts, and compatibility aliases produced by backend renderers. Each output descriptor must declare owner, renderer/check source, destination, and sensitivity (`secret-reference`, `secret-value`, or `public/non-secret`) so generators cannot place secrets in ConfigMaps, docs, dry-runs, or plan comments. |
+| `validation_checks` | Backend bundle | References existing validators such as root config validation, Terraform validate/TFLint, Helm rendering, kubeconform, kube-linter, actionlint, import-linter, and ADR guard. |
+| `health_checks` | Backend bundle | Describes read-only post-render or post-deploy probes, their required credentials, expected timeout, and safe failure text without turning doctor into a mutating deploy command. |
+| `capabilities` | Backend bundle | Declares which existing cloud-neutral protocols the backend satisfies: storage, queue consumer/publisher, task runner, secrets, config store, event bus, database auth, and network inventory. |
+| `owned_files` and `docs` | Backend bundle | Points to backend-owned Terraform, Helm, Kubernetes, script, example, and docs roots so validation and docs generation can find them without branch routers. |
+
+### Incumbents To Reuse
+
+| Concern | Canonical incumbent | Backend contract guardrail |
+| --- | --- | --- |
+| Root config parser | `shifter/installation/schema.py`, `loader.py`, `errors.py`, `cli.py` | Build the registry beside this parser and replace `backends.py` data with registry data. Do not add another YAML parser or backend table in workflows, Django, or scripts. |
+| Validation error model | `installation.errors.ConfigIssue` and `InstallationConfigError` | Reuse aggregated path-based issues for backend settings validation. Messages must not carry rejected secret values. |
+| Schema style | Existing Pydantic v2 models in `installation.schema`, `cms.scenarios.schema`, and `cms.experiments.schemas` | Use typed models and model validators rather than ad hoc dict walking once data crosses the contract boundary. |
+| Portal cloud seams | `shifter/shifter_platform/shared/cloud/types.py` and `shared/cloud/__init__.py` | Backend capabilities point at these protocols/factories. Do not bypass them from CMS, CTF, engine views, or services. |
+| Provisioner cloud seams | `shifter/engine/provisioner/cloud/types.py` and `cloud/__init__.py` | Provisioner capability selection must receive the same backend identity as the portal, not infer a second provider from ambient env. |
+| Runtime env binding | `config/settings.py`, `scripts/gcp/render_runtime_env.py`, `scripts/bootstrap/deploy.py::render_gcp_helm_values`, Helm `runtimeEnv` | The bundle contract names canonical env keys and compatibility aliases. Renderers produce those keys; settings consume them. |
+| Identity/auth | `ADR-009`, `config/settings.py`, `config/oidc.py`, `config/identity_platform.py`, `ensure_gcp_identity_platform_operator` | Backend metadata may choose the auth mode, but provider credential collection and app-session gates stay in the existing auth seams. |
+| Secrets | `shared.cloud.*.secrets`, `engine/provisioner/cloud/*/secrets.py`, bootstrap secret helpers, `.gitleaks.toml` | Registry entries declare references and checks only. Do not log, commit, echo, or pass secret payloads through argv. |
+| Logging and redaction | `config.logging.ECSFormatter`, `shared.log_sanitize.safe_log`, installation errors | Contract/doctor diagnostics name backend, path, check, owner, and remediation while redacting provider messages and user-controlled values where needed. |
+| Infrastructure validation | Terraform validate/TFLint, Helm template rendering, kubeconform, kube-linter, `.importlinter`, ADR guard | Backend validation references these existing authorities. It may front-run or aggregate them, but must not replace or soften their failures. |
+
+### Security Layers
+
+- Auth surface: backend metadata may select `AUTH_PROVIDER`, but must satisfy the
+  existing OIDC/Cognito and Identity Platform boundaries. GCP continues to keep
+  browser credential collection in Identity Platform, enforce verified email and
+  MFA before app sessions, and seed the first operator through bootstrap-owned
+  logic.
+- Secret-handling surface: root config and backend settings hold references
+  only. The selected bundle validates the reference grammar; provider adapters
+  and bootstrap helpers resolve values. Secret payloads must not appear in
+  `shifter.yaml`, registry data, generated docs, logs, ConfigMaps, dry-run
+  output, GitHub comments, or process argv.
+- Env-binding shape: bundle outputs must match canonical `settings.py` keys and
+  document any AWS/Pulumi-era aliases as compatibility. ConfigMaps carry
+  non-secret runtime values; Kubernetes Secrets or provider stores carry secret
+  values.
+- Config validators: validation order is root schema, selected bundle settings,
+  backend prerequisite checks, renderer checks, infrastructure validators, and
+  runtime startup checks. Unknown backend, unsupported profile, unknown setting,
+  missing required tool/secret, insecure public posture, and conflicting outputs
+  fail before mutation.
+- OS/process exposure: checks and renderers use argv-array subprocess calls and
+  temporary credential files with cleanup. Passwords, private keys, service
+  account JSON, access tokens, and bootstrap secrets use existing prompt or
+  provider-secret paths, never shell snippets or command-line flags. Registry
+  metadata is data, not executable text: command specs are structured argv
+  arrays or stable repo-owned check IDs.
+- Error envelopes and logs: CLI/doctor paths return deterministic nonzero exits
+  with sanitized `ConfigIssue`-style messages. Django-facing callers keep using
+  existing Django validation and response patterns; do not add a global backend
+  exception hierarchy unless a caller boundary requires it.
+
+### Extensibility Seam
+
+The required seam is root `version` + backend `contract_version` + `backend` +
+`profile` + backend-owned `settings_schema`. Adding the initial `local` backend,
+a production GCP profile, or a future backend should add registry data,
+bundle-specific settings validation, and backend-owned render/check entries
+behind that seam. It should not require changing the root schema, adding a
+branch router, adding another authoritative config file, or teaching domain code
+about provider packages.
+
+### Anti-Patterns
+
+- Creating separate backend registries in `installation`, Django settings,
+  Terraform, Helm values, GitHub Actions, and docs.
+- Treating capability composition as the default OSS UX or allowing users to mix
+  AWS identity with GCP queues, local storage, or ad hoc task execution without a
+  later ADR-defined advanced mode.
+- Letting `CLOUD_PROVIDER`, `AUTH_PROVIDER`, branch names, generated env files,
+  Terraform directories, or Helm values override the selected backend bundle.
+- Forking provider-specific exception hierarchies, validators, CLI output
+  models, or secret-reference grammars when the installation error model and
+  cloud protocol exceptions already cover the boundary.
+- Putting arbitrary executable code, shell fragments, absolute local paths, or
+  network-fetched backend definitions in the registry.
+- Embedding GCP env allowlists, AWS network assumptions, image names, health
+  checks, or secret keys in portal code instead of backend-owned metadata and
+  renderers.
+- Weakening ADR guard, import boundaries, actionlint, TFLint, kubeconform,
+  kube-linter, gitleaks, Identity Platform checks, or network/TLS controls to
+  make backend migration easier.
+
+### Non-Goals
+
+- Do not implement AWS, GCP, or local bundle migration in #1113.
+- Do not introduce a public plugin marketplace, fleet manager, multi-install
+  controller, remote cluster inventory, or centralized rollout service.
+- Do not move Terraform state, provider credentials, identity policies, secret
+  values, or Kubernetes runtime manifests into the registry.
+- Do not persist backend bundles in the application database or introduce a
+  runtime plugin installation lifecycle.
+- Do not rename Pulumi-era compatibility names, database fields, image
+  repositories, task families, or Terraform moved blocks unless a dedicated
+  migration issue owns state and compatibility impact.
+
+## Backend-Derived Runtime Configuration Preflight
+
+Scope for `PLAT-2005` and #1114: make Django, workers, and provisioner
+processes derive provider and capability adapter selection from the validated
+root config plus selected backend bundle. Do not implement backend migration,
+new provider adapters, setup/doctor orchestration, or CI branch-routing
+replacement as part of this runtime derivation boundary.
+
+### Runtime Boundary
+
+- Runtime derivation starts from the same validated `RootConfig` and backend
+  registry contract used by setup, doctor, examples, and CI. Django settings,
+  worker startup, provisioner startup, and task-launch paths must not parse
+  `shifter.yaml` independently or maintain a second backend table.
+- The selected backend bundle owns the canonical runtime output schema:
+  backend identity, auth provider, cloud region/project/account identifiers,
+  queue identifiers, storage identifiers, task-runner settings, secret
+  references, network placement, health endpoints, and compatibility aliases.
+- Environment variables remain the process binding layer for Django, workers,
+  Kubernetes, ECS, and local subprocesses, but they are derived outputs, not an
+  authority that can override the selected backend. `CLOUD_PROVIDER` and
+  `AUTH_PROVIDER` become compatibility/runtime binding keys emitted by the
+  backend renderer, not ad hoc selectors set by workflows or branch names.
+- Portal code continues to use `shared.cloud` factories and protocols. Workers
+  continue to enter through `shared.management.commands.run_worker` and the
+  queue config from settings. Provisioner code continues to use its Django-free
+  `cloud` factory/protocol layer. Domain services must not import
+  provider-specific adapter packages directly.
+- The portal and provisioner must receive the same backend identity and
+  compatible capability map. A portal-derived task launch must not forward a
+  GCP runtime allowlist while the provisioner independently infers AWS from a
+  missing env var.
+- Runtime startup should fail closed on missing or conflicting derived keys
+  before processing requests, polling queues, launching tasks, or provisioning
+  infrastructure.
+
+### Incumbents To Reuse
+
+| Concern | Canonical incumbent | Runtime guardrail |
+| --- | --- | --- |
+| Root config and validation | `shifter/installation/schema.py`, `loader.py`, `errors.py`, `cli.py` | Runtime derivation consumes validated `RootConfig` and backend registry data. Do not add a Django-local YAML parser or a provisioner-local root schema. |
+| Django env binding | `shifter/shifter_platform/config/settings.py` | Keep one canonical settings surface for derived env keys and compatibility aliases. Backend renderers produce the keys settings already consumes or explicitly add one owner for any new key. |
+| Portal capability adapters | `shifter/shifter_platform/shared/cloud/__init__.py`, `shared/cloud/types.py`, `shared/cloud/exceptions.py` | Backend capabilities dispatch through existing factories/protocols and `CloudError` subclasses. Do not fork provider-specific exceptions or call adapters directly from app layers. |
+| Worker startup | `shared.management.commands.run_worker`, `settings.QUEUE_CONFIG`, `get_queue_consumer()` | Workers inherit the same derived runtime env as Django and resolve queue consumer IDs through the existing queue config shape. Do not create backend-specific worker commands. |
+| Task runner launch | `engine/ecs.py`, `cms/experiments/ecs.py`, `shared.cloud.types.TaskRunner` | Move provider-specific task settings and env propagation into backend-owned runtime descriptors. Preserve local provisioner mode as a compatibility path, but do not let it become a second backend selector. |
+| Provisioner capability adapters | `shifter/engine/provisioner/cloud/__init__.py`, `cloud/types.py`, `cloud/exceptions.py`, `config.py`, `range_terraform_runner.py` | Provisioner startup reads the derived backend identity and capability env emitted by the same backend bundle as the portal. GDC/AWS branching stays behind provisioner seams until replaced by registry dispatch. |
+| Runtime renderers | `scripts/gcp/render_runtime_env.py`, `scripts/bootstrap/deploy.py::render_gcp_helm_values`, Helm `runtimeEnv`, Kubernetes `platform-runtime` ConfigMap | Backend runtime renderers extend or wrap these existing render paths. They must label sensitivity and keep secret values out of ConfigMaps and dry-run output. |
+| Auth seams | `ADR-009`, `config/settings.py`, `config/oidc.py`, `config/identity_platform.py`, `ensure_gcp_identity_platform_operator` | Backend metadata selects the auth mode, but credential collection, verified email, MFA, operator bootstrap, and session creation stay in the existing provider auth boundaries. |
+| Logging and redaction | `config.logging.ECSFormatter`, `shared.log_sanitize.safe_log`, `installation.errors.ConfigIssue` | Startup and derivation diagnostics name backend, config path, generated key, and remediation while redacting provider errors, secret references where sensitive, and user-controlled strings. |
+
+### Security Layers
+
+- Auth surface: the derived `AUTH_PROVIDER` value must match the selected
+  backend's identity capability and `ADR-009`. AWS keeps the OIDC/Cognito path;
+  GCP keeps Identity Platform browser credential collection, verified email,
+  MFA, and bootstrap-owned first-operator seeding. Runtime derivation must reject
+  incompatible backend/auth pairs before Django URL/auth backends initialize.
+- Secret-handling surface: root config and backend settings contain secret
+  references only. Runtime renderers classify every output as
+  `public/non-secret`, `secret-reference`, or `secret-value`; only
+  `public/non-secret` and approved `secret-reference` keys may enter
+  ConfigMaps, logs, dry-runs, GitHub comments, or task env forwarding.
+  Secret-value outputs stay in provider secret stores, Kubernetes Secrets, or
+  temporary files with cleanup.
+- Env-binding shape: generated env must satisfy `settings.py`, worker
+  `QUEUE_CONFIG`, portal task-runner settings, provisioner cloud config, and the
+  Helm/Kubernetes `runtimeEnv` shape. Unknown keys, duplicate canonical owners,
+  conflicting compatibility aliases, and provider-specific required keys missing
+  for the selected backend fail before runtime startup.
+- Config validators: validation order is root schema, selected backend settings
+  schema, backend runtime output validation, renderer sensitivity checks, Helm
+  and Kubernetes shape validation, Django `check --deploy` where applicable, and
+  provisioner startup checks. Runtime derivation may aggregate these failures but
+  must not mask downstream validators.
+- OS/process exposure: local provisioner subprocesses, bootstrap renderers, and
+  task launchers use argv arrays. Do not pass passwords, private keys, service
+  account JSON, access tokens, or generated secret payloads in process argv,
+  command strings, shell snippets, or logged dry-run commands.
+- Error envelopes and logs: CLI/setup/doctor paths should report sanitized
+  `ConfigIssue`-style path failures. Django-facing failures should use existing
+  Django startup, validation, and response patterns. Provisioner failures should
+  use existing `CloudError`/runtime exceptions without adding a parallel backend
+  exception hierarchy.
+
+### Extensibility Seam
+
+The required seam is a typed runtime-output descriptor owned by each backend
+bundle and keyed by `contract_version`, backend, profile, process role, and
+capability. Process role must be explicit (`portal`, `worker`, `provisioner`,
+`experiment-task`, `range-task`) so a future `local` backend, a production GCP
+profile, or a different task runner adds data and render/check entries behind
+the registry rather than adding branch routers or widening low-level capability
+composition in the public config.
+
+### Runtime Gotchas
+
+- `settings.py` currently defaults `CLOUD_PROVIDER` to `aws`; derived runtime
+  work must remove the risk that a missing generated key silently selects AWS.
+- The provisioner has its own `CLOUD_PROVIDER` readers because it cannot import
+  Django settings. It needs an explicit generated binding from the same backend
+  bundle, not a second inference path.
+- `engine/ecs.py` contains a GCP provisioner env allowlist that is already a
+  backend runtime contract embedded in portal code. Move the ownership to
+  backend metadata/renderers before adding another provider or role.
+- `platform/k8s/gcp/overlays/gcp-dev/platform-runtime.env` is compatibility
+  input and currently includes guest-password-style defaults. Runtime derivation
+  must not preserve that pattern for new outputs; secret values belong in secret
+  stores or Kubernetes Secrets.
+- Pulumi-era names such as `pulumi-provisioner` and `PULUMI_*` aliases are
+  compatibility surfaces. Hide them behind canonical backend-neutral descriptors
+  unless a dedicated migration issue owns the rename.
+
+### Anti-Patterns
+
+- Adding a `get_backend()` helper in Django, another one in the provisioner, and
+  a third one in scripts that can disagree.
+- Letting `CLOUD_PROVIDER`, `AUTH_PROVIDER`, task image names, queue IDs,
+  Terraform outputs, Helm values, or branch names override the selected backend.
+- Passing a large inherited `os.environ` into task launches or local provisioner
+  subprocesses without a backend-owned allowlist and sensitivity classification.
+- Duplicating queue/storage/task/secrets protocols instead of extending
+  `shared.cloud.types` or `engine/provisioner/cloud/types` only when a real
+  capability requires it.
+- Emitting provider SDK errors, token payloads, secret names that reveal
+  sensitive tenancy, or unsanitized user-controlled config values into logs.
+
+### Non-Goals
+
+- Do not make runtime derivation a deployment orchestrator, plugin runtime,
+  fleet manager, or persistence-backed backend registry.
+- Do not change domain service ownership, import boundaries, model schemas,
+  queue handler contracts, or CTF/CMS/mission-control workflows as part of
+  deriving backend config.
+- Do not introduce public low-level capability composition. The runtime registry
+  may decompose a backend internally, but the OSS user still selects a backend
+  bundle.
+- Do not rename compatibility env vars, task families, image repositories,
+  database fields, or Terraform state keys without a dedicated migration issue
+  and state-compatibility plan.
+
 ## Setup And Doctor UX Preflight
 
 Scope for `GEN-2002` and #1115: expose a backend-aware setup and validation
@@ -316,3 +610,12 @@ evidence only when corresponding files change.
 
 - The first-class root config file is `shifter.yaml` at the repository root; the
   contract is the `installation` package (`shifter/installation/`). (#1112)
+- The backend bundle contract and registry are the `installation.contract` and
+  `installation.registry` modules; they supersede the provisional
+  `installation.backends` list. The root schema derives backend/profile
+  validation from the registry, and the loader runs the selected backend
+  bundle's per-backend `settings` and secret-reference checks. The shipped
+  `aws`/`gcp` registry entries are provisional (no `settings_model` or
+  `reference_pattern` yet); the AWS/GCP migration issues (#1116/#1117) fill in
+  the per-backend settings schema, secret-reference patterns, and renderer /
+  validation-check wiring. (#1113)

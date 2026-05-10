@@ -84,6 +84,39 @@ def _validate_domain(value: str) -> str:
     return value
 
 
+def _validate_secret_entry(key: str, raw_value: Any) -> tuple[str | None, str | None]:
+    """Validate one ``secrets`` mapping entry.
+
+    Returns ``(reference, None)`` for a usable entry, or ``(None, problem)`` describing
+    what is wrong. The schema treats ``secrets`` values as opaque references and only
+    rejects ones that are *clearly* raw key material; see :data:`_MAX_SECRET_REFERENCE_LEN`.
+    """
+    if not _SECRET_NAME_RE.match(key):
+        return None, f"secret name {key!r} must match ^[a-z][a-z0-9_]*$"
+    if not isinstance(raw_value, str):
+        return None, f"secret reference for {key!r} must be a string"
+    ref: str = raw_value
+    if ref != ref.strip() or not ref.strip():
+        return None, f"secret reference for {key!r} must be a non-empty string with no surrounding whitespace"
+    if any(ch in ref for ch in "\r\n\t"):
+        return None, (
+            f"secret reference for {key!r} must be a single line; the root config holds a reference "
+            "(a provider secret name, a GitHub Actions secret name, an env var, or 'prompt'), not the "
+            "secret value itself"
+        )
+    if ref.startswith("-----BEGIN"):
+        return None, (
+            f"secret reference for {key!r} looks like raw PEM key/certificate material; store the value in "
+            "a secret store and reference it by name"
+        )
+    if len(ref) > _MAX_SECRET_REFERENCE_LEN:
+        return None, (
+            f"secret reference for {key!r} is implausibly long for a reference ({len(ref)} characters, "
+            f"limit {_MAX_SECRET_REFERENCE_LEN}); the root config holds a reference, not the secret value itself"
+        )
+    return ref, None
+
+
 def _validate_secrets(value: Any) -> dict[str, str]:
     # A *present* ``secrets:`` key must be a mapping. An explicit YAML null (a dangling
     # ``secrets:``) is treated as a malformed block and rejected, not silently coerced
@@ -94,37 +127,11 @@ def _validate_secrets(value: Any) -> dict[str, str]:
     cleaned: dict[str, str] = {}
     for raw_key, raw_value in value.items():
         key = str(raw_key)
-        if not _SECRET_NAME_RE.match(key):
-            problems.append(f"secret name {key!r} must match ^[a-z][a-z0-9_]*$")
-            continue
-        if not isinstance(raw_value, str):
-            problems.append(f"secret reference for {key!r} must be a string")
-            continue
-        ref = raw_value
-        if ref != ref.strip() or not ref.strip():
-            problems.append(f"secret reference for {key!r} must be a non-empty string with no surrounding whitespace")
-            continue
-        if any(ch in ref for ch in "\r\n\t"):
-            problems.append(
-                f"secret reference for {key!r} must be a single line; the root config holds a reference "
-                "(a provider secret name, a GitHub Actions secret name, an env var, or 'prompt'), not the "
-                "secret value itself"
-            )
-            continue
-        if ref.startswith("-----BEGIN"):
-            problems.append(
-                f"secret reference for {key!r} looks like raw PEM key/certificate material; store the value in "
-                "a secret store and reference it by name"
-            )
-            continue
-        if len(ref) > _MAX_SECRET_REFERENCE_LEN:
-            problems.append(
-                f"secret reference for {key!r} is implausibly long for a reference ({len(ref)} characters, "
-                f"limit {_MAX_SECRET_REFERENCE_LEN}); the root config holds a reference, not the secret value "
-                "itself"
-            )
-            continue
-        cleaned[key] = ref
+        ref, problem = _validate_secret_entry(key, raw_value)
+        if problem is not None:
+            problems.append(problem)
+        elif ref is not None:
+            cleaned[key] = ref
     if problems:
         raise ValueError("; ".join(problems))
     return cleaned

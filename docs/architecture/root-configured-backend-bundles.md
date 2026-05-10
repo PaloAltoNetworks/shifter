@@ -4,6 +4,9 @@ Status: planning, constrained by ADR-011
 
 Tracking issue: <https://github.com/Brad-Edwards/shifter/issues/1109>
 
+Current-state inventory:
+[Branch Routing and Provider Coupling Inventory](branch-routing-provider-coupling-inventory.md)
+
 ## Context
 
 Shifter currently mixes runtime provider seams with branch-targeted deployment
@@ -87,7 +90,8 @@ evidence only when corresponding files change.
 ## Issue Map
 
 - #1110 Draft requirements and ADR for root-configured backend bundles.
-- #1111 Inventory branch routing and provider coupling.
+- #1111 Inventory branch routing and provider coupling. See
+  [Branch Routing and Provider Coupling Inventory](branch-routing-provider-coupling-inventory.md).
 - #1112 Define root installation config schema.
 - #1113 Define backend bundle contract and registry.
 - #1114 Derive runtime configuration from selected backend bundle.
@@ -99,11 +103,11 @@ evidence only when corresponding files change.
 
 ## Suggested Sequence
 
-1. Complete the current-state inventory.
-2. Define the root config schema and backend bundle contract.
-3. Implement config loading, backend registry, and doctor validation.
-4. Migrate AWS and GCP through compatibility paths.
-5. Replace branch-targeted docs and CI routing with backend validation and
+1. Use the current-state inventory to define the root config schema and backend
+   bundle contract.
+2. Implement config loading, backend registry, and doctor validation.
+3. Migrate AWS and GCP through compatibility paths.
+4. Replace branch-targeted docs and CI routing with backend validation and
    explicit deployment invocation.
 
 ## Open Questions

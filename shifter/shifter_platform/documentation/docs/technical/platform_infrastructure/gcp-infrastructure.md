@@ -22,7 +22,7 @@ Single module provisions the entire GCP control plane.
 | Resource | Service | Purpose |
 |----------|---------|---------|
 | **VPC Networks** (×2) | VPC | `platform` (GKE, shared services) and `range` (guest isolation) |
-| **GKE Cluster** | GKE | Private nodes, VPC-native, Workload Identity enabled, public control-plane endpoint restricted by authorized CIDRs |
+| **GKE Cluster** | GKE | Private nodes, VPC-native, Workload Identity enabled, Binary Authorization enforced via project singleton policy, public control-plane endpoint restricted by authorized CIDRs |
 | **Node Pools** (×3) | GKE | `web` (portal, Guacamole), `workers` (domain workers), `provisioner` (range provisioning jobs) |
 | **Cloud SQL** | Cloud SQL | PostgreSQL. Hosts platform DB and Guacamole DB. Private IP only. |
 | **Memorystore** | Memorystore | Redis. Channel layer and worker coordination. |
@@ -43,6 +43,7 @@ Private nodes with no public node IPs. Cloud NAT provides outbound connectivity.
 - **Networking**: VPC-native with secondary IP ranges for pods and services
 - **Logging/Monitoring**: System components and workload logging enabled
 - **Control-plane access**: public endpoint retained for bootstrap compatibility, restricted by authorized CIDRs
+- **Binary Authorization**: enabled with `PROJECT_SINGLETON_POLICY_ENFORCE`
 
 ### Node Pools
 

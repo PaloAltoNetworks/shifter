@@ -206,10 +206,10 @@ The first slice intentionally stays small:
   matches high-entropy random strings; this catches low-entropy
   committed credentials gitleaks ignores. Implementation note: the
   check is decomposed into focused helpers (`_collect_tfvars_candidates`,
-  `_scan_tfvars_file`, `_flagged_secret_var`, `_wrapped_rhs_has_literal`,
-  `_lines_have_string_literal`, `_find_balanced_close_index`,
-  `_find_block_close_index`, `_balance_scan`, `_block_depth_scan`,
-  `_scrub_line`) so each piece stays under SonarCloud's
+  `_scan_tfvars_file`, `_flagged_secret_var`, `_block_assignment_has_literal`,
+  `_wrapped_rhs_has_literal`, `_lines_have_string_literal`,
+  `_find_balanced_close_index`, `_find_block_close_index`, `_balance_scan`,
+  `_block_depth_scan`, `_scrub_line`) so each piece stays under SonarCloud's
   cognitive-complexity threshold and tests can target each clause
   independently.
 

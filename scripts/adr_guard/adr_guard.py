@@ -1473,6 +1473,19 @@ def _wrapped_rhs_has_literal(
     return _lines_have_string_literal(lines, idx + 1, close_idx)
 
 
+def _block_assignment_has_literal(
+    lines: list[str], idx: int, opener: str
+) -> bool:
+    """``True`` if the object/array block opened on ``lines[idx]`` carries a
+    string literal somewhere between the opener and its matching close (an
+    empty block, or one composed solely of var/local/data references, is
+    acceptable). A block whose close is never found scans to end-of-file.
+    """
+    close_idx = _find_block_close_index(lines, idx, opener)
+    end_idx = close_idx if close_idx is not None else len(lines) - 1
+    return _lines_have_string_literal(lines, idx, end_idx)
+
+
 def _flagged_secret_var(lines: list[str], idx: int) -> str | None:
     """Return the secret-bearing variable on ``lines[idx]`` that is assigned a
     plaintext string literal — directly, via a heredoc, via an object/array
@@ -1480,26 +1493,23 @@ def _flagged_secret_var(lines: list[str], idx: int) -> str | None:
     clean or the variable name is public material.
     """
     line = lines[idx]
+    # Priority: a direct ``= "..."`` / heredoc literal, then an object/array
+    # block, then any other RHS expression. ``_SECRET_ASSIGNMENT_PATTERN`` is
+    # the catch-all, so it is consulted last.
     direct = _SECRET_VAR_PATTERN.match(line) or _SECRET_HEREDOC_PATTERN.match(line)
-    if direct is not None:
-        return None if _is_public_material_name(direct.group(1)) else direct.group(1)
     block_match = _SECRET_BLOCK_OPEN_PATTERN.match(line)
-    if block_match is not None:
-        var_name = block_match.group(1)
-        if _is_public_material_name(var_name):
-            return None
-        close_idx = _find_block_close_index(lines, idx, block_match.group(2))
-        end_idx = close_idx if close_idx is not None else len(lines) - 1
-        return var_name if _lines_have_string_literal(lines, idx, end_idx) else None
     wrapped = _SECRET_ASSIGNMENT_PATTERN.match(line)
-    if wrapped is not None:
-        var_name = wrapped.group(1)
-        if _is_public_material_name(var_name):
-            return None
-        if _wrapped_rhs_has_literal(lines, idx, line, wrapped.group(2)):
-            return var_name
+    match = direct or block_match or wrapped
+    if match is None:
         return None
-    return None
+    var_name = match.group(1)
+    if _is_public_material_name(var_name):
+        return None
+    if direct is not None:
+        return var_name
+    if block_match is not None:
+        return var_name if _block_assignment_has_literal(lines, idx, block_match.group(2)) else None
+    return var_name if _wrapped_rhs_has_literal(lines, idx, line, wrapped.group(2)) else None
 
 
 def _scan_tfvars_file(path: Path, repo_root: Path) -> list[Violation]:

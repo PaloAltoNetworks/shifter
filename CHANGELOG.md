@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.100.5] - 2026-05-10
+## [3.101.2] - 2026-05-10
 
 ### Security
 
@@ -14,6 +14,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now sets `special = true` for `random_password.db_password`,
   `random_password.django_secret_key`, and `random_password.guacamole_db_password`
   to avoid alphanumeric-only generated secrets.
+## [3.101.0] - 2026-05-10
+
+### Added
+
+- **Backend bundle contract and registry (#1113, PLAT-2002 / PLAT-2003).**
+  New `installation.contract` and `installation.registry` modules in the
+  Django-free `installation` package (`shifter/installation/`):
+  - `installation.contract` defines the typed, machine-readable contract every
+    backend bundle exposes (PLAT-2003) — `BackendBundle` with its
+    `contract_version` (versioned independently of `shifter.yaml`'s `version`,
+    fails closed on an unknown version), identity/metadata (`name`, `title`,
+    `maturity`, `description`), `supported_profiles`, a per-backend
+    `settings_model`, `required_tools`, `required_secrets` (logical name, the
+    human-readable reference grammar, and an optional `reference_pattern` regex
+    for machine validation — the root config holds references, never values),
+    `generated_outputs` (the runtime/infra/CI values the backend renders, each
+    tagged with owner, source, a typed `OutputDestination` — `runtime-env`,
+    `kubernetes-secret`, `provider-secret-store`, `terraform-variables`,
+    `helm-values`, `generated-file` — a sensitivity — `public` /
+    `secret-reference` / `secret-value` — and the process roles that consume it;
+    a `secret-value` output may only be placed in a secret store, never a
+    ConfigMap), `validation_checks` (argv command specs — PATH-resolved
+    executable name, repo-relative path arguments, no internal whitespace, shell
+    metacharacters, or absolute host paths), `health_checks` (read-only probes),
+    `capabilities` (which cloud-neutral `shared.cloud` / `engine/provisioner/cloud`
+    protocols the backend satisfies), and `owned_files` / `docs` (repository-relative
+    path roots, so validation and docs generation find a backend's files without a
+    branch router). All contract models are frozen and reject unknown fields; a
+    `BackendBundle` additionally rejects a `settings_model` that does not set
+    `extra="forbid"`, an `argv[0]` / `RequiredTool.name` that is not a bare
+    executable name, a `validation_checks` executable that is not in the same
+    bundle's `required_tools`, and duplicate `name` / `logical_name` across any of
+    its `RequiredTool` / `RequiredSecret` / `GeneratedOutput` / `ValidationCheck` /
+    `HealthCheck` records. The contract also exposes
+    `BackendBundle.validate_settings` (returns the normalized settings or raises a
+    sanitized `InstallationConfigError`) / `settings_issues` /
+    `secret_reference_issues` (and `RequiredSecret.matches_reference`) so consumers
+    can check a `RootConfig` against the selected bundle without the rejected input
+    ever appearing in an error.
+  - `installation.registry` is the single registry of known backend bundles
+    (`BACKEND_BUNDLES`, `get_backend_bundle`) — the OSS unit of backend
+    selection (PLAT-2002). It supersedes the provisional `installation.backends`
+    list; `KNOWN_BACKENDS`, `KNOWN_PROFILES`, and `ALLOWED_PROFILES` are now
+    derived from it, so adding a backend or a profile is a registry entry, not a
+    schema change or a branch router. The shipped `aws` and `gcp` entries are
+    intentionally provisional: each pins `contract_version` and an explicit
+    capability set, and carries its identity, supported profiles, owned repo
+    roots, required Terraform/CLI tools (including `uv`, the executable the
+    root-config check runs), the root-config validation check, a portal health
+    probe, and the `CLOUD_PROVIDER` plus app/database secret-reference runtime
+    bindings the platform actually consumes today (GCP's canonical `*_SECRET_ID`
+    names; AWS's `*_SECRET_ARN` aliases) — but `settings_model` and each
+    `reference_pattern` are left unset (any `settings` mapping and any reference
+    are accepted), and the per-backend renderer / validation-check /
+    infrastructure-entrypoint detail is filled in by the AWS and GCP backend
+    bundle migration issues (#1116/#1117). The `local` backend is #1119.
+  - `installation.schema.RootConfig` now derives backend and profile validation
+    from the registry; the loader (`installation.loader.load_root_config` /
+    `validate_root_config_file`) then runs the selected backend bundle's
+    `settings` and secret checks and returns the bundle's normalized settings. The
+    secret checks flag a `RequiredSecret` the backend declares with no `secrets:`
+    entry (the value may be `PROMPT_REFERENCE` — the literal `prompt` — to collect
+    it at deploy time, or a provider secret name / GitHub Actions secret name / env
+    var), a `secrets:` entry for a logical name the backend does not use (catches
+    typos before deploy), and a reference that does not match the backend's
+    `reference_pattern` when one is declared. Root-shape and backend-specific
+    problems are aggregated into one `InstallationConfigError`, each as a
+    path-anchored `ConfigIssue` (e.g. `settings.region`, `secrets.django_secret_key`)
+    that never echoes the rejected input — a backend setting or secret reference
+    could be sensitive. Behavior is unchanged for the shipped `aws`/`gcp` backends'
+    *settings* (still any mapping), but each of those backends now requires its
+    declared secrets (`aws`: `django_secret_key`, `db_password`; `gcp`:
+    `django_secret_key`) to have a `secrets:` entry.
+  - The provisional `installation.backends` module is removed; import the
+    registry constants from `installation` (or `installation.registry`) instead.
+
 ## [3.100.4] - 2026-05-10
 
 ### Changed
@@ -3401,7 +3477,6 @@ of-truth rule)
 ### Fixed
 - Some range boxes have unexpected Internet access
 
-
 ## [1.0.2] - 2026-01-25
 
 ### Added
@@ -3539,7 +3614,6 @@ of-truth rule)
   - GitHub App authentication for secure runner registration
 - Added runner-deploy.sh script for runner infrastructure management
 - Added manual-deployment.md documentation for global terraform stacks
-
 
 ## [0.10.1] - 2025-01-02
 
@@ -3860,7 +3934,6 @@ of-truth rule)
 - Kali boots slow due to redundant kali headless install
 - Failed range auto-cleanup not running in dev
 
-
 ## [0.7.10] - 2025-12-21
 
 ### Fixed
@@ -3934,7 +4007,6 @@ of-truth rule)
 - Dev environment: autoscaling enabled with 2 instances
 - GitHub Actions portal workflow supports ASG deployment via SSM targeting by tag
 - IAM: Added `elasticache_asg` policy for ElastiCache, Auto Scaling, and Launch Template permissions
-
 
 ## [0.7.3] - 2025-12-17
 

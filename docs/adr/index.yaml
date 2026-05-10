@@ -386,6 +386,8 @@
       "docs/adr/index.yaml",
       "shifter/installation/__init__.py",
       "shifter/installation/schema.py",
+      "shifter/installation/contract.py",
+      "shifter/installation/registry.py",
       "shifter/installation/README.md",
       "shifter/shifter_platform/shared/cloud/__init__.py",
       "shifter/engine/provisioner/cloud/__init__.py",

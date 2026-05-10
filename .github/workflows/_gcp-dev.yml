@@ -105,10 +105,12 @@ jobs:
           PROJECT_ID=$(awk -F'"' '/^project_id/ {print $2}' "$TFVARS_FILE")
           REGION=$(awk -F'"' '/^region/ {print $2}' "$TFVARS_FILE")
           TF_STATE_BUCKET="${PROJECT_ID}-terraform-state"
+          TF_STATE_RETENTION_PERIOD_SECONDS=2592000
           {
             echo "PROJECT_ID=${PROJECT_ID}"
             echo "REGION=${REGION}"
             echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}"
+            echo "TF_STATE_RETENTION_PERIOD_SECONDS=${TF_STATE_RETENTION_PERIOD_SECONDS}"
           } >> "$GITHUB_ENV"
       - name: Bootstrap Terraform state bucket
         run: |
@@ -116,9 +118,42 @@ jobs:
             gcloud storage buckets create "gs://${TF_STATE_BUCKET}" \
               --project="${PROJECT_ID}" \
               --location="${REGION}" \
-              --uniform-bucket-level-access
+              --uniform-bucket-level-access \
+              --public-access-prevention
           fi
           gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
+          CURRENT_RETENTION_SECONDS=$(gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --format='value(retentionPolicy.retentionPeriod)')
+          if [ -z "${CURRENT_RETENTION_SECONDS}" ] || [ "${CURRENT_RETENTION_SECONDS}" -lt "${TF_STATE_RETENTION_PERIOD_SECONDS}" ]; then
+            gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --project "${PROJECT_ID}" --retention-period="${TF_STATE_RETENTION_PERIOD_SECONDS}s"
+          fi
+          gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="serviceAccount:${GCP_SERVICE_ACCOUNT}" \
+            --role="roles/storage.legacyBucketReader" >/dev/null
+          gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="serviceAccount:${GCP_SERVICE_ACCOUNT}" \
+            --role="roles/storage.objectAdmin" >/dev/null
+          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="allUsers" \
+            --role="roles/storage.objectViewer" >/dev/null 2>&1 || true
+          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="allAuthenticatedUsers" \
+            --role="roles/storage.objectViewer" >/dev/null 2>&1 || true
+          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="projectOwner:${PROJECT_ID}" \
+            --role="roles/storage.legacyBucketOwner" >/dev/null 2>&1 || true
+          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="projectEditor:${PROJECT_ID}" \
+            --role="roles/storage.legacyBucketOwner" >/dev/null 2>&1 || true
+          gcloud storage buckets remove-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --project="${PROJECT_ID}" \
+            --member="projectViewer:${PROJECT_ID}" \
+            --role="roles/storage.legacyBucketReader" >/dev/null 2>&1 || true
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
         run: |

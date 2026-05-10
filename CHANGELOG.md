@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.99.3] - 2026-05-10
+
+### Security
+
+- **Hardened GCP Terraform state bucket bootstrap in CI.** The
+  `.github/workflows/_gcp-dev.yml` deploy path now sets a 30-day GCS retention
+  policy for the Terraform backend bucket, enforces public access prevention on
+  creation, and configures bucket IAM so the configured CI service account gets
+  the required backend roles while broad/public bucket bindings are removed.
+
 ## [3.99.2] - 2026-05-10
 
 ### Changed

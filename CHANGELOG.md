@@ -5,10 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.98.0] - 2026-05-10
 
 ### Security
 
+- **Locked Pod Security Standards on K8s Deployments via a new ADR
+  guard check (#951).** Added the
+  `k8s-deployment-security-context` check to
+  `scripts/adr_guard/adr_guard.py`, wired into ADR-006-R2 in
+  `docs/adr/index.yaml`, the ADR guard's `ci` level (kept out of
+  `fast` so the system-Python `adr-guard-fast` hook stays
+  dependency-free), and a dedicated `adr-guard-k8s` pre-commit hook
+  scoped to `platform/k8s/gcp/base/*.{yaml,yml}` and
+  `platform/charts/shifter/`. The check validates two enforcement
+  sources:
+  - **Base manifest snapshots**: PyYAML's `safe_load_all` parses every
+    `.yaml`/`.yml` document under `platform/k8s/gcp/base/` (recursive)
+    and applies the rule to every document whose `kind` is
+    `Deployment` (kind-based filtering rather than filename-based, so
+    a Deployment shipped under any filename or extension is scanned).
+  - **Helm chart rendered output** (per ADR-007, the chart is the
+    authoritative deployment contract; base manifests are supporting
+    snapshots): the check shells out to `helm template
+    platform/charts/shifter -f <values-file>` for each entry in
+    `HELM_VALUES_FILES` (`values-gcp-dev.yaml`, `values-gcp-prod.yaml`)
+    and applies the same rule to every Deployment in the rendered
+    output. Catches regressions where a chart template or values file
+    removes a required securityContext field even when the base
+    snapshots remain compliant. Multi-document files and
+  indentless YAML sequences are supported; non-mapping
+  `spec`/`spec.template`/`spec.template.spec` shapes produce
+  actionable violations rather than crashing the guard. The check
+  fails CI if any pod template is missing
+  `seccompProfile.type: RuntimeDefault`, or if any container OR
+  initContainer's *effective* context (after pod-level inheritance
+  for `runAsNonRoot`/`runAsUser`/`runAsGroup`) is missing
+  `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`
+  (with no `capabilities.add` key at all — empty list is also
+  rejected), `readOnlyRootFilesystem: true`, `runAsNonRoot: true`,
+  a positive integer `runAsUser`/`runAsGroup` (booleans rejected;
+  Python's `bool` is a subclass of `int`), or sets `privileged:
+  true` or a container-level `seccompProfile.type` other than
+  `RuntimeDefault`. PyYAML (`pyyaml>=6.0`) and Helm (`v3.15.4`) are
+  the new ADR-guard runtime dependencies: the `adr-conformance` job
+  in `.github/workflows/_quality.yml` installs both **hermetically
+  per job** — pip is bootstrapped via the stdlib `ensurepip` module
+  (the self-hosted Amazon Linux runner's system Python ships without
+  pip and does not have Python 3.12 available for
+  `actions/setup-python`), then PyYAML via
+  `pip install --no-deps --target ${RUNNER_TEMP}/py-deps` with
+  `PYTHONPATH=${RUNNER_TEMP}/py-deps` on the run step, and Helm via
+  the official `get.helm.sh` release tarball extracted to
+  `${RUNNER_TEMP}/helm-bin/` and added to `$GITHUB_PATH` (no
+  `pip install --user`, no `sudo mv` to system paths, no mutable
+  host state that can leak between jobs on the self-hosted runner).
+  The `adr-guard-tests` job installs PyYAML the same way; the
+  chart-rendering test uses a fake helm shim, not real helm.
+  Locally the dedicated `adr-guard-k8s` pre-commit hook
+  (`language: python`, `additional_dependencies: pyyaml>=6.0`)
+  provisions PyYAML in an isolated venv so the system-Python
+  `adr-guard-fast` hook stays dep-free; helm is a developer
+  prerequisite shared with the existing `helm-lint-shifter-chart`
+  hook. Robustness extras: empty or missing `containers` lists are
+  explicit violations (preventing chart regressions that drop the
+  container list from silently passing as long as pod-level seccomp
+  is set), and a configured Helm values file that is deleted or
+  renamed produces a violation rather than being silently skipped.
+  The k8s check is wired into the ADR guard's `ci` level only;
+  `fast` stays PyYAML- and helm-free. Documented in
+  `shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md`.
+  Tests in `scripts/adr_guard/tests/test_adr_guard.py` cover the
+  negative paths (missing/wrong seccomp, allowPrivilegeEscalation
+  true, partial capability drop, capability re-grant, container-level
+  seccomp override, privileged true, missing fields, UID 0, boolean
+  UID/GID, unsafe initContainer), the robustness paths (`---`
+  separator, indentless sequences, empty flow `securityContext: {}`,
+  non-mapping `securityContext`, multi-document files, kind-based
+  filtering of unsuffixed Deployment files, non-Deployment kinds
+  ignored, pod-level inheritance honored, container override beats
+  pod default), and the real-repo regression. Removed the
+  now-redundant `ADR-006-R2` exception from
+  `docs/adr/exceptions.yaml` (filed when the manifests lacked
+  security contexts; the manifests have since been hardened to
+  1000/1000 for app/guacd and 1001/1001 for guacamole-client via
+  `platform/charts/shifter/templates/_helpers.tpl`, and the new
+  check now enforces the structural fields). Existing kube-linter
+  checks (`run-as-non-root`, `no-read-only-root-fs`,
+  `privilege-escalation-container`) continue to run as
+  defense-in-depth. The unrelated ADR-006-R3 NetworkPolicy exception
+  remains.
 - **Provisioner container now runs with read-only root filesystem and a dedicated
   writable workspace volume (#1103, follow-up to #950).** `shifter/engine/provisioner/Dockerfile`
   no longer chowns `/app` or copies source with `--chown=appuser`; application code

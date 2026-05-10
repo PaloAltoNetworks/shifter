@@ -22,7 +22,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
+        env:
+          PYYAML_VERSION: "6.0.2"
+        run: |
+          set -euo pipefail
+          python3 --version
+          # The self-hosted runner's system Python ships without pip by default
+          # (Amazon Linux). Bootstrap pip via stdlib ensurepip into the user
+          # site, then install PyYAML into a job-scoped target dir. No system
+          # paths are written.
+          python3 -m ensurepip --upgrade --user
+          python3 -m pip install --quiet --no-deps \
+            --target "${RUNNER_TEMP}/py-deps" \
+            "pyyaml==${PYYAML_VERSION}"
+
+      - name: Install Helm for ADR guard chart rendering (hermetic, version-pinned, checksum-verified)
+        env:
+          HELM_VERSION: v3.15.4
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/helm-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          # Verify the downloaded tarball against the published SHA256 checksum
+          # before extraction or execution. Trust boundary is get.helm.sh; if
+          # it is compromised both files compare equal, but this prevents
+          # CDN/transport tampering and silent corruption.
+          expected=$(curl -fsSL \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum" \
+            | awk '{print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
+          echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/helm-bin/helm" version --short
+
       - name: Run ADR guard
+        env:
+          PYTHONPATH: ${{ runner.temp }}/py-deps
         run: python3 scripts/adr_guard/adr_guard.py --all --level ci
 
   workflow-lint:
@@ -575,7 +613,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
+        env:
+          PYYAML_VERSION: "6.0.2"
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m ensurepip --upgrade --user
+          python3 -m pip install --quiet --no-deps \
+            --target "${RUNNER_TEMP}/py-deps" \
+            "pyyaml==${PYYAML_VERSION}"
+
       - name: Run tests
+        env:
+          PYTHONPATH: ${{ runner.temp }}/py-deps
         run: python3 -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
 
   # ===========================================================================

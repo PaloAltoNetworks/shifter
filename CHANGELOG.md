@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.99.2] - 2026-05-10
+
+### Changed
+
+- **DC domain password secret is now Terraform-managed end to end (#760
+  follow-up).** `platform/terraform/modules/engine-provisioner/secrets.tf`
+  replaces the `data "aws_secretsmanager_secret"` reference (which required a
+  manual, per-environment `aws secretsmanager create-secret` +
+  `put-secret-value`) with the same pattern the portal RDS credentials and
+  Django-app secret use: a `random_password` generated at apply time, stored
+  in `aws_secretsmanager_secret.dc_domain_password` via an
+  `aws_secretsmanager_secret_version`. `terraform apply` for the portal stack
+  now creates the secret with a live `AWSCURRENT` value — no out-of-band
+  bootstrap step — and the `iam.tf` / `outputs.tf` / `task_definition.tf`
+  references switch from the data source to the resource. The DC-secret
+  "is it populated yet?" preflight is removed from
+  `platform/terraform/modules/portal/ec2/user_data.sh` and the
+  `_shifter-platform.yml` deploy job (the secret always carries a value now).
+  Docs updated: `dev/secrets.md` (Provisioning / rotation runbook),
+  `platform_infrastructure/ami-management.md` (the DC AMI build reads the
+  Terraform-seeded value rather than choosing one). Rotation is now one
+  `terraform apply -replace='module.engine_provisioner.random_password.dc_domain_password'`.
+
 ## [3.99.1] - 2026-05-10
 
 ### Security

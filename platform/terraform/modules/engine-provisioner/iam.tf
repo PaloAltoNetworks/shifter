@@ -59,7 +59,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
         "secretsmanager:GetSecretValue"
       ]
       Resource = [
-        data.aws_secretsmanager_secret.dc_domain_password.arn
+        aws_secretsmanager_secret.dc_domain_password.arn
       ]
     }]
   })

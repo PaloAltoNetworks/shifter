@@ -1,31 +1,42 @@
 # ------------------------------------------------------------------------------
-# Secrets Manager
+# Secrets Manager — Domain Controller domain Administrator password
 # ------------------------------------------------------------------------------
-# Reference to the prebaked Domain Controller's Administrator password.
-# The secret container AND its value are created out-of-band BEFORE
-# `terraform apply` runs (see "Bootstrap (fresh environment)" in
-# shifter/shifter_platform/documentation/docs/technical/dev/secrets.md).
-# Terraform reads the existing secret via `data` rather than creating it,
-# which avoids the chicken-and-egg case where the same apply that creates
-# the empty secret container also stands up an ASG whose launch hook
-# requires the value — the ASG would ABANDON every first launch until the
-# operator seeded the value, which is not a recoverable bootstrap.
-#
-# Operator pre-bootstrap step (one-time per environment):
-#   aws secretsmanager create-secret \
-#     --name "shifter-${env}-portal-dc-domain" \
-#     --description "Prebaked DC Administrator password" \
-#     --secret-string "$DC_DOMAIN_PASSWORD"
-#
-# After that, `terraform apply` resolves the secret ARN, wires it into
-# the engine provisioner ECS task (via `secrets = [...]` in
-# task_definition.tf) and into the portal Django container (via the
-# portal/ssm + portal/ec2 modules and entrypoint.sh).
-#
-# Rotation / value updates use `aws secretsmanager put-secret-value`;
-# Terraform never touches the value, so the cleartext credential never
-# lands in Terraform state.
+# Terraform-managed, same pattern as the portal RDS credentials
+# (modules/portal/rds) and the Django-app secret (environments/*/portal):
+# a random_password generated at apply time and stored in Secrets Manager.
+# It is read at runtime as DC_DOMAIN_PASSWORD by the engine provisioner ECS
+# task (via `secrets = [...]` in task_definition.tf) and by the portal Django
+# container (via the portal/ssm + portal/ec2 modules and entrypoint.sh), and
+# is the value the engine provisioner uses to promote each prebaked DC AMI
+# (and to domain-join victims) — see shifter/engine/provisioner. The cleartext
+# never appears in committed source; it lives only in Secrets Manager and in
+# Terraform state (S3 backend, restricted), exactly like the DB and app
+# credentials. Rotation:
+#   terraform apply -replace='module.engine_provisioner.random_password.dc_domain_password'
+# then re-promote affected DCs (or let the next range provision pick it up).
 
-data "aws_secretsmanager_secret" "dc_domain_password" {
-  name = "shifter-${var.environment}-portal-dc-domain"
+resource "random_password" "dc_domain_password" {
+  length  = 24
+  special = true
+  # Restrict the symbol set to characters that survive PowerShell / shell
+  # interpolation in the DC bootstrap path while still meeting Windows AD
+  # complexity (length + the character classes guarantee upper/lower/digit/
+  # symbol coverage in practice).
+  override_special = "!@#%^&*()-_=+[]{}:?"
+}
+
+# checkov:skip=CKV_AWS_149:AWS-managed key sufficient for this internal MVP secret; matches the other portal Secrets Manager secrets (see #213).
+resource "aws_secretsmanager_secret" "dc_domain_password" {
+  name                    = "shifter-${var.environment}-portal-dc-domain"
+  description             = "Domain Controller domain Administrator password (DC_DOMAIN_PASSWORD)"
+  recovery_window_in_days = 0 # NOSONAR - matches the other portal secrets: immediate deletion avoids naming conflicts on recreate
+
+  tags = merge(local.common_tags, {
+    Name = "shifter-${var.environment}-portal-dc-domain"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "dc_domain_password" {
+  secret_id     = aws_secretsmanager_secret.dc_domain_password.id
+  secret_string = random_password.dc_domain_password.result
 }

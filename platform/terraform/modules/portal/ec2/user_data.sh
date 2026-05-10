@@ -181,23 +181,11 @@ fi
 
 # Pass the DC domain password secret ARN through; the container's
 # entrypoint resolves it to the DC_DOMAIN_PASSWORD env var used by the
-# portal's Windows-DC RDP credential lookup.
+# portal's Windows-DC RDP credential lookup. The secret is Terraform-
+# managed (created and seeded by the engine-provisioner module), so it
+# always carries an AWSCURRENT value — same posture as the DB / app /
+# Cognito secret ARNs above.
 if [[ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ]]; then
-  # Preflight: refuse to start containers if the Terraform-managed
-  # secret has no AWSCURRENT value yet (a fresh environment requires
-  # an out-of-band `aws secretsmanager put-secret-value` step before
-  # the portal will start; see secrets.md "Bootstrap (fresh
-  # environment)"). Without this guard, docker run -d returns 0 and
-  # the lifecycle hook continues while the containers crash-loop.
-  if ! aws secretsmanager get-secret-value \
-        --secret-id "$DC_DOMAIN_PASSWORD_SECRET_ARN" \
-        --region "$AWS_REGION" \
-        --query SecretString --output text >/dev/null 2>&1; then
-    echo "ERROR: DC domain password secret has no AWSCURRENT value." >&2
-    echo "Seed the value via 'aws secretsmanager put-secret-value' before bootstrap." >&2
-    complete_lifecycle_action ABANDON
-    exit 1
-  fi
   COMMON_ENV="$COMMON_ENV -e DC_DOMAIN_PASSWORD_SECRET_ARN=$DC_DOMAIN_PASSWORD_SECRET_ARN"
 fi
 

@@ -9,10 +9,50 @@ from typing import Any
 
 from django.conf import settings
 
+from shared.cloud import PROVISIONER_CONTAINER_NAME
 from shared.cloud.exceptions import CloudTaskError
 from shared.cloud.gcp.base import build_job_generate_name, parse_job_task_id
 
+__all__ = ("PROVISIONER_CONTAINER_NAME", "GCPTaskRunner")
+
 logger = logging.getLogger(__name__)
+
+_PROVISIONER_RUN_AS_UID = 1000
+_PROVISIONER_RUN_AS_GID = 1000
+
+# Memory-backed workspace volume size cap. Terraform staging trees are tiny
+# (a few MB), but a runaway plan log or provider download could otherwise
+# consume node memory unbounded. 256Mi is generous for the staged terraform/
+# tree plus typical plan output without putting the node under pressure.
+_PROVISIONER_WORKSPACE_SIZE_LIMIT = "256Mi"
+
+# Writable mount points the provisioner image needs at runtime. /app and the
+# rest of the root filesystem are read-only (issue #1103); these explicit
+# emptyDir volumes are the only paths the runtime user can write to.
+# - workspace: terraform_base._stage_workspace target. Memory-backed (medium=Memory)
+#   so terraform.tfvars.json (which can carry secrets) does not persist on disk;
+#   capped at _PROVISIONER_WORKSPACE_SIZE_LIMIT to bound the worst-case node memory
+#   pressure from a runaway plan log or large provider download.
+# - /tmp: Python tempfile, kubectl temp kubeconfigs (gdc_*), etc.
+# - tf plugin cache and pulumi home: Terraform/Pulumi tool state under HOME.
+_PROVISIONER_WRITABLE_MOUNTS: tuple[tuple[str, str, str | None, str | None], ...] = (
+    ("provisioner-workspace", "/var/run/provisioner/workspace", "Memory", _PROVISIONER_WORKSPACE_SIZE_LIMIT),
+    ("tmp", "/tmp", None, None),  # noqa: S108 # nosec B108 — Kubernetes mount path, not a tempfile API call
+    ("tf-plugin-cache", "/home/appuser/.terraform.d/plugin-cache", None, None),
+    ("pulumi-home", "/home/appuser/.pulumi", None, None),
+)
+
+
+def _is_provisioner_task(container_name: str) -> bool:
+    """Return True if the Job being built is the provisioner task.
+
+    Hardening from issue #1103 (read-only root filesystem, writable workspace
+    volume, drop-ALL capabilities, etc.) is provisioner-specific. CMS
+    experiments and any future shared-runner caller keep their current,
+    less-prescribed contract until the runner protocol grows a per-task
+    runtime profile parameter.
+    """
+    return container_name == PROVISIONER_CONTAINER_NAME
 
 
 class GCPTaskRunner:
@@ -55,6 +95,51 @@ class GCPTaskRunner:
             return None
         return [client.V1EnvVar(name=name, value=value) for name, value in sorted(env_overrides.items())]
 
+    def _build_container_security_context(self, client: Any) -> Any:
+        # Issue #1103: lock the provisioner Job's writable surface to the
+        # explicit volumes built below. ALL capabilities dropped, no privilege
+        # escalation, non-root, read-only root FS.
+        return client.V1SecurityContext(
+            read_only_root_filesystem=True,
+            run_as_non_root=True,
+            run_as_user=_PROVISIONER_RUN_AS_UID,
+            run_as_group=_PROVISIONER_RUN_AS_GID,
+            allow_privilege_escalation=False,
+            capabilities=client.V1Capabilities(drop=["ALL"]),
+        )
+
+    def _build_pod_security_context(self, client: Any) -> Any:
+        # seccompProfile=RuntimeDefault matches the platform's worker-engine
+        # baseline and is required for restricted Pod Security Standard
+        # admission (ADR-006). fsGroup=1000 makes the kubelet chown mounted
+        # emptyDir volumes to the runtime group so the non-root container can
+        # write to them without an init-chown or fsGroupChangePolicy=Always
+        # (which would also re-chown read-only mounts on every start).
+        return client.V1PodSecurityContext(
+            seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
+            fs_group=_PROVISIONER_RUN_AS_GID,
+            fs_group_change_policy="OnRootMismatch",
+        )
+
+    def _build_writable_volumes(self, client: Any) -> list[Any]:
+        volumes = []
+        for name, _mount_path, medium, size_limit in _PROVISIONER_WRITABLE_MOUNTS:
+            empty_dir_kwargs: dict[str, Any] = {}
+            if medium:
+                empty_dir_kwargs["medium"] = medium
+            if size_limit:
+                empty_dir_kwargs["size_limit"] = size_limit
+            volumes.append(
+                client.V1Volume(name=name, empty_dir=client.V1EmptyDirVolumeSource(**empty_dir_kwargs)),
+            )
+        return volumes
+
+    def _build_container_volume_mounts(self, client: Any) -> list[Any]:
+        return [
+            client.V1VolumeMount(name=name, mount_path=mount_path)
+            for name, mount_path, _medium, _size_limit in _PROVISIONER_WRITABLE_MOUNTS
+        ]
+
     def _build_container(
         self,
         client: Any,
@@ -63,13 +148,17 @@ class GCPTaskRunner:
         command: list[str],
         env: list[Any] | None,
     ) -> Any:
-        return client.V1Container(
-            name=container_name,
-            image=image,
-            args=command,
-            env=env,
-            image_pull_policy=getattr(settings, "ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent"),
-        )
+        kwargs: dict[str, Any] = {
+            "name": container_name,
+            "image": image,
+            "args": command,
+            "env": env,
+            "image_pull_policy": getattr(settings, "ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent"),
+        }
+        if _is_provisioner_task(container_name):
+            kwargs["security_context"] = self._build_container_security_context(client)
+            kwargs["volume_mounts"] = self._build_container_volume_mounts(client)
+        return client.V1Container(**kwargs)
 
     def _build_job(
         self,
@@ -79,10 +168,14 @@ class GCPTaskRunner:
         command: list[str],
         env: list[Any] | None,
     ) -> Any:
-        pod_spec = client.V1PodSpec(
-            containers=[self._build_container(client, container_name, image, command, env)],
-            restart_policy="Never",
-        )
+        pod_spec_kwargs: dict[str, Any] = {
+            "containers": [self._build_container(client, container_name, image, command, env)],
+            "restart_policy": "Never",
+        }
+        if _is_provisioner_task(container_name):
+            pod_spec_kwargs["security_context"] = self._build_pod_security_context(client)
+            pod_spec_kwargs["volumes"] = self._build_writable_volumes(client)
+        pod_spec = client.V1PodSpec(**pod_spec_kwargs)
 
         service_account_name = getattr(settings, "ENGINE_TASK_SERVICE_ACCOUNT_NAME", "")
         if service_account_name:

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 
-from shared.cloud import get_task_runner
+from shared.cloud import PROVISIONER_CONTAINER_NAME, get_task_runner
 from shared.cloud.exceptions import CloudTaskError
 from shared.enums import ResourceType
 
@@ -326,7 +326,7 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
             task_definition=task_definition,
             cluster=cluster,
             command=command_list,
-            container_name="pulumi-provisioner",
+            container_name=PROVISIONER_CONTAINER_NAME,
             env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
@@ -426,7 +426,7 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
             task_definition=task_definition,
             cluster=cluster,
             command=command_list,
-            container_name="pulumi-provisioner",
+            container_name=PROVISIONER_CONTAINER_NAME,
             env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
@@ -541,7 +541,7 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
             task_definition=task_definition,
             cluster=cluster,
             command=command,
-            container_name="pulumi-provisioner",
+            container_name=PROVISIONER_CONTAINER_NAME,
             env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )

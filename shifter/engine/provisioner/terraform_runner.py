@@ -23,11 +23,6 @@ def has_terraform_state(request_uuid: str) -> bool:
     return terraform_base.has_terraform_state(_STATE_KEY_PREFIX, request_uuid)
 
 
-def init_ngfw_workspace(request_uuid: str, working_dir: Path) -> None:
-    """Initialize Terraform workspace for NGFW."""
-    terraform_base.init_workspace(_STATE_KEY_PREFIX, request_uuid, working_dir, _LABEL)
-
-
 def apply_ngfw(
     request_uuid: str,
     variables: dict[str, Any],

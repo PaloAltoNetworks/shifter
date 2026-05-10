@@ -67,6 +67,8 @@ The first slice intentionally stays small:
 
 - `actionlint`
   Lints GitHub Actions workflows beyond plain YAML validation.
+  This includes the GCP deploy workflow's Terraform state-backend hardening
+  (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
 
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.

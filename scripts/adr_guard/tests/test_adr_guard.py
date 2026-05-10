@@ -1241,6 +1241,112 @@ class K8sDeploymentSecurityContextTests(unittest.TestCase):
             self.assertTrue(any("runAsGroup" in v.message for v in violations))
 
 
+class K8sNetworkPolicyCoverageTests(unittest.TestCase):
+    """Tests for the k8s-network-policy-coverage ADR-006-R3 check."""
+
+    NAMESPACES = (
+        "apiVersion: v1\n"
+        "kind: Namespace\n"
+        "metadata:\n"
+        "  name: shifter-platform\n"
+        "---\n"
+        "apiVersion: v1\n"
+        "kind: Namespace\n"
+        "metadata:\n"
+        "  name: shifter-jobs\n"
+    )
+
+    DEFAULT_DENY_PLATFORM = (
+        "apiVersion: networking.k8s.io/v1\n"
+        "kind: NetworkPolicy\n"
+        "metadata:\n"
+        "  name: default-deny\n"
+        "  namespace: shifter-platform\n"
+        "spec:\n"
+        "  podSelector: {}\n"
+        "  policyTypes:\n"
+        "    - Ingress\n"
+        "    - Egress\n"
+        "  ingress: []\n"
+        "  egress: []\n"
+    )
+
+    DEFAULT_DENY_JOBS = DEFAULT_DENY_PLATFORM.replace(
+        "namespace: shifter-platform", "namespace: shifter-jobs"
+    )
+
+    def _write(self, repo_root: Path, rel: str, body: str) -> None:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def _run(self, repo_root: Path, files: list[str] | None = None) -> list:
+        if files is None:
+            base = repo_root / ADR_GUARD.K8S_BASE_DEPLOYMENT_DIR
+            files = sorted(
+                ADR_GUARD._repo_relative(p, repo_root)
+                for p in list(base.rglob("*.yaml")) + list(base.rglob("*.yml"))
+            )
+        return ADR_GUARD.check_k8s_network_policy_coverage(repo_root, files)
+
+    def test_each_namespace_requires_default_deny_network_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(repo_root, "platform/k8s/gcp/base/namespaces.yaml", self.NAMESPACES)
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/base/networkpolicies.yaml",
+                self.DEFAULT_DENY_PLATFORM,
+            )
+
+            violations = self._run(repo_root)
+
+            self.assertTrue(any("shifter-jobs" in v.message for v in violations))
+            self.assertTrue(all(v.rule_id == "ADR-006-R3" for v in violations))
+
+    def test_default_deny_network_policy_coverage_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(repo_root, "platform/k8s/gcp/base/namespaces.yaml", self.NAMESPACES)
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/base/networkpolicies.yaml",
+                self.DEFAULT_DENY_PLATFORM + "---\n" + self.DEFAULT_DENY_JOBS,
+            )
+
+            self.assertEqual(self._run(repo_root), [])
+
+    def test_broad_egress_ip_block_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            broad_allow = (
+                self.DEFAULT_DENY_PLATFORM
+                + "---\n"
+                + "apiVersion: networking.k8s.io/v1\n"
+                + "kind: NetworkPolicy\n"
+                + "metadata:\n"
+                + "  name: broad-egress\n"
+                + "  namespace: shifter-platform\n"
+                + "spec:\n"
+                + "  podSelector: {}\n"
+                + "  policyTypes: [Egress]\n"
+                + "  egress:\n"
+                + "    - to:\n"
+                + "        - ipBlock:\n"
+                + "            cidr: 0.0.0.0/0\n"
+            )
+            self._write(repo_root, "platform/k8s/gcp/base/namespaces.yaml", self.NAMESPACES)
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/base/networkpolicies.yaml",
+                broad_allow + "---\n" + self.DEFAULT_DENY_JOBS,
+            )
+
+            violations = self._run(repo_root)
+
+            self.assertTrue(any("0.0.0.0/0" in v.message for v in violations))
+
+
 class K8sDeploymentSecurityContextRobustnessTests(unittest.TestCase):
     """Cycle-3 robustness coverage: PyYAML-backed parsing, kind-based filtering,
     pod-level inheritance, multi-document files, and unsupported shapes."""

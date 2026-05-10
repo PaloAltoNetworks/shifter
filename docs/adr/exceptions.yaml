@@ -1,10 +1,1 @@
-[
-  {
-    "rule_id": "ADR-006-R3",
-    "owner": "platform",
-    "reason": "NetworkPolicies not yet authored; deferred until network segmentation design is complete.",
-    "expires_on": "2026-07-08",
-    "checks": [],
-    "paths": ["platform/k8s/gcp/base/"]
-  }
-]
+[]

@@ -5,6 +5,7 @@ resources:
   - namespaces.yaml
   - serviceaccounts.yaml
   - rbac-job-launcher.yaml
+  - networkpolicies.yaml
   - web-service.yaml
   - web-deployment.yaml
   - guacd-service.yaml

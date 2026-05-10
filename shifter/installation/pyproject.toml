@@ -31,6 +31,9 @@ package-dir = {"installation" = "."}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: spawns a subprocess to exercise the installed CLI (`python -m installation`) end to end",
+]
 
 [tool.coverage.run]
 omit = [

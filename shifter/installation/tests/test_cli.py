@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 from installation.cli import main
@@ -64,8 +65,13 @@ class TestArgParsing:
         assert rc != 0
 
 
+@pytest.mark.integration
 class TestModuleEntrypoint:
-    """``python -m installation`` is the documented entry point — exercise it end to end."""
+    """``python -m installation`` is the documented entry point — exercise it end to end.
+
+    Marked ``integration`` because it spawns a subprocess (the test interpreter) rather
+    than calling ``cli.main`` in process.
+    """
 
     def test_python_m_installation_validates_an_example(self, examples_dir):
         example = examples_dir / "aws.yaml"

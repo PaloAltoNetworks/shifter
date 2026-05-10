@@ -108,7 +108,7 @@ backend is #1119.
 | --- | --- | --- |
 | Shared contracts and layer boundaries | `shared/`, `.importlinter`, `scripts/check_layer_imports/layer_imports.yaml`, `ADR-001` | Put any cross-runtime contract behind `shared` or a repo-level script contract that does not import Django app layers directly. Do not create provider schemas separately inside each app. |
 | Schema validation | Existing Pydantic v2 schema style in `shared.schemas`, `cyberscript.schemas`, `cms.scenarios.schema`, and `cms.experiments.schemas`; script-local validators in `scripts/bootstrap/deploy.py` | Use one authoritative typed model/parser for the root config. If YAML is the UX format, use a structured parser and central validation instead of ad hoc regex/string parsing. |
-| Runtime env binding | `shifter/shifter_platform/config/settings.py`, `scripts/gcp/render_runtime_env.py`, `scripts/bootstrap/deploy.py::render_gcp_helm_values`, Helm `runtimeEnv` | Treat runtime env as derived output. Generate canonical keys first and keep AWS/Pulumi-era aliases as compatibility only while migration work requires them. |
+| Runtime env binding | `shifter/shifter_platform/config/settings.py`, `scripts/gcp/render_runtime_env.py`, `scripts/bootstrap/deploy.py::render_gcp_helm_values`, Helm `runtimeEnv` | Treat runtime env as derived output. Generate canonical keys first and keep AWS/Pulumi-era aliases as compatibility only while migration work requires them. Production `DJANGO_DEBUG`, `SESSION_COOKIE_SECURE`, and `CSRF_COOKIE_SECURE` are runtime-profile security settings, not edge-certificate readiness outputs; the GCP renderer always emits `SITE_URL=https://<public_hostname>` and fails closed (no HTTP/ingress-IP fallback) when a public hostname or managed TLS is missing. |
 | Cloud capability seams | `shifter/shifter_platform/shared/cloud/__init__.py`, `shared/cloud/types.py`, `shifter/engine/provisioner/cloud/__init__.py`, `ADR-005-R1` | Backend selection may feed the existing factories, but domain code must continue to call cloud-neutral factories/protocols instead of provider-specific modules. |
 | Identity/auth | `ADR-009`, `config/settings.py`, `config/oidc.py`, `config/identity_platform.py`, `scripts/bootstrap/deploy.py::ensure_gcp_identity_platform_operator` | Backend config may choose the identity stack through backend metadata; it must not move provider credential collection into Django or bypass domain/email/MFA/bootstrap controls. |
 | Secrets | `shared.cloud.*.secrets`, `engine/provisioner/cloud/*/secrets.py`, `scripts/bootstrap/deploy.py` Secret Manager/GitHub secret helpers, `.gitleaks.toml` | Store and pass secret identifiers, not values. Keep generated secret-bearing Helm values in temporary/staged outputs or provider secret stores, and never echo secret values in diagnostics. |
@@ -129,7 +129,11 @@ backend is #1119.
 - Env-binding shape: generated env must match `settings.py` canonical keys and
   existing alias windows. Any new key must have one owner, one renderer, and one
   validation source; generated ConfigMaps must not carry values that should be
-  Kubernetes Secrets or provider secrets.
+  Kubernetes Secrets or provider secrets. For #966, `DJANGO_DEBUG` and secure
+  cookie settings must be separated from managed TLS certificate activation,
+  DNS convergence, and identity-secret availability. Edge readiness may affect
+  ingress promotion or fail-closed deployment checks, but must not make a
+  production runtime debug-enabled or send session/CSRF cookies over plaintext.
 - Config validators: the root parser validates shape and cross-field conflicts;
   backend bundles validate provider requirements; Terraform, Helm, Kubernetes,
   actionlint, import-linter, and ADR guard keep their existing authority.
@@ -146,9 +150,11 @@ The schema needs an explicit version/profile/backend seam so the next backend
 or profile does not require redefining the root contract. The root parser owns
 root keys and dispatches selected-backend settings to backend bundle validation;
 backend bundles own provider-specific requirements, generated outputs,
-entrypoints, health checks, and docs. Future `local` or production variants
-should add backend/profile data behind that seam, not add another authoritative
-root file or branch convention.
+entrypoints, health checks, and docs. Runtime security profile and edge readiness
+must remain separate parameters: a production profile fixes debug and cookie
+security, while edge readiness controls hostname/TLS promotion or fail-closed
+gates. Future `local` or production variants should add backend/profile data
+behind that seam, not add another authoritative root file or branch convention.
 
 ### Anti-Patterns
 

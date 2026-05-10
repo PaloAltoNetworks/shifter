@@ -9,6 +9,14 @@ on:
       deploy_changes:
         required: true
         type: boolean
+      require_active_certificate:
+        description: >-
+          Fail the deploy if the managed certificate is not Active for the public
+          hostname (the portal is rendered for https://<hostname> only). Set false
+          for first-time bootstrap before DNS is pointed at the ingress IP.
+        required: false
+        type: boolean
+        default: true
     secrets:
       GCP_SERVICE_ACCOUNT:
         required: false
@@ -224,15 +232,7 @@ jobs:
               env_file.write(f"PROVISIONER_IMAGE_ROOT={image_roots['pulumi-provisioner']}\n")
               env_file.write(f"ARTIFACT_REGISTRY_HOST={image_roots['portal'].split('/')[0]}\n")
               env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
-              env_file.write(f"MANAGED_TLS_ENABLED={'true' if value('managed_tls_enabled') else 'false'}\n")
           PY
-      - name: Resolve requested portal auth mode
-        run: |
-          SECURE_PORTAL_MODE_REQUESTED=false
-          if [ -n "${PUBLIC_HOSTNAME}" ] && [ "${MANAGED_TLS_ENABLED}" = "true" ]; then
-            SECURE_PORTAL_MODE_REQUESTED=true
-          fi
-          echo "SECURE_PORTAL_MODE_REQUESTED=${SECURE_PORTAL_MODE_REQUESTED}" >> "$GITHUB_ENV"
       - name: Login to Artifact Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
@@ -309,32 +309,25 @@ jobs:
           cluster_name: ${{ env.GKE_CLUSTER_NAME }}
           location: ${{ env.GKE_CLUSTER_LOCATION }}
           project_id: ${{ env.PROJECT_ID }}
-      - name: Resolve active secure portal state
-        run: |
-          SECURE_PORTAL_MODE=false
-          if [ "${SECURE_PORTAL_MODE_REQUESTED}" = "true" ]; then
-            CERT_STATUS=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
-            if [ "${CERT_STATUS}" = "Active" ]; then
-              SECURE_PORTAL_MODE=true
-            fi
-          fi
-          echo "SECURE_PORTAL_MODE=${SECURE_PORTAL_MODE}" >> "$GITHUB_ENV"
       - name: Render generated runtime env
         run: |
-          RENDER_ARGS=(
-            --terraform-output-json /tmp/gcp-terraform-outputs.json
+          # The GCP portal runtime is always production-secure (DEBUG off,
+          # secure cookies, Identity Platform auth, SITE_URL=https://<hostname>).
+          # render_runtime_env.py fails closed if the Terraform outputs lack a
+          # public hostname / managed TLS, so an insecure runtime is never
+          # rendered or applied (ADR-008-R1/R3).
+          python3 scripts/gcp/render_runtime_env.py \
+            --terraform-output-json /tmp/gcp-terraform-outputs.json \
             --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env"
-          )
-          if [ "${SECURE_PORTAL_MODE}" = "true" ]; then
-            RENDER_ARGS+=(--secure-portal-mode)
-          fi
-          python3 scripts/gcp/render_runtime_env.py "${RENDER_ARGS[@]}"
       - name: Render generated edge manifest
         run: |
           python3 scripts/gcp/render_edge_manifest.py \
             --environment "${GCP_ENVIRONMENT}" \
             > "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
-      - name: Apply GKE manifests
+      # Roll out the production-secure workload (new runtime ConfigMap + restart)
+      # BEFORE (re-)applying the public edge, so the public Ingress never routes
+      # to pods still running an older, less-secure runtime config.
+      - name: Apply GKE workload manifests
         run: kubectl apply -k "${K8S_OVERLAY_DIR}"
       - name: Sync Guacamole runtime secret
         run: |
@@ -403,29 +396,55 @@ jobs:
             fi
             sleep 10
           done
-          echo "::warning::Ingress IP was not assigned within 10 minutes"
-      - name: Promote portal to secure mode
+          echo "::error::Ingress platform-external did not receive a load-balancer IP within 10 minutes"
+          exit 1
+      - name: Wait for managed certificate to cover the public hostname
+        env:
+          REQUIRE_ACTIVE_CERTIFICATE: ${{ inputs.require_active_certificate }}
         run: |
-          if [ "${SECURE_PORTAL_MODE_REQUESTED}" != "true" ] || [ "${SECURE_PORTAL_MODE}" = "true" ]; then
-            exit 0
+          # The portal is rendered for https://<public_hostname> only, so a
+          # reachable deploy needs a ManagedCertificate that is Active for that
+          # exact hostname. The certificate object name is fixed, so verify
+          # .spec.domains covers ${PUBLIC_HOSTNAME} (a stale cert for a previous
+          # hostname can read Active). The production-secure workload is already
+          # rolled out by this point, so when this gate fails the cluster is left
+          # in the secure config (just not yet HTTPS-reachable via the hostname),
+          # not the old runtime.
+          cert_covers_hostname() {
+            local domains d
+            local -a parsed
+            domains=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.spec.domains[*]}' 2>/dev/null || true)
+            read -ra parsed <<< "${domains}"
+            for d in "${parsed[@]}"; do
+              [ "${d}" = "${PUBLIC_HOSTNAME}" ] && return 0
+            done
+            return 1
+          }
+
+          if [ "${REQUIRE_ACTIVE_CERTIFICATE}" != "true" ]; then
+            # First-time bootstrap: DNS for the hostname cannot be pointed at the
+            # ingress IP until the operator has it from this run, so don't park
+            # the deploy on the Active wait. Confirm the certificate object was
+            # rendered for the hostname, warn, and continue.
+            for _ in $(seq 1 12); do
+              if cert_covers_hostname; then
+                echo "::warning::Bootstrap mode: ManagedCertificate ${EDGE_CERT_NAME} is configured for ${PUBLIC_HOSTNAME} but is not yet Active. Point DNS for ${PUBLIC_HOSTNAME} at the ingress IP, then re-run the deploy without gcp_require_active_certificate."
+                exit 0
+              fi
+              sleep 10
+            done
+            echo "::error::Bootstrap mode: ManagedCertificate ${EDGE_CERT_NAME} did not appear with ${PUBLIC_HOSTNAME} in .spec.domains within 2 minutes"
+            exit 1
           fi
+
           for _ in $(seq 1 120); do
             CERT_STATUS=$(kubectl get managedcertificate "${EDGE_CERT_NAME}" -n shifter-platform -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
-            if [ "${CERT_STATUS}" = "Active" ]; then
-              python3 scripts/gcp/render_runtime_env.py \
-                --terraform-output-json /tmp/gcp-terraform-outputs.json \
-                --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env" \
-                --secure-portal-mode
-              kubectl apply -k "${K8S_OVERLAY_DIR}"
-              for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
-                kubectl rollout restart "deployment/${deployment}" -n shifter-platform
-              done
-              for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
-                kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
-              done
+            if cert_covers_hostname && [ "${CERT_STATUS}" = "Active" ]; then
+              echo "ManagedCertificate ${EDGE_CERT_NAME} is Active for ${PUBLIC_HOSTNAME}"
               exit 0
             fi
-            echo "Waiting for ManagedCertificate ${EDGE_CERT_NAME}: status='${CERT_STATUS:-pending}'"
+            echo "Waiting for ManagedCertificate ${EDGE_CERT_NAME} to cover ${PUBLIC_HOSTNAME} and become Active: status='${CERT_STATUS:-pending}'"
             sleep 30
           done
-          echo "::warning::ManagedCertificate ${EDGE_CERT_NAME} did not become Active within 60 minutes. The portal remains in the debug-auth fallback until a later deploy promotes it."
+          echo "::error::ManagedCertificate ${EDGE_CERT_NAME} is not Active for ${PUBLIC_HOSTNAME} after 60 minutes; check that DNS for ${PUBLIC_HOSTNAME} points at the ingress IP. Re-run with gcp_require_active_certificate=false only for first-time bootstrap."
+          exit 1

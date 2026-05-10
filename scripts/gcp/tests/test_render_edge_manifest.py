@@ -103,7 +103,9 @@ def test_main_writes_manifest_to_stdout(tmp_path, monkeypatch, capsys):
     tf_output = tmp_path / "terraform-output.json"
     tf_output.write_text(json.dumps(_outputs(public_hostname="portal.example.test", managed_tls_enabled=True)))
 
-    monkeypatch.setattr(module, "_output_path_for_environment", lambda environment: tmp_path / "platform-edge.generated.yaml")
+    monkeypatch.setattr(
+        module, "_output_path_for_environment", lambda environment: tmp_path / "platform-edge.generated.yaml"
+    )
     monkeypatch.setattr(module, "_TERRAFORM_OUTPUT_PATH", tf_output)
     monkeypatch.setattr(
         "sys.argv",

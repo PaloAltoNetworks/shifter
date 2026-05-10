@@ -233,16 +233,21 @@
     "title": "GCP bootstrap fails closed and uses private operator access",
     "status": "accepted",
     "scope": "gcp",
-    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, Cloud Armor on public backends, and IAP-based access to private GDC operator hosts.",
+    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: production Django DEBUG disabled independently of edge certificate readiness, managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, Cloud Armor on public backends, secure session/CSRF cookies, and IAP-based access to private GDC operator hosts.",
     "rules": [
       {
         "id": "ADR-008-R1",
-        "description": "Bootstrap must reject insecure GCP inputs instead of falling back to public debug or dev-login behavior.",
+        "description": "Bootstrap and runtime renderers must reject insecure GCP inputs instead of falling back to public debug or dev-login behavior.",
         "checks": []
       },
       {
         "id": "ADR-008-R2",
         "description": "GDC operator hosts must be private-only and reached through IAP rather than public SSH.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R3",
+        "description": "Production DJANGO_DEBUG and secure session/CSRF cookie settings must not be derived from managed TLS certificate readiness, DNS convergence, or identity secret availability.",
         "checks": []
       }
     ],

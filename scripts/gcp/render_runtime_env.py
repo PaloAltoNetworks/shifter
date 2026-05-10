@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Render the generated GKE runtime env file from Terraform outputs."""
+"""Render the generated GKE runtime env file from Terraform outputs.
+
+The GCP portal runtime is always rendered in the production security posture
+(ADR-008, ADR-008-R1, ADR-008-R3):
+
+* ``DJANGO_DEBUG=false``, ``SESSION_COOKIE_SECURE=true``,
+  ``CSRF_COOKIE_SECURE=true``, ``AUTH_PROVIDER=identity_platform`` — emitted
+  unconditionally; never derived from managed-TLS certificate readiness, DNS
+  convergence, or identity-secret availability.
+* ``SITE_URL`` is always ``https://<public_hostname>``. There is no
+  ``http://<ingress-ip>`` fallback: a configured public hostname and managed
+  TLS are mandatory inputs, and the renderer fails closed when either is
+  missing. (Certificate *activation* is asynchronous and is handled by the
+  deploy workflow — it does not change what this renderer emits.)
+* The Identity Platform allow-list (``IDENTITY_ALLOWED_EMAIL_DOMAIN`` /
+  ``IDENTITY_ALLOWED_EMAILS``) is rendered from the same Terraform outputs that
+  configure the provider-side blocking function, so both enforce one policy.
+"""
 
 from __future__ import annotations
 
@@ -37,7 +54,21 @@ def _csv_env(name: str) -> list[str]:
     return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
 
 
-def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) -> str:
+def _string_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def render_env(outputs: dict[str, object]) -> str:
+    """Render the GCP portal runtime env contract.
+
+    A configured public hostname and managed TLS are mandatory: the renderer
+    fails closed (``ValueError``) rather than emitting an HTTP/ingress-IP
+    runtime. The production security profile (debug disabled, secure
+    session/CSRF cookies, Identity Platform auth, ``https://<hostname>``
+    ``SITE_URL``) is emitted unconditionally.
+    """
     assets_bucket = _value(outputs, "assets_bucket_name")
     terraform_state_bucket = _value(outputs, "terraform_state_bucket_name")
     topic_id = _value(outputs, "platform_events_topic_id")
@@ -49,7 +80,8 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     image_roots = _value(outputs, "artifact_registry_image_roots")
     identity_platform_api_key = _value(outputs, "identity_platform_api_key")
     identity_platform_project_id = _value(outputs, "identity_platform_project_id")
-    public_ingress_ip = _value(outputs, "public_ingress_ip_address")
+    identity_allowed_email_domain = str(_value(outputs, "identity_allowed_email_domain")).strip()
+    identity_allowed_emails = _string_list(_value(outputs, "identity_allowed_emails"))
     public_hostname = _value(outputs, "public_hostname").strip()
     managed_tls_enabled = bool(_value(outputs, "managed_tls_enabled"))
     range_network_id = _value(outputs, "range_network_id")
@@ -57,23 +89,25 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
     range_network_region = _value(outputs, "range_network_region")
     portal_network_cidrs = _value(outputs, "portal_network_cidrs")
 
-    if secure_portal_mode and (not public_hostname or not managed_tls_enabled):
+    if not public_hostname or not managed_tls_enabled:
         raise ValueError(
-            "secure portal mode requires public_hostname and managed_tls_enabled to be configured"
+            "GCP portal runtime requires public_hostname and managed_tls_enabled "
+            f"(got public_hostname={public_hostname!r}, managed_tls_enabled={managed_tls_enabled}); "
+            "refusing to render an insecure HTTP/ingress-IP runtime"
         )
+    if not identity_allowed_email_domain:
+        raise ValueError("GCP portal runtime requires identity_allowed_email_domain to be set")
 
-    use_hostname = secure_portal_mode and public_hostname and managed_tls_enabled
-    public_origin_host = public_hostname if use_hostname else public_ingress_ip
-    public_scheme = "https" if use_hostname else "http"
-    site_url = f"{public_scheme}://{public_origin_host}"
-    allowed_hosts = ",".join(_unique([public_hostname, public_ingress_ip, "localhost", "127.0.0.1"]))
-    csrf_origins = [site_url]
-    if not secure_portal_mode and public_hostname:
-        csrf_origins.append(f"http://{public_hostname}")
+    site_url = f"https://{public_hostname}"
+    # The public hostname is the only externally addressable host. Health-check
+    # probes hit /health/, which HealthCheckMiddleware short-circuits before
+    # ALLOWED_HOSTS validation, so the ingress IP is intentionally not an
+    # accepted application host. localhost/127.0.0.1 stay for in-pod probes and
+    # port-forward debugging.
+    allowed_hosts = ",".join(_unique([public_hostname, "localhost", "127.0.0.1"]))
 
     bootstrap_staff_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_STAFF_EMAILS"))
     bootstrap_superuser_emails = ",".join(_csv_env("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"))
-    identity_allowed_emails = ",".join(_csv_env("IDENTITY_ALLOWED_EMAILS"))
 
     values = {
         "STORAGE_BUCKET_NAME": assets_bucket,
@@ -92,15 +126,16 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "APP_SECRET_ID": secret_ids["app"],
         "GUACAMOLE_SECRET_ID": secret_ids["guacamole-json-auth"],
         "GDC_ACCESS_SECRET_ID": _derive_sibling_secret_id(secret_ids["app"], "app", "gdc-access"),
-        "DJANGO_DEBUG": "false" if secure_portal_mode else "true",
-        "SESSION_COOKIE_SECURE": "true" if secure_portal_mode else "false",
-        "CSRF_COOKIE_SECURE": "true" if secure_portal_mode else "false",
+        # Production runtime security profile — unconditional (ADR-008-R1, R3).
+        "DJANGO_DEBUG": "false",
+        "SESSION_COOKIE_SECURE": "true",
+        "CSRF_COOKIE_SECURE": "true",
         "DB_HOST": database["private_ip"],
         "DB_PORT": str(database["port"]),
         "REDIS_HOST": cache["host"],
         "REDIS_PORT": str(cache["port"]),
         "DJANGO_ALLOWED_HOSTS": allowed_hosts,
-        "DJANGO_CSRF_TRUSTED_ORIGINS": ",".join(_unique(csrf_origins)),
+        "DJANGO_CSRF_TRUSTED_ORIGINS": site_url,
         "SITE_URL": site_url,
         "GUACAMOLE_BASE_URL": "/guacamole",
         "GUACAMOLE_API_BASE_URL": "http://guacamole-client.shifter-platform.svc.cluster.local:8080/guacamole",
@@ -108,11 +143,14 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "GUACAMOLE_POSTGRESQL_PORT": str(guacamole_database["port"]),
         "GUACAMOLE_POSTGRESQL_DATABASE": guacamole_database["database_name"],
         "ENGINE_TASK_IMAGE": f"{image_roots['pulumi-provisioner']}:latest",
-        "AUTH_PROVIDER": "identity_platform" if secure_portal_mode else "oidc",
+        # GCP deployments authenticate against Identity Platform in every case.
+        "AUTH_PROVIDER": "identity_platform",
         "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
         "IDENTITY_PLATFORM_PROJECT_ID": identity_platform_project_id,
         "IDENTITY_PLATFORM_AUTH_DOMAIN": f"{identity_platform_project_id}.firebaseapp.com",
-        "IDENTITY_ALLOWED_EMAIL_DOMAIN": "paloaltonetworks.com",
+        # Allow-list rendered from the same Terraform outputs the provider-side
+        # blocking function uses, so both enforce one policy.
+        "IDENTITY_ALLOWED_EMAIL_DOMAIN": identity_allowed_email_domain,
         "IDENTITY_PLATFORM_ISSUER": "Shifter",
         "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME": "Shifter Authenticator",
         "RANGE_NETWORK_ID": range_network_id,
@@ -127,12 +165,12 @@ def render_env(outputs: dict[str, object], *, secure_portal_mode: bool = False) 
         "RANGE_VPC_CIDR": range_network_cidr,
     }
 
+    if identity_allowed_emails:
+        values["IDENTITY_ALLOWED_EMAILS"] = ",".join(identity_allowed_emails)
     if bootstrap_staff_emails:
         values["PLATFORM_BOOTSTRAP_STAFF_EMAILS"] = bootstrap_staff_emails
     if bootstrap_superuser_emails:
         values["PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"] = bootstrap_superuser_emails
-    if identity_allowed_emails:
-        values["IDENTITY_ALLOWED_EMAILS"] = identity_allowed_emails
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 
@@ -141,15 +179,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--terraform-output-json", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument(
-        "--secure-portal-mode",
-        action="store_true",
-        help="Render the portal runtime contract for the non-debug OIDC path.",
-    )
     args = parser.parse_args()
 
     outputs = json.loads(args.terraform_output_json.read_text())
-    rendered = render_env(outputs, secure_portal_mode=args.secure_portal_mode)
+    rendered = render_env(outputs)
     args.output.write_text(rendered)
     return 0
 

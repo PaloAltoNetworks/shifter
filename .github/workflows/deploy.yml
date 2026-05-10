@@ -6,6 +6,15 @@ on:
   push:
     branches: [main, dev, aws-dev, gcp-dev]
   workflow_dispatch:
+    inputs:
+      gcp_require_active_certificate:
+        description: >-
+          Fail the GCP deploy if the GKE ManagedCertificate is not Active for the
+          public hostname. Set false only for first-time bootstrap, before DNS for
+          the hostname has been pointed at the ingress IP. Automatic (push) deploys
+          always require an active certificate.
+        type: boolean
+        default: true
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -231,6 +240,9 @@ jobs:
     with:
       environment: ${{ needs.changes.outputs.gcp_environment }}
       deploy_changes: ${{ needs.changes.outputs.deploy_gcp == 'true' }}
+      # Automatic deploys always require an active certificate; only a manual
+      # workflow_dispatch may opt into the first-time-bootstrap bypass.
+      require_active_certificate: ${{ github.event_name != 'workflow_dispatch' || inputs.gcp_require_active_certificate }}
     secrets:
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}

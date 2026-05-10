@@ -59,7 +59,8 @@ log() {
 }
 
 fail() {
-    log "ERROR: $1"
+    local message="$1"
+    log "ERROR: $message"
     exit 1
 }
 

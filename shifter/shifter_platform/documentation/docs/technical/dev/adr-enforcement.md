@@ -83,6 +83,10 @@ The first slice intentionally stays small:
   updates `PYTHON_COMPLEXITY_THRESHOLD`, every canonical
   `pyproject.toml`, and the backlog rows in a single PR. Runs in both
   `fast` and `ci` levels.
+  Test coverage in `scripts/adr_guard/tests/test_adr_guard.py` drives
+  the silent-bypass and prefix-selector cases through `subTest()` loops
+  so adding a new bypass shape (e.g., `extend-select`-side variants) is
+  one row in the cases tuple, not a new test method.
 
 - `import-linter`
   Adds package-level forbidden-import contracts across the main Django app layers.

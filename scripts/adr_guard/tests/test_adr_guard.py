@@ -2046,91 +2046,67 @@ class PythonComplexityGateTests(unittest.TestCase):
 
     # ----- Findings 1: silent gate bypass through ignore / per-file-ignores -----
 
-    PYPROJECT_C901_IN_IGNORE = (
-        "[project]\n"
-        'name = "pkg-a"\n'
-        "\n"
-        "[tool.ruff.lint]\n"
-        'select = ["E", "F", "C901"]\n'
-        'ignore = ["C901"]\n'
-        "\n"
-        "[tool.ruff.lint.mccabe]\n"
-        "max-complexity = 15\n"
-    )
+    @staticmethod
+    def _pyproject_with_lint_keys(extra_lint_lines: str = "", extra_sections: str = "") -> str:
+        """Build a synthetic pyproject with extra `[tool.ruff.lint]` lines or sections.
 
-    PYPROJECT_C901_IN_EXTEND_IGNORE = (
-        "[project]\n"
-        'name = "pkg-a"\n'
-        "\n"
-        "[tool.ruff.lint]\n"
-        'select = ["E", "F", "C901"]\n'
-        'extend-ignore = ["C901"]\n'
-        "\n"
-        "[tool.ruff.lint.mccabe]\n"
-        "max-complexity = 15\n"
-    )
+        Used by the silent-bypass + prefix-selector tests so each case only
+        declares what differs from the OK baseline.
+        """
+        lint = "[tool.ruff.lint]\nselect = [\"E\", \"F\", \"C901\"]\n"
+        if extra_lint_lines:
+            lint += extra_lint_lines if extra_lint_lines.endswith("\n") else extra_lint_lines + "\n"
+        return (
+            "[project]\n"
+            'name = "pkg-a"\n'
+            "\n"
+            + lint
+            + "\n[tool.ruff.lint.mccabe]\nmax-complexity = 15\n"
+            + (("\n" + extra_sections) if extra_sections else "")
+        )
 
-    PYPROJECT_C901_IN_PER_FILE_IGNORES = (
-        "[project]\n"
-        'name = "pkg-a"\n'
-        "\n"
-        "[tool.ruff.lint]\n"
-        'select = ["E", "F", "C901"]\n'
-        "\n"
-        "[tool.ruff.lint.mccabe]\n"
-        "max-complexity = 15\n"
-        "\n"
-        "[tool.ruff.lint.per-file-ignores]\n"
-        '"**/*.py" = ["C901"]\n'
-    )
-
-    def test_c901_in_ignore_violates(self) -> None:
-        """`C901` listed in [tool.ruff.lint].ignore disables the gate; must fail."""
+    def _assert_single_bypass_violation(
+        self, pyproject_body: str, must_contain: tuple[str, ...]
+    ) -> None:
+        """Helper: synthetic repo with one bad pyproject; assert one violation matching all strings."""
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
             packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
-            packages[target_pkg] = self.PYPROJECT_C901_IN_IGNORE
+            packages[target_pkg] = pyproject_body
             self._write_packages(repo_root, packages)
 
             violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
 
-            self.assertEqual(len(violations), 1)
+            self.assertEqual(len(violations), 1, msg=str(violations))
             self.assertEqual(violations[0].rule_id, "ADR-012-R1")
-            self.assertIn("ignore", violations[0].message)
-            self.assertIn("C901", violations[0].message)
+            for needle in must_contain:
+                self.assertIn(needle, violations[0].message)
 
-    def test_c901_in_extend_ignore_violates(self) -> None:
-        """`C901` listed in [tool.ruff.lint].extend-ignore disables the gate; must fail."""
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
-            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
-            packages[target_pkg] = self.PYPROJECT_C901_IN_EXTEND_IGNORE
-            self._write_packages(repo_root, packages)
-
-            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
-
-            self.assertEqual(len(violations), 1)
-            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
-            self.assertIn("extend-ignore", violations[0].message)
-            self.assertIn("C901", violations[0].message)
-
-    def test_c901_in_per_file_ignores_violates(self) -> None:
-        """`C901` in [tool.ruff.lint.per-file-ignores] silently exempts whole globs; must fail."""
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
-            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
-            packages[target_pkg] = self.PYPROJECT_C901_IN_PER_FILE_IGNORES
-            self._write_packages(repo_root, packages)
-
-            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
-
-            self.assertEqual(len(violations), 1)
-            self.assertEqual(violations[0].rule_id, "ADR-012-R1")
-            self.assertIn("per-file-ignores", violations[0].message)
-            self.assertIn("C901", violations[0].message)
+    def test_silent_bypass_variants_violate(self) -> None:
+        """Each silent-bypass shape (ignore / extend-ignore / per-file-ignores with C901) fails."""
+        cases = (
+            (
+                "ignore_C901",
+                self._pyproject_with_lint_keys(extra_lint_lines='ignore = ["C901"]'),
+                ("ignore", "C901"),
+            ),
+            (
+                "extend-ignore_C901",
+                self._pyproject_with_lint_keys(extra_lint_lines='extend-ignore = ["C901"]'),
+                ("extend-ignore", "C901"),
+            ),
+            (
+                "per-file-ignores_C901",
+                self._pyproject_with_lint_keys(
+                    extra_sections='[tool.ruff.lint.per-file-ignores]\n"**/*.py" = ["C901"]\n'
+                ),
+                ("per-file-ignores", "C901"),
+            ),
+        )
+        for label, body, expected_substrings in cases:
+            with self.subTest(case=label):
+                self._assert_single_bypass_violation(body, expected_substrings)
 
     # ----- Finding 2: package inventory must match pre-commit ruff hooks -----
 
@@ -2380,97 +2356,42 @@ class PythonComplexityGateTests(unittest.TestCase):
 
     # ----- Cycle-3 finding 2: prefix selectors that cover C901 -----
 
-    def test_c_prefix_in_ignore_violates(self) -> None:
-        """`ignore = ["C"]` is a prefix selector that covers C901; must fail."""
-        body = (
-            "[project]\n"
-            'name = "pkg-a"\n'
-            "\n"
-            "[tool.ruff.lint]\n"
-            'select = ["E", "F", "C901"]\n'
-            'ignore = ["C"]\n'
-            "\n"
-            "[tool.ruff.lint.mccabe]\n"
-            "max-complexity = 15\n"
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
-            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
-            packages[target_pkg] = body
-            self._write_packages(repo_root, packages)
-
-            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
-
-            self.assertTrue(
-                any(
-                    "ignore" in v.message and "C901" in v.message
-                    for v in violations
+    def test_prefix_selectors_silently_disabling_c901_violate(self) -> None:
+        """Prefix selectors that cover C901 (C, C9, C90, ALL) in suppress fields must fail."""
+        cases = (
+            (
+                'ignore_C_prefix',
+                self._pyproject_with_lint_keys(extra_lint_lines='ignore = ["C"]'),
+                ("ignore", "C901"),
+            ),
+            (
+                'extend-ignore_ALL',
+                self._pyproject_with_lint_keys(extra_lint_lines='extend-ignore = ["ALL"]'),
+                ("extend-ignore", "C901"),
+            ),
+            (
+                'per-file-ignores_C90_prefix',
+                self._pyproject_with_lint_keys(
+                    extra_sections='[tool.ruff.lint.per-file-ignores]\n"**/*.py" = ["C90"]\n'
                 ),
-                msg=f"Expected prefix-ignore violation: {violations}",
-            )
-
-    def test_all_selector_in_extend_ignore_violates(self) -> None:
-        """`extend-ignore = ["ALL"]` covers C901; must fail."""
-        body = (
-            "[project]\n"
-            'name = "pkg-a"\n'
-            "\n"
-            "[tool.ruff.lint]\n"
-            'select = ["E", "F", "C901"]\n'
-            'extend-ignore = ["ALL"]\n'
-            "\n"
-            "[tool.ruff.lint.mccabe]\n"
-            "max-complexity = 15\n"
+                ("per-file-ignores", "C901"),
+            ),
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
-            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
-            packages[target_pkg] = body
-            self._write_packages(repo_root, packages)
+        for label, body, expected_substrings in cases:
+            with self.subTest(case=label):
+                with tempfile.TemporaryDirectory() as tmp:
+                    repo_root = Path(tmp)
+                    target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+                    packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+                    packages[target_pkg] = body
+                    self._write_packages(repo_root, packages)
 
-            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
+                    violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
 
-            self.assertTrue(
-                any(
-                    "extend-ignore" in v.message and "C901" in v.message
-                    for v in violations
-                ),
-                msg=f"Expected ALL-extend-ignore violation: {violations}",
-            )
-
-    def test_c90_prefix_in_per_file_ignores_violates(self) -> None:
-        """`per-file-ignores` with `C90` (prefix) covers C901; must fail."""
-        body = (
-            "[project]\n"
-            'name = "pkg-a"\n'
-            "\n"
-            "[tool.ruff.lint]\n"
-            'select = ["E", "F", "C901"]\n'
-            "\n"
-            "[tool.ruff.lint.mccabe]\n"
-            "max-complexity = 15\n"
-            "\n"
-            "[tool.ruff.lint.per-file-ignores]\n"
-            '"**/*.py" = ["C90"]\n'
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
-            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
-            packages[target_pkg] = body
-            self._write_packages(repo_root, packages)
-
-            violations = ADR_GUARD.check_python_complexity_gate(repo_root, None)
-
-            self.assertTrue(
-                any(
-                    "per-file-ignores" in v.message and "C901" in v.message
-                    for v in violations
-                ),
-                msg=f"Expected prefix-per-file-ignores violation: {violations}",
-            )
+                    self.assertTrue(
+                        any(all(s in v.message for s in expected_substrings) for v in violations),
+                        msg=f"{label}: expected violation containing {expected_substrings}; got {violations}",
+                    )
 
     def test_select_with_c_prefix_satisfies_gate(self) -> None:
         """`select = ["C"]` enables C901 by prefix; the gate accepts it."""

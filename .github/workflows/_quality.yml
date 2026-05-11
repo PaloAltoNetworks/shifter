@@ -265,14 +265,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install kustomize (hermetic, version-pinned, checksum-verified)
+        env:
+          KUSTOMIZE_VERSION: v5.4.3
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/kustomize-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/kustomize.tar.gz" \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          # Verify the downloaded tarball against the published SHA256 checksum
+          # before extraction or execution. checksums.txt lists every release
+          # artifact; pull the row for our tarball.
+          expected=$(curl -fsSL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/checksums.txt" \
+            | awk -v fname="kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" '$2 == fname {print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/kustomize.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kustomize.tar.gz" -C "${RUNNER_TEMP}/kustomize-bin" kustomize
+          echo "${RUNNER_TEMP}/kustomize-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/kustomize-bin/kustomize" version
+
       - name: Install kube-linter
         run: |
           curl -fsSL -o /tmp/kube-linter.tar.gz \
             "https://github.com/stackrox/kube-linter/releases/download/v0.7.2/kube-linter-linux.tar.gz"
           tar -xzf /tmp/kube-linter.tar.gz -C /tmp kube-linter
 
-      - name: Run kube-linter
-        run: /tmp/kube-linter lint --config .kube-linter.yaml platform/k8s/
+      # Render every kustomize root before linting. The previous "lint the
+      # raw tree" pattern broke as soon as an overlay added a strategic-merge
+      # patch for a Deployment: the patch file is a partial Deployment by
+      # design (no selector, no resources, no securityContext — those come
+      # from the base), but kube-linter saw it as a full Deployment and
+      # tripped on every required field. Rendering kustomize first validates
+      # what actually gets deployed.
+      - name: Render kustomize roots + run kube-linter
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rendered-k8s"
+          while IFS= read -r kfile; do
+            root=$(dirname "$kfile")
+            slug=$(echo "$root" | tr '/' '_')
+            kustomize build "$root" > "${RUNNER_TEMP}/rendered-k8s/${slug}.yaml"
+          done < <(find platform/k8s -name kustomization.yaml)
+          /tmp/kube-linter lint --config .kube-linter.yaml "${RUNNER_TEMP}/rendered-k8s/"
 
   k8s-schema:
     permissions:
@@ -282,16 +316,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install kustomize (hermetic, version-pinned, checksum-verified)
+        env:
+          KUSTOMIZE_VERSION: v5.4.3
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/kustomize-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/kustomize.tar.gz" \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          expected=$(curl -fsSL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/checksums.txt" \
+            | awk -v fname="kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" '$2 == fname {print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/kustomize.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kustomize.tar.gz" -C "${RUNNER_TEMP}/kustomize-bin" kustomize
+          echo "${RUNNER_TEMP}/kustomize-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/kustomize-bin/kustomize" version
+
       - name: Install kubeconform
         run: |
           curl -fsSL -o /tmp/kubeconform.tar.gz \
             "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
 
-      - name: Validate k8s manifests
+      # Same rationale as k8s-lint: validate the rendered (kustomized) shape
+      # so overlay patches don't fail schema validation as standalone partial
+      # Deployments.
+      - name: Render kustomize roots + validate schemas
         run: |
-          find platform/k8s -name '*.yaml' ! -name 'kustomization.yaml' -print0 | \
-            xargs -0 /tmp/kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rendered-k8s"
+          while IFS= read -r kfile; do
+            root=$(dirname "$kfile")
+            slug=$(echo "$root" | tr '/' '_')
+            kustomize build "$root" > "${RUNNER_TEMP}/rendered-k8s/${slug}.yaml"
+          done < <(find platform/k8s -name kustomization.yaml)
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas \
+            -kubernetes-version 1.31.0 \
+            "${RUNNER_TEMP}/rendered-k8s/"*.yaml
 
   # ===========================================================================
   # Type Checking (non-blocking quality gate)

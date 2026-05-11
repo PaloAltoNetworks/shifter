@@ -285,6 +285,8 @@ input[type="datetime-local"] {
 </div>
 {% endblock %}
 
+{{ scenarios_list|json_script:"scenarios-data" }}
+
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -520,7 +522,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Load scenarios into dropdown ---
     function loadScenarios() {
-        var scenarios = {{ scenarios_json|safe }};
+        var scenarios = JSON.parse(document.getElementById('scenarios-data').textContent);
         var itemsEl = document.getElementById('scenario-items');
 
         // Clear existing items

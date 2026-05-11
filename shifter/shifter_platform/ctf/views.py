@@ -1051,13 +1051,13 @@ def admin_event_create(request: HttpRequest) -> HttpResponse:
 
     user = _get_user(request)
     scenarios = cms_list_scenarios(user)
-    scenarios_json = json.dumps([{"id": sid, "name": name} for sid, name in scenarios])
+    scenarios_list = [{"id": sid, "name": name} for sid, name in scenarios]
     return render(
         request,
         "ctf/admin/event_form.html",
         {
             "is_edit": False,
-            "scenarios_json": scenarios_json,
+            "scenarios_list": scenarios_list,
         },
     )
 
@@ -1241,14 +1241,14 @@ def admin_event_edit(request: HttpRequest, event_id: UUID) -> HttpResponse:
 
     user = _get_user(request)
     scenarios = cms_list_scenarios(user)
-    scenarios_json = json.dumps([{"id": sid, "name": name} for sid, name in scenarios])
+    scenarios_list = [{"id": sid, "name": name} for sid, name in scenarios]
     return render(
         request,
         "ctf/admin/event_form.html",
         {
             "is_edit": True,
             "event_id": str(event_id),
-            "scenarios_json": scenarios_json,
+            "scenarios_list": scenarios_list,
         },
     )
 

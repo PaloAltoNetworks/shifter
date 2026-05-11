@@ -4,7 +4,7 @@ Covers destroy_ngfw variable passing and _build_tf_variables helper.
 """
 
 import os
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -156,6 +156,50 @@ class TestBuildTfVariables:
 
         with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
             _build_tf_variables("req-1", "inst-1", {})
+
+
+class TestCleanupNgfwBootstrapObjects:
+    """Test post-ready cleanup of sensitive NGFW S3 bootstrap objects."""
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket",
+        },
+        clear=False,
+    )
+    @patch("cloud.get_object_storage")
+    def test_deletes_sensitive_bootstrap_objects(self, mock_get_object_storage):
+        """Cleanup removes init-cfg.txt and authcodes from the instance bootstrap prefix."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        storage = mock_get_object_storage.return_value
+
+        _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        assert storage.delete_object.call_args_list == [
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/config/init-cfg.txt"),
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/license/authcodes"),
+        ]
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp", "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket"}, clear=False)
+    @patch("cloud.get_object_storage")
+    def test_skips_non_aws_provider(self, mock_get_object_storage):
+        """Cleanup is S3-specific and should not run for GCP VM-Series provisioning."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        mock_get_object_storage.assert_not_called()
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True)
+    def test_requires_bootstrap_bucket_for_aws_cleanup(self):
+        """AWS cleanup should fail loudly rather than silently retaining bootstrap secrets."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        with pytest.raises(RuntimeError, match="NGFW_BOOTSTRAP_BUCKET"):
+            _cleanup_ngfw_bootstrap_objects("inst-555")
 
 
 class TestBuildProviderState:

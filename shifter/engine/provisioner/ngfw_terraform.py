@@ -211,6 +211,27 @@ def _build_tf_variables(
     }
 
 
+def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
+    """Delete sensitive AWS S3 bootstrap objects after NGFW readiness."""
+    if os.environ.get("CLOUD_PROVIDER", "aws") != "aws":
+        return
+
+    bootstrap_bucket = os.environ.get("NGFW_BOOTSTRAP_BUCKET", "").strip()
+    if not bootstrap_bucket:
+        raise RuntimeError("NGFW_BOOTSTRAP_BUCKET is required for bootstrap object cleanup")
+
+    from cloud import get_object_storage
+
+    storage = get_object_storage()
+    bootstrap_prefix = f"bootstrap/ngfw/{instance_id}"
+    for key in (
+        f"{bootstrap_prefix}/config/init-cfg.txt",
+        f"{bootstrap_prefix}/license/authcodes",
+    ):
+        logger.info("Deleting NGFW bootstrap object: bucket=%s key=%s", bootstrap_bucket, key)
+        storage.delete_object(bucket=bootstrap_bucket, key=key)
+
+
 def _run_pan_os_post_provision(
     *,
     request_id: str,
@@ -348,6 +369,7 @@ def _run_pan_os_post_provision(
         status=STATUS_READY,
         serial_number=serial_number,
     )
+    _cleanup_ngfw_bootstrap_objects(instance_id)
     logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
 
     logger.info("Auto-stopping NGFW: request_id=%s", request_id)

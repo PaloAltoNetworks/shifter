@@ -105,6 +105,84 @@ def _mutable_instance_action_matches(actions: set[str]) -> list[str]:
     return sorted(matches)
 
 
+def _wildcard_action_violations(
+    path: Path, line: int, mutable_actions: list[str]
+) -> list[Violation]:
+    wildcard_actions = [action for action in mutable_actions if "*" in action]
+    if not wildcard_actions:
+        return []
+    return [
+        Violation(
+            path,
+            line,
+            "mutable EC2 instance lifecycle actions must be enumerated, "
+            f"not granted through wildcard action patterns ({', '.join(wildcard_actions)})",
+        )
+    ]
+
+
+def _statement_scope_violations(
+    path: Path, line: int, block: str, mutable_actions: list[str]
+) -> list[Violation]:
+    violations: list[Violation] = []
+    if 'Resource = "*"' in block:
+        violations.append(
+            Violation(
+                path,
+                line,
+                "mutable EC2 instance lifecycle actions must not use Resource=* "
+                f"({', '.join(mutable_actions)})",
+            )
+        )
+    if REQUIRED_RESOURCE_SNIPPET not in block:
+        violations.append(
+            Violation(
+                path,
+                line,
+                "mutable EC2 instance lifecycle actions must be scoped to EC2 "
+                "instance ARNs",
+            )
+        )
+    return violations
+
+
+def _required_tag_violations(path: Path, line: int, block: str) -> list[Violation]:
+    return [
+        Violation(
+            path,
+            line,
+            f"mutable EC2 instance lifecycle actions must require {tag_key}",
+        )
+        for tag_key in REQUIRED_TAG_KEYS
+        if tag_key not in block
+    ]
+
+
+def _statement_mixing_violations(path: Path, line: int, block: str) -> list[Violation]:
+    if "ec2:Describe*" not in block:
+        return []
+    return [
+        Violation(
+            path,
+            line,
+            "Describe APIs must stay separate from mutable lifecycle actions",
+        )
+    ]
+
+
+def _check_statement(path: Path, line: int, block: str) -> list[Violation]:
+    mutable_actions = _mutable_instance_action_matches(_actions(block))
+    if not mutable_actions:
+        return []
+
+    return [
+        *_wildcard_action_violations(path, line, mutable_actions),
+        *_statement_scope_violations(path, line, block, mutable_actions),
+        *_required_tag_violations(path, line, block),
+        *_statement_mixing_violations(path, line, block),
+    ]
+
+
 def check_file(path: Path, resource_name: str = "ec2_provisioning") -> list[Violation]:
     lines = path.read_text().splitlines()
     policy = _extract_policy_body(lines, resource_name)
@@ -115,57 +193,7 @@ def check_file(path: Path, resource_name: str = "ec2_provisioning") -> list[Viol
     violations: list[Violation] = []
     for relative_line, block in _extract_statement_blocks(policy_lines):
         line = policy_start_line + relative_line - 1
-        mutable_actions = _mutable_instance_action_matches(_actions(block))
-        if not mutable_actions:
-            continue
-
-        wildcard_actions = [action for action in mutable_actions if "*" in action]
-        if wildcard_actions:
-            violations.append(
-                Violation(
-                    path,
-                    line,
-                    "mutable EC2 instance lifecycle actions must be enumerated, "
-                    f"not granted through wildcard action patterns ({', '.join(wildcard_actions)})",
-                )
-            )
-
-        if 'Resource = "*"' in block:
-            violations.append(
-                Violation(
-                    path,
-                    line,
-                    "mutable EC2 instance lifecycle actions must not use Resource=* "
-                    f"({', '.join(mutable_actions)})",
-                )
-            )
-        if REQUIRED_RESOURCE_SNIPPET not in block:
-            violations.append(
-                Violation(
-                    path,
-                    line,
-                    "mutable EC2 instance lifecycle actions must be scoped to EC2 "
-                    "instance ARNs",
-                )
-            )
-        for tag_key in REQUIRED_TAG_KEYS:
-            if tag_key not in block:
-                violations.append(
-                    Violation(
-                        path,
-                        line,
-                        "mutable EC2 instance lifecycle actions must require "
-                        f"{tag_key}",
-                    )
-                )
-        if "ec2:Describe*" in block:
-            violations.append(
-                Violation(
-                    path,
-                    line,
-                    "Describe APIs must stay separate from mutable lifecycle actions",
-                )
-            )
+        violations.extend(_check_statement(path, line, block))
     return violations
 
 

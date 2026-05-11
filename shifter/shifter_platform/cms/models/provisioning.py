@@ -16,6 +16,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 
+from cms.credential_encryption import EncryptedInstanceDataField
 from cms.models.catalogs import AppType, InstanceType
 from cms.models.lifecycle import apply_terminal_soft_delete
 from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
@@ -145,7 +146,7 @@ class Instance(EntityBase):
         on_delete=models.PROTECT,
         related_name="instance_configs",
     )
-    data = models.JSONField(
+    data = EncryptedInstanceDataField(
         default=dict,
         help_text="Type-specific instance data (validated by spec_class)",
     )

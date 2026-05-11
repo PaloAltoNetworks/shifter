@@ -13,6 +13,11 @@ configMapGenerator:
       - platform-runtime.env
       - platform-runtime.generated.env
 
+secretGenerator:
+  - name: platform-runtime-secrets
+    envs:
+      - platform-runtime-secrets.env
+
 images:
   - name: placeholder-portal
     newName: us-central1-docker.pkg.dev/shifter-gcp-dev/shifter-gcp-dev-portal/portal
@@ -25,10 +30,18 @@ images:
     newTag: latest
 
 patches:
+  - path: patch-runtime-secretref.yaml
   - path: patch-serviceaccounts.yaml
   - target:
       kind: ConfigMap
       name: platform-runtime
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: shifter-platform
+  - target:
+      kind: Secret
+      name: platform-runtime-secrets
     patch: |-
       - op: add
         path: /metadata/namespace

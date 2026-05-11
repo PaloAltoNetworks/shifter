@@ -230,4 +230,3 @@ This is a multi-asset chain: A6 → A8 → A7.
 6. The decrypted content is a simulation recording. The flag is at the bottom as a "Simulation ID."
 
 **Expected flag:** `FLAG{d4c8f0a2e6b71935}`
-

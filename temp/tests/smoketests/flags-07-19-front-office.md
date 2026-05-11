@@ -212,4 +212,3 @@ These flags come from the intranet (A3 at **172.20.10.30**), mail server (A1 at 
 7. **This is the collective gate** — it opens the Bunker for all participants.
 
 **Expected flag:** `FLAG{a7f2c8d0e5b34169}`
-

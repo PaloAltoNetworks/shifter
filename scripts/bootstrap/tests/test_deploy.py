@@ -63,6 +63,9 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 "db": f"projects/{project_id}/secrets/shifter-gcp-dev-db",
                 "guacamole-db": f"projects/{project_id}/secrets/shifter-gcp-dev-guacamole-db",
                 "guacamole-json-auth": f"projects/{project_id}/secrets/shifter-gcp-dev-guacamole-json-auth",
+                # ADR-008-R6 (#963): the GCP runtime renderer fails closed
+                # without the Memorystore Secret Manager bundle ID.
+                "redis": f"projects/{project_id}/secrets/shifter-gcp-dev-redis",
             }
         },
         "identity_platform_api_key": {"value": "identity-platform-api-key"},
@@ -77,7 +80,10 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 "user_name": "shifter",
             }
         },
-        "control_plane_cache": {"value": {"host": "10.40.0.20", "port": 6379}},
+        # ADR-008-R6 (#963): Memorystore runs with TLS on the GCP runtime,
+        # so the cache payload must carry tls_enabled or the renderer fails
+        # closed.
+        "control_plane_cache": {"value": {"host": "10.40.0.20", "port": 6378, "tls_enabled": True}},
         "guacamole_database": {
             "value": {
                 "host": "10.40.0.10",

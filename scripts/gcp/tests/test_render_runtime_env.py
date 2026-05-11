@@ -41,6 +41,7 @@ def _outputs(
                 "app": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-app",
                 "db": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-db",
                 "guacamole-json-auth": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-guacamole-json-auth",
+                "redis": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-redis",
             }
         },
         "identity_platform_api_key": {"value": "identity-platform-api-key"},
@@ -57,6 +58,7 @@ def _outputs(
             "value": {
                 "host": "10.0.0.20",
                 "port": 6379,
+                "tls_enabled": True,
             }
         },
         "guacamole_database": {
@@ -149,6 +151,81 @@ def test_render_env_renders_identity_allow_list_from_terraform_outputs():
     )
     assert "IDENTITY_ALLOWED_EMAIL_DOMAIN=contractors.example.com\n" in custom_rendered
     assert "IDENTITY_ALLOWED_EMAILS=alice@partner.test,bob@partner.test\n" in custom_rendered
+
+
+def test_render_env_emits_redis_tls_and_secret_id_for_authenticated_cache():
+    """GCP Memorystore posture (#963/ADR-008-R6) propagates to the runtime env:
+    REDIS_TLS marks the TLS mode and REDIS_SECRET_ID points at the Secret Manager
+    bundle that carries the AUTH token. Host/port stay in the ConfigMap-bound env;
+    the password never does.
+    """
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+
+    rendered = module.render_env(_outputs())
+
+    assert "REDIS_HOST=10.0.0.20\n" in rendered
+    assert "REDIS_PORT=6379\n" in rendered
+    assert "REDIS_TLS=true\n" in rendered
+    assert "REDIS_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-redis\n" in rendered
+
+
+def test_render_env_never_emits_redis_password_or_url():
+    """Structural secret-leakage gate: the runtime env contract is ConfigMap-bound,
+    so it must never carry the Redis AUTH token. The token flows through Secret
+    Manager + entrypoint hydration only (ADR-008-R6, #963)."""
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+
+    rendered = module.render_env(_outputs())
+
+    # Negative assertions — exact key names the entrypoint exports and any
+    # plausible URL/password keys the renderer could leak.
+    forbidden_keys = (
+        "REDIS_PASSWORD",
+        "REDIS_AUTH",
+        "REDIS_AUTH_STRING",
+        "REDIS_URL",
+        "REDIS_DSN",
+    )
+    for key in forbidden_keys:
+        assert f"{key}=" not in rendered, f"runtime env must not contain {key}; AUTH material belongs in Secret Manager"
+    # And no `rediss://` URL anywhere — the renderer never builds a URL.
+    assert "rediss://" not in rendered
+    assert "redis://" not in rendered
+
+
+def test_render_env_fails_closed_when_cache_payload_lacks_tls_flag():
+    """ADR-008-R6 fail-closed: the GCP runtime is the Memorystore-AUTH/TLS
+    boundary, so the renderer refuses to emit Redis env vars when the
+    Terraform state's control_plane_cache lacks tls_enabled=true. A stale
+    state or misconfigured environment surfaces here, not as an opaque
+    Django channels_redis startup error."""
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+
+    outputs = _outputs()
+    # Simulate a stale / pre-#963 Terraform output shape (no tls_enabled).
+    outputs["control_plane_cache"] = {"value": {"host": "10.0.0.20", "port": 6379}}
+
+    with pytest.raises(ValueError, match="tls_enabled"):
+        module.render_env(outputs)
+
+
+def test_render_env_fails_closed_when_redis_secret_id_missing():
+    """ADR-008-R6 fail-closed: the GCP runtime must publish the Memorystore
+    Secret Manager bundle ID; refuse to render without it."""
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+
+    outputs = _outputs()
+    # Drop the redis entry from runtime_secret_ids while keeping tls_enabled.
+    outputs["runtime_secret_ids"] = {
+        "value": {
+            "app": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-app",
+            "db": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-db",
+            "guacamole-json-auth": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-guacamole-json-auth",
+        }
+    }
+
+    with pytest.raises(ValueError, match='runtime_secret_ids\\["redis"\\]'):
+        module.render_env(outputs)
 
 
 def test_render_env_preserves_bootstrap_admin_lists_from_environment(monkeypatch):

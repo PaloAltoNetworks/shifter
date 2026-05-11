@@ -30,13 +30,19 @@ variable "gke_subnet_cidr" {
 }
 
 variable "gke_pods_cidr" {
-  description = "Secondary range for GKE pods."
+  description = "Secondary range for GKE pods (web + worker node pools)."
   type        = string
 }
 
 variable "gke_services_cidr" {
   description = "Secondary range for GKE services."
   type        = string
+}
+
+variable "gke_provisioner_pods_cidr" {
+  description = "Dedicated secondary pod range for the provisioner node pool. Isolating the provisioner's pod IPs from the shared pods range lets the range-VPC firewall scope admin-port ingress to just the provisioner — a compromised portal/worker/guacamole pod sourced from the shared pods range no longer satisfies range-allow-platform-provisioner (ADR-008-R4, #959)."
+  type        = string
+  default     = "10.46.0.0/20"
 }
 
 variable "gke_master_ipv4_cidr" {
@@ -84,6 +90,12 @@ variable "gke_services_secondary_range_name" {
   description = "Secondary range name for GKE services."
   type        = string
   default     = "gke-services"
+}
+
+variable "gke_provisioner_pods_secondary_range_name" {
+  description = "Secondary range name on the GKE subnet for the provisioner node pool's dedicated pod range."
+  type        = string
+  default     = "gke-provisioner-pods"
 }
 
 variable "private_service_range_prefix_length" {
@@ -169,10 +181,21 @@ variable "cloud_sql_user_name" {
   default     = "shifter"
 }
 
+variable "cloud_sql_deletion_protection" {
+  description = "Enable Cloud SQL deletion protection on the platform instance. Default true; only set false for intentionally disposable environments (the platform database is durable control-plane state)."
+  type        = bool
+  default     = true
+}
+
 variable "redis_tier" {
-  description = "Memorystore tier for the control-plane Redis instance."
+  description = "Memorystore tier for the control-plane Redis instance. Default STANDARD_HA: the platform cache is shared multi-pod state and the production posture is high-availability replication. AUTH and TLS posture are independent of tier — the module enables them unconditionally — so a future disposable environment can opt into BASIC by overriding this variable without weakening the security contract."
   type        = string
-  default     = "BASIC"
+  default     = "STANDARD_HA"
+
+  validation {
+    condition     = contains(["BASIC", "STANDARD_HA"], var.redis_tier)
+    error_message = "redis_tier must be one of: BASIC, STANDARD_HA."
+  }
 }
 
 variable "redis_memory_size_gb" {
@@ -233,4 +256,58 @@ variable "identity_allowed_emails" {
   description = "Explicit non-domain email addresses allowed to self-register in Identity Platform."
   type        = list(string)
   default     = []
+}
+
+variable "range_provisioner_ports" {
+  description = "TCP ports the platform provisioner is allowed to reach on the range VPC. Used to construct the range-allow-platform-provisioner firewall rule. The range VPC otherwise denies all ingress (ADR-008-R4)."
+  type        = list(number)
+  # Provisioner-to-range protocols today: SSH (22) for Linux range VMs,
+  # RDP (3389) for Windows DC, and Guacamole websocket port (8080) for
+  # remote display when proxied from the platform side. Update the list
+  # when a new provisioner protocol is introduced.
+  default = [22, 3389, 8080]
+
+  validation {
+    condition     = length(var.range_provisioner_ports) > 0
+    error_message = "range_provisioner_ports must list at least one TCP port; an empty list would leave the provisioner unable to reach the range VPC."
+  }
+
+  validation {
+    condition     = alltrue([for p in var.range_provisioner_ports : p >= 1 && p <= 65535])
+    error_message = "range_provisioner_ports entries must be in the inclusive range [1, 65535]."
+  }
+}
+
+variable "operator_admin_cidrs" {
+  description = "Optional CIDR list authorized for break-glass direct SSH onto platform GKE nodes and range VMs. This is a direct-access allowlist (source CIDR matched at the VPC firewall), NOT an IAP rule — IAP TCP forwarding presents traffic from Google's fixed proxy range and is handled separately. Default empty: dev relies on Workload Identity and IAM-only operator paths. Entries must be valid CIDR blocks with an IPv4 prefix of /24 or narrower (or IPv6 /96 or narrower); broad ranges are rejected so a misconfigured environment cannot accidentally open SSH to internet-scale sources past the broader deny rule."
+  type        = list(string)
+  default     = []
+
+  # Parse the CIDR with cidrhost() — that fails for bare IPs, malformed
+  # entries, and unparseable prefixes — and then require a prefix length
+  # that is meaningfully narrow. The pattern matches the
+  # gke_master_authorized_cidrs validation in this same module.
+  #
+  # Prefix-breadth policy: IPv4 must be /24 or longer, IPv6 must be /96
+  # or longer. This prevents both literal `0.0.0.0/0`/`::/0` AND broad
+  # equivalents like `0.0.0.0/1` + `128.0.0.0/1` from satisfying the
+  # rule. Operator workstations and small office subnets fit easily;
+  # provider ASNs / continent-sized ranges do not.
+  validation {
+    condition = alltrue([
+      for cidr in var.operator_admin_cidrs : (
+        can(cidrhost(cidr, 0))
+        && can(regex("/[0-9]+$", cidr))
+        && (
+          # IPv4 path: cidrnetmask succeeds only for IPv4. Require /24+.
+          (can(cidrnetmask(cidr)) && tonumber(regex("/([0-9]+)$", cidr)[0]) >= 24)
+          ||
+          # IPv6 path: cidrnetmask refuses IPv6, but cidrhost succeeded
+          # above. Require /96+ as the IPv6 equivalent of a narrow subnet.
+          (!can(cidrnetmask(cidr)) && tonumber(regex("/([0-9]+)$", cidr)[0]) >= 96)
+        )
+      )
+    ])
+    error_message = "operator_admin_cidrs entries must be valid CIDRs with an explicit /N suffix (IPv4 must be /24 or longer; IPv6 must be /96 or longer). Direct break-glass SSH is never opened to broad external ranges; route wider operator access through IAP / OS Login instead (ADR-008-R4)."
+  }
 }

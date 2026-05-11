@@ -90,7 +90,7 @@ cat > "$TMPFILE" << EOF
     $(echo "$KEY_CONTENT" | jq -Rs .),
     "EOFKEY",
     "chmod 600 /tmp/ngfw.pem",
-    "echo show system info | ssh -i /tmp/ngfw.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 admin@$NGFW_IP 2>&1"
+    "echo show system info | ssh -i /tmp/ngfw.pem -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10 admin@$NGFW_IP 2>&1"
   ]
 }
 EOF

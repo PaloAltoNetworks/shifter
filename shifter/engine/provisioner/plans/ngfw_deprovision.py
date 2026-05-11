@@ -23,7 +23,7 @@ echo "Deactivating VM-Series license on $NGFW_IP..."
 
 # Send license deactivation command via SSH
 # IMPORTANT: PAN-OS requires commands piped to SSH, not passed as arguments
-cat << 'EOF' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 admin@$NGFW_IP
+cat << 'EOF' | ssh -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=30 admin@$NGFW_IP
 request license deactivate VM-Capacity mode auto
 EOF
 
@@ -48,7 +48,7 @@ echo "Verifying cleanup on $NGFW_IP..."
 
 # Check if NGFW is still reachable (it may not be if already being terminated)
 if timeout 10 bash -c \
-    "echo 'show system info' | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 admin@$NGFW_IP" \
+    "echo 'show system info' | ssh -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=5 admin@$NGFW_IP" \
     2>/dev/null; then
     echo "NGFW still reachable - cleanup verification complete"
 else

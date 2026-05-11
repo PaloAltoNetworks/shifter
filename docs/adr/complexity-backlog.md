@@ -14,22 +14,26 @@ canonical `pyproject.toml`, and the relevant table rows in one PR.
 | Package | File | Function | Complexity at introduction | Tracking issue |
 |---|---|---|---|---|
 | shifter_platform | `shifter/shifter_platform/cms/services.py` | `list_agents` | 16 | #1142 |
-| shifter_platform | `shifter/shifter_platform/cms/services.py` | `create_range` | 16 | #1143 |
 | shifter_platform | `shifter/shifter_platform/cms/services.py` | `initiate_upload` | 16 | #1144 |
 | shifter_platform | `shifter/shifter_platform/ctf/services/participant.py` | `bulk_import_participants` | 16 | #1145 |
 | shifter_platform | `shifter/shifter_platform/ctf/services/submission.py` | `submit_flag` | 19 | #1146 |
 | shifter_platform | `shifter/shifter_platform/ctf/views.py` | `challenge_detail` | 17 | #1147 |
-| provisioner | `shifter/engine/provisioner/main.py` | `_run_single_instance_setup` | 18 | #1148 |
-| provisioner | `shifter/engine/provisioner/main.py` | `run_instance_setup` | 16 | #1149 |
-| provisioner | `shifter/engine/provisioner/main.py` | `run_range_terraform` | 18 | #1150 |
-| provisioner | `shifter/engine/provisioner/main.py` | `_build_range_terraform_variables` | 16 | #1151 |
 | provisioner | `shifter/engine/provisioner/orchestrators/setup_orchestrator.py` | `_execute_step` | 22 | #1152 |
 
-Total: 11 functions across 2 packages (6 in `shifter_platform`, 5 in
-`provisioner`). The remaining 6 lint-scoped Python packages
-(`shifter/packer`, `shifter/installation`, `scripts/bootstrap`, `scripts/gcp`,
-`scripts/check_layer_imports`, `scripts/check_rds_pending_modifications`)
-ship with zero exemptions and must stay clean.
+Total: 6 functions in `shifter_platform` (1 in `cms/services`, 2 in
+`ctf/services`, 1 in `ctf/views`, 2 elsewhere), plus 1 in
+`provisioner/orchestrators/setup_orchestrator.py`. The other six
+lint-scoped Python packages (`shifter/packer`, `shifter/installation`,
+`scripts/bootstrap`, `scripts/gcp`, `scripts/check_layer_imports`,
+`scripts/check_rds_pending_modifications`) ship with zero exemptions
+and must stay clean.
+
+The five originally-exempted functions in `cms/services.py::create_range`
+and `provisioner/main.py` (`_run_single_instance_setup`,
+`run_instance_setup`, `run_range_terraform`,
+`_build_range_terraform_variables`) were refactored below the threshold
+in the ADR-012 introduction PR (#1141) and their tracking issues
+(#1143, #1148–#1151) were closed in the same PR.
 
 New `C901` violations are not added to this list by default. The expectation
 is "refactor or the gate fails"; a new exemption requires explicit reviewer

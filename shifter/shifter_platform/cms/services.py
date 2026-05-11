@@ -1419,7 +1419,207 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     )
 
 
-def create_range(  # noqa: C901
+def _validate_create_range_user(user: User) -> None:
+    """Validate the ``user`` argument shape for create_range."""
+    if user is None:
+        logger.error("create_range called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error(
+            "create_range called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("create_range called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _validate_create_range_scenario(user: User, scenario: str) -> None:
+    """Validate the ``scenario`` argument shape for create_range."""
+    if scenario is None:
+        logger.error(
+            "create_range called with None scenario for user_id=%s",
+            user.id,
+        )
+        raise ValueError("scenario cannot be None")
+    if not isinstance(scenario, str) or not scenario:
+        logger.error(
+            "create_range called with invalid scenario '%s' for user_id=%s",
+            scenario,
+            user.id,
+        )
+        raise ValueError("scenario must be a non-empty string")
+
+
+def _validate_create_range_agents_by_os(user: User, agents_by_os: dict[str, int]) -> None:
+    """Validate the ``agents_by_os`` argument shape for create_range."""
+    if agents_by_os is None:
+        logger.error(
+            "create_range called with None agents_by_os for user_id=%s",
+            user.id,
+        )
+        raise TypeError("agents_by_os cannot be None")
+    if not isinstance(agents_by_os, dict):
+        logger.error(
+            "create_range called with invalid agents_by_os type: %s",
+            type(agents_by_os).__name__,
+        )
+        msg = f"agents_by_os must be a dict, got {type(agents_by_os).__name__}"
+        raise TypeError(msg)
+
+
+def _assert_no_active_range(user: User) -> None:
+    """Raise CMSError if the user already has an active range."""
+    from cms.exceptions import CMSError
+
+    existing = get_active_range(user)
+    if existing:
+        logger.warning(
+            "create_range: user_id=%s already has active range request_id=%s",
+            user.id,
+            existing.range_id,
+        )
+        msg = "You already have an active range. Please destroy it before creating a new one."
+        raise CMSError(msg)
+
+
+def _load_scenario_template_or_raise(scenario: str) -> Any:
+    """Return the scenario template or raise CMSError if not found."""
+    from cms.exceptions import CMSError
+    from cms.scenarios.registry import load_scenario_template as load_scenario
+
+    try:
+        return load_scenario(scenario)
+    except ValueError as e:
+        logger.error("create_range: scenario '%s' not found", scenario)
+        raise CMSError(str(e)) from e
+
+
+def _check_scenario_agent_requirements(scenario: str, requirements: dict, agents_by_os: dict[str, int]) -> None:
+    """Raise CMSError when scenario requirements are not met by agents_by_os."""
+    from cms.exceptions import CMSError
+
+    if requirements["requires_windows"] and "windows" not in agents_by_os:
+        raise CMSError(f"Scenario '{scenario}' requires a Windows agent")
+    if requirements["requires_linux"] and "linux" not in agents_by_os:
+        raise CMSError(f"Scenario '{scenario}' requires a Linux agent")
+    if requirements["has_from_agent"] and not agents_by_os:
+        raise CMSError(f"Scenario '{scenario}' requires at least one agent")
+
+
+def _lookup_agents_by_os(user: User, agents_by_os: dict[str, int]) -> dict[str, AgentConfig]:
+    """Resolve each agent ID to an AgentConfig owned by the user."""
+    return {os_type: get_agent(user, aid) for os_type, aid in agents_by_os.items()}
+
+
+def _create_cms_request_and_dispatch_engine(user: User, range_spec: Any) -> tuple[UUID, Any]:
+    """Create the CMS Request row, dispatch the engine, return (request_id, cms_request)."""
+    from uuid import uuid4
+
+    from cms.models import Request
+    from shared.enums import RequestType
+    from shared.schemas import RequestSpec
+
+    request_id = uuid4()
+    cms_request = Request.objects.create(
+        request_id=request_id,
+        request_type=RequestType.RANGE.value,
+        user=user,
+    )
+    logger.info(
+        "create_range: created CMS Request id=%s for user_id=%s",
+        request_id,
+        user.id,
+    )
+    request_spec = RequestSpec(
+        request_id=request_id,
+        user_id=user.id,
+        items=[range_spec],
+    )
+    engine_create_range(request_spec)
+    return request_id, cms_request
+
+
+def _persist_range_instance_record(
+    cms_request: Any,
+    scenario: str,
+    user: User,
+    agents: dict[str, AgentConfig],
+    range_spec: Any,
+) -> None:
+    """Persist the RangeInstance row tying the CMS Request to the hydrated spec."""
+    from cms.models import RangeInstance
+
+    # Store first agent for backward compatibility (field is nullable).
+    first_agent = next(iter(agents.values()), None)
+    RangeInstance.objects.create(
+        request=cms_request,
+        scenario_id=scenario,
+        user_id=user.id,
+        agent=first_agent,
+        range_spec=range_spec.model_dump(mode="json"),
+    )
+
+
+def _audit_range_provision(
+    request_id: UUID,
+    scenario: str,
+    user: User,
+    agents: dict[str, AgentConfig],
+    ngfw_enabled: bool,
+) -> None:
+    """Write the audit-log entry for a successful create_range request."""
+    audit_log(
+        entity_type=AuditLog.EntityType.RANGE,
+        entity_id=0,  # Range ID not yet assigned at this point.
+        action=AuditLog.Action.PROVISION,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={
+            "request_id": str(request_id),
+            "scenario": scenario,
+            "agents": {os_type: a.name for os_type, a in agents.items()},
+            "ngfw_enabled": ngfw_enabled,
+        },
+        request_id=str(request_id),
+    )
+
+
+def _build_range_context_for_create(
+    request_id: UUID,
+    scenario: str,
+    user: User,
+    range_spec: Any,
+    agents: dict[str, AgentConfig],
+) -> RangeContext:
+    """Build the RangeContext projection returned by create_range."""
+    from shared.schemas import InstanceContext, RangeContext
+
+    instance_contexts = [
+        InstanceContext(
+            uuid=spec.uuid,
+            name=spec.name or "",
+            role=spec.role,
+            os_type=spec.os_type,
+            join_domain=spec.join_domain,
+        )
+        for spec in range_spec.all_instances
+    ]
+    agent_names = ", ".join(a.name for a in agents.values())
+    return RangeContext(
+        request_id=request_id,
+        range_id=None,  # Legacy field, use request_id for new ranges.
+        scenario_id=scenario,
+        user_id=user.id,
+        status=ResourceStatus.PROVISIONING,
+        instances=instance_contexts,
+        agent_name=agent_names,
+    )
+
+
+def create_range(
     user: User,
     scenario: str,
     agents_by_os: dict[str, int],
@@ -1448,58 +1648,11 @@ def create_range(  # noqa: C901
             requirements not met
     """
     from cms.exceptions import CMSError
-    from cms.models import RangeInstance
     from cms.scenarios.hydrator import hydrate_scenario
-    from cms.scenarios.registry import load_scenario_template as load_scenario
 
-    # Input validation - user
-    if user is None:
-        logger.error("create_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "create_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("create_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - scenario
-    if scenario is None:
-        logger.error(
-            "create_range called with None scenario for user_id=%s",
-            user.id,
-        )
-        raise ValueError("scenario cannot be None")
-
-    if not isinstance(scenario, str) or not scenario:
-        logger.error(
-            "create_range called with invalid scenario '%s' for user_id=%s",
-            scenario,
-            user.id,
-        )
-        raise ValueError("scenario must be a non-empty string")
-
-    # Input validation - agents_by_os
-    if agents_by_os is None:
-        logger.error(
-            "create_range called with None agents_by_os for user_id=%s",
-            user.id,
-        )
-        raise TypeError("agents_by_os cannot be None")
-
-    if not isinstance(agents_by_os, dict):
-        logger.error(
-            "create_range called with invalid agents_by_os type: %s",
-            type(agents_by_os).__name__,
-        )
-        msg = f"agents_by_os must be a dict, got {type(agents_by_os).__name__}"
-        raise TypeError(msg)
+    _validate_create_range_user(user)
+    _validate_create_range_scenario(user, scenario)
+    _validate_create_range_agents_by_os(user, agents_by_os)
 
     logger.debug(
         "create_range called for user_id=%s, scenario=%s, agents_by_os=%s, ngfw_enabled=%s",
@@ -1510,96 +1663,18 @@ def create_range(  # noqa: C901
     )
 
     try:
-        # 0. Check user doesn't already have an active range
-        existing = get_active_range(user)
-        if existing:
-            logger.warning(
-                "create_range: user_id=%s already has active range request_id=%s",
-                user.id,
-                existing.range_id,
-            )
-            msg = "You already have an active range. Please destroy it before creating a new one."
-            raise CMSError(msg)
+        _assert_no_active_range(user)
 
-        # 1. Load scenario and get requirements
-        try:
-            scenario_template = load_scenario(scenario)
-        except ValueError as e:
-            logger.error("create_range: scenario '%s' not found", scenario)
-            raise CMSError(str(e)) from e
+        scenario_template = _load_scenario_template_or_raise(scenario)
         requirements = scenario_template.get_agent_requirements()
+        _check_scenario_agent_requirements(scenario, requirements, agents_by_os)
 
-        # 2. Validate we have all required agents
-        if requirements["requires_windows"] and "windows" not in agents_by_os:
-            raise CMSError(f"Scenario '{scenario}' requires a Windows agent")
-        if requirements["requires_linux"] and "linux" not in agents_by_os:
-            raise CMSError(f"Scenario '{scenario}' requires a Linux agent")
-        if requirements["has_from_agent"] and not agents_by_os:
-            raise CMSError(f"Scenario '{scenario}' requires at least one agent")
-
-        # 3. Look up each agent (validates ownership and not deleted)
-        agents: dict[str, AgentConfig] = {}
-        for os_type, aid in agents_by_os.items():
-            agents[os_type] = get_agent(user, aid)
-
-        # 4. Hydrate scenario with agent details
+        agents = _lookup_agents_by_os(user, agents_by_os)
         range_spec = hydrate_scenario(scenario, user.id, agents)
 
-        # 5. Create CMS Request record
-        from uuid import uuid4
-
-        from cms.models import Request
-        from shared.enums import RequestType
-        from shared.schemas import RequestSpec
-
-        request_id = uuid4()
-        cms_request = Request.objects.create(
-            request_id=request_id,
-            request_type=RequestType.RANGE.value,
-            user=user,
-        )
-
-        logger.info(
-            "create_range: created CMS Request id=%s for user_id=%s",
-            request_id,
-            user.id,
-        )
-
-        # 6. Wrap RangeSpec in RequestSpec and call engine
-        request_spec = RequestSpec(
-            request_id=request_id,
-            user_id=user.id,
-            items=[range_spec],
-        )
-
-        engine_create_range(request_spec)
-
-        # 7. Store RangeInstance record with request FK
-        # Store first agent for backward compatibility (field is nullable)
-        first_agent = next(iter(agents.values()), None)
-        RangeInstance.objects.create(
-            request=cms_request,
-            scenario_id=scenario,
-            user_id=user.id,
-            agent=first_agent,
-            range_spec=range_spec.model_dump(mode="json"),
-        )
-
-        # Audit log range provisioning request
-        audit_log(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=0,  # Range ID not yet assigned
-            action=AuditLog.Action.PROVISION,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            new_state={
-                "request_id": str(request_id),
-                "scenario": scenario,
-                "agents": {os_type: a.name for os_type, a in agents.items()},
-                "ngfw_enabled": ngfw_enabled,
-            },
-            request_id=str(request_id),
-        )
+        request_id, cms_request = _create_cms_request_and_dispatch_engine(user, range_spec)
+        _persist_range_instance_record(cms_request, scenario, user, agents, range_spec)
+        _audit_range_provision(request_id, scenario, user, agents, ngfw_enabled)
 
         logger.debug(
             "create_range completed: request_id=%s, scenario=%s, user_id=%s",
@@ -1607,39 +1682,10 @@ def create_range(  # noqa: C901
             scenario,
             user.id,
         )
-
-        # 8. Return RangeContext projection with instances
-        # Engine always sets PROVISIONING status on creation
-        # Note: range_id is 0 for new Request-based ranges (use request_id for correlation)
-        from shared.schemas import InstanceContext, RangeContext
-
-        # Flatten instances from all subnets for RangeContext
-        instance_contexts = [
-            InstanceContext(
-                uuid=spec.uuid,
-                name=spec.name or "",
-                role=spec.role,
-                os_type=spec.os_type,
-                join_domain=spec.join_domain,
-            )
-            for spec in range_spec.all_instances
-        ]
-
-        # Format agent names for display
-        agent_names = ", ".join(a.name for a in agents.values())
-
-        return RangeContext(
-            request_id=request_id,
-            range_id=None,  # Legacy field, use request_id for new ranges
-            scenario_id=scenario,
-            user_id=user.id,
-            status=ResourceStatus.PROVISIONING,
-            instances=instance_contexts,
-            agent_name=agent_names,
-        )
+        return _build_range_context_for_create(request_id, scenario, user, range_spec, agents)
 
     except (TypeError, ValueError, CMSError):
-        # Re-raise known errors
+        # Re-raise known errors so callers see the original exception type.
         raise
     except Exception:
         logger.exception("Error in create_range for user_id=%s", user.id)

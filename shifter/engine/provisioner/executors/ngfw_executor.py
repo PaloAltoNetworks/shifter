@@ -79,9 +79,9 @@ class NGFWExecutor:
             "-p",
             str(self._port),
             "-o",
-            "StrictHostKeyChecking=no",  # NOSONAR — freshly provisioned VMs in isolated VPC
+            "StrictHostKeyChecking=yes",
             "-o",
-            "UserKnownHostsFile=/dev/null",
+            "BatchMode=yes",
             "-o",
             "ConnectTimeout=10",
             "-o",

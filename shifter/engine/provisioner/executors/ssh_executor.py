@@ -65,6 +65,13 @@ class SSHExecutor:
         # Parse the private key (supports RSA and Ed25519)
         self._pkey = self._load_private_key(private_key)
 
+    def _create_client(self) -> paramiko.SSHClient:
+        """Create an SSH client which verifies target host keys."""
+        client = paramiko.SSHClient()
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        return client
+
     def _load_private_key(self, private_key: str) -> paramiko.PKey:
         """Load a private key, detecting type automatically.
 
@@ -124,12 +131,7 @@ class SSHExecutor:
         """
         del document_name
         host = instance_id
-        client = paramiko.SSHClient()
-        # Security context: AutoAddPolicy is acceptable because we connect to freshly
-        # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
-        client.set_missing_host_key_policy(
-            paramiko.AutoAddPolicy()  # noqa: S507  # NOSONAR — freshly provisioned VMs in isolated VPC
-        )  # nosec B507
+        client = self._create_client()
 
         # Build the full command to send via stdin
         commands = script
@@ -324,11 +326,7 @@ class SSHExecutor:
         does not support the SSH exec channel.
         """
         try:
-            client = paramiko.SSHClient()
-            # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
-            client.set_missing_host_key_policy(
-                paramiko.AutoAddPolicy()  # noqa: S507  # NOSONAR — freshly provisioned VMs in isolated VPC
-            )  # nosec B507
+            client = self._create_client()
             client.connect(
                 hostname=host,
                 port=self._port,

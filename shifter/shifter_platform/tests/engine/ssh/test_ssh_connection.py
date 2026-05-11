@@ -84,7 +84,6 @@ class TestSSHConnectionConnect:
                 port=22,
                 username="testuser",
                 client_keys=[mock_key],
-                known_hosts=None,
             )
             # PTY process created with no command (default shell)
             mock_asyncssh_connection.create_process.assert_called_once_with(

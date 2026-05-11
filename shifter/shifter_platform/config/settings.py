@@ -45,10 +45,14 @@ INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 # For testing, use a deterministic key; in production, use FIELD_ENCRYPTION_KEY env var
 FIELD_ENCRYPTION_KEY = os.environ.get(
     "FIELD_ENCRYPTION_KEY",
-    # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required)
+    # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required).
+    # Empty-string (not None) when neither env nor test mode applies so the
+    # type stays `str` for consumers like `cms.credential_encryption`. The
+    # production fail-closed check on the second FIELD_ENCRYPTION_KEY block
+    # below treats an empty string as "unset" and raises.
     "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # NOSONAR - test-only key, not a production credential
     if IS_TEST_RUN
-    else None,
+    else "",
 )
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
@@ -293,6 +297,23 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", True)
     CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", True)
+
+    # HTTPS enforcement (issue #776). `SECURE_PROXY_SSL_HEADER` above tells
+    # Django to read the LB's forwarded-proto, so `SECURE_SSL_REDIRECT`
+    # won't loop behind a TLS-terminating proxy. Health-check probes that
+    # arrive over plain HTTP without `X-Forwarded-Proto: https` will 301;
+    # add their paths to `SECURE_REDIRECT_EXEMPT` via env if the LB
+    # doesn't follow redirects.
+    SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
+
+    # HSTS — defense in depth so an active downgrade can't strip the first
+    # redirect. Defaults: 1 year, include subdomains, NO preload. Preload
+    # is opt-in because submission to the browser-baked preload list is
+    # near-irreversible (chromium docs: weeks-to-months to remove); only
+    # enable once you actually intend to submit chrome://net-internals.
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+    SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", False)
 
 # ------------------------------------------------------------------------------
 # Authentication

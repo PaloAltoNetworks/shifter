@@ -173,6 +173,12 @@ repos:
         language: system
         files: ^(scripts/polaris-aws-range/|shifter/engine/provisioner/terraform/modules/range/).*\.tf$
 
+      - id: check-tf-iam-ec2-scope
+        name: AWS EC2 lifecycle IAM scoping (engine provisioner)
+        entry: python3 scripts/check_tf_iam_ec2_scope/check_tf_iam_ec2_scope.py
+        language: system
+        files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
+
   # Kubernetes schema validation
   - repo: local
     hooks:

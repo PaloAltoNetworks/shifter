@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.core.exceptions import PermissionDenied
 
 from cms.experiments import services
 from cms.experiments.exceptions import (
@@ -394,8 +395,10 @@ class TestCreateExperimentAccess:
         mock_check.side_effect = ValueError("Scenario is disabled")
 
         data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
-        with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
+        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
             services.create_experiment(regular_user, data)
+        mock_check.assert_not_called()
+        mock_load.assert_not_called()
 
     @patch("cms.experiments.services.load_scenario_template")
     @patch("cms.experiments.services.check_scenario_access")
@@ -403,8 +406,10 @@ class TestCreateExperimentAccess:
         mock_check.side_effect = ValueError("Scenario is staff-only")
 
         data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
-        with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
+        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
             services.create_experiment(regular_user, data)
+        mock_check.assert_not_called()
+        mock_load.assert_not_called()
 
     @patch("cms.experiments.services.audit_log")
     @patch("cms.experiments.services.ExperimentScript")
@@ -427,6 +432,14 @@ class TestCreateExperimentAccess:
         data = ExperimentCreateInput(name="Allowed", scenario_id="basic")
         exp = services.create_experiment(staff_user, data)
         assert exp.pk == 50
+
+    @patch("cms.experiments.services.load_scenario_template")
+    @patch("cms.experiments.services.check_scenario_access")
+    def test_scenario_instances_blocks_non_staff_service_call(self, mock_check, mock_load, regular_user):
+        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
+            services.get_scenario_instances("basic", regular_user)
+        mock_check.assert_not_called()
+        mock_load.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

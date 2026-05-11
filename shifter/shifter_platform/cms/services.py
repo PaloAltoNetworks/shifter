@@ -1937,6 +1937,19 @@ def cancel_range(user: User, range_id: int) -> None:
             raise CMSError(f"Range {range_id} has no associated request")
 
         engine_cancel_range_by_request(request_id)
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.CANCEL,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": ResourceStatus.DESTROYED.value,
+                "scenario": instance.scenario_id,
+            },
+            request_id=str(request_id),
+        )
     except (TypeError, ValueError, CMSError):
         # Re-raise known errors
         raise
@@ -2113,6 +2126,19 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
 
         # Call Engine with request_id directly
         engine_cancel_range_by_request(instance.request.request_id)
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.id,
+            action=AuditLog.Action.CANCEL,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": ResourceStatus.DESTROYED.value,
+                "scenario": instance.scenario_id,
+            },
+            request_id=str(instance.request.request_id),
+        )
 
         logger.debug(
             "cancel_range_by_request_id completed: request_id=%s user_id=%s",

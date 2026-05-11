@@ -1058,6 +1058,37 @@ class TestCancelRange:
         with pytest.raises((TypeError, ValueError)):
             services.cancel_range(mock_user, invalid_range_id)
 
+    # -------------------------------------------------------------------------
+    # Audit log (#694)
+    # -------------------------------------------------------------------------
+
+    def test_audits_cancel_action(self, mock_user):
+        """Service records an AuditLog CANCEL entry on successful cancel."""
+        from cms.models import RangeInstance
+        from risk_register.models import AuditLog as AuditLogModel
+        from shared.enums import ResourceStatus
+
+        mock_request = make_mock_request()
+        mock_range = Mock(spec=RangeInstance, range_id=42, user_id=mock_user.id, scenario_id="basic")
+        mock_range.agent = None
+        mock_range.request = mock_request
+        mock_range.save = Mock()
+        with (
+            patch.object(services, "get_range", return_value=mock_range),
+            patch("cms.services.engine_cancel_range_by_request"),
+            patch("cms.services.audit_log") as mock_audit,
+        ):
+            services.cancel_range(mock_user, 42)
+
+        mock_audit.assert_called_once()
+        kwargs = mock_audit.call_args.kwargs
+        assert kwargs["entity_type"] == AuditLogModel.EntityType.RANGE
+        assert kwargs["entity_id"] == 42
+        assert kwargs["action"] == AuditLogModel.Action.CANCEL
+        assert kwargs["actor_id"] == mock_user.id
+        assert kwargs["previous_state"]["scenario"] == "basic"
+        assert kwargs["previous_state"]["status"] == ResourceStatus.DESTROYED.value
+
 
 class TestPauseRange:
     """Tests for pause_range() service function.

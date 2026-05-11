@@ -32,10 +32,11 @@ function now() {
 }
 
 const PLAN_ID_PATTERN = /^[a-f0-9]{8}$/;
+const PLAN_ID_ERROR = "Invalid plan ID format: must be 8 lowercase hexadecimal characters";
 
 function validatePlanId(id) {
   if (typeof id !== "string" || !PLAN_ID_PATTERN.test(id)) {
-    throw new Error("Invalid plan ID");
+    throw new Error(PLAN_ID_ERROR);
   }
   return id;
 }
@@ -46,7 +47,7 @@ function planPath(id) {
   const target = resolve(base, `${validId}.json`);
   const rel = relative(base, target);
   if (rel.startsWith("..") || isAbsolute(rel)) {
-    throw new Error("Invalid plan ID");
+    throw new Error(PLAN_ID_ERROR);
   }
   return target;
 }

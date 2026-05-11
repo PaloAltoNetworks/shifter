@@ -1,4 +1,4 @@
-# shifter-ngfw MCP command execution guardrails
+# shifter-ngfw MCP security boundaries
 
 The ngfw MCP server runs with the local operator's AWS credentials and
 only exposes EC2 discovery metadata (`list_ngfws`). It does **not**
@@ -36,8 +36,7 @@ Secrets Manager. The remaining shell boundary that must stay closed:
 
 - Reuse the existing Zod schemas in `index.js` for tool input shape and
   the shared helpers in `lib.js` (`buildAwsArgv`, `awsExec`, `awsJson`,
-  `awsText`, `buildSsmSendCommandArgs`, `buildNgfwSshCommands`,
-  `validateNgfwIp`).
+  `awsText`).
 
 ## Shared helper module at `mcp/shared/aws-helpers.js`
 

@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const testDir = mkdtempSync(join(tmpdir(), "planner-test-"));
 process.env.PLANNER_DIR = testDir;
@@ -81,6 +82,29 @@ describe("Plan CRUD", () => {
     setCurrentPlan(a.id);
     const current = getPlan();
     assert.equal(current.id, a.id);
+  });
+
+  it("rejects traversal in getPlan plan_id", () => {
+    const outsideId = `outside-${randomUUID()}`;
+    const outsidePath = join(testDir, "..", `${outsideId}.json`);
+    writeFileSync(outsidePath, JSON.stringify({ secret: true }), "utf-8");
+    try {
+      assert.throws(() => getPlan(`../${outsideId}`), /Invalid plan ID/);
+    } finally {
+      rmSync(outsidePath, { force: true });
+    }
+  });
+
+  it("rejects traversal in deletePlan plan_id without deleting external file", () => {
+    const outsideId = `outside-${randomUUID()}`;
+    const outsidePath = join(testDir, "..", `${outsideId}.json`);
+    writeFileSync(outsidePath, JSON.stringify({ keep: true }), "utf-8");
+    try {
+      assert.throws(() => deletePlan(`../${outsideId}`), /Invalid plan ID/);
+      assert.equal(existsSync(outsidePath), true);
+    } finally {
+      rmSync(outsidePath, { force: true });
+    }
   });
 
   it("get_plan includes progress stats", () => {

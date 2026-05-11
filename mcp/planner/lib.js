@@ -6,7 +6,7 @@ import {
   readdirSync,
   unlinkSync,
 } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 
@@ -31,8 +31,24 @@ function now() {
   return new Date().toISOString();
 }
 
+const PLAN_ID_PATTERN = /^[a-f0-9]{8}$/;
+
+function validatePlanId(id) {
+  if (typeof id !== "string" || !PLAN_ID_PATTERN.test(id)) {
+    throw new Error(`Invalid plan ID: ${id}`);
+  }
+  return id;
+}
+
 function planPath(id) {
-  return join(plansDir(), `${id}.json`);
+  const validId = validatePlanId(id);
+  const base = resolve(plansDir());
+  const target = resolve(base, `${validId}.json`);
+  const rel = relative(base, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Invalid plan ID: ${id}`);
+  }
+  return target;
 }
 
 function loadPlan(id) {
@@ -65,7 +81,7 @@ function getCurrentPlanId() {
 
 function setCurrentPlanId(id) {
   ensureDir();
-  writeFileSync(currentFile(), id, "utf-8");
+  writeFileSync(currentFile(), validatePlanId(id), "utf-8");
 }
 
 function clearCurrentPlanId() {
@@ -74,11 +90,11 @@ function clearCurrentPlanId() {
 }
 
 function resolvePlanId(id) {
-  if (id) return id;
+  if (id) return validatePlanId(id);
   const current = getCurrentPlanId();
   if (!current)
     throw new Error("No plan specified and no current plan set. Create a plan first.");
-  return current;
+  return validatePlanId(current);
 }
 
 // ---------------------------------------------------------------------------
@@ -157,9 +173,10 @@ function deletePlan(planId) {
 }
 
 function setCurrentPlan(planId) {
-  loadPlan(planId); // verify it exists
-  setCurrentPlanId(planId);
-  return { current: planId };
+  const id = resolvePlanId(planId);
+  loadPlan(id); // verify it exists
+  setCurrentPlanId(id);
+  return { current: id };
 }
 
 // ---------------------------------------------------------------------------

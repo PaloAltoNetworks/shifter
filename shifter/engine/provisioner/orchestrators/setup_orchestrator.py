@@ -5,6 +5,7 @@ the plan step by step, handling reboots and verification.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,6 +64,8 @@ class SetupOrchestrator:
 
     # Default reboot timeout (5 minutes)
     DEFAULT_REBOOT_TIMEOUT = 300
+    SENSITIVE_ENV_VARS = ("DC_DOMAIN_PASSWORD",)
+    SENSITIVE_CONTEXT_KEY_PARTS = ("password", "secret", "token")
 
     def __init__(self, executor: Executor):
         """Initialize orchestrator with an executor.
@@ -281,10 +284,11 @@ class SetupOrchestrator:
                         max_retries + 1,
                     )
                     if result.stdout:
+                        masked_stdout = self._mask_sensitive_output(result.stdout, context)
                         logger.warning(
                             "_execute_step: step=%s COMMIT FAILED STDOUT:\n%s",
                             step.name,
-                            result.stdout,
+                            masked_stdout,
                         )
                     if attempt < max_retries:
                         continue  # Retry
@@ -300,17 +304,19 @@ class SetupOrchestrator:
                     result.exit_code,
                 )
                 if result.stdout:
+                    masked_stdout = self._mask_sensitive_output(result.stdout, context)
                     # Log full output - critical for debugging setup issues
                     logger.info(
                         "_execute_step: step=%s STDOUT:\n%s",
                         step.name,
-                        result.stdout,
+                        masked_stdout,
                     )
                 if result.stderr:
+                    masked_stderr = self._mask_sensitive_output(result.stderr, context)
                     logger.info(
                         "_execute_step: step=%s STDERR:\n%s",
                         step.name,
-                        result.stderr,
+                        masked_stderr,
                     )
                 return StepResult(
                     step_name=step.name,
@@ -327,16 +333,18 @@ class SetupOrchestrator:
                     result.exit_code,
                 )
                 if result.stdout:
+                    masked_stdout = self._mask_sensitive_output(result.stdout, context)
                     logger.warning(
                         "_execute_step: step=%s FAILED STDOUT:\n%s",
                         step.name,
-                        result.stdout,
+                        masked_stdout,
                     )
                 if result.stderr:
+                    masked_stderr = self._mask_sensitive_output(result.stderr, context)
                     logger.warning(
                         "_execute_step: step=%s FAILED STDERR:\n%s",
                         step.name,
-                        result.stderr,
+                        masked_stderr,
                     )
                 if attempt < max_retries:
                     continue  # Retry
@@ -348,6 +356,33 @@ class SetupOrchestrator:
             stdout=last_result.stdout if last_result else "",
             stderr=last_result.stderr if last_result else "",
         )
+
+    @classmethod
+    def _mask_sensitive_output(cls, output: str, context: dict[str, Any] | None = None) -> str:
+        """Mask known secret values before writing command output to logs."""
+        if not output:
+            return output
+
+        masked_output = output
+        for sensitive_value in cls._sensitive_values(context):
+            masked_output = masked_output.replace(sensitive_value, "[REDACTED]")
+        return masked_output
+
+    @classmethod
+    def _sensitive_values(cls, context: dict[str, Any] | None = None) -> list[str]:
+        values = {os.environ.get(env_var, "") for env_var in cls.SENSITIVE_ENV_VARS}
+
+        if context:
+            for key, value in context.items():
+                if value is not None and cls._is_sensitive_context_key(key):
+                    values.add(str(value))
+
+        return sorted((value for value in values if value), key=len, reverse=True)
+
+    @classmethod
+    def _is_sensitive_context_key(cls, key: str) -> bool:
+        normalized_key = key.lower()
+        return any(part in normalized_key for part in cls.SENSITIVE_CONTEXT_KEY_PARTS)
 
     def _check_commit_success(self, output: str) -> bool:
         """Check if PAN-OS commit succeeded.

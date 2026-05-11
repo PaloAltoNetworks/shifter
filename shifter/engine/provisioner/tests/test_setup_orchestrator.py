@@ -4,6 +4,7 @@ SetupOrchestrator runs SetupPlans using an SSMExecutor.
 It handles step sequencing, reboots, and verification.
 """
 
+import logging
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
@@ -336,6 +337,59 @@ class TestStepExecution:
             script = call_obj.kwargs.get("script") or call_obj[1].get("script")
             scripts.append(script)
         assert scripts == ["echo first", "echo second", "echo third", "echo verify"]
+
+
+class TestSensitiveOutputMasking:
+    """Test secret masking for command output logs."""
+
+    def test_masks_dc_domain_password_from_success_logs(self, caplog, monkeypatch):
+        """DC_DOMAIN_PASSWORD is redacted from stdout/stderr log lines."""
+        secret = "DomainPass123!"
+        monkeypatch.setenv("DC_DOMAIN_PASSWORD", secret)
+        mock_executor = MagicMock(spec=SSMExecutor)
+        mock_executor.run_command.return_value = CommandResult(
+            success=True,
+            exit_code=0,
+            stdout=f"Joined domain with {secret}",
+            stderr=f"Warning included {secret}",
+        )
+        plan = MockSetupPlan(
+            steps=[SetupStep(name="join_domain", script="join", timeout_seconds=60)],
+            verify_step=None,
+        )
+        orchestrator = SetupOrchestrator(executor=mock_executor)
+
+        caplog.set_level(logging.INFO, logger="orchestrators.setup_orchestrator")
+        orchestrator.orchestrate("i-12345", plan, {})
+
+        assert secret not in caplog.text
+        assert "[REDACTED]" in caplog.text
+
+    def test_masks_sensitive_context_value_from_failed_output_logs(self, caplog):
+        """Sensitive context values are redacted from failed stdout/stderr logs."""
+        secret = "DomainPass456!"
+        mock_executor = MagicMock(spec=SSMExecutor)
+        mock_executor.run_command.return_value = CommandResult(
+            success=False,
+            exit_code=1,
+            stdout=f"Failure stdout contained {secret}",
+            stderr=f"Failure stderr contained {secret}",
+        )
+        orchestrator = SetupOrchestrator(executor=mock_executor)
+        step = SetupStep(name="join_domain", script="join", timeout_seconds=60)
+
+        caplog.set_level(logging.WARNING, logger="orchestrators.setup_orchestrator")
+        result = orchestrator._execute_step(
+            "i-12345",
+            step,
+            {"domain_admin_password": secret},
+            "AWS-RunPowerShellScript",
+            max_retries=0,
+        )
+
+        assert result.success is False
+        assert secret not in caplog.text
+        assert "[REDACTED]" in caplog.text
 
 
 class TestRebootTimeout:

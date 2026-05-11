@@ -50,6 +50,9 @@ The portal command pipeline is built by
   material. `buildNgfwSshCommands` validates any caller-supplied
   `keyPath` against `^/tmp/ngfw-[A-Za-z0-9._-]+\.pem$` so a future
   caller cannot widen the boundary.
+- SSH host-key verification is enforced. The portal jump host must have
+  the expected NGFW host key in its configured known_hosts before these
+  management commands run.
 - `ngfwIp` is interpolated into the SSH target argument. It is sourced
   from EC2 `describe-instances` (AWS-controlled), but
   `validateNgfwIp` enforces a strict dotted-quad IPv4 check before

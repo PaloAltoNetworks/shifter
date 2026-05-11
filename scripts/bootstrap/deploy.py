@@ -819,7 +819,7 @@ def render_gdc_prepare_workstation_script(config: GDCBootstrapConfig) -> str:
         install -m 644 {config.staging_bundle_dir}/id_rsa.pub /root/.ssh/id_rsa.pub
         install -m 600 {config.staging_bundle_dir}/bm-gcr.json /root/bm-gcr.json
         install -m 755 {config.staging_bundle_dir}/bmctl /usr/local/sbin/bmctl
-        printf 'Host *\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n' >/root/.ssh/config
+        printf 'Host *\\n  StrictHostKeyChecking yes\\n  BatchMode yes\\n' >/root/.ssh/config
         chmod 600 /root/.ssh/config
         """
     )
@@ -856,7 +856,7 @@ def render_gdc_prepare_hosts_script(config: GDCBootstrapConfig) -> str:
         "configure_remote_host() {",
         '  local host_ip="$1"',
         '  local vxlan_ip="$2"',
-        "  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\",
+        "  ssh -o StrictHostKeyChecking=yes -o BatchMode=yes \\",
         '    "root@${host_ip}" "bash -s" -- "${vxlan_ip}" <<\'EOF\'',
         "set -euo pipefail",
         'vxlan_ip="$1"',

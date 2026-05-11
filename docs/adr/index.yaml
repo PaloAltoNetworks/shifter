@@ -404,5 +404,43 @@
       "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md",
       "shifter/shifter_platform/documentation/docs/technical/architecture.md"
     ]
+  },
+  {
+    "id": "ADR-012",
+    "title": "Unified platform information architecture uses a shared navigation contract",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Shifter treats CTF, Mission Control, Scenario Editor, Risk Register, and Documentation as one platform information architecture. Future navigation implementation must use a shared, role-aware navigation contract derived from the maintained IA and taxonomy artifacts rather than duplicating app-local navigation schemas.",
+    "rules": [
+      {
+        "id": "ADR-012-R1",
+        "description": "Surface names, audience placement, and cross-surface taxonomy must stay aligned with the maintained UX-003 IA and sitemap artifact.",
+        "checks": []
+      },
+      {
+        "id": "ADR-012-R2",
+        "description": "Future navigation data must be centralized behind the shared platform boundary instead of being duplicated independently by CTF, Mission Control, Scenario Editor, Risk Register, and Documentation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-012-R3",
+        "description": "Navigation visibility may improve orientation, but authorization must continue to come from existing role and permission policies rather than display-only links.",
+        "checks": []
+      },
+      {
+        "id": "ADR-012-R4",
+        "description": "Participant and organizer surfaces must remain structurally distinct even when a user has access to both modes.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "docs/design/ux-003-information-architecture-sitemap.md",
+      "docs/design/ux-003-oss-shifter-research-personas.md",
+      "shifter/shifter_platform/shared/auth.py",
+      "shifter/shifter_platform/templates/partials/icon_sidebar.html",
+      "shifter/shifter_platform/templates/partials/ctf_participant_sidebar.html"
+    ]
   }
 ]

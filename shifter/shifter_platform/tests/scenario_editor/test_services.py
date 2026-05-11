@@ -2,6 +2,7 @@
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 
 from cms.models import Scenario, ScenarioMetadata
 from cms.scenario_editor.services import (
@@ -295,6 +296,34 @@ class TestExportScenarioYaml:
 
 class TestUserValidation:
     """Tests for _validate_user enforcement on all service functions."""
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            "create",
+            "update",
+            "delete",
+            "clone",
+            "metadata",
+        ],
+    )
+    def test_regular_user_denied_by_service_layer(self, operation, regular_user, valid_definition):
+        calls = {
+            "create": lambda: create_scenario(
+                regular_user,
+                scenario_id="regular-create",
+                name="Denied",
+                description="Denied",
+                definition=valid_definition,
+            ),
+            "update": lambda: update_scenario(regular_user, "some-id", name="Denied"),
+            "delete": lambda: delete_scenario(regular_user, "some-id"),
+            "clone": lambda: clone_scenario(regular_user, "some-id", new_scenario_id="clone"),
+            "metadata": lambda: update_metadata(regular_user, "some-id", enabled=False),
+        }
+
+        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
+            calls[operation]()
 
     def test_create_none_user(self, valid_definition):
         with pytest.raises(TypeError, match="cannot be None"):

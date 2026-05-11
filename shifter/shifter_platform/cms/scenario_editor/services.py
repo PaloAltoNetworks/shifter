@@ -11,6 +11,7 @@ import re
 from typing import TYPE_CHECKING
 
 import yaml
+from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
@@ -48,6 +49,9 @@ def _validate_user(user: User, func_name: str) -> None:
     if user.id is None:
         logger.error("%s called with unsaved user (id=None)", func_name)
         raise ValueError(USER_MUST_BE_SAVED)
+    if getattr(user, "is_staff", False) is not True:
+        logger.warning("%s called by non-staff user_id=%s", func_name, user.id)
+        raise PermissionDenied("Staff privileges are required")
 
 
 # Regex for valid scenario IDs: lowercase alphanumeric, hyphens, underscores.

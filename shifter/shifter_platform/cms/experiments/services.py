@@ -9,6 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -72,6 +73,9 @@ def _validate_user(user: User, func_name: str) -> None:
     if user.id is None:
         logger.error("%s called with unsaved user (id=None)", func_name)
         raise ValueError(USER_MUST_BE_SAVED)
+    if getattr(user, "is_staff", False) is not True:
+        logger.warning("%s called by non-staff user_id=%s", func_name, user.id)
+        raise PermissionDenied("Staff privileges are required")
 
 
 def _check_result_type(result: object, expected_type: type, func_name: str) -> None:
@@ -689,6 +693,8 @@ def get_scenario_instances(scenario_id: str, user: User | None = None) -> list[d
         ExperimentValidationError: If scenario not found or access denied.
     """
     logger.debug("get_scenario_instances called for scenario_id=%s", scenario_id)
+    if user is not None:
+        _validate_user(user, "get_scenario_instances")
     try:
         try:
             if user is not None:

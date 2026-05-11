@@ -218,6 +218,14 @@ spec:
         - protocol: TCP
           port: 5432
         - protocol: TCP
+          # Plaintext Redis (AWS ElastiCache + pre-#963 GCP Memorystore).
           port: 6379
+        - protocol: TCP
+          # Memorystore TLS endpoint (ADR-008-R6, #963).
+          # `google_redis_instance.platform.port` returns 6378 when
+          # transit_encryption_mode is SERVER_AUTHENTICATION; pods must be
+          # able to reach it on egress or channels_redis cannot negotiate
+          # TLS to the Memorystore instance.
+          port: 6378
 {{- end }}
 {{- end }}

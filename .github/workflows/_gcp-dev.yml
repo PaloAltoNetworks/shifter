@@ -324,11 +324,26 @@ jobs:
           python3 scripts/gcp/render_edge_manifest.py \
             --environment "${GCP_ENVIRONMENT}" \
             > "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
+      - name: Render generated private-service NetworkPolicy
+        run: |
+          # ADR-008-R6 (#963): the Kustomize base ships a default-deny
+          # egress policy for shifter-platform, so the platform pods need
+          # an explicit allow rule to reach Cloud SQL / Memorystore. The
+          # destination CIDRs are dynamic Terraform outputs, so the
+          # NetworkPolicy is generated from /tmp/gcp-terraform-outputs.json
+          # with per-endpoint /32 ipBlocks — matching the Helm chart's
+          # `privateServiceCidrs` flow used by the bootstrap deploy path
+          # rather than opening broad RFC1918 supernets.
+          python3 scripts/gcp/render_private_service_netpol.py \
+            --terraform-output-json /tmp/gcp-terraform-outputs.json \
+            --output "${K8S_OVERLAY_DIR}/platform-private-service.generated.yaml"
       # Roll out the production-secure workload (new runtime ConfigMap + restart)
       # BEFORE (re-)applying the public edge, so the public Ingress never routes
       # to pods still running an older, less-secure runtime config.
       - name: Apply GKE workload manifests
         run: kubectl apply -k "${K8S_OVERLAY_DIR}"
+      - name: Apply private-service NetworkPolicy
+        run: kubectl apply -f "${K8S_OVERLAY_DIR}/platform-private-service.generated.yaml"
       - name: Sync Guacamole runtime secret
         run: |
           python3 - <<'PY'

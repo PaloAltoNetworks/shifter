@@ -30,7 +30,10 @@ cloud_sql_disk_size_gb      = 20
 cloud_sql_database_name     = "shifter"
 cloud_sql_user_name         = "shifter"
 
-redis_tier           = "BASIC"
+# Memorystore tier: STANDARD_HA is the production high-availability posture.
+# AUTH and SERVER_AUTHENTICATION TLS are enforced unconditionally by the
+# platform-core module regardless of tier (ADR-008-R6, #963).
+redis_tier           = "STANDARD_HA"
 redis_memory_size_gb = 1
 
 public_hostname         = "shifter.keplerops.com"

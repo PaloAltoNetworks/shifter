@@ -233,7 +233,7 @@
     "title": "GCP bootstrap fails closed and uses private operator access",
     "status": "accepted",
     "scope": "gcp",
-    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: production Django DEBUG disabled independently of edge certificate readiness, managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, Cloud Armor on public backends, secure session/CSRF cookies, and IAP-based access to private GDC operator hosts.",
+    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: production Django DEBUG disabled independently of edge certificate readiness, managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, explicit least-privilege VPC firewall policy for platform/range networks, Cloud Armor on public backends, secure session/CSRF cookies, and IAP-based access to private GDC operator hosts.",
     "rules": [
       {
         "id": "ADR-008-R1",
@@ -248,6 +248,21 @@
       {
         "id": "ADR-008-R3",
         "description": "Production DJANGO_DEBUG and secure session/CSRF cookie settings must not be derived from managed TLS certificate readiness, DNS convergence, or identity secret availability.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R4",
+        "description": "GCP platform and range VPC reachability must be explicit, least-privilege Terraform policy: range ingress defaults closed, platform-to-range access is limited to documented provisioner/participant paths, and SSH/RDP are never opened from world or broad external CIDRs.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R5",
+        "description": "GCP GCS bucket encryption stays on Google-managed keys for the current scope; CMEK is deferred until a compliance driver justifies the operational cost of bucket-role-specific KMS keys, KMS service-agent IAM, and a state-bucket bootstrap KMS contract. Owner: platform infra. Review trigger: an external compliance requirement (FedRAMP, SOC 2 Type II contract, GovCloud-style customer asks, or an explicit security review). Recorded 2026-05-11 from issue #962.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R6",
+        "description": "GCP Memorystore for the platform control-plane cache must run with auth_enabled = true and transit_encryption_mode = SERVER_AUTHENTICATION. The AUTH token and the Memorystore server CA both flow through Secret Manager and are hydrated by the runtime entrypoint exactly like the DB and app secrets; neither value may appear in ConfigMaps, generated env files, or process argv. Django Channels consumes the cache via a TLS (rediss://) channels_redis dict-form host carrying ssl_cert_reqs=required and ssl_ca_data set to the Memorystore CA. STANDARD_HA is the default production tier (high-availability posture); auth/TLS posture is independent of tier and is always-on at the module level.",
         "checks": []
       }
     ],
@@ -264,7 +279,13 @@
       "platform/terraform/gcp/README.md",
       "platform/k8s/gcp/README.md",
       "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/networking.md",
-      "docs/architecture/gke-control-plane-access-preflight.md"
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/entrypoint.sh",
+      "docs/architecture/gke-control-plane-access-preflight.md",
+      "docs/architecture/gcp-vpc-firewall-preflight.md",
+      "docs/architecture/gcp-cloud-sql-deletion-protection-preflight.md",
+      "docs/architecture/gcp-gcs-cmek-preflight.md",
+      "docs/architecture/gcp-redis-auth-tls-preflight.md"
     ]
   },
   {

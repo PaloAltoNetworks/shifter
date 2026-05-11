@@ -176,10 +176,11 @@ output "control_plane_database" {
 }
 
 output "control_plane_cache" {
-  description = "Control-plane Redis connection metadata."
+  description = "Control-plane Redis connection metadata. tls_enabled signals to the runtime renderer that the channel layer must build a rediss:// host; the AUTH token itself is held in Secret Manager and surfaced via `runtime_secret_ids[\"redis\"]` (ADR-008-R6)."
   value = {
-    host = google_redis_instance.platform.host
-    port = google_redis_instance.platform.port
+    host        = google_redis_instance.platform.host
+    port        = google_redis_instance.platform.port
+    tls_enabled = google_redis_instance.platform.transit_encryption_mode != "DISABLED"
   }
 }
 

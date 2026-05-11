@@ -134,9 +134,9 @@ variable "cloud_sql_user_name" {
 }
 
 variable "redis_tier" {
-  description = "Memorystore tier for the control-plane Redis instance."
+  description = "Memorystore tier for the control-plane Redis instance. STANDARD_HA is the default production high-availability posture; AUTH and TLS are enforced unconditionally by the platform-core module regardless of tier (ADR-008-R6)."
   type        = string
-  default     = "BASIC"
+  default     = "STANDARD_HA"
 }
 
 variable "redis_memory_size_gb" {

@@ -132,6 +132,11 @@ def render_env(outputs: dict[str, object]) -> str:
         "CSRF_COOKIE_SECURE": "true",
         "DB_HOST": database["private_ip"],
         "DB_PORT": str(database["port"]),
+        # Redis host/port are non-secret and ride in the runtime ConfigMap.
+        # REDIS_TLS / REDIS_SECRET_ID (added below) flag the secure posture
+        # and point the entrypoint at the Secret Manager bundle that carries
+        # the AUTH token; the password itself NEVER flows through this
+        # ConfigMap-bound env (ADR-008-R6, #963).
         "REDIS_HOST": cache["host"],
         "REDIS_PORT": str(cache["port"]),
         "DJANGO_ALLOWED_HOSTS": allowed_hosts,
@@ -171,6 +176,31 @@ def render_env(outputs: dict[str, object]) -> str:
         values["PLATFORM_BOOTSTRAP_STAFF_EMAILS"] = bootstrap_staff_emails
     if bootstrap_superuser_emails:
         values["PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"] = bootstrap_superuser_emails
+
+    # Redis TLS posture and AUTH-secret pointer (ADR-008-R6, #963). This
+    # renderer IS the GCP production runtime contract — there is no
+    # legitimate path here where Memorystore lacks AUTH/TLS or where the
+    # AUTH secret isn't published. If the Terraform outputs don't carry
+    # the secure posture, the deploy is either pointed at a stale state
+    # or has been rendered from a misconfigured environment; fail closed
+    # so the misconfiguration surfaces at render time rather than as an
+    # opaque Django startup or TLS handshake failure later. Local-dev
+    # fallback (no REDIS_HOST at all) is handled separately in
+    # config/settings.py and is unaffected by this gate.
+    if not isinstance(cache, dict) or not cache.get("tls_enabled"):
+        raise ValueError(
+            "GCP runtime requires control_plane_cache.tls_enabled=true "
+            "(ADR-008-R6); refusing to render an insecure Redis posture"
+        )
+    redis_secret_id = secret_ids.get("redis") if isinstance(secret_ids, dict) else None
+    if not redis_secret_id:
+        raise ValueError(
+            'GCP runtime requires runtime_secret_ids["redis"] (the Memorystore '
+            "AUTH/CA Secret Manager bundle) to be present in the Terraform outputs "
+            "(ADR-008-R6); refusing to render without it"
+        )
+    values["REDIS_TLS"] = "true"
+    values["REDIS_SECRET_ID"] = redis_secret_id
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 

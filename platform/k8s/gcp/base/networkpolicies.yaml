@@ -201,3 +201,10 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+# NOTE: The `allow-platform-private-service-egress` policy is rendered
+# dynamically at deploy time by `scripts/gcp/render_private_service_netpol.py`
+# (output: `platform-private-service.generated.yaml`) so the destination
+# ipBlocks are the actual Cloud SQL / Memorystore private IPs from Terraform
+# outputs rather than broad RFC1918 supernets. The `_gcp-dev.yml` workflow
+# applies the generated manifest with `kubectl apply -f` alongside the
+# Kustomize base. See ADR-008-R6 and `docs/architecture/gcp-redis-auth-tls-preflight.md`.

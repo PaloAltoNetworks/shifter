@@ -379,7 +379,7 @@ class TestCreateExperiment:
 
 
 class TestCreateExperimentAccess:
-    """Verify that create_experiment enforces scenario access controls."""
+    """Verify that create_experiment enforces staff and scenario access controls."""
 
     @pytest.fixture()
     def staff_user(self):
@@ -391,9 +391,7 @@ class TestCreateExperimentAccess:
 
     @patch("cms.experiments.services.load_scenario_template")
     @patch("cms.experiments.services.check_scenario_access")
-    def test_disabled_scenario_blocked_for_non_staff(self, mock_check, mock_load, regular_user):
-        mock_check.side_effect = ValueError("Scenario is disabled")
-
+    def test_non_staff_blocked_before_disabled_scenario_validation(self, mock_check, mock_load, regular_user):
         data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
         with pytest.raises(PermissionDenied, match="Staff privileges are required"):
             services.create_experiment(regular_user, data)
@@ -402,9 +400,7 @@ class TestCreateExperimentAccess:
 
     @patch("cms.experiments.services.load_scenario_template")
     @patch("cms.experiments.services.check_scenario_access")
-    def test_staff_only_scenario_blocked_for_non_staff(self, mock_check, mock_load, regular_user):
-        mock_check.side_effect = ValueError("Scenario is staff-only")
-
+    def test_non_staff_blocked_before_staff_only_scenario_validation(self, mock_check, mock_load, regular_user):
         data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
         with pytest.raises(PermissionDenied, match="Staff privileges are required"):
             services.create_experiment(regular_user, data)

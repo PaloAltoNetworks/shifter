@@ -1,0 +1,1 @@
+**Scenario editor delete confirmation no longer embeds scenario names in inline JavaScript.** The scenarios list now binds delete confirmation handlers in a separate script and reads names from a safely escaped `data-scenario-name` attribute, preventing stored XSS via crafted scenario names.

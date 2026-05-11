@@ -66,6 +66,7 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
 
     environment = [
       { name = "ENVIRONMENT", value = var.environment },
+      { name = "SECRETS_KMS_KEY_ARN", value = var.secrets_manager_kms_key_arn },
       { name = "AWS_REGION", value = local.region },
       { name = "DB_HOST", value = var.db_host },
       { name = "DB_PORT", value = tostring(var.db_port) },

@@ -25,11 +25,11 @@ resource "random_password" "dc_domain_password" {
   override_special = "!@#%^&*()-_=+[]{}:?"
 }
 
-# checkov:skip=CKV_AWS_149:AWS-managed key sufficient for this internal MVP secret; matches the other portal Secrets Manager secrets (see #213).
 resource "aws_secretsmanager_secret" "dc_domain_password" {
   name                    = "shifter-${var.environment}-portal-dc-domain"
   description             = "Domain Controller domain Administrator password (DC_DOMAIN_PASSWORD)"
   recovery_window_in_days = 0 # NOSONAR - matches the other portal secrets: immediate deletion avoids naming conflicts on recreate
+  kms_key_id              = var.secrets_manager_kms_key_arn
 
   tags = merge(local.common_tags, {
     Name = "shifter-${var.environment}-portal-dc-domain"

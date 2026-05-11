@@ -20,6 +20,11 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "secrets_kms_key_arn" {
+  description = "ARN of the portal Secrets Manager CMK used to encrypt range instance SSH-key secrets at runtime (CKV_AWS_149). Sourced from the engine-provisioner ECS task env (SECRETS_KMS_KEY_ARN) which is wired from the platform env root."
+  type        = string
+}
+
 # VPC configuration
 variable "vpc_id" {
   description = "Range VPC ID"

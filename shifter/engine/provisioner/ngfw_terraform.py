@@ -224,8 +224,7 @@ def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
 
     storage = get_object_storage()
     bootstrap_prefix = f"bootstrap/ngfw/{instance_id}"
-    failed_keys: list[str] = []
-    last_error: Exception | None = None
+    failures: list[tuple[str, Exception]] = []
     for key in (
         f"{bootstrap_prefix}/config/init-cfg.txt",
         f"{bootstrap_prefix}/license/authcodes",
@@ -235,11 +234,11 @@ def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
             storage.delete_object(bucket=bootstrap_bucket, key=key)
         except Exception as e:
             logger.error("Failed to delete NGFW bootstrap object: bucket=%s key=%s error=%s", bootstrap_bucket, key, e)
-            failed_keys.append(key)
-            last_error = e
+            failures.append((key, e))
 
-    if failed_keys:
-        raise RuntimeError(f"Failed to delete NGFW bootstrap object(s): {', '.join(failed_keys)}") from last_error
+    if failures:
+        failed_keys = [key for key, _ in failures]
+        raise RuntimeError(f"Failed to delete NGFW bootstrap object(s): {', '.join(failed_keys)}") from failures[-1][1]
 
 
 def _run_pan_os_post_provision(
@@ -379,7 +378,12 @@ def _run_pan_os_post_provision(
         status=STATUS_READY,
         serial_number=serial_number,
     )
-    _cleanup_ngfw_bootstrap_objects(instance_id)
+    bootstrap_cleanup_error = None
+    try:
+        _cleanup_ngfw_bootstrap_objects(instance_id)
+    except Exception as e:
+        logger.exception("NGFW bootstrap object cleanup failed: request_id=%s", request_id)
+        bootstrap_cleanup_error = e
     logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
 
     logger.info("Auto-stopping NGFW: request_id=%s", request_id)
@@ -391,6 +395,9 @@ def _run_pan_os_post_provision(
             "Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
             request_id,
         )
+
+    if bootstrap_cleanup_error:
+        raise RuntimeError("NGFW bootstrap object cleanup failed") from bootstrap_cleanup_error
 
 
 def _run_provision(

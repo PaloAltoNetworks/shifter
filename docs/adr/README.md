@@ -27,6 +27,9 @@ Current mechanisms:
 
 - `scripts/adr_guard/adr_guard.py`: repo-native policy runner
 - `.pre-commit-config.yaml`: local fast checks
+  - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
+    keeps engine-provisioner EC2 instance lifecycle actions scoped to
+    Shifter-owned, Terraform-managed instances.
 - `.github/workflows/_quality.yml`: CI architecture gate
 - `.claude/hooks/adr_guard_hook.py`: Claude post-edit validation
 - `AGENTS.md`: Codex repo-local policy. Points at `.ground-control.yaml` and `.gc/plan-rules.md` for Ground Control workflow context (requirements and plan rules); enforcement of ADR rules still lives here.

@@ -81,7 +81,7 @@
                         {% if not scenario.is_default %}
                         <form method="post" action="{% url 'scenario_editor:delete' scenario_id=scenario.id %}" style="display: inline;">
                             {% csrf_token %}
-                            <button type="submit" class="btn" onclick="return confirm('Delete scenario \'{{ scenario.name }}\'? This cannot be undone.')" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: auto; background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3);">Delete</button>
+                            <button type="submit" class="btn js-scenario-delete-btn" data-scenario-name="{{ scenario.name }}" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: auto; background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3);">Delete</button>
                         </form>
                         {% endif %}
                     </div>
@@ -97,4 +97,19 @@
     <a href="{% url 'scenario_editor:create' %}" class="btn btn-primary">Create First Scenario</a>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".js-scenario-delete-btn").forEach(function (button) {
+        button.addEventListener("click", function (event) {
+            const scenarioName = button.dataset.scenarioName || "";
+            if (!confirm(`Delete scenario '${scenarioName}'? This cannot be undone.`)) {
+                event.preventDefault();
+            }
+        });
+    });
+});
+</script>
 {% endblock %}

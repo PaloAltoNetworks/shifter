@@ -49,6 +49,24 @@ class TestScenarioListView:
         response = threat_research_client.get(VIEW_BASE)
         assert response.status_code == 200
 
+    def test_delete_button_uses_safe_data_attribute_for_scenario_name(self, staff_client, staff_user, valid_definition):
+        Scenario.objects.create(
+            scenario_id="xss-test",
+            name="');alert(document.domain);//",
+            description="XSS payload scenario",
+            definition=valid_definition,
+            created_by=staff_user,
+            updated_by=staff_user,
+        )
+
+        response = staff_client.get(VIEW_BASE)
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        assert "js-scenario-delete-btn" in content
+        assert "data-scenario-name=\"&#x27;);alert(document.domain);//\"" in content
+        assert "onclick=\"return confirm('Delete scenario" not in content
+
 
 class TestThreatResearchGroupAccess:
     """Threat Research group members have the same access as staff for

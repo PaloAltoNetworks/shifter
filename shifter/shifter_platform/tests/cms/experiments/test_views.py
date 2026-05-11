@@ -355,6 +355,43 @@ class TestExperimentCreateView:
         resp = experiment_create(request)
         assert resp.status_code == 302
 
+    @patch("cms.experiments.views.services.create_experiment")
+    @patch("cms.scenarios.registry.load_scenario_template")
+    def test_threat_research_user_blocked_from_hidden_scenario_post(self, mock_load, mock_create, rf, threat_user):
+        """Regression for #771: a non-staff Threat Research user must not be
+        able to POST a disabled or staff_only scenario_id and have an experiment
+        created. The decorator lets the user in; the access check lives in
+        services.create_experiment via registry.check_scenario_access.
+
+        The view's POST handler must therefore propagate the service-layer
+        rejection as a form redirect, never as a created experiment.
+        """
+        mock_template = MagicMock()
+        mock_template.instances = []
+        mock_load.return_value = mock_template
+        mock_create.side_effect = ExperimentValidationError(
+            "Invalid scenario: Scenario 'hidden-internal' is not available"
+        )
+
+        request = _post_request(
+            rf,
+            threat_user,
+            data={
+                "name": "Trying hidden",
+                "scenario_id": "hidden-internal",
+                "total_runs": "1",
+                "max_parallel_runs": "1",
+                "scripts_json": "[]",
+            },
+        )
+        resp = experiment_create(request)
+
+        # Decorator must have admitted the Threat Research user; the service
+        # layer must have been called and must have rejected the request.
+        mock_create.assert_called_once()
+        # Response is a redirect back to the form, NOT a 200 / detail view.
+        assert resp.status_code == 302
+
 
 # =============================================================================
 # ScenarioInstancesViewTest — AJAX scenario instances

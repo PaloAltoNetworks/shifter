@@ -45,9 +45,28 @@ variable "gke_master_ipv4_cidr" {
 }
 
 variable "gke_master_authorized_cidrs" {
-  description = "CIDR blocks allowed to access the public GKE control-plane endpoint."
+  description = "CIDR blocks allowed to reach the public GKE control-plane endpoint. Required: the cluster runs with enable_private_endpoint = false, so master_authorized_networks_config is the only network-level restriction on the public Kubernetes API server (ADR-008; docs/architecture/gke-control-plane-access-preflight.md). The environment root must supply at least one CIDR."
   type        = list(string)
-  default     = []
+
+  # Fail closed: an empty, malformed, or world-open (/0) allowlist would expose
+  # the public API server to the entire internet. This is the Terraform-layer
+  # backstop for the bootstrap preflight
+  # (scripts/bootstrap/deploy.py::validate_gcp_control_plane_security_inputs);
+  # both gates express the same contract from the parsed prefix:
+  #   1. cidrhost(cidr, 0) — entry parses as a CIDR (rejects bare IPs, garbage,
+  #      bad octets, bad prefixes).
+  #   2. an explicit /N suffix is present.
+  #   3. the parsed prefix length is > 0 (so /0 is rejected from the prefix
+  #      number, not by string-suffix matching against one spelling).
+  validation {
+    condition = length(var.gke_master_authorized_cidrs) > 0 && alltrue([
+      for cidr in var.gke_master_authorized_cidrs :
+      can(cidrhost(cidr, 0))
+      && can(regex("/[0-9]+$", cidr))
+      && tonumber(regex("/([0-9]+)$", cidr)[0]) > 0
+    ])
+    error_message = "gke_master_authorized_cidrs must contain at least one CIDR; every entry must be a valid CIDR with an explicit /N suffix (e.g. 203.0.113.10/32), and no entry may be a /0 (world-open) range. The GKE control-plane endpoint is public (enable_private_endpoint = false), so an empty or world-open allowlist would expose the Kubernetes API server to the entire internet. Set it from the environment root (see ADR-008 and docs/architecture/gke-control-plane-access-preflight.md); if a private endpoint is intended, change enable_private_endpoint and relax this rule together."
+  }
 }
 
 variable "range_network_cidr" {

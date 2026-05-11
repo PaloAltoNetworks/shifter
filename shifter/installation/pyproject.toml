@@ -47,10 +47,15 @@ line-length = 120
 exclude = [".venv", "__pycache__"]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "T20", "SIM", "RUF"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "T20", "SIM", "RUF", "C901"]
 # T201: print is intentional in the CLI tool
 # S101: assert is fine in tests (covered by per-file ignores too)
 ignore = ["S101", "T201"]
+
+# Per-function McCabe complexity limit (ADR-012). Existing offenders carry
+# `# noqa: C901`; threshold ratchets down as the backlog shrinks.
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
 # S603: tests spawn the test interpreter (`sys.executable`) with fully literal args

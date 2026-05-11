@@ -8,7 +8,7 @@ Requirement: `UX-003` - Single information architecture across the platform
 
 Status: Draft design artifact for review
 
-Architecture decision: `ADR-012` records the implementation constraint that
+Architecture decision: `ADR-013` records the implementation constraint that
 future navigation work must use a shared, role-aware platform navigation
 contract rather than duplicating app-local navigation schemas.
 

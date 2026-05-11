@@ -385,7 +385,7 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @ctf_participant_required
-def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
+def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:  # noqa: C901
     """Participant challenge detail with submission form.
 
     Args:

@@ -117,7 +117,7 @@ def invite_participant(
     return participant
 
 
-def bulk_import_participants(
+def bulk_import_participants(  # noqa: C901
     event_id: UUID,
     csv_content: str,
 ) -> list[CTFParticipant]:

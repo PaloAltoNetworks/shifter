@@ -174,7 +174,7 @@ class SetupOrchestrator:
             verification_result=verify_result,
         )
 
-    def _execute_step(
+    def _execute_step(  # noqa: C901
         self,
         instance_id: str,
         step: SetupStep,

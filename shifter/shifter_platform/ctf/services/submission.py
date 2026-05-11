@@ -53,7 +53,7 @@ def _count_attempts_in_current_window(
     return count
 
 
-def submit_flag(
+def submit_flag(  # noqa: C901
     participant_id: UUID,
     challenge_id: UUID,
     submitted_flag: str,

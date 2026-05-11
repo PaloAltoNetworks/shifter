@@ -404,5 +404,50 @@
       "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md",
       "shifter/shifter_platform/documentation/docs/technical/architecture.md"
     ]
+  },
+  {
+    "id": "ADR-012",
+    "title": "Python per-function complexity is bounded by Ruff C901",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Every lint-scoped Python package enforces a hard per-function McCabe complexity limit via Ruff's C901 rule. The repo-wide threshold is 15 (matching SonarCloud's default cognitive-complexity threshold). Existing offenders carry explicit per-function `# noqa: C901` exemptions and are tracked as a backlog; the threshold ratchets down as the backlog shrinks. The complexity gate is Ruff itself, running in both pre-commit and CI; an adr_guard check verifies the config is in place so the gate cannot be silently removed.",
+    "rules": [
+      {
+        "id": "ADR-012-R1",
+        "description": "Each canonical Python package pyproject.toml must enable C901 in [tool.ruff.lint].select and set [tool.ruff.lint.mccabe].max-complexity to the repo-wide threshold.",
+        "checks": ["python-complexity-gate"]
+      },
+      {
+        "id": "ADR-012-R2",
+        "description": "Existing high-complexity functions are exempted with per-function `# noqa: C901` comments. New violations are not exempted by default; they must be refactored or the gate fails. The function-level backlog (one row per exemption, with current complexity) lives at docs/adr/complexity-backlog.md and shrinks as the threshold ratchets.",
+        "checks": []
+      },
+      {
+        "id": "ADR-012-R3",
+        "description": "The threshold ratchets down toward parity with SonarCloud as the exemption backlog shrinks. Ratchet edits update PYTHON_COMPLEXITY_THRESHOLD in scripts/adr_guard/adr_guard.py and every canonical pyproject.toml in a single PR.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      "scripts/adr_guard/adr_guard.py",
+      "docs/adr/complexity-backlog.md",
+      "docs/architecture/python-complexity-gate-preflight.md",
+      "shifter/shifter_platform/pyproject.toml",
+      "shifter/engine/provisioner/pyproject.toml",
+      "shifter/packer/pyproject.toml",
+      "shifter/installation/pyproject.toml",
+      "scripts/bootstrap/pyproject.toml",
+      "scripts/gcp/pyproject.toml",
+      "scripts/check_layer_imports/pyproject.toml",
+      "scripts/check_rds_pending_modifications/pyproject.toml",
+      "shifter/shifter_platform/cms/services.py",
+      "shifter/shifter_platform/ctf/services/participant.py",
+      "shifter/shifter_platform/ctf/services/submission.py",
+      "shifter/shifter_platform/ctf/views.py",
+      "shifter/engine/provisioner/main.py",
+      "shifter/engine/provisioner/orchestrators/setup_orchestrator.py"
+    ]
   }
 ]

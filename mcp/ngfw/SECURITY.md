@@ -31,6 +31,37 @@ Secrets Manager. The remaining shell boundary that must stay closed:
   server.
 - If operational firewall administration is needed, use a separate
   break-glass operator workflow with approval and RBAC.
+The PAN-OS CLI command supplied to `run_command`, `show_system_info`,
+and `show_routes` is forwarded to the NGFW via the portal jump host.
+The portal command pipeline is built by
+`buildNgfwSshCommands({ sshKey, ngfwIp, command })` in `lib.js`:
+
+- The user command is base64-encoded (`command + "\n"` so PAN-OS
+  receives a complete line — the appliance is line-oriented and needs
+  Enter to execute) into a single argv-safe token. Base64 outputs only
+  `[A-Za-z0-9+/=]`, none of which are shell-special inside single
+  quotes, so `printf %s '<base64>'` cannot be broken open by
+  attacker-controlled bytes.
+- The portal decodes the base64 (`base64 -d`) and pipes the resulting
+  bytes into `ssh`'s stdin. The portal shell never sees the raw command.
+- The SSH private key rides via a single-quoted heredoc terminator
+  (`<< 'EOFKEY'`). The single quotes around the terminator suppress
+  expansion of `$`, backticks, and `$( )` inside the heredoc body.
+- The temporary key path is per-invocation (`/tmp/ngfw-<uuid>.pem`) so
+  concurrent MCP calls cannot clobber or delete each other's key
+  material. `buildNgfwSshCommands` validates any caller-supplied
+  `keyPath` against `^/tmp/ngfw-[A-Za-z0-9._-]+\.pem$` so a future
+  caller cannot widen the boundary.
+- SSH host-key verification is enforced. The portal jump host must have
+  the expected NGFW host key in its configured known_hosts before these
+  management commands run.
+- `ngfwIp` is interpolated into the SSH target argument. It is sourced
+  from EC2 `describe-instances` (AWS-controlled), but
+  `validateNgfwIp` enforces a strict dotted-quad IPv4 check before
+  interpolation as defense in depth.
+
+Single-quote escaping of arbitrary command bytes is explicitly NOT the
+remediation strategy. Base64 is the boundary.
 
 ## Validation and boundaries
 

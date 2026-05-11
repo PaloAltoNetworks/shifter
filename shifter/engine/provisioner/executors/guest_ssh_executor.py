@@ -79,9 +79,9 @@ class GuestSSHExecutor:
             "-p",
             str(self._port),
             "-o",
-            "StrictHostKeyChecking=no",  # NOSONAR — freshly provisioned range guests
+            "StrictHostKeyChecking=yes",
             "-o",
-            "UserKnownHostsFile=/dev/null",
+            "BatchMode=yes",
             "-o",
             f"ConnectTimeout={self._connect_timeout}",
             "-o",

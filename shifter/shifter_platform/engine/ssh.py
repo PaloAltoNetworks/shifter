@@ -75,7 +75,6 @@ class SSHConnection:
                 port=self.port,
                 username=self.username,
                 client_keys=[key],
-                known_hosts=None,  # Accept any host key (internal network)
             )
 
             # Build command for persistent tmux session or default shell

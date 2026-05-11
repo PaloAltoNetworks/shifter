@@ -109,6 +109,6 @@ export function buildNgfwSshCommands({ sshKey, ngfwIp, command, keyPath }) {
     sshKey,
     `EOFKEY`,
     `chmod 600 ${path}`,
-    `printf %s '${encoded}' | base64 -d | ssh -i ${path} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 admin@${ngfwIp} 2>&1`,
+    `printf %s '${encoded}' | base64 -d | ssh -i ${path} -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10 admin@${ngfwIp} 2>&1`,
   ];
 }

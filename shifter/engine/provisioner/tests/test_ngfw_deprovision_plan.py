@@ -38,6 +38,19 @@ class TestNGFWDeprovisionPlan:
         assert "vm-capacity" in script
         assert "mode auto" in script
 
+    def test_scripts_enforce_ssh_host_key_checking(self):
+        """Deprovision scripts fail closed when the NGFW host key is unknown."""
+        plan = NGFWDeprovisionPlan()
+        scripts = [step.script for step in plan.steps]
+        if plan.verify_step:
+            scripts.append(plan.verify_step.script)
+
+        joined = "\n".join(scripts)
+        assert "StrictHostKeyChecking=yes" in joined
+        assert "BatchMode=yes" in joined
+        assert "StrictHostKeyChecking=no" not in joined
+        assert "UserKnownHostsFile=/dev/null" not in joined
+
 
 class TestNGFWDeprovisionPlanContext:
     """Tests for get_context method."""

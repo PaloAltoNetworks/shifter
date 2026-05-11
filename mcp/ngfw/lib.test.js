@@ -119,6 +119,10 @@ describe("buildNgfwSshCommands", () => {
     const sshLine = cmds[6];
     assert.ok(sshLine.startsWith("printf %s '"));
     assert.ok(sshLine.includes(`' | base64 -d | ssh -i ${path} `));
+    assert.ok(sshLine.includes("-o StrictHostKeyChecking=yes"));
+    assert.ok(sshLine.includes("-o BatchMode=yes"));
+    assert.ok(!sshLine.includes("StrictHostKeyChecking=no"));
+    assert.ok(!sshLine.includes("UserKnownHostsFile=/dev/null"));
     const printfMatch = /^printf %s '([A-Za-z0-9+/=]+)'/.exec(sshLine);
     assert.ok(printfMatch, "printf segment must contain only base64 characters");
   });

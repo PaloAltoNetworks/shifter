@@ -434,7 +434,7 @@ class TestEventCreateView:
         with patch("ctf.bridges.cms_list_scenarios", return_value=[("basic", "Basic")]):
             response = organizer_client.get(reverse("ctf:admin_event_create"))
         assert response.status_code == 200
-        assert "scenarios_json" in response.context
+        assert "scenarios_list" in response.context
 
     def test_create_view_is_get_only(self, organizer_client: Client):
         """Create view should reject POST (form submission is via API now)."""
@@ -553,7 +553,7 @@ class TestEventEditView:
         ):
             response = organizer_client.get(reverse("ctf:admin_event_edit", kwargs={"event_id": mock_event_draft.pk}))
         assert response.status_code == 200
-        assert "scenarios_json" in response.context
+        assert "scenarios_list" in response.context
         assert response.context["is_edit"] is True
         assert response.context["event_id"] == str(mock_event_draft.pk)
 

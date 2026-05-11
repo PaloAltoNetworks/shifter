@@ -889,6 +889,9 @@ class TestGdcRenderers:
         assert "ip link add vxlan0 type vxlan id 42" in rendered
         assert "fs.inotify.max_user_instances = 1024" in rendered
         assert 'configure_remote_host "10.240.0.3" "10.200.0.3"' in rendered
+        assert "StrictHostKeyChecking=yes" in rendered
+        assert "StrictHostKeyChecking=no" not in rendered
+        assert "UserKnownHostsFile=/dev/null" not in rendered
 
     def test_prepare_workstation_script_installs_staged_bmctl(self):
         """The workstation prep must install the pinned staged bmctl binary, not curl it remotely."""
@@ -898,6 +901,9 @@ class TestGdcRenderers:
 
         assert f"install -m 755 {config.staging_bundle_dir}/bmctl /usr/local/sbin/bmctl" in rendered
         assert "anthos-baremetal-release" not in rendered
+        assert "StrictHostKeyChecking yes" in rendered
+        assert "StrictHostKeyChecking no" not in rendered
+        assert "UserKnownHostsFile /dev/null" not in rendered
 
     def test_rendered_gdc_shell_scripts_parse_with_bash(self, tmp_path):
         """Rendered bootstrap shell scripts must be syntactically valid bash."""

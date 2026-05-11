@@ -116,7 +116,7 @@ resource "aws_kms_key" "secrets_manager" {
         # other Secrets Manager secret in the account.
         Sid       = "AllowPortalSecretsManagerCallers"
         Effect    = "Allow"
-        Principal = { AWS = "*" }
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
         Action = [
           "kms:Decrypt",
           "kms:DescribeKey",
@@ -176,7 +176,7 @@ resource "aws_kms_key" "portal_s3" {
         # this key to decrypt some other S3 object in the account.
         Sid       = "AllowPortalUserUploadsBucket"
         Effect    = "Allow"
-        Principal = { AWS = "*" }
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
         Action = [
           "kms:Decrypt",
           "kms:DescribeKey",

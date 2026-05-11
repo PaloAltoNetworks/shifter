@@ -22,6 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The self-hosted runner ships with Python 3.9, but `adr_guard.py` uses
+      # the stdlib `tomllib` module added in 3.11. Pin a CI-managed 3.11
+      # toolchain here so the guard runs the same way it does locally.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
         env:
           PYYAML_VERSION: "6.0.2"
@@ -722,6 +729,12 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+
+      # Same Python-version rationale as adr-conformance: `adr_guard` imports
+      # `tomllib` (stdlib 3.11+); the self-hosted runner is on 3.9.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
         env:

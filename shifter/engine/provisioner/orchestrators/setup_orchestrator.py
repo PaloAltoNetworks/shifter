@@ -370,7 +370,7 @@ class SetupOrchestrator:
 
     @classmethod
     def _sensitive_values(cls, context: dict[str, Any] | None = None) -> list[str]:
-        values = {os.environ.get(env_var, "") for env_var in cls.SENSITIVE_ENV_VARS}
+        values = {value for env_var in cls.SENSITIVE_ENV_VARS if (value := os.environ.get(env_var))}
 
         if context:
             for key, value in context.items():
@@ -444,14 +444,14 @@ class SetupOrchestrator:
         for var_name in matches:
             if var_name not in context:
                 logger.error(
-                    "_render_script: missing variable=%s step=%s available=%s",
+                    "_render_script: missing variable=%s step=%s context_keys=%d",
                     var_name,
                     step_name,
-                    list(context.keys()),
+                    len(context),
                 )
                 raise SetupError(
                     f"Missing template variable '{var_name}' in step '{step_name}'. "
-                    f"Available variables: {list(context.keys())}",
+                    "Required variables are missing from the supplied context.",
                     step_name=step_name,
                 )
             # Replace {{ var }} with the value

@@ -15,6 +15,7 @@ import logging
 from django.conf import settings
 from django.db import models
 
+from cms.credential_encryption import EncryptedCredentialDataField
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
 from shared.db import ExpiringStateMixin, SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
@@ -157,7 +158,7 @@ class Credential(CredentialBase):
         on_delete=models.PROTECT,
         related_name="credentials",
     )
-    data = models.JSONField(
+    data = EncryptedCredentialDataField(
         default=dict,
         help_text="Type-specific credential data (validated by spec_class)",
     )

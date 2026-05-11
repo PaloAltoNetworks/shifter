@@ -6,7 +6,7 @@ since it requires bcrypt hashes.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -170,7 +170,7 @@ class TestSubmissionRateLimit:
 
     @patch("ctf.services.submission.verify_flag", return_value=False)
     def test_rate_limit_error_includes_retry_after(self, mock_verify, participant, challenge):
-        """Rate limit error details include retry_after_seconds for the client."""
+        """Rate limit error includes retry delay and retry timestamp details."""
         submit_flag(participant.id, challenge.id, "FLAG{first}")
 
         with pytest.raises(CTFRateLimitError) as exc_info:
@@ -180,6 +180,9 @@ class TestSubmissionRateLimit:
         assert "retry_after_seconds" in details
         assert details["retry_after_seconds"] > 0
         assert details["retry_after_seconds"] <= 11  # cooldown is 10s, +1 ceiling
+        assert "retry_at" in details
+        assert datetime.fromisoformat(details["retry_at"])
+        assert "retry at" in str(exc_info.value).lower()
         assert details["cooldown_seconds"] == 10
 
 

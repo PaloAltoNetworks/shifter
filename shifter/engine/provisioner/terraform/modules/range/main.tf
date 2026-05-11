@@ -247,6 +247,7 @@ resource "aws_secretsmanager_secret" "ssh_key" {
   name                    = "shifter/${var.environment}/range/${var.range_id}/${each.value.role}-${substr(each.value.instance_uuid, 0, 8)}-ssh-key"
   description             = "SSH private key for ${each.value.role} instance ${each.value.instance_uuid}"
   recovery_window_in_days = 0 # Immediate delete for cleanup
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(local.common_tags, {
     "shifter:instance_uuid" = each.value.instance_uuid

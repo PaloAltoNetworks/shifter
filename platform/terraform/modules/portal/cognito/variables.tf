@@ -66,3 +66,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "secrets_kms_key_arn" {
+  description = "ARN of the KMS CMK used to encrypt Secrets Manager secrets owned by this module (CKV_AWS_149). Required input — no default."
+  type        = string
+}

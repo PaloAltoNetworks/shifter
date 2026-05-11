@@ -129,6 +129,11 @@ variable "engine_secrets_kms_key_alias" {
   type        = string
 }
 
+variable "secrets_manager_kms_key_arn" {
+  description = "ARN of the portal Secrets Manager CMK used to encrypt the DC domain password and any future module-owned Secrets Manager secrets (CKV_AWS_149). Distinct from engine_secrets_kms_key_arn, which is the Pulumi state CMK and must not be reused for Secrets Manager. Required input — no default."
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # Range VPC Configuration
 # ------------------------------------------------------------------------------

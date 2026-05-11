@@ -2981,13 +2981,20 @@ def _resolve_ngfw_for_range(user_id: int, range_id: int) -> tuple[str, dict[str,
 
 
 def _build_aws_extra_tf_variables() -> dict:
-    """AWS-only Terraform variables: per-OS AMI IDs + instance profile."""
+    """AWS-only Terraform variables: per-OS AMI IDs + instance profile + Secrets Manager CMK.
+
+    `secrets_kms_key_arn` is AWS-only: it encrypts per-instance SSH-key secrets
+    stored in AWS Secrets Manager (CKV_AWS_149 / #213). The GCP range path uses
+    GDC VM Runtime + GCP Secret Manager and does not consume this variable, so
+    it lives in this AWS-only block rather than the provider-neutral payload.
+    """
     return {
         "kali_ami_id": get_ami_id("kali"),
         "victim_ami_id": get_ami_id("victim"),
         "windows_ami_id": get_ami_id("windows"),
         "dc_ami_id": get_ami_id("dc"),
         "instance_profile_name": os.environ.get("RANGE_INSTANCE_PROFILE_NAME", ""),
+        "secrets_kms_key_arn": os.environ["SECRETS_KMS_KEY_ARN"],
     }
 
 

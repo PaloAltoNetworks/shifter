@@ -93,7 +93,6 @@ resource "aws_acm_certificate_validation" "this" {
 # Application Load Balancer
 # ------------------------------------------------------------------------------
 
-# checkov:skip=CKV_AWS_150:Deletion protection deferred - see #214
 resource "aws_lb" "this" {
   name                       = "${var.name_prefix}-alb"
   internal                   = false
@@ -101,6 +100,7 @@ resource "aws_lb" "this" {
   security_groups            = [aws_security_group.this.id]
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
+  enable_deletion_protection = var.enable_deletion_protection
 
   access_logs {
     bucket  = var.logs_bucket_name

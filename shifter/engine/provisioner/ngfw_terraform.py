@@ -196,6 +196,7 @@ def _build_tf_variables(
         "instance_uuid": instance_id,
         "request_uuid": request_id,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
+        "secrets_kms_key_arn": os.environ["SECRETS_KMS_KEY_ARN"],
         "subnet_id": os.environ.get("NGFW_SUBNET_ID", ""),
         "mgmt_security_group_id": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
         "data_security_group_id": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),

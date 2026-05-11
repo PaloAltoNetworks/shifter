@@ -224,12 +224,22 @@ def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
 
     storage = get_object_storage()
     bootstrap_prefix = f"bootstrap/ngfw/{instance_id}"
+    failed_keys: list[str] = []
+    last_error: Exception | None = None
     for key in (
         f"{bootstrap_prefix}/config/init-cfg.txt",
         f"{bootstrap_prefix}/license/authcodes",
     ):
         logger.info("Deleting NGFW bootstrap object: bucket=%s key=%s", bootstrap_bucket, key)
-        storage.delete_object(bucket=bootstrap_bucket, key=key)
+        try:
+            storage.delete_object(bucket=bootstrap_bucket, key=key)
+        except Exception as e:
+            logger.error("Failed to delete NGFW bootstrap object: bucket=%s key=%s error=%s", bootstrap_bucket, key, e)
+            failed_keys.append(key)
+            last_error = e
+
+    if failed_keys:
+        raise RuntimeError(f"Failed to delete NGFW bootstrap object(s): {', '.join(failed_keys)}") from last_error
 
 
 def _run_pan_os_post_provision(

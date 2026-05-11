@@ -193,6 +193,30 @@ class TestCleanupNgfwBootstrapObjects:
 
         mock_get_object_storage.assert_not_called()
 
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket",
+        },
+        clear=False,
+    )
+    @patch("cloud.get_object_storage")
+    def test_attempts_all_sensitive_bootstrap_objects_before_raising(self, mock_get_object_storage):
+        """Cleanup should try every sensitive key even when one delete fails."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        storage = mock_get_object_storage.return_value
+        storage.delete_object.side_effect = [RuntimeError("denied"), None]
+
+        with pytest.raises(RuntimeError, match=r"config/init-cfg\.txt"):
+            _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        assert storage.delete_object.call_args_list == [
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/config/init-cfg.txt"),
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/license/authcodes"),
+        ]
+
     @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True)
     def test_requires_bootstrap_bucket_for_aws_cleanup(self):
         """AWS cleanup should fail loudly rather than silently retaining bootstrap secrets."""

@@ -4,7 +4,9 @@ Covers destroy_ngfw variable passing and _build_tf_variables helper.
 """
 
 import os
-from unittest.mock import patch
+import sys
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -156,6 +158,135 @@ class TestBuildTfVariables:
 
         with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
             _build_tf_variables("req-1", "inst-1", {})
+
+
+class TestCleanupNgfwBootstrapObjects:
+    """Test post-ready cleanup of sensitive NGFW S3 bootstrap objects."""
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket",
+        },
+        clear=False,
+    )
+    @patch("cloud.get_object_storage")
+    def test_deletes_sensitive_bootstrap_objects(self, mock_get_object_storage):
+        """Cleanup removes init-cfg.txt and authcodes from the instance bootstrap prefix."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        storage = mock_get_object_storage.return_value
+
+        _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        assert storage.delete_object.call_args_list == [
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/config/init-cfg.txt"),
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/license/authcodes"),
+        ]
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp", "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket"}, clear=False)
+    @patch("cloud.get_object_storage")
+    def test_skips_non_aws_provider(self, mock_get_object_storage):
+        """Cleanup is S3-specific and should not run for GCP VM-Series provisioning."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        mock_get_object_storage.assert_not_called()
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket",
+        },
+        clear=False,
+    )
+    @patch("cloud.get_object_storage")
+    def test_attempts_all_sensitive_bootstrap_objects_before_raising(self, mock_get_object_storage):
+        """Cleanup should try every sensitive key even when one delete fails."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        storage = mock_get_object_storage.return_value
+        storage.delete_object.side_effect = [RuntimeError("denied"), None]
+
+        with pytest.raises(RuntimeError, match=r"config/init-cfg\.txt"):
+            _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        assert storage.delete_object.call_args_list == [
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/config/init-cfg.txt"),
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/license/authcodes"),
+        ]
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True)
+    def test_requires_bootstrap_bucket_for_aws_cleanup(self):
+        """AWS cleanup should fail loudly rather than silently retaining bootstrap secrets."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        with pytest.raises(RuntimeError, match="NGFW_BOOTSTRAP_BUCKET"):
+            _cleanup_ngfw_bootstrap_objects("inst-555")
+
+
+class TestRunPanOsPostProvision:
+    """Test PAN-OS post-provision lifecycle behavior."""
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_SSH_WAIT_TIMEOUT": "1",
+            "NGFW_CERT_POLL_TIMEOUT": "1",
+        },
+        clear=False,
+    )
+    @patch("ngfw_terraform.publish_ngfw_event")
+    @patch("ngfw_terraform._cleanup_ngfw_bootstrap_objects", side_effect=RuntimeError("cleanup failed"))
+    @patch("ngfw_terraform.time.sleep")
+    @patch("ngfw_terraform.SetupOrchestrator")
+    @patch("ngfw_terraform.NGFWExecutor")
+    @patch("cloud.get_secrets_store")
+    def test_cleanup_failure_does_not_skip_auto_stop(
+        self,
+        mock_get_secrets_store,
+        mock_ngfw_executor_class,
+        mock_setup_orchestrator_class,
+        _mock_sleep,
+        _mock_cleanup,
+        _mock_publish_ngfw_event,
+        monkeypatch,
+    ):
+        """Bootstrap cleanup failures should surface only after auto-stop is attempted."""
+        from ngfw_terraform import _run_pan_os_post_provision
+
+        fake_main = SimpleNamespace(
+            NGFW_SSH_WAIT_TIMEOUT_DEFAULT=1,
+            poll_for_serial_number=MagicMock(return_value="serial-1"),
+            poll_for_serial_and_cert=MagicMock(return_value="serial-2"),
+            run_ngfw_operation=MagicMock(),
+            update_instance_state=MagicMock(),
+        )
+        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_get_secrets_store.return_value.get_secret.return_value = "private-key"
+        mock_ngfw_executor = mock_ngfw_executor_class.return_value
+        mock_ngfw_executor.run_command.return_value = MagicMock(success=True, stdout="", stderr="")
+        mock_setup_orchestrator_class.return_value.orchestrate.return_value = MagicMock(success=True)
+
+        with pytest.raises(RuntimeError, match="bootstrap object cleanup failed"):
+            _run_pan_os_post_provision(
+                request_id="req-1",
+                instance_id="inst-1",
+                app_id="app-1",
+                output_data={
+                    "management_ip": "10.1.1.10",
+                    "dataplane_ip": "10.1.2.10",
+                    "data_eni_id": "eni-1",
+                    "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+                },
+                sls_region="americas",
+            )
+
+        fake_main.run_ngfw_operation.assert_called_once_with("stop", "req-1")
 
 
 class TestBuildProviderState:

@@ -22,25 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The self-hosted runner ships with Python 3.9, but `adr_guard.py` uses
-      # the stdlib `tomllib` module added in 3.11. Pin a CI-managed 3.11
-      # toolchain here so the guard runs the same way it does locally.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
-        env:
-          PYYAML_VERSION: "6.0.2"
-        run: |
-          set -euo pipefail
-          python3 --version
-          python3 -m pip --version
-          # Install PyYAML into a job-scoped target dir. No system paths are
-          # written.
-          python3 -m pip install --quiet --no-deps \
-            --target "${RUNNER_TEMP}/py-deps" \
-            "pyyaml==${PYYAML_VERSION}"
+      # The self-hosted runner ships with Python 3.9, but `adr_guard.py`
+      # imports the stdlib `tomllib` module added in 3.11. `uv` brings its
+      # own Python and is already the Python toolchain every other job in
+      # this workflow uses, so it's the portable fix: no OS-package upgrade
+      # on the runner VMs, no dependency on `actions/setup-python`'s
+      # version manifest (which doesn't cover the runner distro).
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Install Helm for ADR guard chart rendering (hermetic, version-pinned, checksum-verified)
         env:
@@ -64,9 +52,9 @@ jobs:
           "${RUNNER_TEMP}/helm-bin/helm" version --short
 
       - name: Run ADR guard
-        env:
-          PYTHONPATH: ${{ runner.temp }}/py-deps
-        run: python3 scripts/adr_guard/adr_guard.py --all --level ci
+        run: |
+          uv run --python 3.11 --with 'pyyaml==6.0.2' \
+            python scripts/adr_guard/adr_guard.py --all --level ci
 
   workflow-lint:
     permissions:
@@ -730,27 +718,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same Python-version rationale as adr-conformance: `adr_guard` imports
-      # `tomllib` (stdlib 3.11+); the self-hosted runner is on 3.9.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install PyYAML for ADR guard (hermetic, job-scoped, version-pinned)
-        env:
-          PYYAML_VERSION: "6.0.2"
-        run: |
-          set -euo pipefail
-          python3 --version
-          python3 -m pip --version
-          python3 -m pip install --quiet --no-deps \
-            --target "${RUNNER_TEMP}/py-deps" \
-            "pyyaml==${PYYAML_VERSION}"
+      # Same rationale as adr-conformance: `adr_guard` imports `tomllib`
+      # (stdlib 3.11+); the self-hosted runner ships 3.9. Use `uv` to
+      # source Python so the workflow doesn't depend on a system upgrade.
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Run tests
-        env:
-          PYTHONPATH: ${{ runner.temp }}/py-deps
-        run: python3 -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
+        run: |
+          uv run --python 3.11 --with 'pyyaml==6.0.2' \
+            python -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
 
   # ===========================================================================
   # JavaScript Tests

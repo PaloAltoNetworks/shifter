@@ -1,0 +1,1 @@
+- Hardened `mcp/ngfw` by removing PAN-OS command execution tools from the MCP surface, so connected MCP clients can no longer run firewall admin commands or trigger Secrets Manager SSH key retrieval through this server.

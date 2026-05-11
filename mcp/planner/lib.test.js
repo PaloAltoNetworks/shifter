@@ -86,6 +86,7 @@ describe("Plan CRUD", () => {
 
   it("accepts valid generated plan IDs", () => {
     const created = createPlan("Valid ID");
+    assert.match(created.id, /^[a-f0-9]{8}$/);
     const fetched = getPlan(created.id);
     assert.equal(fetched.id, created.id);
   });

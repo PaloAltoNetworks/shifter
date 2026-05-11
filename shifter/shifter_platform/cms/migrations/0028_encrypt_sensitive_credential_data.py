@@ -24,7 +24,7 @@ def transform_existing_credential_data(apps, *, encrypt: bool):
     Credential = apps.get_model("cms", "Credential")
     credentials_to_update = []
 
-    for credential in Credential.objects.all().iterator():
+    for credential in Credential.objects.all().iterator(chunk_size=1000):
         data = credential.data
         if not isinstance(data, dict):
             continue

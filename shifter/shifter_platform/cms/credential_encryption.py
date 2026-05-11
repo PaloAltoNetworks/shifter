@@ -27,7 +27,8 @@ class EncryptedCredentialDataField(models.JSONField):
 
     def get_prep_value(self, value):
         if isinstance(value, dict):
-            value = encrypt_sensitive_credential_data(value)
+            encrypted_value = encrypt_sensitive_credential_data(value)
+            return super().get_prep_value(encrypted_value)
         return super().get_prep_value(value)
 
     def from_db_value(self, value, expression, connection):

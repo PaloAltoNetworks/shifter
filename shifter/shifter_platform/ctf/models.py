@@ -1076,15 +1076,33 @@ class CTFTeam(CTFBaseModel):
 
     @property
     def total_score(self) -> int:
-        """Calculate total team score from all members (submissions + awards)."""
-        result = self.members.aggregate(
-            submission_total=Sum(
-                "submissions__points_awarded",
-                filter=Q(submissions__is_correct=True),
-            ),
-            award_total=Sum("awards__points"),
+        """Calculate total team score from eligible members (submissions + awards).
+
+        Codex review (#765/#768/#769 cycle 5 + cycle 7):
+          - Cycle 5: aggregating both `submissions` and `awards` on the
+            same `self.members` queryset joined them in one SQL query, so
+            a member with both a solve and an award caused the
+            cartesian-product row multiplication and inflated the total.
+            Aggregate the two relations separately.
+          - Cycle 7: filter members by `eligible_participant_q()` so a
+            disqualified or unregistered teammate's solves/awards do not
+            appear in the participant-visible team score (the official
+            `get_team_scoreboard` already excludes them).
+        """
+        from ctf.models import CTFAward, CTFSubmission
+        from ctf.services.participant import eligible_participant_q
+
+        eligible_member_ids = self.members.filter(eligible_participant_q()).values_list("id", flat=True)
+        submission_total = (
+            CTFSubmission.objects.filter(participant_id__in=eligible_member_ids, is_correct=True).aggregate(
+                t=Sum("points_awarded")
+            )["t"]
+            or 0
         )
-        return (result["submission_total"] or 0) + (result["award_total"] or 0)
+        award_total = (
+            CTFAward.objects.filter(participant_id__in=eligible_member_ids).aggregate(t=Sum("points"))["t"] or 0
+        )
+        return submission_total + award_total
 
 
 class CTFParticipant(CTFBaseModel):

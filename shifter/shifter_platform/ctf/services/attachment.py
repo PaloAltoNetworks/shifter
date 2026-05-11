@@ -36,6 +36,8 @@ def add_challenge_file(
     filename: str,
     display_name: str = "",
     content_type: str = "application/octet-stream",
+    *,
+    actor_id: int,
 ) -> CTFChallengeFile:
     """Add a file attachment to a challenge.
 
@@ -45,15 +47,19 @@ def add_challenge_file(
         filename: Original filename.
         display_name: Optional friendly display name.
         content_type: MIME type of the file.
+        actor_id: User pk of the caller. Required (issue #765 DiD).
 
     Returns:
         The created CTFChallengeFile instance.
 
     Raises:
         CTFNotFoundError: If challenge doesn't exist.
+        CTFPermissionError: If actor does not own the challenge's event.
         CTFStateError: If event is not content-modifiable.
         CTFValidationError: If file fails validation.
     """
+    from ctf.services.authorization import assert_actor_owns_event
+
     try:
         challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
     except CTFChallenge.DoesNotExist:
@@ -61,6 +67,8 @@ def add_challenge_file(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
         ) from None
+
+    assert_actor_owns_event(actor_id, challenge.event)
 
     if not challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -135,18 +143,22 @@ def add_challenge_file(
     return challenge_file
 
 
-def remove_challenge_file(file_id: UUID) -> None:
+def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
     """Remove a file attachment from a challenge.
 
     Deletes from S3 and soft-deletes the database record.
 
     Args:
         file_id: UUID of the file to remove.
+        actor_id: User pk of the caller. Required (issue #765 DiD).
 
     Raises:
         CTFNotFoundError: If file doesn't exist.
+        CTFPermissionError: If actor does not own the file's event.
         CTFStateError: If event is not content-modifiable.
     """
+    from ctf.services.authorization import assert_actor_owns_event
+
     try:
         challenge_file = CTFChallengeFile.objects.select_related("challenge__event").get(pk=file_id)
     except CTFChallengeFile.DoesNotExist:
@@ -154,6 +166,8 @@ def remove_challenge_file(file_id: UUID) -> None:
             f"Challenge file {file_id} not found",
             details={"file_id": str(file_id)},
         ) from None
+
+    assert_actor_owns_event(actor_id, challenge_file.challenge.event)
 
     if not challenge_file.challenge.event.is_content_modifiable:
         raise CTFStateError(

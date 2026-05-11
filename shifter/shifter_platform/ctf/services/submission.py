@@ -13,8 +13,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from ctf.enums import EventStatus
-from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
+from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFValidationError
 from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
 from ctf.services.challenge import verify_flag
 
@@ -53,7 +52,7 @@ def _count_attempts_in_current_window(
     return count
 
 
-def submit_flag(  # noqa: C901
+def submit_flag(
     participant_id: UUID,
     challenge_id: UUID,
     submitted_flag: str,
@@ -99,71 +98,15 @@ def submit_flag(  # noqa: C901
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    # Validate event state
-    if challenge.event_id != participant.event_id:
-        raise CTFValidationError(
-            "Challenge does not belong to participant's event",
-            details={
-                "participant_event": str(participant.event_id),
-                "challenge_event": str(challenge.event_id),
-            },
-        )
+    # Issue #769: shared participant→challenge availability policy. Same
+    # contract as use_hint(), so hints can never be easier to obtain than
+    # flag submission. Covers event match, ACTIVE status, competition
+    # window (CTF-702), visibility, release state, and prerequisites.
+    from ctf.services.challenge import assert_challenge_available_for_participant
+
+    assert_challenge_available_for_participant(participant, challenge)
 
     event = participant.event
-    if event.status != EventStatus.ACTIVE.value:
-        raise CTFStateError(
-            f"Event is not active (status: {event.status})",
-            details={"event_id": str(event.id), "status": event.status},
-        )
-
-    # Enforce time boundaries regardless of state (CTF-702)
-    now = timezone.now()
-    if now < event.event_start or now > event.event_end:
-        raise CTFStateError(
-            "Event is not within its competition window",
-            details={
-                "event_id": str(event.id),
-                "event_start": event.event_start.isoformat(),
-                "event_end": event.event_end.isoformat(),
-                "server_time": now.isoformat(),
-            },
-        )
-
-    # Check visibility state
-    if challenge.visibility == "hidden":
-        raise CTFStateError(
-            "Challenge is not available",
-            details={"challenge_id": str(challenge_id)},
-        )
-    if challenge.visibility == "locked":
-        raise CTFStateError(
-            "Challenge is locked",
-            details={"challenge_id": str(challenge_id)},
-        )
-
-    # Check if challenge is released (time-based)
-    if not challenge.is_released:
-        raise CTFStateError(
-            "Challenge has not been released yet",
-            details={
-                "challenge_id": str(challenge_id),
-                "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
-            },
-        )
-
-    # Check prerequisites
-    from ctf.services.challenge import check_prerequisites_met
-
-    prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant_id)
-    if not prereqs_met:
-        unmet_names = [c.name for c in unmet_challenges]
-        raise CTFStateError(
-            f"Prerequisites not met. Complete first: {', '.join(unmet_names)}",
-            details={
-                "challenge_id": str(challenge_id),
-                "unmet_prerequisites": [str(c.id) for c in unmet_challenges],
-            },
-        )
 
     # Check if already solved
     existing_correct = CTFSubmission.objects.filter(
@@ -382,6 +325,20 @@ def rate_challenge(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
         ) from None
+
+    # Codex review (#765 cycle 6): an internal caller passing a raw
+    # participant_id for an INVITED or DISQUALIFIED row would otherwise
+    # bypass the access predicate the views apply via
+    # `is_active_participant`. Mirror that here.
+    from ctf.services.participant import _PLAYING_PARTICIPANT_STATUSES
+
+    if participant.registered_at is None or participant.status not in _PLAYING_PARTICIPANT_STATUSES:
+        from ctf.exceptions import CTFStateError as _CTFStateError
+
+        raise _CTFStateError(
+            "Participant is not eligible",
+            details={"participant_id": str(participant.id), "status": participant.status},
+        )
 
     try:
         challenge = CTFChallenge.objects.get(pk=challenge_id)

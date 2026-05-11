@@ -79,7 +79,13 @@ class TestAddChallengeFile:
     def test_upload_success(self, challenge, mock_s3):
         """Valid file upload creates a CTFChallengeFile record."""
         file_obj = _make_file()
-        result = add_challenge_file(challenge.id, file_obj, "capture.pcap", display_name="Network Capture")
+        result = add_challenge_file(
+            challenge.id,
+            file_obj,
+            "capture.pcap",
+            display_name="Network Capture",
+            actor_id=challenge.event.created_by_id,
+        )
         assert result.filename == "capture.pcap"
         assert result.display_name == "Network Capture"
         assert result.file_size_bytes == len(b"test file content")
@@ -89,19 +95,21 @@ class TestAddChallengeFile:
 
     def test_upload_sets_order_incrementally(self, challenge, mock_s3):
         """Each uploaded file gets an incrementing order value."""
-        f1 = add_challenge_file(challenge.id, _make_file(), "file1.txt")
-        f2 = add_challenge_file(challenge.id, _make_file(), "file2.txt")
+        f1 = add_challenge_file(challenge.id, _make_file(), "file1.txt", actor_id=challenge.event.created_by_id)
+        f2 = add_challenge_file(challenge.id, _make_file(), "file2.txt", actor_id=challenge.event.created_by_id)
         assert f2.order > f1.order
 
     def test_disallowed_extension_rejected(self, challenge, mock_s3):
         """File with disallowed extension is rejected."""
         with pytest.raises(CTFValidationError, match="not allowed"):
-            add_challenge_file(challenge.id, _make_file(name="malware.php"), "malware.php")
+            add_challenge_file(
+                challenge.id, _make_file(name="malware.php"), "malware.php", actor_id=challenge.event.created_by_id
+            )
 
     def test_empty_file_rejected(self, challenge, mock_s3):
         """Empty file is rejected."""
         with pytest.raises(CTFValidationError, match="empty"):
-            add_challenge_file(challenge.id, _make_file(b""), "empty.txt")
+            add_challenge_file(challenge.id, _make_file(b""), "empty.txt", actor_id=challenge.event.created_by_id)
 
     def test_oversized_file_rejected(self, challenge, mock_s3):
         """File exceeding MAX_FILE_SIZE is rejected."""
@@ -109,17 +117,17 @@ class TestAddChallengeFile:
 
         big_content = b"x" * (MAX_FILE_SIZE + 1)
         with pytest.raises(CTFValidationError, match="exceeds maximum"):
-            add_challenge_file(challenge.id, _make_file(big_content), "big.bin")
+            add_challenge_file(challenge.id, _make_file(big_content), "big.bin", actor_id=challenge.event.created_by_id)
 
     def test_max_files_per_challenge_enforced(self, challenge, mock_s3):
         """Cannot upload more than MAX_FILES_PER_CHALLENGE files."""
         from ctf.s3 import MAX_FILES_PER_CHALLENGE
 
         for i in range(MAX_FILES_PER_CHALLENGE):
-            add_challenge_file(challenge.id, _make_file(), f"file{i}.txt")
+            add_challenge_file(challenge.id, _make_file(), f"file{i}.txt", actor_id=challenge.event.created_by_id)
 
         with pytest.raises(CTFValidationError, match="Maximum files"):
-            add_challenge_file(challenge.id, _make_file(), "one_more.txt")
+            add_challenge_file(challenge.id, _make_file(), "one_more.txt", actor_id=challenge.event.created_by_id)
 
     def test_non_modifiable_event_rejected(self, organizer_user, mock_s3):
         """Cannot upload files when event is not content-modifiable."""
@@ -142,12 +150,12 @@ class TestAddChallengeFile:
             flag_hash="$2b$12$hash_active",
         )
         with pytest.raises(CTFStateError):
-            add_challenge_file(ch.id, _make_file(), "file.txt")
+            add_challenge_file(ch.id, _make_file(), "file.txt", actor_id=ch.event.created_by_id)
 
     def test_nonexistent_challenge_raises_not_found(self, db, mock_s3):
         """Uploading to a nonexistent challenge raises CTFNotFoundError."""
         with pytest.raises(CTFNotFoundError):
-            add_challenge_file(uuid4(), _make_file(), "file.txt")
+            add_challenge_file(uuid4(), _make_file(), "file.txt", actor_id=1)
 
 
 class TestRemoveChallengeFile:
@@ -155,8 +163,8 @@ class TestRemoveChallengeFile:
 
     def test_remove_soft_deletes_and_calls_s3(self, challenge, mock_s3):
         """Removing a file soft-deletes the record and calls S3 delete."""
-        cf = add_challenge_file(challenge.id, _make_file(), "remove_me.txt")
-        remove_challenge_file(cf.id)
+        cf = add_challenge_file(challenge.id, _make_file(), "remove_me.txt", actor_id=challenge.event.created_by_id)
+        remove_challenge_file(cf.id, actor_id=cf.challenge.event.created_by_id)
 
         assert not CTFChallengeFile.objects.filter(pk=cf.id).exists()
         assert CTFChallengeFile.all_objects.filter(pk=cf.id).exists()
@@ -165,18 +173,18 @@ class TestRemoveChallengeFile:
     def test_remove_nonexistent_raises(self, db, mock_s3):
         """Removing a nonexistent file raises CTFNotFoundError."""
         with pytest.raises(CTFNotFoundError):
-            remove_challenge_file(uuid4())
+            remove_challenge_file(uuid4(), actor_id=1)
 
     def test_s3_delete_failure_still_soft_deletes(self, challenge, mock_s3):
         """If S3 delete fails, the record is still soft-deleted."""
         from botocore.exceptions import ClientError
 
-        cf = add_challenge_file(challenge.id, _make_file(), "file.txt")
+        cf = add_challenge_file(challenge.id, _make_file(), "file.txt", actor_id=challenge.event.created_by_id)
         mock_s3.delete_object.side_effect = ClientError(
             {"Error": {"Code": "500", "Message": "S3 error"}}, "DeleteObject"
         )
         # Should not raise — soft delete happens anyway
-        remove_challenge_file(cf.id)
+        remove_challenge_file(cf.id, actor_id=cf.challenge.event.created_by_id)
         assert not CTFChallengeFile.objects.filter(pk=cf.id).exists()
 
 
@@ -185,10 +193,10 @@ class TestGetChallengeFiles:
 
     def test_returns_active_files_ordered(self, challenge, mock_s3):
         """Returns only active (non-deleted) files in order."""
-        f1 = add_challenge_file(challenge.id, _make_file(), "first.txt")
-        f2 = add_challenge_file(challenge.id, _make_file(), "second.txt")
-        f3 = add_challenge_file(challenge.id, _make_file(), "third.txt")
-        remove_challenge_file(f2.id)
+        f1 = add_challenge_file(challenge.id, _make_file(), "first.txt", actor_id=challenge.event.created_by_id)
+        f2 = add_challenge_file(challenge.id, _make_file(), "second.txt", actor_id=challenge.event.created_by_id)
+        f3 = add_challenge_file(challenge.id, _make_file(), "third.txt", actor_id=challenge.event.created_by_id)
+        remove_challenge_file(f2.id, actor_id=f2.challenge.event.created_by_id)
 
         files = list(get_challenge_files(challenge.id))
         assert len(files) == 2
@@ -201,7 +209,7 @@ class TestGetDownloadUrl:
 
     def test_returns_presigned_url(self, challenge, mock_s3):
         """Returns a presigned S3 URL and filename."""
-        cf = add_challenge_file(challenge.id, _make_file(), "download_me.pcap")
+        cf = add_challenge_file(challenge.id, _make_file(), "download_me.pcap", actor_id=challenge.event.created_by_id)
         url, filename = get_download_url(cf.id)
         assert "amazonaws.com" in url
         assert filename == "download_me.pcap"
@@ -217,19 +225,25 @@ class TestCTFChallengeFileModel:
 
     def test_display_property(self, challenge, mock_s3):
         """display returns display_name if set, otherwise filename."""
-        f1 = add_challenge_file(challenge.id, _make_file(), "raw.bin", display_name="Memory Dump")
+        f1 = add_challenge_file(
+            challenge.id, _make_file(), "raw.bin", display_name="Memory Dump", actor_id=challenge.event.created_by_id
+        )
         assert f1.display == "Memory Dump"
 
-        f2 = add_challenge_file(challenge.id, _make_file(), "data.pcap")
+        f2 = add_challenge_file(challenge.id, _make_file(), "data.pcap", actor_id=challenge.event.created_by_id)
         assert f2.display == "data.pcap"
 
     def test_file_size_display(self, challenge, mock_s3):
         """file_size_display returns human-readable size."""
-        f = add_challenge_file(challenge.id, _make_file(b"x" * 1500), "file.bin")
+        f = add_challenge_file(
+            challenge.id, _make_file(b"x" * 1500), "file.bin", actor_id=challenge.event.created_by_id
+        )
         assert "KB" in f.file_size_display
 
     def test_str_representation(self, challenge, mock_s3):
         """__str__ includes display name and challenge name."""
-        f = add_challenge_file(challenge.id, _make_file(), "test.bin", display_name="Binary")
+        f = add_challenge_file(
+            challenge.id, _make_file(), "test.bin", display_name="Binary", actor_id=challenge.event.created_by_id
+        )
         assert "Binary" in str(f)
         assert challenge.name in str(f)

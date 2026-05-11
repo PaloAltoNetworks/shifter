@@ -221,12 +221,18 @@ class TestGetScoreboard:
         assert board[0]["score"] == 300
 
     def test_excludes_non_active_statuses(self, mock_participant_objects, mock_queryset):
-        """Only ACTIVE, REGISTERED, and COMPLETED participants appear.
+        """Only ACTIVE / REGISTERED / COMPLETED participants appear.
 
-        The service passes status__in filter. We verify the filter is called
-        with the right statuses, and that the returned list only has what the
-        queryset yields (which excludes disqualified).
+        Codex review (issue #765/#768/#769) consolidated the eligibility
+        predicate behind `eligible_participant_q`, which is now passed as a
+        positional `Q` argument rather than a `status__in` kwarg. We verify
+        the predicate matches the playing-status set here so any future
+        change to the shared helper has to update this test deliberately.
         """
+        from django.db.models import Q
+
+        from ctf.services.participant import eligible_participant_q
+
         p_active = _make_participant("Active", computed_score=100, solve_count=1, last_solve_time=_NOW)
 
         self._wire_qs(mock_participant_objects, mock_queryset, [p_active])
@@ -235,13 +241,16 @@ class TestGetScoreboard:
         names = [e["name"] for e in board]
         assert "Active" in names
 
-        # Verify filter was called with the correct status values
-        call_kwargs = mock_participant_objects.filter.call_args[1]
-        assert set(call_kwargs["status__in"]) == {
-            ParticipantStatus.ACTIVE.value,
-            ParticipantStatus.REGISTERED.value,
-            ParticipantStatus.COMPLETED.value,
-        }
+        # Verify the eligibility Q predicate is passed positionally and
+        # matches the canonical playing-status filter.
+        call_args, _call_kwargs = mock_participant_objects.filter.call_args
+        positional_q_args = [a for a in call_args if isinstance(a, Q)]
+        assert positional_q_args, "expected eligibility Q to be passed positionally"
+        # Compare children (Q stores predicates as a tree of (key, value) tuples).
+        expected = eligible_participant_q()
+        assert positional_q_args[0].children == expected.children
+        # Sanity: the predicate must reject DISQUALIFIED.
+        assert ParticipantStatus.DISQUALIFIED.value not in dict(expected.children)["status__in"]
 
     def test_empty_scoreboard(self, mock_participant_objects, mock_queryset):
         """Event with no participants returns empty list."""

@@ -12,9 +12,15 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus, ParticipantStatus
+from ctf.enums import (
+    ChallengeCategory,
+    ChallengeDifficulty,
+    ChallengeVisibility,
+    EventStatus,
+    ParticipantStatus,
+)
 from ctf.exceptions import CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFEvent, CTFHint, CTFParticipant
+from ctf.models import CTFChallenge, CTFEvent, CTFHint, CTFHintUsage, CTFParticipant
 from ctf.services.hint import (
     add_hint,
     get_hints,
@@ -92,24 +98,28 @@ class TestHintCRUD:
     """Tests for hint add/remove."""
 
     def test_add_hint(self, challenge):
-        hint = add_hint(challenge.id, {"text": "Look at the source code", "penalty": 10, "order": 0})
+        hint = add_hint(
+            challenge.id,
+            {"text": "Look at the source code", "penalty": 10, "order": 0},
+            actor_id=challenge.event.created_by_id,
+        )
         assert hint.text == "Look at the source code"
         assert hint.penalty == 10
         assert hint.order == 0
 
     def test_add_hint_requires_text(self, challenge):
         with pytest.raises(CTFValidationError, match="text is required"):
-            add_hint(challenge.id, {"text": "", "penalty": 10})
+            add_hint(challenge.id, {"text": "", "penalty": 10}, actor_id=challenge.event.created_by_id)
 
     def test_remove_hint(self, challenge):
-        hint = add_hint(challenge.id, {"text": "Remove me", "penalty": 5})
-        remove_hint(hint.id)
+        hint = add_hint(challenge.id, {"text": "Remove me", "penalty": 5}, actor_id=challenge.event.created_by_id)
+        remove_hint(hint.id, actor_id=hint.challenge.event.created_by_id)
         # CTFHint.objects (SoftDeleteManager) excludes deleted rows by default.
         assert CTFHint.objects.filter(pk=hint.id).count() == 0
 
     def test_get_hints_ordered(self, challenge):
-        add_hint(challenge.id, {"text": "Second", "penalty": 10, "order": 1})
-        add_hint(challenge.id, {"text": "First", "penalty": 5, "order": 0})
+        add_hint(challenge.id, {"text": "Second", "penalty": 10, "order": 1}, actor_id=challenge.event.created_by_id)
+        add_hint(challenge.id, {"text": "First", "penalty": 5, "order": 0}, actor_id=challenge.event.created_by_id)
         hints = list(get_hints(challenge.id))
         assert hints[0].text == "First"
         assert hints[1].text == "Second"
@@ -260,3 +270,196 @@ class TestHintPurchaseContext:
         response = participant_client.get(url)
         assert response.context["next_hint_cost"] == 79
         assert response.context["points_after_next_hint"] == 1
+
+
+# ============================================================================
+# Issue #769 — hint unlock must enforce the same availability policy as
+# flag submission (event time window, challenge release / visibility,
+# prerequisites). Persistence on CTFHintUsage is locked down here too —
+# the issue body's "never persisted" claim is stale; this regression
+# test stops it from drifting back.
+# ============================================================================
+
+
+@pytest.mark.django_db
+class TestHintAvailabilityPolicy:
+    """Hint unlocks must mirror flag-submission availability checks.
+
+    Hints leak the solution path; they must not be cheaper to obtain than
+    flag submission.
+    """
+
+    def test_use_hint_rejects_when_event_outside_window(self, active_event, participant):
+        """Active event whose competition window ended still rejects hint unlock."""
+        # Push window into the past — event status remains ACTIVE but the
+        # competition window has closed (mirrors submit_flag's CTF-702 check).
+        active_event.event_start = timezone.now() - timedelta(days=2)
+        active_event.event_end = timezone.now() - timedelta(days=1)
+        active_event.save(update_fields=["event_start", "event_end"])
+
+        challenge = CTFChallenge.objects.create(
+            event=active_event,
+            name="Window Test",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_window",
+        )
+        hint = CTFHint.objects.create(challenge=challenge, text="x", penalty=5, order=0)
+
+        with pytest.raises(CTFStateError, match="competition window"):
+            use_hint(participant.id, hint.id)
+
+    def test_use_hint_rejects_when_challenge_hidden(self, active_challenge, participant):
+        active_challenge.visibility = ChallengeVisibility.HIDDEN.value
+        active_challenge.save(update_fields=["visibility"])
+        hint = CTFHint.objects.create(challenge=active_challenge, text="x", penalty=5, order=0)
+
+        with pytest.raises(CTFStateError, match=r"not available|hidden"):
+            use_hint(participant.id, hint.id)
+
+    def test_use_hint_rejects_when_challenge_locked(self, active_challenge, participant):
+        active_challenge.visibility = ChallengeVisibility.LOCKED.value
+        active_challenge.save(update_fields=["visibility"])
+        hint = CTFHint.objects.create(challenge=active_challenge, text="x", penalty=5, order=0)
+
+        with pytest.raises(CTFStateError, match="locked"):
+            use_hint(participant.id, hint.id)
+
+    def test_use_hint_rejects_when_challenge_unreleased(self, active_event, participant):
+        """Future release_time keeps the challenge from being unlockable yet."""
+        challenge = CTFChallenge.objects.create(
+            event=active_event,
+            name="Delayed",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_delayed",
+            release_time=timezone.now() + timedelta(hours=2),
+        )
+        hint = CTFHint.objects.create(challenge=challenge, text="x", penalty=5, order=0)
+
+        with pytest.raises(CTFStateError, match="released"):
+            use_hint(participant.id, hint.id)
+
+    def test_use_hint_rejects_when_prerequisites_not_met(self, active_event, participant):
+        from ctf.models import CTFChallengePrerequisite
+
+        gating = CTFChallenge.objects.create(
+            event=active_event,
+            name="Gating",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_gating",
+        )
+        gated = CTFChallenge.objects.create(
+            event=active_event,
+            name="Gated",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=200,
+            difficulty=ChallengeDifficulty.MEDIUM.value,
+            flag_hash="$2b$12$placeholder_gated",
+        )
+        CTFChallengePrerequisite.objects.create(challenge=gated, required_challenge=gating)
+        hint = CTFHint.objects.create(challenge=gated, text="x", penalty=5, order=0)
+
+        with pytest.raises(CTFStateError, match=r"[Pp]rerequisites"):
+            use_hint(participant.id, hint.id)
+
+    def test_use_hint_persists_usage(self, active_challenge, participant):
+        """Lock-down regression: a successful unlock writes a CTFHintUsage row.
+
+        The issue body claimed hint usage was never persisted; this test stops
+        that drifting back. Without the row, get_total_hint_penalty would
+        return 0 and submit_flag would never apply the penalty.
+        """
+        hint = CTFHint.objects.create(challenge=active_challenge, text="real hint", penalty=20, order=0)
+
+        use_hint(participant.id, hint.id)
+
+        assert CTFHintUsage.objects.filter(participant=participant, hint=hint).exists()
+
+    def test_use_hint_rejects_when_expected_challenge_id_mismatches(self, active_event, participant):
+        """Service-level enforcement of the route/body coherence guard
+        (codex review finding for #769). Even when called directly from a
+        non-HTTP caller, `use_hint` must refuse to unlock a hint that
+        belongs to a different challenge than the caller intended.
+        """
+        # Two challenges in the same event; the participant intends to
+        # interact with `intended` but the supplied hint belongs to `other`.
+        intended = CTFChallenge.objects.create(
+            event=active_event,
+            name="Intended",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_intended",
+        )
+        other = CTFChallenge.objects.create(
+            event=active_event,
+            name="Other",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="$2b$12$placeholder_other",
+        )
+        hint_for_other = CTFHint.objects.create(challenge=other, text="x", penalty=5, order=0)
+
+        with pytest.raises(CTFValidationError, match=r"not belong"):
+            use_hint(participant.id, hint_for_other.id, expected_challenge_id=intended.id)
+
+        # And no usage row was written — refusal is total, not partial.
+        assert not CTFHintUsage.objects.filter(participant=participant, hint=hint_for_other).exists()
+
+
+@pytest.mark.django_db
+class TestSubmitFlagAppliesHintPenalty:
+    """Lock-down regression for issue #769: scoring path through
+    get_total_hint_penalty must actually deduct unlocked hints' penalty.
+
+    Issue body claimed "the advertised penalty is never applied"; today
+    submit_flag already calls get_total_hint_penalty. This test guards the
+    integration so a future refactor can't silently break it.
+    """
+
+    def test_submit_flag_applies_hint_penalty_after_unlock(self, active_event, participant_user):
+        from ctf.services.challenge import hash_flag
+        from ctf.services.submission import submit_flag
+
+        challenge = CTFChallenge.objects.create(
+            event=active_event,
+            name="Penalty Test",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash=hash_flag("FLAG{penalty_test}"),
+        )
+        # The hint penalty machinery is on CTFHint + CTFHintUsage.
+        CTFHint.objects.create(challenge=challenge, text="The flag", penalty=25, order=0)
+        # The active_event fixture's owner is the organizer; create a fresh
+        # participant for THIS event — `participant` fixture is bound to a
+        # different active_event in this file.
+        p = CTFParticipant.objects.create(
+            event=active_event,
+            user=participant_user,
+            email=participant_user.email,
+            name="Penalty User",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+        )
+        # Unlock the hint, then submit the correct flag.
+        hint = CTFHint.objects.get(challenge=challenge, order=0)
+        use_hint(p.id, hint.id)
+        submission = submit_flag(p.id, challenge.id, "FLAG{penalty_test}")
+
+        # 25% penalty on a 100pt challenge = 75 awarded.
+        assert submission.is_correct is True
+        assert submission.points_awarded == 75

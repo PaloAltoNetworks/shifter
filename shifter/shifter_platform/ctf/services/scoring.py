@@ -13,8 +13,8 @@ from uuid import UUID
 from django.db.models import Count, F, Max, Q, Sum
 from django.db.models.functions import Coalesce
 
-from ctf.enums import ParticipantStatus
 from ctf.models import CTFAward, CTFParticipant, CTFSubmission, CTFTeam
+from ctf.services.participant import eligible_participant_q
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -67,42 +67,64 @@ def get_scoreboard(
     """
     logger.debug("Getting scoreboard for event %s", event_id)
 
-    submission_filter = Q(submissions__is_correct=True)
-    award_filter = Q()
-    if freeze_at:
-        submission_filter &= Q(submissions__submitted_at__lt=freeze_at)
-        award_filter &= Q(awards__created_at__lt=freeze_at)
+    # Codex review cycle 6 (mirrors the team-scoreboard cycle-5 fix):
+    # annotating both `submissions` and `awards` on the same participant
+    # queryset joined them in one SQL query, so a participant with both a
+    # solve and an award produced a cartesian product that inflated both
+    # scores and counts. Pre-aggregate via per-participant subqueries on
+    # CTFSubmission and CTFAward instead.
+    from django.db.models import IntegerField, OuterRef, Subquery
 
-    base_filter: dict[str, Any] = {
-        "event_id": event_id,
-        "status__in": [
-            ParticipantStatus.ACTIVE.value,
-            ParticipantStatus.REGISTERED.value,
-            ParticipantStatus.COMPLETED.value,
-        ],
-    }
+    submission_qs = CTFSubmission.objects.filter(
+        is_correct=True,
+        participant_id=OuterRef("pk"),
+    )
+    if freeze_at:
+        submission_qs = submission_qs.filter(submitted_at__lt=freeze_at)
+
+    award_qs = CTFAward.objects.filter(participant_id=OuterRef("pk"))
+    if freeze_at:
+        award_qs = award_qs.filter(created_at__lt=freeze_at)
+
+    # Eligibility (status not disqualified + registration completed) is the
+    # single shared predicate from `ctf.services.participant`. Codex review
+    # cycle 3 caught the predicate divergence — keep the filter sourced
+    # from one place so individual scoring, team scoring, and access
+    # checks cannot drift apart.
+    base_filter: dict[str, Any] = {"event_id": event_id}
     if bracket_id is not None:
         base_filter["bracket_id"] = bracket_id
 
     participants = (
-        CTFParticipant.objects.filter(**base_filter)
+        CTFParticipant.objects.filter(eligible_participant_q(), **base_filter)
         .annotate(
             submission_score=Coalesce(
-                Sum(
-                    "submissions__points_awarded",
-                    filter=submission_filter,
+                Subquery(
+                    submission_qs.order_by()
+                    .values("participant_id")
+                    .annotate(t=Coalesce(Sum("points_awarded"), 0))
+                    .values("t"),
+                    output_field=IntegerField(),
                 ),
                 0,
             ),
-            award_points=Coalesce(Sum("awards__points", filter=award_filter if freeze_at else None), 0),
-            computed_score=F("submission_score") + F("award_points"),
-            solve_count=Count(
-                "submissions",
-                filter=submission_filter,
+            award_points=Coalesce(
+                Subquery(
+                    award_qs.order_by().values("participant_id").annotate(t=Coalesce(Sum("points"), 0)).values("t"),
+                    output_field=IntegerField(),
+                ),
+                0,
             ),
-            last_solve_time=Max(
-                "submissions__submitted_at",
-                filter=submission_filter,
+            computed_score=F("submission_score") + F("award_points"),
+            solve_count=Coalesce(
+                Subquery(
+                    submission_qs.order_by().values("participant_id").annotate(c=Count("id")).values("c"),
+                    output_field=IntegerField(),
+                ),
+                0,
+            ),
+            last_solve_time=Subquery(
+                submission_qs.order_by().values("participant_id").annotate(m=Max("submitted_at")).values("m"),
             ),
         )
         .order_by("-computed_score", "last_solve_time")
@@ -165,38 +187,88 @@ def get_team_scoreboard(
     """
     logger.debug("Getting team scoreboard for event %s", event_id)
 
-    submission_filter = Q(members__submissions__is_correct=True)
-    award_filter = Q()
-    member_filter = Q()
+    # Codex review cycle 5 (and cycle 3): the previous implementation
+    # joined `members__submissions` and `members__awards` in the SAME
+    # aggregate query — so when a member had both a solve and an award,
+    # the cartesian product multiplied each row, inflating both team
+    # score and award points. Pre-aggregate submissions and awards as
+    # SEPARATE per-team subqueries (each over its own join), then add
+    # them in Python after the row-multiplication is gone.
+    #
+    # Eligibility (non-disqualified, registered) is applied inside each
+    # subquery so disqualified members' solves and awards no longer leak
+    # into team totals.
+    from django.db.models import IntegerField, OuterRef, Subquery
+
+    # `eligible_participant_q("members__")` for filters applied at the
+    # CTFTeam.members relation; bare `eligible_participant_q()` for filters
+    # applied directly on CTFParticipant subqueries.
+    member_eligibility_via_team = eligible_participant_q("members__")
+
+    # Submission stats per team (sum of points, distinct solved challenge
+    # count, max submitted_at), via a CTFSubmission queryset filtered by
+    # team membership through the participant join.
+    submission_qs = CTFSubmission.objects.filter(
+        is_correct=True,
+        participant__team_id=OuterRef("pk"),
+    ).filter(eligible_participant_q("participant__"))
     if freeze_at:
-        submission_filter &= Q(members__submissions__submitted_at__lt=freeze_at)
-        award_filter &= Q(members__awards__created_at__lt=freeze_at)
+        submission_qs = submission_qs.filter(submitted_at__lt=freeze_at)
     if bracket_id is not None:
-        submission_filter &= Q(members__bracket_id=bracket_id)
-        award_filter &= Q(members__bracket_id=bracket_id)
-        member_filter = Q(members__bracket_id=bracket_id)
+        submission_qs = submission_qs.filter(participant__bracket_id=bracket_id)
+
+    # Award stats per team (sum of points), filtered the same way.
+    award_qs = CTFAward.objects.filter(participant__team_id=OuterRef("pk")).filter(
+        eligible_participant_q("participant__")
+    )
+    if freeze_at:
+        award_qs = award_qs.filter(created_at__lt=freeze_at)
+    if bracket_id is not None:
+        award_qs = award_qs.filter(participant__bracket_id=bracket_id)
+
+    # Member count per team (eligible-only). Applied on the CTFTeam.members
+    # relation, so the predicate must be `members__`-prefixed.
+    member_count_filter = member_eligibility_via_team
+    if bracket_id is not None:
+        member_count_filter &= Q(members__bracket_id=bracket_id)
 
     teams = (
         CTFTeam.objects.filter(event_id=event_id)
         .annotate(
             submission_score=Coalesce(
-                Sum(
-                    "members__submissions__points_awarded",
-                    filter=submission_filter,
+                Subquery(
+                    submission_qs.order_by()
+                    .values("participant__team_id")
+                    .annotate(total=Coalesce(Sum("points_awarded"), 0))
+                    .values("total"),
+                    output_field=IntegerField(),
                 ),
                 0,
             ),
-            award_points=Coalesce(Sum("members__awards__points", filter=award_filter if freeze_at else None), 0),
-            computed_score=F("submission_score") + F("award_points"),
-            solve_count=Count(
-                "members__submissions__challenge",
-                filter=submission_filter,
-                distinct=True,
+            award_points=Coalesce(
+                Subquery(
+                    award_qs.order_by()
+                    .values("participant__team_id")
+                    .annotate(total=Coalesce(Sum("points"), 0))
+                    .values("total"),
+                    output_field=IntegerField(),
+                ),
+                0,
             ),
-            computed_member_count=Count("members", filter=member_filter if bracket_id else None, distinct=True),
-            last_solve_time=Max(
-                "members__submissions__submitted_at",
-                filter=submission_filter,
+            computed_score=F("submission_score") + F("award_points"),
+            solve_count=Coalesce(
+                Subquery(
+                    submission_qs.order_by()
+                    .values("participant__team_id")
+                    .annotate(c=Count("challenge_id", distinct=True))
+                    .values("c"),
+                    output_field=IntegerField(),
+                ),
+                0,
+            ),
+            computed_member_count=Count("members", filter=member_count_filter, distinct=True),
+            last_solve_time=Subquery(
+                submission_qs.order_by().values("participant__team_id").annotate(m=Max("submitted_at")).values("m"),
             ),
         )
         .order_by("-computed_score", "last_solve_time")

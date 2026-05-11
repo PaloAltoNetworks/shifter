@@ -6,6 +6,7 @@ Provides business logic for flag submission and scoring.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -185,11 +186,13 @@ def submit_flag(
             elapsed = (timezone.now() - last_submission_time).total_seconds()
             if elapsed < cooldown:
                 retry_after = int(cooldown - elapsed) + 1
+                retry_at = last_submission_time + timedelta(seconds=cooldown)
                 raise CTFRateLimitError(
-                    f"Please wait {retry_after} seconds before submitting again",
+                    f"Please wait {retry_after} seconds before submitting again (retry at {retry_at.isoformat()})",
                     details={
                         "challenge_id": str(challenge_id),
                         "retry_after_seconds": retry_after,
+                        "retry_at": retry_at.isoformat(),
                         "cooldown_seconds": cooldown,
                     },
                 )

@@ -1098,6 +1098,66 @@ gke_master_authorized_cidrs = []
         with pytest.raises(ValueError, match="public hostname"):
             deploy.validate_gcp_control_plane_security_inputs(tf_dir)
 
+    @staticmethod
+    def _write_secure_tfvars(tf_dir, cidrs):
+        """Write a terraform.tfvars whose hostname/TLS pass, so a test isolates the CIDR allowlist check."""
+        tf_dir.mkdir()
+        cidr_lines = "".join(f'  "{cidr}",\n' for cidr in cidrs)
+        (tf_dir / "terraform.tfvars").write_text(
+            'public_hostname = "portal.example.test"\n'
+            "enable_managed_tls = true\n"
+            f"gke_master_authorized_cidrs = [\n{cidr_lines}]\n"
+        )
+
+    @pytest.mark.parametrize(
+        ("cidrs", "expected_match"),
+        [
+            # The same contract the Terraform `validation` block on
+            # `gke_master_authorized_cidrs` enforces — keep these in lockstep.
+            (["0.0.0.0/0"], r"/0 range"),
+            (["::/0"], r"/0 range"),
+            (["198.51.100.0/24", "0.0.0.0/0"], r"/0 range"),
+            (["203.0.113.10"], r"explicit /N prefix"),
+            (["not-a-cidr"], r"explicit /N prefix"),
+            (["not/a/cidr"], r"not a valid CIDR"),
+            (["198.51.100.999/32"], r"not a valid CIDR"),
+            (["198.51.100.0/33"], r"not a valid CIDR"),
+        ],
+        ids=[
+            "ipv4_world_open",
+            "ipv6_world_open",
+            "mixed_with_world_open",
+            "bare_ip_no_prefix",
+            "no_prefix_garbage",
+            "garbage_with_slashes",
+            "bad_octet",
+            "bad_prefix",
+        ],
+    )
+    def test_validate_security_inputs_rejects_unsafe_authorized_cidrs(self, tmp_path, cidrs, expected_match):
+        """Bootstrap must reject malformed CIDR entries and world-open /0 ranges in the admin allowlist."""
+        tf_dir = tmp_path / "gcp-dev"
+        self._write_secure_tfvars(tf_dir, cidrs)
+
+        with pytest.raises(ValueError, match=expected_match):
+            deploy.validate_gcp_control_plane_security_inputs(tf_dir)
+
+    def test_validate_security_inputs_accepts_specific_admin_cidrs(self, tmp_path):
+        """A non-empty allowlist of specific, well-formed v4/v6 CIDRs passes the preflight.
+
+        The validator is a side-effect-only contract (raise on bad input, return
+        None on good input), so the assertions cover both halves: the documented
+        None return and a round-trip parse that proves the test fixture's input
+        was actually consumed (so a future refactor that silently skipped the
+        CIDR loop would still be caught here, not just by the negative cases).
+        """
+        tf_dir = tmp_path / "gcp-dev"
+        cidrs = ["198.51.100.10/32", "203.0.113.0/24", "2001:db8::/48"]
+        self._write_secure_tfvars(tf_dir, cidrs)
+
+        assert deploy.validate_gcp_control_plane_security_inputs(tf_dir) is None
+        assert deploy.read_gcp_control_plane_security_inputs(tf_dir)["gke_master_authorized_cidrs"] == cidrs
+
 
 class TestGdcTerraformBootstrapCredentials:
     """Tests for the ephemeral Terraform credential path used by GCP bootstrap."""

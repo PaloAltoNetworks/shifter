@@ -64,7 +64,7 @@ class TestScenarioListView:
         content = response.content.decode()
 
         assert "js-scenario-delete-btn" in content
-        assert "data-scenario-name=\"&#x27;);alert(document.domain);//\"" in content
+        assert 'data-scenario-name="&#x27;);alert(document.domain);//"' in content
         assert "onclick=\"return confirm('Delete scenario" not in content
 
 

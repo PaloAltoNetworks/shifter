@@ -4,11 +4,15 @@ Tests the credential service layer that returns Pydantic schema projections.
 Uses real database objects via Django's test client infrastructure.
 """
 
+import json
+
 import pytest
 from django.contrib.auth.models import User
+from django.db import connection
 from django.utils import timezone
 
 from cms import services
+from cms.credential_encryption import ENCRYPTED_VALUE_PREFIX
 from cms.exceptions import CMSError
 from cms.models import Credential, CredentialType
 from shared.schemas import (
@@ -16,6 +20,14 @@ from shared.schemas import (
     DeploymentProfileContext,
     SCMCredentialContext,
 )
+
+
+def get_raw_credential_data(credential_id: int) -> dict:
+    """Read credential data directly from the database, bypassing model decryption."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT data FROM cms_credential WHERE id = %s", [credential_id])
+        raw_data = cursor.fetchone()[0]
+    return json.loads(raw_data) if isinstance(raw_data, str) else raw_data
 
 
 @pytest.fixture
@@ -151,6 +163,45 @@ class TestCreateCredential:
         assert cred.data["scm_pin_id"] == "persistpin"
         assert cred.data["scm_pin_value"] == "persistsecret"
         assert cred.data["sls_region"] == "japan"
+
+    def test_create_scm_credential_encrypts_pin_at_rest(self, user, scm_credential_type):
+        """SCM PIN values are encrypted in raw database JSON."""
+        secret = "pin-secret-at-rest"
+
+        result = services.create_credential(
+            user=user,
+            credential_type_slug="scm",
+            name="Encrypted SCM",
+            scm_folder_name="EncryptedFolder",
+            scm_pin_id="encryptedpin",
+            scm_pin_value=secret,
+            sls_region="americas",
+        )
+
+        raw_data = get_raw_credential_data(result.credential_id)
+        assert raw_data["scm_pin_value"] != secret
+        assert raw_data["scm_pin_value"].startswith(ENCRYPTED_VALUE_PREFIX)
+
+        cred = Credential.objects.get(id=result.credential_id)
+        assert cred.data["scm_pin_value"] == secret
+
+    def test_create_deployment_credential_encrypts_authcode_at_rest(self, user, deployment_profile_type):
+        """Deployment profile authcodes are encrypted in raw database JSON."""
+        secret = "AUTHCODE-SECRET"
+
+        result = services.create_credential(
+            user=user,
+            credential_type_slug="deployment_profile",
+            name="Encrypted Deployment",
+            authcode=secret,
+        )
+
+        raw_data = get_raw_credential_data(result.credential_id)
+        assert raw_data["authcode"] != secret
+        assert raw_data["authcode"].startswith(ENCRYPTED_VALUE_PREFIX)
+
+        cred = Credential.objects.get(id=result.credential_id)
+        assert cred.data["authcode"] == secret
 
     def test_create_credential_with_expires_at(self, user, scm_credential_type):
         """create_credential accepts optional expires_at parameter."""

@@ -35,7 +35,7 @@ const PLAN_ID_PATTERN = /^[a-f0-9]{8}$/;
 
 function validatePlanId(id) {
   if (typeof id !== "string" || !PLAN_ID_PATTERN.test(id)) {
-    throw new Error(`Invalid plan ID: ${id}`);
+    throw new Error("Invalid plan ID");
   }
   return id;
 }
@@ -46,7 +46,7 @@ function planPath(id) {
   const target = resolve(base, `${validId}.json`);
   const rel = relative(base, target);
   if (rel.startsWith("..") || isAbsolute(rel)) {
-    throw new Error(`Invalid plan ID: ${id}`);
+    throw new Error("Invalid plan ID");
   }
   return target;
 }
@@ -420,6 +420,7 @@ function searchPlans(query) {
 }
 
 export {
+  PLAN_ID_PATTERN,
   createPlan,
   listPlans,
   getPlan,

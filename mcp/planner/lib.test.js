@@ -84,6 +84,12 @@ describe("Plan CRUD", () => {
     assert.equal(current.id, a.id);
   });
 
+  it("accepts valid generated plan IDs", () => {
+    const created = createPlan("Valid ID");
+    const fetched = getPlan(created.id);
+    assert.equal(fetched.id, created.id);
+  });
+
   it("rejects traversal in getPlan plan_id", () => {
     const outsideId = `outside-${randomUUID()}`;
     const outsidePath = join(testDir, "..", `${outsideId}.json`);

@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  PLAN_ID_PATTERN,
   createPlan,
   listPlans,
   getPlan,
@@ -34,7 +35,7 @@ function err(e) {
 const STEP_STATUSES = ["pending", "in_progress", "completed", "skipped", "blocked"];
 const PLAN_ID_SCHEMA = z
   .string()
-  .regex(/^[a-f0-9]{8}$/, "Plan ID must be 8 lowercase hex characters");
+  .regex(PLAN_ID_PATTERN, "Plan ID must be 8 lowercase hex characters");
 
 const server = new McpServer({ name: "shifter-planner", version: "1.0.0" });
 

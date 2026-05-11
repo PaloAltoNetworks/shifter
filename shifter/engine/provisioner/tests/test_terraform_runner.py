@@ -87,6 +87,7 @@ class TestBuildTfVariables:
         "os.environ",
         {
             "ENVIRONMENT": "prod",
+            "SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234",
             "NGFW_SUBNET_ID": "subnet-abc",
             "NGFW_MGMT_SECURITY_GROUP_ID": "sg-mgmt",
             "NGFW_DATA_SECURITY_GROUP_ID": "sg-data",
@@ -116,15 +117,20 @@ class TestBuildTfVariables:
         assert result["instance_uuid"] == "inst-555"
         assert result["request_uuid"] == "req-999"
         assert result["environment"] == "prod"
+        assert result["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
         assert result["subnet_id"] == "subnet-abc"
         assert result["ami_id"] == "ami-123"
         assert result["instance_profile_name"] == "my-profile"
         assert result["scm_pin_id"] == "pin-1"
         assert result["authcode"] == "auth-abc"
 
-    @patch.dict("os.environ", {}, clear=True)
-    def test_defaults_when_env_vars_missing(self):
-        """Should use defaults when env vars are not set."""
+    @patch.dict(
+        "os.environ",
+        {"SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"},
+        clear=True,
+    )
+    def test_defaults_when_optional_env_vars_missing(self):
+        """Should use defaults for optional env vars; mandatory KMS ARN is supplied."""
         from ngfw_terraform import _build_tf_variables
 
         result = _build_tf_variables("req-1", "inst-1", {})
@@ -132,9 +138,24 @@ class TestBuildTfVariables:
         assert result["user_id"] == 0
         assert result["name_prefix"] == "ngfw-user-0"
         assert result["environment"] == "dev"
+        assert result["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
         assert result["subnet_id"] == ""
         assert result["instance_type"] == "m5.xlarge"
         assert result["instance_profile_name"] is None
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_raises_keyerror_when_secrets_kms_key_arn_missing(self):
+        """Fail-fast on missing SECRETS_KMS_KEY_ARN.
+
+        Mandatory env var; runtime tfvars must not silently fall back to
+        AWS-managed keys (CKV_AWS_149 / #213).
+        """
+        import pytest
+
+        from ngfw_terraform import _build_tf_variables
+
+        with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
+            _build_tf_variables("req-1", "inst-1", {})
 
 
 class TestBuildProviderState:

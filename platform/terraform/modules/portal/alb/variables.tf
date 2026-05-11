@@ -44,6 +44,12 @@ variable "enable_waf" {
   default     = true
 }
 
+variable "enable_deletion_protection" {
+  description = "Enable ALB deletion protection (CKV_AWS_150). Mirrors the `db_deletion_protection` convention: secure default is `true` in prod; dev environments that need intentional teardown set this to `false` and re-apply before destroying."
+  type        = bool
+  default     = true
+}
+
 # ------------------------------------------------------------------------------
 # Access Logs
 # ------------------------------------------------------------------------------

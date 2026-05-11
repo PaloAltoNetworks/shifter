@@ -83,3 +83,8 @@ variable "instance_profile_name" {
   type        = string
   default     = null
 }
+
+variable "secrets_kms_key_arn" {
+  description = "ARN of the portal Secrets Manager CMK used to encrypt the NGFW SSH-key secret at runtime (CKV_AWS_149). Sourced from the engine-provisioner ECS task env (SECRETS_KMS_KEY_ARN) which is wired from the platform env root."
+  type        = string
+}

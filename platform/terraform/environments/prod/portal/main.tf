@@ -72,6 +72,150 @@ data "aws_ssm_parameter" "dc_ami" {
   name = "/shifter/ami/dc"
 }
 
+data "aws_caller_identity" "current" {}
+
+# ------------------------------------------------------------------------------
+# KMS CMKs — Secrets Manager and Portal S3 bucket
+# ------------------------------------------------------------------------------
+# Closes Checkov CKV_AWS_149 (Secrets Manager CMK) and CKV_AWS_145 (S3 SSE-KMS)
+# for #213 / #218. The `kms:ViaService` + `kms:CallerAccount` condition is the
+# AWS-recommended pattern for service-scoped CMKs: anyone in this account who
+# already holds `secretsmanager:GetSecretValue` (or `s3:GetObject`) on the
+# specific resource can transparently decrypt through the service; principals
+# from other accounts cannot. Annual key rotation is enabled automatically
+# (`enable_key_rotation = true`).
+#
+# These keys are intentionally separate from `engine-state` (Pulumi state) and
+# from each other, so a future revoke/rotate of one boundary does not collapse
+# the others. See docs/architecture/secrets-manager-cmk-preflight.md and
+# docs/architecture/s3-bucket-hardening-preflight.md.
+
+resource "aws_kms_key" "secrets_manager" {
+  description             = "CMK for portal Secrets Manager secrets (CKV_AWS_149) — see #213"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        # Account-scoped use via Secrets Manager only, AND bound by encryption
+        # context to portal-owned secret ARNs (`shifter-<env>-*` for platform
+        # secrets and `shifter/<env>/*` for engine-provisioner runtime secrets).
+        # Secrets Manager always passes `SecretARN` as encryption context, so
+        # `kms:EncryptionContext:SecretARN` constrains use of this key to the
+        # specific secret namespace this CMK is intended to protect — a
+        # principal with `kms:Decrypt` could not use this key to decrypt some
+        # other Secrets Manager secret in the account.
+        Sid       = "AllowPortalSecretsManagerCallers"
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+          "kms:CreateGrant",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "secretsmanager.${var.aws_region}.amazonaws.com"
+          }
+          "ForAnyValue:StringLike" = {
+            "kms:EncryptionContext:SecretARN" = [
+              "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:shifter-${var.environment}-*",
+              "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:shifter/${var.environment}/*",
+            ]
+          }
+        }
+      },
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-secrets-manager"
+  })
+}
+
+resource "aws_kms_alias" "secrets_manager" {
+  name          = "alias/shifter-${var.environment}-secrets-manager"
+  target_key_id = aws_kms_key.secrets_manager.key_id
+}
+
+resource "aws_kms_key" "portal_s3" {
+  description             = "CMK for the portal user-uploads S3 bucket (CKV_AWS_145) — see #218"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        # Account-scoped use via S3 only, AND bound by encryption context to
+        # objects under the portal user-uploads bucket. S3 always passes
+        # `aws:s3:arn = arn:aws:s3:::<bucket>/<key>` as encryption context for
+        # SSE-KMS, so this condition constrains use of this key to objects in
+        # the configured bucket — a principal with `kms:Decrypt` could not use
+        # this key to decrypt some other S3 object in the account.
+        Sid       = "AllowPortalUserUploadsBucket"
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+            "kms:ViaService"    = "s3.${var.aws_region}.amazonaws.com"
+          }
+          "ForAnyValue:StringLike" = {
+            # With S3 Bucket Keys enabled (set in `modules/portal/s3`), S3
+            # passes the BUCKET ARN as KMS encryption context for the per-bucket
+            # data key. For object-level operations without Bucket Keys S3
+            # passes the OBJECT ARN. Allow both patterns so the policy doesn't
+            # deny the first SSE-KMS operation.
+            "kms:EncryptionContext:aws:s3:arn" = [
+              "arn:aws:s3:::${var.user_storage_bucket}",
+              "arn:aws:s3:::${var.user_storage_bucket}/*",
+            ]
+          }
+        }
+      },
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-s3"
+  })
+}
+
+resource "aws_kms_alias" "portal_s3" {
+  name          = "alias/shifter-${var.environment}-portal-s3"
+  target_key_id = aws_kms_key.portal_s3.key_id
+}
+
 # ------------------------------------------------------------------------------
 # VPC
 # ------------------------------------------------------------------------------
@@ -98,6 +242,7 @@ module "rds" {
   source = "../../../modules/portal/rds"
 
   name_prefix         = local.name_prefix
+  secrets_kms_key_arn = aws_kms_key.secrets_manager.arn
   vpc_id              = module.vpc.vpc_id
   subnet_ids          = module.vpc.private_subnet_ids
   allowed_cidr_blocks = [module.vpc.vpc_cidr]
@@ -128,13 +273,14 @@ module "rds" {
 module "alb" {
   source = "../../../modules/portal/alb"
 
-  name_prefix       = local.name_prefix
-  vpc_id            = module.vpc.vpc_id
-  public_subnet_ids = module.vpc.public_subnet_ids
-  domain_name       = var.domain_name
-  app_port          = var.app_port
-  health_check_path = var.health_check_path
-  enable_stickiness = var.enable_autoscaling
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  public_subnet_ids          = module.vpc.public_subnet_ids
+  domain_name                = var.domain_name
+  app_port                   = var.app_port
+  health_check_path          = var.health_check_path
+  enable_stickiness          = var.enable_autoscaling
+  enable_deletion_protection = true # prod: secure default; flip false + apply before any intentional destroy
 
   # Phase 5: ALB Access Logs and WAF Logging
   enable_access_logs      = var.enable_alb_access_logs
@@ -178,6 +324,7 @@ module "cognito" {
   environment           = var.environment
   aws_region            = var.aws_region
   log_retention_days    = var.log_retention_days
+  secrets_kms_key_arn   = aws_kms_key.secrets_manager.arn
   cognito_domain_prefix = var.cognito_domain_prefix
   callback_urls         = ["https://${var.domain_name}/oidc/callback/"]
   logout_urls           = ["https://${var.domain_name}/"]
@@ -366,6 +513,7 @@ module "s3" {
 
   bucket_name          = var.user_storage_bucket
   cors_allowed_origins = ["https://${var.domain_name}"]
+  kms_key_arn          = aws_kms_key.portal_s3.arn
   tags                 = var.tags
 }
 
@@ -383,11 +531,11 @@ resource "random_id" "field_encryption_key" {
   byte_length = 32
 }
 
-# checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "app" {
   name                    = "shifter-${local.name_prefix}-app"
   description             = "Django application secrets"
   recovery_window_in_days = 7
+  kms_key_id              = aws_kms_key.secrets_manager.arn
 
   tags = merge(var.tags, {
     Name = "shifter-${local.name_prefix}-app"
@@ -443,10 +591,11 @@ resource "aws_route" "range_to_portal" {
 module "engine_provisioner" {
   source = "../../../modules/engine-provisioner"
 
-  name_prefix        = local.name_prefix
-  environment        = var.environment
-  tags               = var.tags
-  log_retention_days = var.log_retention_days
+  name_prefix                 = local.name_prefix
+  environment                 = var.environment
+  tags                        = var.tags
+  log_retention_days          = var.log_retention_days
+  secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
 
   # ECR
   ecr_repository_url  = data.terraform_remote_state.foundation.outputs.engine_provisioner_ecr_url
@@ -538,9 +687,10 @@ moved {
 module "guacamole" {
   source = "../../../modules/guacamole"
 
-  name_prefix = local.name_prefix
-  environment = var.environment
-  tags        = var.tags
+  name_prefix         = local.name_prefix
+  environment         = var.environment
+  tags                = var.tags
+  secrets_kms_key_arn = aws_kms_key.secrets_manager.arn
 
   # Networking (Portal VPC)
   vpc_id                   = module.vpc.vpc_id

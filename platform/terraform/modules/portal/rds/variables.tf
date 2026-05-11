@@ -75,6 +75,11 @@ variable "tags" {
   type        = map(string)
 }
 
+variable "secrets_kms_key_arn" {
+  description = "ARN of the KMS CMK used to encrypt Secrets Manager secrets owned by this module (CKV_AWS_149). Required input — no default."
+  type        = string
+}
+
 variable "prevent_destroy" {
   description = "Prevent accidental destruction of RDS instance (use in prod)"
   type        = bool

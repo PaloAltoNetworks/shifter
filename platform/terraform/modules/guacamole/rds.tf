@@ -29,11 +29,11 @@ resource "random_password" "db_password" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal platform
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "shifter-${var.name_prefix}-guacamole-db"
   description             = "Guacamole PostgreSQL database credentials"
   recovery_window_in_days = var.secrets_recovery_window_days
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(local.common_tags, {
     Name = "shifter-${var.name_prefix}-guacamole-db"
@@ -66,11 +66,11 @@ resource "random_id" "json_auth_secret" {
   byte_length = 16 # 16 bytes = 128 bits = 32 hex characters
 }
 
-# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal platform
 resource "aws_secretsmanager_secret" "json_auth" {
   name                    = "shifter-${var.name_prefix}-guacamole-json-auth"
   description             = "Guacamole JSON auth 128-bit secret key for Portal RDP integration"
   recovery_window_in_days = var.secrets_recovery_window_days
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(local.common_tags, {
     Name = "shifter-${var.name_prefix}-guacamole-json-auth"

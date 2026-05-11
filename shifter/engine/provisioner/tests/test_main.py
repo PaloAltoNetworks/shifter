@@ -472,6 +472,8 @@ class TestGdcProvisioning:
     def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self, mocker):
         from main import _build_range_terraform_variables
 
+        # GCP path uses GDC VM Runtime + GCP Secret Manager and does not
+        # consume SECRETS_KMS_KEY_ARN — verify by omitting it from the env.
         mocker.patch.dict(
             "os.environ",
             {
@@ -529,6 +531,82 @@ class TestGdcProvisioning:
         assert variables["ngfw_data_eni_id"] == ""
         assert variables["ngfw_attachment"]["cloud_provider"] == "gcp"
         assert variables["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
+        # GCP path must NOT include the AWS-only Secrets Manager CMK ARN (#213).
+        assert "secrets_kms_key_arn" not in variables
+
+    def test_build_range_terraform_variables_aws_includes_secrets_kms_key_arn(self, mocker):
+        """AWS range tfvars include the Secrets Manager CMK ARN (#213).
+
+        Mirrors the NGFW positive coverage in test_terraform_runner.py: the
+        runtime range Terraform module's `aws_secretsmanager_secret.ssh_key`
+        resource depends on this variable.
+        """
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "aws",
+                "ENVIRONMENT": "dev",
+                "SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234",
+                "RANGE_INSTANCE_PROFILE_NAME": "shifter-dev-range-profile",
+            },
+            clear=True,
+        )
+        mocker.patch(
+            "main.load_range_network_config",
+            return_value=mocker.Mock(
+                network_id="vpc-test",
+                network_cidr="10.1.0.0/16",
+                primary_portal_cidr="10.0.0.0/16",
+            ),
+        )
+        mocker.patch("main.get_range_availability_zone", return_value="us-east-2a")
+        mocker.patch("main.get_ami_id", return_value="ami-deadbeef")
+        mocker.patch("main.generate_presigned_url", return_value="")
+
+        variables = _build_range_terraform_variables(
+            request_id="req-aws-1",
+            range_id=1,
+            user_id=2,
+            range_spec={"ngfw": False, "subnets": []},
+        )
+
+        assert variables["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
+        assert variables["kali_ami_id"] == "ami-deadbeef"
+
+    def test_build_range_terraform_variables_aws_raises_when_secrets_kms_key_arn_missing(self, mocker):
+        """Fail-fast on missing SECRETS_KMS_KEY_ARN for AWS range path (#213)."""
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "aws",
+                "ENVIRONMENT": "dev",
+                "RANGE_INSTANCE_PROFILE_NAME": "shifter-dev-range-profile",
+            },
+            clear=True,
+        )
+        mocker.patch(
+            "main.load_range_network_config",
+            return_value=mocker.Mock(
+                network_id="vpc-test",
+                network_cidr="10.1.0.0/16",
+                primary_portal_cidr="10.0.0.0/16",
+            ),
+        )
+        mocker.patch("main.get_range_availability_zone", return_value="us-east-2a")
+        mocker.patch("main.get_ami_id", return_value="ami-deadbeef")
+        mocker.patch("main.generate_presigned_url", return_value="")
+
+        with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
+            _build_range_terraform_variables(
+                request_id="req-aws-2",
+                range_id=1,
+                user_id=2,
+                range_spec={"ngfw": False, "subnets": []},
+            )
 
     def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, mocker):
         from main import run_range_terraform

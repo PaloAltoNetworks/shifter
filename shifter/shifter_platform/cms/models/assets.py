@@ -15,7 +15,7 @@ import logging
 from django.conf import settings
 from django.db import models
 
-from cms.credential_encryption import decrypt_sensitive_credential_data, encrypt_sensitive_credential_data
+from cms.credential_encryption import EncryptedCredentialDataField
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
 from shared.db import ExpiringStateMixin, SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 
@@ -158,7 +158,7 @@ class Credential(CredentialBase):
         on_delete=models.PROTECT,
         related_name="credentials",
     )
-    data = models.JSONField(
+    data = EncryptedCredentialDataField(
         default=dict,
         help_text="Type-specific credential data (validated by spec_class)",
     )
@@ -178,21 +178,6 @@ class Credential(CredentialBase):
                 name="unique_active_credential_name_per_user",
             ),
         ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if isinstance(self.data, dict):
-            self.data = decrypt_sensitive_credential_data(self.data)
-
-    def save(self, *args, **kwargs):
-        plaintext_data = self.data
-        if isinstance(plaintext_data, dict):
-            self.data = encrypt_sensitive_credential_data(plaintext_data)
-        try:
-            return super().save(*args, **kwargs)
-        finally:
-            if isinstance(plaintext_data, dict):
-                self.data = plaintext_data
 
 
 class AgentConfig(FileAsset):

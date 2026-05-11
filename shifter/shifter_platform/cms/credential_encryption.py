@@ -6,6 +6,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
+from django.db import models
 
 SENSITIVE_CREDENTIAL_DATA_KEYS = frozenset({"authcode", "scm_pin_value"})
 ENCRYPTED_VALUE_PREFIX = "enc:v1:"
@@ -19,6 +20,31 @@ def encrypt_sensitive_credential_data(data: dict[str, Any]) -> dict[str, Any]:
 def decrypt_sensitive_credential_data(data: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of credential data with sensitive values decrypted."""
     return _transform_sensitive_credential_data(data, encrypt=False)
+
+
+class EncryptedCredentialDataField(models.JSONField):
+    """JSONField that encrypts credential secret values before database writes."""
+
+    def get_prep_value(self, value):
+        if isinstance(value, dict):
+            value = encrypt_sensitive_credential_data(value)
+        return super().get_prep_value(value)
+
+    def from_db_value(self, value, expression, connection):
+        value = super().from_db_value(value, expression, connection)
+        if isinstance(value, dict):
+            return decrypt_sensitive_credential_data(value)
+        return value
+
+    def to_python(self, value):
+        value = super().to_python(value)
+        if isinstance(value, dict):
+            return decrypt_sensitive_credential_data(value)
+        return value
+
+    def deconstruct(self):
+        name, _path, args, kwargs = super().deconstruct()
+        return name, "django.db.models.JSONField", args, kwargs
 
 
 def _transform_sensitive_credential_data(data: dict[str, Any], *, encrypt: bool) -> dict[str, Any]:

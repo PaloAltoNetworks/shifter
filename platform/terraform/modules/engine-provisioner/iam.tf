@@ -145,7 +145,15 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
           "ec2:ImportKeyPair",
           "ec2:DeleteKeyPair"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*",
+          "arn:aws:ec2:${local.region}::image/*"
+        ]
       },
       {
         # Instance creation is restricted by the runtime Terraform tags that
@@ -155,7 +163,20 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         Action = [
           "ec2:RunInstances"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:route-table/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:internet-gateway/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:elastic-ip/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:natgateway/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint-service/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
+        ]
         Condition = {
           StringEquals = {
             "aws:RequestTag/shifter:system"      = "shifter"

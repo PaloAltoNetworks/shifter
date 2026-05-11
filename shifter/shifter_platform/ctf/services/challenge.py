@@ -497,6 +497,66 @@ def remove_flag(flag_id: UUID, *, actor_id: int) -> None:
     logger.info("Removed flag %s", flag_id)
 
 
+def _compute_legacy_flag_hash(data: dict[str, Any], flags_list: list | None) -> None:
+    """Populate `data['flag_hash']` from either `data['flag']` or the first
+    entry in `flags_list`. Mutates `data` in place. Caller has already
+    validated that one of them is present.
+    """
+    if "flag" in data:
+        plaintext_flag = data.pop("flag")
+        data["flag_hash"] = hash_flag(plaintext_flag)
+        return
+    if not flags_list:
+        return
+    first_flag = flags_list[0]
+    first_type = first_flag.get("flag_type", "static")
+    if first_type == "static":
+        data["flag_hash"] = hash_flag(
+            first_flag["flag"],
+            case_sensitive=first_flag.get("case_sensitive", True),
+        )
+    elif first_type in ("programmable", "http"):
+        data["flag_hash"] = first_type
+    else:
+        data["flag_hash"] = "multi-flag"
+
+
+def _apply_challenge_m2m(
+    challenge: CTFChallenge,
+    event: CTFEvent,
+    *,
+    tag_names: list[str] | None,
+    topic_names: list[str] | None,
+    flags_list: list[dict[str, Any]] | None,
+    actor_id: int,
+) -> None:
+    """Apply tags, topics, and per-challenge flag records after a challenge
+    has been created/updated. Caller is responsible for the surrounding
+    `transaction.atomic()`.
+    """
+    if flags_list:
+        for i, fd in enumerate(flags_list):
+            add_flag(challenge.id, {**fd, "order": fd.get("order", i)}, actor_id=actor_id)
+    if tag_names is not None:
+        challenge.tags.set(_resolve_tags(event, tag_names))
+    if topic_names is not None:
+        challenge.topics.set(_resolve_topics(topic_names))
+
+
+def _build_challenge_safe_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Filter `data` to allowed challenge fields, plus the explicitly
+    handled `flag_hash` and pre-resolved `next_challenge` instance.
+    `next_challenge` is kept out of the generic allowlist so unvalidated
+    JSON FK input cannot crash FK assignment.
+    """
+    safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
+    if "flag_hash" in data:
+        safe_data["flag_hash"] = data["flag_hash"]
+    if "next_challenge" in data:
+        safe_data["next_challenge"] = data["next_challenge"]
+    return safe_data
+
+
 def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id: int) -> CTFChallenge:
     """Create a new challenge.
 
@@ -556,54 +616,19 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
             details={"missing_fields": ["flag"]},
         )
 
-    # Extract flag and hash it for the legacy field
-    if "flag" in data:
-        plaintext_flag = data.pop("flag")
-        data["flag_hash"] = hash_flag(plaintext_flag)
-    elif flags_list:
-        # Use first static flag for legacy field, or sentinel for other types
-        first_flag = flags_list[0]
-        first_type = first_flag.get("flag_type", "static")
-        if first_type == "static":
-            data["flag_hash"] = hash_flag(
-                first_flag["flag"],
-                case_sensitive=first_flag.get("case_sensitive", True),
-            )
-        else:
-            data["flag_hash"] = first_type if first_type in ("programmable", "http") else "multi-flag"
-
-    # Filter to allowed fields only — prevent mass assignment of event,
-    # flag_hash (set internally above), id, timestamps, etc.
-    safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
-    if "flag_hash" in data:
-        safe_data["flag_hash"] = data["flag_hash"]
-    # next_challenge: kept OUT of the generic allowlist so unvalidated FK
-    # input from JSON callers cannot crash the FK assignment with a 500.
-    # Resolved + validated above; pass the validated instance through
-    # explicitly here.
-    if "next_challenge" in data:
-        safe_data["next_challenge"] = data["next_challenge"]
+    _compute_legacy_flag_hash(data, flags_list)
+    safe_data = _build_challenge_safe_data(data)
 
     with transaction.atomic():
-        challenge = CTFChallenge.objects.create(
-            event=event,
-            **safe_data,
+        challenge = CTFChallenge.objects.create(event=event, **safe_data)
+        _apply_challenge_m2m(
+            challenge,
+            event,
+            tag_names=tag_names,
+            topic_names=topic_names,
+            flags_list=flags_list,
+            actor_id=actor_id,
         )
-
-        # Create CTFFlag records if flags list provided
-        if flags_list:
-            for i, fd in enumerate(flags_list):
-                add_flag(challenge.id, {**fd, "order": fd.get("order", i)}, actor_id=actor_id)
-
-        # Set tags if provided
-        if tag_names is not None:
-            tag_objects = _resolve_tags(event, tag_names)
-            challenge.tags.set(tag_objects)
-
-        # Set topics if provided
-        if topic_names is not None:
-            topic_objects = _resolve_topics(topic_names)
-            challenge.topics.set(topic_objects)
 
         logger.info(
             "Created challenge %s for event %s: %s",

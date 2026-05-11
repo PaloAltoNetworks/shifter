@@ -151,6 +151,9 @@ def _get_client_ip(request):
     return request.META.get("REMOTE_ADDR")
 
 
+_FORBIDDEN_CHALLENGE_ACCESS_MSG = "Forbidden: You do not have access to this challenge"
+
+
 def _check_event_ownership(event, user) -> JsonResponse | None:
     """Return a 403 JsonResponse if the user does not own the event, else None."""
     if event.created_by_id != user.pk:
@@ -192,6 +195,116 @@ def _get_participant_for_challenge(request: HttpRequest, challenge):
     from ctf.services.participant import get_participant_by_user
 
     return get_participant_by_user(_get_user(request), event_id=challenge.event_id)
+
+
+def _compute_hint_purchase_info(challenge, all_hints, unlocked_hint_ids, total_hint_penalty) -> dict:
+    """Compute next-hint, cost, and warning state for the challenge detail page.
+
+    Extracted to keep `challenge_detail`'s cognitive complexity below the
+    SonarCloud threshold (python:S3776).
+    """
+    next_hint = next((h for h in all_hints if h.id not in unlocked_hint_ids), None)
+    next_hint_cost = 0
+    points_after_next_hint = challenge.points
+    penalty_warning = False
+    if next_hint and next_hint.penalty > 0:
+        current_value = challenge.calculate_points_with_penalty(total_hint_penalty)
+        projected_penalty = total_hint_penalty + next_hint.penalty
+        points_after_next_hint = challenge.calculate_points_with_penalty(projected_penalty)
+        next_hint_cost = current_value - points_after_next_hint
+        penalty_warning = projected_penalty >= 100
+    return {
+        "next_hint": next_hint,
+        "next_hint_cost": next_hint_cost,
+        "points_after_next_hint": points_after_next_hint,
+        "penalty_warning": penalty_warning,
+    }
+
+
+def _resolve_target_connection_info(challenge, participant):
+    """Return connection-info dict for the challenge's target instance, or None.
+
+    Extracted from `challenge_detail` (SonarCloud python:S3776).
+    """
+    if not challenge.target_instance_name or participant.range_status != "ready":
+        return None
+    participant_user = participant.user
+    if participant_user is None:
+        return None
+    import cms.services as cms_services
+
+    for inst in cms_services.get_range_target_instances(participant_user.pk):
+        if inst.get("name") != challenge.target_instance_name:
+            continue
+        host = inst.get("private_ip")
+        if not host:
+            return None
+        return {
+            "host": host,
+            "port": challenge.target_port,
+            "instance_name": inst["name"],
+            "os_type": inst.get("os_type", ""),
+        }
+    return None
+
+
+def _resolve_hint_to_unlock(request: HttpRequest, participant, challenge_id):
+    """Resolve which hint UUID to unlock for `api_use_hint`.
+
+    Returns either a `UUID` (the hint to unlock) or a `JsonResponse` that
+    the caller should return as-is. Keeps `api_use_hint` below the
+    SonarCloud cognitive-complexity threshold (python:S3776).
+
+    Distinguishes three caller intents:
+      - empty body / `{}` → caller wants the next-hint default path;
+        returns the UUID of the first not-yet-unlocked hint, or 400 when
+        none remain.
+      - body explicitly contains `hint_id` (any value, including
+        `null`/`""`/malformed) → returns the parsed UUID, or 400 instead
+        of silently falling back to the next-hint path.
+      - JSON parse failure / non-object body → 400.
+    """
+    from ctf.services.hint import get_hints, get_unlocked_hints
+
+    try:
+        body = _parse_body_object(request, allow_empty=True)
+    except _BodyParseError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    if "hint_id" in body:
+        try:
+            return _parse_body_uuid(body.get("hint_id"), "hint_id")
+        except _BodyUUIDError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+    # Default path: pick the first hint not yet unlocked.
+    unlocked_ids = {h.id for h in get_unlocked_hints(participant.id, challenge_id)}
+    next_hint = next((h for h in get_hints(challenge_id) if h.id not in unlocked_ids), None)
+    if not next_hint:
+        return JsonResponse({"error": "No more hints available"}, status=400)
+    return next_hint.id
+
+
+def _compute_attempt_state(challenge, participant, submissions, attempt_count: int):
+    """Return `(attempt_count, timeout_retry_after, attempts_remaining)`.
+
+    Extracted from `challenge_detail` (SonarCloud python:S3776). Recomputes
+    `attempt_count` under "timeout" attempt-limit mode (counts only the
+    current cooldown window) and derives the retry-after timer and
+    remaining-attempts display.
+    """
+    timeout_retry_after = None
+    if participant.event.attempt_limit_mode == "timeout" and challenge.max_attempts > 0:
+        from ctf.services.submission import _count_attempts_in_current_window
+
+        attempt_cooldown = participant.event.attempt_limit_cooldown_seconds
+        attempt_count = _count_attempts_in_current_window(submissions, attempt_cooldown)
+        if attempt_count >= challenge.max_attempts:
+            last_sub = submissions.first()
+            if last_sub:
+                elapsed = (timezone.now() - last_sub.submitted_at).total_seconds()
+                if elapsed < attempt_cooldown:
+                    timeout_retry_after = int(attempt_cooldown - elapsed) + 1
+    attempts_remaining = max(0, challenge.max_attempts - attempt_count) if challenge.max_attempts else None
+    return attempt_count, timeout_retry_after, attempts_remaining
 
 
 class _BodyUUIDError(ValueError):
@@ -258,11 +371,12 @@ def _parse_body_object(request: HttpRequest, *, allow_empty: bool = False) -> di
         raise _BodyParseError("Request body is required")
     try:
         decoded = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
-        # Codex review (cycle 5): `json.loads(bytes)` can also raise
-        # `UnicodeDecodeError` for non-UTF-8 input, and that's a `ValueError`
-        # subclass not a `JSONDecodeError`. Catch the union here so every
-        # caller gets the same 400 envelope instead of a leaked 500.
+    except ValueError as e:
+        # Catches both `json.JSONDecodeError` (subclass of ValueError) and
+        # `UnicodeDecodeError` (also a ValueError subclass — non-UTF-8
+        # bytes), so every malformed-body call gets the same 400 envelope
+        # instead of a leaked 500. Listing the subclasses explicitly is
+        # redundant (SonarCloud python:S5713).
         raise _BodyParseError("Invalid JSON") from e
     if not isinstance(decoded, dict):
         raise _BodyParseError("Request body must be a JSON object")
@@ -516,7 +630,7 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @ctf_participant_required
-def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:  # noqa: C901
+def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse:
     """Participant challenge detail with submission form.
 
     Args:
@@ -563,75 +677,24 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse: 
     from ctf.services.hint import get_hints, get_total_hint_penalty, get_unlocked_hints
 
     all_hints = list(get_hints(challenge_id))
-    unlocked_hints = get_unlocked_hints(participant.id, challenge_id)
-    unlocked_hint_ids = {h.id for h in unlocked_hints}
+    unlocked_hint_ids = {h.id for h in get_unlocked_hints(participant.id, challenge_id)}
     total_hint_penalty = get_total_hint_penalty(participant.id, challenge_id)
+    hint_purchase = _compute_hint_purchase_info(
+        challenge,
+        all_hints,
+        unlocked_hint_ids,
+        total_hint_penalty,
+    )
 
-    # Determine the next available hint (first one not yet unlocked)
-    next_hint = None
-    for h in all_hints:
-        if h.id not in unlocked_hint_ids:
-            next_hint = h
-            break
-
-    # Compute hint purchase cost info (CTF-304)
-    next_hint_cost = 0
-    points_after_next_hint = challenge.points
-    penalty_warning = False
-    if next_hint and next_hint.penalty > 0:
-        current_value = challenge.calculate_points_with_penalty(total_hint_penalty)
-        projected_penalty = total_hint_penalty + next_hint.penalty
-        points_after_next_hint = challenge.calculate_points_with_penalty(projected_penalty)
-        next_hint_cost = current_value - points_after_next_hint
-        penalty_warning = projected_penalty >= 100
-
-    # Get challenge files
     from ctf.services.attachment import get_challenge_files
-
-    challenge_files = get_challenge_files(challenge_id)
-
-    # Check prerequisites
     from ctf.services.challenge import check_prerequisites_met
 
+    challenge_files = get_challenge_files(challenge_id)
     prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant.id)
-
-    connection_info = None
-    participant_user = participant.user
-    if challenge.target_instance_name and participant.range_status == "ready" and participant_user is not None:
-        import cms.services as cms_services
-
-        for inst in cms_services.get_range_target_instances(participant_user.pk):
-            if inst.get("name") != challenge.target_instance_name:
-                continue
-            host = inst.get("private_ip")
-            if not host:
-                break
-            connection_info = {
-                "host": host,
-                "port": challenge.target_port,
-                "instance_name": inst["name"],
-                "os_type": inst.get("os_type", ""),
-            }
-            break
-
-    # Calculate timeout state for attempt limits
-    attempt_limit_mode = participant.event.attempt_limit_mode
-    timeout_retry_after = None
-    if attempt_limit_mode == "timeout" and challenge.max_attempts > 0:
-        from ctf.services.submission import _count_attempts_in_current_window
-
-        attempt_cooldown = participant.event.attempt_limit_cooldown_seconds
-        attempt_count = _count_attempts_in_current_window(submissions, attempt_cooldown)
-        if attempt_count >= challenge.max_attempts:
-            last_sub = submissions.first()
-            if last_sub:
-                elapsed = (timezone.now() - last_sub.submitted_at).total_seconds()
-                if elapsed < attempt_cooldown:
-                    timeout_retry_after = int(attempt_cooldown - elapsed) + 1
-
-    attempts_remaining = None
-    if challenge.max_attempts:
-        attempts_remaining = max(0, challenge.max_attempts - attempt_count)
+    connection_info = _resolve_target_connection_info(challenge, participant)
+    attempt_count, timeout_retry_after, attempts_remaining = _compute_attempt_state(
+        challenge, participant, submissions, attempt_count
+    )
 
     context = {
         "participant": participant,
@@ -642,10 +705,10 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse: 
         "attempt_count": attempt_count,
         "hints": all_hints,
         "unlocked_hint_ids": unlocked_hint_ids,
-        "next_hint": next_hint,
-        "next_hint_cost": next_hint_cost,
-        "points_after_next_hint": points_after_next_hint,
-        "penalty_warning": penalty_warning,
+        "next_hint": hint_purchase["next_hint"],
+        "next_hint_cost": hint_purchase["next_hint_cost"],
+        "points_after_next_hint": hint_purchase["points_after_next_hint"],
+        "penalty_warning": hint_purchase["penalty_warning"],
         "total_hint_penalty": total_hint_penalty,
         "max_attempts": challenge.max_attempts,
         "attempts_remaining": attempts_remaining,
@@ -653,7 +716,7 @@ def challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResponse: 
         "prereqs_met": prereqs_met,
         "unmet_challenges": unmet_challenges,
         "connection_info": connection_info,
-        "attempt_limit_mode": attempt_limit_mode,
+        "attempt_limit_mode": participant.event.attempt_limit_mode,
         "timeout_retry_after": timeout_retry_after,
         "show_solution": bool(challenge.solution and participant.event.status in ("ended", "archived")),
     }
@@ -1332,7 +1395,7 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
 
     # Check permission
     if challenge.event.created_by_id != request.user.pk:
-        return HttpResponse("Forbidden: You do not have access to this challenge", status=403)
+        return HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
 
     # Get submission stats
     from ctf.models import CTFChallenge, CTFSubmission
@@ -1417,7 +1480,7 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
 
     # Check permission
     if event.created_by_id != request.user.pk:
-        return HttpResponse("Forbidden: You do not have access to this challenge", status=403)
+        return HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
 
     # Check if event content is modifiable
     if not event.is_content_modifiable:
@@ -1442,7 +1505,7 @@ def admin_challenge_edit(request: HttpRequest, challenge_id: UUID) -> HttpRespon
                     actor_id=request.user.pk,
                 )
             except CTFPermissionError:
-                return HttpResponse("Forbidden: You do not have access to this challenge", status=403)
+                return HttpResponse(_FORBIDDEN_CHALLENGE_ACCESS_MSG, status=403)
             except (CTFStateError, CTFValidationError) as e:
                 form.add_error(None, str(e))
             else:
@@ -2646,7 +2709,7 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     """
     from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
     from ctf.services.challenge import get_challenge
-    from ctf.services.hint import get_hints, get_unlocked_hints, use_hint
+    from ctf.services.hint import use_hint
 
     # Resolve the participant scoped to THIS challenge's event (codex cycle 4).
     try:
@@ -2657,56 +2720,17 @@ def api_use_hint(request: HttpRequest, challenge_id: UUID) -> JsonResponse:
     if not participant:
         return JsonResponse({"error": "Forbidden"}, status=403)
 
-    # Parse optional hint_id from body. Distinguish three cases:
-    #   - request body is empty / "{}"  → caller wants the next-hint default
-    #     path
-    #   - body explicitly contains "hint_id" → caller wants to unlock a
-    #     specific hint, even if the value is empty/null/malformed (in which
-    #     case we MUST return a 400 instead of silently falling back to the
-    #     next-hint path — codex review caught the silent-fallback bug)
-    #   - JSON parse failure / non-object body → 400, never silent
-    hint_id_supplied = False
-    hint_id = None
-    try:
-        body = _parse_body_object(request, allow_empty=True)
-    except _BodyParseError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    if "hint_id" in body:
-        hint_id_supplied = True
-        hint_id = body.get("hint_id")
+    # Resolve which hint to unlock from the request body. The helper
+    # returns either a UUID to unlock or a JsonResponse to return as-is
+    # (empty-body → next hint; explicit-but-malformed → 400; no remaining
+    # hints → 400). Keeping this out of the main body keeps the cognitive
+    # complexity below SonarCloud's threshold.
+    hint_uuid_or_response = _resolve_hint_to_unlock(request, participant, challenge_id)
+    if isinstance(hint_uuid_or_response, JsonResponse):
+        return hint_uuid_or_response
 
     try:
-        if hint_id_supplied:
-            # Issue #769: parse the body UUID through `_parse_body_uuid` so a
-            # malformed value returns a 400 envelope instead of leaking
-            # ValueError to a 500 OR silently falling back to the next-hint
-            # default. The route/body coherence (URL challenge_id ↔
-            # hint.challenge_id) is enforced inside
-            # `use_hint(..., expected_challenge_id=...)` so internal callers
-            # are bound by the same contract.
-            try:
-                hint_uuid = _parse_body_uuid(hint_id, "hint_id")
-            except _BodyUUIDError as e:
-                return JsonResponse({"error": str(e)}, status=400)
-
-            result = use_hint(participant.id, hint_uuid, expected_challenge_id=challenge_id)
-        else:
-            # Unlock next hint in order
-            all_hints = list(get_hints(challenge_id))
-            unlocked = get_unlocked_hints(participant.id, challenge_id)
-            unlocked_ids = {h.id for h in unlocked}
-
-            next_hint = None
-            for h in all_hints:
-                if h.id not in unlocked_ids:
-                    next_hint = h
-                    break
-
-            if not next_hint:
-                return JsonResponse({"error": "No more hints available"}, status=400)
-
-            result = use_hint(participant.id, next_hint.id, expected_challenge_id=challenge_id)
-
+        result = use_hint(participant.id, hint_uuid_or_response, expected_challenge_id=challenge_id)
         return JsonResponse(result)
     except CTFNotFoundError as e:
         return JsonResponse({"error": str(e)}, status=404)

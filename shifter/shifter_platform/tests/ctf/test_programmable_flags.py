@@ -218,6 +218,7 @@ class TestProgrammableFlagVerification:
                     "params": {"expected": "answer"},
                 },
             },
+            actor_id=draft_challenge.event.created_by_id,
         )
         assert flag_obj.flag_type == "programmable"
         assert flag_obj.flag_hash == "programmable"
@@ -226,10 +227,7 @@ class TestProgrammableFlagVerification:
     def test_add_flag_programmable_missing_config(self, draft_challenge):
         """add_flag rejects programmable flag without validator_config."""
         with pytest.raises(CTFValidationError, match="validator_config is required"):
-            add_flag(
-                draft_challenge.id,
-                {"flag_type": "programmable"},
-            )
+            add_flag(draft_challenge.id, {"flag_type": "programmable"}, actor_id=draft_challenge.event.created_by_id)
 
     def test_add_flag_programmable_missing_name(self, draft_challenge):
         """add_flag rejects programmable flag without validator_name."""
@@ -240,6 +238,7 @@ class TestProgrammableFlagVerification:
                     "flag_type": "programmable",
                     "validator_config": {"params": {}},
                 },
+                actor_id=draft_challenge.event.created_by_id,
             )
 
     def test_add_flag_programmable_unknown_validator(self, draft_challenge):
@@ -251,6 +250,7 @@ class TestProgrammableFlagVerification:
                     "flag_type": "programmable",
                     "validator_config": {"validator_name": "no_such_validator"},
                 },
+                actor_id=draft_challenge.event.created_by_id,
             )
 
 
@@ -407,6 +407,7 @@ class TestHTTPFlagVerification:
                 "flag_type": "http",
                 "validator_config": {"url": "https://example.com/validate"},
             },
+            actor_id=draft_challenge.event.created_by_id,
         )
         assert flag_obj.flag_type == "http"
         assert flag_obj.flag_hash == "http"
@@ -415,10 +416,7 @@ class TestHTTPFlagVerification:
     def test_add_flag_http_missing_config(self, draft_challenge):
         """add_flag rejects HTTP flag without validator_config."""
         with pytest.raises(CTFValidationError, match="validator_config is required"):
-            add_flag(
-                draft_challenge.id,
-                {"flag_type": "http"},
-            )
+            add_flag(draft_challenge.id, {"flag_type": "http"}, actor_id=draft_challenge.event.created_by_id)
 
     def test_add_flag_http_missing_url(self, draft_challenge):
         """add_flag rejects HTTP flag without URL."""
@@ -426,6 +424,7 @@ class TestHTTPFlagVerification:
             add_flag(
                 draft_challenge.id,
                 {"flag_type": "http", "validator_config": {}},
+                actor_id=draft_challenge.event.created_by_id,
             )
 
     def test_add_flag_http_rejects_non_https(self, draft_challenge):
@@ -434,6 +433,7 @@ class TestHTTPFlagVerification:
             add_flag(
                 draft_challenge.id,
                 {"flag_type": "http", "validator_config": {"url": "http://example.com/check"}},
+                actor_id=draft_challenge.event.created_by_id,
             )
 
     def test_add_flag_http_rejects_ftp(self, draft_challenge):
@@ -442,6 +442,7 @@ class TestHTTPFlagVerification:
             add_flag(
                 draft_challenge.id,
                 {"flag_type": "http", "validator_config": {"url": "ftp://bad.com"}},
+                actor_id=draft_challenge.event.created_by_id,
             )
 
     def test_add_flag_http_invalid_timeout(self, draft_challenge):
@@ -453,6 +454,7 @@ class TestHTTPFlagVerification:
                     "flag_type": "http",
                     "validator_config": {"url": "https://ok.com", "timeout": 99},
                 },
+                actor_id=draft_challenge.event.created_by_id,
             )
 
 
@@ -512,6 +514,7 @@ class TestURLBlocklistCreation:
                     "flag_type": "http",
                     "validator_config": {"url": "https://169.254.169.254/latest/"},
                 },
+                actor_id=draft_challenge.event.created_by_id,
             )
 
 

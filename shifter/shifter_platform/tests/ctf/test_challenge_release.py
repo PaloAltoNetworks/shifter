@@ -258,6 +258,7 @@ class TestChallengeServiceIntegration:
                 "visibility": ChallengeVisibility.HIDDEN.value,
                 "release_time": release_time,
             },
+            actor_id=ctf_event.created_by_id,
         )
 
         assert CTFScheduledTask.objects.filter(
@@ -282,6 +283,7 @@ class TestChallengeServiceIntegration:
                 "visibility": ChallengeVisibility.VISIBLE.value,
                 "release_time": release_time,
             },
+            actor_id=ctf_event.created_by_id,
         )
 
         assert not CTFScheduledTask.objects.filter(
@@ -304,10 +306,15 @@ class TestChallengeServiceIntegration:
                 "visibility": ChallengeVisibility.HIDDEN.value,
                 "release_time": release_time,
             },
+            actor_id=ctf_event.created_by_id,
         )
 
         new_release_time = ctf_event.event_start + timedelta(hours=4)
-        update_challenge(challenge.pk, {"release_time": new_release_time})
+        update_challenge(
+            challenge.pk,
+            {"release_time": new_release_time},
+            actor_id=ctf_event.created_by_id,
+        )
 
         pending = CTFScheduledTask.objects.filter(
             task_type=ScheduledTaskType.RELEASE_CHALLENGE.value,

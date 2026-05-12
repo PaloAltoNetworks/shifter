@@ -3,12 +3,30 @@
 These tests verify the security-critical logic that controls access to dev_login/dev_logout.
 """
 
+from pathlib import Path
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from django.urls import reverse
 
 User = get_user_model()
+
+
+def test_environment_setting_default_is_fail_closed():
+    """settings.ENVIRONMENT must not default to 'development' (issue #761).
+
+    A 'development' default means any deployment that omits the ENVIRONMENT
+    env var silently activates /dev-login/. The safe default is fail-closed
+    ('production'), forcing dev environments to opt in explicitly.
+    """
+    settings_path = Path(__file__).resolve().parents[2] / "config" / "settings.py"
+    source = settings_path.read_text()
+    forbidden = 'os.environ.get("ENVIRONMENT", "development")'
+    assert forbidden not in source, (
+        f"settings.ENVIRONMENT must not default to 'development' (regression of #761). "
+        f"Found {forbidden!r} in {settings_path}"
+    )
 
 
 @pytest.fixture

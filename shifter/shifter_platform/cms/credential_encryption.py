@@ -6,6 +6,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
 SENSITIVE_CREDENTIAL_DATA_KEYS = frozenset({"authcode", "scm_pin_value"})
@@ -76,4 +77,7 @@ def _decrypt_value(value: str) -> str:
 
 
 def _fernet() -> Fernet:
-    return Fernet(settings.FIELD_ENCRYPTION_KEY.encode("utf-8"))
+    key = settings.FIELD_ENCRYPTION_KEY
+    if not key:
+        raise ImproperlyConfigured("FIELD_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode("utf-8"))

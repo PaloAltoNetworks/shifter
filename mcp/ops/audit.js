@@ -169,10 +169,10 @@ export function appendAuditRecord(policy, record) {
   const path = resolveAuditPath(audit.path);
   const sanitized_args = sanitizeArgs(record.args, audit.redact ?? []);
 
-  // Build the emit record. Strip the raw `args` so it never lands
-  // on disk; emit `sanitized_args` in its place.
-  const { args: _ignored, ...rest } = record;
-  const emit = { ...rest, sanitized_args };
+  // Build the emit record. The raw `args` must NEVER land on disk;
+  // emit `sanitized_args` in its place.
+  const emit = { ...record, sanitized_args };
+  delete emit.args;
 
   try {
     mkdirSync(dirname(path), { recursive: true, mode: AUDIT_DIR_MODE });

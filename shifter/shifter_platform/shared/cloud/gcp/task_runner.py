@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 _PROVISIONER_RUN_AS_UID = 1000
 _PROVISIONER_RUN_AS_GID = 1000
 
+# Canonical Kubernetes recommended labels referenced by multiple
+# spec builders (Job metadata, Pod template, Secret metadata).
+_K8S_LABEL_PART_OF = "app.kubernetes.io/part-of"
+_K8S_LABEL_COMPONENT = "app.kubernetes.io/component"
+_SHIFTER_PART_OF_VALUE = "shifter"
+_SHIFTER_LABEL_TASK_RUNNER = "shifter.dev/task-runner"
+_SHIFTER_TASK_RUNNER_GCP = "gcp"
+
+
+def _shifter_resource_labels(container_name: str, *, include_task_runner: bool) -> dict[str, str]:
+    """Build the standard Shifter label set for K8s resources.
+
+    The label set varies between Pod-template labels (no task-runner
+    tag) and Job/Secret metadata (with task-runner tag). Container
+    names are truncated to 63 characters to stay within the
+    Kubernetes label-value length limit.
+    """
+    labels = {
+        _K8S_LABEL_PART_OF: _SHIFTER_PART_OF_VALUE,
+        _K8S_LABEL_COMPONENT: container_name[:63],
+    }
+    if include_task_runner:
+        labels[_SHIFTER_LABEL_TASK_RUNNER] = _SHIFTER_TASK_RUNNER_GCP
+    return labels
+
+
 # Memory-backed workspace volume size cap. Terraform staging trees are tiny
 # (a few MB), but a runaway plan log or provider download could otherwise
 # consume node memory unbounded. 256Mi is generous for the staged terraform/
@@ -146,19 +172,13 @@ class GCPTaskRunner:
         Job in kubectl. ``string_data`` carries plaintext values which
         the apiserver base64-encodes into ``data`` on write.
         """
+        labels = _shifter_resource_labels(container_name, include_task_runner=True)
+        labels["shifter.dev/secret-purpose"] = "provisioner-sensitive-env"
         return client.V1Secret(
             api_version="v1",
             kind="Secret",
             type="Opaque",
-            metadata=client.V1ObjectMeta(
-                name=secret_name,
-                labels={
-                    "app.kubernetes.io/part-of": "shifter",
-                    "app.kubernetes.io/component": container_name[:63],
-                    "shifter.dev/task-runner": "gcp",
-                    "shifter.dev/secret-purpose": "provisioner-sensitive-env",
-                },
-            ),
+            metadata=client.V1ObjectMeta(name=secret_name, labels=labels),
             string_data=dict(sensitive_env),
         )
 
@@ -265,11 +285,7 @@ class GCPTaskRunner:
 
         metadata = client.V1ObjectMeta(
             generate_name=build_job_generate_name(container_name, command),
-            labels={
-                "app.kubernetes.io/part-of": "shifter",
-                "app.kubernetes.io/component": container_name[:63],
-                "shifter.dev/task-runner": "gcp",
-            },
+            labels=_shifter_resource_labels(container_name, include_task_runner=True),
             annotations={
                 "shifter.dev/task-image": image,
             },
@@ -277,10 +293,7 @@ class GCPTaskRunner:
 
         template = client.V1PodTemplateSpec(
             metadata=client.V1ObjectMeta(
-                labels={
-                    "app.kubernetes.io/part-of": "shifter",
-                    "app.kubernetes.io/component": container_name[:63],
-                }
+                labels=_shifter_resource_labels(container_name, include_task_runner=False),
             ),
             spec=pod_spec,
         )

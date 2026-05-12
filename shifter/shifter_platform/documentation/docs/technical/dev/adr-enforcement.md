@@ -273,18 +273,22 @@ The first slice intentionally stays small:
   sensitive artifacts are tracked in source under narrow roots. Two
   artifact families are blocked, each scoped to its own root:
   Terraform plan outputs (`tfplan`, `tfplan.binary`, `plan.out`,
-  `*.tfplan`) under `platform/terraform/environments/` and
+  `*.tfplan`, `*.tfplan.binary`) under
+  `platform/terraform/environments/` and
   `platform/terraform/gcp/environments/`; and license / authcode
   bootstrap material (`authcodes`, `*.authcodes`) under
-  `temp/bootstrap/`. The blocked path/name set is centralized in
-  `scripts/adr_guard/adr_guard.py` so adding another generated
-  filename or environment root is one edit. The guardrail fails
-  closed: violations name only the repo-relative path and a
-  remediation hint, never echoing plan content, license material, or
-  binary payloads. Backstops `.gitignore`, which does not retroactively
-  un-track files that were already added (e.g. through `git add -f`),
-  and complements `no-plaintext-secrets-in-tfvars`. Enforces
-  ADR-004-R8.
+  `temp/bootstrap/`. Enumeration uses `git ls-files` (tracked +
+  staged + untracked-but-not-ignored) so ignored ephemeral
+  workspace artifacts are intentionally allowed; a synthetic-tree
+  test-mode fallback walks the filesystem. The blocked path/name
+  set is centralized in `scripts/adr_guard/adr_guard.py` so adding
+  another generated filename or environment root is one edit. The
+  guardrail fails closed: violations name only the repo-relative
+  path and a remediation hint, never echoing plan content, license
+  material, or binary payloads. Backstops `.gitignore`, which does
+  not retroactively un-track files that were already added (e.g.
+  through `git add -f`), and complements
+  `no-plaintext-secrets-in-tfvars`. Enforces ADR-004-R8.
 
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal

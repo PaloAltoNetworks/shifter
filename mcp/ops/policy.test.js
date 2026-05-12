@@ -645,6 +645,73 @@ async function callRegisteredTool(server, toolName, args) {
   return found.handler(args);
 }
 
+/**
+ * Test helper that wires a tool through registerTool with the same
+ * shape the production code uses. Keeps the gate test bodies focused
+ * on the per-gate assertion rather than re-stating the descriptor
+ * boilerplate.
+ */
+function setupTool(server, policy, opts) {
+  const {
+    name,
+    klass,
+    description = "",
+    schema = {},
+    handler,
+  } = opts;
+  registerTool(
+    { server, policy },
+    { name, klass, description, schema, handler },
+  );
+}
+
+/**
+ * Single-text-content response — common shape returned by many tools
+ * in tests. Sharing the constructor avoids re-asserting the response
+ * shape in every test.
+ */
+function textResponse(text) {
+  return { content: [{ type: "text", text }] };
+}
+
+/**
+ * Register a counter-tracking tool. The handler increments a shared
+ * counter and returns `r-<n>:<args.title>` (title falls back to
+ * empty). Returns a function that reports the current run count so
+ * tests can assert on how many times the handler ran.
+ */
+function setupCounterTool(server, policy, { name, klass }) {
+  const state = { runs: 0 };
+  setupTool(server, policy, {
+    name,
+    klass,
+    handler: async (args) => {
+      state.runs += 1;
+      return textResponse(`r-${state.runs}:${args?.title ?? ""}`);
+    },
+  });
+  return () => state.runs;
+}
+
+/**
+ * Register a tool whose handler runs the supplied body and records
+ * whether it was called. Returns a getter for the called-state flag.
+ * Lets per-test bodies stay focused on the gate assertion rather
+ * than re-stating the tracking-counter setup.
+ */
+function setupTrackedTool(server, policy, name, klass, body) {
+  const state = { called: false };
+  setupTool(server, policy, {
+    name,
+    klass,
+    handler: async (args) => {
+      state.called = true;
+      return body(args);
+    },
+  });
+  return () => state.called;
+}
+
 describe("registerTool gates (Phase 2): env policy", () => {
   let server;
   beforeEach(() => {
@@ -652,41 +719,32 @@ describe("registerTool gates (Phase 2): env policy", () => {
     _resetGateCachesForTests();
   });
 
+  function setupOkTool(server, policy, name, klass, opts = {}) {
+    const state = { called: false };
+    setupTool(server, policy, {
+      name,
+      klass,
+      handler: async () => {
+        state.called = true;
+        return opts.empty ? { content: [] } : textResponse("ok");
+      },
+    });
+    return () => state.called;
+  }
+
   it("refuses prod calls without confirm_env=prod for prod-touching classes", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    let handlerCalled = false;
-    registerTool(
-      { server, policy },
-      {
-        name: "terminate_ec2",
-        klass: "infra_mutation",
-        description: "",
-        schema: {},
-        handler: async () => {
-          handlerCalled = true;
-          return { content: [] };
-        },
-      },
-    );
+    const called = setupOkTool(server, policy, "terminate_ec2", "infra_mutation", { empty: true });
     await assert.rejects(
       callRegisteredTool(server, "terminate_ec2", { env: "prod", execute: true }),
       (e) => e instanceof PolicyError && /confirm_env="prod"/.test(e.message),
     );
-    assert.equal(handlerCalled, false, "handler must not run when env gate fails");
+    assert.equal(called(), false, "handler must not run when env gate fails");
   });
 
   it("accepts prod calls when confirm_env=prod is supplied", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    registerTool(
-      { server, policy },
-      {
-        name: "terminate_ec2",
-        klass: "infra_mutation",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      },
-    );
+    setupOkTool(server, policy, "terminate_ec2", "infra_mutation");
     const res = await callRegisteredTool(server, "terminate_ec2", {
       env: "prod",
       confirm_env: "prod",
@@ -697,32 +755,14 @@ describe("registerTool gates (Phase 2): env policy", () => {
 
   it("non-prod calls are unaffected by the confirm gate", async () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "list_db",
-        klass: "named_db_read",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      },
-    );
+    setupOkTool(server, policy, "list_db", "named_db_read");
     const res = await callRegisteredTool(server, "list_db", { env: "dev" });
     assert.equal(res.content[0].text, "ok");
   });
 
   it("dev_bypass_tunnel refuses env outside its allowed_envs list", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    registerTool(
-      { server, policy },
-      {
-        name: "start_portal_test_tunnel",
-        klass: "dev_bypass_tunnel",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [] }),
-      },
-    );
+    setupOkTool(server, policy, "start_portal_test_tunnel", "dev_bypass_tunnel", { empty: true });
     await assert.rejects(
       callRegisteredTool(server, "start_portal_test_tunnel", {
         env: "prod",
@@ -742,22 +782,15 @@ describe("registerTool gates (Phase 2): dry-run defaults", () => {
 
   it("returns a preview without invoking the handler when execute is missing", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    let handlerCalled = false;
-    registerTool(
-      { server, policy },
-      {
-        name: "query",
-        klass: "db_arbitrary",
-        description: "",
-        schema: {},
-        handler: async () => {
-          handlerCalled = true;
-          return { content: [{ type: "text", text: "should not run" }] };
-        },
-      },
+    const called = setupTrackedTool(
+      server,
+      policy,
+      "query",
+      "db_arbitrary",
+      () => textResponse("should not run"),
     );
     const res = await callRegisteredTool(server, "query", { env: "dev", sql: "select 1" });
-    assert.equal(handlerCalled, false);
+    assert.equal(called(), false);
     const parsed = JSON.parse(res.content[0].text);
     assert.equal(parsed.dry_run, true);
     assert.equal(parsed.tool, "query");
@@ -766,37 +799,25 @@ describe("registerTool gates (Phase 2): dry-run defaults", () => {
 
   it("runs the handler when execute=true is supplied", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    let handlerCalled = false;
-    registerTool(
-      { server, policy },
-      {
-        name: "query",
-        klass: "db_arbitrary",
-        description: "",
-        schema: {},
-        handler: async () => {
-          handlerCalled = true;
-          return { content: [{ type: "text", text: "real result" }] };
-        },
-      },
+    const called = setupTrackedTool(
+      server,
+      policy,
+      "query",
+      "db_arbitrary",
+      () => textResponse("real result"),
     );
     const res = await callRegisteredTool(server, "query", { env: "dev", execute: true, sql: "select 1" });
-    assert.equal(handlerCalled, true);
+    assert.equal(called(), true);
     assert.equal(res.content[0].text, "real result");
   });
 
   it("classes without execute_default:false skip dry-run entirely", async () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "list_logs",
-        klass: "observability",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "logs" }] }),
-      },
-    );
+    setupTool(server, policy, {
+      name: "list_logs",
+      klass: "observability",
+      handler: async () => textResponse("logs"),
+    });
     const res = await callRegisteredTool(server, "list_logs", { env: "dev" });
     assert.equal(res.content[0].text, "logs");
   });
@@ -811,35 +832,27 @@ describe("registerTool gates (Phase 2): description redaction", () => {
 
   it("replaces dev_bypass_tunnel descriptions before reaching server.tool()", () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    registerTool(
-      { server, policy },
-      {
-        name: "start_portal_test_tunnel",
-        klass: "dev_bypass_tunnel",
-        description: "Use the SSM port-forward bypass to skip MFA and reach the dev portal directly.",
-        schema: {},
-        handler: async () => ({ content: [] }),
-      },
-    );
+    setupTool(server, policy, {
+      name: "start_portal_test_tunnel",
+      klass: "dev_bypass_tunnel",
+      description: "Use the SSM port-forward bypass to skip MFA and reach the dev portal directly.",
+      handler: async () => ({ content: [] }),
+    });
     const registered = server.registered.find((r) => r.name === "start_portal_test_tunnel");
     assert.equal(registered.description, "[description redacted per ADR-014-R6 — operator agent tool]");
-    assert.equal(registered.description.includes("SSM"), false);
-    assert.equal(registered.description.includes("bypass"), false);
-    assert.equal(registered.description.includes("MFA"), false);
+    for (const forbidden of ["SSM", "bypass", "MFA"]) {
+      assert.equal(registered.description.includes(forbidden), false);
+    }
   });
 
   it("does not redact descriptions for non-bypass classes", () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "list_things",
-        klass: "observability",
-        description: "List logs.",
-        schema: {},
-        handler: async () => ({ content: [] }),
-      },
-    );
+    setupTool(server, policy, {
+      name: "list_things",
+      klass: "observability",
+      description: "List logs.",
+      handler: async () => ({ content: [] }),
+    });
     assert.equal(server.registered[0].description, "List logs.");
   });
 });
@@ -851,18 +864,11 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     _resetGateCachesForTests();
   });
 
+  const CREATE_RISK = { name: "create_risk", klass: "named_db_write" };
+
   it("refuses named_db_write calls without an idempotency_key", async () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      },
-    );
+    setupCounterTool(server, policy, CREATE_RISK);
     await assert.rejects(
       callRegisteredTool(server, "create_risk", { title: "x" }),
       (e) => e instanceof PolicyError && /idempotency_key/.test(e.message),
@@ -871,20 +877,7 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
 
   it("returns the cached result on retry with the same key", async () => {
     const policy = buildPolicyAuditOff();
-    let runCount = 0;
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async () => {
-          runCount += 1;
-          return { content: [{ type: "text", text: `result-${runCount}` }] };
-        },
-      },
-    );
+    const runs = setupCounterTool(server, policy, CREATE_RISK);
     const first = await callRegisteredTool(server, "create_risk", {
       title: "x",
       idempotency_key: "abc",
@@ -893,151 +886,96 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
       title: "x",
       idempotency_key: "abc",
     });
-    assert.equal(first.content[0].text, "result-1");
-    assert.equal(second.content[0].text, "result-1", "cached result must be returned");
-    assert.equal(runCount, 1, "handler must run exactly once across the retries");
+    assert.equal(first.content[0].text, "r-1:x");
+    assert.equal(second.content[0].text, "r-1:x", "cached result must be returned");
+    assert.equal(runs(), 1, "handler must run exactly once across the retries");
   });
 
   it("different idempotency keys execute the handler independently", async () => {
     const policy = buildPolicyAuditOff();
-    let runCount = 0;
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async () => {
-          runCount += 1;
-          return { content: [{ type: "text", text: `result-${runCount}` }] };
-        },
-      },
-    );
+    const runs = setupCounterTool(server, policy, CREATE_RISK);
     const a = await callRegisteredTool(server, "create_risk", { idempotency_key: "k1" });
     const b = await callRegisteredTool(server, "create_risk", { idempotency_key: "k2" });
-    assert.equal(a.content[0].text, "result-1");
-    assert.equal(b.content[0].text, "result-2");
-    assert.equal(runCount, 2);
+    assert.equal(a.content[0].text, "r-1:");
+    assert.equal(b.content[0].text, "r-2:");
+    assert.equal(runs(), 2);
   });
 
   it("same key with different args is REFUSED as a programming error", async () => {
     // Codex review #1180 cycle 2 finding 1: reusing an
     // idempotency_key with different non-control args is a
-    // programming error; the wrapper must refuse the second call
-    // rather than executing it as a fresh write OR returning the
-    // stale cached result.
+    // programming error; the wrapper must refuse the second call.
     const policy = buildPolicyAuditOff();
-    let runCount = 0;
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async (args) => {
-          runCount += 1;
-          return { content: [{ type: "text", text: `${runCount}:${args.title}` }] };
-        },
-      },
-    );
+    const runs = setupCounterTool(server, policy, CREATE_RISK);
     const a = await callRegisteredTool(server, "create_risk", {
       idempotency_key: "k1",
       title: "alpha",
     });
     await assert.rejects(
-      callRegisteredTool(server, "create_risk", {
-        idempotency_key: "k1",
-        title: "beta",
-      }),
+      callRegisteredTool(server, "create_risk", { idempotency_key: "k1", title: "beta" }),
       (e) => e instanceof PolicyError && /different args/.test(e.message),
     );
-    assert.equal(a.content[0].text, "1:alpha");
-    assert.equal(runCount, 1, "handler must not run again for the mismatched retry");
+    assert.equal(a.content[0].text, "r-1:alpha");
+    assert.equal(runs(), 1, "handler must not run again for the mismatched retry");
   });
 
   it("expired idempotency entries are reaped (TTL eviction)", async () => {
     // Codex review #1180 cycle 2 finding 2: a long-lived server
     // must not accumulate one cached entry per unique key forever.
     const policy = buildPolicyAuditOff();
-    let runCount = 0;
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async () => {
-          runCount += 1;
-          return { content: [{ type: "text", text: `r-${runCount}` }] };
-        },
-      },
-    );
+    setupCounterTool(server, policy, CREATE_RISK);
     const a = await callRegisteredTool(server, "create_risk", { idempotency_key: "k-evict" });
-    assert.equal(a.content[0].text, "r-1");
+    assert.equal(a.content[0].text, "r-1:");
 
     const realNow = Date.now;
     try {
-      // Travel past the 15-minute TTL.
-      const future = realNow() + 16 * 60 * 1000;
-      Date.now = () => future;
-      // A fresh call with a DIFFERENT key triggers the reap; after
-      // it, the original key's entry is gone (TTL exceeded).
+      Date.now = () => realNow() + 16 * 60 * 1000;
+      // Fresh call with a different key triggers the reap, after
+      // which the original entry is gone (TTL exceeded).
       const b = await callRegisteredTool(server, "create_risk", { idempotency_key: "k-new" });
-      assert.equal(b.content[0].text, "r-2");
-
-      // Re-using "k-evict" with the SAME args after reap should run
-      // fresh (it was evicted), proving the cache was swept.
+      assert.equal(b.content[0].text, "r-2:");
       const c = await callRegisteredTool(server, "create_risk", { idempotency_key: "k-evict" });
-      assert.equal(c.content[0].text, "r-3");
+      assert.equal(c.content[0].text, "r-3:");
     } finally {
       Date.now = realNow;
     }
   });
 
+  function setupSlowCounterTool(server, policy) {
+    const state = { runs: 0, resolveStarted: null };
+    state.started = new Promise((r) => (state.resolveStarted = r));
+    setupTool(server, policy, {
+      ...CREATE_RISK,
+      handler: async (args) => {
+        state.runs += 1;
+        state.resolveStarted();
+        // Hold the handler open long enough for a concurrent retry
+        // to find the in-flight Promise.
+        await new Promise((r) => setTimeout(r, 30));
+        return textResponse(`r-${state.runs}:${args?.title ?? ""}`);
+      },
+    });
+    return state;
+  }
+
   it("concurrent retries with the same key but different args are REFUSED", async () => {
     // Codex review #1180 cycle 3 finding 1: the in-flight path must
-    // validate fingerprints, not just the cacheKey. A concurrent
-    // retry with mismatched payload is the same programming error
-    // as the serial mismatched-retry case (cycle 2 finding 1) and
-    // must be refused with the same error.
+    // validate fingerprints, not just the cacheKey.
     const policy = buildPolicyAuditOff();
-    let runCount = 0;
-    let resolveHandler;
-    const handlerStarted = new Promise((r) => (resolveHandler = r));
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async (args) => {
-          runCount += 1;
-          resolveHandler();
-          await new Promise((r) => setTimeout(r, 30));
-          return { content: [{ type: "text", text: `r-${runCount}:${args.title}` }] };
-        },
-      },
-    );
+    const tool = setupSlowCounterTool(server, policy);
 
     const first = callRegisteredTool(server, "create_risk", {
       idempotency_key: "k1",
       title: "alpha",
     });
-    await handlerStarted;
+    await tool.started;
     await assert.rejects(
-      callRegisteredTool(server, "create_risk", {
-        idempotency_key: "k1",
-        title: "beta", // different fingerprint
-      }),
+      callRegisteredTool(server, "create_risk", { idempotency_key: "k1", title: "beta" }),
       (e) => e instanceof PolicyError && /different args/.test(e.message),
     );
     const a = await first;
     assert.equal(a.content[0].text, "r-1:alpha");
-    assert.equal(runCount, 1);
+    assert.equal(tool.runs, 1);
   });
 
   it("concurrent retries with the same key share one execution", async () => {
@@ -1046,36 +984,16 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     // do not both execute. Both await the same Promise; the handler
     // runs exactly once.
     const policy = buildPolicyAuditOff();
-    let runCount = 0;
-    let resolveHandler;
-    const handlerStarted = new Promise((r) => (resolveHandler = r));
-    registerTool(
-      { server, policy },
-      {
-        name: "create_risk",
-        klass: "named_db_write",
-        description: "",
-        schema: {},
-        handler: async () => {
-          runCount += 1;
-          resolveHandler();
-          // Hold the handler open long enough for the second call
-          // to find the in-flight Promise.
-          await new Promise((r) => setTimeout(r, 30));
-          return { content: [{ type: "text", text: `result-${runCount}` }] };
-        },
-      },
-    );
+    const tool = setupSlowCounterTool(server, policy);
 
     const first = callRegisteredTool(server, "create_risk", { idempotency_key: "k1" });
-    // Wait until the handler is in flight before issuing the retry.
-    await handlerStarted;
+    await tool.started;
     const second = callRegisteredTool(server, "create_risk", { idempotency_key: "k1" });
 
     const [a, b] = await Promise.all([first, second]);
-    assert.equal(a.content[0].text, "result-1");
-    assert.equal(b.content[0].text, "result-1");
-    assert.equal(runCount, 1, "handler must execute exactly once across concurrent retries");
+    assert.equal(a.content[0].text, "r-1:");
+    assert.equal(b.content[0].text, "r-1:");
+    assert.equal(tool.runs, 1, "handler must execute exactly once across concurrent retries");
   });
 });
 
@@ -1086,66 +1004,41 @@ describe("registerTool gates (Phase 2): per-tool overrides", () => {
     _resetGateCachesForTests();
   });
 
+  function policyWithOverride(toolName, overrides, opts = {}) {
+    return parsePolicy(
+      {
+        ...BASE_POLICY,
+        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
+        tools: { [toolName]: { overrides } },
+      },
+      opts,
+    );
+  }
+
   it("per-tool overrides relax dry-run defaults when configured", async () => {
     // Codex review #1180 cycle 1 finding 3: gates must consume the
     // resolved tool policy. Build a policy where `query`
     // specifically opts out of dry-run via tools.<name>.overrides.
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        tools: {
-          query: {
-            overrides: { execute_default: true },
-          },
-        },
-      },
-      { profile: "destructive" },
+    const policy = policyWithOverride("query", { execute_default: true }, { profile: "destructive" });
+    const called = setupTrackedTool(
+      server,
+      policy,
+      "query",
+      "db_arbitrary",
+      () => textResponse("real"),
     );
-    let handlerCalled = false;
-    registerTool(
-      { server, policy },
-      {
-        name: "query",
-        klass: "db_arbitrary",
-        description: "",
-        schema: {},
-        handler: async () => {
-          handlerCalled = true;
-          return { content: [{ type: "text", text: "real" }] };
-        },
-      },
-    );
-    // Without execute=true, class default would dry-run. Tool
-    // override flips execute_default to true, so the handler runs.
     const res = await callRegisteredTool(server, "query", { env: "dev", sql: "select 1" });
-    assert.equal(handlerCalled, true);
+    assert.equal(called(), true);
     assert.equal(res.content[0].text, "real");
   });
 
   it("per-tool overrides can require idempotency on a class that does not by default", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        tools: {
-          touchy_read: {
-            overrides: { idempotency_key: "required" },
-          },
-        },
-      },
-      {},
-    );
-    registerTool(
-      { server, policy },
-      {
-        name: "touchy_read",
-        klass: "named_db_read",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      },
-    );
+    const policy = policyWithOverride("touchy_read", { idempotency_key: "required" });
+    setupTool(server, policy, {
+      name: "touchy_read",
+      klass: "named_db_read",
+      handler: async () => textResponse("ok"),
+    });
     await assert.rejects(
       callRegisteredTool(server, "touchy_read", {}),
       (e) => e instanceof PolicyError && /idempotency_key/.test(e.message),
@@ -1160,23 +1053,21 @@ describe("registerTool gates (Phase 2): secret handles", () => {
     _resetGateCachesForTests();
   });
 
+  function setupSecretTool(server, policy, name, value) {
+    setupTool(server, policy, {
+      name,
+      klass: "secret_handle",
+      handler: async () => textResponse(value),
+    });
+  }
+
   it("wraps secret_handle return values into shf-secret:<uuid> handles", async () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "get_secret",
-        klass: "secret_handle",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "raw-db-password" }] }),
-      },
-    );
+    setupSecretTool(server, policy, "get_secret", "raw-db-password");
     const res = await callRegisteredTool(server, "get_secret", { secret_id: "x" });
     const text = res.content[0].text;
     assert.ok(text.startsWith("shf-secret:"), `got: ${text}`);
     assert.notEqual(text, "raw-db-password", "raw value must not be returned");
-    // resolveSecretHandle gives the raw value back in-process.
     assert.equal(resolveSecretHandle(text), "raw-db-password");
   });
 
@@ -1189,29 +1080,14 @@ describe("registerTool gates (Phase 2): secret handles", () => {
 
   it("resolveSecretHandle drops expired handles and refuses to return their value", async () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "get_secret",
-        klass: "secret_handle",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "raw-value" }] }),
-      },
-    );
+    setupSecretTool(server, policy, "get_secret", "raw-value");
     const res = await callRegisteredTool(server, "get_secret", {});
     const handle = res.content[0].text;
-
-    // First resolve within TTL succeeds.
     assert.equal(resolveSecretHandle(handle), "raw-value");
 
-    // Travel past the 15-minute TTL by overwriting Date.now. The
-    // module reads Date.now() inside resolveSecretHandle; we patch
-    // and restore in a try/finally.
     const realNow = Date.now;
     try {
-      const future = realNow() + 16 * 60 * 1000;
-      Date.now = () => future;
+      Date.now = () => realNow() + 16 * 60 * 1000;
       assert.throws(
         () => resolveSecretHandle(handle),
         (e) => e instanceof PolicyError && /expired/.test(e.message),
@@ -1228,16 +1104,11 @@ describe("registerTool gates (Phase 2): secret handles", () => {
 
   it("non-secret-handle classes pass results through unchanged", async () => {
     const policy = buildPolicyAuditOff();
-    registerTool(
-      { server, policy },
-      {
-        name: "list_things",
-        klass: "observability",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "raw-info" }] }),
-      },
-    );
+    setupTool(server, policy, {
+      name: "list_things",
+      klass: "observability",
+      handler: async () => textResponse("raw-info"),
+    });
     const res = await callRegisteredTool(server, "list_things", {});
     assert.equal(res.content[0].text, "raw-info");
   });
@@ -1275,23 +1146,22 @@ describe("registerTool gates (Phase 2): audit append", () => {
     );
   }
 
+  function readAuditLines() {
+    return readFileSync(auditPath, "utf-8").trim().split("\n");
+  }
+
   it("appends one JSONL line per call with sanitized args", async () => {
     const policy = buildAuditPolicy();
-    registerTool(
-      { server, policy },
-      {
-        name: "list_things",
-        klass: "observability",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      },
-    );
+    setupTool(server, policy, {
+      name: "list_things",
+      klass: "observability",
+      handler: async () => textResponse("ok"),
+    });
     await callRegisteredTool(server, "list_things", { env: "dev", password: "leaked" });
     await callRegisteredTool(server, "list_things", { env: "dev" });
 
     assert.ok(existsSync(auditPath));
-    const lines = readFileSync(auditPath, "utf-8").trim().split("\n");
+    const lines = readAuditLines();
     assert.equal(lines.length, 2);
     const r1 = JSON.parse(lines[0]);
     assert.equal(r1.tool, "list_things");
@@ -1305,25 +1175,17 @@ describe("registerTool gates (Phase 2): audit append", () => {
 
   it("records dry_run results, then success on a real execute", async () => {
     const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-      },
+      { ...BASE_POLICY, audit: { enabled: true, path: auditPath, redact: [] } },
       { profile: "destructive" },
     );
-    registerTool(
-      { server, policy },
-      {
-        name: "query",
-        klass: "db_arbitrary",
-        description: "",
-        schema: {},
-        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      },
-    );
+    setupTool(server, policy, {
+      name: "query",
+      klass: "db_arbitrary",
+      handler: async () => textResponse("ok"),
+    });
     await callRegisteredTool(server, "query", { env: "dev", sql: "select 1" });
     await callRegisteredTool(server, "query", { env: "dev", execute: true, sql: "select 1" });
-    const lines = readFileSync(auditPath, "utf-8").trim().split("\n");
+    const lines = readAuditLines();
     assert.equal(lines.length, 2);
     assert.equal(JSON.parse(lines[0]).result_class, "dry_run");
     assert.equal(JSON.parse(lines[1]).result_class, "success");
@@ -1331,18 +1193,13 @@ describe("registerTool gates (Phase 2): audit append", () => {
 
   it("records error result_class when the handler throws", async () => {
     const policy = buildAuditPolicy();
-    registerTool(
-      { server, policy },
-      {
-        name: "list_things",
-        klass: "observability",
-        description: "",
-        schema: {},
-        handler: async () => {
-          throw new Error("boom");
-        },
+    setupTool(server, policy, {
+      name: "list_things",
+      klass: "observability",
+      handler: async () => {
+        throw new Error("boom");
       },
-    );
+    });
     await assert.rejects(callRegisteredTool(server, "list_things", { env: "dev" }));
     const line = JSON.parse(readFileSync(auditPath, "utf-8").trim());
     assert.equal(line.result_class, "error");

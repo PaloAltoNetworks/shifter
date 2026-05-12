@@ -442,7 +442,7 @@ function _canonicalJson(value) {
   if (Array.isArray(value)) {
     return "[" + value.map((v) => _canonicalJson(v)).join(",") + "]";
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
   return (
     "{" +
     keys.map((k) => JSON.stringify(k) + ":" + _canonicalJson(value[k])).join(",") +
@@ -535,7 +535,7 @@ function _dryRunPreview(args, descriptor) {
   // The preview is deliberately small: it tells the agent what would
   // happen without actually running. Sanitization of `args` happens
   // at audit time; here we just echo the agent's request back.
-  const previewArgs = { ...(args ?? {}) };
+  const previewArgs = args ? { ...args } : {};
   delete previewArgs.execute;
   return {
     content: [
@@ -616,7 +616,7 @@ function _extractRawSecretText(result) {
   // returns should be re-classed away from secret_handle.
   if (result && Array.isArray(result.content) && result.content.length > 0) {
     const first = result.content[0];
-    if (first && first.type === "text" && typeof first.text === "string") {
+    if (first?.type === "text" && typeof first?.text === "string") {
       return first.text;
     }
   }

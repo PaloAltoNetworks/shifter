@@ -563,6 +563,40 @@ def _consume_string(text: str, i: int, quote: str) -> tuple[int, str, str, str]:
     return i + 1, _blank_for(ch), "string", quote
 
 
+def _strip_line_comment(text: str, i: int, n: int) -> tuple[str, int]:
+    """Consume a `//` line comment starting at `i` and return
+    `(spaces, new_index)`. Newlines are preserved so line numbers
+    stay correct."""
+    end = text.find("\n", i + 2)
+    if end == -1:
+        return " " * (n - i), n
+    return " " * (end - i), end
+
+
+def _strip_block_comment(text: str, i: int, n: int) -> tuple[str, int]:
+    """Consume a `/* */` block comment starting at `i`. Replace its
+    body with whitespace; preserve newlines."""
+    end = text.find("*/", i + 2)
+    if end == -1:
+        return " " * (n - i), n
+    segment = text[i : end + 2]
+    return "".join(c if c == "\n" else " " for c in segment), end + 2
+
+
+def _scan_to_closing_quote(text: str, start: int, n: int, quote: str) -> int:
+    """Return the index just past the matching closing quote starting
+    at `start`. Handles backslash escapes."""
+    j = start
+    while j < n:
+        if text[j] == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if text[j] == quote:
+            return j + 1
+        j += 1
+    return j
+
+
 def _strip_js_comments_only(text: str) -> str:
     """Replace JS `//` and `/* */` comment contents with whitespace,
     preserve string-literal contents verbatim.
@@ -580,53 +614,22 @@ def _strip_js_comments_only(text: str) -> str:
     while i < n:
         ch = text[i]
         if ch == "/" and i + 1 < n and text[i + 1] == "/":
-            # Line comment runs to end of line; emit spaces.
-            end = text.find("\n", i + 2)
-            if end == -1:
-                out.append(" " * (n - i))
-                i = n
-            else:
-                out.append(" " * (end - i))
-                i = end
+            emit, i = _strip_line_comment(text, i, n)
+            out.append(emit)
             continue
         if ch == "/" and i + 1 < n and text[i + 1] == "*":
-            end = text.find("*/", i + 2)
-            if end == -1:
-                out.append(" " * (n - i))
-                i = n
-            else:
-                # Preserve newlines so line numbers stay correct.
-                segment = text[i : end + 2]
-                out.append("".join(c if c == "\n" else " " for c in segment))
-                i = end + 2
+            emit, i = _strip_block_comment(text, i, n)
+            out.append(emit)
             continue
-        if ch == '"' or ch == "'":
-            # String literal: preserve verbatim, including quotes.
-            quote = ch
-            j = i + 1
-            while j < n:
-                if text[j] == "\\" and j + 1 < n:
-                    j += 2
-                    continue
-                if text[j] == quote:
-                    j += 1
-                    break
-                j += 1
-            out.append(text[i:j])
-            i = j
+        if ch in ('"', "'"):
+            end = _scan_to_closing_quote(text, i + 1, n, ch)
+            out.append(text[i:end])
+            i = end
             continue
         if ch == "`":
-            # Template literal: preserve verbatim (substitutions are
-            # rare in TLS-config call sites; if one ever appears, the
-            # reviewer can rewrite the line).
-            j = i + 1
-            while j < n and text[j] != "`":
-                if text[j] == "\\" and j + 1 < n:
-                    j += 2
-                    continue
-                j += 1
-            out.append(text[i : j + 1])
-            i = j + 1
+            end = _scan_to_closing_quote(text, i + 1, n, "`")
+            out.append(text[i:end])
+            i = end
             continue
         out.append(ch)
         i += 1
@@ -1885,7 +1888,7 @@ def _is_terraform_plan_artifact(basename: str) -> bool:
     """
     if basename in ("tfplan", "tfplan.binary", "plan.out"):
         return True
-    return basename.endswith(".tfplan") or basename.endswith(".tfplan.binary")
+    return basename.endswith((".tfplan", ".tfplan.binary"))
 
 
 def _is_bootstrap_authcode_artifact(basename: str) -> bool:
@@ -1930,19 +1933,28 @@ def _iter_artifact_candidates(repo_root: Path) -> list[str]:
     tracked = _git_tracked_under_roots(repo_root)
     if tracked is None:
         # No git index — synthetic test mode. Walk the filesystem.
-        candidates: list[str] = []
-        for root in _GENERATED_ARTIFACT_ROOTS:
-            base = repo_root / root
-            if not base.exists():
-                continue
-            for path in base.rglob("*"):
-                if not path.is_file():
-                    continue
-                rel = _repo_relative(path, repo_root)
-                if _generated_artifact_match(rel):
-                    candidates.append(rel)
-        return candidates
+        return _walk_filesystem_artifacts(repo_root)
     return [p for p in tracked if _generated_artifact_match(p)]
+
+
+def _walk_filesystem_artifacts(repo_root: Path) -> list[str]:
+    """Test-mode fallback: walk `_GENERATED_ARTIFACT_ROOTS` on disk
+    and return matching repo-relative paths. Production code always
+    reaches `_git_tracked_under_roots`; this branch is only exercised
+    by unit tests building a synthetic tmpdir tree without a `.git`
+    directory."""
+    candidates: list[str] = []
+    for root in _GENERATED_ARTIFACT_ROOTS:
+        base = repo_root / root
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = _repo_relative(path, repo_root)
+            if _generated_artifact_match(rel):
+                candidates.append(rel)
+    return candidates
 
 
 def _git_tracked_under_roots(repo_root: Path) -> list[str] | None:

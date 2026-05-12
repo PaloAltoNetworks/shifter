@@ -103,6 +103,40 @@ class AWSObjectStorage:
             logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, key, e)
             raise CloudStorageError(f"Failed to head S3 object: {e}") from e
 
+    def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes:
+        """Read up to `max_bytes` from the start of the object using a Range GET.
+
+        Used by server-side upload inspection to validate magic bytes without
+        downloading the whole object. The HTTP Range header is end-inclusive,
+        so `max_bytes=512` requests `bytes=0-511`. The S3 ``StreamingBody``
+        is closed in a ``finally`` block so concurrent finalization requests
+        cannot leak botocore connections under load.
+        """
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, key, max_bytes)
+        try:
+            client = self._get_client()
+            response = client.get_object(
+                Bucket=bucket,
+                Key=key,
+                Range=f"bytes=0-{max_bytes - 1}",
+            )
+            stream = response["Body"]
+            try:
+                body = stream.read(max_bytes)
+            finally:
+                stream.close()
+        except (ClientError, BotoCoreError) as e:
+            logger.error(
+                "read_object_header: failed bucket=%s key=%s error=%s",
+                bucket,
+                key,
+                e,
+            )
+            raise CloudStorageError(f"Failed to read S3 object header: {e}") from e
+        return body[:max_bytes]
+
     def object_exists(self, bucket: str, key: str) -> bool:
         """Return True iff the object exists.
 

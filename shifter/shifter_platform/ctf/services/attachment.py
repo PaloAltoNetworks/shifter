@@ -10,9 +10,16 @@ import os
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from django.conf import settings
 from django.db.models import QuerySet
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+from ctf.inspection import (
+    CTFInspectionError,
+    inspect_attachment_header,
+    is_text_extension,
+    new_text_stream_validator,
+)
 from ctf.models import CTFChallenge, CTFChallengeFile
 from ctf.s3 import (
     ALLOWED_EXTENSIONS,
@@ -98,6 +105,64 @@ def add_challenge_file(
             "File is empty",
             details={"filename": filename},
         )
+
+    # Server-side header inspection (issue #696). Run before S3 PutObject so a
+    # mismatch never leaves a rejected object behind in the bucket. For TEXT-
+    # category extensions we additionally stream-validate the entire body
+    # below (during the SHA256 loop) so a `valid text prefix + binary tail`
+    # upload cannot bypass the bounded-header check.
+    file_obj.seek(0)
+    header = file_obj.read(settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES)
+    file_obj.seek(0)
+    try:
+        inspect_attachment_header(header, ext)
+    except CTFInspectionError as exc:
+        logger.warning(
+            "add_challenge_file: header inspection failed challenge=%s ext=%s actor=%s reason=%s",
+            challenge_id,
+            ext,
+            actor_id,
+            exc,
+        )
+        raise CTFValidationError(
+            f"File content inspection failed: {exc}",
+            details={"filename": filename, "extension": ext},
+        ) from exc
+
+    # Full-body text validation for TEXT-category extensions. We feed the
+    # whole file through a UTF-8 incremental decoder so any binary bytes in
+    # the tail of an otherwise-text-looking upload are rejected before S3.
+    if is_text_extension(ext):
+        stream_validator = new_text_stream_validator()
+        try:
+            file_obj.seek(0)
+            while True:
+                chunk = file_obj.read(8192)
+                if not chunk:
+                    break
+                stream_validator.feed(chunk)
+            stream_validator.finalize()
+        except Exception as exc:
+            # `feed`/`finalize` raise InspectionError on bad bytes; surface
+            # as CTFValidationError so the API contract matches the bounded
+            # rejection path above.
+            from shared.uploads.inspection import InspectionError as _Inspect
+
+            if not isinstance(exc, _Inspect):
+                raise
+            logger.warning(
+                "add_challenge_file: streaming text inspection rejected challenge=%s ext=%s actor=%s reason=%s",
+                challenge_id,
+                ext,
+                actor_id,
+                exc,
+            )
+            raise CTFValidationError(
+                f"File content inspection failed: {exc}",
+                details={"filename": filename, "extension": ext},
+            ) from exc
+        finally:
+            file_obj.seek(0)
 
     # Check file count limit
     current_count = CTFChallengeFile.objects.filter(challenge=challenge).count()

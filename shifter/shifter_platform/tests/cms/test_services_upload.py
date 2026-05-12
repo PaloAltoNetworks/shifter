@@ -16,6 +16,10 @@ from cms import services
 from cms.models import AgentConfig
 from shared.constants import USER_CANNOT_BE_NONE
 
+# MSI magic prefix used to make every happy-path complete_upload test pass the
+# server-side header inspection added in issue #696.
+_MSI_HEADER = bytes([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) + b"\x00" * 16
+
 
 @pytest.fixture
 def mock_user():
@@ -373,6 +377,7 @@ class TestCompleteUpload:
         with (
             patch(verify_token_path, return_value=token_payload) as mock_verify,
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent") as mock_create,
         ):
@@ -395,6 +400,7 @@ class TestCompleteUpload:
                 return_value=token_payload,
             ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")) as mock_verify_s3,
+            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent") as mock_create,
         ):
@@ -417,6 +423,7 @@ class TestCompleteUpload:
                 return_value=token_payload,
             ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
             patch("cms.assets.s3.tag_s3_object") as mock_tag,
             patch("cms.assets.services.create_agent") as mock_create,
         ):
@@ -440,6 +447,7 @@ class TestCompleteUpload:
                 return_value=token_payload,
             ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(5000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent") as mock_create,
         ):
@@ -474,6 +482,7 @@ class TestCompleteUpload:
                 return_value=token_payload,
             ),
             patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=_MSI_HEADER),
             patch("cms.assets.s3.tag_s3_object"),
             patch("cms.assets.services.create_agent", return_value=mock_agent),
         ):
@@ -608,6 +617,111 @@ class TestCompleteUpload:
             pytest.raises(RuntimeError, match="Unexpected"),
         ):
             services.complete_upload(mock_user, "token123")
+
+    # --- Server-side header inspection (issue #696) ---
+
+    def test_reads_object_header_after_size_verify(self, mock_user):
+        """Service reads the object header via the cloud seam before tagging."""
+        token_payload = {
+            "s3_key": "agents/1/abc_agent.msi",
+            "name": "Agent",
+            "filename": "agent.msi",
+            "os_slug": "windows",
+            "file_size": 1000,
+        }
+        msi_magic = bytes([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
+        with (
+            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=msi_magic + b"\x00" * 16) as mock_read,
+            patch("cms.assets.s3.tag_s3_object"),
+            patch("cms.assets.services.create_agent") as mock_create,
+        ):
+            mock_create.return_value = Mock(spec=AgentConfig, id=42)
+            services.complete_upload(mock_user, "token123")
+            mock_read.assert_called_once()
+            args, _ = mock_read.call_args
+            assert args[0] == "agents/1/abc_agent.msi"
+
+    def test_magic_byte_mismatch_raises_and_deletes_object(self, mock_user):
+        """Magic-byte mismatch must delete the object and skip tag + create_agent + audit."""
+        from cms.exceptions import CMSError
+
+        token_payload = {
+            "s3_key": "agents/1/abc_agent.msi",
+            "name": "Agent",
+            "filename": "agent.msi",  # .msi expects D0 CF 11 E0 ...
+            "os_slug": "windows",
+            "file_size": 1000,
+        }
+        # Header is ZIP magic, not MSI — mismatch.
+        bogus_header = b"\x50\x4b\x03\x04" + b"\x00" * 16
+        with (
+            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=bogus_header),
+            patch("cms.assets.s3.tag_s3_object") as mock_tag,
+            patch("cms.assets.s3.delete_agent") as mock_delete,
+            patch("cms.assets.services.create_agent") as mock_create,
+            pytest.raises(CMSError, match="content"),
+        ):
+            services.complete_upload(mock_user, "token123")
+        mock_delete.assert_called_once_with("agents/1/abc_agent.msi")
+        mock_tag.assert_not_called()
+        mock_create.assert_not_called()
+
+    def test_rejection_log_does_not_leak_header_bytes_or_token(self, mock_user, caplog):
+        from cms.exceptions import CMSError
+
+        token_payload = {
+            "s3_key": "agents/1/abc_agent.msi",
+            "name": "Agent",
+            "filename": "agent.msi",
+            "os_slug": "windows",
+            "file_size": 1000,
+        }
+        leak = b"\x50\x4b\x03\x04S3CR3T-DO-NOT-LEAK"
+        with (
+            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch("cms.assets.s3.read_agent_header", return_value=leak),
+            patch("cms.assets.s3.delete_agent"),
+            patch("cms.assets.s3.tag_s3_object"),
+            patch("cms.assets.services.create_agent"),
+            caplog.at_level("WARNING", logger="cms.services"),
+            pytest.raises(CMSError),
+        ):
+            services.complete_upload(mock_user, "token-S3CR3T-DO-NOT-LEAK")
+
+        combined = " ".join(record.getMessage() for record in caplog.records)
+        assert "S3CR3T-DO-NOT-LEAK" not in combined
+
+    def test_header_read_failure_raises_cmserror(self, mock_user):
+        """If reading the header fails, the service raises CMSError and does not finalize."""
+        from cms.assets.s3 import S3Error
+        from cms.exceptions import CMSError
+
+        token_payload = {
+            "s3_key": "agents/1/abc_agent.msi",
+            "name": "Agent",
+            "filename": "agent.msi",
+            "os_slug": "windows",
+            "file_size": 1000,
+        }
+        with (
+            patch("cms.assets.upload_token.verify_upload_token", return_value=token_payload),
+            patch("cms.assets.s3.verify_s3_object_exists", return_value=(1000, "etag")),
+            patch(
+                "cms.assets.s3.read_agent_header",
+                side_effect=S3Error("range read failed"),
+            ),
+            patch("cms.assets.s3.tag_s3_object") as mock_tag,
+            patch("cms.assets.services.create_agent") as mock_create,
+            pytest.raises(CMSError),
+        ):
+            services.complete_upload(mock_user, "token123")
+        mock_tag.assert_not_called()
+        mock_create.assert_not_called()
 
 
 class TestCancelUpload:

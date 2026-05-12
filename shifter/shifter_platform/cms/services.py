@@ -2801,13 +2801,22 @@ def initiate_upload(  # noqa: C901
             )
             raise CMSError("Failed to initiate upload") from e
 
-        # Generate upload token
+        # Generate upload token. Agent installer formats always carry an
+        # os_slug — the shared FileFormat dataclass makes the field Optional
+        # for non-installer consumers (CTF), so narrow here.
+        os_slug = file_format.os_slug
+        if os_slug is None:
+            logger.error(
+                "initiate_upload: installer format missing os_slug for filename=%s",
+                filename,
+            )
+            raise CMSError("Internal error: installer format misconfigured")
         upload_token = generate_upload_token(
             user_id=user.id,
             s3_key=s3_key,
             name=name,
             filename=filename,
-            os_slug=file_format.os_slug,
+            os_slug=os_slug,
             file_size=file_size,
             agent_type=agent_type,
         )
@@ -2853,10 +2862,27 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
         CMSError: If token is invalid/expired, S3 verification fails,
             or size mismatch
     """
-    from cms.assets.s3 import S3Error, tag_s3_object, verify_s3_object_exists
+    from django.conf import settings as _settings
+
+    from cms.assets import s3 as _s3
+    from cms.assets.s3 import (
+        S3Error,
+        tag_s3_object,
+        verify_s3_object_exists,
+    )
     from cms.assets.services import create_agent
     from cms.assets.upload_token import verify_upload_token
+    from cms.assets.validation import (
+        ValidationError as _AssetValidationError,
+    )
+    from cms.assets.validation import (
+        validate_file_extension,
+    )
     from cms.exceptions import CMSError
+    from shared.uploads.inspection import InspectionError as _InspectionError
+    from shared.uploads.inspection import (
+        validate_magic_bytes as _validate_magic_bytes,
+    )
 
     # Input validation - user
     if user is None:
@@ -2929,6 +2955,55 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
             )
             msg = f"File size mismatch: expected {expected_size}, got {actual_size}"
             raise CMSError(msg)
+
+        # Server-side header inspection (issue #696). Resolve the expected
+        # installer format from the signed filename, read a bounded byte range,
+        # and reject the upload if the magic bytes don't match. Token shape
+        # already guarantees `filename` came from initiate_upload, so the
+        # extension lookup cannot be steered by request input.
+        try:
+            expected_format = validate_file_extension(payload["filename"])
+        except _AssetValidationError as exc:
+            logger.error(
+                "complete_upload: filename failed extension check user_id=%s",
+                user.id,
+            )
+            _s3.delete_agent(s3_key)
+            raise CMSError(f"Invalid upload filename: {exc}") from exc
+
+        max_header = _settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES
+        try:
+            header = _s3.read_agent_header(s3_key, max_header)
+        except S3Error as exc:
+            logger.error(
+                "complete_upload: header read failed user_id=%s s3_key=%s",
+                user.id,
+                s3_key,
+            )
+            raise CMSError("Upload content inspection failed") from exc
+
+        try:
+            _validate_magic_bytes(header, expected_format)
+        except _InspectionError as exc:
+            logger.warning(
+                "complete_upload: header inspection rejected upload user_id=%s s3_key=%s expected=%s reason=%s",
+                user.id,
+                s3_key,
+                expected_format.description,
+                exc,
+            )
+            # Remove the rejected object so the bucket does not accumulate
+            # mismatched uploads. delete_agent failures are best-effort logged.
+            try:
+                _s3.delete_agent(s3_key)
+            except S3Error as delete_exc:
+                logger.error(
+                    "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s error=%s",
+                    user.id,
+                    s3_key,
+                    delete_exc,
+                )
+            raise CMSError("Uploaded content does not match the declared installer format") from exc
 
         # Tag S3 object as completed
         tag_s3_object(s3_key, {"status": "completed"})

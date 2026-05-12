@@ -1,6 +1,6 @@
-# Terraform Patterns
+# Terraform
 
-How we manage infrastructure.
+Infrastructure layout and local Terraform commands.
 
 ## Directory Structure
 
@@ -34,8 +34,8 @@ platform/terraform/
 │   │   └── vpc/              # Portal VPC, subnets
 │   ├── range/
 │   │   └── vpc/              # Range VPC, Network Firewall
-│   ├── pulumi-provisioner/   # ECS task for Shifter Engine
-│   ├── pulumi-state/         # S3 + DynamoDB for Pulumi
+│   ├── engine-provisioner/   # ECS task for Shifter Engine
+│   ├── engine-state/         # Engine state bucket and DynamoDB runtime locks
 │   ├── guacamole/            # Browser-based RDP
 │   ├── log-aggregation/      # Centralized logging
 │   └── ecr/                  # Container registries
@@ -76,9 +76,13 @@ Each component has its own state file:
 | Range | `shifter/{env}/range/terraform.tfstate` |
 | Global | `global/{component}/terraform.tfstate` |
 
-State is stored in S3 with DynamoDB locking:
+AWS Terraform state is stored in S3 with S3 native locking
+(`use_lockfile = true`):
 - **Dev**: `shifter-dev-infra-*` bucket
 - **Prod**: `shifter-infra-*` bucket
+
+The `engine-state` module creates a DynamoDB table for provisioner runtime
+locks. It is not the Terraform backend lock.
 
 ## Working Locally
 
@@ -100,7 +104,7 @@ terraform validate
 CI bootstraps a GCS backend bucket named `${project_id}-terraform-state` for
 `gcp-dev` pushes before running `terraform init`.
 
-The `gcp-dev` tfvars file now carries the security-critical public edge and operator-access settings:
+The `gcp-dev` tfvars file carries the public edge and operator-access settings:
 
 ```hcl
 public_hostname             = "shifter.example.com"
@@ -112,7 +116,8 @@ dns_zone_dns_name       = ""
 dns_record_ttl          = 300
 ```
 
-`gdc-bootstrap` now fails before Terraform apply if those secure inputs are missing. The GCP path no longer treats a public IP/debug runtime as an acceptable bootstrap fallback, and normal applies happen through CI/CD on `gcp-dev` rather than ad hoc local deploys.
+`gdc-bootstrap` fails before Terraform apply if these inputs are missing.
+Routine GCP applies happen through CI/CD on `gcp-dev`.
 
 ### Plan
 

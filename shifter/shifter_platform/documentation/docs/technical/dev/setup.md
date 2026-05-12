@@ -1,17 +1,30 @@
 # Setup
 
-Deploying Shifter from a bare cloud account to a running environment.
+Deploy Shifter from a cloud account to a running environment.
 
 ## Prerequisites
 
 - Python 3.12+
+- `uv`
 - Terraform 1.7+
 - GitHub CLI (`gh`) authenticated
 - Docker
 - **AWS**: AWS CLI v2 configured with SSO or IAM credentials
 - **GCP**: `gcloud` CLI authenticated with appropriate project
 
-## Cold-Start Deployment (New AWS Account)
+## Root Installation Config
+
+Create and validate `shifter.yaml` before deployment:
+
+```bash
+cp shifter/installation/examples/aws.yaml shifter.yaml
+uv run --project shifter/installation shifter-config validate shifter.yaml
+```
+
+Use `shifter/installation/examples/gcp.yaml` for GCP. See
+[Installation Config](installation-config) for the field reference.
+
+## AWS Deployment
 
 Use the deployment CLI which walks you through each step with confirmations:
 
@@ -26,7 +39,7 @@ Use the deployment CLI which walks you through each step with confirmations:
 Or run phases separately:
 
 ```bash
-# Phase 1: Bootstrap AWS account (S3, DynamoDB, IAM)
+# Phase 1: Bootstrap AWS account (S3 state backend, GitHub OIDC, IAM)
 ./scripts/bootstrap/deploy.py bootstrap --env prod --profile <your-prod-profile>
 
 # Or use standalone bash scripts:
@@ -39,8 +52,7 @@ Or run phases separately:
 ### 1. Bootstrap AWS Account
 
 The `bootstrap` command creates:
-- S3 bucket for Terraform state
-- DynamoDB table for state locking
+- S3 bucket for Terraform state with S3 native locking (`use_lockfile = true`)
 - GitHub OIDC provider (keyless CI/CD auth)
 - IAM role with all required permissions
 
@@ -125,7 +137,8 @@ The CLI walks through each component, shows the plan, and asks for confirmation 
 
 **Via CI/CD:**
 
-Push to `main` branch to trigger deployment (after bootstrap and backend.tf are configured).
+Push to `main` to deploy the AWS production environment after bootstrap and
+backend configuration are complete.
 
 **Manual deployment:**
 
@@ -288,17 +301,13 @@ aws ecr describe-images --repository-name shifter-prod-portal
 
 If empty, push a container first.
 
-## GCP Cold-Start Deployment
+## GCP Deployment
 
 GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus a Helm-packaged control plane (`platform/charts/shifter/`).
 
 ### 1. GCP Project Setup
 
-Create a GCP project and enable required APIs. The bootstrap script handles this:
-
-```bash
-# See scripts/gcp/ for bootstrap tooling
-```
+Create a GCP project and enable the APIs required by the bootstrap path.
 
 ### 2. Configure Workload Identity Federation
 
@@ -333,7 +342,7 @@ For CI deploys the equivalent values come from GitHub secrets — see
 
 ### 4. Deploy
 
-Normal GCP deployments happen through CI/CD on `gcp-dev`. The bootstrap entrypoint remains available for first-time setup and controlled recovery:
+GCP deployments run through CI/CD on `gcp-dev`. The bootstrap entrypoint is:
 
 ```bash
 ./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <your-gcp-project-id> --cluster-id cluster1
@@ -349,4 +358,6 @@ That flow:
 
 ### 5. DNS and TLS
 
-The secure bootstrap path expects a real hostname and managed TLS from the start. Point `shifter.example.com` to the reserved global ingress IP so the Google-managed certificate can become active. The GCP path no longer uses the old debug-auth fallback as an acceptable first-boot mode.
+The GCP path requires a real hostname and managed TLS. Point the configured
+hostname to the reserved global ingress IP so the Google-managed certificate can
+become active.

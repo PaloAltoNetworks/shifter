@@ -25,8 +25,8 @@ deployment:
 secrets:
   django_secret_key: projects/your-gcp-project/secrets/shifter-django-secret-key/versions/latest
 
-# Backend-specific settings. Validated by the GCP backend bundle, not by the root
-# schema — see issue #1113 for the backend bundle contract.
+# Backend-specific settings. The root schema checks that this is a mapping.
+# Deployment tooling validates the values it consumes.
 settings:
   region: us-central1
   project_id: your-gcp-project

@@ -8,9 +8,8 @@ the deploy workflows write them into a gitignored `local.auto.tfvars`
 that Terraform auto-loads alongside the baseline (the `.local`/`.auto`
 overrides win).
 
-This file is the canonical inventory of what needs to be configured before
-a fresh deploy. Set values under **Settings → Secrets and variables →
-Actions**, separated by:
+This file lists values that must be configured before a fresh deploy. Set values
+under **Settings → Secrets and variables → Actions**, separated by:
 
 - **Secrets** — sensitive (project IDs, public keys with identifying
   comments, alarm email addresses, allow-list domains for self-signup,
@@ -18,9 +17,7 @@ Actions**, separated by:
 - **Variables** — non-sensitive deployment parameters (region selection,
   feature flags).
 
-Required values are flagged as required by the workflow's own preflight
-step; missing-secret runs fail loud with a pointer to this doc rather
-than silently deploying the placeholder baseline.
+Required values are enforced by the workflow preflight step.
 
 ## GCP (gcp-dev)
 
@@ -40,6 +37,11 @@ Consumed by `.github/workflows/_gcp-dev.yml`.
 | `PLATFORM_BOOTSTRAP_STAFF_EMAILS` | secret | no | Comma-separated list of emails elevated to Django `is_staff` on first sign-in. |
 | `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` | secret | no | Comma-separated list of emails elevated to `is_superuser`. |
 
+For local GCP bootstrap, `scripts/bootstrap/deploy.py` validates the bootstrap
+operator email against the Terraform output `identity_allowed_email_domain`.
+When Terraform outputs are not available yet, it uses
+`SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN` from the process environment.
+
 ## AWS portal (`dev` / `prod`)
 
 Consumed by `.github/workflows/_shifter-platform.yml`. The portal stack
@@ -53,11 +55,11 @@ thresholds, etc.).
 | `AWS_ROLE_ARN_DEV` / `AWS_ROLE_ARN` | secret | yes | OIDC role assumed by the deploy job. |
 | `AWS_PORTAL_ENABLE_AUTOSCALING` | variable | no | Default `false`. Enables ASG scaling steps in the deploy job. |
 
-Additional values currently live in the committed `terraform.tfvars`
-baseline. To override them per-deployment, drop a `local.auto.tfvars`
-next to the corresponding `terraform.tfvars` and Terraform will merge
-the two automatically (the `.local`/`.auto` file is in `.gitignore`).
-The minimum set to override before a real deploy:
+Additional values live in the committed `terraform.tfvars` baseline. To
+override them per deployment, add a `local.auto.tfvars` next to the
+corresponding `terraform.tfvars`; Terraform merges it automatically. The
+`.local`/`.auto` file is gitignored. The minimum set to override before a real
+deploy:
 
 - `domain_name`, `ses_domain`, `ctfd_domain`, `ctf_from_email`
 - `alarm_email`
@@ -68,10 +70,8 @@ The minimum set to override before a real deploy:
 - `user_storage_bucket`
 - AWS-account-suffixed bucket names that vary per environment
 
-Future iterations of this workflow will move these into GitHub secrets
-the same way the GCP path does; for now, contributors run a local
-`terraform apply` (with their own `local.auto.tfvars`) from a workstation
-that has the right role.
+For AWS local deploys, run `terraform apply` with a gitignored
+`local.auto.tfvars` from a workstation that has the target role.
 
 ## Local development
 

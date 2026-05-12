@@ -4,7 +4,7 @@ Run XDR/XSIAM demos without installing tools on your laptop.
 
 ## Get Started
 
-- [Quickstart](getting-started/quickstart) - Launch your first range in 5 minutes
+- [Quickstart](getting-started/quickstart) - Launch your first range
 - [Key Concepts](getting-started/concepts) - Agents, ranges, scenarios, terminals
 
 ## How-To Guides

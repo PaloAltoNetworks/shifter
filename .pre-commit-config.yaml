@@ -198,7 +198,10 @@ repos:
         # Kustomize patch files (patch-*.yaml) are partial strategic-merge
         # patches, not full manifests; strict schema validation is for
         # fully-rendered resources, not patches. The base manifests under
-        # platform/k8s/gcp/base/ are still validated.
+        # platform/k8s/gcp/base/ are still validated. The CI workflow
+        # (`.github/workflows/_quality.yml`) additionally renders every
+        # kustomize root via `kustomize build` and re-runs kubeconform on
+        # the rendered output. See ADR-004-R5.
         exclude: (kustomization\.yaml|patch-.*\.yaml)$
         types: [yaml]
 
@@ -269,7 +272,9 @@ repos:
         # Kustomize patch files (patch-*.yaml) are partial strategic-merge
         # patches and don't carry full Deployment fields; kube-linter's
         # security checks are for fully-rendered resources, not patches.
-        # Base manifests under platform/k8s/gcp/base/ remain checked.
+        # Base manifests and the rest of platform/k8s/ remain checked.
+        # CI (`.github/workflows/_quality.yml`) additionally renders every
+        # kustomize root and runs kube-linter on the result. See ADR-004-R5.
         entry: kube-linter lint --config .kube-linter.yaml --ignore-paths "**/patch-*.yaml" platform/k8s/
         language: system
         files: ^platform/k8s/
@@ -321,7 +326,7 @@ repos:
         name: architecture (adr guard fast)
         entry: python3 scripts/adr_guard/adr_guard.py --changed --level fast
         language: system
-        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|platform/terraform/environments/.*\.tfvars$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$|mcp/.*\.(js|mjs|cjs)$)
+        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|platform/terraform/environments/.*\.tfvars$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$|\.shifter\.yaml$|mcp/.*\.(js|mjs|cjs)$)
         pass_filenames: false
         verbose: true
 

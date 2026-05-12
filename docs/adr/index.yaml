@@ -93,7 +93,7 @@
       },
       {
         "id": "ADR-004-R5",
-        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter.",
+        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter on two tiers. Local pre-commit hooks scan platform/k8s/ but exclude Kustomize patch files (patch-*.yaml) from both validators because patches are partial strategic-merge documents and cannot satisfy standalone Deployment schema/lint checks (no selector, no image, no securityContext). CI (.github/workflows/_quality.yml) runs `kustomize build` on every kustomization.yaml root under platform/k8s/ and runs both validators against the rendered output, which catches overlay-introduced regressions on the manifests that actually deploy.",
         "checks": []
       },
       {
@@ -507,6 +507,65 @@
       "shifter/shifter_platform/shared/auth.py",
       "shifter/shifter_platform/templates/partials/icon_sidebar.html",
       "shifter/shifter_platform/templates/partials/ctf_participant_sidebar.html"
+    ]
+  },
+  {
+    "id": "ADR-014",
+    "title": "MCP servers expose either least-privilege general surfaces or policy-gated operator agent surfaces",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "MCP servers in this repo fall into two classes. General-purpose MCP servers (where the client is not a trusted operator agent loop) must default to non-secret, non-mutating observability; privileged operations on those surfaces require a separate approved operator workflow with authenticated actor context, per-tool RBAC, environment allowlisting, and auditability, and otherwise must not be registered as tools. Operator agent surfaces (e.g. `mcp/ops`, where the intended client IS the operator's own agent loop and agents are meant to perform writes, mutations, secret retrieval, and remote execution as routine work) MAY expose privileged capability, but MUST gate it through a structured per-tool policy layer with capability classes, environment policy with explicit prod confirmation, dry-run defaults for destructive and arbitrary classes, secret references instead of raw values in MCP responses, structured per-call audit, session profile gating, and out-of-band confirmation for apex operations. Neither class may advertise auth-bypass procedures in tool descriptions reachable via MCP `list_tools`. Phased rollout for `mcp/ops`: this ADR is accepted at the design level; the runtime enforcement invariant of R5/R6 is delivered incrementally across issue #777 (introduces the policy seam in `mcp/ops/policy.js` + `.shifter.yaml`) and sub-issues #1198 (cheap defenses), #1199 (mid-cost), #1200 (expensive), #1201 (convert all 45 tool registrations), and #1202 (surface invariant tests). The invariant is fully enforced on the live server only when every sub-issue has shipped. Until then, the policy seam exists but `mcp/ops/index.js` still calls `server.tool(...)` directly, and `.shifter.yaml` / `SHIFTER_OPS_PROFILE` have no runtime effect on the registered tool surface.",
+    "rules": [
+      {
+        "id": "ADR-014-R1",
+        "description": "General-purpose MCP tool surfaces (those whose intended client is not a trusted operator agent loop) must not expose plaintext secret retrieval, arbitrary SQL, arbitrary SSM/shell/PowerShell execution, infrastructure termination, auth-bypass tunnel helpers, or other privileged production administration directly to any connected client. Operator agent surfaces are governed by ADR-014-R5, not R1.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R2",
+        "description": "MCP argument schemas, environment selectors, and local AWS profiles are validation and credential-selection mechanisms, not authorization boundaries. They are inputs to the policy layer required by ADR-014-R5 on operator agent surfaces, and they do not substitute for the separate approved operator workflow required by ADR-014-R1 on general-purpose surfaces.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R3",
+        "description": "MCP surface hardening changes must include negative surface tests or equivalent review evidence that the surface invariants hold: forbidden tool names absent (R1 surfaces), or capability-class gates intact (R5 surfaces).",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R4",
+        "description": "MCP outputs, error envelopes, and logs must not return raw secret values, private keys, DB passwords, OIDC client secrets, full secret-bearing URLs, raw SQL payloads, shell command bodies, or multiline user input. On operator agent surfaces, secret-bearing tools must return references resolvable only inside the server process.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R5",
+        "description": "Operator agent MCP surfaces (servers whose intended client IS the operator's own trusted agent loop) MAY expose privileged capability but MUST gate every tool through a structured per-tool policy layer declaring its capability class (observability, named_db_read, named_db_write, secret_handle, ssm_named, ssm_arbitrary, db_arbitrary, infra_mutation, dev_bypass_tunnel, or equivalent). The policy layer MUST enforce: environment policy with no implicit prod and explicit prod confirmation for prod-touching calls; dry-run defaults for destructive and arbitrary classes; secret references (not raw values) in MCP responses; structured per-call audit; session profile gating that suppresses class registration at startup; out-of-band operator confirmation for apex operations (prod termination, drop-table, secret rotation, equivalent).",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R6",
+        "description": "MCP tool descriptions reachable via `list_tools` must not advertise auth-bypass procedures, bypass URLs, or step-by-step authentication-circumvention instructions, regardless of server class. Policy layers MAY support a description-redaction flag for bypass-class tools so the capability can remain registered while the description text is sanitized.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/mcp-ops-privileged-surface-preflight-777.md",
+      ".shifter.yaml",
+      "mcp/ops/policy.js",
+      "mcp/ops/policy.test.js",
+      "mcp/ops/SECURITY.md",
+      "mcp/shared/aws-helpers.js",
+      "mcp/ngfw/SECURITY.md",
+      "mcp/ngfw/tool-surface.test.js",
+      "shifter/installation/schema.py",
+      "shifter/installation/contract.py",
+      "shifter/installation/errors.py",
+      "shifter/shifter_platform/shared/auth.py",
+      "shifter/shifter_platform/risk_register/services.py",
+      "shifter/shifter_platform/config/dev_auth.py",
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/shared/log_sanitize.py"
     ]
   }
 ]

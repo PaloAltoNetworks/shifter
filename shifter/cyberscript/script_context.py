@@ -13,20 +13,18 @@ Three principles:
    destination. Render methods read off validated fields and never apply
    their own sanitization — there is nothing left to sanitize.
 2. **Path identifier is the instance ID, not the display name.** EC2
-   instance IDs (`i-[0-9a-f]{8,17}`) are structurally safe to interpolate
-   into shell text. Display names may contain spaces, punctuation, and
-   unicode (e.g. "Workstation 1", "Domain Controller"); they are
-   metadata only.
-3. **The Claude prompt's single-quote encoder is the only surviving
-   ad-hoc shell encoder.** It lives inside `render_claude_command` and
-   operates on the already-validated `PromptText`. The prompt may carry
-   shell metacharacters (`$`, `;`, backticks, `|`); single-quote
-   wrapping neutralises them at the shell layer without altering the
-   semantic content of the prompt itself.
+   instance IDs (`i-[0-9a-f]{8,17}`) are the only per-instance value the
+   fixed shell wrapper embeds directly. Display names may contain spaces,
+   punctuation, and unicode (e.g. "Workstation 1", "Domain Controller");
+   they are metadata only.
+3. **Payloads cross the remote shell boundary as encoded data.** Render
+   methods emit fixed Python wrappers, base64-encode user-controlled payloads,
+   and invoke tools with structured argv inside the wrapper.
 """
 
 from __future__ import annotations
 
+import base64
 import ipaddress
 import re
 from typing import Annotated, Any, Final, Literal, Self
@@ -96,10 +94,15 @@ def build_ai_execution_policy_payload() -> dict[str, object]:
     return {
         "version": AI_EXPERIMENT_EXECUTION_POLICY_VERSION,
         "claude_code": {
-            "prompt_delivery": "validated_single_argument",
+            "prompt_delivery": "encoded_shell_wrapper",
             "transcript_artifact_required": True,
         },
     }
+
+
+def _encode_command_payload(value: str) -> str:
+    """Encode data for fixed shell wrappers using shell-safe base64."""
+    return base64.urlsafe_b64encode(value.encode()).decode()
 
 
 def _validate_instance_id(v: str) -> str:
@@ -337,36 +340,81 @@ class ScriptExecutionContext(BaseModel):
         return self.render_claude_command()
 
     def render_python_command(self) -> str:
-        """Build the `aws s3 cp … && python3 … | tee …` pipeline.
+        """Build the SSM shell wrapper for Python script execution.
 
-        The path segment is the instance ID (structurally `i-[0-9a-f]{8,17}`)
-        and the S3 key is whitelist-validated; both are safe to interpolate
-        directly into shell text.
+        The remote transport accepts one shell string, so the shell text stays
+        a fixed wrapper. The S3 key crosses that boundary as base64 data and
+        is decoded inside Python before structured argv subprocess calls.
         """
         seg = self.instance.instance_id
-        s3 = self.script_s3_key
-        return (
-            f"aws s3 cp s3://${{BUCKET_NAME}}/{s3} /tmp/script_{seg}.py "
-            f"&& python3 /tmp/script_{seg}.py "
-            f"2>&1 | tee /tmp/output_{seg}.log"
-        )
+        s3 = _encode_command_payload(self.script_s3_key or "")
+        return f"""python3 - <<'PY'
+import base64
+import os
+import subprocess
+import sys
+
+instance_id = "{seg}"
+script_s3_key = base64.urlsafe_b64decode("{s3}").decode()
+bucket_name = os.environ["BUCKET_NAME"]
+script_path = f"/tmp/script_{{instance_id}}.py"
+output_path = f"/tmp/output_{{instance_id}}.log"
+
+subprocess.run(
+    ["aws", "s3", "cp", f"s3://{{bucket_name}}/{{script_s3_key}}", script_path],
+    check=True,
+)
+with open(output_path, "wb") as output:
+    process = subprocess.Popen(
+        ["python3", script_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert process.stdout is not None
+    for chunk in iter(lambda: process.stdout.read(8192), b""):
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
+        output.write(chunk)
+        output.flush()
+    raise SystemExit(process.wait())
+PY"""
 
     def render_claude_command(self) -> str:
-        """Build the `claude … -p '…' | tee …` invocation.
+        """Build the SSM shell wrapper for Claude Code execution.
 
-        Applies POSIX single-quote encoding to the validated prompt
-        (`'foo'\\''bar'` for an embedded single quote), then wraps the
-        result in `'…'`. Shell metacharacters inside the prompt are
-        neutralised by the single-quoted argument and never reach the
-        shell interpreter.
+        The prompt crosses the shell-only SSM boundary as base64 data. The
+        fixed wrapper decodes it and passes it to Claude as one argv value.
         """
-        encoded = self.claude_prompt_resolved.replace("'", "'\\''")
-        return (
-            "claude --dangerously-skip-permissions "
-            "--output-format stream-json "
-            f"-p '{encoded}' "
-            "2>&1 | tee /tmp/claude_output.json"
-        )
+        prompt = _encode_command_payload(self.claude_prompt_resolved or "")
+        return f"""python3 - <<'PY'
+import base64
+import subprocess
+import sys
+
+prompt = base64.urlsafe_b64decode("{prompt}").decode()
+output_path = "/tmp/claude_output.json"
+
+with open(output_path, "wb") as output:
+    process = subprocess.Popen(
+        [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--output-format",
+            "stream-json",
+            "-p",
+            prompt,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert process.stdout is not None
+    for chunk in iter(lambda: process.stdout.read(8192), b""):
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
+        output.write(chunk)
+        output.flush()
+    raise SystemExit(process.wait())
+PY"""
 
     # ----- factories ------------------------------------------------------
 

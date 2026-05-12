@@ -9,6 +9,8 @@ representation (path segment, S3 key, instance ID, IP, prompt text).
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 from pydantic import ValidationError
 
@@ -255,9 +257,9 @@ class TestPromptText:
         [
             "Attack the box at 10.0.0.1",
             "Multi\nline\nprompt",
-            "Has 'quotes' and \"double\" and `backticks`",  # shell metas allowed inside the encoded arg
+            "Has 'quotes' and \"double\" and `backticks`",  # shell metas are allowed before encoding
             "Pipes | and semicolons ; and ampersands & — all fine pre-encoding",
-            "$(echo not-actually-executed-because-of-single-quote-wrap)",
+            "$(echo not-actually-executed-because-it-is-encoded)",
             "x" * 8192,                                       # exactly 8 KiB
         ],
     )
@@ -378,8 +380,12 @@ class TestScriptExecutionContextDiscriminator:
 
 
 # ---------------------------------------------------------------------------
-# Render methods — exact shell-string shape; nothing slips past the encoder
+# Render methods — fixed wrappers; user-controlled data crosses as encoded data
 # ---------------------------------------------------------------------------
+
+
+def _encoded(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode()).decode()
 
 
 class TestRenderPythonCommand:
@@ -396,8 +402,9 @@ class TestRenderPythonCommand:
         cmd = ctx.render_command()
 
         # Path segment is the instance_id, not the display name.
-        assert "/tmp/script_i-abc12345.py" in cmd
-        assert "/tmp/output_i-abc12345.log" in cmd
+        assert 'instance_id = "i-abc12345"' in cmd
+        assert 'script_path = f"/tmp/script_{instance_id}.py"' in cmd
+        assert 'output_path = f"/tmp/output_{instance_id}.log"' in cmd
         # The display name with its embedded space must NOT appear in the shell text.
         assert "Workstation 1" not in cmd
         assert "Workstation" not in cmd
@@ -410,31 +417,32 @@ class TestRenderPythonCommand:
             instance={"name": "Workstation", "instance_id": "i-abc12345"},
             script_s3_key="scripts/1/script.py",
         )
-        expected = (
-            "aws s3 cp s3://${BUCKET_NAME}/scripts/1/script.py /tmp/script_i-abc12345.py "
-            "&& python3 /tmp/script_i-abc12345.py "
-            "2>&1 | tee /tmp/output_i-abc12345.log"
-        )
-        assert ctx.render_command() == expected
+        cmd = ctx.render_command()
+
+        assert cmd.startswith("python3 - <<'PY'\n")
+        assert 'subprocess.run(\n    ["aws", "s3", "cp"' in cmd
+        assert '["python3", script_path]' in cmd
+        assert 'instance_id = "i-abc12345"' in cmd
+        assert f'script_s3_key = base64.urlsafe_b64decode("{_encoded("scripts/1/script.py")}").decode()' in cmd
+        assert "scripts/1/script.py" not in cmd
 
 
 class TestRenderClaudeCommand:
 
     @pytest.mark.parametrize(
-        "prompt, expected_arg",
+        "prompt",
         [
-            ("simple prompt", "'simple prompt'"),
-            ("with 'quote'", "'with '\\''quote'\\'''"),
-            ("two 'a' and 'b'", "'two '\\''a'\\'' and '\\''b'\\'''"),
-            ("no quotes here", "'no quotes here'"),
-            # Shell metas survive inside the single-quoted arg — that's correct,
-            # because `claude -p` receives the prompt as a literal string.
-            ("$(injected)", "'$(injected)'"),
-            ("`backticks`", "'`backticks`'"),
-            ("pipes | and ; semis", "'pipes | and ; semis'"),
+            "simple prompt",
+            "with 'quote'",
+            "two 'a' and 'b'",
+            "no quotes here",
+            "$(injected)",
+            "`backticks`",
+            "pipes | and ; semis",
+            "line one\nline two",
         ],
     )
-    def test_posix_single_quote_encoding(self, prompt: str, expected_arg: str) -> None:
+    def test_prompt_crosses_shell_boundary_encoded(self, prompt: str) -> None:
         from cyberscript.script_context import ScriptExecutionContext
 
         ctx = ScriptExecutionContext(
@@ -443,7 +451,9 @@ class TestRenderClaudeCommand:
             claude_prompt_resolved=prompt,
         )
         cmd = ctx.render_command()
-        assert f" -p {expected_arg} " in cmd
+        assert prompt not in cmd
+        assert f'prompt = base64.urlsafe_b64decode("{_encoded(prompt)}").decode()' in cmd
+        assert '"-p",\n            prompt,' in cmd
 
     def test_full_shape(self) -> None:
         from cyberscript.script_context import (
@@ -456,13 +466,14 @@ class TestRenderClaudeCommand:
             instance={"name": "Workstation", "instance_id": "i-abc12345"},
             claude_prompt_resolved="attack the box",
         )
-        expected = (
-            "claude --dangerously-skip-permissions "
-            "--output-format stream-json "
-            "-p 'attack the box' "
-            "2>&1 | tee /tmp/claude_output.json"
-        )
-        assert ctx.render_command() == expected
+        cmd = ctx.render_command()
+        assert cmd.startswith("python3 - <<'PY'\n")
+        assert '"claude",' in cmd
+        assert '"--dangerously-skip-permissions",' in cmd
+        assert '"--output-format",' in cmd
+        assert '"stream-json",' in cmd
+        assert 'output_path = "/tmp/claude_output.json"' in cmd
+        assert "attack the box" not in cmd
         assert AI_EXPERIMENT_EXECUTION_POLICY_VERSION == "ai-experiment-execution-v1"
 
     def test_policy_payload_pins_allowed_claude_boundary(self) -> None:
@@ -472,7 +483,7 @@ class TestRenderClaudeCommand:
         claude = policy["claude_code"]
 
         assert policy["version"] == "ai-experiment-execution-v1"
-        assert claude["prompt_delivery"] == "validated_single_argument"
+        assert claude["prompt_delivery"] == "encoded_shell_wrapper"
         assert claude["transcript_artifact_required"] is True
 
 
@@ -755,27 +766,41 @@ class TestInjectionBattery:
                 script_s3_key=s3_key,
             )
 
-    def test_injection_inside_quoted_prompt_does_not_escape(self) -> None:
-        """Even when the prompt contains `'` and shell metas, the rendered command
-        must keep them inside a single quoted argument — no break-out possible.
-        """
+    def test_prompt_metacharacters_do_not_reach_shell_text(self) -> None:
+        """Prompt shell metacharacters are encoded before the SSM shell string."""
         from cyberscript.script_context import ScriptExecutionContext
 
-        evil = "'; rm -rf / ; echo '"
+        evil = "'; rm -rf / ; echo ' $(id) `whoami`\nnext"
         ctx = ScriptExecutionContext(
             script_type="claude_code",
             instance={"name": "Workstation", "instance_id": "i-abc12345"},
             claude_prompt_resolved=evil,
         )
         cmd = ctx.render_command()
-        # The argument starts and ends with one literal single quote — every other
-        # quote in the rendered string is part of `'\''` escape sequences.
-        prefix = " -p '"
-        suffix = "' 2>&1 | tee "
-        assert prefix in cmd and suffix in cmd
-        # Count of bare-quote *boundaries*: exactly the opener and the closer.
-        between = cmd.split(prefix, 1)[1].rsplit(suffix, 1)[0]
-        # The argument body must not contain a raw "'" that isn't part of "'\''".
-        # Replace every "'\''" with sentinel, then no "'" should remain.
-        sanitized = between.replace("'\\''", "\x01")
-        assert "'" not in sanitized, f"unescaped single quote leaked: {between!r}"
+
+        assert evil not in cmd
+        assert "; rm -rf" not in cmd
+        assert "$(id)" not in cmd
+        assert "`whoami`" not in cmd
+        assert _encoded(evil) in cmd
+
+    def test_prompt_template_display_name_metacharacters_do_not_reach_shell_text(self) -> None:
+        from cyberscript.script_context import ScriptExecutionContext
+
+        prompt = "Use {{Target.name}}"
+        target_name = "Target One; $(id) `whoami`"
+        ctx = ScriptExecutionContext.for_claude(
+            instance_name="Workstation",
+            instance_id="i-abc12345",
+            private_ip=None,
+            claude_prompt_template=prompt,
+            instance_data={
+                "Target": {"ip": "10.0.0.5", "name": target_name, "instance_id": "i-def67890"},
+            },
+        )
+        cmd = ctx.render_command()
+
+        assert target_name not in cmd
+        assert "$(id)" not in cmd
+        assert "`whoami`" not in cmd
+        assert _encoded(f"Use {target_name}") in cmd

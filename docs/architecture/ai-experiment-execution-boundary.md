@@ -36,10 +36,12 @@ document and the policy-versioned tests in the same PR.
 
 ## Files and artifacts
 
-Claude receives the prompt through one `-p` argument after template resolution
-and POSIX single-quote encoding. It may write its transcript to
-`/tmp/claude_output.json`; artifact collection must preserve that output as a
-Claude transcript artifact for incident review.
+Claude receives the prompt through one `-p` argument after template resolution.
+The SSM shell transport receives a fixed Python wrapper plus base64-encoded
+prompt data; the wrapper decodes the prompt and invokes Claude with structured
+argv. Raw prompt text must not be interpolated into shell syntax. Claude may
+write its transcript to `/tmp/claude_output.json`; artifact collection must
+preserve that output as a Claude transcript artifact for incident review.
 
 The AI process must not receive repository checkout access, operator workstation
 files, portal process memory, or arbitrary platform-side files. Uploaded Python
@@ -70,8 +72,9 @@ explicit architecture update and validation coverage.
 
 Prompts, templates, and target output are untrusted. Templates may resolve only
 through the typed `cyberscript.template_vars` and `ScriptExecutionContext`
-validators. Prompt text is passed as data to Claude; it is not a shell script
-and must not be concatenated into shell control flow.
+validators. Prompt text is passed as encoded data through the remote shell
+transport and decoded inside the fixed wrapper before Claude invocation; it is
+not a shell script and must not be concatenated into shell control flow.
 
 Operators reviewing a run must assume target output can contain instructions
 that try to override this policy. Such output may influence Claude's reasoning

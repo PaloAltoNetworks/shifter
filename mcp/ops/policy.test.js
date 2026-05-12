@@ -73,7 +73,10 @@ const BASE_POLICY = {
   tools: {},
   audit: {
     enabled: true,
-    path: "/tmp/test-audit.jsonl",
+    // Synthetic path used only as Zod-shape input (no I/O happens
+    // against this in tests). Kept off `/tmp/` so SonarCloud's S5443
+    // hardcoded-tmp check stays clean.
+    path: "./.test-audit.jsonl",
     redact: ["password"],
   },
 };
@@ -160,7 +163,8 @@ describe("parsePolicy", () => {
   });
 
   it("fails closed when a declared class is missing a class_defaults entry", () => {
-    const { observability: _drop, ...partialDefaults } = BASE_POLICY.class_defaults;
+    const partialDefaults = { ...BASE_POLICY.class_defaults };
+    delete partialDefaults.observability;
     const bad = { ...BASE_POLICY, class_defaults: partialDefaults };
     assert.throws(() => parsePolicy(bad), PolicyError);
   });
@@ -215,7 +219,7 @@ describe("parsePolicy", () => {
       () =>
         parsePolicy({
           ...BASE_POLICY,
-          audit: { enabled: "yes", path: "/tmp/a.jsonl", redact: [] },
+          audit: { enabled: "yes", path: "./.a.jsonl", redact: [] },
         }),
       PolicyError,
     );
@@ -231,7 +235,7 @@ describe("parsePolicy", () => {
       () =>
         parsePolicy({
           ...BASE_POLICY,
-          audit: { enabled: true, path: "/tmp/a.jsonl", redact: "password" },
+          audit: { enabled: true, path: "./.a.jsonl", redact: "password" },
         }),
       PolicyError,
     );
@@ -409,7 +413,7 @@ describe("parsePolicy", () => {
     it("rejects audit.enabled: false", () => {
       const bad = {
         ...BASE_POLICY,
-        audit: { enabled: false, path: "/tmp/x.jsonl", redact: [] },
+        audit: { enabled: false, path: "./.x.jsonl", redact: [] },
       };
       assert.throws(() => parsePolicy(bad), PolicyError);
     });
@@ -451,7 +455,7 @@ describe("loadPolicy", () => {
     const file = path.join(dir, ".shifter.yaml");
     writeFileSync(
       file,
-      `mcp_ops:\n  version: 1\n  classes: [observability]\n  session_profile:\n    default: read_only\n    profiles:\n      read_only: [observability]\n  environments:\n    default: dev\n    prod_requires_confirm: true\n  class_defaults:\n    observability: {}\n  tools: {}\n  audit:\n    enabled: true\n    path: /tmp/x.jsonl\n    redact: []\n`,
+      `mcp_ops:\n  version: 1\n  classes: [observability]\n  session_profile:\n    default: read_only\n    profiles:\n      read_only: [observability]\n  environments:\n    default: dev\n    prod_requires_confirm: true\n  class_defaults:\n    observability: {}\n  tools: {}\n  audit:\n    enabled: true\n    path: ./.x.jsonl\n    redact: []\n`,
     );
     const p = loadPolicy({ path: file });
     assert.equal(p.profile, "read_only");

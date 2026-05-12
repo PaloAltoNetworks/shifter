@@ -157,7 +157,7 @@ function _assertAdr014Invariants(raw) {
 // Pure parser — takes the parsed `mcp_ops:` namespace as a plain JS
 // object and returns a Policy. Side-effect-free so tests can build
 // fixtures without touching the filesystem.
-export function parsePolicy(raw, opts = {}) {
+function _assertTopLevelShape(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new PolicyError("policy: top-level value must be an object");
   }
@@ -174,13 +174,14 @@ export function parsePolicy(raw, opts = {}) {
   if (!Array.isArray(raw.classes) || raw.classes.length === 0) {
     throw new PolicyError("policy: 'classes' must be a non-empty array");
   }
-  const declaredClasses = new Set(raw.classes);
+}
 
-  // class_defaults MUST have an entry for every declared class, and
-  // MUST NOT have entries for undeclared classes. Each entry MUST be
-  // an object (even if empty). The wrapper depends on every
-  // declared class having a defaults block; a silent {} fallback
-  // would let a future class slip in without gates wired up.
+// class_defaults MUST have an entry for every declared class, and
+// MUST NOT have entries for undeclared classes. Each entry MUST be
+// an object (even if empty). The wrapper depends on every declared
+// class having a defaults block; a silent {} fallback would let a
+// future class slip in without gates wired up.
+function _assertClassDefaults(raw, declaredClasses) {
   const cd = raw.class_defaults;
   if (!cd || typeof cd !== "object" || Array.isArray(cd)) {
     throw new PolicyError("policy: 'class_defaults' must be an object");
@@ -191,8 +192,6 @@ export function parsePolicy(raw, opts = {}) {
         `policy: 'class_defaults' is missing an entry for declared class '${klass}'`,
       );
     }
-    // Strict-shape validation per class_defaults entry. Catches
-    // typos like `rate_cap: { count: 'three' }` or unknown keys.
     _zodValidate(`class_defaults.${klass}`, ClassDefaultsValueSchema, cd[klass]);
   }
   for (const key of Object.keys(cd)) {
@@ -202,47 +201,37 @@ export function parsePolicy(raw, opts = {}) {
       );
     }
   }
+}
 
-  // Cross-validate: any `class_defaults.<k>.allowed_envs` entry must
-  // contain `environments.default` so the default env is always
-  // permitted (otherwise the default env would refuse the call).
-  // Deferred until environments is validated below.
-
-  // Environments: strict shape. The default env must be one of
-  // dev/prod and prod_requires_confirm must be boolean. A typo like
-  // `prod_requires_confirm: 'true'` (string) would otherwise be
-  // truthy-but-not-=== true, and `envProdRequiresConfirm()` would
-  // return false — silently weakening the gate.
-  _zodValidate("environments", EnvironmentsSchema, raw.environments);
-
-  // Audit: strict shape. A missing `redact:` list, a non-boolean
-  // `enabled`, or a non-string `path` are all fail-closed conditions.
-  _zodValidate("audit", AuditSchema, raw.audit);
-
-  // Tools: per-tool override map (may be empty / absent). Each entry
-  // is strict-shaped so a typo doesn't bypass the policy.
-  if ("tools" in raw) {
-    if (raw.tools === null) {
-      // explicit null is fine — same as absent
-    } else if (typeof raw.tools !== "object" || Array.isArray(raw.tools)) {
-      throw new PolicyError("policy: 'tools' must be an object (or omitted)");
-    } else {
-      _zodValidate("tools", ToolsMapSchema, raw.tools);
-      for (const [toolName, override] of Object.entries(raw.tools)) {
-        if (override.class !== undefined && !declaredClasses.has(override.class)) {
-          throw new PolicyError(
-            `policy: 'tools.${toolName}.class' is '${override.class}', which is not in 'classes'`,
-          );
-        }
-      }
+// Tools: per-tool override map (may be empty / absent). Each entry
+// is strict-shaped so a typo doesn't bypass the policy.
+function _assertToolsOverrides(raw, declaredClasses) {
+  if (!("tools" in raw) || raw.tools === null) return;
+  if (typeof raw.tools !== "object" || Array.isArray(raw.tools)) {
+    throw new PolicyError("policy: 'tools' must be an object (or omitted)");
+  }
+  _zodValidate("tools", ToolsMapSchema, raw.tools);
+  // ToolOverrideSchema enforces shape; this loop catches a class
+  // reference that points outside the declared `classes:` array.
+  for (const [toolName, override] of Object.entries(raw.tools)) {
+    if (override.class !== undefined && !declaredClasses.has(override.class)) {
+      throw new PolicyError(
+        `policy: 'tools.${toolName}.class' is '${override.class}', which is not in 'classes'`,
+      );
     }
   }
+}
 
+function _assertSessionProfiles(raw, declaredClasses) {
   const sp = raw.session_profile;
-  if (!sp || typeof sp !== "object" || !sp.profiles || typeof sp.profiles !== "object") {
+  if (
+    !sp ||
+    typeof sp !== "object" ||
+    !sp.profiles ||
+    typeof sp.profiles !== "object"
+  ) {
     throw new PolicyError("policy: 'session_profile.profiles' must be an object");
   }
-
   for (const [profileName, classList] of Object.entries(sp.profiles)) {
     if (!Array.isArray(classList)) {
       throw new PolicyError(
@@ -257,18 +246,34 @@ export function parsePolicy(raw, opts = {}) {
       }
     }
   }
+}
 
+function _resolveActiveProfile(raw, opts) {
+  const sp = raw.session_profile;
   const activeProfileName = opts.profile ?? sp.default;
   if (!activeProfileName || !sp.profiles[activeProfileName]) {
     throw new PolicyError(`policy: unknown active profile '${activeProfileName}'`);
   }
+  return activeProfileName;
+}
 
+export function parsePolicy(raw, opts = {}) {
+  _assertTopLevelShape(raw);
+  const declaredClasses = new Set(raw.classes);
+  _assertClassDefaults(raw, declaredClasses);
+  // Environments: strict shape (default in {dev,prod}, prod_requires_confirm
+  // strictly boolean). A typo like `prod_requires_confirm: 'true'` must fail.
+  _zodValidate("environments", EnvironmentsSchema, raw.environments);
+  // Audit: strict shape (enabled boolean, path non-empty string, redact
+  // string-array).
+  _zodValidate("audit", AuditSchema, raw.audit);
+  _assertToolsOverrides(raw, declaredClasses);
+  _assertSessionProfiles(raw, declaredClasses);
+  const activeProfileName = _resolveActiveProfile(raw, opts);
   // Final layer: enforce ADR-014-R5/R6 semantic invariants. Shape
   // checks above don't catch a config that's structurally valid but
-  // weakens the boundary (e.g. infra_mutation with execute_default:
-  // true).
+  // weakens the boundary.
   _assertAdr014Invariants(raw);
-
   return new Policy(raw, activeProfileName);
 }
 

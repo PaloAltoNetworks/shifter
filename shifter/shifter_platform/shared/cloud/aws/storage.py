@@ -70,6 +70,26 @@ class AWSObjectStorage:
             raise CloudStorageError(f"Failed to delete from S3: {e}") from e  # nosec B608
         logger.info("delete_object: success bucket=%s key=%s", bucket, key)
 
+    def copy_object(self, bucket: str, src_key: str, dst_key: str) -> None:
+        """Server-side copy within the same bucket. No data flows through this process."""
+        logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+        try:
+            client = self._get_client()
+            client.copy_object(
+                Bucket=bucket,
+                CopySource={"Bucket": bucket, "Key": src_key},
+                Key=dst_key,
+            )
+        except (ClientError, BotoCoreError) as e:
+            logger.exception(
+                "copy_object: failed bucket=%s src=%s dst=%s",
+                bucket,
+                src_key,
+                dst_key,
+            )
+            raise CloudStorageError(f"Failed to copy S3 object: {e}") from e
+        logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+
     def head_object(self, bucket: str, key: str) -> dict[str, Any]:
         logger.debug("head_object: bucket=%s key=%s", bucket, key)
         try:
@@ -82,6 +102,36 @@ class AWSObjectStorage:
         except (ClientError, BotoCoreError) as e:
             logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, key, e)
             raise CloudStorageError(f"Failed to head S3 object: {e}") from e
+
+    def object_exists(self, bucket: str, key: str) -> bool:
+        """Return True iff the object exists.
+
+        Distinguishes 404 (object not found → False) from any other error
+        (auth failure, network, throttling → raises `CloudStorageError`).
+        Callers must use this for "is the destination already occupied?"
+        preflights — `head_object` raises on miss and is unsafe for that
+        use because exception-as-boolean swallows real failures.
+        """
+        logger.debug("object_exists: bucket=%s key=%s", bucket, key)
+        try:
+            client = self._get_client()
+            client.head_object(Bucket=bucket, Key=key)
+            return True
+        except ClientError as e:
+            code = (e.response.get("Error") or {}).get("Code")
+            status = (e.response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+            if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
+                return False
+            logger.exception(
+                "object_exists: unexpected ClientError bucket=%s key=%s code=%s",
+                bucket,
+                key,
+                code,
+            )
+            raise CloudStorageError(f"Failed to test S3 object existence: {e}") from e
+        except BotoCoreError as e:
+            logger.exception("object_exists: BotoCoreError bucket=%s key=%s", bucket, key)
+            raise CloudStorageError(f"Failed to test S3 object existence: {e}") from e
 
     def generate_presigned_upload_url(
         self,

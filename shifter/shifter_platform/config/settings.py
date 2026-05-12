@@ -593,7 +593,7 @@ REST_FRAMEWORK = {
 # Environment
 # ------------------------------------------------------------------------------
 
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 DEV_LOGIN_ALLOWED_HOSTS = _env_list("DEV_LOGIN_ALLOWED_HOSTS") or ["localhost", "127.0.0.1", "[::1]"]
 DEV_LOGIN_ALLOWED_CIDRS = _env_list("DEV_LOGIN_ALLOWED_CIDRS")
 

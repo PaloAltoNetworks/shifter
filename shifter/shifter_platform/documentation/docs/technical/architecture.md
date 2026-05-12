@@ -133,4 +133,4 @@ See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
 | API style | REST via Django REST Framework | Proven, simple, mature Django ecosystem support. |
 | Cloud abstraction | Protocol-based adapters per provider | Same Django app runs on AWS or GCP. Cloud-specific code isolated behind interfaces. |
 | Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform with FirebaseUI/browser auth. Both require MFA, email-based usernames, and keep provider-specific auth details behind the app auth seam. |
-| Domains | keplerops.com | Operator-owned domain. DNS may be hosted externally or in cloud-managed DNS. Current `gcp-dev` hostname is `shifter.keplerops.com`. |
+| Domains | example.com | Operator-owned domain. DNS may be hosted externally or in cloud-managed DNS. Current `gcp-dev` hostname is `shifter.example.com`. |

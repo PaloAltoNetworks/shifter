@@ -103,7 +103,7 @@ CI bootstraps a GCS backend bucket named `${project_id}-terraform-state` for
 The `gcp-dev` tfvars file now carries the security-critical public edge and operator-access settings:
 
 ```hcl
-public_hostname             = "shifter.keplerops.com"
+public_hostname             = "shifter.example.com"
 enable_managed_tls          = true
 gke_master_authorized_cidrs = ["173.181.31.170/32"]
 create_dns_managed_zone = false
@@ -158,18 +158,32 @@ relies on the maintenance-window path.
 
 ## Configuration vs Secrets
 
-### In terraform.tfvars (Committed)
+### In terraform.tfvars (committed baseline)
 
 ```hcl
-# Environment config - not secrets
+# Non-deployment-specific environment config — committed.
 aws_region         = "us-east-2"
 environment        = "dev"
 instance_type      = "t3.large"
-domain_name        = "dev.shifter.example.com"
+domain_name        = "dev.shifter.example.com"  # example.com baseline
 enable_autoscaling = false
 ```
 
-Terraform variables are committed to the repo. CI/CD reads them directly after checkout.
+### In local.auto.tfvars (gitignored, per-deployment override)
+
+```hcl
+# Deployment-specific identifiers — never committed.
+domain_name           = "dev.shifter.your-domain.example"
+ses_domain            = "your-domain.example"
+alarm_email           = "your-team@your-domain.example"
+allowed_email_domains = ["your-domain.example"]
+user_storage_bucket   = "shifter-dev-user-storage-<account-id>"
+```
+
+Terraform auto-loads `*.auto.tfvars` files alongside `terraform.tfvars`
+and the `.local`/`.auto.tfvars` values win. CI deploy workflows render
+`local.auto.tfvars` from GitHub secrets and repository variables; see
+[`docs/dev/deploy-secrets.md`](../../../../../docs/dev/deploy-secrets.md).
 
 ### In Cloud Secret Managers (Runtime)
 

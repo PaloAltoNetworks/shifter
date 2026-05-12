@@ -337,10 +337,13 @@ jobs:
 
       - name: Get deployment config
         id: config
+        env:
+          # `vars` are repository / environment variables managed in
+          # GitHub settings; this avoids parsing the committed example
+          # tfvars baseline. Default `false` for safety — autoscaling
+          # opts in explicitly per environment.
+          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}
         run: |
-          TFVARS_FILE="platform/terraform/environments/${ENV}/portal/terraform.tfvars"
-          # Check if autoscaling is enabled
-          ENABLE_AUTOSCALING=$(grep '^enable_autoscaling' "$TFVARS_FILE" | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
           echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> "$GITHUB_OUTPUT"
 
       - name: Update Parameter Store with new image tag

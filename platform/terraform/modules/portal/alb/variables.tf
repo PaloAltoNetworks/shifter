@@ -14,7 +14,7 @@ variable "public_subnet_ids" {
 }
 
 variable "domain_name" {
-  description = "Domain name for ACM certificate (e.g., shifter.keplerops.com)"
+  description = "Domain name for ACM certificate (e.g., shifter.example.com)"
   type        = string
 }
 

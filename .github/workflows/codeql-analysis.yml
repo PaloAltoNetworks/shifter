@@ -1,0 +1,58 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+  schedule:
+    # Weekly Sunday 06:00 UTC re-scan to catch any drift between PR runs.
+    - cron: '0 6 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        # github/codeql-action v4.35.4
+        uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds higher-confidence security queries on top of
+          # the default suite (per GitHub's documented query suites).
+          queries: security-extended
+
+      - name: Autobuild
+        # github/codeql-action v4.35.4
+        uses: github/codeql-action/autobuild@68bde559dea0fdcac2102bfdf6230c5f70eb485e
+
+      - name: Perform CodeQL Analysis
+        # github/codeql-action v4.35.4
+        uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e
+        with:
+          category: "/language:${{ matrix.language }}"

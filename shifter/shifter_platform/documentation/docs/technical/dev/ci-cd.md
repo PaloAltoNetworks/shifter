@@ -113,7 +113,13 @@ Each component follows the same pattern:
    - Skip on PRs to prod
    - `terraform apply -auto-approve`
 
-**Note**: Terraform variables are committed to the repo in `terraform.tfvars` files. CI/CD reads them directly after checkout - no secrets or environment variables needed for tfvars.
+**Note**: The committed `terraform.tfvars` files ship an `example.com`
+baseline. Deployment-specific values (domains, alarm emails, allow-list
+domains, account-suffixed bucket names, GCP project id, etc.) come from
+GitHub repository variables and secrets at deploy time; CI/CD renders
+them into a gitignored `local.auto.tfvars` before `terraform apply`.
+See [`docs/dev/deploy-secrets.md`](../../../../../docs/dev/deploy-secrets.md)
+for the required surface.
 
 ## Portal Deployment
 

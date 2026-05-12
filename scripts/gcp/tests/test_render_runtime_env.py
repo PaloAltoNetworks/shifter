@@ -230,10 +230,10 @@ def test_render_env_fails_closed_when_redis_secret_id_missing():
 
 def test_render_env_preserves_bootstrap_admin_lists_from_environment(monkeypatch):
     module = _load_module("render_runtime_env.py", "render_runtime_env")
-    monkeypatch.setenv("PLATFORM_BOOTSTRAP_STAFF_EMAILS", "bedwards@paloaltonetworks.com")
-    monkeypatch.setenv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", "bedwards@paloaltonetworks.com")
+    monkeypatch.setenv("PLATFORM_BOOTSTRAP_STAFF_EMAILS", "admin@example.com")
+    monkeypatch.setenv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", "admin@example.com")
 
     rendered = module.render_env(_outputs())
 
-    assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
-    assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+    assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=admin@example.com\n" in rendered
+    assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=admin@example.com\n" in rendered

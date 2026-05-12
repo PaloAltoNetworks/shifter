@@ -54,11 +54,11 @@ class TestDevLoginSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_blocks_public_access_even_in_development(self, client):
         """Deployed dev auth must not be reachable from the public ingress host."""
-        response = client.get("/dev-login/", HTTP_HOST="shifter.keplerops.com")
+        response = client.get("/dev-login/", HTTP_HOST="shifter.example.com")
         assert response.status_code == 403
         assert b"local or admin access paths" in response.content
 
@@ -94,7 +94,7 @@ class TestDevLoginSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_allows_access_over_localhost_in_development(self, client):
         """Deployed dev auth stays available through loopback/admin tunnels."""
@@ -116,7 +116,7 @@ class TestDevLogoutSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_allows_access_when_environment_development(self, client, user):
         """dev_logout stays available through localhost/admin paths only."""
@@ -127,11 +127,11 @@ class TestDevLogoutSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_blocks_public_access_in_development(self, client, user):
         client.force_login(user)
-        response = client.get("/dev-logout/", HTTP_HOST="shifter.keplerops.com")
+        response = client.get("/dev-logout/", HTTP_HOST="shifter.example.com")
         assert response.status_code == 403
         assert b"local or admin access paths" in response.content
 

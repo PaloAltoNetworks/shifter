@@ -103,7 +103,7 @@ enablement tool, not a product—but it is used in front of customers and MUST b
 - Customer-facing: UI/UX MUST be professional and consistent with Cortex product suite
 - NOT for product/stress testing PANW products or services
 - NOT a replacement for BYOS, shared demo tenants, or official enablement tools
-- Domain: `keplerops.com` (temporary; will migrate to `paloaltonetworks.com` if adopted)
+- Domain: `example.com` (temporary; will migrate to `paloaltonetworks.com` if adopted)
 - Identity: Cognito (temporary; will migrate to PANW SSO if adopted)
 
 ### Ethics

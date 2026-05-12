@@ -121,7 +121,7 @@ The GCP deploy flow executed by CI:
 ## Current `gcp-dev` concrete values
 
 - Project: `prod-rwctxzl6shxk`
-- Hostname: `shifter.keplerops.com`
+- Hostname: `shifter.example.com`
 - Managed TLS: enabled
 - Current authorized admin CIDR: `173.181.31.170/32` from the WSL bootstrap host as of 2026-04-11
 

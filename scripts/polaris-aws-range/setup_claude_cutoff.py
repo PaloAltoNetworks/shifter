@@ -147,7 +147,7 @@ def build_zip() -> bytes:
 def ensure_lambda(role_arn: str) -> str:
     code = build_zip()
     env = {
-        "CTFD_URL": "https://polaris.keplerops.com",
+        "CTFD_URL": "https://polaris.example.com",
         "CTFD_TOKEN_SECRET_ID": SECRET_NAME,
         "DRY_RUN": "1",   # start in dry-run
         "KEEP_CLAUDE": "",
@@ -277,7 +277,7 @@ def main() -> int:
     print(f"     cat /tmp/out.json")
     print(f"  2. When happy, flip DRY_RUN=0 and enable the schedule:")
     print(f"     aws --region {REGION} lambda update-function-configuration --function-name {LAMBDA_NAME} "
-          f"--environment 'Variables={{CTFD_URL=https://polaris.keplerops.com,"
+          f"--environment 'Variables={{CTFD_URL=https://polaris.example.com,"
           f"CTFD_TOKEN_SECRET_ID={SECRET_NAME},DRY_RUN=0,KEEP_CLAUDE=}}'")
     print(f"     aws --region {REGION} scheduler update-schedule --name {SCHEDULE_NAME} ... --state ENABLED ...")
     return 0

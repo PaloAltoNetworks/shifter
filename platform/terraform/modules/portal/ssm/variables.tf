@@ -188,7 +188,7 @@ variable "email_backend" {
 variable "ctf_from_email" {
   description = "From address for CTF emails"
   type        = string
-  default     = "ctf@keplerops.com"
+  default     = "ctf@example.com"
 }
 
 # ------------------------------------------------------------------------------

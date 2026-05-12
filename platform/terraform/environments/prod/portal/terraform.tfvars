@@ -1,3 +1,9 @@
+# terraform.tfvars — example values for OSS deployers.
+# Copy this file to terraform.tfvars (gitignored) and replace example.com placeholders
+# with your real domains / email senders / alarm destinations before
+# `terraform apply`. Secrets remain in AWS Secrets Manager / GCP Secret Manager,
+# never in tfvars.
+
 # ------------------------------------------------------------------------------
 # General
 # ------------------------------------------------------------------------------
@@ -49,7 +55,7 @@ ec2_root_volume_size = 50
 # ALB
 # ------------------------------------------------------------------------------
 
-domain_name       = "shifter.keplerops.com"
+domain_name       = "shifter.example.com"
 app_port          = 8000
 health_check_path = "/health"
 
@@ -58,14 +64,18 @@ health_check_path = "/health"
 # ------------------------------------------------------------------------------
 
 cognito_domain_prefix = "shifter-portal"
-allowed_email_domains = ["paloaltonetworks.com"]
+# REPLACE: the email domains permitted to self-register via Cognito pre-signup.
+# Leaving this empty fails closed — no domain-wide self-signup. Add only domains
+# your tenancy owns; do NOT ship a third-party domain in an example.
+allowed_email_domains = []
 allowed_emails        = []
 
 # ------------------------------------------------------------------------------
 # S3
 # ------------------------------------------------------------------------------
 
-user_storage_bucket = "shifter-user-storage-7a3f9c2e"
+# REPLACE: your S3 bucket name for user-uploaded artifacts.
+user_storage_bucket = "shifter-user-storage-REPLACE_WITH_ACCOUNT_ID"
 
 # ------------------------------------------------------------------------------
 # Provisioner
@@ -193,15 +203,15 @@ messaging_alarm_actions               = [] # Populated by main.tf from shared SN
 # SES
 # ------------------------------------------------------------------------------
 
-ses_domain     = "keplerops.com"
+ses_domain     = "example.com"
 email_backend  = "django_ses.SESBackend"
-ctf_from_email = "ctf@keplerops.com"
+ctf_from_email = "ctf@example.com"
 
 # ------------------------------------------------------------------------------
 # Alerting
 # ------------------------------------------------------------------------------
 
-alarm_email = "bedwards@paloaltonetworks.com"
+alarm_email = "admin@example.com"
 
 # ------------------------------------------------------------------------------
 # Bedrock Logging

@@ -339,6 +339,28 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Deployment-specific tfvars overrides. The committed `terraform.tfvars`
+# files in `platform/terraform/.../portal/` and `platform/terraform/gcp/.../`
+# ship example.com baselines that fail-loud on apply. Each deployment writes
+# its real values to `local.auto.tfvars` (or any `*.tfvars.local`) alongside
+# the baseline; Terraform auto-loads `*.auto.tfvars` and the .local form is
+# the convention for "do not commit this." CI deploy workflows render
+# `local.auto.tfvars` inline from GitHub secrets/repository variables; see
+# CONTRIBUTING.md and docs/dev/deploy-secrets.md for the configuration
+# surface.
+local.auto.tfvars
+*.tfvars.local
+*.auto.tfvars.local
+
+# Generated kustomize overlay files — the renderers
+# (scripts/gcp/render_edge_manifest.py, render_private_service_netpol.py)
+# overwrite these at deploy time from terraform outputs. The
+# `platform-runtime.generated.env` file is intentionally kept committed as
+# a placeholder so `kustomize build` succeeds in static validation; the
+# deploy renderer overwrites it in place.
+platform/k8s/gcp/overlays/*/platform-edge.generated.yaml
+platform/k8s/gcp/overlays/*/platform-private-service.generated.yaml
+
 # GitHub Runner Lambda zips (downloaded by terraform module)
 platform/terraform/global/github-runner/*.zip
 

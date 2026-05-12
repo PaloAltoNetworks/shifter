@@ -45,6 +45,7 @@ GUARDRAIL_FILES = {
     ".github/CODEOWNERS",
     ".github/pull_request_template.md",
     ".github/copilot-instructions.md",
+    ".github/dependabot.yml",
     ".importlinter",
     ".tflint.hcl",
     ".gitleaks.toml",

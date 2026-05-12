@@ -67,24 +67,27 @@ Copy the backend config from bootstrap output to these files:
 | `platform/terraform/environments/prod/portal/backend.tf` | `prod/portal/terraform.tfstate` |
 | `platform/terraform/environments/prod/range/backend.tf` | `prod/range/terraform.tfstate` |
 
-### 4. Configure terraform.tfvars
+### 4. Configure deployment-specific values
 
-Copy and fill in the example:
+The committed `terraform.tfvars` files ship an `example.com` baseline.
+Override per-deployment values with a `local.auto.tfvars` (gitignored)
+alongside each baseline — Terraform auto-loads `*.auto.tfvars` and the
+local overrides win:
 
 ```bash
-cp platform/terraform/environments/prod/portal/terraform.tfvars.example \
-   platform/terraform/environments/prod/portal/terraform.tfvars
+cat > platform/terraform/environments/prod/portal/local.auto.tfvars <<EOF
+domain_name           = "shifter.your-domain.example"
+ses_domain            = "your-domain.example"
+alarm_email           = "your-team@your-domain.example"
+allowed_email_domains = ["your-domain.example"]
+user_storage_bucket   = "shifter-user-storage-<your-account-id>"
+EOF
 ```
 
-Edit `terraform.tfvars` with your values. Key settings:
-
-```hcl
-environment  = "prod"
-aws_region   = "us-east-2"
-domain_name  = "shifter.yourdomain.com"
-```
-
-Terraform variables are committed to the repo (they're config, not secrets).
+`local.auto.tfvars` is gitignored — never commit one. The full list of
+required values, plus the CI-deploy equivalent via GitHub secrets and
+repository variables, is documented in
+[`docs/dev/deploy-secrets.md`](../../../../../docs/dev/deploy-secrets.md).
 
 ### 5. Deploy Infrastructure
 
@@ -320,7 +323,7 @@ Edit `terraform.tfvars` with the real project/environment values. At minimum the
 
 ```hcl
 project_id                 = "prod-rwctxzl6shxk"
-public_hostname            = "shifter.keplerops.com"
+public_hostname            = "shifter.example.com"
 enable_managed_tls         = true
 gke_master_authorized_cidrs = ["173.181.31.170/32"]
 ```
@@ -345,4 +348,4 @@ That flow:
 
 ### 5. DNS and TLS
 
-The secure bootstrap path expects a real hostname and managed TLS from the start. Point `shifter.keplerops.com` to the reserved global ingress IP so the Google-managed certificate can become active. The GCP path no longer uses the old debug-auth fallback as an acceptable first-boot mode.
+The secure bootstrap path expects a real hostname and managed TLS from the start. Point `shifter.example.com` to the reserved global ingress IP so the Google-managed certificate can become active. The GCP path no longer uses the old debug-auth fallback as an acceptable first-boot mode.

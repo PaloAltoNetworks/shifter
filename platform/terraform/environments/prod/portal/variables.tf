@@ -128,7 +128,7 @@ variable "ec2_root_volume_size" {
 # ------------------------------------------------------------------------------
 
 variable "domain_name" {
-  description = "Domain name for ACM certificate (e.g., shifter.keplerops.com)"
+  description = "Domain name for ACM certificate (e.g., shifter.example.com)"
   type        = string
 }
 
@@ -493,11 +493,11 @@ variable "email_backend" {
 variable "ctf_from_email" {
   description = "From address for CTF emails"
   type        = string
-  default     = "ctf@keplerops.com"
+  default     = "ctf@example.com"
 }
 
 variable "ses_domain" {
-  description = "Domain for SES email sending (e.g., keplerops.com)"
+  description = "Domain for SES email sending (e.g., example.com)"
   type        = string
 }
 

@@ -21,7 +21,8 @@ spec:
         checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
     spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
-      automountServiceAccountToken: false
+      serviceAccountName: {{ .Values.serviceAccounts.portal.name }}
+      automountServiceAccountToken: true
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -32,7 +33,6 @@ spec:
                     app.kubernetes.io/part-of: shifter
                     app.kubernetes.io/component: portal
                 topologyKey: kubernetes.io/hostname
-      serviceAccountName: {{ .Values.serviceAccounts.portal.name }}
       containers:
         - name: portal
           image: {{ include "shifter.portalImage" . }}

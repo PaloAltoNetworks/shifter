@@ -41,13 +41,21 @@ def _no_db_transactions():
 # ---------------------------------------------------------------------------
 
 
-def _make_user(pk=1, username="testuser", is_staff=True):
-    """Create a MagicMock user with the minimum attributes services need."""
+def _make_user(pk=1, username="testuser", is_staff=True, is_active=True, threat_research=False):
+    """Create a MagicMock user with the minimum attributes services need.
+
+    The ``threat_research`` flag controls what
+    ``user.groups.filter(name=THREAT_RESEARCH_GROUP).exists()`` returns —
+    set to ``True`` for non-staff Threat Research members. Default ``False``
+    so non-staff fixtures resolve as unrelated authenticated users.
+    """
     user = MagicMock()
     user.pk = pk
     user.id = pk
     user.username = username
     user.is_staff = is_staff
+    user.is_active = is_active
+    user.groups.filter.return_value.exists.return_value = bool(threat_research)
     return user
 
 
@@ -379,31 +387,54 @@ class TestCreateExperiment:
 
 
 class TestCreateExperimentAccess:
-    """Verify that create_experiment enforces staff and scenario access controls."""
+    """Verify create_experiment enforces the canonical CMS authoring policy.
+
+    Policy (see shared.auth.can_edit_cms_authoring): active staff users and
+    active Threat Research group members may invoke create_experiment;
+    unrelated authenticated users may not. Per-scenario availability is then
+    enforced by check_scenario_access.
+    """
 
     @pytest.fixture()
     def staff_user(self):
         return _make_user(pk=1, username="access_staff", is_staff=True)
 
     @pytest.fixture()
-    def regular_user(self):
-        return _make_user(pk=2, username="access_regular", is_staff=False)
+    def threat_research_user(self):
+        return _make_user(pk=2, username="access_tr", is_staff=False, threat_research=True)
+
+    @pytest.fixture()
+    def unrelated_user(self):
+        return _make_user(pk=3, username="access_unrelated", is_staff=False, threat_research=False)
+
+    @pytest.fixture()
+    def inactive_threat_research_user(self):
+        return _make_user(pk=4, username="access_tr_inactive", is_staff=False, is_active=False, threat_research=True)
 
     @patch("cms.experiments.services.load_scenario_template")
     @patch("cms.experiments.services.check_scenario_access")
-    def test_non_staff_blocked_before_disabled_scenario_validation(self, mock_check, mock_load, regular_user):
+    def test_unrelated_user_blocked_before_disabled_scenario_validation(self, mock_check, mock_load, unrelated_user):
         data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
-        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
-            services.create_experiment(regular_user, data)
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            services.create_experiment(unrelated_user, data)
         mock_check.assert_not_called()
         mock_load.assert_not_called()
 
     @patch("cms.experiments.services.load_scenario_template")
     @patch("cms.experiments.services.check_scenario_access")
-    def test_non_staff_blocked_before_staff_only_scenario_validation(self, mock_check, mock_load, regular_user):
+    def test_unrelated_user_blocked_before_staff_only_scenario_validation(self, mock_check, mock_load, unrelated_user):
         data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
-        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
-            services.create_experiment(regular_user, data)
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            services.create_experiment(unrelated_user, data)
+        mock_check.assert_not_called()
+        mock_load.assert_not_called()
+
+    @patch("cms.experiments.services.load_scenario_template")
+    @patch("cms.experiments.services.check_scenario_access")
+    def test_inactive_threat_research_user_blocked(self, mock_check, mock_load, inactive_threat_research_user):
+        data = ExperimentCreateInput(name="Blocked", scenario_id="basic")
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            services.create_experiment(inactive_threat_research_user, data)
         mock_check.assert_not_called()
         mock_load.assert_not_called()
 
@@ -429,13 +460,70 @@ class TestCreateExperimentAccess:
         exp = services.create_experiment(staff_user, data)
         assert exp.pk == 50
 
+    @patch("cms.experiments.services.audit_log")
+    @patch("cms.experiments.services.ExperimentScript")
+    @patch("cms.experiments.services.Experiment")
+    @patch("cms.experiments.services.ScriptAsset")
     @patch("cms.experiments.services.load_scenario_template")
     @patch("cms.experiments.services.check_scenario_access")
-    def test_scenario_instances_blocks_non_staff_service_call(self, mock_check, mock_load, regular_user):
-        with pytest.raises(PermissionDenied, match="Staff privileges are required"):
-            services.get_scenario_instances("basic", regular_user)
+    def test_threat_research_user_reaches_scenario_access_check(
+        self,
+        mock_check,
+        mock_load,
+        mock_script_model,
+        mock_exp_model,
+        mock_es_model,
+        mock_audit,
+        threat_research_user,
+    ):
+        mock_instance = MagicMock()
+        mock_instance.name = "Workstation"
+        mock_template = MagicMock()
+        mock_template.instances = [mock_instance]
+        mock_load.return_value = mock_template
+
+        mock_exp = _make_experiment(pk=51, user=threat_research_user)
+        mock_exp_model.return_value = mock_exp
+
+        data = ExperimentCreateInput(name="Allowed", scenario_id="basic")
+        exp = services.create_experiment(threat_research_user, data)
+        assert exp.pk == 51
+        mock_check.assert_called_once_with("basic", threat_research_user)
+
+    @patch("cms.experiments.services.load_scenario_template")
+    @patch("cms.experiments.services.check_scenario_access")
+    def test_threat_research_user_propagates_scenario_access_rejection(
+        self, mock_check, mock_load, threat_research_user
+    ):
+        """A Threat Research user reaches check_scenario_access; if that rejects
+        the scenario (e.g. staff_only=True), the service must surface the
+        scenario-level denial — never a generic auth denial.
+        """
+        mock_check.side_effect = ValueError("Scenario 'hidden-internal' is not available")
+        data = ExperimentCreateInput(name="Hidden", scenario_id="hidden-internal")
+        with pytest.raises(ExperimentValidationError, match="Invalid scenario"):
+            services.create_experiment(threat_research_user, data)
+        mock_check.assert_called_once_with("hidden-internal", threat_research_user)
+        mock_load.assert_not_called()
+
+    @patch("cms.experiments.services.load_scenario_template")
+    @patch("cms.experiments.services.check_scenario_access")
+    def test_scenario_instances_blocks_unrelated_user(self, mock_check, mock_load, unrelated_user):
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            services.get_scenario_instances("basic", unrelated_user)
         mock_check.assert_not_called()
         mock_load.assert_not_called()
+
+    @patch("cms.experiments.services.load_scenario_template")
+    @patch("cms.experiments.services.check_scenario_access")
+    def test_scenario_instances_allows_threat_research_user(self, mock_check, mock_load, threat_research_user):
+        mock_template = MagicMock()
+        mock_template.instances = []
+        mock_load.return_value = mock_template
+
+        result = services.get_scenario_instances("basic", threat_research_user)
+        assert result == []
+        mock_check.assert_called_once_with("basic", threat_research_user)
 
 
 # ---------------------------------------------------------------------------

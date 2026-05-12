@@ -1758,7 +1758,7 @@ def _set_local_password_or_raise(
     error.
     """
     cloud_provider = _get_cloud_provider()
-    password_token: str
+    rdp_token: str
     if cloud_provider == "aws":
         ssm_param_name = instance_data.get("rdp_password_ssm_param_name")
         if not ssm_param_name:
@@ -1767,7 +1767,7 @@ def _set_local_password_or_raise(
                 "rdp_password_ssm_param_name; provisioner did not record an SSM "
                 "Parameter Store reference for the per-instance password"
             )
-        password_token = f"{{{{ssm-secure:{ssm_param_name}}}}}"
+        rdp_token = f"{{{{ssm-secure:{ssm_param_name}}}}}"
     else:
         secret_ref = instance_data.get("rdp_password_secret_arn")
         if not secret_ref:
@@ -1778,9 +1778,9 @@ def _set_local_password_or_raise(
         fetched = _resolve_rdp_password_from_secret_ref(secret_ref)
         if not fetched:
             raise SetupError(f"{failure_prefix}: per-instance RDP password fetch returned empty for {instance_id}")
-        password_token = fetched
+        rdp_token = fetched
     plan = SetLocalPasswordPlan(platform=platform)
-    context = plan.get_context({"rdp_username": ctx.ssh_user, "rdp_password": password_token})
+    context = plan.get_context({"rdp_username": ctx.ssh_user, "rdp_password": rdp_token})
     _run_setup_plan(
         orchestrator,
         execution,

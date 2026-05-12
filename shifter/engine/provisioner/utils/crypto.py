@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # single-quote, double-quote, dollar, backslash, and whitespace because
 # those are the most common shell- and YAML-parsing minefields and
 # provide no entropy benefit. Not itself a credential.
-_RDP_PASSWORD_PUNCTUATION = "!#%&*+,-./:;<=>?@[]^_{|}~"  # noqa: S105 -- character set, not a credential  # nosec B105
+_RDP_PASSWORD_PUNCTUATION = "!#%&*+,-./:;<=>?@[]^_{|}~"  # noqa: S105  # nosec B105  # NOSONAR character set, not a credential
 _RDP_PASSWORD_ALPHABET = string.ascii_letters + string.digits + _RDP_PASSWORD_PUNCTUATION
 
 

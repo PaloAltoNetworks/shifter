@@ -70,7 +70,7 @@ fi
 "${CHPASSWD_CMD[@]}" <<'__SHIFTER_RDP_PW__'
 {{ rdp_username }}:{{ rdp_password }}
 __SHIFTER_RDP_PW__
-"""  # noqa: S105 -- shell script template, not a credential  # nosec B105
+"""  # noqa: S105  # nosec B105  # NOSONAR shell script template, not a credential
 
 LINUX_VERIFY_SCRIPT = """#!/bin/bash
 set -euo pipefail
@@ -126,7 +126,7 @@ try {
 } finally {
     $secure = $null
 }
-"""  # noqa: S105 -- powershell script template, not a credential  # nosec B105
+"""  # noqa: S105  # nosec B105  # NOSONAR powershell script template, not a credential
 
 WINDOWS_VERIFY_SCRIPT = """
 $ErrorActionPreference = "Stop"

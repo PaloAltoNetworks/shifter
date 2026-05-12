@@ -54,8 +54,15 @@ def is_ctf_participant_only(user) -> bool:
     return THREAT_RESEARCH_GROUP not in user_groups
 
 
-def _is_staff_or_threat_researcher(user) -> bool:
-    """Return True if the user is active and is staff or in the Threat Research group."""
+def can_edit_cms_authoring(user) -> bool:
+    """Return True if the user may use the CMS authoring surfaces.
+
+    Canonical policy for the experiment and scenario editor: an active user
+    who is either staff or a member of the ``Threat Research`` group. This
+    predicate is the single source of truth for view decorators, service-layer
+    gates, and template context — service-layer authorization MUST consume
+    this rather than re-implementing the group check locally.
+    """
     if not user.is_active:
         return False
     if user.is_staff:
@@ -77,7 +84,7 @@ def threat_research_required(view_func: Callable[..., HttpResponse]) -> Callable
             logger.debug("threat_research_required: unauthenticated user, redirecting to login")
             return redirect(settings.LOGIN_URL)
 
-        if _is_staff_or_threat_researcher(request.user):
+        if can_edit_cms_authoring(request.user):
             return view_func(request, *args, **kwargs)
 
         logger.warning(

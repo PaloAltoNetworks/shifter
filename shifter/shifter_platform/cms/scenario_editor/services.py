@@ -21,6 +21,7 @@ from cms.scenarios.registry import is_default_scenario
 from cms.scenarios.schema import ScenarioTemplate
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
+from shared.auth import can_edit_cms_authoring
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.exceptions import CMSError
 
@@ -35,7 +36,13 @@ class ScenarioEditorError(CMSError):
 
 
 def _validate_user(user: User, func_name: str) -> None:
-    """Validate user parameter — matches cms/services.py pattern."""
+    """Validate user shape and CMS authoring authorization.
+
+    Structural checks (None / instance / saved) match the cms/services.py
+    pattern. Authorization defers to ``shared.auth.can_edit_cms_authoring`` so
+    the service-layer gate stays aligned with the view decorator
+    (``threat_research_required``).
+    """
     if user is None:
         logger.error("%s called with None user", func_name)
         raise TypeError(USER_CANNOT_BE_NONE)
@@ -49,9 +56,9 @@ def _validate_user(user: User, func_name: str) -> None:
     if user.id is None:
         logger.error("%s called with unsaved user (id=None)", func_name)
         raise ValueError(USER_MUST_BE_SAVED)
-    if getattr(user, "is_staff", False) is not True:
-        logger.warning("%s called by non-staff user_id=%s", func_name, user.id)
-        raise PermissionDenied("Staff privileges are required")
+    if not can_edit_cms_authoring(user):
+        logger.warning("%s denied: user_id=%s not staff or Threat Research", func_name, user.id)
+        raise PermissionDenied("Active staff or Threat Research group membership is required")
 
 
 # Regex for valid scenario IDs: lowercase alphanumeric, hyphens, underscores.

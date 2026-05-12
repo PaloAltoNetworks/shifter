@@ -7,7 +7,7 @@ from django.test import RequestFactory
 
 from shared.auth import (
     THREAT_RESEARCH_GROUP,
-    _is_staff_or_threat_researcher,
+    can_edit_cms_authoring,
     threat_research_required,
 )
 
@@ -27,27 +27,31 @@ def _make_user(is_staff=False, is_active=True, groups=None):
     return user
 
 
-class TestIsStaffOrThreatResearcher:
-    """Unit tests for _is_staff_or_threat_researcher helper."""
+class TestCanEditCmsAuthoring:
+    """Unit tests for can_edit_cms_authoring helper."""
 
     def test_active_staff_returns_true(self):
         user = _make_user(is_staff=True)
-        assert _is_staff_or_threat_researcher(user) is True
+        assert can_edit_cms_authoring(user) is True
 
     def test_active_threat_research_member_returns_true(self):
         user = _make_user(is_staff=False, groups=[THREAT_RESEARCH_GROUP])
-        assert _is_staff_or_threat_researcher(user) is True
+        assert can_edit_cms_authoring(user) is True
 
-    def test_inactive_user_returns_false(self):
+    def test_inactive_staff_returns_false(self):
         user = _make_user(is_staff=True, is_active=False)
-        assert _is_staff_or_threat_researcher(user) is False
+        assert can_edit_cms_authoring(user) is False
+
+    def test_inactive_threat_research_member_returns_false(self):
+        user = _make_user(is_staff=False, is_active=False, groups=[THREAT_RESEARCH_GROUP])
+        assert can_edit_cms_authoring(user) is False
 
     def test_regular_user_returns_false(self):
         user = _make_user(is_staff=False)
-        assert _is_staff_or_threat_researcher(user) is False
+        assert can_edit_cms_authoring(user) is False
 
     def test_anonymous_user_returns_false(self):
-        assert _is_staff_or_threat_researcher(AnonymousUser()) is False
+        assert can_edit_cms_authoring(AnonymousUser()) is False
 
 
 class TestThreatResearchRequiredDecorator:

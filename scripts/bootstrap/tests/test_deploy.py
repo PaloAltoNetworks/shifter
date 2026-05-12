@@ -869,7 +869,7 @@ class TestGdcRenderers:
         config = deploy.GDCBootstrapConfig(
             project_id="prod-rwctxzl6shxk",
             cluster_id="cluster1",
-            google_account_email="bedwards@paloaltonetworks.com",
+            google_account_email="admin@example.com",
         )
 
         rendered = deploy.render_gdc_cluster_config(config)
@@ -878,7 +878,7 @@ class TestGdcRenderers:
         assert "controlPlaneVIP: 10.200.0.49" in rendered
         assert "ingressVIP: 10.200.0.50" in rendered
         assert "clusterAdmin:" in rendered
-        assert "bedwards@paloaltonetworks.com" in rendered
+        assert "admin@example.com" in rendered
 
     def test_prepare_hosts_script_bakes_in_vxlan_and_inotify_fix(self):
         """The host prep script should contain both the vxlan setup and the inotify hardening."""
@@ -2652,13 +2652,13 @@ class TestGcpBootstrapIdentityPlatform:
         with (
             patch(
                 "deploy.resolve_gcp_bootstrap_operator_credentials",
-                return_value=("bedwards@paloaltonetworks.com", "correct-horse-battery-staple"),
+                return_value=("analyst@paloaltonetworks.com", "correct-horse-battery-staple"),
             ),
             patch("deploy._gcp_identity_admin_request", return_value={"localId": "user-123"}),
         ):
             email = deploy.ensure_gcp_identity_platform_operator(config, outputs)
 
-        assert email == "bedwards@paloaltonetworks.com"
+        assert email == "analyst@paloaltonetworks.com"
 
     def test_ensure_gcp_identity_platform_operator_skips_existing_user(self):
         """Bootstrap should treat an existing operator account as success."""
@@ -2694,9 +2694,14 @@ class TestGcpBootstrapIdentityPlatform:
         mock_prompt.assert_called_once_with()
 
     def test_ensure_gcp_identity_platform_operator_rejects_non_corporate_email(self):
-        """Bootstrap must fail before touching Identity Platform when the operator email is not corporate."""
+        """Bootstrap must reject an operator email outside the
+        identity_allowed_email_domain Terraform output before touching
+        Identity Platform — that domain is the same allow-list the
+        Identity Platform beforeCreate hook enforces."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        # _sample_gcp_control_plane_outputs sets identity_allowed_email_domain
+        # to "paloaltonetworks.com"; an email outside that domain must fail.
 
         with (
             patch(
@@ -2707,6 +2712,38 @@ class TestGcpBootstrapIdentityPlatform:
         ):
             deploy.ensure_gcp_identity_platform_operator(config, outputs)
 
+    def test_ensure_gcp_identity_platform_operator_env_fallback(self, monkeypatch):
+        """When no identity_allowed_email_domain output is supplied (e.g., a dry
+        run before terraform apply), SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN is the
+        fallback enforcement seam."""
+        monkeypatch.setenv("SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN", "example.org")
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        outputs.pop("identity_allowed_email_domain")  # simulate no terraform output
+
+        with (
+            patch(
+                "deploy.resolve_gcp_bootstrap_operator_credentials",
+                return_value=("intruder@example.com", "correct-horse-battery-staple"),
+            ),
+            pytest.raises(ValueError, match=r"example\.org"),
+        ):
+            deploy.ensure_gcp_identity_platform_operator(config, outputs)
+
+    def test_ensure_gcp_identity_platform_operator_rejects_malformed_email(self):
+        """Bootstrap must fail before touching Identity Platform when the operator email is malformed."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+
+        with (
+            patch(
+                "deploy.resolve_gcp_bootstrap_operator_credentials",
+                return_value=("not-an-email", "correct-horse-battery-staple"),
+            ),
+            pytest.raises(ValueError, match=r"@"),
+        ):
+            deploy.ensure_gcp_identity_platform_operator(config, outputs)
+
     def test_render_gcp_platform_runtime_env_elevates_bootstrap_operator(self):
         """The generated runtime env should elevate the first operator without hardcoding an email in the repo."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
@@ -2714,11 +2751,11 @@ class TestGcpBootstrapIdentityPlatform:
         with patch("deploy.load_bootstrap_env_values", return_value={}):
             rendered = deploy.render_gcp_platform_runtime_env(
                 config,
-                bootstrap_operator_email="bedwards@paloaltonetworks.com",
+                bootstrap_operator_email="admin@example.com",
             )
 
-        assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
-        assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+        assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=admin@example.com\n" in rendered
+        assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=admin@example.com\n" in rendered
 
     def test_render_gcp_platform_runtime_env_uses_blank_guest_password_samples(self):
         """The generated env contract must not embed sample guest passwords in source-controlled output."""
@@ -2727,7 +2764,7 @@ class TestGcpBootstrapIdentityPlatform:
         with patch("deploy.load_bootstrap_env_values", return_value={}):
             rendered = deploy.render_gcp_platform_runtime_env(
                 config,
-                bootstrap_operator_email="bedwards@paloaltonetworks.com",
+                bootstrap_operator_email="admin@example.com",
             )
 
         assert "GDC_WINDOWS_ADMIN_PASSWORD=\n" in rendered

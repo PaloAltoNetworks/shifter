@@ -471,7 +471,7 @@ def walkthrough(request: HttpRequest) -> HttpResponse:
         "ctfd_url": getattr(
             django_settings,
             "CTFD_PLATFORM_URL",
-            "https://ctf.shifter.keplerops.com/login",
+            "https://ctf.shifter.example.com/login",
         ),
     }
     return render(request, "mission_control/walkthrough.html", context)

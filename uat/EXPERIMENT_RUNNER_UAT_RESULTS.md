@@ -26,7 +26,7 @@
 - Scenarios: **0 active (all soft-deleted)** ⚠️
 
 ### User Accounts
-- ✅ bedwards@paloaltonetworks.com (superuser)
+- ✅ admin@example.com (superuser)
 - ✅ bsookying@paloaltonetworks.com (staff)
 - ✅ dev@example.com (staff)
 - Note: Multiple staff accounts available for TC-10.2 (user isolation testing)

@@ -223,8 +223,9 @@ def test_identity_backend_enforces_corporate_domain(db):
 
 
 @override_settings(
-    PLATFORM_BOOTSTRAP_STAFF_EMAILS=["bedwards@paloaltonetworks.com"],
-    PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=["bedwards@paloaltonetworks.com"],
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="example.com",
+    PLATFORM_BOOTSTRAP_STAFF_EMAILS=["admin@example.com"],
+    PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=["admin@example.com"],
 )
 def test_identity_backend_bootstrap_admin_gets_staff_superuser(db):
     from config import identity_platform as identity_platform_auth
@@ -236,7 +237,7 @@ def test_identity_backend_bootstrap_admin_gets_staff_superuser(db):
         request,
         identity_claims={
             "sub": "sub-456",
-            "email": "bedwards@paloaltonetworks.com",
+            "email": "admin@example.com",
             "email_verified": True,
         },
     )

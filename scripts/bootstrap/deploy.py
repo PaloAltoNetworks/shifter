@@ -1930,9 +1930,51 @@ def prompt_for_gcp_bootstrap_operator_credentials() -> tuple[str, str]:
     return email, password
 
 
-def _validate_gcp_bootstrap_operator_email(email: str) -> None:
-    if not email.endswith("@paloaltonetworks.com"):
-        raise ValueError("GCP operator email must use the paloaltonetworks.com domain")
+def _validate_gcp_bootstrap_operator_email(
+    email: str,
+    outputs: dict[str, dict[str, object]] | None = None,
+) -> None:
+    """Validate the bootstrap operator email against the Identity Platform allow-list.
+
+    The shape check (must contain a single `@`, non-empty local + domain parts)
+    is always enforced. The domain restriction is derived, in order:
+
+    1. The ``identity_allowed_email_domain`` Terraform output (when ``outputs``
+       is supplied) — this is the same value the Identity Platform
+       ``beforeCreate`` hook uses, so the bootstrap operator the bootstrap
+       script writes into ``PLATFORM_BOOTSTRAP_*`` will actually be able to
+       sign in to the deployed portal.
+    2. The ``SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN`` environment variable as a
+       fallback for callers that have not yet run Terraform (e.g., unit tests
+       or dry-run flows). Unset means "accept any well-formed email" — only
+       legitimate when no Identity Platform deployment is in scope.
+    """
+    if email.count("@") != 1:
+        raise ValueError("GCP operator email must contain exactly one '@' character")
+    local, _, domain = email.partition("@")
+    if not local or not domain:
+        raise ValueError("GCP operator email must have a non-empty local part and domain")
+
+    required_domain = ""
+    source = ""
+    if outputs is not None:
+        tf_value = outputs.get("identity_allowed_email_domain", {}).get("value")
+        if isinstance(tf_value, str) and tf_value.strip():
+            required_domain = tf_value.strip().lower()
+            source = "Terraform output identity_allowed_email_domain"
+    if not required_domain:
+        env_value = os.environ.get("SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN", "").strip().lower()
+        if env_value:
+            required_domain = env_value
+            source = "SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN"
+
+    if required_domain and not email.lower().endswith(f"@{required_domain}"):
+        raise ValueError(
+            f"GCP operator email must use the {required_domain} domain "
+            f"(constraint from {source}). Bootstrap-time validation matches the "
+            "Identity Platform allow-list, so an operator whose domain fails "
+            "here cannot subsequently sign in to the deployed portal."
+        )
 
 
 def _gcp_identity_access_token() -> str:
@@ -1999,7 +2041,7 @@ def ensure_gcp_identity_platform_operator(
         credentials = prompt_for_gcp_bootstrap_operator_credentials()
 
     email, password = credentials
-    _validate_gcp_bootstrap_operator_email(email)
+    _validate_gcp_bootstrap_operator_email(email, outputs=outputs)
 
     if dry_run:
         info(f"[DRY-RUN] Would create or verify the Identity Platform operator account for {email}")

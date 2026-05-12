@@ -195,7 +195,11 @@ repos:
         entry: kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
         language: system
         files: ^platform/k8s/.*\.yaml$
-        exclude: kustomization\.yaml$
+        # Kustomize patch files (patch-*.yaml) are partial strategic-merge
+        # patches, not full manifests; strict schema validation is for
+        # fully-rendered resources, not patches. The base manifests under
+        # platform/k8s/gcp/base/ are still validated.
+        exclude: (kustomization\.yaml|patch-.*\.yaml)$
         types: [yaml]
 
   # =============================================================================
@@ -262,7 +266,11 @@ repos:
     hooks:
       - id: kube-linter
         name: kube-linter (k8s security)
-        entry: kube-linter lint --config .kube-linter.yaml platform/k8s/
+        # Kustomize patch files (patch-*.yaml) are partial strategic-merge
+        # patches and don't carry full Deployment fields; kube-linter's
+        # security checks are for fully-rendered resources, not patches.
+        # Base manifests under platform/k8s/gcp/base/ remain checked.
+        entry: kube-linter lint --config .kube-linter.yaml --ignore-paths "**/patch-*.yaml" platform/k8s/
         language: system
         files: ^platform/k8s/
         pass_filenames: false

@@ -34,7 +34,11 @@ Security posture:
 - Cloud SQL deletion protection is on by default (`var.cloud_sql_deletion_protection`, default `true`); the platform control-plane database cannot be destroyed without an explicit, environment-root override.
 - Memorystore Redis runs on the STANDARD_HA tier with `auth_enabled = true` and `transit_encryption_mode = "SERVER_AUTHENTICATION"` (ADR-008-R6). The AUTH token lives in a `redis` Secret Manager bundle and is hydrated by the runtime entrypoint just like the DB/app secrets — never in the runtime ConfigMap, generated env, or process argv. Django Channels reads `REDIS_TLS` / `REDIS_PASSWORD` and uses a `rediss://` channels_redis URL host; the helper fails closed if TLS is enabled without a hydrated password.
 - GCS buckets stay on Google-managed encryption keys (ADR-008-R5). Customer-managed encryption keys (CMEK) are deferred until an external compliance trigger materializes; see `docs/architecture/gcp-gcs-cmek-preflight.md` for the recorded decision, owner, and review trigger.
-- `gdc-bootstrap` now fails before Terraform apply unless `terraform.tfvars` provides:
+- `gdc-bootstrap` now fails before Terraform apply unless your
+  deployment-specific override (typically `local.auto.tfvars` for local
+  runs, or rendered from GitHub secrets for CI — see
+  [`docs/dev/deploy-secrets.md`](../../../docs/dev/deploy-secrets.md))
+  provides:
   - `public_hostname`
   - `enable_managed_tls = true`
   - at least one `gke_master_authorized_cidrs` entry
@@ -59,10 +63,10 @@ contract consumed by the provisioner runtime:
 `gcp-dev` concrete values:
 
 - `project_id = "prod-rwctxzl6shxk"`
-- `public_hostname = "shifter.keplerops.com"`
+- `public_hostname = "shifter.example.com"`
 - `enable_managed_tls = true`
 - `gke_master_authorized_cidrs = ["173.181.31.170/32"]` as of 2026-04-11 from the current WSL operator egress
 
 Operational note:
 
-- `create_dns_managed_zone = false` is intentional. DNS is assumed to be managed outside this Terraform tree for now. `shifter.keplerops.com` must resolve to the reserved ingress IP before the Google-managed certificate will become active.
+- `create_dns_managed_zone = false` is intentional. DNS is assumed to be managed outside this Terraform tree for now. `shifter.example.com` must resolve to the reserved ingress IP before the Google-managed certificate will become active.

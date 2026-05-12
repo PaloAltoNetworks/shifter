@@ -1,0 +1,236 @@
+# Dependabot configuration for Shifter.
+#
+# Each `updates` entry maps to one package root in the repo. Adding a
+# new root means appending a new entry here — there is no shared workspace.
+#
+# Ecosystems used:
+#   - `uv`             — Python (each package root has its own pyproject.toml + uv.lock)
+#   - `npm`            — Node (mcp/* and shifter_platform's frontend asset bundle)
+#   - `github-actions` — pinned third-party GitHub Actions at repo root
+#   - `pre-commit`     — guardrail toolchain pinned in .pre-commit-config.yaml
+#
+# Open-PR limits and cadence follow PANW's polish-tier convention. Major
+# updates are grouped where the ecosystem supports it so the maintainers
+# see one PR per major-version surface rather than one per package.
+#
+# Every update block targets `dev` (the integration branch); `main` is the
+# stable release line per CONTRIBUTING.md and only receives release-PR
+# promotions, never automated dep bumps.
+
+version: 2
+updates:
+  # ------------------------------------------------------------------
+  # GitHub Actions
+  # ------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ------------------------------------------------------------------
+  # Pre-commit guardrail toolchain
+  # ------------------------------------------------------------------
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pre-commit-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ------------------------------------------------------------------
+  # Python (uv) — one entry per pyproject root
+  # ------------------------------------------------------------------
+  - package-ecosystem: "uv"
+    directory: "/shifter/shifter_platform"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/shifter/installation"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/shifter/cyberscript"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/shifter/packer"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/shifter/engine/provisioner"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/scripts/bootstrap"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/scripts/gcp"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/scripts/check_layer_imports"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/scripts/check_rds_pending_modifications"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ------------------------------------------------------------------
+  # Node (npm) — one entry per package.json root
+  # ------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/shifter/shifter_platform"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/mcp/shared"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/mcp/ngfw"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/mcp/ops"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/mcp/planner"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/platform/terraform/gcp/modules/platform-core/functions/identity-platform"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

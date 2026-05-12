@@ -40,7 +40,7 @@ docker-compose up -d
 cat > /etc/nginx/conf.d/ctfd.conf << 'NGINX'
 server {
     listen 80;
-    server_name ts2026.keplerops.com;
+    server_name ts2026.example.com;
 
     client_max_body_size 100M;
 

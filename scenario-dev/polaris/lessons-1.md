@@ -337,7 +337,7 @@ Save this as a snippet. Don't fight shell escaping on event day.
    have saved 15 minutes on the PDF hotfix.
 7. **Put the Discord support link on the Start Here page before the event, not mid-event.**
 8. **Have the briefing deck served from the CTFd server from day 1, not as a post-event
-   thought.** `polaris.keplerops.com/briefing/` is the right URL.
+   thought.** `polaris.example.com/briefing/` is the right URL.
 9. **Event window starts 15 min early.** 5:45 PM open, 6:00 PM brief — gives time for the
    first "I can't log in" round before any content pressure.
 

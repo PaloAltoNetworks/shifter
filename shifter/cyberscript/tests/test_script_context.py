@@ -446,7 +446,10 @@ class TestRenderClaudeCommand:
         assert f" -p {expected_arg} " in cmd
 
     def test_full_shape(self) -> None:
-        from cyberscript.script_context import ScriptExecutionContext
+        from cyberscript.script_context import (
+            AI_EXPERIMENT_EXECUTION_POLICY_VERSION,
+            ScriptExecutionContext,
+        )
 
         ctx = ScriptExecutionContext(
             script_type="claude_code",
@@ -460,6 +463,17 @@ class TestRenderClaudeCommand:
             "2>&1 | tee /tmp/claude_output.json"
         )
         assert ctx.render_command() == expected
+        assert AI_EXPERIMENT_EXECUTION_POLICY_VERSION == "ai-experiment-execution-v1"
+
+    def test_policy_payload_pins_allowed_claude_boundary(self) -> None:
+        from cyberscript.script_context import build_ai_execution_policy_payload
+
+        policy = build_ai_execution_policy_payload()
+        claude = policy["claude_code"]
+
+        assert policy["version"] == "ai-experiment-execution-v1"
+        assert claude["prompt_delivery"] == "validated_single_argument"
+        assert claude["transcript_artifact_required"] is True
 
 
 # ---------------------------------------------------------------------------

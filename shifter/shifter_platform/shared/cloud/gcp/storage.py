@@ -101,6 +101,29 @@ class GCPObjectStorage:
             logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, key, e)
             raise CloudStorageError(f"Failed to head GCS object: {e}") from e
 
+    def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes:
+        """Read up to `max_bytes` from the start of the blob.
+
+        GCS `download_as_bytes(start=, end=)` uses an inclusive `end`, so
+        `max_bytes=512` corresponds to `end=511`.
+        """
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, key, max_bytes)
+        try:
+            client = self._get_client()
+            blob = client.bucket(bucket).blob(key)
+            body = blob.download_as_bytes(start=0, end=max_bytes - 1)
+        except Exception as e:
+            logger.error(
+                "read_object_header: failed bucket=%s key=%s error=%s",
+                bucket,
+                key,
+                e,
+            )
+            raise CloudStorageError(f"Failed to read GCS object header: {e}") from e
+        return body[:max_bytes]
+
     def generate_presigned_upload_url(
         self,
         bucket: str,

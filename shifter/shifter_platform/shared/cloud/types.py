@@ -30,6 +30,8 @@ class ObjectStorage(Protocol):
 
     def head_object(self, bucket: str, key: str) -> dict[str, Any]: ...
 
+    def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes: ...
+
     def generate_presigned_upload_url(
         self,
         bucket: str,

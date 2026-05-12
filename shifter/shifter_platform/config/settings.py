@@ -527,6 +527,21 @@ AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1MB max per script
 SCRIPT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
+# Server-side upload inspection (issue #696). Provider-neutral byte budget for
+# the magic-byte header read performed at finalization across CTF, agent, and
+# experiment-script uploads. The floor is dictated by the largest registered
+# offset signature (POSIX tar's ``ustar`` marker at offset 257 needs 262 bytes);
+# 512 comfortably covers it with slack. Sub-floor or non-positive overrides
+# (env mis-set to 0/-1) clamp to the floor so the adapter never raises
+# ``ValueError`` from an invalid runtime config, and so offset-based formats
+# remain inspectable.
+_UPLOAD_INSPECTION_FLOOR = 512
+try:
+    _UPLOAD_INSPECTION_RAW = int(os.environ.get("UPLOAD_INSPECTION_MAX_HEADER_BYTES", str(_UPLOAD_INSPECTION_FLOOR)))
+except ValueError:
+    _UPLOAD_INSPECTION_RAW = _UPLOAD_INSPECTION_FLOOR
+UPLOAD_INSPECTION_MAX_HEADER_BYTES = max(_UPLOAD_INSPECTION_RAW, _UPLOAD_INSPECTION_FLOOR)
+
 # Experiment execution limits
 EXPERIMENT_MAX_TOTAL_RUNS = 10
 EXPERIMENT_MAX_PARALLEL_RUNS = 5

@@ -181,6 +181,34 @@ def delete_s3_object(s3_key: str) -> None:
     logger.info("delete_s3_object: success s3_key=%s", safe_log(s3_key))
 
 
+def read_script_header(s3_key: str, max_bytes: int) -> bytes:
+    """Read up to `max_bytes` from the start of a script upload object.
+
+    Bridges `CloudStorageError` to the `S3Error` family used by experiment
+    services. Used by `complete_script_upload` to inspect server-side that
+    the uploaded bytes are text rather than a binary file masquerading as a
+    Python script (issue #696).
+    """
+    if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("read_script_header: AWS_S3_BUCKET_NAME not configured")
+        raise S3Error("AWS_S3_BUCKET_NAME is not configured")
+
+    try:
+        storage = get_object_storage()
+        return storage.read_object_header(
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            max_bytes=max_bytes,
+        )
+    except CloudStorageError as e:
+        logger.error(
+            "read_script_header: failed s3_key=%s error=%s",
+            safe_log(s3_key),
+            safe_log(str(e)),
+        )
+        raise S3Error(str(e)) from e
+
+
 def verify_s3_object(s3_key: str) -> tuple[int, str]:
     """Verify an S3 object exists and return its metadata.
 

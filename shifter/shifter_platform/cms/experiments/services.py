@@ -35,6 +35,7 @@ from cms.experiments.s3 import (
     generate_presigned_download_url,
     generate_script_upload_url,
     generate_upload_token,
+    read_script_header,
     verify_s3_object,
     verify_upload_token,
 )
@@ -49,6 +50,12 @@ from risk_register.models import AuditLog
 from risk_register.services import audit_log
 from shared.auth import validate_cms_authoring_user
 from shared.log_sanitize import safe_log
+from shared.uploads.inspection import (
+    InspectionError as _ScriptInspectionError,
+)
+from shared.uploads.inspection import (
+    validate_text_header as _validate_script_text_header,
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -173,6 +180,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             raise ScriptUploadError(f"Invalid upload token: {e}") from e
 
         s3_key = payload["s3_key"]
+        expected_size = payload["file_size"]
 
         try:
             actual_size, etag = verify_s3_object(s3_key)
@@ -190,6 +198,54 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             )
             delete_s3_object(s3_key)
             raise ScriptUploadError(f"File size {actual_size} exceeds maximum {max_size} bytes")
+
+        # Enforce the signed upload contract: actual object size must match
+        # the size signed into the upload token. Matches the agent
+        # `complete_upload` invariant; without it a caller could initiate a
+        # small-size upload and PUT a different-size object to the same key.
+        if actual_size != expected_size:
+            logger.warning(
+                "complete_script_upload: size mismatch s3_key=%s expected=%d actual=%d",
+                safe_log(s3_key),
+                expected_size,
+                actual_size,
+            )
+            delete_s3_object(s3_key)
+            raise ScriptUploadError(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+        # Server-side full-body content inspection (issue #696). Scripts are
+        # capped at 1 MB, so we read the entire body — not just a header — and
+        # require it to be valid UTF-8 with no binary signature anywhere in
+        # the stream. This blocks the "valid text prefix + binary tail" bypass
+        # the bounded-header check by itself cannot detect.
+        try:
+            body = read_script_header(s3_key, max_size)
+        except S3Error as e:
+            logger.error(
+                "complete_script_upload: body read failed s3_key=%s: %s",
+                safe_log(s3_key),
+                safe_log(str(e)),
+            )
+            raise ScriptUploadError("Upload content inspection failed") from e
+
+        try:
+            _validate_script_text_header(body, complete=True)
+        except _ScriptInspectionError as e:
+            logger.warning(
+                "complete_script_upload: header inspection rejected upload user_id=%s s3_key=%s reason=%s",
+                user.pk,
+                safe_log(s3_key),
+                e,
+            )
+            try:
+                delete_s3_object(s3_key)
+            except S3Error as delete_exc:
+                logger.error(
+                    "complete_script_upload: delete after inspection failure also failed s3_key=%s: %s",
+                    safe_log(s3_key),
+                    safe_log(str(delete_exc)),
+                )
+            raise ScriptUploadError("Uploaded content is not a valid script (binary or non-UTF-8 header)") from e
 
         script = ScriptAsset(
             user=user,

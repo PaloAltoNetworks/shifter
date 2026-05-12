@@ -66,9 +66,25 @@ def challenge(db, draft_event):
     )
 
 
-def _make_file(content: bytes = b"test file content", name: str = "test.pcap"):
-    """Create a file-like object for upload testing."""
+_PCAP_MAGIC = b"\xd4\xc3\xb2\xa1"
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _make_file(content: bytes = b"test file content", name: str = "test.txt"):
+    """Create a file-like object for upload testing.
+
+    Default content is plain UTF-8 text and the default name is `.txt`
+    (TEXT-category inspection passes for plain text). Tests that exercise a
+    specific binary extension must supply a matching magic-byte header.
+    """
     f = io.BytesIO(content)
+    f.name = name
+    return f
+
+
+def _make_pcap_file(name: str = "capture.pcap"):
+    """File-like object whose header is a real libpcap magic prefix."""
+    f = io.BytesIO(_PCAP_MAGIC + b"\x00" * 32)
     f.name = name
     return f
 
@@ -78,7 +94,8 @@ class TestAddChallengeFile:
 
     def test_upload_success(self, challenge, mock_s3):
         """Valid file upload creates a CTFChallengeFile record."""
-        file_obj = _make_file()
+        pcap_content = _PCAP_MAGIC + b"\x00" * 32
+        file_obj = _make_file(content=pcap_content, name="capture.pcap")
         result = add_challenge_file(
             challenge.id,
             file_obj,
@@ -88,7 +105,7 @@ class TestAddChallengeFile:
         )
         assert result.filename == "capture.pcap"
         assert result.display_name == "Network Capture"
-        assert result.file_size_bytes == len(b"test file content")
+        assert result.file_size_bytes == len(pcap_content)
         assert result.sha256_hash  # non-empty
         assert result.s3_key.startswith("ctf-files/")
         mock_s3.upload_fileobj.assert_called_once()
@@ -157,6 +174,86 @@ class TestAddChallengeFile:
         with pytest.raises(CTFNotFoundError):
             add_challenge_file(uuid4(), _make_file(), "file.txt", actor_id=1)
 
+    def test_magic_byte_mismatch_rejected_before_upload(self, challenge, mock_s3):
+        """A .png filename with a PDF magic-byte header is rejected and S3 is not called."""
+        bogus_png = io.BytesIO(b"%PDF-1.7\n" + b"\x00" * 32)
+        with pytest.raises(CTFValidationError, match="inspection"):
+            add_challenge_file(
+                challenge.id,
+                bogus_png,
+                "fake.png",
+                actor_id=challenge.event.created_by_id,
+            )
+        mock_s3.upload_fileobj.assert_not_called()
+
+    def test_text_extension_with_binary_header_rejected(self, challenge, mock_s3):
+        """A .txt filename whose body is a PE binary header is rejected."""
+        pe_bytes = io.BytesIO(b"MZ\x90\x00" + b"\x00" * 32)
+        with pytest.raises(CTFValidationError, match="inspection"):
+            add_challenge_file(
+                challenge.id,
+                pe_bytes,
+                "wolf-in-sheep.txt",
+                actor_id=challenge.event.created_by_id,
+            )
+        mock_s3.upload_fileobj.assert_not_called()
+
+    def test_opaque_extension_accepts_arbitrary_bytes(self, challenge, mock_s3):
+        """.bin is an OPAQUE category — any byte content is accepted (size still enforced)."""
+        opaque = io.BytesIO(b"\xff\xfe\xfd\xfc\x00\x01\x02\x03 random binary blob")
+        result = add_challenge_file(
+            challenge.id,
+            opaque,
+            "raw.bin",
+            actor_id=challenge.event.created_by_id,
+        )
+        assert result.filename == "raw.bin"
+        mock_s3.upload_fileobj.assert_called_once()
+
+    def test_magic_byte_match_passes(self, challenge, mock_s3):
+        """A .png with a real PNG header succeeds."""
+        png = io.BytesIO(_PNG_MAGIC + b"\x00" * 32)
+        result = add_challenge_file(
+            challenge.id,
+            png,
+            "screenshot.png",
+            actor_id=challenge.event.created_by_id,
+        )
+        assert result.filename == "screenshot.png"
+        mock_s3.upload_fileobj.assert_called_once()
+
+    def test_text_extension_with_binary_tail_rejected(self, challenge, mock_s3):
+        """Cycle 3 finding 5: a text-prefix + binary-tail upload must fail.
+
+        The bounded header inspection alone would not catch this (the prefix
+        is valid UTF-8); the streaming text validator that runs alongside the
+        SHA256 loop rejects the binary tail.
+        """
+        prefix = b"# Looks like a Python file\n" + b" " * 600
+        body = prefix + b"\xff\xfe\xfd\xfc binary garbage tail\n"
+        bypass = io.BytesIO(body)
+        with pytest.raises(CTFValidationError, match="inspection"):
+            add_challenge_file(
+                challenge.id,
+                bypass,
+                "smuggle.py",
+                actor_id=challenge.event.created_by_id,
+            )
+        mock_s3.upload_fileobj.assert_not_called()
+
+    def test_text_extension_with_full_utf8_body_succeeds(self, challenge, mock_s3):
+        """Streaming validator must accept a clean UTF-8 body."""
+        body = ("# valid UTF-8 with multibyte: café résumé\n" * 200).encode("utf-8")
+        clean = io.BytesIO(body)
+        result = add_challenge_file(
+            challenge.id,
+            clean,
+            "clean.py",
+            actor_id=challenge.event.created_by_id,
+        )
+        assert result.filename == "clean.py"
+        mock_s3.upload_fileobj.assert_called_once()
+
 
 class TestRemoveChallengeFile:
     """Tests for remove_challenge_file."""
@@ -209,7 +306,12 @@ class TestGetDownloadUrl:
 
     def test_returns_presigned_url(self, challenge, mock_s3):
         """Returns a presigned S3 URL and filename."""
-        cf = add_challenge_file(challenge.id, _make_file(), "download_me.pcap", actor_id=challenge.event.created_by_id)
+        cf = add_challenge_file(
+            challenge.id,
+            _make_pcap_file("download_me.pcap"),
+            "download_me.pcap",
+            actor_id=challenge.event.created_by_id,
+        )
         url, filename = get_download_url(cf.id)
         assert "amazonaws.com" in url
         assert filename == "download_me.pcap"
@@ -230,7 +332,9 @@ class TestCTFChallengeFileModel:
         )
         assert f1.display == "Memory Dump"
 
-        f2 = add_challenge_file(challenge.id, _make_file(), "data.pcap", actor_id=challenge.event.created_by_id)
+        f2 = add_challenge_file(
+            challenge.id, _make_pcap_file("data.pcap"), "data.pcap", actor_id=challenge.event.created_by_id
+        )
         assert f2.display == "data.pcap"
 
     def test_file_size_display(self, challenge, mock_s3):

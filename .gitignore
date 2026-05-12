@@ -355,10 +355,13 @@ local.auto.tfvars
 # Generated kustomize overlay files — the renderers
 # (scripts/gcp/render_edge_manifest.py, render_private_service_netpol.py)
 # overwrite these at deploy time from terraform outputs. The
-# `platform-runtime.generated.env` file is intentionally kept committed as
-# a placeholder so `kustomize build` succeeds in static validation; the
-# deploy renderer overwrites it in place.
-platform/k8s/gcp/overlays/*/platform-edge.generated.yaml
+# `platform-runtime.generated.env` and `platform-edge.generated.yaml`
+# files are intentionally kept committed (they carry no deployment-
+# specific identifiers in their checked-in shape) so `kustomize build`
+# + the validate workflow succeed in static validation; the deploy
+# renderer overwrites them in place at apply time. The
+# `platform-private-service.generated.yaml` IS regenerated per deploy
+# from terraform-output CIDRs and is gitignored.
 platform/k8s/gcp/overlays/*/platform-private-service.generated.yaml
 
 # GitHub Runner Lambda zips (downloaded by terraform module)

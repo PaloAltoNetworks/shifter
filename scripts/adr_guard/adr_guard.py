@@ -563,6 +563,76 @@ def _consume_string(text: str, i: int, quote: str) -> tuple[int, str, str, str]:
     return i + 1, _blank_for(ch), "string", quote
 
 
+def _strip_js_comments_only(text: str) -> str:
+    """Replace JS `//` and `/* */` comment contents with whitespace,
+    preserve string-literal contents verbatim.
+
+    Used by `mcp-ops-tls-strict` (#1190 / codex review #1180 cycle 1
+    finding 7): the previous full strip erased quoted property keys
+    like `{ "rejectUnauthorized": false }` along with the legitimate
+    string-literal documentation neighbours. Stripping only comments
+    keeps the quoted-key form visible to the regex while still
+    suppressing false-positives from explanatory `//` comments.
+    """
+    out: list[str] = []
+    n = len(text)
+    i = 0
+    while i < n:
+        ch = text[i]
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            # Line comment runs to end of line; emit spaces.
+            end = text.find("\n", i + 2)
+            if end == -1:
+                out.append(" " * (n - i))
+                i = n
+            else:
+                out.append(" " * (end - i))
+                i = end
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            end = text.find("*/", i + 2)
+            if end == -1:
+                out.append(" " * (n - i))
+                i = n
+            else:
+                # Preserve newlines so line numbers stay correct.
+                segment = text[i : end + 2]
+                out.append("".join(c if c == "\n" else " " for c in segment))
+                i = end + 2
+            continue
+        if ch == '"' or ch == "'":
+            # String literal: preserve verbatim, including quotes.
+            quote = ch
+            j = i + 1
+            while j < n:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if text[j] == quote:
+                    j += 1
+                    break
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+        if ch == "`":
+            # Template literal: preserve verbatim (substitutions are
+            # rare in TLS-config call sites; if one ever appears, the
+            # reviewer can rewrite the line).
+            j = i + 1
+            while j < n and text[j] != "`":
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            out.append(text[i : j + 1])
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _strip_js_comments_and_strings(text: str) -> str:
     """Flatten JS string-literal and comment contents to whitespace.
 
@@ -696,6 +766,96 @@ def check_mcp_no_shell_exec(repo_root: Path, files: list[str] | None) -> list[Vi
                     "ADR-010-R1",
                     rel,
                     "Uses spawn/spawnSync/execFile/execFileSync with { shell: true }; MCP servers must invoke external CLIs via argv arrays without a shell",
+                )
+            )
+    return violations
+
+
+# Issue #1190 — mcp/ops Postgres TLS verification must stay on. This
+# is a defense-in-depth backstop for `mcp/ops/lib.js::buildPoolConfig`,
+# which is the single place that builds the pg.Pool TLS config. The
+# guardrail flags any other file under `mcp/ops/` that introduces
+# `rejectUnauthorized: false` (or `0`/`null`), even in a different
+# call site, before code review notices.
+#
+# The regex matches BOTH the unquoted `rejectUnauthorized: false`
+# property form AND the quoted property-name forms
+# `"rejectUnauthorized": false` / `'rejectUnauthorized': false`.
+# Stripping JS strings before matching would erase the quoted-key
+# form (codex #1180 cycle 1 finding 7) so we match against raw text.
+# A comment line literally containing this token is rare enough that
+# the false-positive risk is bounded; in that case the reviewer
+# rewrites the comment, which is the right outcome anyway.
+_REJECT_UNAUTH_FALSE = re.compile(
+    r"""["']?rejectUnauthorized["']?\s*:\s*(?:false|0|null)\b""",
+    re.IGNORECASE,
+)
+
+
+def check_mcp_ops_tls_strict(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Forbid `rejectUnauthorized: false` under mcp/ops (ADR-014-R7).
+
+    The `mcp/ops` MCP server connects to RDS Postgres via an SSM port
+    forward. Issue #1190 — the previous implementation disabled TLS
+    verification to work around the cert/host mismatch caused by the
+    tunnel. `buildPoolConfig` (in `mcp/ops/lib.js`) now sets
+    `ssl.servername` to the captured RDS endpoint so verification fires
+    against the real RDS cert; the `rejectUnauthorized: false` escape
+    hatch is removed.
+
+    This check scans the JS/MJS/CJS files under `mcp/ops/` (excluding
+    `node_modules/`) for any reintroduction of
+    `rejectUnauthorized: false` (or `0`/`null`). Matches both
+    unquoted property keys (`rejectUnauthorized: false`) and quoted
+    property keys (`"rejectUnauthorized": false`,
+    `'rejectUnauthorized': false`) so JSON-shaped config cannot
+    re-introduce the setting under the guard's nose.
+    """
+    ops_root = repo_root / "mcp" / "ops"
+    if not ops_root.exists():
+        return []
+
+    if files is not None:
+        candidate_paths = [
+            repo_root / path
+            for path in files
+            if path.startswith("mcp/ops/") and path.endswith((".js", ".mjs", ".cjs"))
+        ]
+    else:
+        candidate_paths = [
+            p
+            for p in ops_root.rglob("*")
+            if p.is_file()
+            and p.suffix in (".js", ".mjs", ".cjs")
+            and "node_modules" not in p.parts
+        ]
+
+    violations: list[Violation] = []
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        # Strip comments only (not strings) so:
+        #   - `// rejectUnauthorized: false` doc comments do not trip.
+        #   - quoted-key forms `{ "rejectUnauthorized": false }` still
+        #     match the regex (codex review #1180 cycle 1 finding 7).
+        comment_stripped = _strip_js_comments_only(text)
+        if _REJECT_UNAUTH_FALSE.search(comment_stripped):
+            rel = _repo_relative(path, repo_root)
+            violations.append(
+                Violation(
+                    check="mcp-ops-tls-strict",
+                    rule_id="ADR-014-R7",
+                    path=rel,
+                    message=(
+                        "Postgres TLS verification must stay enabled. "
+                        "Use buildPoolConfig() in mcp/ops/lib.js, which sets "
+                        "ssl.servername to the captured RDS endpoint so cert "
+                        "verification fires against RDS, not localhost."
+                    ),
                 )
             )
     return violations
@@ -1689,6 +1849,182 @@ def check_no_plaintext_secrets_in_tfvars(repo_root: Path, files: list[str] | Non
     return violations
 
 
+# Centralized blocked-path / blocked-name set for the
+# `no-tracked-generated-artifacts` check (ADR-004-R8). Each entry is a
+# pair: (root prefix under which the rule applies, predicate over the
+# repo-relative path's basename). The roots are intentionally narrow so
+# unrelated source files with overlapping names elsewhere in the repo
+# are not flagged.
+#
+# Terraform plan outputs: `tfplan`, `plan.out`, and any `*.tfplan` /
+# `*.tfplan.binary` under the AWS or GCP terraform environment trees.
+# These are generated security-sensitive artifacts; they may carry
+# state-derived values, resource addresses, and provider metadata and
+# must not be tracked in source.
+#
+# Bootstrap license/authcode material: `authcodes` (and `*.authcodes`)
+# under `temp/bootstrap/`. These are pre-staging outputs from local
+# bootstrap workflows and must not be committed.
+_GENERATED_ARTIFACT_ROOTS: tuple[str, ...] = (
+    "platform/terraform/environments/",
+    "platform/terraform/gcp/environments/",
+    "temp/bootstrap/",
+)
+
+
+def _is_terraform_plan_artifact(basename: str) -> bool:
+    """Return True for Terraform plan output filenames.
+
+    Matches the canonical names produced by `terraform plan -out=...`
+    workflows: `tfplan` and `tfplan.binary` (binary plan files) and
+    `plan.out` (typical text dump). Also matches the `*.tfplan` and
+    `*.tfplan.binary` families so per-environment names like
+    `dev.tfplan` and `prod.tfplan.binary` are caught. Case-sensitive
+    to avoid over-matching unrelated source filenames such as
+    `terraform_planner.py`.
+    """
+    if basename in ("tfplan", "tfplan.binary", "plan.out"):
+        return True
+    return basename.endswith(".tfplan") or basename.endswith(".tfplan.binary")
+
+
+def _is_bootstrap_authcode_artifact(basename: str) -> bool:
+    """Return True for tracked bootstrap license/authcode filenames."""
+    return basename == "authcodes" or basename.endswith(".authcodes")
+
+
+def _generated_artifact_match(rel_path: str) -> bool:
+    """Return True if a repo-relative path is a blocked generated artifact."""
+    in_scope = any(rel_path.startswith(root) for root in _GENERATED_ARTIFACT_ROOTS)
+    if not in_scope:
+        return False
+    basename = rel_path.rsplit("/", 1)[-1]
+    if rel_path.startswith("platform/terraform/"):
+        return _is_terraform_plan_artifact(basename)
+    if rel_path.startswith("temp/bootstrap/"):
+        return _is_bootstrap_authcode_artifact(basename)
+    return False
+
+
+def _iter_artifact_candidates(repo_root: Path) -> list[str]:
+    """Return repo-relative paths of TRACKED files matching the policy.
+
+    Codex review #1180 cycle 1 finding 1: the previous walk-the-
+    filesystem implementation flagged any ignored local workspace
+    file under the Terraform/temp roots, which would break
+    `adr_guard --all --level ci` when a developer or earlier CI step
+    generated an ephemeral `tfplan`. The contract is to block files
+    that are tracked in source control (or staged for the next
+    commit); files matched only by `.gitignore` are intentionally
+    allowed. We delegate the source-controlled detection to
+    `git ls-files`, which already considers both tracked + staged
+    entries and is the canonical source for "what is in version
+    control."
+
+    A test that runs against a synthetic tmpdir (no `.git` present)
+    falls back to the filesystem walk so the unit tests can build
+    pseudo-trees without initializing a git repo. The fallback only
+    triggers when there is no usable git index, never in real-repo
+    use.
+    """
+    tracked = _git_tracked_under_roots(repo_root)
+    if tracked is None:
+        # No git index — synthetic test mode. Walk the filesystem.
+        candidates: list[str] = []
+        for root in _GENERATED_ARTIFACT_ROOTS:
+            base = repo_root / root
+            if not base.exists():
+                continue
+            for path in base.rglob("*"):
+                if not path.is_file():
+                    continue
+                rel = _repo_relative(path, repo_root)
+                if _generated_artifact_match(rel):
+                    candidates.append(rel)
+        return candidates
+    return [p for p in tracked if _generated_artifact_match(p)]
+
+
+def _git_tracked_under_roots(repo_root: Path) -> list[str] | None:
+    """Return all tracked (and staged) repo-relative paths under
+    `_GENERATED_ARTIFACT_ROOTS`, or `None` if `repo_root` is not a
+    git working tree."""
+    if not (repo_root / ".git").exists():
+        return None
+    cmd = [
+        "git",
+        "-C",
+        str(repo_root),
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        *_GENERATED_ARTIFACT_ROOTS,
+    ]
+    try:
+        # `--cached` enumerates tracked files; `--others
+        # --exclude-standard` adds untracked files NOT ignored by
+        # gitignore — that captures `git add -f` candidates that
+        # bypassed .gitignore and would otherwise be invisible to a
+        # tracked-only check until they hit the index.
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.decode("utf-8", errors="replace")
+    return [entry for entry in output.split("\0") if entry]
+
+
+def check_no_tracked_generated_artifacts(
+    repo_root: Path, files: list[str] | None
+) -> list[Violation]:
+    """Forbid tracked generated/sensitive artifacts (ADR-004-R8).
+
+    Two artifact families are blocked, each scoped narrowly:
+
+    - Terraform plan outputs (`tfplan`, `plan.out`, `*.tfplan`,
+      `*.tfplan.binary`) under `platform/terraform/environments/` and
+      `platform/terraform/gcp/environments/`. Plan files are generated
+      security-sensitive artifacts: they may carry state-derived
+      values, resource addresses, provider metadata, and deployment-
+      specific operational details.
+    - License / authcode bootstrap material (`authcodes`,
+      `*.authcodes`) under `temp/bootstrap/`. These pre-staging
+      outputs must not be tracked.
+
+    The check fails closed at the staged-source boundary. It does NOT
+    parse plan binaries or echo file content — the violation message
+    names the repo-relative path and the remediation.
+    """
+    violations: list[Violation] = []
+    if files is not None:
+        in_scope = sorted({p for p in files if _generated_artifact_match(p)})
+    else:
+        in_scope = sorted(set(_iter_artifact_candidates(repo_root)))
+    for rel in in_scope:
+        violations.append(
+            Violation(
+                check="no-tracked-generated-artifacts",
+                rule_id="ADR-004-R8",
+                path=rel,
+                message=(
+                    "Generated/sensitive artifact must not be tracked in source. "
+                    "Remove with `git rm` and ensure the path is covered by "
+                    ".gitignore + the ADR-004-R8 guardrail."
+                ),
+            )
+        )
+    return violations
+
+
 # Canonical Python packages whose pyproject.toml must enforce the per-function
 # complexity gate. Keyed off `.pre-commit-config.yaml` ruff hooks. Adding a new
 # Python package with a ruff-pre-commit hook means adding it here too.
@@ -2166,6 +2502,8 @@ CHECKS = {
     "k8s-deployment-security-context": check_k8s_deployment_security_context,
     "k8s-network-policy-coverage": check_k8s_network_policy_coverage,
     "no-plaintext-secrets-in-tfvars": check_no_plaintext_secrets_in_tfvars,
+    "no-tracked-generated-artifacts": check_no_tracked_generated_artifacts,
+    "mcp-ops-tls-strict": check_mcp_ops_tls_strict,
     "python-complexity-gate": check_python_complexity_gate,
 }
 CHECK_LEVELS = {
@@ -2177,6 +2515,8 @@ CHECK_LEVELS = {
         "cloud-factory-seam",
         "mcp-no-shell-exec",
         "no-plaintext-secrets-in-tfvars",
+        "no-tracked-generated-artifacts",
+        "mcp-ops-tls-strict",
         "python-complexity-gate",
     ],
     "ci": [
@@ -2188,6 +2528,8 @@ CHECK_LEVELS = {
         "k8s-deployment-security-context",
         "k8s-network-policy-coverage",
         "no-plaintext-secrets-in-tfvars",
+        "no-tracked-generated-artifacts",
+        "mcp-ops-tls-strict",
         "python-complexity-gate",
     ],
     "all": list(CHECKS),

@@ -105,6 +105,11 @@
         "id": "ADR-004-R7",
         "description": "Committed Terraform variable files under platform/terraform/environments/ must not assign string literals to *_password / *_secret / *_token / *_key / *_credentials variables; reference an out-of-band secret store (Secrets Manager, SSM, environment) instead. Backstops gitleaks for low-entropy committed credentials it ignores.",
         "checks": ["no-plaintext-secrets-in-tfvars"]
+      },
+      {
+        "id": "ADR-004-R8",
+        "description": "Generated and pre-staging sensitive artifacts must not be tracked in source: Terraform plan outputs (tfplan, tfplan.binary, plan.out, *.tfplan) under platform/terraform/environments/ and platform/terraform/gcp/environments/, and license/authcode bootstrap material (authcodes, *.authcodes) under temp/bootstrap/. The blocked path/name set is centralized in scripts/adr_guard/adr_guard.py; the guardrail fails closed and emits repo-relative paths only, never file contents.",
+        "checks": ["no-tracked-generated-artifacts"]
       }
     ],
     "exceptions": [],
@@ -545,6 +550,11 @@
         "id": "ADR-014-R6",
         "description": "MCP tool descriptions reachable via `list_tools` must not advertise auth-bypass procedures, bypass URLs, or step-by-step authentication-circumvention instructions, regardless of server class. Policy layers MAY support a description-redaction flag for bypass-class tools so the capability can remain registered while the description text is sanitized.",
         "checks": []
+      },
+      {
+        "id": "ADR-014-R7",
+        "description": "Operator agent MCP surfaces that connect to managed databases through transport-layer tunneling MUST preserve TLS verification end-to-end. `mcp/ops` connects to RDS Postgres via an SSM port forward; the pg.Pool configuration MUST keep `rejectUnauthorized: true` and target the real DB endpoint for SNI / hostname verification (via `ssl.servername` or an equivalent verified path). Disabling verification (`rejectUnauthorized: false`) — even with a documented exception — is not an acceptable answer to the hostname-mismatch problem the tunnel creates.",
+        "checks": ["mcp-ops-tls-strict"]
       }
     ],
     "exceptions": [],
@@ -555,6 +565,7 @@
       "mcp/ops/policy.js",
       "mcp/ops/policy.test.js",
       "mcp/ops/SECURITY.md",
+      "mcp/ops/lib.js",
       "mcp/shared/aws-helpers.js",
       "mcp/ngfw/SECURITY.md",
       "mcp/ngfw/tool-surface.test.js",

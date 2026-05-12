@@ -16,37 +16,60 @@ from cryptography.fernet import Fernet
 logger = logging.getLogger(__name__)
 
 
+class FieldDecryptError(RuntimeError):
+    """Raised when an encrypted field cannot be decrypted.
+
+    Fail-closed (#1189): the provisioner refuses to continue with
+    ciphertext or malformed values silently. Callers that catch this
+    error must decide explicitly whether to abort the request or fall
+    back to a documented test/local plaintext mode — the function
+    itself never returns the raw input on failure.
+    """
+
+
 def decrypt_field(encrypted_value: str) -> str:
     """Decrypt a Fernet-encrypted field value.
 
     Used for sensitive fields that are encrypted at rest in the Django
-    database using django-encrypted-model-fields.
+    database using django-encrypted-model-fields. Fail-closed: any
+    decryption failure raises ``FieldDecryptError`` rather than
+    silently returning the input. Exception messages never include
+    the input value.
 
     Args:
-        encrypted_value: Base64-encoded Fernet ciphertext from database
+        encrypted_value: Base64-url-encoded Fernet ciphertext.
 
     Returns:
-        Decrypted plaintext string
+        Decrypted plaintext string. Empty input returns ``""`` as the
+        "no field present" sentinel.
 
     Raises:
-        ValueError: If FIELD_ENCRYPTION_KEY not set or decryption fails
+        FieldDecryptError: ``FIELD_ENCRYPTION_KEY`` is missing for a
+            non-empty input; input is not valid base64-url; the Fernet
+            token is malformed; the key is wrong; or any other decrypt
+            failure.
     """
     if not encrypted_value:
         return ""
 
     key = os.environ.get("FIELD_ENCRYPTION_KEY")
     if not key:
-        logger.warning("FIELD_ENCRYPTION_KEY not set, returning value as-is")
-        return encrypted_value
+        # Drift signal: caller supplied an encrypted-looking value but
+        # the encryption key isn't configured. The previous behavior
+        # (pass-through) hid mis-configured secret flows; refuse instead.
+        raise FieldDecryptError("FIELD_ENCRYPTION_KEY is not set; cannot decrypt provisioner field")
 
     try:
         fernet = Fernet(key.encode() if isinstance(key, str) else key)
         encrypted_bytes = base64.urlsafe_b64decode(encrypted_value.encode("ascii"))
         return fernet.decrypt(encrypted_bytes).decode("utf-8")
     except Exception as e:
-        # If decryption fails, log and return as-is (for backward compatibility)
-        logger.warning(f"Failed to decrypt field: {e}")
-        return encrypted_value
+        # Wrap the underlying cryptography / binascii error so callers
+        # see one stable exception type. The original exception is
+        # chained for diagnostic logs, but the message we surface here
+        # never carries the input value.
+        logger.warning("Failed to decrypt provisioner field (%s)", type(e).__name__)
+        raise FieldDecryptError("failed to decrypt provisioner field") from e
 
 
 def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:

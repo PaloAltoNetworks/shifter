@@ -339,6 +339,26 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Terraform plan outputs. Plan files are generated security-sensitive
+# artifacts: they may carry state-derived values, provider metadata,
+# resource addresses, and deployment-specific operational details. CI
+# may continue producing plan files in job workspaces or CI artifact
+# storage — those remain ephemeral. Scoped narrowly to the terraform
+# environment trees so unrelated source files with overlapping names
+# elsewhere in the repo (e.g. `terraform_planner.py`) are not hidden.
+# ADR-004-R8 (`no-tracked-generated-artifacts`) backstops these rules
+# for files that slipped past `.gitignore` via `git add -f`.
+platform/terraform/environments/**/tfplan
+platform/terraform/environments/**/tfplan.binary
+platform/terraform/environments/**/plan.out
+platform/terraform/environments/**/*.tfplan
+platform/terraform/environments/**/*.tfplan.binary
+platform/terraform/gcp/environments/**/tfplan
+platform/terraform/gcp/environments/**/tfplan.binary
+platform/terraform/gcp/environments/**/plan.out
+platform/terraform/gcp/environments/**/*.tfplan
+platform/terraform/gcp/environments/**/*.tfplan.binary
+
 # Deployment-specific tfvars overrides. The committed `terraform.tfvars`
 # files in `platform/terraform/.../portal/` and `platform/terraform/gcp/.../`
 # ship example.com baselines that fail-loud on apply. Each deployment writes

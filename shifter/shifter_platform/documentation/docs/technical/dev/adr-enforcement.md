@@ -253,6 +253,39 @@ The first slice intentionally stays small:
   cognitive-complexity threshold and tests can target each clause
   independently.
 
+- `mcp-ops-tls-strict`
+  Architecture check that fails the build when any file under
+  `mcp/ops/` (`.js`, `.mjs`, `.cjs`, excluding `node_modules/`)
+  re-introduces `rejectUnauthorized: false` (or `0` / `null`) on a
+  TLS configuration. `mcp/ops` connects to RDS Postgres through an
+  SSM port forward; `mcp/ops/lib.js::buildPoolConfig` is the single
+  call site that builds the pool's TLS config and now preserves
+  verification by setting `ssl.servername` to the captured RDS
+  endpoint. Comments and string literals are flattened to whitespace
+  before matching (mirroring `mcp-no-shell-exec`'s approach) so a
+  descriptive doc-string about the prior `rejectUnauthorized: false`
+  workaround does not trip the check. Backstops the `buildPoolConfig`
+  unit-test invariant on every other JS file in the package. Enforces
+  ADR-014-R7.
+
+- `no-tracked-generated-artifacts`
+  Architecture check that fails the build when generated or pre-staging
+  sensitive artifacts are tracked in source under narrow roots. Two
+  artifact families are blocked, each scoped to its own root:
+  Terraform plan outputs (`tfplan`, `tfplan.binary`, `plan.out`,
+  `*.tfplan`) under `platform/terraform/environments/` and
+  `platform/terraform/gcp/environments/`; and license / authcode
+  bootstrap material (`authcodes`, `*.authcodes`) under
+  `temp/bootstrap/`. The blocked path/name set is centralized in
+  `scripts/adr_guard/adr_guard.py` so adding another generated
+  filename or environment root is one edit. The guardrail fails
+  closed: violations name only the repo-relative path and a
+  remediation hint, never echoing plan content, license material, or
+  binary payloads. Backstops `.gitignore`, which does not retroactively
+  un-track files that were already added (e.g. through `git add -f`),
+  and complements `no-plaintext-secrets-in-tfvars`. Enforces
+  ADR-004-R8.
+
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal
   Terraform outputs, then calls `aws rds describe-db-instances` for each

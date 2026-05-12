@@ -447,7 +447,17 @@ jobs:
         run: uv run lint-imports --config ../../.importlinter
 
   # ===========================================================================
-  # SAST
+  # SAST (Bandit)
+  #
+  # Policy (#1193): every Bandit job in this workflow is BLOCKING. There
+  # are no advisory Bandit jobs by default. Owner: @Brad-Edwards. Scope
+  # covers every Python package that ships from this repo — runtime
+  # (shifter_platform, provisioner), build (packer), bootstrap and
+  # install scripts (scripts/bootstrap, shifter/installation), operator
+  # scripts (scripts/gcp), and dev-tool linters
+  # (scripts/check_layer_imports). Adding a new Bandit job MUST NOT
+  # introduce `continue-on-error: true` — fix the finding, narrow the
+  # scan, or use a documented `# nosec` with an inline justification.
   # ===========================================================================
 
   shifter-platform-sast:
@@ -489,7 +499,6 @@ jobs:
       contents: read
     name: SAST (packer)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -506,7 +515,6 @@ jobs:
       contents: read
     name: SAST (bootstrap)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -523,7 +531,6 @@ jobs:
       contents: read
     name: SAST (gcp scripts)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -540,7 +547,6 @@ jobs:
       contents: read
     name: SAST (check_layer_imports)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -558,7 +564,6 @@ jobs:
       contents: read
     name: SAST (installation)
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

@@ -1,8 +1,9 @@
-# terraform.tfvars — example values for OSS deployers.
-# Copy this file to terraform.tfvars (gitignored) and replace example.com placeholders
-# with your real domains / email senders / alarm destinations before
-# `terraform apply`. Secrets remain in AWS Secrets Manager / GCP Secret Manager,
-# never in tfvars.
+# terraform.tfvars — committed example.com baseline for OSS deployers.
+# This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
+# a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
+# `*.auto.tfvars` and the local values win. CI deploys render the overrides
+# from GitHub secrets/repository variables; see docs/dev/deploy-secrets.md.
+
 
 # REPLACE: your GCP project id (no default — this must be your project).
 project_id                 = "REPLACE_WITH_YOUR_GCP_PROJECT_ID"

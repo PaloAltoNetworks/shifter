@@ -183,7 +183,7 @@ user_storage_bucket   = "shifter-dev-user-storage-<account-id>"
 Terraform auto-loads `*.auto.tfvars` files alongside `terraform.tfvars`
 and the `.local`/`.auto.tfvars` values win. CI deploy workflows render
 `local.auto.tfvars` from GitHub secrets and repository variables; see
-[`docs/dev/deploy-secrets.md`](../../../../../docs/dev/deploy-secrets.md).
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### In Cloud Secret Managers (Runtime)
 

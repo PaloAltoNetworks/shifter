@@ -18,7 +18,7 @@ Safety invariants (cannot be overridden):
   next tick.
 
 Env vars:
-    CTFD_URL                  https://polaris.example.com
+    CTFD_URL                  https://polaris.keplerops.com
     CTFD_TOKEN_SECRET_ID      polaris/claude-ops-token
     DRY_RUN                   "1" = print what WOULD happen, no changes
     KEEP_CLAUDE               comma-separated operator numbers to never disable
@@ -245,7 +245,7 @@ def disable_claude_on_instance(instance_id: str) -> dict:
 # -----------------------------------------------------------------------------
 
 def handler(event, context):
-    ctfd_url = os.environ.get("CTFD_URL", "https://polaris.example.com")
+    ctfd_url = os.environ.get("CTFD_URL", "https://polaris.keplerops.com")
     secret_id = os.environ.get("CTFD_TOKEN_SECRET_ID", "polaris/claude-ops-token")
     dry_run = os.environ.get("DRY_RUN", "0") == "1"
     keep_claude_raw = (os.environ.get("KEEP_CLAUDE") or "").strip()

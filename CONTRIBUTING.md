@@ -55,6 +55,12 @@ of making a fork and pull request yourself:
 > 5. Create a pull request to pull the changes from your fork back into the
 >    upstream repository
 
+**Base PRs off `dev`, not `main`.** `main` is the stable release line and only
+receives release-PR promotions; `dev` is the integration branch where
+day-to-day work merges. Conventional-commit titles per the towncrier types
+listed in [`changelog.d/README.md`](changelog.d/README.md); the
+`pr-title-lint` workflow enforces the shape.
+
 Please use clear commit messages so we can understand what each commit does.
 We'll review every PR and might offer feedback or request changes before
 merging.

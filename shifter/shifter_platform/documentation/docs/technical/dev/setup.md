@@ -87,7 +87,7 @@ EOF
 `local.auto.tfvars` is gitignored — never commit one. The full list of
 required values, plus the CI-deploy equivalent via GitHub secrets and
 repository variables, is documented in
-[`docs/dev/deploy-secrets.md`](../../../../../docs/dev/deploy-secrets.md).
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### 5. Deploy Infrastructure
 
@@ -199,7 +199,7 @@ The first deploy creates empty ECR repos. Push the portal container:
 
 Cognito is fully configured by Terraform. You only need to:
 
-1. **Set `cognito_domain_prefix`** in `terraform.tfvars` (must be globally unique):
+1. **Set `cognito_domain_prefix`** in `local.auto.tfvars` (must be globally unique):
    ```hcl
    cognito_domain_prefix = "shifter-prod-yourorg"
    ```
@@ -313,29 +313,30 @@ Set up OIDC federation for GitHub Actions:
 | `GCP_SERVICE_ACCOUNT` | Service account email |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name |
 
-### 3. Configure terraform.tfvars
+### 3. Configure deployment-specific values
+
+The committed `terraform.tfvars` ships an `example.com` baseline; supply
+the real values via a gitignored `local.auto.tfvars` (Terraform auto-loads
+`*.auto.tfvars`):
 
 ```bash
-cd platform/terraform/gcp/environments/gcp-dev
+cat > platform/terraform/gcp/environments/gcp-dev/local.auto.tfvars <<'EOF'
+project_id                  = "<your-gcp-project-id>"
+public_hostname             = "shifter.<your-domain>"
+enable_managed_tls          = true
+gke_master_authorized_cidrs = ["<your-operator-egress>/32"]
+EOF
 ```
 
-Edit `terraform.tfvars` with the real project/environment values. At minimum the secure bootstrap requires:
-
-```hcl
-project_id                 = "prod-rwctxzl6shxk"
-public_hostname            = "shifter.example.com"
-enable_managed_tls         = true
-gke_master_authorized_cidrs = ["173.181.31.170/32"]
-```
-
-Update `gke_master_authorized_cidrs` if the operator egress IP changes.
+For CI deploys the equivalent values come from GitHub secrets — see
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### 4. Deploy
 
 Normal GCP deployments happen through CI/CD on `gcp-dev`. The bootstrap entrypoint remains available for first-time setup and controlled recovery:
 
 ```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <your-gcp-project-id> --cluster-id cluster1
 ```
 
 That flow:

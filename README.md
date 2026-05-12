@@ -168,7 +168,8 @@ under [`changelog.d/`](changelog.d/) — see
 ## Ethics
 
 AI-driven attack capabilities exist in the wild. Defenders need realistic
-exposure. [Read more](shifter/shifter_platform/documentation/docs/ops/ethics.md).
+exposure to defend effectively. Shifter's ranges are network-isolated, all
+attack tooling is contained, and all AI actions are logged.
 
 ## Safety
 

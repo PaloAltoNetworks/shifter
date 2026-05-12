@@ -118,7 +118,7 @@ baseline. Deployment-specific values (domains, alarm emails, allow-list
 domains, account-suffixed bucket names, GCP project id, etc.) come from
 GitHub repository variables and secrets at deploy time; CI/CD renders
 them into a gitignored `local.auto.tfvars` before `terraform apply`.
-See [`docs/dev/deploy-secrets.md`](../../../../../docs/dev/deploy-secrets.md)
+See [`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md)
 for the required surface.
 
 ## Portal Deployment

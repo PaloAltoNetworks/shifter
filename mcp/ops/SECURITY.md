@@ -28,22 +28,24 @@ landed in phases (issue #777 + sub-issues #1198–#1202). Today's
 runtime status:
 
 - `.shifter.yaml` exists at the repo root and `mcp/ops/policy.js`
-  provides `parsePolicy`, `loadPolicy`, the `Policy` class, and a
-  `registerTool` wrapper. The wrapper today enforces **class
-  declaration and session-profile gating only** — a tool registered
-  with a class disabled by the active profile is not registered at
-  all; a tool with no class or an undeclared class fails closed at
-  registration.
-- The rest of the gates listed below (env confirmation, dry-run,
-  description redaction, idempotency, audit, secret handles,
-  two-phase, rate caps, untrusted-input fencing, apex out-of-band
-  approval) **are not yet wrapped around handlers in this PR.** They
-  land in #1198 (Phase 2), #1199 (Phase 3), and #1200 (Phase 4).
+  provides `parsePolicy`, `loadPolicy`, the `Policy` class, the
+  `registerTool` wrapper, and (after Phase 2 / #1198) the
+  composed-gate wrap. Phase 1 enforcement (class declaration and
+  session-profile gating) is unchanged. Phase 2 (#1198) added five
+  cheap-defense gates at the seam: env confirmation, dry-run
+  defaults, description redaction, idempotency keys, secret-handle
+  return-mode, and a per-call JSONL audit append via
+  `mcp/ops/audit.js`. The gates compose around every handler
+  registered through `registerTool`.
+- Higher-cost gates (two-phase plan/execute, rate caps,
+  untrusted-input fencing, apex out-of-band approval) **are not yet
+  wrapped around handlers.** They land in #1199 (Phase 3) and
+  #1200 (Phase 4).
 - The 45 tools in `mcp/ops/index.js` **are not yet registered through
   `registerTool`** — that is Phase 5 (#1201). Until then,
   `.shifter.yaml` and `SHIFTER_OPS_PROFILE` have **no runtime effect
-  on the live server**; the policy seam is in place but the live
-  registration path is unchanged.
+  on the live server**; the Phase 2 gate code exists at the seam but
+  the live registration path is unchanged.
 - `mcp/ops/tool-surface.test.js` (the load-bearing
   ADR-014-R3 / R5 invariant suite referenced below) is Phase 6
   (#1202) and **does not yet exist**.
@@ -131,6 +133,49 @@ each handler:
 The `.shifter.yaml` policy is the source of truth. The policy wrapper
 fails closed if a tool is registered without a class, or if
 `.shifter.yaml` is missing or malformed at startup.
+
+## Database TLS
+
+`mcp/ops` connects to the per-environment RDS Postgres database
+through an SSM port forward (`localhost:<local_port>` → RDS endpoint
+`:5432`). The pool is constructed by
+`mcp/ops/lib.js::buildPoolConfig`, which is the single source of
+truth for the TLS configuration.
+
+**Trust model.**
+
+- TLS verification stays on (`rejectUnauthorized: true`). Disabling
+  verification — even as a documented exception — is rejected by
+  ADR-014-R7 and by the `mcp-ops-tls-strict` adr_guard check.
+- The tunnel terminates at `localhost`, but the RDS-issued cert
+  carries the RDS endpoint in its CN/SAN. `buildPoolConfig` sets
+  `ssl.servername` to the RDS endpoint discovered when the SSM
+  tunnel was started (`tunnels[env].rdsHost`). Node's `tls.connect`
+  uses `servername` for both SNI and the default
+  `checkServerIdentity` hostname check, so verification fires
+  against the real RDS endpoint rather than the localhost target of
+  the port forward.
+- The cert chain is rooted at Amazon Root CA 1, which is present in
+  every mainstream OS root store, so the default Node trust store
+  verifies the chain. No bundled CA is shipped in this repo at
+  present.
+
+**Switching to a pinned CA bundle.** If the OS trust store ever
+proves insufficient (e.g., for an air-gapped host whose root bundle
+is curated separately), download AWS's published global RDS bundle
+from `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`,
+commit it under `mcp/ops/certs/rds-global-bundle.pem`, document the
+sha256 + refresh procedure in this file, and pass
+`ca: readFileSync(<path>)` alongside the existing `servername` in
+the `ssl` block. The check sites stay the same; only the trust
+input changes.
+
+**Regression coverage.** `mcp/ops/lib.test.js`'s `buildPoolConfig`
+describe block asserts the SSL invariants (verification on,
+servername set, fail-closed when `rdsHost` is empty / missing /
+non-string). The `mcp-ops-tls-strict` adr_guard check is a
+defense-in-depth backstop that flags any other JS file under
+`mcp/ops/` that re-introduces `rejectUnauthorized: false`.
 
 ## AWS CLI execution (unchanged)
 

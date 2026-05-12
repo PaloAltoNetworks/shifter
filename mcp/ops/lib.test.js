@@ -28,6 +28,7 @@ import {
   buildFilterLogEventsArgs,
   buildSsmSendCommandArgs,
   buildRunManageArgs,
+  buildPoolConfig,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -980,5 +981,72 @@ describe("buildUpdateSet", () => {
 
   it("throws when fields object is empty", () => {
     assert.throws(() => buildUpdateSet({}), /No fields to update/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPoolConfig (#1190 — verified TLS over SSM tunnel)
+//
+// The Pool is built lazily inside getPool() in index.js, but the SSL
+// shape and the rdsHost ↔ servername wiring are the security-load-bearing
+// invariants. This pure helper lets us assert that contract without
+// spawning a real pool or RDS instance.
+// ---------------------------------------------------------------------------
+describe("buildPoolConfig", () => {
+  const validArgs = () => ({
+    rdsHost: "dev-portal-db.cluster-xxx.us-east-2.rds.amazonaws.com",
+    creds: { username: "u", password: "p", dbname: "d" },
+    port: 5444,
+  });
+
+  it("turns TLS verification ON (rejectUnauthorized: true)", () => {
+    const cfg = buildPoolConfig(validArgs());
+    assert.equal(cfg.ssl.rejectUnauthorized, true);
+  });
+
+  it("targets the SSM-tunneled localhost socket", () => {
+    const cfg = buildPoolConfig(validArgs());
+    assert.equal(cfg.host, "localhost");
+    assert.equal(cfg.port, 5444);
+  });
+
+  it("sets ssl.servername to the captured rdsHost so cert verification fires against RDS, not localhost", () => {
+    const args = validArgs();
+    const cfg = buildPoolConfig(args);
+    assert.equal(cfg.ssl.servername, args.rdsHost);
+  });
+
+  it("forwards credential fields without leaking unrelated keys", () => {
+    const cfg = buildPoolConfig(validArgs());
+    assert.equal(cfg.user, "u");
+    assert.equal(cfg.password, "p");
+    assert.equal(cfg.database, "d");
+    // The previous escape hatch must not sneak back in via a stray
+    // Object.assign or spread.
+    assert.equal(cfg.ssl.rejectUnauthorized, true);
+  });
+
+  it("fails closed when rdsHost is empty / missing / non-string", () => {
+    for (const bad of ["", "   ", undefined, null, 0, {}]) {
+      assert.throws(
+        () => buildPoolConfig({ ...validArgs(), rdsHost: bad }),
+        /rdsHost is required/,
+      );
+    }
+  });
+
+  it("fails closed when creds or port shape is wrong", () => {
+    assert.throws(
+      () => buildPoolConfig({ ...validArgs(), creds: null }),
+      /creds is required/,
+    );
+    assert.throws(
+      () => buildPoolConfig({ ...validArgs(), port: 0 }),
+      /port must be a positive integer/,
+    );
+    assert.throws(
+      () => buildPoolConfig({ ...validArgs(), port: "5444" }),
+      /port must be a positive integer/,
+    );
   });
 });

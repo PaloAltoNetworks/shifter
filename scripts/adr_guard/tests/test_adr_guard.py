@@ -2442,5 +2442,219 @@ class PythonComplexityGateTests(unittest.TestCase):
             )
 
 
+class McpOpsTlsStrictTests(unittest.TestCase):
+    """Tests for ADR-014-R7: mcp/ops must keep Postgres TLS verification on.
+
+    The check is a defense-in-depth backstop for
+    `mcp/ops/lib.js::buildPoolConfig`, which is the single source of
+    truth for the pool TLS config. Any other file under `mcp/ops/`
+    that re-introduces `rejectUnauthorized: false` (or `0`/`null`)
+    must trip this check.
+    """
+
+    def _write_mcp_ops_file(self, repo_root: Path, rel: str, contents: str) -> None:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+
+    def test_flags_rejectunauthorized_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_mcp_ops_file(
+                repo_root,
+                "mcp/ops/legacy.js",
+                "export const cfg = { ssl: { rejectUnauthorized: false } };",
+            )
+
+            violations = ADR_GUARD.check_mcp_ops_tls_strict(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-014-R7")
+            self.assertEqual(violations[0].path, "mcp/ops/legacy.js")
+
+    def test_flags_rejectunauthorized_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_mcp_ops_file(
+                repo_root,
+                "mcp/ops/other.js",
+                "const tls = { rejectUnauthorized: 0 };",
+            )
+
+            violations = ADR_GUARD.check_mcp_ops_tls_strict(repo_root, None)
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-014-R7")
+
+    def test_ignores_comments_about_the_pattern(self) -> None:
+        """Doc comments mentioning the pattern must NOT trip the check.
+
+        Both `//` and `/* */` comment forms are stripped before the
+        regex runs (codex review #1180 cycle 1 finding 7's selected
+        fix). String literals are NOT stripped — see the next test —
+        because that erases quoted property keys.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_mcp_ops_file(
+                repo_root,
+                "mcp/ops/doc.js",
+                "/* previously rejectUnauthorized: false */\n"
+                "// rejectUnauthorized: false was the old behavior\n"
+                "export const cfg = { ssl: { rejectUnauthorized: true } };",
+            )
+
+            violations = ADR_GUARD.check_mcp_ops_tls_strict(repo_root, None)
+            self.assertEqual(violations, [])
+
+    def test_flags_quoted_property_key_form(self) -> None:
+        """`{ "rejectUnauthorized": false }` and the single-quoted form
+        must trip the check (codex review #1180 cycle 1 finding 7)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_mcp_ops_file(
+                repo_root,
+                "mcp/ops/dq.js",
+                'export const cfg = { ssl: { "rejectUnauthorized": false } };',
+            )
+            self._write_mcp_ops_file(
+                repo_root,
+                "mcp/ops/sq.js",
+                "export const cfg = { ssl: { 'rejectUnauthorized': false } };",
+            )
+
+            violations = ADR_GUARD.check_mcp_ops_tls_strict(repo_root, None)
+            flagged = {v.path for v in violations}
+            self.assertIn("mcp/ops/dq.js", flagged)
+            self.assertIn("mcp/ops/sq.js", flagged)
+
+    def test_real_repo_passes(self) -> None:
+        """The shipped mcp/ops tree must not contain a rejectUnauthorized: false anywhere."""
+        violations = ADR_GUARD.check_mcp_ops_tls_strict(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected mcp-ops-tls-strict violations: {violations}")
+
+    def test_files_arg_narrows_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_mcp_ops_file(
+                repo_root,
+                "mcp/ops/a.js",
+                "const cfg = { rejectUnauthorized: false };",
+            )
+            # files arg lists an unrelated file: no violation surfaced.
+            violations = ADR_GUARD.check_mcp_ops_tls_strict(repo_root, ["mcp/ops/b.js"])
+            self.assertEqual(violations, [])
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECKS)
+        self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("mcp-ops-tls-strict", ADR_GUARD.CHECK_LEVELS["fast"])
+
+
+class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
+    """Tests for ADR-004-R8: forbid tracked generated/sensitive artifacts.
+
+    Covers Terraform plan outputs under terraform environment trees and
+    bootstrap license / authcode material under temp/bootstrap/. The
+    blocked path/name set is centralized in the check.
+    """
+
+    def _make_terraform_env(self, repo_root: Path, rel: str) -> Path:
+        env_dir = repo_root / rel
+        env_dir.mkdir(parents=True)
+        return env_dir
+
+    def test_flags_tracked_tfplan_under_aws_environments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            env_dir = self._make_terraform_env(repo_root, "platform/terraform/environments/dev/portal")
+            (env_dir / "tfplan").write_bytes(b"\x00binary plan output")
+            (env_dir / "plan.out").write_text("plan output", encoding="utf-8")
+            # A clearly-unrelated file in the same tree must NOT be flagged.
+            (env_dir / "main.tf").write_text("# terraform", encoding="utf-8")
+
+            violations = ADR_GUARD.check_no_tracked_generated_artifacts(repo_root, None)
+
+            flagged_paths = {v.path for v in violations}
+            self.assertIn("platform/terraform/environments/dev/portal/tfplan", flagged_paths)
+            self.assertIn("platform/terraform/environments/dev/portal/plan.out", flagged_paths)
+            self.assertNotIn("platform/terraform/environments/dev/portal/main.tf", flagged_paths)
+            for v in violations:
+                self.assertEqual(v.rule_id, "ADR-004-R8")
+                # Per preflight: messages must NOT echo file content,
+                # only the repo-relative path + remediation.
+                self.assertNotIn("binary plan output", v.message)
+
+    def test_flags_tracked_tfplan_under_gcp_environments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            env_dir = self._make_terraform_env(repo_root, "platform/terraform/gcp/environments/dev")
+            (env_dir / "tfplan.binary").write_text("binary", encoding="utf-8")
+            (env_dir / "my.tfplan").write_text("text", encoding="utf-8")
+
+            violations = ADR_GUARD.check_no_tracked_generated_artifacts(repo_root, None)
+
+            flagged_paths = {v.path for v in violations}
+            self.assertIn("platform/terraform/gcp/environments/dev/tfplan.binary", flagged_paths)
+            self.assertIn("platform/terraform/gcp/environments/dev/my.tfplan", flagged_paths)
+
+    def test_flags_bootstrap_license_and_authcode_material(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            license_dir = repo_root / "temp" / "bootstrap" / "license"
+            license_dir.mkdir(parents=True)
+            (license_dir / "authcodes").write_text("XYZ-123", encoding="utf-8")
+
+            violations = ADR_GUARD.check_no_tracked_generated_artifacts(repo_root, None)
+
+            flagged_paths = {v.path for v in violations}
+            self.assertIn("temp/bootstrap/license/authcodes", flagged_paths)
+            for v in violations:
+                self.assertEqual(v.rule_id, "ADR-004-R8")
+                self.assertNotIn("XYZ-123", v.message)
+
+    def test_clean_tree_emits_no_violations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            env_dir = self._make_terraform_env(repo_root, "platform/terraform/environments/dev")
+            (env_dir / "main.tf").write_text("# terraform", encoding="utf-8")
+            (env_dir / "terraform.tfvars").write_text("# vars", encoding="utf-8")
+
+            violations = ADR_GUARD.check_no_tracked_generated_artifacts(repo_root, None)
+
+            self.assertEqual(violations, [])
+
+    def test_files_arg_narrows_scope(self) -> None:
+        """When the --files arg is given, only those paths are inspected."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            env_dir = self._make_terraform_env(repo_root, "platform/terraform/environments/dev")
+            (env_dir / "tfplan").write_text("plan", encoding="utf-8")
+            license_dir = repo_root / "temp" / "bootstrap" / "license"
+            license_dir.mkdir(parents=True)
+            (license_dir / "authcodes").write_text("X", encoding="utf-8")
+
+            # files arg lists only the terraform file
+            files_violations = ADR_GUARD.check_no_tracked_generated_artifacts(
+                repo_root, ["platform/terraform/environments/dev/tfplan"]
+            )
+            self.assertEqual(
+                {v.path for v in files_violations},
+                {"platform/terraform/environments/dev/tfplan"},
+            )
+
+            # files arg lists an unrelated path: no violations even though
+            # blocked artifacts exist on disk
+            unrelated = ADR_GUARD.check_no_tracked_generated_artifacts(
+                repo_root, ["platform/terraform/environments/dev/main.tf"]
+            )
+            self.assertEqual(unrelated, [])
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        """The new check is part of the CI level so adr_guard --all --level ci catches it."""
+        self.assertIn("no-tracked-generated-artifacts", ADR_GUARD.CHECKS)
+        self.assertIn("no-tracked-generated-artifacts", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("no-tracked-generated-artifacts", ADR_GUARD.CHECK_LEVELS["fast"])
+
+
 if __name__ == "__main__":
     unittest.main()

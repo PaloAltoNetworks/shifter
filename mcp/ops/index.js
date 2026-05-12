@@ -26,6 +26,7 @@ import {
   buildFilterLogEventsArgs,
   buildSsmSendCommandArgs,
   buildRunManageArgs,
+  buildPoolConfig,
 } from "./lib.js";
 
 // Spawn a long-running aws-cli process (e.g. an SSM port-forward that
@@ -151,15 +152,62 @@ function killTunnel(env) {
   }
 }
 
+function discoverRdsEndpoint(env) {
+  // The RDS endpoint is the verification target for TLS (#1190) and
+  // the destination address for the SSM port-forward. Both code
+  // paths in ensureTunnel() rely on this — the "tunnel already open"
+  // shortcut needs the endpoint too, not just the start-from-scratch
+  // path. Factored out so the lookup runs every invocation and we
+  // never reach getPool() with `tunnels[env].rdsHost === undefined`
+  // (codex review #1180 cycle 1 finding 2).
+  const profile = getProfile(env);
+  const jmesQuery = `DBInstances[?DBInstanceIdentifier==\`${env}-portal-db\`].Endpoint.Address`;
+  const rdsHost = awsTextLib(
+    profile,
+    [
+      "rds",
+      "describe-db-instances",
+      "--query",
+      jmesQuery,
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
+  );
+  if (!rdsHost || rdsHost === "None") {
+    throw new Error(`Could not find RDS endpoint for ${env}`);
+  }
+  return rdsHost;
+}
+
 async function ensureTunnel(env) {
   const port = LOCAL_PORTS[env];
 
+  // Tunnel-already-up paths: still resolve and cache the RDS
+  // endpoint so getPool()'s buildPoolConfig() has the verification
+  // target. Without this, a pre-existing port-forward (started by a
+  // previous server instance, an operator's manual session, etc.)
+  // would short-circuit ensureTunnel() and leave rdsHost undefined,
+  // which buildPoolConfig() refuses by design.
   if (tunnels[env]?.process && !tunnels[env].process.killed) {
-    if (await isPortOpen(port)) return;
+    if (await isPortOpen(port)) {
+      if (!tunnels[env].rdsHost) {
+        tunnels[env].rdsHost = discoverRdsEndpoint(env);
+      }
+      return;
+    }
     killTunnel(env);
   }
 
-  if (await isPortOpen(port)) return;
+  if (await isPortOpen(port)) {
+    // Port is open but we don't own the tunnel record. Cache the
+    // RDS endpoint so getPool can target the right cert; record the
+    // tunnel as managed-elsewhere (no `.process`) so killTunnel
+    // doesn't try to kill someone else's process.
+    const rdsHost = discoverRdsEndpoint(env);
+    tunnels[env] = { process: null, rdsHost };
+    return;
+  }
 
   const profile = getProfile(env);
 
@@ -183,23 +231,7 @@ async function ensureTunnel(env) {
     throw new Error(`Could not find running ${env} portal EC2 instance`);
   }
 
-  const jmesQuery = `DBInstances[?DBInstanceIdentifier==\`${env}-portal-db\`].Endpoint.Address`;
-  const rdsHost = awsTextLib(
-    profile,
-    [
-      "rds",
-      "describe-db-instances",
-      "--query",
-      jmesQuery,
-      "--output",
-      "text",
-    ],
-    { timeoutMs: 30000 }
-  );
-
-  if (!rdsHost || rdsHost === "None") {
-    throw new Error(`Could not find RDS endpoint for ${env}`);
-  }
+  const rdsHost = discoverRdsEndpoint(env);
 
   const proc = spawnAws(
     profile,
@@ -220,7 +252,11 @@ async function ensureTunnel(env) {
     { stdio: ["ignore", "pipe", "pipe"] }
   );
 
-  tunnels[env] = { process: proc };
+  // Capture the discovered rdsHost so getPool() can set ssl.servername
+  // for cert verification. The tunnel terminates at localhost but the
+  // RDS-issued cert names the RDS endpoint; without this the previous
+  // `rejectUnauthorized: false` workaround silently broke TLS trust.
+  tunnels[env] = { process: proc, rdsHost };
 
   proc.on("exit", () => {
     delete tunnels[env];
@@ -241,17 +277,10 @@ async function getPool(env) {
   const creds = await fetchCredentials(env);
 
   if (!pools[env]) {
-    pools[env] = new Pool({
-      host: "localhost",
-      port: LOCAL_PORTS[env],
-      user: creds.username,
-      password: creds.password,
-      database: creds.dbname,
-      ssl: { rejectUnauthorized: false },
-      max: 3,
-      connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 30000,
-    });
+    const rdsHost = tunnels[env]?.rdsHost;
+    pools[env] = new Pool(
+      buildPoolConfig({ rdsHost, creds, port: LOCAL_PORTS[env] }),
+    );
     pools[env].on("error", () => {
       pools[env]?.end().catch(() => {});
       delete pools[env];

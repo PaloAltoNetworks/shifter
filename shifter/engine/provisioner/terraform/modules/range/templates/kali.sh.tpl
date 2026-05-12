@@ -26,6 +26,12 @@ chmod 600 /home/kali/.ssh/authorized_keys
 chown -R kali:kali /home/kali/.ssh 2>/dev/null || echo "kali user not present on host (likely a containerized Kali stack); skipping chown"
 echo "SSH access configured"
 
+# Issue #762: the per-instance kali desktop password is set by the
+# engine provisioner via SSM Run Command after this instance reports
+# SSMAvailable — not in user_data. The password value never appears
+# in EC2 user_data, IMDS, or process argv on this host. See
+# shifter/engine/provisioner/plans/set_local_password_plan.py.
+
 # Ensure xrdp is running for RDP access via Guacamole. Same compatibility
 # story as the chown above — a containerized-Kali AMI has no host xrdp
 # unit and this systemctl call legitimately fails.

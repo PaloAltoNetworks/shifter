@@ -157,6 +157,108 @@ aws secretsmanager create-secret \
 2. Update in Secrets Manager
 3. Restart portal
 
+### VM guest passwords (per-instance)
+
+Range guest desktop / RDP passwords are unique per instance. They are
+**not** stored in the platform secret bundles, **not** carried as
+environment variables, and **not** baked into AMIs. The password value
+**never appears in EC2 user_data, IMDS, Terraform-rendered cloud-init
+manifests, or the guest's process argv**.
+
+The lifecycle aligns with the documented best practice for AWS Systems
+Manager Parameter Store + Run Command (and the GCP equivalent: control-
+plane-pushes-after-boot via the per-instance SSH identity-brokered
+channel). See `docs/architecture/vm-guest-credential-preflight-762.md`.
+
+#### Lifecycle
+
+1. **Generate**: the range Terraform module (AWS) and
+   `gdc_vmruntime_assets._ensure_rdp_password_secret` (GCP) generate a
+   per-instance random password with all four character classes (upper,
+   lower, digit, shell-safe punctuation) enforced.
+2. **Store**: the value is persisted in the cloud's secret manager:
+   - AWS: `arn:aws:secretsmanager:<region>:<account>:secret:shifter/<env>/range/<range_id>/<role>-<uuid8>-rdp-password`
+   - GCP: `projects/<project>/secrets/shifter-<env>-range-<range_id>-<role>-<token>-rdp-password`
+3. **Reference, don't render**: the secret ARN / resource path flows
+   into `engine_instance.state.rdp_password_secret_arn` and
+   `Range.provisioned_instances[].rdp_password_secret_arn`. The
+   *value* never lands in EC2 user_data, GDC VM Runtime
+   cloud-init data, or Terraform-rendered scripts.
+4. **Push at provisioning time**: after the instance comes up and the
+   per-instance SSH key is in `authorized_keys` /
+   `administrators_authorized_keys`, the engine provisioner runs
+   `SetLocalPasswordPlan` via `SetupOrchestrator`:
+   - Linux (kali, ubuntu): the password is piped through `chpasswd`
+     stdin — never as a `chpasswd` argv.
+   - Windows victim: `Set-LocalUser -Password (ConvertTo-SecureString …)` —
+     never as a `net user` argv.
+   - `SetupOrchestrator.SENSITIVE_CONTEXT_KEY_PARTS` masks the value
+     in captured stdout/stderr because the context key is
+     `rdp_password`.
+5. **Resolve at access time**: the portal's
+   `engine.services._resolve_non_dc_rdp_password` reads the per-
+   instance secret reference from `Range.provisioned_instances` and
+   fetches the value via `engine.secrets.get_rdp_password` →
+   `shared.cloud.get_secrets_store().get_secret()`. If the fetch fails
+   (deleted secret, IAM regression), the portal raises a
+   non-sensitive `ValueError` that the Mission Control RDP view maps
+   to HTTP 400 — same envelope as a missing reference.
+
+#### DC role
+
+The DC role keeps the deployment-scoped `DC_DOMAIN_PASSWORD` contract
+documented below — a DC host's local Administrator account *is* the
+domain Administrator account, so per-instance rotation is handled
+through DC promotion rather than the per-instance secret.
+
+#### Residual state exposure
+
+The generated `random_password.result` (AWS) and the
+`add_secret_version` payload (GCP) appear in Terraform / provisioner-
+side memory at apply time and in the Terraform state object for the
+AWS path, the same as the existing per-instance SSH-key precedent
+(`tls_private_key.instance` and `aws_secretsmanager_secret_version.ssh_key`).
+Terraform state lives in the S3 backend with bucket-level encryption
+and least-privilege IAM access; this is the established mitigation.
+Eliminating state exposure entirely would require external secret
+generation (e.g., a Lambda invoking `aws secretsmanager create-secret`)
+and is a separate workstream.
+
+#### Residual SSM Run Command body exposure (AWS)
+
+For the AWS push path, the rendered `SetLocalPasswordPlan` script body
+contains the per-instance password (Linux: in a `chpasswd` here-doc;
+Windows: as the `$Password` variable assigned to `ConvertTo-SecureString`).
+SSM Run Command persists the command body in CloudWatch Logs / S3
+output (if configured) and in the `GetCommandInvocation` API record.
+This is the same residual exposure as the pre-existing `DCSetupPlan`
+and `DomainJoinPlan`, which also render `DC_DOMAIN_PASSWORD` into
+their script bodies. The established mitigations are:
+
+- `ssm:GetCommandInvocation` and `ssm:ListCommands` are scoped to
+  the engine-provisioner ECS task role and platform administrators;
+  range guests and portal users never have this grant.
+- `SetupOrchestrator.SENSITIVE_CONTEXT_KEY_PARTS` masks the value in
+  our own captured stdout/stderr (the orchestrator-side log redaction).
+- Run Command results in the AWS-managed S3 bucket are server-side
+  encrypted with the bucket's KMS key.
+
+The architecturally cleanest fix would be SSM SecureString parameter
+substitution (`{{ssm-secure:/path/to/secret}}`), which resolves the
+value inside the SSM agent on the target without recording the value
+in the command body. That requires migrating the secret store from
+Secrets Manager to SSM Parameter Store SecureString (or maintaining
+both) and is a separate workstream tracked outside of #762.
+
+#### Rotation
+
+Per-instance rotation is achieved by destroying and re-provisioning
+the range; the Terraform `random_password` regenerates, the new value
+replaces the previous secret version, and `SetLocalPasswordPlan` pushes
+it on the next provision. Image rebuilds (Packer) do **not** rotate
+live credentials — they only refresh the bootstrap scripts shipped on
+first boot.
+
 ### Domain Controller Administrator Password
 
 The portal Django container reads `DC_DOMAIN_PASSWORD` once at startup

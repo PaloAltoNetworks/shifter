@@ -5,10 +5,12 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting Kali headless setup..."
 
-# Configure stable desktop credentials for Guacamole/RDP access
-echo "Setting Kali desktop password..."
-echo "kali:{{ kali_password }}" | chpasswd
-echo "Kali password configured"
+# Issue #762: the per-instance Kali desktop password is set by the
+# engine provisioner via SSH (using the per-instance SSH key already
+# baked into authorized_keys below) after this VM reaches a reachable
+# state — not in user_data. The password value never appears in the
+# rendered cloud-init payload. See
+# shifter/engine/provisioner/plans/set_local_password_plan.py.
 
 # Ensure the packages needed for SSH/RDP access exist on the VM Runtime image
 if command -v apt-get >/dev/null 2>&1; then

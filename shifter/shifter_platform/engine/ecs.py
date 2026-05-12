@@ -74,9 +74,12 @@ _GCP_PROVISIONER_ENV_KEYS = (
     "GDC_VMSERIES_DISK_SIZE_GIB",
     "GDC_VMSERIES_BOOTSTRAP_DISK_SIZE_GIB",
     "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
-    "GDC_WINDOWS_ADMIN_PASSWORD",
-    "GDC_KALI_PASSWORD",
-    "GDC_UBUNTU_PASSWORD",
+    # GDC_WINDOWS_ADMIN_PASSWORD / GDC_KALI_PASSWORD / GDC_UBUNTU_PASSWORD
+    # intentionally removed (#762). Guest passwords are now per-instance
+    # GCP Secret Manager secrets created by the provisioner at apply
+    # time and resolved by the portal through shared.cloud at access
+    # time. No shared static credential flows through the provisioner
+    # env any more.
     "DC_DOMAIN_PASSWORD",
     "GDC_KALI_IMAGE_URL",
     "GDC_KALI_VCPUS",

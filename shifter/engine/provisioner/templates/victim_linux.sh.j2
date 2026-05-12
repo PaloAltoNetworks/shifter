@@ -5,18 +5,13 @@ set -euo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Victim Linux instance booting..."
 
-# Configure stable desktop credentials for Guacamole/RDP access
-guest_password="{{ guest_password }}"
-
-# SSH access for browser terminal.
+# Issue #762: the per-instance local password is set by the engine
+# provisioner via SSH after this VM reaches a reachable state — not
+# in user_data. The password value never appears in the rendered
+# cloud-init payload. See
+# shifter/engine/provisioner/plans/set_local_password_plan.py.
 ssh_user="{{ ssh_user }}"
 public_key="{{ public_key }}"
-
-if [ -n "$guest_password" ] && id "$ssh_user" >/dev/null 2>&1; then
-    echo "Setting local password for $ssh_user..."
-    echo "$ssh_user:$guest_password" | chpasswd
-    echo "Password configured for $ssh_user"
-fi
 
 # Ensure SSH/RDP packages exist on the base image
 if command -v apt-get >/dev/null 2>&1; then

@@ -18,7 +18,7 @@ from cloud.gcp.base import get_project_id, import_google_module
 from components.instance import sanitize_hostname
 from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig, load_gdc_network_access_config, load_gdc_vmruntime_config
 from executors.factory import get_ssh_username
-from utils.crypto import derive_ssh_public_key, generate_ssh_keypair
+from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
 
@@ -116,11 +116,21 @@ def _build_instance_hostname(instance: dict[str, Any], vm_name: str) -> str:
     return sanitize_hostname(vm_name, max_length=20)
 
 
-def _build_instance_secret_name(range_id: int, instance: dict[str, Any]) -> str:
+def _build_instance_secret_name(range_id: int, instance: dict[str, Any], *, kind: str = "ssh") -> str:
+    """Build a per-instance Secret Manager secret name for ``kind``.
+
+    ``kind`` is appended as the trailing identifier so SSH keys and RDP
+    passwords live in distinct secrets per instance (``ssh`` vs
+    ``rdp-password``). The naming pattern matches the AWS Terraform
+    range module convention.
+    """
     environment = _sanitize_name(os.environ.get("ENVIRONMENT", "gcp-dev"), max_length=32)
     token = _instance_token(instance)
     role = _sanitize_name(str(instance.get("role", "vm")), max_length=12)
-    return _sanitize_name(f"shifter-{environment}-range-{range_id}-{role}-{token}-ssh", max_length=255)
+    return _sanitize_name(
+        f"shifter-{environment}-range-{range_id}-{role}-{token}-{kind}",
+        max_length=255,
+    )
 
 
 def _load_template(name: str):
@@ -135,59 +145,33 @@ def _load_template(name: str):
     return env.get_template(name)
 
 
-def _get_linux_access_password(os_type: str) -> str:
-    if os_type == "kali":
-        return os.environ.get("GDC_KALI_PASSWORD", "kali")
-    return os.environ.get("GDC_UBUNTU_PASSWORD", "ubuntu")
-
-
-def _get_windows_admin_password(role: str) -> str:
-    if role == "dc":
-        # DC role: read DC_DOMAIN_PASSWORD only. Same env var contract
-        # as the AWS provisioner (`main.py`) and the portal RDP
-        # credential lookup (`shifter_platform/engine/services.py`).
-        # Fail-loud when unset (matches `main.py:1816`'s SetupError on
-        # the AWS path) instead of falling back to a literal credential
-        # — committing the DC admin password as a default is the
-        # vulnerability class #760 closed.
-        password = os.environ.get("DC_DOMAIN_PASSWORD")
-        if not password:
-            raise RuntimeError(
-                "DC_DOMAIN_PASSWORD is not configured for the GDC VM Runtime DC; "
-                "seed the DC domain password secret before provisioning"
-            )
-        return password
-    return os.environ.get("GDC_WINDOWS_ADMIN_PASSWORD", "CortexSavesTheDay!")  # nosec B105 - non-DC fallback (separate follow-up)
-
-
 def _render_user_data(instance: dict[str, Any], hostname: str, public_key: str) -> str:
+    """Render the cloud-init user_data for a GDC VM Runtime instance.
+
+    Per #762, the per-instance guest password is **not** rendered into
+    user_data. The engine provisioner sets it post-boot via SSH (Linux)
+    or SSH-driven PowerShell (Windows) using the per-instance SSH key
+    already provisioned in ``authorized_keys`` /
+    ``administrators_authorized_keys`` by this template. The DC role's
+    domain Administrator password (deployment-scoped
+    ``DC_DOMAIN_PASSWORD``) is set by the DC promote workflow via
+    Ansible/SSM, also post-boot.
+    """
     role = str(instance.get("role", "victim"))
     os_type = str(instance.get("os_type", "ubuntu"))
 
     if role == "dc":
         template = _load_template("dc_windows.ps1.j2")
-        admin_password = _get_windows_admin_password(role)
-        return template.render(public_key=public_key, admin_password=admin_password)
+        return template.render(public_key=public_key)
     if os_type == "windows":
         template = _load_template("victim_windows.ps1.j2")
-        return template.render(
-            public_key=public_key,
-            admin_password=_get_windows_admin_password(role),
-        )
+        return template.render(public_key=public_key)
     if role == "attacker" or os_type == "kali":
         template = _load_template("kali.sh.j2")
-        return template.render(
-            hostname=hostname,
-            public_key=public_key,
-            kali_password=_get_linux_access_password("kali"),
-        )
+        return template.render(hostname=hostname, public_key=public_key)
 
     template = _load_template("victim_linux.sh.j2")
-    return template.render(
-        public_key=public_key,
-        ssh_user=get_ssh_username(os_type, role),
-        guest_password=_get_linux_access_password(os_type),
-    )
+    return template.render(public_key=public_key, ssh_user=get_ssh_username(os_type, role))
 
 
 def _resolve_image_source(source_url: str, gcs_secret_name: str | None) -> dict[str, Any]:
@@ -501,7 +485,7 @@ def _ensure_ssh_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, st
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_id = _build_instance_secret_name(range_id, instance)
+    secret_id = _build_instance_secret_name(range_id, instance, kind="ssh")
     full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
 
     try:
@@ -535,10 +519,69 @@ def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance)}"
+    secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='ssh')}"
     try:
         client.delete_secret(request={"name": secret_name})
         logger.info("Deleted GDC SSH secret %s", secret_name)
+    except google_exceptions.NotFound:
+        return
+
+
+def _ensure_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, str]:
+    """Create or read a per-instance RDP password (GCP Secret Manager) (#762).
+
+    Idempotent: on repeated runs (e.g., resume after a transient
+    failure) the existing secret's value is returned so the guest's
+    chpasswd / net-user step keeps using the same value across boots.
+    Returns a tuple of ``(secret_ref, password_value)``.
+    """
+    project_id = get_project_id()
+    if not project_id:
+        raise RuntimeError("GCP project ID is required to manage GDC VM Runtime RDP password secrets")
+
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
+    client = secretmanager.SecretManagerServiceClient()
+    secret_id = _build_instance_secret_name(range_id, instance, kind="rdp-password")
+    full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
+
+    try:
+        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
+        password = response.payload.data.decode("utf-8")
+    except google_exceptions.NotFound:
+        password = generate_rdp_password()
+        with suppress(google_exceptions.AlreadyExists):
+            client.create_secret(
+                request={
+                    "parent": f"projects/{project_id}",
+                    "secret_id": secret_id,
+                    "secret": {"replication": {"automatic": {}}},
+                }
+            )
+        client.add_secret_version(
+            request={
+                "parent": full_secret_name,
+                "payload": {"data": password.encode("utf-8")},
+            }
+        )
+
+    return full_secret_name, password
+
+
+def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None:
+    project_id = get_project_id()
+    if not project_id:
+        return
+
+    secretmanager = import_google_module(_SECRETMANAGER_MODULE)
+    google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
+    client = secretmanager.SecretManagerServiceClient()
+    secret_name = (
+        f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='rdp-password')}"
+    )
+    try:
+        client.delete_secret(request={"name": secret_name})
+        logger.info("Deleted GDC RDP password secret %s", secret_name)
     except google_exceptions.NotFound:
         return
 
@@ -673,6 +716,16 @@ def _build_pending_vm_runtime_instance(
     disk_name = _disk_name(vm_name)
     hostname = _build_instance_hostname(instance, vm_name)
     ssh_secret_ref, public_key = _ensure_ssh_secret(range_id, instance)
+    role = str(instance.get("role", "victim"))
+    # DC keeps DC_DOMAIN_PASSWORD (deployment-scoped); per-instance
+    # password is only created for non-DC guests (#762). The value is
+    # stored in GCP Secret Manager here at provisioning time; the
+    # engine provisioner sets it on the guest post-boot via SSH using
+    # the per-instance SSH key.
+    if role == "dc":
+        rdp_password_secret_ref: str | None = None
+    else:
+        rdp_password_secret_ref, _ = _ensure_rdp_password_secret(range_id, instance)
     user_data = _render_user_data(instance, hostname, public_key)
     os_type = str(instance.get("os_type", "ubuntu"))
     profile = vm_config.get_profile(role=str(instance.get("role", "victim")), os_type=os_type)
@@ -726,6 +779,7 @@ def _build_pending_vm_runtime_instance(
         "disk_name": disk_name,
         "hostname": hostname,
         "ssh_secret_ref": ssh_secret_ref,
+        "rdp_password_secret_ref": rdp_password_secret_ref,
         "public_key": public_key,
         "static_ip": static_ip,
     }
@@ -745,7 +799,8 @@ def _build_vm_runtime_output(
     subnet_output = pending["subnet_output"]
     os_type = str(instance.get("os_type", "ubuntu"))
     role = str(instance.get("role", "victim"))
-    return {
+    rdp_password_secret_ref = pending.get("rdp_password_secret_ref")
+    output: dict[str, Any] = {
         "uuid": str(instance.get("uuid", "")),
         "name": str(instance.get("name", "")).strip() or pending["hostname"],
         "asset_type": "vm_runtime_vm",
@@ -767,6 +822,15 @@ def _build_vm_runtime_output(
         "vmruntime_disk_name": pending["disk_name"],
         **vmi_metadata,
     }
+    if rdp_password_secret_ref:
+        # Surface the reference both at the top-level (mirrors the
+        # AWS Terraform output's ssh_key_secret_arn / rdp_password_secret_arn
+        # pattern) and inside the gdc_-prefixed alias so the provisioner
+        # state writer's _extract_provider_metadata picks it up in the
+        # gcp provider_metadata block.
+        output["rdp_password_secret_arn"] = rdp_password_secret_ref
+        output["gdc_rdp_password_secret_ref"] = rdp_password_secret_ref
+    return output
 
 
 def _iter_vm_runtime_instances(subnets: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
@@ -818,6 +882,7 @@ def _destroy_vm_runtime_disks_and_secrets(
             api_exception=api_exception,
         )
         _delete_ssh_secret(range_id, instance)
+        _delete_rdp_password_secret(range_id, instance)
 
 
 def _delete_image_import_secret_if_needed(

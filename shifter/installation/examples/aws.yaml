@@ -26,7 +26,7 @@ secrets:
   django_secret_key: shifter/prod/django-secret-key
   db_password: shifter/prod/db-password
 
-# Backend-specific settings. Validated by the AWS backend bundle, not by the root
-# schema — see issue #1113 for the backend bundle contract.
+# Backend-specific settings. The root schema checks that this is a mapping.
+# Deployment tooling validates the values it consumes.
 settings:
   region: us-east-2

@@ -1,6 +1,6 @@
 # Quickstart
 
-Launch your first range in 5 minutes.
+Launch your first range.
 
 ## Prerequisites
 
@@ -26,7 +26,8 @@ Launch your first range in 5 minutes.
 
 ### 3. Wait for Provisioning
 
-Takes 10 minutes. You'll see status updates:
+Provisioning time depends on the selected scenario and cloud backend. You'll see
+status updates:
 
 - **Pending** - Queued for provisioning
 - **Provisioning** - Infrastructure spinning up

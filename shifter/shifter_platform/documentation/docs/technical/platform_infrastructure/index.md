@@ -1,6 +1,6 @@
 # Platform Infrastructure
 
-Cloud infrastructure and CI/CD for Shifter. Deploys to AWS or GCP.
+Cloud infrastructure and CI/CD for Shifter.
 
 ## AWS
 
@@ -16,8 +16,8 @@ platform/terraform/
 │   ├── ecr/              # Container registries
 │   ├── portal/           # Shifter app infrastructure
 │   ├── range/            # Range VPC and networking
-│   ├── pulumi-provisioner/   # ECS Fargate for Engine
-│   ├── pulumi-state/         # Pulumi backend (S3 + DynamoDB)
+│   ├── engine-provisioner/   # ECS Fargate for Engine
+│   ├── engine-state/         # Engine state bucket and DynamoDB locks
 │   ├── guacamole/            # Browser-based RDP (Guacamole)
 │   └── log-aggregation/      # Centralized logging
 ├── environments/
@@ -34,7 +34,7 @@ platform/terraform/
 | **Core** | `environments/{env}/` | ECR repositories, budget alerts |
 | **Range** | `modules/range/` | Range VPC, security groups, Network Firewall |
 | **Portal*** | `modules/portal/` | ALB, EC2 (configurable ASG), RDS, Redis, Cognito, S3 |
-| **Provisioner** | `modules/pulumi-provisioner/` | ECS Fargate task for range provisioning |
+| **Provisioner** | `modules/engine-provisioner/` | ECS Fargate task for range provisioning |
 | **Guacamole** | `modules/guacamole/` | Browser-based RDP access to range instances |
 | **CloudFormation** | `cloudformation/{env}/` | Cortex XDR connector IAM roles (manually deployed) |
 
@@ -42,7 +42,9 @@ platform/terraform/
 
 ### State Management
 
-Terraform state stored in S3 with DynamoDB locking per environment.
+Terraform state is stored in S3 with S3 native locking (`use_lockfile = true`).
+The engine state module also creates a DynamoDB table for provisioner runtime
+locks; that table is not the Terraform backend lock.
 
 ## GCP
 
@@ -74,7 +76,7 @@ platform/
 
 ### State Management
 
-Terraform state stored in GCS bucket per environment.
+Terraform state is stored in a GCS bucket per environment.
 
 ## Related Docs
 

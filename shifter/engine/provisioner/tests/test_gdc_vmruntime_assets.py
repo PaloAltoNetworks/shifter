@@ -45,27 +45,53 @@ class TestRenderUserData:
     # user_data. The engine provisioner sets it post-boot via SSH using
     # the per-instance SSH key. user_data carries only public material
     # (hostname, SSH public key).
-    def test_non_dc_render_does_not_embed_any_password_value(self):
-        # The rendered user_data must not carry plaintext credentials
-        # for kali/ubuntu/windows victims; absence of literals AND
-        # absence of any "chpasswd"/"net user $" form proves this.
-        for role, os_type in (("victim", "ubuntu"), ("attacker", "kali"), ("victim", "windows")):
-            result = _render_user_data(
-                {"role": role, "os_type": os_type},
-                hostname="target-01",
-                public_key="ssh-rsa AAAA",
-            )
-            assert "CortexSavesTheDay!" not in result
-            # No chpasswd / net user invocation embedded with a value.
-            import re
+    import pytest as _pytest
 
-            chpasswd_pattern = re.compile(r'(?:echo\s+["\']?)([a-z]+):\1(?:["\']?\s*\|\s*chpasswd)')
-            assert not chpasswd_pattern.search(result), result
-            # No gcloud / aws fetch leftover from the prior fetch-at-boot
-            # approach — the password is now pushed by the provisioner,
-            # not fetched by the guest.
-            assert "gcloud secrets versions access" not in result
-            assert "aws secretsmanager get-secret-value" not in result
+    _PUBLIC_KEY = "ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAIExample"
+
+    @_pytest.mark.parametrize(
+        ("role", "os_type"),
+        [("victim", "ubuntu"), ("attacker", "kali"), ("victim", "windows")],
+    )
+    def test_non_dc_user_data_embeds_public_key_and_no_password_material(self, role, os_type):
+        # Positive assertions: the rendered user_data MUST embed the
+        # SSH public key (the provisioner relies on this to SSH in
+        # post-boot to push the password). Plus shape checks per OS
+        # family — Windows is a PowerShell script wrapped in
+        # `<powershell>`; Linux is a bash script that starts with
+        # the shebang. The hostname assertion is omitted because the
+        # Kali template sets the hostname directly (`hostnamectl
+        # set-hostname`) while the windows-victim template defers it
+        # to SSM Run Command; different shapes per OS.
+        import re
+
+        result = _render_user_data(
+            {"role": role, "os_type": os_type},
+            hostname="target-01",
+            public_key=self._PUBLIC_KEY,
+        )
+
+        # The SSH public key (the post-boot push channel) MUST be
+        # rendered into user_data.
+        assert self._PUBLIC_KEY in result, result
+
+        # Per-OS structural shape.
+        if os_type == "windows":
+            assert "<powershell>" in result
+            assert "administrators_authorized_keys" in result
+        else:
+            assert result.lstrip().startswith("#!/bin/bash"), result[:80]
+
+        # Negative assertions: no password value rendered. The
+        # ``chpasswd_pattern`` matches ``echo "<user>:<user>" |
+        # chpasswd`` (the legacy literal-as-password shape). The
+        # ``net_user_with_value_pattern`` matches a bare net-user
+        # invocation that would put the password on argv.
+        assert "CortexSavesTheDay!" not in result
+        chpasswd_pattern = re.compile(r'(?:echo\s+["\']?)([a-z]+):\1(?:["\']?\s*\|\s*chpasswd)')
+        assert not chpasswd_pattern.search(result), result
+        assert "gcloud secrets versions access" not in result
+        assert "aws secretsmanager get-secret-value" not in result
 
     def test_dc_render_does_not_embed_password(self, monkeypatch):
         # Per #762: even the DC's pre-promote local Administrator

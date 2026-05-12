@@ -14,22 +14,33 @@ class TestSetLocalPasswordPlan:
     """The plan that pushes per-instance guest credentials post-boot."""
 
     def test_linux_step_pipes_password_through_here_doc_not_argv(self):
+        # Password is delivered through a chpasswd here-doc inside the
+        # script body, not via stdin_input (SSMExecutor ignores stdin)
+        # and not via argv. The orchestrator masks the value in log
+        # capture via the ``rdp_password`` context-key heuristic.
+        import re
+
         from plans.set_local_password import SetLocalPasswordPlan
 
         plan = SetLocalPasswordPlan(platform="linux")
         assert len(plan.steps) == 1
         step = plan.steps[0]
-        # Password is delivered through a chpasswd here-doc inside the
-        # script body, not via stdin_input (SSMExecutor ignores stdin)
-        # and not via argv. The orchestrator masks the value in log
-        # capture via the ``rdp_password`` context-key heuristic.
-        assert "chpasswd" in step.script
-        # The user:password line MUST flow through a here-doc, not
-        # through ``echo "$USER:$PASSWORD" | chpasswd`` (that shape
-        # would put the value on echo's argv on some shells).
-        assert "<<" in step.script
-        assert "{{ rdp_username }}" in step.script
-        assert "{{ rdp_password }}" in step.script
+
+        # Structural check: the script MUST invoke chpasswd via a
+        # here-doc whose body contains the ``{{ rdp_username }}:{{
+        # rdp_password }}`` Jinja substitution. A loose substring
+        # check would pass on a comment containing the variable name
+        # while the actual chpasswd call put the password on argv.
+        here_doc_pattern = re.compile(
+            r"chpasswd[\s\S]*?<<[^\n]*\n[\s\S]*?\{\{\s*rdp_username\s*\}\}:\{\{\s*rdp_password\s*\}\}",
+        )
+        assert here_doc_pattern.search(step.script), step.script
+
+        # Negative: the password MUST NOT appear as a chpasswd argv
+        # (``echo "..." | chpasswd``). The here-doc reads from stdin,
+        # never from argv.
+        argv_pattern = re.compile(r'echo\s+["\']?[^"\']*\{\{\s*rdp_password\s*\}\}[^"\']*["\']?\s*\|\s*chpasswd')
+        assert not argv_pattern.search(step.script), step.script
 
     def test_windows_step_uses_securestring_not_net_user(self):
         from plans.set_local_password import SetLocalPasswordPlan

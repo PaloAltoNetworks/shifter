@@ -122,6 +122,7 @@ class TestDispatchCommands:
 
         payload = mock_ecs.call_args[1]["payload"]
         assert "commands" in payload
+        assert payload["ai_execution_policy"]["version"] == "ai-experiment-execution-v1"
         assert len(payload["commands"]) == 2
         assert payload["commands"][0]["instance_id"] == "i-abc123"
         assert payload["commands"][0]["execution_order"] == 1

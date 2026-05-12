@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -48,6 +48,7 @@ from cyberscript.template_vars import (
 
 
 __all__ = [
+    "AI_EXPERIMENT_EXECUTION_POLICY_VERSION",
     "DisplayName",
     "InstanceIdValue",
     "InstanceValues",
@@ -55,6 +56,7 @@ __all__ = [
     "PromptText",
     "S3KeySegment",
     "ScriptExecutionContext",
+    "build_ai_execution_policy_payload",
 ]
 
 
@@ -79,6 +81,25 @@ _MAX_S3_KEY = 500
 _MAX_DISPLAY_NAME = 100
 _MAX_PROMPT_TEXT = 8192
 _ALLOWED_CONTROL_CHARS = frozenset({"\t", "\n", "\r"})
+
+AI_EXPERIMENT_EXECUTION_POLICY_VERSION: Final = "ai-experiment-execution-v1"
+
+
+def build_ai_execution_policy_payload() -> dict[str, object]:
+    """Return the auditable policy contract for AI experiment execution.
+
+    The executor receives this payload with each command batch so incident
+    review can tie a run back to the code-level policy that allowed Claude
+    Code to run with skipped prompts. Keep this in lockstep with
+    docs/architecture/ai-experiment-execution-boundary.md.
+    """
+    return {
+        "version": AI_EXPERIMENT_EXECUTION_POLICY_VERSION,
+        "claude_code": {
+            "prompt_delivery": "validated_single_argument",
+            "transcript_artifact_required": True,
+        },
+    }
 
 
 def _validate_instance_id(v: str) -> str:

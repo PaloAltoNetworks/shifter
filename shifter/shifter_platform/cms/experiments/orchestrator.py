@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from cyberscript.script_context import ScriptExecutionContext
+from cyberscript.script_context import (
+    ScriptExecutionContext,
+    build_ai_execution_policy_payload,
+)
 from cyberscript.template_vars import build_instance_data
 from pydantic import ValidationError
 
@@ -667,6 +670,7 @@ class ExperimentOrchestrator:
         )
 
         payload = {
+            "ai_execution_policy": build_ai_execution_policy_payload(),
             "commands": [asdict(cmd) for cmd in commands],
         }
 

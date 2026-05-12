@@ -9,12 +9,17 @@ shell text.
 
 from __future__ import annotations
 
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cms.experiments.exceptions import ExecutionPlanError
 from cms.experiments.orchestrator import ExperimentOrchestrator
+
+
+def _encoded(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode()).decode()
 
 
 def _make_experiment(**overrides):
@@ -79,10 +84,11 @@ class TestPythonCommandSafety:
         assert len(plan.victim_commands) == 1
         cmd = plan.victim_commands[0].command
         assert "Workstation 1" not in cmd, "display name must not reach shell text"
-        # S108 false positives: these are string assertions on generated shell
-        # text, not actual file operations from this test.
-        assert "/tmp/script_i-0abcdef12.py" in cmd  # noqa: S108
-        assert "/tmp/output_i-0abcdef12.log" in cmd  # noqa: S108
+        assert 'instance_id = "i-0abcdef12"' in cmd
+        assert 'script_path = f"/tmp/script_{instance_id}.py"' in cmd
+        assert 'output_path = f"/tmp/output_{instance_id}.log"' in cmd
+        assert "scripts/1/script.py" not in cmd
+        assert _encoded("scripts/1/script.py") in cmd
 
     def test_rejects_malformed_instance_id(self):
         exp = _make_experiment()
@@ -218,7 +224,9 @@ class TestClaudeCommandSafety:
             plan = orch._build_execution_plan(run, provisioned)
 
         cmd = plan.victim_commands[0].command
-        assert "-p 'Attack the box at 10.0.0.5'" in cmd
+        assert "Attack the box at 10.0.0.5" not in cmd
+        assert _encoded("Attack the box at 10.0.0.5") in cmd
+        assert '"-p",\n            prompt,' in cmd
 
     def test_validation_error_does_not_leak_raw_prompt(self):
         """Pydantic's default str() includes input_value; orchestrator must strip it."""
@@ -280,8 +288,8 @@ class TestClaudeCommandSafety:
                 orch._build_execution_plan(run, provisioned)
         assert "claude_prompt_template" in str(exc.value)
 
-    def test_quoted_metacharacters_survive_inside_single_quoted_arg(self):
-        """`'; rm -rf /; echo '` in the prompt must not break out of the `-p '…'` arg."""
+    def test_prompt_metacharacters_cross_shell_boundary_encoded(self):
+        """`'; rm -rf /; echo '` in the prompt must not reach shell syntax."""
         exp = _make_experiment()
         run = _make_run()
         sa = _make_script_assignment(
@@ -308,8 +316,7 @@ class TestClaudeCommandSafety:
             plan = orch._build_execution_plan(run, provisioned)
 
         cmd = plan.victim_commands[0].command
-        # The argument is wrapped: -p '<encoded>' …
-        between = cmd.split(" -p '", 1)[1].split("' 2>&1 ", 1)[0]
-        # Every bare `'` in the argument body must be part of a `'\''` sequence.
-        # Replace every `'\''` with a sentinel; no `'` should remain.
-        assert "'" not in between.replace("'\\''", "\x01")
+        assert "'; rm -rf /; echo '" not in cmd
+        assert "; rm -rf" not in cmd
+        assert _encoded("'; rm -rf /; echo '") in cmd
+        assert '"-p",\n            prompt,' in cmd

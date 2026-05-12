@@ -9,7 +9,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -48,8 +47,7 @@ from cms.experiments.schemas import (
 from cms.scenarios.registry import check_scenario_access, load_scenario_template
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
-from shared.auth import can_edit_cms_authoring
-from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
+from shared.auth import validate_cms_authoring_user
 from shared.log_sanitize import safe_log
 
 if TYPE_CHECKING:
@@ -60,29 +58,8 @@ logger = logging.getLogger(__name__)
 
 
 def _validate_user(user: User, func_name: str) -> None:
-    """Validate user shape and CMS authoring authorization.
-
-    Structural checks (None / instance / saved) match the cms/services.py
-    pattern. Authorization defers to ``shared.auth.can_edit_cms_authoring`` so
-    the service-layer gate cannot drift from the view decorator
-    (``threat_research_required``).
-    """
-    if user is None:
-        logger.error("%s called with None user", func_name)
-        raise TypeError(USER_CANNOT_BE_NONE)
-    if not hasattr(user, "id"):
-        logger.error(
-            "%s called with invalid user type: %s",
-            func_name,
-            type(user).__name__,
-        )
-        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
-    if user.id is None:
-        logger.error("%s called with unsaved user (id=None)", func_name)
-        raise ValueError(USER_MUST_BE_SAVED)
-    if not can_edit_cms_authoring(user):
-        logger.warning("%s denied: user_id=%s not staff or Threat Research", func_name, user.id)
-        raise PermissionDenied("Active staff or Threat Research group membership is required")
+    """Delegate to the shared CMS authoring user validator (see shared.auth)."""
+    validate_cms_authoring_user(user, func_name)
 
 
 def _check_result_type(result: object, expected_type: type, func_name: str) -> None:

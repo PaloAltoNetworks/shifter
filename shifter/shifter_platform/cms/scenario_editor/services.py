@@ -11,7 +11,6 @@ import re
 from typing import TYPE_CHECKING
 
 import yaml
-from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
@@ -21,8 +20,7 @@ from cms.scenarios.registry import is_default_scenario
 from cms.scenarios.schema import ScenarioTemplate
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
-from shared.auth import can_edit_cms_authoring
-from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
+from shared.auth import validate_cms_authoring_user
 from shared.exceptions import CMSError
 
 if TYPE_CHECKING:
@@ -36,29 +34,8 @@ class ScenarioEditorError(CMSError):
 
 
 def _validate_user(user: User, func_name: str) -> None:
-    """Validate user shape and CMS authoring authorization.
-
-    Structural checks (None / instance / saved) match the cms/services.py
-    pattern. Authorization defers to ``shared.auth.can_edit_cms_authoring`` so
-    the service-layer gate stays aligned with the view decorator
-    (``threat_research_required``).
-    """
-    if user is None:
-        logger.error("%s called with None user", func_name)
-        raise TypeError(USER_CANNOT_BE_NONE)
-    if not hasattr(user, "id"):
-        logger.error(
-            "%s called with invalid user type: %s",
-            func_name,
-            type(user).__name__,
-        )
-        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
-    if user.id is None:
-        logger.error("%s called with unsaved user (id=None)", func_name)
-        raise ValueError(USER_MUST_BE_SAVED)
-    if not can_edit_cms_authoring(user):
-        logger.warning("%s denied: user_id=%s not staff or Threat Research", func_name, user.id)
-        raise PermissionDenied("Active staff or Threat Research group membership is required")
+    """Delegate to the shared CMS authoring user validator (see shared.auth)."""
+    validate_cms_authoring_user(user, func_name)
 
 
 # Regex for valid scenario IDs: lowercase alphanumeric, hyphens, underscores.

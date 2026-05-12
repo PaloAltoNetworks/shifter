@@ -338,21 +338,9 @@ class ExperimentOrchestrator:
                 or if the configured cloud provider is not AWS (experiment script
                 execution lands in SSM RunCommand, which is AWS-only today).
         """
-        from django.conf import settings
-
         from cms.experiments.exceptions import ExecutionPlanError
 
-        # `cyberscript.script_context.ScriptExecutionContext` validates EC2
-        # instance IDs and renders `aws s3 cp` shell text; today's dispatch
-        # path lands in SSM RunCommand. Gate non-AWS providers with a clear
-        # message rather than letting the validator's `i-…` rejection
-        # masquerade as an unsupported-provider error.
-        provider = (getattr(settings, "CLOUD_PROVIDER", None) or "aws").lower()
-        if provider != "aws":
-            raise ExecutionPlanError(
-                f"Cannot build execution plan for run {run.pk}: experiment "
-                f"script execution is AWS-only today (CLOUD_PROVIDER={provider!r})."
-            )
+        self._enforce_aws_only_provider(run)
 
         instance_data = build_instance_data(provisioned_instances)
         scripts = (
@@ -380,55 +368,14 @@ class ExperimentOrchestrator:
                 missing_instances.append(instance_name)
                 continue
 
-            private_ip = instance_info.get("private_ip") or None
-
-            try:
-                if script_assignment.script_type == ScriptType.PYTHON.value:
-                    s3_key = script_assignment.script.s3_key if script_assignment.script else ""
-                    ctx = ScriptExecutionContext.for_python(
-                        instance_name=instance_name,
-                        instance_id=instance_id,
-                        private_ip=private_ip,
-                        script_s3_key=s3_key,
-                    )
-                    cmd = ScriptCommand(
-                        instance_name=instance_name,
-                        instance_id=instance_id,
-                        script_type=ScriptType.PYTHON.value,
-                        command=ctx.render_command(),
-                        execution_order=script_assignment.execution_order,
-                        script_s3_key=s3_key,
-                    )
-                elif script_assignment.script_type == ScriptType.CLAUDE_CODE.value:
-                    ctx = ScriptExecutionContext.for_claude(
-                        instance_name=instance_name,
-                        instance_id=instance_id,
-                        private_ip=private_ip,
-                        claude_prompt_template=script_assignment.claude_prompt,
-                        instance_data=instance_data,
-                    )
-                    cmd = ScriptCommand(
-                        instance_name=instance_name,
-                        instance_id=instance_id,
-                        script_type=ScriptType.CLAUDE_CODE.value,
-                        command=ctx.render_command(),
-                        execution_order=script_assignment.execution_order,
-                    )
-                else:
-                    raise ExecutionPlanError(
-                        f"Cannot build execution plan for run {run.pk}: "
-                        f"unknown script_type for instance '{instance_name}'"
-                    )
-            except ValidationError as exc:
-                # Surface field locations and error types only — never echo
-                # the rejected input value into orchestration errors / logs.
-                # Pydantic's default str() and exc.errors() include input_value.
-                summary = "; ".join(
-                    f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors(include_input=False)
-                )
-                raise ExecutionPlanError(
-                    f"Cannot build execution plan for run {run.pk}: script for instance failed validation: {summary}"
-                ) from exc
+            cmd = self._build_script_command(
+                run=run,
+                script_assignment=script_assignment,
+                instance_name=instance_name,
+                instance_info=instance_info,
+                instance_id=instance_id,
+                instance_data=instance_data,
+            )
 
             if script_assignment.execution_order < 100:
                 plan.victim_commands.append(cmd)
@@ -442,6 +389,121 @@ class ExperimentOrchestrator:
             )
 
         return plan
+
+    def _enforce_aws_only_provider(self, run: ExperimentRun) -> None:
+        """Gate non-AWS providers with a clear `ExecutionPlanError` before plan construction.
+
+        `cyberscript.script_context.ScriptExecutionContext` validates EC2 instance
+        IDs and renders `aws s3 cp` shell text; today's dispatch path lands in SSM
+        RunCommand, which is AWS-only. Surface this explicitly rather than letting
+        the validator's `i-…` rejection masquerade as an unsupported-provider error.
+        """
+        from django.conf import settings
+
+        from cms.experiments.exceptions import ExecutionPlanError
+
+        provider = (getattr(settings, "CLOUD_PROVIDER", None) or "aws").lower()
+        if provider != "aws":
+            raise ExecutionPlanError(
+                f"Cannot build execution plan for run {run.pk}: experiment "
+                f"script execution is AWS-only today (CLOUD_PROVIDER={provider!r})."
+            )
+
+    def _build_script_command(
+        self,
+        *,
+        run: ExperimentRun,
+        script_assignment: ExperimentScript,
+        instance_name: str,
+        instance_info: dict[str, Any],
+        instance_id: str,
+        instance_data: dict[str, dict[str, Any]],
+    ) -> ScriptCommand:
+        """Construct a single `ScriptCommand` from a script assignment.
+
+        Wraps `ScriptExecutionContext` construction and rendering so the loop in
+        `_build_execution_plan` stays declarative. Any `pydantic.ValidationError`
+        is surfaced as `ExecutionPlanError` with the rejected input value redacted
+        from the message — Pydantic's default `str()` includes `input_value=`.
+        """
+        from cms.experiments.exceptions import ExecutionPlanError
+
+        private_ip = instance_info.get("private_ip") or None
+
+        try:
+            if script_assignment.script_type == ScriptType.PYTHON.value:
+                return self._build_python_script_command(
+                    script_assignment=script_assignment,
+                    instance_name=instance_name,
+                    instance_id=instance_id,
+                    private_ip=private_ip,
+                )
+            if script_assignment.script_type == ScriptType.CLAUDE_CODE.value:
+                return self._build_claude_script_command(
+                    script_assignment=script_assignment,
+                    instance_name=instance_name,
+                    instance_id=instance_id,
+                    private_ip=private_ip,
+                    instance_data=instance_data,
+                )
+            raise ExecutionPlanError(
+                f"Cannot build execution plan for run {run.pk}: unknown script_type for instance '{instance_name}'"
+            )
+        except ValidationError as exc:
+            summary = "; ".join(
+                f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors(include_input=False)
+            )
+            raise ExecutionPlanError(
+                f"Cannot build execution plan for run {run.pk}: script for instance failed validation: {summary}"
+            ) from exc
+
+    def _build_python_script_command(
+        self,
+        *,
+        script_assignment: ExperimentScript,
+        instance_name: str,
+        instance_id: str,
+        private_ip: str | None,
+    ) -> ScriptCommand:
+        s3_key = script_assignment.script.s3_key if script_assignment.script else ""
+        ctx = ScriptExecutionContext.for_python(
+            instance_name=instance_name,
+            instance_id=instance_id,
+            private_ip=private_ip,
+            script_s3_key=s3_key,
+        )
+        return ScriptCommand(
+            instance_name=instance_name,
+            instance_id=instance_id,
+            script_type=ScriptType.PYTHON.value,
+            command=ctx.render_command(),
+            execution_order=script_assignment.execution_order,
+            script_s3_key=s3_key,
+        )
+
+    def _build_claude_script_command(
+        self,
+        *,
+        script_assignment: ExperimentScript,
+        instance_name: str,
+        instance_id: str,
+        private_ip: str | None,
+        instance_data: dict[str, dict[str, Any]],
+    ) -> ScriptCommand:
+        ctx = ScriptExecutionContext.for_claude(
+            instance_name=instance_name,
+            instance_id=instance_id,
+            private_ip=private_ip,
+            claude_prompt_template=script_assignment.claude_prompt,
+            instance_data=instance_data,
+        )
+        return ScriptCommand(
+            instance_name=instance_name,
+            instance_id=instance_id,
+            script_type=ScriptType.CLAUDE_CODE.value,
+            command=ctx.render_command(),
+            execution_order=script_assignment.execution_order,
+        )
 
     def _request_range_provisioning(self, run: ExperimentRun) -> None:
         """Request range provisioning for a run via the engine.

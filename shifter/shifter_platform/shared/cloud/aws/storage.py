@@ -81,12 +81,11 @@ class AWSObjectStorage:
                 Key=dst_key,
             )
         except (ClientError, BotoCoreError) as e:
-            logger.error(
-                "copy_object: failed bucket=%s src=%s dst=%s error=%s",
+            logger.exception(
+                "copy_object: failed bucket=%s src=%s dst=%s",
                 bucket,
                 src_key,
                 dst_key,
-                e,
             )
             raise CloudStorageError(f"Failed to copy S3 object: {e}") from e
         logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
@@ -123,7 +122,7 @@ class AWSObjectStorage:
             status = (e.response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
             if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
                 return False
-            logger.error(
+            logger.exception(
                 "object_exists: unexpected ClientError bucket=%s key=%s code=%s",
                 bucket,
                 key,
@@ -131,7 +130,7 @@ class AWSObjectStorage:
             )
             raise CloudStorageError(f"Failed to test S3 object existence: {e}") from e
         except BotoCoreError as e:
-            logger.error("object_exists: BotoCoreError bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("object_exists: BotoCoreError bucket=%s key=%s", bucket, key)
             raise CloudStorageError(f"Failed to test S3 object existence: {e}") from e
 
     def generate_presigned_upload_url(

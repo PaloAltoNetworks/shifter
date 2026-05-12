@@ -58,12 +58,11 @@ class GCPObjectStorage:
             source_blob = source_bucket.blob(src_key)
             source_bucket.copy_blob(source_blob, source_bucket, dst_key)
         except Exception as e:
-            logger.error(
-                "copy_object: failed bucket=%s src=%s dst=%s error=%s",
+            logger.exception(
+                "copy_object: failed bucket=%s src=%s dst=%s",
                 bucket,
                 src_key,
                 dst_key,
-                e,
             )
             raise CloudStorageError(f"Failed to copy GCS object: {e}") from e
         logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
@@ -82,7 +81,7 @@ class GCPObjectStorage:
             blob = client.bucket(bucket).get_blob(key)
             return blob is not None
         except Exception as e:
-            logger.error("object_exists: failed bucket=%s key=%s error=%s", bucket, key, e)
+            logger.exception("object_exists: failed bucket=%s key=%s", bucket, key)
             raise CloudStorageError(f"Failed to test GCS object existence: {e}") from e
 
     def head_object(self, bucket: str, key: str) -> dict[str, Any]:

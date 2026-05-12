@@ -108,7 +108,8 @@ def _validate_private_ip(v: str | None) -> str | None:
         return None
     try:
         canonical = str(ipaddress.IPv4Address(v))
-    except (ipaddress.AddressValueError, ValueError) as exc:
+    except ValueError as exc:
+        # ipaddress.AddressValueError subclasses ValueError; one except clause covers both.
         raise ValueError("private_ip must be an IPv4 dotted-quad") from exc
     if canonical != v:
         raise ValueError("private_ip must be in canonical IPv4 form")

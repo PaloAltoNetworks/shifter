@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from cyberscript.template_vars import build_instance_data, resolve_template
+from cyberscript.script_context import ScriptExecutionContext
+from cyberscript.template_vars import build_instance_data
+from pydantic import ValidationError
 
 from cms.experiments.ecs import start_experiment_task
 from cms.experiments.models import (
@@ -332,9 +334,25 @@ class ExperimentOrchestrator:
         """Build an execution plan from experiment scripts and provisioned data.
 
         Raises:
-            ExecutionPlanError: If required instances are missing from provisioned data.
+            ExecutionPlanError: If required instances are missing from provisioned data,
+                or if the configured cloud provider is not AWS (experiment script
+                execution lands in SSM RunCommand, which is AWS-only today).
         """
+        from django.conf import settings
+
         from cms.experiments.exceptions import ExecutionPlanError
+
+        # `cyberscript.script_context.ScriptExecutionContext` validates EC2
+        # instance IDs and renders `aws s3 cp` shell text; today's dispatch
+        # path lands in SSM RunCommand. Gate non-AWS providers with a clear
+        # message rather than letting the validator's `i-…` rejection
+        # masquerade as an unsupported-provider error.
+        provider = (getattr(settings, "CLOUD_PROVIDER", None) or "aws").lower()
+        if provider != "aws":
+            raise ExecutionPlanError(
+                f"Cannot build execution plan for run {run.pk}: experiment "
+                f"script execution is AWS-only today (CLOUD_PROVIDER={provider!r})."
+            )
 
         instance_data = build_instance_data(provisioned_instances)
         scripts = (
@@ -362,27 +380,55 @@ class ExperimentOrchestrator:
                 missing_instances.append(instance_name)
                 continue
 
-            if script_assignment.script_type == ScriptType.PYTHON.value:
-                s3_key = script_assignment.script.s3_key if script_assignment.script else ""
-                command = self._build_python_command(s3_key, instance_name)
-                cmd = ScriptCommand(
-                    instance_name=instance_name,
-                    instance_id=instance_id,
-                    script_type=ScriptType.PYTHON.value,
-                    command=command,
-                    execution_order=script_assignment.execution_order,
-                    script_s3_key=s3_key,
+            private_ip = instance_info.get("private_ip") or None
+
+            try:
+                if script_assignment.script_type == ScriptType.PYTHON.value:
+                    s3_key = script_assignment.script.s3_key if script_assignment.script else ""
+                    ctx = ScriptExecutionContext.for_python(
+                        instance_name=instance_name,
+                        instance_id=instance_id,
+                        private_ip=private_ip,
+                        script_s3_key=s3_key,
+                    )
+                    cmd = ScriptCommand(
+                        instance_name=instance_name,
+                        instance_id=instance_id,
+                        script_type=ScriptType.PYTHON.value,
+                        command=ctx.render_command(),
+                        execution_order=script_assignment.execution_order,
+                        script_s3_key=s3_key,
+                    )
+                elif script_assignment.script_type == ScriptType.CLAUDE_CODE.value:
+                    ctx = ScriptExecutionContext.for_claude(
+                        instance_name=instance_name,
+                        instance_id=instance_id,
+                        private_ip=private_ip,
+                        claude_prompt_template=script_assignment.claude_prompt,
+                        instance_data=instance_data,
+                    )
+                    cmd = ScriptCommand(
+                        instance_name=instance_name,
+                        instance_id=instance_id,
+                        script_type=ScriptType.CLAUDE_CODE.value,
+                        command=ctx.render_command(),
+                        execution_order=script_assignment.execution_order,
+                    )
+                else:
+                    raise ExecutionPlanError(
+                        f"Cannot build execution plan for run {run.pk}: "
+                        f"unknown script_type for instance '{instance_name}'"
+                    )
+            except ValidationError as exc:
+                # Surface field locations and error types only — never echo
+                # the rejected input value into orchestration errors / logs.
+                # Pydantic's default str() and exc.errors() include input_value.
+                summary = "; ".join(
+                    f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors(include_input=False)
                 )
-            else:
-                prompt = resolve_template(script_assignment.claude_prompt, instance_data)
-                command = self._build_claude_command(prompt)
-                cmd = ScriptCommand(
-                    instance_name=instance_name,
-                    instance_id=instance_id,
-                    script_type=ScriptType.CLAUDE_CODE.value,
-                    command=command,
-                    execution_order=script_assignment.execution_order,
-                )
+                raise ExecutionPlanError(
+                    f"Cannot build execution plan for run {run.pk}: script for instance failed validation: {summary}"
+                ) from exc
 
             if script_assignment.execution_order < 100:
                 plan.victim_commands.append(cmd)
@@ -396,43 +442,6 @@ class ExperimentOrchestrator:
             )
 
         return plan
-
-    def _build_python_command(self, s3_key: str, instance_name: str) -> str:
-        """Build shell command to download and run a Python script from S3."""
-        return (
-            f"aws s3 cp s3://${{BUCKET_NAME}}/{s3_key} /tmp/script_{instance_name}.py "
-            f"&& python3 /tmp/script_{instance_name}.py "
-            f"2>&1 | tee /tmp/output_{instance_name}.log"
-        )
-
-    def _build_claude_command(self, resolved_prompt: str) -> str:
-        """Build Claude Code invocation command.
-
-        Security model:
-        - Only staff users can create experiments (enforced at API layer)
-        - Commands execute in isolated ECS Fargate tasks (network isolation)
-        - Tasks run in the user's own range (no cross-user access)
-        - Single-quote POSIX escaping (replace ' with '\\'' per POSIX.1-2008)
-
-        Intentional design decision: Minimal escaping for user flexibility.
-        The resolved prompt may contain shell metacharacters (backticks, $(), |, etc.)
-        from template variables. This is acceptable because:
-        1. Staff-only access boundary (malicious staff = bigger problems)
-        2. Isolated execution environment (ECS task, user's own infrastructure)
-        3. Scientific use case requires complex command composition
-
-        Alternative approaches (not used):
-        - Full shell escaping: Breaks legitimate use cases (piping, command substitution)
-        - Base64 encoding: Obscures debugging, breaks readability
-        - Python subprocess: Would require shipping Python to range instances
-        """
-        escaped_prompt = resolved_prompt.replace("'", "'\\''")
-        return (
-            f"claude --dangerously-skip-permissions "
-            f"--output-format stream-json "
-            f"-p '{escaped_prompt}' "
-            f"2>&1 | tee /tmp/claude_output.json"
-        )
 
     def _request_range_provisioning(self, run: ExperimentRun) -> None:
         """Request range provisioning for a run via the engine.

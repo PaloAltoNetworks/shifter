@@ -49,6 +49,12 @@ class TestProtocolStructuralTyping:
             def delete_object(self, bucket, key):
                 pass
 
+            def copy_object(self, bucket, src_key, dst_key):
+                pass
+
+            def object_exists(self, bucket, key):
+                return False
+
             def head_object(self, bucket, key):
                 return {}
 

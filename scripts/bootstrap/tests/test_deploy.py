@@ -2767,10 +2767,15 @@ class TestGcpBootstrapIdentityPlatform:
                 bootstrap_operator_email="admin@example.com",
             )
 
-        assert "GDC_WINDOWS_ADMIN_PASSWORD=\n" in rendered
-        assert "GDC_KALI_PASSWORD=\n" in rendered
-        assert "GDC_UBUNTU_PASSWORD=\n" in rendered
+        # Issue #762: per-instance guest passwords replace shared env
+        # entries. The bootstrap-rendered platform-runtime env file must
+        # not advertise these legacy keys, and never the legacy literal.
+        assert "GDC_WINDOWS_ADMIN_PASSWORD" not in rendered
+        assert "GDC_KALI_PASSWORD" not in rendered
+        assert "GDC_UBUNTU_PASSWORD" not in rendered
         assert "CortexSavesTheDay!" not in rendered
+        assert "kali:kali" not in rendered
+        assert "ubuntu:ubuntu" not in rendered
 
 
 class TestGcpIdentityAdminApi:

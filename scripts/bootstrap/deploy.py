@@ -174,12 +174,15 @@ def _format_sample_env_assignment(key: str, value: str = "") -> str:
 
 
 def _sample_guest_access_defaults() -> list[str]:
-    """Return placeholder guest credential env entries without baked-in secrets."""
-    return [
-        _format_sample_env_assignment("GDC_WINDOWS_ADMIN_PASSWORD"),
-        _format_sample_env_assignment("GDC_KALI_PASSWORD"),
-        _format_sample_env_assignment("GDC_UBUNTU_PASSWORD"),
-    ]
+    """Return placeholder guest credential env entries.
+
+    Issue #762: GDC_KALI_PASSWORD / GDC_UBUNTU_PASSWORD /
+    GDC_WINDOWS_ADMIN_PASSWORD were dropped. Guest passwords are now
+    per-instance GCP Secret Manager secrets created at provisioning
+    time. The DC role keeps its deployment-scoped DC_DOMAIN_PASSWORD
+    contract (set elsewhere in the deploy pipeline).
+    """
+    return []
 
 
 def run_cmd(

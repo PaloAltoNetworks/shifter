@@ -56,6 +56,7 @@ from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
 from plans.ngfw_configure_subnets import NGFWConfigureSubnetsPlan, NGFWRemoveSubnetsPlan
 from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+from plans.set_local_password import SetLocalPasswordPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
 
 logger = logging.getLogger(__name__)
@@ -439,6 +440,19 @@ def _build_instance_state(instance_data: dict[str, Any], provider: str | None = 
         "instance_id": instance_data.get("instance_id"),
         "private_ip": instance_data.get("private_ip"),
         "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        # Per-instance RDP password secret reference (#762). Carries the
+        # provider-native identifier (AWS Secrets Manager ARN or GCP
+        # Secret Manager resource path); the password value itself is
+        # never persisted in state.
+        "rdp_password_secret_arn": instance_data.get("rdp_password_secret_arn"),
+        # SSM Parameter Store SecureString name for the same per-
+        # instance password (AWS only; GCP carries ``None``). Used by
+        # the AWS push path's ``{{ssm-secure:<name>}}`` substitution so
+        # the value never lands in SSM Run Command history (#762 codex
+        # cycle 3). Mirrors the Secrets Manager copy referenced above;
+        # the portal continues to read the value from Secrets Manager
+        # via ``shared.cloud`` at access time.
+        "rdp_password_ssm_param_name": instance_data.get("rdp_password_ssm_param_name"),
         "ssh_username": instance_data.get("ssh_username"),
         "subnet_name": instance_data.get("subnet_name"),
         "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
@@ -461,6 +475,10 @@ def _build_provisioned_instance_payload(instance_data: dict[str, Any], provider:
         "instance_id": instance_data.get("instance_id"),
         "private_ip": instance_data.get("private_ip"),
         "ssh_key_secret_arn": instance_data.get("ssh_key_secret_arn"),
+        # Per-instance RDP password secret reference (#762).
+        "rdp_password_secret_arn": instance_data.get("rdp_password_secret_arn"),
+        # AWS-only mirror in SSM Parameter Store SecureString (#762 cycle 3).
+        "rdp_password_ssm_param_name": instance_data.get("rdp_password_ssm_param_name"),
         "ssh_username": instance_data.get("ssh_username"),
         "cloud_provider": resolved_provider,
         "provider_metadata": _build_instance_provider_metadata(instance_data, resolved_provider),
@@ -1692,10 +1710,93 @@ def _run_setup_plan(
         raise SetupError(f"{failure_prefix}: {result.error}")
 
 
+def _resolve_rdp_password_from_secret_ref(rdp_password_secret_arn: str | None) -> str | None:
+    """Fetch the per-instance RDP password value from the active cloud secret store.
+
+    Returns ``None`` when no secret reference is recorded (e.g., DC role,
+    or older state without the field). Callers that require the value
+    must check for ``None`` and either skip the push or raise.
+    """
+    if not rdp_password_secret_arn:
+        return None
+    from cloud import get_secrets_store
+
+    secrets = get_secrets_store()
+    return secrets.get_secret(rdp_password_secret_arn)
+
+
+def _set_local_password_or_raise(
+    orchestrator: SetupOrchestrator,
+    execution: Any,
+    ctx: _InstanceSetupCtx,
+    instance_data: dict[str, Any],
+    document_name: str,
+    instance_id: str,
+    platform: str,
+    failure_prefix: str,
+) -> None:
+    """Push the per-instance local guest password via SSM/SSH (#762).
+
+    On AWS the script body uses ``{{ssm-secure:<param-name>}}``
+    substitution against the per-instance SSM Parameter Store
+    SecureString that mirrors the Secrets Manager value (see
+    ``aws_ssm_parameter.guest_password`` in the range Terraform module).
+    The SSM service substitutes the placeholder server-side on the way
+    to the agent; the resolved value never appears in
+    ``GetCommandInvocation`` history or anywhere else SSM retains the
+    original ``commands`` parameter.
+
+    On GCP/GDC there is no analogous service-side substitution. The
+    password value is fetched from the per-instance GCP Secret Manager
+    secret via ``shared.cloud`` and rendered into the SSH-transported
+    script body — the SSH transport does not persist the body
+    anywhere; it lives only in the target's bash process memory.
+
+    Raises ``SetupError`` when the appropriate per-instance reference
+    is missing or the GCP fetch returns empty: a "ready" range whose
+    Guacamole credential is unusable is worse than a provisioning
+    error.
+    """
+    cloud_provider = _get_cloud_provider()
+    rdp_token: str
+    if cloud_provider == "aws":
+        ssm_param_name = instance_data.get("rdp_password_ssm_param_name")
+        if not ssm_param_name:
+            raise SetupError(
+                f"{failure_prefix}: instance {instance_id} has no "
+                "rdp_password_ssm_param_name; provisioner did not record an SSM "
+                "Parameter Store reference for the per-instance password"
+            )
+        rdp_token = f"{{{{ssm-secure:{ssm_param_name}}}}}"
+    else:
+        secret_ref = instance_data.get("rdp_password_secret_arn")
+        if not secret_ref:
+            raise SetupError(
+                f"{failure_prefix}: instance {instance_id} has no rdp_password_secret_arn "
+                "in its provisioned state; provisioner did not record a per-instance secret reference"
+            )
+        fetched = _resolve_rdp_password_from_secret_ref(secret_ref)
+        if not fetched:
+            raise SetupError(f"{failure_prefix}: per-instance RDP password fetch returned empty for {instance_id}")
+        rdp_token = fetched
+    plan = SetLocalPasswordPlan(platform=platform)
+    context = plan.get_context({"rdp_username": ctx.ssh_user, "rdp_password": rdp_token})
+    _run_setup_plan(
+        orchestrator,
+        execution,
+        plan,
+        context,
+        document_name,
+        failure_prefix=failure_prefix,
+    )
+    logger.info("Per-instance RDP password set on %s (%s)", instance_id, platform)
+
+
 def _setup_attacker_role(
     orchestrator: SetupOrchestrator,
     execution: Any,
     ctx: _InstanceSetupCtx,
+    instance_data: dict[str, Any],
     document_name: str,
     instance_id: str,
 ) -> None:
@@ -1708,6 +1809,16 @@ def _setup_attacker_role(
         plan.get_context(ctx),
         document_name,
         failure_prefix="Kali setup failed",
+    )
+    _set_local_password_or_raise(
+        orchestrator,
+        execution,
+        ctx,
+        instance_data,
+        document_name,
+        instance_id,
+        platform="linux",
+        failure_prefix="Kali RDP password push failed",
     )
     logger.info("Kali setup complete for %s", instance_id)
 
@@ -1746,12 +1857,13 @@ def _setup_linux_victim(
     orchestrator: SetupOrchestrator,
     execution: Any,
     ctx: _InstanceSetupCtx,
+    instance_data: dict[str, Any],
     document_name: str,
     instance_id: str,
     agent_presigned_url: str,
     xdr_required: bool,
 ) -> None:
-    """Run the linux victim path: bootstrap then optional XDR install."""
+    """Run the linux victim path: bootstrap, per-instance RDP password, optional XDR install."""
     plan = LinuxBootstrapPlan()
     _run_setup_plan(
         orchestrator,
@@ -1762,6 +1874,16 @@ def _setup_linux_victim(
         failure_prefix="Linux bootstrap failed",
     )
     logger.info("Linux bootstrap complete for %s", instance_id)
+    _set_local_password_or_raise(
+        orchestrator,
+        execution,
+        ctx,
+        instance_data,
+        document_name,
+        instance_id,
+        platform="linux",
+        failure_prefix="Linux RDP password push failed",
+    )
     _install_xdr_or_raise(
         orchestrator,
         execution,
@@ -1816,6 +1938,7 @@ def _setup_windows_victim(
     orchestrator: SetupOrchestrator,
     execution: Any,
     ctx: _InstanceSetupCtx,
+    instance_data: dict[str, Any],
     document_name: str,
     instance_id: str,
     agent_presigned_url: str,
@@ -1824,7 +1947,7 @@ def _setup_windows_victim(
     dc_ip: str | None,
     domain_name: str | None,
 ) -> None:
-    """Run the windows victim path: bootstrap, XDR install, optional domain join."""
+    """Run the windows victim path: bootstrap, per-instance Admin password, XDR install, optional domain join."""
     plan = BootstrapPlan()
     _run_setup_plan(
         orchestrator,
@@ -1835,6 +1958,24 @@ def _setup_windows_victim(
         failure_prefix="Windows bootstrap failed",
     )
     logger.info("Windows bootstrap complete for %s", instance_id)
+    # Override the bootstrap-default Administrator username for the
+    # local-Administrator password push.
+    pw_ctx = _InstanceSetupCtx(
+        hostname=ctx.hostname,
+        public_key=ctx.public_key,
+        agent_presigned_url=ctx.agent_presigned_url,
+        ssh_user="Administrator",
+    )
+    _set_local_password_or_raise(
+        orchestrator,
+        execution,
+        pw_ctx,
+        instance_data,
+        document_name,
+        instance_id,
+        platform="windows",
+        failure_prefix="Windows Administrator password push failed",
+    )
     _install_xdr_or_raise(
         orchestrator,
         execution,
@@ -1861,6 +2002,7 @@ def _dispatch_instance_setup_role(
     orchestrator: SetupOrchestrator,
     execution: Any,
     ctx: _InstanceSetupCtx,
+    instance_data: dict[str, Any],
     document_name: str,
     instance_id: str,
     role: str,
@@ -1873,7 +2015,7 @@ def _dispatch_instance_setup_role(
 ) -> None:
     """Route an instance through the correct role/os setup path."""
     if role == "attacker":
-        _setup_attacker_role(orchestrator, execution, ctx, document_name, instance_id)
+        _setup_attacker_role(orchestrator, execution, ctx, instance_data, document_name, instance_id)
         return
     if role != "victim":
         # Unknown role: leave behavior identical to pre-refactor (no plan runs).
@@ -1883,6 +2025,7 @@ def _dispatch_instance_setup_role(
             orchestrator,
             execution,
             ctx,
+            instance_data,
             document_name,
             instance_id,
             agent_presigned_url,
@@ -1893,6 +2036,7 @@ def _dispatch_instance_setup_role(
         orchestrator,
         execution,
         ctx,
+        instance_data,
         document_name,
         instance_id,
         agent_presigned_url,
@@ -1960,6 +2104,7 @@ def _run_single_instance_setup(
             orchestrator,
             execution,
             ctx,
+            instance_data,
             document_name,
             instance_id,
             role,

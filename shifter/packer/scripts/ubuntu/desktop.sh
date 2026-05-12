@@ -51,22 +51,20 @@ chmod +x /etc/xrdp/startwm.sh
 # Add ubuntu user to ssl-cert group (required for xrdp)
 usermod -aG ssl-cert ubuntu
 
-# Configure cloud-init to set password and enable password auth on every boot
-# This is applied by cloud-init when the instance launches, ensuring it persists
-# nosec B105 - Ephemeral isolated range, not a production credential
+# Issue #762: do not bake a shared static password into the AMI.
+# Keep ssh_pwauth on and chpasswd's expire:false so the per-range
+# user_data (Terraform random_password.guest) can apply a per-instance
+# password on first boot without cloud-init re-expiring or re-locking
+# the ubuntu account.
 cat > /etc/cloud/cloud.cfg.d/99-enable-password.cfg << 'EOF'
-# Enable password authentication for RDP and SSH access in ranges
+# Enable password authentication for RDP and SSH access in ranges.
+# Per-instance value is set by user_data on first boot (see
+# shifter/engine/provisioner/terraform/modules/range/templates/
+# victim_linux.sh.tpl and kali.sh.tpl).
 chpasswd:
   expire: false
-  users:
-    - name: ubuntu
-      password: ubuntu
-      type: text
 ssh_pwauth: true
 EOF
-
-# Also set password now for the Packer build validation
-echo "ubuntu:ubuntu" | chpasswd
 
 # Set home directory permissions for SFTP access
 # Guacamole's SFTP (libssh2) needs read+execute on the directory

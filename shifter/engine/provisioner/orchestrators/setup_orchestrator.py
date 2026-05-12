@@ -64,7 +64,15 @@ class SetupOrchestrator:
 
     # Default reboot timeout (5 minutes)
     DEFAULT_REBOOT_TIMEOUT = 300
-    SENSITIVE_ENV_VARS = ("DC_DOMAIN_PASSWORD",)
+    SENSITIVE_ENV_VARS = (
+        "DC_DOMAIN_PASSWORD",
+        # Defense in depth (#762): if a per-instance RDP password is ever
+        # forwarded into setup orchestration as an env var (e.g., a future
+        # plan that needs to chpasswd through SSM), keep the value out of
+        # captured stdout/stderr.
+        "RDP_PASSWORD",
+        "GUEST_PASSWORD",
+    )
     SENSITIVE_CONTEXT_KEY_PARTS = ("password", "secret", "token")
 
     def __init__(self, executor: Executor):

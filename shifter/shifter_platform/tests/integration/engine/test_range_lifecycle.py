@@ -5,6 +5,7 @@ AWS services (ECS, Secrets Manager) are mocked as they require infrastructure.
 """
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -89,6 +90,10 @@ def range_ready(db, user, request_obj):
                 "os_type": "kali",
                 "private_ip": "10.1.1.10",
                 "ssh_key_secret_arn": ("arn:aws:secretsmanager:us-east-2:123:secret:key"),
+                # Per #762: per-instance RDP password secret reference.
+                "rdp_password_secret_arn": (
+                    "arn:aws:secretsmanager:us-east-2:123:secret:shifter/dev/range/1/attacker-abc-rdp-password"
+                ),
             },
             {
                 "uuid": "victim-uuid-456",
@@ -96,6 +101,9 @@ def range_ready(db, user, request_obj):
                 "os_type": "windows",
                 "private_ip": "10.1.1.20",
                 "ssh_key_secret_arn": ("arn:aws:secretsmanager:us-east-2:123:secret:key2"),
+                "rdp_password_secret_arn": (
+                    "arn:aws:secretsmanager:us-east-2:123:secret:shifter/dev/range/1/victim-456-rdp-password"
+                ),
             },
         ],
     )
@@ -483,26 +491,30 @@ class TestGetRdpConnectionInfoIntegration:
 
     def test_returns_connection_info_for_windows_instance(self, range_ready):
         """get_rdp_connection_info returns correct info for Windows."""
-        result = get_rdp_connection_info(
-            user=range_ready.user,
-            instance_uuid="victim-uuid-456",
-        )
+        with patch("engine.services.get_rdp_password", return_value="PerInstanceWinPw!"):
+            result = get_rdp_connection_info(
+                user=range_ready.user,
+                instance_uuid="victim-uuid-456",
+            )
 
         assert result["private_ip"] == "10.1.1.20"
         assert result["os_type"] == "windows"
         assert result["rdp_username"] == "Administrator"
+        assert result["rdp_password"] == "PerInstanceWinPw!"
         assert "connection_name" in result
 
     def test_returns_connection_info_for_kali_instance(self, range_ready):
         """get_rdp_connection_info returns correct info for Kali."""
-        result = get_rdp_connection_info(
-            user=range_ready.user,
-            instance_uuid="attacker-uuid-123",
-        )
+        with patch("engine.services.get_rdp_password", return_value="PerInstanceKaliPw!"):
+            result = get_rdp_connection_info(
+                user=range_ready.user,
+                instance_uuid="attacker-uuid-123",
+            )
 
         assert result["private_ip"] == "10.1.1.10"
         assert result["os_type"] == "kali"
         assert result["rdp_username"] == "kali"
+        assert result["rdp_password"] == "PerInstanceKaliPw!"
 
     def test_raises_for_nonexistent_instance(self, range_ready):
         """get_rdp_connection_info raises for unknown instance UUID."""
@@ -529,7 +541,7 @@ class TestGetRdpConnectionInfoIntegration:
             )
 
     def test_returns_ubuntu_rdp_credentials(self, user, request_obj):
-        """get_rdp_connection_info returns credentials for Ubuntu (has GUI via xrdp)."""
+        """get_rdp_connection_info returns per-instance credentials for Ubuntu (#762)."""
         Range.objects.create(
             uuid=uuid.uuid4(),
             user=user,
@@ -542,15 +554,19 @@ class TestGetRdpConnectionInfoIntegration:
                     "role": "victim",
                     "os_type": "ubuntu",
                     "private_ip": "10.1.1.30",
+                    "rdp_password_secret_arn": (
+                        "arn:aws:secretsmanager:us-east-2:123:secret:shifter/dev/range/2/victim-ubuntu-rdp-password"
+                    ),
                 },
             ],
         )
 
-        result = get_rdp_connection_info(user=user, instance_uuid="ubuntu-uuid")
+        with patch("engine.services.get_rdp_password", return_value="PerInstanceUbuntuPw!"):
+            result = get_rdp_connection_info(user=user, instance_uuid="ubuntu-uuid")
 
         assert result["os_type"] == "ubuntu"
         assert result["rdp_username"] == "ubuntu"
-        assert result["rdp_password"] == "ubuntu"
+        assert result["rdp_password"] == "PerInstanceUbuntuPw!"
         assert result["private_ip"] == "10.1.1.30"
 
     def test_raises_for_none_user(self, range_ready):

@@ -69,7 +69,14 @@ locals {
     ])
     provisioner = toset([
       "roles/pubsub.publisher",
-      "roles/secretmanager.secretAccessor",
+      # Per-instance RDP password secrets (#762) require the provisioner
+      # to create, write versions to, and delete per-range secrets at
+      # provisioning / teardown time. The full secret lifecycle role
+      # is bounded to the provisioner workload identity and is never
+      # granted to range guests, so this stays within the trust
+      # boundary the SSH-key precedent established for per-range
+      # secret management.
+      "roles/secretmanager.admin",
       "roles/storage.objectAdmin",
     ])
   }

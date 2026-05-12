@@ -35,7 +35,6 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key=test_key,
-            kali_password="kali",
         )
         assert test_key in result
         assert "{{ public_key }}" not in result
@@ -45,7 +44,6 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key="ssh-rsa AAAA...",
-            kali_password="kali",
         )
         assert result.strip().startswith("#!/bin/bash")
         # Verify essential script components rather than arbitrary length
@@ -58,7 +56,6 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-99",
             public_key="ssh-rsa AAAA...",
-            kali_password="kali",
         )
         assert "hostnamectl set-hostname" in result
 
@@ -67,18 +64,26 @@ class TestKaliTemplate:
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key="ssh-rsa AAAA...",
-            kali_password="kali",
         )
         assert "authorized_keys" in result
         assert "/home/kali/.ssh" in result
 
-    def test_kali_template_configures_password_and_desktop_services(self, kali_template):
+    def test_kali_template_configures_desktop_services_without_baked_password(self, kali_template):
+        # Issue #762: the per-instance password is set post-boot by the
+        # engine provisioner via SSH; nothing about it lives in user_data.
         result = kali_template.render(
             hostname="shifter-kali-42",
             public_key="ssh-rsa AAAA...",
-            kali_password="LabKali123!",
         )
-        assert "LabKali123!" in result
+        assert "CortexSavesTheDay!" not in result
+        # No baked chpasswd / fetch-at-boot leftovers.
+        assert "gcloud secrets versions access" not in result
+        assert "aws secretsmanager get-secret-value" not in result
+        import re
+
+        chpasswd_pattern = re.compile(r'(?:echo\s+["\']?)([a-z]+):\1(?:["\']?\s*\|\s*chpasswd)')
+        assert not chpasswd_pattern.search(result), result
+        # Desktop services still wired.
         assert "apt-get install -y openssh-server xrdp" in result
         assert "PasswordAuthentication yes" in result
         assert "enable --now xrdp" in result
@@ -107,7 +112,6 @@ class TestVictimLinuxTemplate:
         result = linux_template.render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
-            guest_password="ubuntu",
         )
         # Should NOT set hostname (SSM does that)
         assert "hostnamectl" not in result
@@ -122,7 +126,6 @@ class TestVictimLinuxTemplate:
         result = linux_template.render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
-            guest_password="ubuntu",
         )
         assert result.strip().startswith("#!/bin/bash")
         assert "set -euo pipefail" in result or "set -e" in result
@@ -132,17 +135,24 @@ class TestVictimLinuxTemplate:
         result = linux_template.render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
-            guest_password="ubuntu",
         )
         assert "Shifter setup plans" in result
 
-    def test_victim_linux_template_configures_password_and_desktop_services(self, linux_template):
+    def test_victim_linux_template_configures_services_without_baked_password(self, linux_template):
+        # Issue #762: the per-instance password is set post-boot by the
+        # engine provisioner via SSH; nothing about it lives in user_data.
         result = linux_template.render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
-            guest_password="LabUbuntu123!",
         )
-        assert "LabUbuntu123!" in result
+        # No baked chpasswd / fetch-at-boot leftovers.
+        assert "gcloud secrets versions access" not in result
+        assert "aws secretsmanager get-secret-value" not in result
+        import re
+
+        chpasswd_pattern = re.compile(r'(?:echo\s+["\']?)([a-z]+):\1(?:["\']?\s*\|\s*chpasswd)')
+        assert not chpasswd_pattern.search(result), result
+        # Desktop services still wired.
         assert "apt-get install -y openssh-server xrdp" in result
         assert "PasswordAuthentication yes" in result
         assert "enable --now xrdp" in result
@@ -167,7 +177,6 @@ class TestVictimWindowsTemplate:
         """Template should configure SSH/RDP access."""
         result = windows_template.render(
             public_key="ssh-rsa test-key",
-            admin_password="CortexSavesTheDay!",
         )
         # Should NOT set hostname (SSM does that)
         assert "Rename-Computer" not in result
@@ -181,7 +190,6 @@ class TestVictimWindowsTemplate:
         """Output should be a valid PowerShell script."""
         result = windows_template.render(
             public_key="ssh-rsa test-key",
-            admin_password="CortexSavesTheDay!",
         )
         assert "<powershell>" in result
         assert "</powershell>" in result
@@ -190,14 +198,12 @@ class TestVictimWindowsTemplate:
         """Template should explain that setup plans handle the remaining steps."""
         result = windows_template.render(
             public_key="ssh-rsa test-key",
-            admin_password="CortexSavesTheDay!",
         )
         assert "Shifter setup plans" in result
 
     def test_victim_windows_template_enables_access_services(self, windows_template):
         result = windows_template.render(
             public_key="ssh-rsa test-key",
-            admin_password="CortexSavesTheDay!",
         )
         assert "OpenSSH.Server" in result
         assert 'Enable-NetFirewallRule -DisplayGroup "Remote Desktop"' in result
@@ -225,12 +231,10 @@ class TestTemplateContentSafety:
         kali_result = all_templates["kali"].render(
             hostname="test",
             public_key="test",
-            kali_password="kali",
         )
         linux_result = all_templates["linux"].render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
-            guest_password="ubuntu",
         )
         assert "set -euo pipefail" in kali_result or "set -e" in kali_result
         assert "set -euo pipefail" in linux_result or "set -e" in linux_result
@@ -239,7 +243,6 @@ class TestTemplateContentSafety:
         """Windows template should use ErrorActionPreference Stop."""
         result = all_templates["windows"].render(
             public_key="ssh-rsa test-key",
-            admin_password="CortexSavesTheDay!",
         )
         assert "ErrorActionPreference" in result and "Stop" in result
 
@@ -249,7 +252,6 @@ class TestTemplateContentSafety:
         kali_result = all_templates["kali"].render(
             hostname="test",
             public_key="test",
-            kali_password="kali",
         )
         assert "log" in kali_result.lower() or "echo" in kali_result.lower()
 
@@ -257,11 +259,9 @@ class TestTemplateContentSafety:
         linux_result = all_templates["linux"].render(
             public_key="ssh-rsa test-key",
             ssh_user="ubuntu",
-            guest_password="ubuntu",
         )
         windows_result = all_templates["windows"].render(
             public_key="ssh-rsa test-key",
-            admin_password="CortexSavesTheDay!",
         )
         assert "log" in linux_result.lower() or "echo" in linux_result.lower()
         assert "log" in windows_result.lower() or "Write-Host" in windows_result

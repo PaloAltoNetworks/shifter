@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "eslint": "^9.39.2",

@@ -50,6 +50,11 @@ GUARDRAIL_FILES = {
     ".tflint.hcl",
     ".gitleaks.toml",
     ".kube-linter.yaml",
+    # Repo-root runtime config seeded by #777 (mcp_ops policy). Changes
+    # here can weaken capability classes, profile gating, env defaults,
+    # audit redaction, or prod-confirm policy without touching code, so
+    # ADR enforcement watches the file.
+    ".shifter.yaml",
 }
 DOC_PATHS = (
     "docs/adr/",

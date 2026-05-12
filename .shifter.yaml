@@ -1,0 +1,100 @@
+# Shifter runtime configuration.
+#
+# Today this file scopes the `mcp_ops:` namespace — per-tool policy
+# for the shifter-ops MCP server (issue #777). Follow-up #1197
+# evolves it into the project's single repo-root runtime
+# configuration surface.
+#
+# DO NOT hand-edit `CHANGELOG.md` references here. CHANGELOG is
+# towncrier-collated from `changelog.d/*.md` fragments.
+
+mcp_ops:
+  version: 1
+
+  # Capability classes. Every registered tool MUST be tagged with
+  # exactly one of these. Adding a new class requires a matching entry
+  # under `class_defaults:` and at least one profile that includes it.
+  classes:
+    - observability        # logs, describe-*, list-* — no secrets, no writes
+    - named_db_read        # named, parameterized read-only DB diagnostics
+    - named_db_write       # named, parameterized DB mutations
+    - secret_handle        # returns secret references, not raw values
+    - ssm_named            # allowlisted Django manage.py via SSM
+    - ssm_arbitrary        # free-form SSM send-command / get-command-invocation
+    - db_arbitrary         # query / execute / list_tables / describe_table
+    - infra_mutation       # start/stop/terminate EC2, restart_ecs, reconcile_ranges
+    - dev_bypass_tunnel    # dev-only auth-bypass tunnel for agents (no MFA)
+
+  # Session profile gates which classes get registered as tools at
+  # server startup. `SHIFTER_OPS_PROFILE=read_only|standard|destructive`
+  # overrides the default at startup. Changing profile requires
+  # restart — intentional (runtime profile flips would be a
+  # confused-deputy surface).
+  session_profile:
+    default: standard
+    profiles:
+      read_only:
+        - observability
+        - named_db_read
+      standard:
+        - observability
+        - named_db_read
+        - named_db_write
+        - secret_handle
+        - ssm_named
+      destructive:
+        - observability
+        - named_db_read
+        - named_db_write
+        - secret_handle
+        - ssm_named
+        - ssm_arbitrary
+        - db_arbitrary
+        - infra_mutation
+        - dev_bypass_tunnel
+
+  # Environment policy. The env arg is selection-only; the policy
+  # layer enforces authorization on top.
+  environments:
+    default: dev
+    prod_requires_confirm: true   # confirm_env="prod" required for prod-touching tools
+
+  # Per-class defaults. Applied to every tool of that class unless an
+  # entry in `tools:` overrides specific keys.
+  class_defaults:
+    observability: {}
+    named_db_read: {}
+    named_db_write:
+      idempotency_key: required
+    secret_handle:
+      return_mode: handle           # never return raw value to client
+    ssm_named: {}
+    ssm_arbitrary:
+      execute_default: false        # dry-run unless execute=true
+      two_phase: true               # plan_<name> -> execute_<name>
+    db_arbitrary:
+      execute_default: false
+      two_phase: true
+    infra_mutation:
+      execute_default: false
+      two_phase: true
+      rate_cap:
+        count: 3
+        window_seconds: 60
+    dev_bypass_tunnel:
+      allowed_envs: [dev]
+      description_redaction: true   # strip bypass-procedure language from MCP description
+
+  # Per-tool overrides (only when a specific tool needs to deviate
+  # from its class defaults). Most tools should leave this empty and
+  # rely on class defaults.
+  tools: {}
+
+  # Append-only JSONL audit log. `~/` expands at server startup.
+  audit:
+    enabled: true
+    path: ~/.shifter-ops-audit.jsonl
+    redact:
+      - password
+      - db_password
+      - secret_value

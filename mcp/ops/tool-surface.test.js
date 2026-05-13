@@ -567,20 +567,45 @@ describe("dev_bypass_tunnel descriptions are redacted", () => {
 // =====================================================================
 
 describe("untrusted-input fencing + acknowledge flag", () => {
-  it("plan_query rejects fenced SQL without acknowledge_untrusted_input", async () => {
-    const { server } = buildSurface("destructive");
-    const entry = server.byName("plan_query");
-    await assert.rejects(
-      () =>
-        entry.handler({
-          env: "dev",
-          sql: "[UNTRUSTED:logs:BEGIN]select 1[UNTRUSTED:logs:END]",
-        }),
-      (err) =>
-        err instanceof PolicyError &&
-        /contains an untrusted-input fence/.test(err.message),
-    );
-  });
+  // Parameterized rejection table: each entry exercises one consumer
+  // descriptor's `untrusted_inputs` field. Consolidated from three
+  // near-identical `it()` blocks (SonarCloud cycle 1, duplicated-
+  // lines-density gate); the loop still produces three independently
+  // reported subtests via `it.test.each`-equivalent `for`-then-`it`
+  // pattern (node:test exposes each `it` line as its own report row).
+  const CONSUMER_REJECTION_CASES = [
+    {
+      tool: "plan_query",
+      field: "sql",
+      extra: {},
+      fence: "[UNTRUSTED:logs:BEGIN]select 1[UNTRUSTED:logs:END]",
+    },
+    {
+      tool: "plan_execute",
+      field: "sql",
+      extra: {},
+      fence: "[UNTRUSTED:logs:BEGIN]update foo set a=1[UNTRUSTED:logs:END]",
+    },
+    {
+      tool: "plan_ssm_send_command",
+      field: "command",
+      extra: { instance_id: "i-0123456789abcdef0" },
+      fence: "[UNTRUSTED:logs:BEGIN]uname -a[UNTRUSTED:logs:END]",
+    },
+  ];
+
+  for (const c of CONSUMER_REJECTION_CASES) {
+    it(`${c.tool} rejects fenced ${c.field} without acknowledge_untrusted_input`, async () => {
+      const { server } = buildSurface("destructive");
+      const entry = server.byName(c.tool);
+      await assert.rejects(
+        () => entry.handler({ env: "dev", ...c.extra, [c.field]: c.fence }),
+        (err) =>
+          err instanceof PolicyError &&
+          /contains an untrusted-input fence/.test(err.message),
+      );
+    });
+  }
 
   it("plan_query accepts fenced SQL when acknowledge_untrusted_input is true", async () => {
     const { server } = buildSurface("destructive");
@@ -592,37 +617,6 @@ describe("untrusted-input fencing + acknowledge flag", () => {
     });
     const payload = JSON.parse(result.content[0].text);
     assert.equal(payload.summary.tool, "query");
-  });
-
-  it("plan_execute rejects fenced SQL without acknowledge_untrusted_input", async () => {
-    const { server } = buildSurface("destructive");
-    const entry = server.byName("plan_execute");
-    await assert.rejects(
-      () =>
-        entry.handler({
-          env: "dev",
-          sql: "[UNTRUSTED:logs:BEGIN]update foo set a=1[UNTRUSTED:logs:END]",
-        }),
-      (err) =>
-        err instanceof PolicyError &&
-        /contains an untrusted-input fence/.test(err.message),
-    );
-  });
-
-  it("plan_ssm_send_command rejects fenced command without acknowledge_untrusted_input", async () => {
-    const { server } = buildSurface("destructive");
-    const entry = server.byName("plan_ssm_send_command");
-    await assert.rejects(
-      () =>
-        entry.handler({
-          env: "dev",
-          instance_id: "i-0123456789abcdef0",
-          command: "[UNTRUSTED:logs:BEGIN]uname -a[UNTRUSTED:logs:END]",
-        }),
-      (err) =>
-        err instanceof PolicyError &&
-        /contains an untrusted-input fence/.test(err.message),
-    );
   });
 
   it("consumer descriptors expose acknowledge_untrusted_input on the registered schema", () => {

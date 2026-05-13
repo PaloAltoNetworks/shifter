@@ -1563,10 +1563,10 @@ export function registerTool(ctx, descriptor) {
   // this callback, so the live server is unchanged. Tests set it on
   // the FakeServer ctx to capture descriptor metadata post-validation
   // / pre-gate-composition, without copying capability maps or
-  // re-parsing index.js.
-  if (typeof ctx.onRegisterDescriptor === "function") {
-    ctx.onRegisterDescriptor(descriptor);
-  }
+  // re-parsing index.js. Written as optional-chained invocation so
+  // the SonarCloud cognitive-complexity gate stays under threshold
+  // (S3776: optional chaining is a single expression, not a branch).
+  ctx.onRegisterDescriptor?.(descriptor);
 
   // Codex review #1201 cycle 3 finding 3: under Phase 3 the dry-run
   // gate is gone — execution-default is enforced only via the

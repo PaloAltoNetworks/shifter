@@ -721,7 +721,9 @@ function _extractApexToken(stderrBuffer) {
  * pattern that the per-describe blocks were repeating, which kept
  * SonarCloud's new-duplicated-lines metric above the 3% threshold.
  */
-function policyWithAudit(auditPath, extra = {}, opts = { profile: "destructive" }) {
+const _DEFAULT_AUDIT_POLICY_OPTS = Object.freeze({ profile: "destructive" });
+function policyWithAudit(auditPath, extra = {}, opts) {
+  const effectiveOpts = opts ?? _DEFAULT_AUDIT_POLICY_OPTS;
   const { redact, ...rest } = extra;
   return parsePolicy(
     {
@@ -729,7 +731,7 @@ function policyWithAudit(auditPath, extra = {}, opts = { profile: "destructive" 
       audit: { enabled: true, path: auditPath, redact: redact ?? [] },
       ...rest,
     },
-    opts,
+    effectiveOpts,
   );
 }
 

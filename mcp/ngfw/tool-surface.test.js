@@ -89,9 +89,89 @@ describe("ngfw MCP tool surface hardening", () => {
   });
 
   it("does not fetch firewall SSH keys from Secrets Manager", () => {
-    assert.doesNotMatch(indexSource, /secretsmanager/);
-    assert.doesNotMatch(indexSource, /get-secret-value/);
-    assert.doesNotMatch(indexSource, /list-secrets/);
+    // The intent is to catch any path back to AWS Secrets Manager,
+    // not only AWS-CLI invocations. Cover both shapes:
+    //
+    // - AWS CLI naming: `secretsmanager` service token, `get-secret-value`
+    //   / `list-secrets` operation flags (case-sensitive forms in argv).
+    // - AWS SDK naming: `SecretsManagerClient`, `GetSecretValueCommand`,
+    //   `ListSecretsCommand`, and the hyphenated SDK package import
+    //   `@aws-sdk/client-secrets-manager`. Match case-insensitively
+    //   and accept an optional `-` between words so the test catches
+    //   `secrets-manager`, `secrets_manager`, and `SecretsManager` in
+    //   one rule per concept.
+    assert.doesNotMatch(indexSource, /secrets[\s\-_]?manager/i);
+    assert.doesNotMatch(indexSource, /get[\s\-_]?secret[\s\-_]?value/i);
+    assert.doesNotMatch(indexSource, /list[\s\-_]?secrets?/i);
+  });
+
+  it("only registers tools via static string literals", () => {
+    // Every `server.tool(` invocation must use a static string literal
+    // as the tool name so the surface can be enumerated statically.
+    // A future registration like `server.tool(toolName, ...)` or
+    // `server.tool(`tool_${env}`, ...)` would slip past the
+    // EXPECTED_TOOLS set assertion below, defeating the invariant.
+    const literalCount = countLiteralRegistrations(indexSource);
+    const anyCount = countAnyRegistrations(indexSource);
+    assert.strictEqual(
+      literalCount,
+      anyCount,
+      `index.js has ${anyCount} \`server.tool(\` call(s) but only ` +
+        `${literalCount} use a static string literal as the tool name. ` +
+        "Inline the tool name as a literal or extend the regex in " +
+        "`extractRegisteredTools` / the literal-form guard to recognize " +
+        "the new shape.",
+    );
+  });
+
+  it("exports exactly the expected tool set (no extras, no missing)", () => {
+    const registered = extractRegisteredTools(indexSource);
+    assert.deepStrictEqual(
+      registered,
+      EXPECTED_TOOLS,
+      `index.js registers ${[...registered].join(", ")}; expected ${[...EXPECTED_TOOLS].join(", ")}. ` +
+        "Update EXPECTED_TOOLS in this file AND mcp/ngfw/SECURITY.md when " +
+        "the tool surface changes.",
+    );
+  });
+
+  it("SECURITY.md references the tool-surface guard and every live tool", () => {
+    assert.match(
+      securitySource,
+      /tool-surface\.test\.js/,
+      "SECURITY.md must name `tool-surface.test.js` so future surface changes " +
+        "have a discoverable enforcement seam.",
+    );
+    for (const tool of EXPECTED_TOOLS) {
+      assert.ok(
+        securitySource.includes(tool),
+        `SECURITY.md must describe the currently-registered tool \`${tool}\`.`,
+      );
+    }
+  });
+
+  it("SECURITY.md does not describe removed tools as active capabilities", () => {
+    // Removed tools may be named only inside an explicit "Removed
+    // administration tools" section so a reader cannot mistake them for
+    // the current surface. Everything before that heading must be silent
+    // on them.
+    const removedHeadingMatch = securitySource.match(
+      /^##\s+Removed administration tools\s*$/m,
+    );
+    assert.ok(
+      removedHeadingMatch,
+      "SECURITY.md must include a `## Removed administration tools` " +
+        "section that marks the removed PAN-OS tools as historical.",
+    );
+    const before = securitySource.slice(0, removedHeadingMatch.index);
+    for (const tool of REMOVED_TOOLS) {
+      assert.ok(
+        !before.includes(tool),
+        `SECURITY.md mentions removed tool \`${tool}\` before the ` +
+          "`Removed administration tools` section, which presents it as " +
+          "an active capability. Move the reference under that section.",
+      );
+    }
   });
 
   it("only registers tools via static string literals", () => {

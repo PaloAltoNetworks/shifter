@@ -13,10 +13,10 @@
 // rules.
 
 import { readFileSync } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import yaml from "yaml";
 import { z } from "zod";
-import { appendAuditRecord } from "./audit.js";
+import { appendAuditRecord, sanitizeArgs } from "./audit.js";
 
 const SUPPORTED_VERSION = 1;
 
@@ -85,6 +85,44 @@ const ToolOverrideSchema = z
   })
   .strict();
 const ToolsMapSchema = z.record(z.string().min(1), ToolOverrideSchema);
+
+// Phase 4 #1200: apex out-of-band approval rules. Each rule is keyed
+// by either tool OR class (exactly one), AND env, AND operation_kind.
+// `requires_write: true` further restricts class-keyed rules to
+// descriptors marked `is_write: true` so a class like `db_arbitrary`
+// can apex on `execute` but not on read-only `query` / `list_tables`.
+const ApexOpEntrySchema = z
+  .object({
+    tool: z.string().min(1).optional(),
+    class: z.string().min(1).optional(),
+    env: z.enum(["dev", "prod"]),
+    operation_kind: z.enum(["plan", "execute", "direct"]),
+    requires_write: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Boolean(v.tool) !== Boolean(v.class), {
+    message: "exactly one of 'tool' or 'class' must be set",
+  })
+  // Codex review #1201 cycle 2 finding: `requires_write` only makes
+  // sense as a refinement on a class-keyed rule (it filters which
+  // descriptors of a class are apex-gated). On a tool-keyed rule the
+  // tool is already named exactly, so requires_write would either
+  // be redundant (when the tool is is_write) or silently disable the
+  // gate (when it isn't). Reject the combination instead of letting
+  // a valid-looking config fail open.
+  .refine((v) => !(v.requires_write === true && v.tool), {
+    message: "requires_write may only be set on class-keyed apex rules, not tool-keyed",
+  });
+const ApexOperationsSchema = z.array(ApexOpEntrySchema);
+
+// Phase 4 #1200: untrusted-input source label allowlist. The source
+// label that producer descriptors embed in `[UNTRUSTED:<source>:...]`
+// fences MUST appear in this list, so a typo or attacker-controlled
+// label can't widen the contract the LLM sees.
+const UntrustedSourceLabelSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,31}$/, "must match [a-z][a-z0-9_]{0,31}");
+const UntrustedSourcesSchema = z.array(UntrustedSourceLabelSchema).nonempty();
 
 function _zodValidate(label, schema, value) {
   const result = schema.safeParse(value);
@@ -259,6 +297,23 @@ function _resolveActiveProfile(raw, opts) {
   return activeProfileName;
 }
 
+function _assertApexOperations(raw, declaredClasses) {
+  if (raw.apex_operations === undefined) return;
+  _zodValidate("apex_operations", ApexOperationsSchema, raw.apex_operations);
+  for (const op of raw.apex_operations) {
+    if (op.class && !declaredClasses.has(op.class)) {
+      throw new PolicyError(
+        `policy: apex_operations entry references unknown class '${op.class}'`,
+      );
+    }
+  }
+}
+
+function _assertUntrustedSources(raw) {
+  if (raw.untrusted_sources === undefined) return;
+  _zodValidate("untrusted_sources", UntrustedSourcesSchema, raw.untrusted_sources);
+}
+
 export function parsePolicy(raw, opts = {}) {
   _assertTopLevelShape(raw);
   const declaredClasses = new Set(raw.classes);
@@ -271,6 +326,8 @@ export function parsePolicy(raw, opts = {}) {
   _zodValidate("audit", AuditSchema, raw.audit);
   _assertToolsOverrides(raw, declaredClasses);
   _assertSessionProfiles(raw, declaredClasses);
+  _assertApexOperations(raw, declaredClasses);
+  _assertUntrustedSources(raw);
   const activeProfileName = _resolveActiveProfile(raw, opts);
   // Final layer: enforce ADR-014-R5/R6 semantic invariants. Shape
   // checks above don't catch a config that's structurally valid but
@@ -348,6 +405,17 @@ export class Policy {
     return this._raw.audit;
   }
 
+  apexOperations() {
+    return this._raw.apex_operations ?? [];
+  }
+
+  untrustedSources() {
+    if (!this._untrustedSourcesCache) {
+      this._untrustedSourcesCache = new Set(this._raw.untrusted_sources ?? []);
+    }
+    return this._untrustedSourcesCache;
+  }
+
   // Convenience for tests / debuggers — returns the resolved
   // class-defaults merged with any per-tool override.
   resolveToolPolicy(toolName, klass) {
@@ -385,6 +453,51 @@ export class Policy {
 
 const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const SECRET_HANDLE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+// Phase 3 (#1199): two-phase plan store. Each plan_<name> call stores
+// the verbatim caller args here, returns the plan_id, and the matching
+// execute_<name>(plan_id) consumes the entry atomically before running
+// the handler. The store is intentionally in-process, volatile, and
+// bounded — long agent conversations cannot pre-plan-and-batch
+// destructive ops.
+const PLAN_TTL_MS = 60 * 1000;
+const MAX_PLAN_STORE_SIZE = 64;
+const planStore = new Map(); // plan_id -> { tool, klass, args, fingerprint, expiresAt }
+
+// Phase 3 (#1199): per-class sliding-window rate-cap state. The window
+// is keyed by class (not tool, env, or profile) because the issue spec
+// asks for per-class caps; per-tool tunings come from
+// `tools.<name>.overrides.rate_cap` but share the class window so a
+// tool that loosens the count doesn't get a separate quota bucket. A
+// dry-run / plan_<name> call does NOT consume capacity; only
+// execute_<name> (and direct execution for non-two-phase classes)
+// does.
+const rateCapWindows = new Map(); // klass -> sorted timestamp[]
+
+// Phase 4 (#1200): pending apex approval state. Each apex-gated
+// execute_<name> generates a single-use token, prints it to stderr,
+// and parks on a promise registered here. The dedicated `approve`
+// MCP tool consumes the token and releases the parked handler. On
+// timeout (60s) the entry is removed and the parked handler rejects.
+const APEX_APPROVAL_TTL_MS = 60 * 1000;
+const APEX_TOKEN_BYTES = 16; // 128-bit, hex-encoded to 32 chars
+// Codex review #1201 cycle 3 finding 4: bound the parked-promise
+// queue so an agent loop can't enqueue an unbounded number of pending
+// apex requests (each carrying a 60s timer) before any operator
+// confirms. The plan store is bounded for the same reason. 16 keeps
+// the queue small enough that the operator can keep up with prompts
+// while still allowing legitimate concurrent apex flows.
+const MAX_PENDING_APEX = 16;
+const pendingApex = new Map(); // token -> { resolve, reject, timer }
+
+// Phase 5 (#1201) + codex review #1201 cycle 1 finding 4:
+// `apex_operations` can be keyed by descriptor name (`tool:`) or by
+// class. A typo in the tool name parses successfully but silently
+// disables the intended apex gate. We track every descriptor that
+// reaches `registerTool` so the server can call
+// `validateApexCoverage(policy)` once after all registrations and
+// fail closed on a mismatch.
+const registeredDescriptorNames = new Set();
 
 // Per-process caches. These are module-level state by design: an MCP
 // server runs a single process and the caches are bounded by the
@@ -430,6 +543,32 @@ export function _resetGateCachesForTests() {
   idempotencyCache.clear();
   idempotencyInFlight.clear();
   secretHandles.clear();
+  planStore.clear();
+  rateCapWindows.clear();
+  for (const entry of pendingApex.values()) {
+    if (entry.timer) clearTimeout(entry.timer);
+  }
+  pendingApex.clear();
+  registeredDescriptorNames.clear();
+}
+
+/**
+ * Validate that every `apex_operations[*].tool` rule in the active
+ * policy corresponds to a descriptor that actually reached
+ * `registerTool`. Intended to be called from the server entrypoint
+ * once after every `registerTool` has run. Fails closed if a typo
+ * in `.shifter.yaml` would silently disable the intended apex gate.
+ *
+ * Codex review #1201 cycle 1 finding 4.
+ */
+export function validateApexCoverage(policy) {
+  for (const rule of policy.apexOperations()) {
+    if (rule.tool && !registeredDescriptorNames.has(rule.tool)) {
+      throw new PolicyError(
+        `policy: apex_operations references tool '${rule.tool}' which is not a registered descriptor`,
+      );
+    }
+  }
 }
 
 function _canonicalJson(value) {
@@ -450,19 +589,36 @@ function _canonicalJson(value) {
   );
 }
 
+// Control args injected by the wrapper / consumed by gates rather
+// than by the underlying handler. Stripped from the args passed to
+// the handler and excluded from the idempotency fingerprint.
+//
+// Phase 2's `execute` flag was the dry-run/real-run toggle — it
+// belongs here. Phase 3 replaces that mechanism with two-phase
+// plan/execute registration, so the wrapper-control role of
+// `execute` is gone. `execute` is back to being a free domain arg
+// (e.g. `reconcile_ranges` uses it to gate its own internal
+// preview-vs-mutate path), and the wrapper must NOT strip it from
+// handler args.
+const WRAPPER_CONTROL_KEYS = [
+  "idempotency_key",
+  "confirm_env",
+  "acknowledge_untrusted_input",
+  "plan_id",
+];
+
 function _fingerprintArgs(args) {
-  // The idempotency_key and the execute control flag are excluded
-  // from the fingerprint: re-running a write with `execute=true`
-  // after a dry-run with the same `idempotency_key` would otherwise
-  // bypass the cache. Everything else in `args` (including `env`,
-  // the SQL payload, etc.) participates so a mismatched retry is
-  // detected.
   if (!args || typeof args !== "object") return _canonicalJson(args ?? null);
   const fingerprintArgs = { ...args };
-  delete fingerprintArgs.idempotency_key;
-  delete fingerprintArgs.execute;
-  delete fingerprintArgs.confirm_env;
+  for (const key of WRAPPER_CONTROL_KEYS) delete fingerprintArgs[key];
   return createHash("sha256").update(_canonicalJson(fingerprintArgs)).digest("hex");
+}
+
+function _stripWrapperControlArgs(args) {
+  if (!args || typeof args !== "object") return args;
+  const handlerArgs = { ...args };
+  for (const key of WRAPPER_CONTROL_KEYS) delete handlerArgs[key];
+  return handlerArgs;
 }
 
 // Description redaction phrase, used when a class declares
@@ -525,32 +681,330 @@ function _enforceEnvPolicy(args, descriptor, policy) {
   }
 }
 
-function _shouldDryRun(args, descriptor, policy) {
-  const tp = _toolPolicy(descriptor, policy);
-  if (tp.execute_default !== false) return false;
-  return args?.execute !== true;
+// ===========================================================================
+// Phase 4 (#1200): untrusted-input fencing.
+//
+// Producers (tools whose handler returns free-form text sourced from
+// outside the operator's own trust boundary — log streams, S3 object
+// bodies, SSM stdout, future web fetches) declare a small static
+// source label in their descriptor. The wrapper post-processes the
+// handler's text return and embeds it inside an
+// `[UNTRUSTED:<source>:BEGIN] ... [UNTRUSTED:<source>:END]` fence so
+// the LLM can recognize that subsequent text is attacker-controllable.
+//
+// Consumers (tools whose handler accepts free-form text that becomes
+// the operative payload — `query.sql`, `execute.sql`,
+// `ssm_send_command.command`, `run_manage_command.command`) declare
+// which fields to scan. The wrapper refuses calls whose declared
+// fields contain a fence pattern unless
+// `acknowledge_untrusted_input: true` is also set, forcing the agent
+// to explicitly acknowledge it is acting on text sourced from a
+// producer's untrusted output.
+// ===========================================================================
+
+const UNTRUSTED_SOURCE_LABEL_RE = /^[a-z][a-z0-9_]{0,31}$/;
+// Match a producer fence opener anywhere in the field. The closer is
+// allowed to be missing; an opener alone is enough signal that the
+// argument carries content from an untrusted producer.
+const UNTRUSTED_FENCE_OPENER_RE = /\[UNTRUSTED:[a-z][a-z0-9_]{0,31}:BEGIN]/;
+
+function _validateUntrustedSource(descriptor, policy) {
+  const label = descriptor.untrusted_source;
+  if (label === undefined) return;
+  if (typeof label !== "string" || !UNTRUSTED_SOURCE_LABEL_RE.test(label)) {
+    throw new PolicyError(
+      `registerTool: tool '${descriptor.name}' has malformed untrusted_source '${label}' (must match ${UNTRUSTED_SOURCE_LABEL_RE})`,
+    );
+  }
+  const allow = policy.untrustedSources();
+  // Allowlist is required: if `.shifter.yaml` omits `untrusted_sources`
+  // entirely while a descriptor declares one, the contract collapses
+  // to "anything goes" — and a typo in the descriptor (or a malicious
+  // future descriptor) could relabel the fence without any check.
+  // Force the operator to enumerate accepted labels explicitly.
+  if (allow.size === 0) {
+    throw new PolicyError(
+      `registerTool: tool '${descriptor.name}' declares untrusted_source '${label}' but .shifter.yaml has no 'untrusted_sources' allowlist`,
+    );
+  }
+  if (!allow.has(label)) {
+    throw new PolicyError(
+      `registerTool: tool '${descriptor.name}' has untrusted_source '${label}' not in .shifter.yaml's untrusted_sources allowlist`,
+    );
+  }
 }
 
-function _dryRunPreview(args, descriptor) {
-  // The preview is deliberately small: it tells the agent what would
-  // happen without actually running. Sanitization of `args` happens
-  // at audit time; here we just echo the agent's request back.
-  const previewArgs = args ? { ...args } : {};
-  delete previewArgs.execute;
+// Codex review #1201 cycle 2 finding: a typo in a descriptor's
+// `untrusted_inputs` / `sensitive_args` list (e.g. `["sqll"]` on
+// `query`) registers cleanly and silently disables the intended
+// guardrail. Cross-check every named field against the registered
+// schema's keys so misconfigured descriptors fail closed at startup.
+function _assertFieldsInSchema(descriptor, listName) {
+  const fields = descriptor[listName];
+  if (fields === undefined) return;
+  if (!Array.isArray(fields) || fields.some((f) => typeof f !== "string" || !f)) {
+    throw new PolicyError(
+      `registerTool: tool '${descriptor.name}' ${listName} must be an array of non-empty field names`,
+    );
+  }
+  const schemaKeys = new Set(
+    Object.keys(
+      descriptor.schema && typeof descriptor.schema === "object" ? descriptor.schema : {},
+    ),
+  );
+  for (const field of fields) {
+    if (!schemaKeys.has(field)) {
+      throw new PolicyError(
+        `registerTool: tool '${descriptor.name}' ${listName}[*]='${field}' is not a key of descriptor.schema`,
+      );
+    }
+  }
+}
+
+function _validateUntrustedInputs(descriptor) {
+  _assertFieldsInSchema(descriptor, "untrusted_inputs");
+}
+
+function _validateSensitiveArgs(descriptor) {
+  _assertFieldsInSchema(descriptor, "sensitive_args");
+}
+
+function _enforceUntrustedInputGate(args, descriptor) {
+  const fields = descriptor.untrusted_inputs;
+  if (!fields || fields.length === 0) return;
+  if (args?.acknowledge_untrusted_input === true) return;
+  for (const field of fields) {
+    const value = args?.[field];
+    if (typeof value === "string" && UNTRUSTED_FENCE_OPENER_RE.test(value)) {
+      throw new PolicyError(
+        `${descriptor.name}: arg '${field}' contains an untrusted-input fence; set acknowledge_untrusted_input: true to consume it`,
+      );
+    }
+  }
+}
+
+// Substring an attacker-controlled producer output cannot be allowed
+// to embed verbatim — a literal `[UNTRUSTED:logs:END]` inside a log
+// line would visually terminate the fence and let the LLM treat the
+// trailing bytes as trusted. Neutralize every `[UNTRUSTED:` in the
+// body by replacing the leading bracket-keyword pair with a sentinel
+// that preserves the text visually but does not lex as a fence
+// boundary. Codex review #1201 cycle 1 finding 7 (security/class).
+const UNTRUSTED_BODY_RE = /\[UNTRUSTED:/g;
+const UNTRUSTED_BODY_ESCAPE = "[UNTRUSTED-ESC:";
+
+function _escapeUntrustedBody(text) {
+  return text.replace(UNTRUSTED_BODY_RE, UNTRUSTED_BODY_ESCAPE);
+}
+
+function _wrapUntrustedSource(result, descriptor) {
+  const label = descriptor.untrusted_source;
+  if (!label) return result;
+  if (!result || !Array.isArray(result.content) || result.content.length === 0) {
+    return result;
+  }
+  // Codex review #1201 cycle 2 finding: a multi-item text response
+  // would previously leave items beyond content[0] outside the
+  // trust-boundary fence even though the whole producer output is
+  // by definition untrusted. Wrap every text item individually so
+  // the contract — "all text content from this producer is fenced"
+  // — holds regardless of how many content items the handler
+  // emitted. Non-text items pass through unchanged.
   return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          dry_run: true,
-          tool: descriptor.name,
-          klass: descriptor.klass,
-          would_execute_with: previewArgs,
-          note: "Pass execute=true to actually run this tool.",
-        }),
-      },
-    ],
+    ...result,
+    content: result.content.map((item) => {
+      if (item?.type !== "text" || typeof item?.text !== "string") return item;
+      const safeBody = _escapeUntrustedBody(item.text);
+      return {
+        ...item,
+        text: `[UNTRUSTED:${label}:BEGIN]\n${safeBody}\n[UNTRUSTED:${label}:END]`,
+      };
+    }),
   };
+}
+
+// ===========================================================================
+// Phase 3 (#1199): per-class sliding-window rate cap.
+// ===========================================================================
+
+function _enforceRateCap(args, descriptor, policy) {
+  const tp = _toolPolicy(descriptor, policy);
+  const cap = tp.rate_cap;
+  if (!cap) return;
+  const { count, window_seconds } = cap;
+  const windowMs = window_seconds * 1000;
+  const now = Date.now();
+  let arr = rateCapWindows.get(descriptor.klass);
+  if (!arr) {
+    arr = [];
+    rateCapWindows.set(descriptor.klass, arr);
+  }
+  while (arr.length > 0 && arr[0] <= now - windowMs) {
+    arr.shift();
+  }
+  if (arr.length >= count) {
+    throw new PolicyError(
+      `${descriptor.name}: rate cap exceeded for class '${descriptor.klass}' (${count} calls per ${window_seconds}s)`,
+    );
+  }
+  arr.push(now);
+}
+
+// ===========================================================================
+// Phase 3 (#1199): two-phase plan store.
+// ===========================================================================
+
+function _reapExpiredPlans() {
+  const now = Date.now();
+  for (const [id, entry] of planStore) {
+    if (now >= entry.expiresAt) planStore.delete(id);
+  }
+}
+
+function _storePlan(descriptor, args, fingerprint) {
+  _reapExpiredPlans();
+  if (planStore.size >= MAX_PLAN_STORE_SIZE) {
+    // FIFO eviction once the cap is hit even after reaping — Map
+    // iteration order is insertion order, so the first key is the
+    // oldest. Eviction is fail-closed: the evicted plan_id becomes
+    // unknown to subsequent execute_<name> calls.
+    const oldest = planStore.keys().next().value;
+    if (oldest !== undefined) planStore.delete(oldest);
+  }
+  const planId = randomUUID();
+  const expiresAt = Date.now() + PLAN_TTL_MS;
+  planStore.set(planId, {
+    tool: descriptor.name,
+    klass: descriptor.klass,
+    args,
+    fingerprint,
+    expiresAt,
+  });
+  return { planId, expiresAt };
+}
+
+function _consumePlan(planId, expectedTool, descriptor) {
+  if (!planId || typeof planId !== "string") {
+    throw new PolicyError(
+      `${descriptor.name}: plan_id argument is required`,
+    );
+  }
+  _reapExpiredPlans();
+  const entry = planStore.get(planId);
+  if (!entry) {
+    throw new PolicyError(
+      `${descriptor.name}: unknown plan_id (not found, expired, or already consumed)`,
+    );
+  }
+  if (Date.now() >= entry.expiresAt) {
+    planStore.delete(planId);
+    throw new PolicyError(
+      `${descriptor.name}: plan_id expired (60s TTL exceeded)`,
+    );
+  }
+  if (entry.tool !== expectedTool) {
+    // Don't reveal cross-tool plan ids; treat mismatched-tool consumption
+    // the same as unknown so a probing caller can't enumerate the store.
+    throw new PolicyError(
+      `${descriptor.name}: unknown plan_id`,
+    );
+  }
+  // Atomic consume: delete BEFORE running the handler so a concurrent
+  // execute with the same plan_id sees "unknown" rather than running
+  // twice.
+  planStore.delete(planId);
+  return entry;
+}
+
+// ===========================================================================
+// Phase 4 (#1200): apex out-of-band operator approval.
+// ===========================================================================
+
+function _matchesApexRule(rule, args, descriptor, kind) {
+  if (rule.env !== (args?.env ?? null) && rule.env !== args?.env) return false;
+  if (rule.operation_kind !== kind) return false;
+  if (rule.tool && rule.tool !== descriptor.name) return false;
+  if (rule.class && rule.class !== descriptor.klass) return false;
+  if (rule.requires_write === true && descriptor.is_write !== true) return false;
+  return true;
+}
+
+function _isApexCall(args, descriptor, policy, kind) {
+  for (const rule of policy.apexOperations()) {
+    if (_matchesApexRule(rule, args, descriptor, kind)) return true;
+  }
+  return false;
+}
+
+async function _enforceApexApproval(args, descriptor, policy, kind, auditExtras = {}) {
+  if (!_isApexCall(args, descriptor, policy, kind)) return false;
+  // Bounded queue check: refuse new apex requests when the operator
+  // already has the cap's worth of unconfirmed prompts. Throwing
+  // here flows into _runHandlerAndPostGates's catch path, which
+  // audits the refusal as result_class:'error'.
+  if (pendingApex.size >= MAX_PENDING_APEX) {
+    throw new PolicyError(
+      `${descriptor.name}: apex pending-approval queue is full (${MAX_PENDING_APEX} prompts awaiting operator confirmation)`,
+    );
+  }
+  const token = randomBytes(APEX_TOKEN_BYTES).toString("hex");
+  const env = args?.env ?? null;
+  // Codex review #1201 cycle 1 finding 5: audit the awaiting-approval
+  // event so the operator can distinguish an apex-approved execution
+  // from a non-apex execution in the JSONL audit, and so the policy
+  // facts (tool, class, env, profile) for the apex prompt are durably
+  // recorded. The token itself is NEVER emitted to audit — only the
+  // structural fact that an apex prompt was raised.
+  //
+  // Cycle 2 finding "Execute-side audit events lose plan correlation":
+  // thread plan_id (when present) into the awaiting_approval record
+  // so the apex prompt event ties back to the plan that triggered it.
+  _writeAudit(policy, descriptor, args, Date.now(), {
+    result_class: "awaiting_approval",
+    apex: true,
+    plan_id: auditExtras.plan_id,
+  });
+  // Stderr-only emission: never goes to MCP responses, audit args, or
+  // error envelopes. The fence around env value avoids accidentally
+  // emitting a multi-line stderr line if an attacker-controlled env
+  // somehow reached this point (it can't through the Zod schema, but
+  // defense in depth).
+  process.stderr.write(
+    `[apex-approval] ${descriptor.name} env=${JSON.stringify(env)} kind=${kind} token=${token} ttl=${APEX_APPROVAL_TTL_MS / 1000}s — call 'approve' with this token to release\n`,
+  );
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingApex.delete(token);
+      reject(
+        new PolicyError(
+          `${descriptor.name}: apex approval timeout (no operator confirmation within ${APEX_APPROVAL_TTL_MS / 1000}s)`,
+        ),
+      );
+    }, APEX_APPROVAL_TTL_MS);
+    pendingApex.set(token, { resolve, reject, timer });
+  });
+  // Apex passed — signal back so the caller marks the final audit
+  // record with `apex: true`.
+  return true;
+}
+
+/**
+ * Consume a pending apex approval token. Returns `true` when the
+ * token matched an active pending request (releasing the parked
+ * handler) or `false` when the token is unknown / already consumed /
+ * expired. Single-use: the entry is deleted as part of the consume,
+ * so a duplicate `approve` call returns `false`.
+ *
+ * Intended caller: the `approve` MCP tool registered on the server.
+ */
+export function consumeApexToken(token) {
+  if (typeof token !== "string" || token.length === 0) return false;
+  const entry = pendingApex.get(token);
+  if (!entry) return false;
+  if (entry.timer) clearTimeout(entry.timer);
+  pendingApex.delete(token);
+  entry.resolve();
+  return true;
 }
 
 function _idempotencyState(args, descriptor, policy) {
@@ -625,6 +1079,14 @@ function _extractRawSecretText(result) {
 
 function _wrapSecretReturn(result, descriptor, policy) {
   if (!_isSecretHandleClass(descriptor, policy)) return result;
+  // Codex review #1201 cycle 3 finding 2: pass error envelopes through
+  // unmodified. The handler-level convention is `return { content:
+  // [{text: "Error: ..."}], isError: true }`; wrapping that into an
+  // opaque handle would mask AWS / lookup failures as apparently-
+  // successful handle responses AND would be audited as success.
+  // Leaving isError envelopes alone lets _runHandlerAndPostGates'
+  // handlerReturnedError check fire correctly.
+  if (result?.isError === true) return result;
   const raw = _extractRawSecretText(result);
   const handle = `shf-secret:${randomUUID()}`;
   secretHandles.set(handle, { value: raw, ts: Date.now() });
@@ -676,22 +1138,357 @@ function _resultClass(result, error, opts) {
   return "success";
 }
 
+// Sanitize args for any output the operator or audit log might see.
+// Combines:
+//   - `audit.redact` from .shifter.yaml (name + suffix classifier)
+//   - the descriptor's `untrusted_inputs` field list (free-form
+//     operative payloads — raw SQL, raw shell command bodies — that
+//     are not "secrets" but MUST NOT appear in plan summaries or
+//     audit records per the Phase 3/4 design).
+// Codex review #1201 cycle 1 finding 3.
+function _safeOutputArgs(args, descriptor, policy) {
+  if (args === null || args === undefined) return args;
+  const sanitized = sanitizeArgs(args, policy.auditConfig().redact ?? []);
+  if (
+    sanitized &&
+    typeof sanitized === "object" &&
+    !Array.isArray(sanitized)
+  ) {
+    if (Array.isArray(descriptor?.untrusted_inputs)) {
+      for (const field of descriptor.untrusted_inputs) {
+        if (sanitized[field] !== undefined) {
+          sanitized[field] = `<redacted: operative ${field}>`;
+        }
+      }
+    }
+    // Codex review #1201 cycle 2: `sensitive_args` is the descriptor
+    // escape hatch for fields that aren't free-form operative payloads
+    // (handled by untrusted_inputs) and aren't covered by audit.redact's
+    // suffix classifier, but still must not appear in plan summaries
+    // or audit records. The `approve` tool uses this for its `token`
+    // arg — the apex design says the token MUST NEVER appear in audit.
+    if (Array.isArray(descriptor?.sensitive_args)) {
+      for (const field of descriptor.sensitive_args) {
+        if (sanitized[field] !== undefined) {
+          sanitized[field] = "<redacted>";
+        }
+      }
+    }
+  }
+  return sanitized;
+}
+
 function _writeAudit(policy, descriptor, args, started, outcome) {
   // Per #1198: audit every invocation. The audit module fails closed
   // (returns ok:false) but never throws out; we don't need a
   // try/catch here.
+  //
+  // Pre-sanitize args here so the descriptor-specific
+  // `untrusted_inputs` redaction folds in alongside the policy-wide
+  // `audit.redact` list. `appendAuditRecord` re-runs sanitizeArgs
+  // internally — that pass is idempotent on the placeholder strings
+  // we've already substituted.
   appendAuditRecord(policy, {
     timestamp: new Date(started).toISOString(),
     tool: descriptor.name,
     class: descriptor.klass,
     env: args?.env ?? null,
     profile: policy.profile,
-    args: args ?? {},
+    args: _safeOutputArgs(args ?? {}, descriptor, policy),
     result_class: outcome.result_class,
     duration_ms: Date.now() - started,
     error_class: outcome.error_class,
     idempotency_key: outcome.idempotency_key,
+    apex: outcome.apex,
+    plan_id: outcome.plan_id,
   });
+}
+
+function _isTwoPhaseClass(descriptor, policy) {
+  return _toolPolicy(descriptor, policy).two_phase === true;
+}
+
+// Codex review #1201 cycle 1 finding 1: the wrapper-gated control
+// fields MUST be visible in the registered MCP schema so agents can
+// discover them via `list_tools` and the SDK does not strip them
+// before they reach the wrapper. The base schema (the descriptor's
+// domain fields) is preserved verbatim; this helper adds policy
+// control fields on top.
+function _augmentSchemaWithControlKeys(baseSchema, descriptor, policy) {
+  const augmented = { ...(baseSchema ?? {}) };
+  const tp = _toolPolicy(descriptor, policy);
+  if (policy.envProdRequiresConfirm()) {
+    augmented.confirm_env = z
+      .literal("prod")
+      .optional()
+      .describe(
+        'Set to "prod" to confirm a prod-environment call (required when env="prod").',
+      );
+  }
+  if (tp.idempotency_key === "required") {
+    augmented.idempotency_key = z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Idempotency key — reusing the same key for 15 minutes returns the cached result.",
+      );
+  }
+  if (
+    Array.isArray(descriptor.untrusted_inputs) &&
+    descriptor.untrusted_inputs.length > 0
+  ) {
+    augmented.acknowledge_untrusted_input = z
+      .boolean()
+      .optional()
+      .describe(
+        "Set to true to consume free-form text containing [UNTRUSTED:<src>] fences sourced from producer tools.",
+      );
+  }
+  return augmented;
+}
+
+// Audit helper for the planned/cached/success branches; keeps the
+// wrapper bodies linear instead of repeating the audit call shape.
+function _audit(policy, descriptor, args, started, outcome) {
+  _writeAudit(policy, descriptor, args, started, outcome);
+}
+
+// Execute-time gate composition. Runs the side-effect gates that
+// must NOT fire at plan time: rate-cap, apex approval, idempotency,
+// the handler, the secret-handle wrap, and the untrusted-input
+// producer fence wrap. Used by both the direct path (non-two-phase
+// classes) and the execute_<name> path (two-phase classes replaying
+// stored plan args).
+//
+// `descriptor` is the original Phase 5 descriptor — it carries the
+// stable name used for tool-policy lookups in `.shifter.yaml`
+// (`tools.<name>.overrides`). `auditDescriptor` controls the
+// audit record's `tool` field: for two-phase classes this is
+// `execute_<name>` so the audit log distinguishes the plan-time and
+// execute-time records, while resolveToolPolicy keeps targeting the
+// underlying tool's class-defaults block.
+async function _runHandlerAndPostGates(
+  args,
+  descriptor,
+  auditDescriptor,
+  policy,
+  kind,
+  started,
+  auditExtras = {},
+) {
+  const planId = auditExtras.plan_id;
+  // Pre-handler gates that DO consume capacity / require operator
+  // attention. Idempotency check happens BEFORE rate-cap and apex so
+  // a retried call returns the cached result without re-asking the
+  // operator and without consuming a fresh rate-cap slot.
+  const idem = _idempotencyState(args, descriptor, policy);
+  if (idem.cached) {
+    _audit(policy, auditDescriptor, args, started, {
+      result_class: "cached",
+      idempotency_key: idem.key,
+      plan_id: planId,
+    });
+    return idem.result;
+  }
+  if (idem.required) {
+    const inFlight = idempotencyInFlight.get(idem.cacheKey);
+    if (inFlight) {
+      if (inFlight.fingerprint !== idem.fingerprint) {
+        throw new PolicyError(
+          `${descriptor.name}: idempotency_key '${idem.key}' is in flight with different args; refuse to double-mutate`,
+        );
+      }
+      const result = await inFlight.promise;
+      _audit(policy, auditDescriptor, args, started, {
+        result_class: "cached",
+        idempotency_key: idem.key,
+        plan_id: planId,
+      });
+      return result;
+    }
+  }
+
+  _enforceRateCap(args, descriptor, policy);
+  const apexApproved = await _enforceApexApproval(
+    args,
+    descriptor,
+    policy,
+    kind,
+    { plan_id: planId },
+  );
+
+  _reapExpiredSecretHandles();
+  _reapExpiredIdempotency();
+
+  const handlerArgs = _stripWrapperControlArgs(args);
+  const handlerPromise = (async () => {
+    const result = await descriptor.handler(handlerArgs);
+    const fenced = _wrapUntrustedSource(result, descriptor);
+    return _wrapSecretReturn(fenced, descriptor, policy);
+  })();
+  if (idem.required) {
+    idempotencyInFlight.set(idem.cacheKey, {
+      promise: handlerPromise,
+      fingerprint: idem.fingerprint,
+    });
+  }
+  let wrappedResult;
+  try {
+    wrappedResult = await handlerPromise;
+  } finally {
+    if (idem.required) {
+      idempotencyInFlight.delete(idem.cacheKey);
+    }
+  }
+  if (idem.required) {
+    idempotencyCache.set(idem.cacheKey, {
+      ts: Date.now(),
+      result: wrappedResult,
+      fingerprint: idem.fingerprint,
+    });
+  }
+  // Codex review #1201 cycle 2: a handler that signals failure by
+  // returning `{isError: true}` (the convention shifter-ops uses
+  // throughout its handler bodies via `err()`) was previously audited
+  // as `success`. Honor isError as an error result class so audit
+  // observability matches what the MCP client actually saw.
+  const handlerReturnedError = wrappedResult?.isError === true;
+  _audit(policy, auditDescriptor, args, started, {
+    result_class: handlerReturnedError ? "error" : "success",
+    error_class: handlerReturnedError ? "HandlerReturnedError" : undefined,
+    idempotency_key: idem.key,
+    apex: apexApproved || undefined,
+    plan_id: planId,
+  });
+  return wrappedResult;
+}
+
+// Direct-execution wrapper: used for non-two-phase classes. The
+// wrapper runs the no-side-effect gates (env policy, untrusted-input
+// scan) then `_runHandlerAndPostGates` does the rest.
+function _buildDirectHandler(descriptor, policy) {
+  return async (args) => {
+    const started = Date.now();
+    try {
+      _enforceUntrustedInputGate(args, descriptor);
+      _enforceEnvPolicy(args, descriptor, policy);
+      return await _runHandlerAndPostGates(
+        args,
+        descriptor,
+        descriptor,
+        policy,
+        "direct",
+        started,
+      );
+    } catch (err) {
+      _audit(policy, descriptor, args, started, {
+        result_class: "error",
+        error_class: err?.name ?? "Error",
+      });
+      throw err;
+    }
+  };
+}
+
+// Plan-side wrapper: enforces no-side-effect gates and stores the
+// caller's verbatim args, then returns a small preview the agent
+// hands to the matching execute_<name>. The handler is NEVER run
+// from this path.
+function _buildPlanHandler(descriptor, policy) {
+  const planToolName = `plan_${descriptor.name}`;
+  const planDescriptor = { ...descriptor, name: planToolName };
+  return async (args) => {
+    const started = Date.now();
+    try {
+      _enforceUntrustedInputGate(args, descriptor);
+      _enforceEnvPolicy(args, descriptor, policy);
+      const fingerprint = _fingerprintArgs(args);
+      const { planId, expiresAt } = _storePlan(descriptor, args, fingerprint);
+      // Per Phase 3 design and codex review #1201 cycle 1 finding 3:
+      // plan summaries must not echo raw SQL/command bodies. Use the
+      // descriptor-aware sanitizer so `untrusted_inputs` fields are
+      // replaced with placeholder strings even though they pass the
+      // plain audit.redact classifier.
+      const summary = {
+        tool: descriptor.name,
+        class: descriptor.klass,
+        env: args?.env ?? null,
+        args: _safeOutputArgs(args, descriptor, policy),
+        expires_at: new Date(expiresAt).toISOString(),
+      };
+      _audit(policy, planDescriptor, args, started, {
+        result_class: "planned",
+        plan_id: planId,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ plan_id: planId, summary, ttl_seconds: 60 }),
+          },
+        ],
+      };
+    } catch (err) {
+      // plan-time error: no plan_id has been issued yet (planId is
+      // scoped inside the try-block above), so this audit naturally
+      // carries no plan_id correlation. Args here are the caller's
+      // request and may include the operative payload — sanitization
+      // happens inside _writeAudit via _safeOutputArgs.
+      _audit(policy, planDescriptor, args, started, {
+        result_class: "error",
+        error_class: err?.name ?? "Error",
+      });
+      throw err;
+    }
+  };
+}
+
+// Execute-side wrapper: consumes a plan_id, replays its stored args
+// through the side-effect gates, runs the handler. The caller's
+// non-plan_id args are ignored (the plan is the single source of
+// truth for what runs).
+//
+// Codex review #1201 cycle 2: every execute-side audit record must
+// carry the consumed plan_id so events tie back to the plan. The
+// error path also uses the STORED plan args (when consumed
+// successfully) rather than the transient `{plan_id}` call args, so
+// errors after plan consumption still record env/profile/sanitized
+// payload — not `null` env and an empty payload.
+function _buildExecuteHandler(descriptor, policy) {
+  const execToolName = `execute_${descriptor.name}`;
+  const execDescriptor = { ...descriptor, name: execToolName };
+  return async (args) => {
+    const started = Date.now();
+    const planId = args?.plan_id;
+    let entry = null;
+    try {
+      entry = _consumePlan(planId, descriptor.name, execDescriptor);
+      // The stored args have already passed env policy + untrusted-input
+      // scan at plan time. Re-running env policy here is redundant but
+      // cheap; re-running the untrusted-input scan would be wrong (an
+      // acknowledged fence is already locked in to the plan). We skip
+      // both at the execute side and proceed straight to the
+      // side-effect gates.
+      return await _runHandlerAndPostGates(
+        entry.args,
+        descriptor,
+        execDescriptor,
+        policy,
+        "execute",
+        started,
+        { plan_id: planId },
+      );
+    } catch (err) {
+      const auditArgs = entry?.args ?? args ?? {};
+      _audit(policy, execDescriptor, auditArgs, started, {
+        result_class: "error",
+        error_class: err?.name ?? "Error",
+        plan_id: planId,
+      });
+      throw err;
+    }
+  };
 }
 
 // Register an MCP tool under the policy layer. Tools whose class is
@@ -699,11 +1496,14 @@ function _writeAudit(policy, descriptor, args, started, outcome) {
 // don't appear in `list_tools`. Tools without a class tag, or with a
 // class the policy did not declare, fail closed.
 //
-// Phase 2 (#1198) composes env-policy / dry-run / description-
-// redaction / idempotency / secret-handle gates and a per-call
-// audit append around the handler. Phase 5 (#1201) is what wires the
-// 45 tools in `index.js` through `registerTool`; until then the
-// gates exist at the seam but the live server still bypasses them.
+// For classes where `class_defaults.<class>.two_phase: true`
+// (`infra_mutation`, `ssm_arbitrary`, `db_arbitrary` in the shipped
+// policy), the wrapper registers a PAIR of MCP tools:
+//   - plan_<name>(args)       — returns {plan_id, summary, ttl_seconds}
+//   - execute_<name>(plan_id) — runs the stored handler args, gated
+//                                by rate-cap + apex approval + idempotency
+// For non-two-phase classes the wrapper registers the original
+// `<name>` with the side-effect gates composed directly.
 export function registerTool(ctx, descriptor) {
   const { server, policy } = ctx;
   if (!server || typeof server.tool !== "function") {
@@ -734,104 +1534,79 @@ export function registerTool(ctx, descriptor) {
       `registerTool: descriptor.handler must be a function (tool '${name}')`,
     );
   }
+
+  // Phase 4 descriptor-time validation: catches malformed
+  // `untrusted_source` labels and `untrusted_inputs` / `sensitive_args`
+  // field lists before the tool reaches the registry. Done
+  // unconditionally (not gated on classEnabled) so misconfigured
+  // descriptors are caught even when a profile excludes the class
+  // today.
+  _validateUntrustedSource(descriptor, policy);
+  _validateUntrustedInputs(descriptor);
+  _validateSensitiveArgs(descriptor);
+
+  // Record every descriptor that survives validation, regardless of
+  // whether the active profile registers it as a live tool, so the
+  // apex-coverage check (codex #1201 cycle 1 finding 4) can detect
+  // typos against the full canonical descriptor set rather than just
+  // the active subset.
+  registeredDescriptorNames.add(name);
+
+  // Codex review #1201 cycle 3 finding 3: under Phase 3 the dry-run
+  // gate is gone — execution-default is enforced only via the
+  // two-phase plan_/execute_ pair. A resolved tool policy of
+  // `{execute_default: false, two_phase: !== true}` would run with
+  // no preview at all (the direct handler executes immediately),
+  // which silently contradicts what the config says. Fail closed
+  // rather than letting `execute_default: false` become a no-op.
+  const _tp = _toolPolicy(descriptor, policy);
+  if (_tp.execute_default === false && _tp.two_phase !== true) {
+    throw new PolicyError(
+      `registerTool: tool '${name}' resolves to execute_default:false without two_phase:true — the dry-run preview is enforced only by the two-phase wrapper, so this combination has no runtime effect`,
+    );
+  }
+
   if (!policy.classEnabled(klass)) {
     return { registered: false, reason: "class-disabled" };
   }
 
   const finalDescription = _maybeRedactDescription(description, descriptor, policy);
 
-  const wrapped = async (args) => {
-    const started = Date.now();
-    let outcome;
-    try {
-      _enforceEnvPolicy(args, descriptor, policy);
-      const idem = _idempotencyState(args, descriptor, policy);
-      if (idem.cached) {
-        outcome = {
-          result_class: _resultClass(idem.result, null, { cached: true }),
-          idempotency_key: idem.key,
-        };
-        _writeAudit(policy, descriptor, args, started, outcome);
-        return idem.result;
-      }
-      // In-flight retry protection (codex review #1180 cycle 1
-      // finding 4 + cycle 3 finding 1): if a concurrent call with
-      // the SAME `(tool, key)` is already running, share its promise
-      // — unless the fingerprints differ, in which case refuse the
-      // mismatched concurrent retry the same way the completed-cache
-      // path does.
-      if (idem.required) {
-        const inFlight = idempotencyInFlight.get(idem.cacheKey);
-        if (inFlight) {
-          if (inFlight.fingerprint !== idem.fingerprint) {
-            throw new PolicyError(
-              `${descriptor.name}: idempotency_key '${idem.key}' is in flight with different args; refuse to double-mutate`,
-            );
-          }
-          const result = await inFlight.promise;
-          outcome = {
-            result_class: _resultClass(result, null, { cached: true }),
-            idempotency_key: idem.key,
-          };
-          _writeAudit(policy, descriptor, args, started, outcome);
-          return result;
-        }
-      }
-      if (_shouldDryRun(args, descriptor, policy)) {
-        const preview = _dryRunPreview(args, descriptor);
-        outcome = { result_class: "dry_run" };
-        _writeAudit(policy, descriptor, args, started, outcome);
-        return preview;
-      }
+  const augmentedSchema = _augmentSchemaWithControlKeys(schema, descriptor, policy);
 
-      _reapExpiredSecretHandles();
-      _reapExpiredIdempotency();
+  if (_isTwoPhaseClass(descriptor, policy)) {
+    const planHandler = _buildPlanHandler(descriptor, policy);
+    const execHandler = _buildExecuteHandler(descriptor, policy);
+    // plan_<name> exposes the descriptor's domain fields PLUS the
+    // policy control fields the wrapper requires (confirm_env,
+    // idempotency_key, acknowledge_untrusted_input — whichever
+    // apply). execute_<name> takes only { plan_id }; the stored plan
+    // carries the control fields from the plan_<name> call.
+    server.tool(
+      `plan_${name}`,
+      finalDescription
+        ? `[plan] ${finalDescription}`
+        : `[plan] ${name}`,
+      augmentedSchema,
+      planHandler,
+    );
+    server.tool(
+      `execute_${name}`,
+      finalDescription
+        ? `[execute] ${finalDescription}`
+        : `[execute] ${name}`,
+      {
+        plan_id: z
+          .string()
+          .min(1)
+          .describe("plan_id returned by the matching plan_<name> call"),
+      },
+      execHandler,
+    );
+    return { registered: true, twoPhase: true };
+  }
 
-      // Wrap the handler call in a Promise we can park in
-      // idempotencyInFlight so concurrent retries observe it. The
-      // Promise is removed from the in-flight map in `finally` so
-      // failures don't leave stale entries.
-      const handlerPromise = (async () => {
-        const result = await handler(args);
-        return _wrapSecretReturn(result, descriptor, policy);
-      })();
-      if (idem.required) {
-        idempotencyInFlight.set(idem.cacheKey, {
-          promise: handlerPromise,
-          fingerprint: idem.fingerprint,
-        });
-      }
-      let wrappedResult;
-      try {
-        wrappedResult = await handlerPromise;
-      } finally {
-        if (idem.required) {
-          idempotencyInFlight.delete(idem.cacheKey);
-        }
-      }
-      if (idem.required) {
-        idempotencyCache.set(idem.cacheKey, {
-          ts: Date.now(),
-          result: wrappedResult,
-          fingerprint: idem.fingerprint,
-        });
-      }
-      outcome = {
-        result_class: "success",
-        idempotency_key: idem.key,
-      };
-      _writeAudit(policy, descriptor, args, started, outcome);
-      return wrappedResult;
-    } catch (err) {
-      outcome = {
-        result_class: "error",
-        error_class: err?.name ?? "Error",
-      };
-      _writeAudit(policy, descriptor, args, started, outcome);
-      throw err;
-    }
-  };
-
-  server.tool(name, finalDescription, schema ?? {}, wrapped);
-  return { registered: true };
+  const directHandler = _buildDirectHandler(descriptor, policy);
+  server.tool(name, finalDescription, augmentedSchema, directHandler);
+  return { registered: true, twoPhase: false };
 }

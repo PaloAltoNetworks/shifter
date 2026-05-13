@@ -23,35 +23,46 @@ capabilities of the agent.
 
 ## Implementation status
 
-This document describes the **target policy layer**, which is being
-landed in phases (issue #777 + sub-issues #1198–#1202). Today's
-runtime status:
+This document describes the **target policy layer**, which has now
+landed across issue #777 + sub-issues #1198–#1201 (Phase 6 / #1202 is
+still pending). Today's runtime status:
 
 - `.shifter.yaml` exists at the repo root and `mcp/ops/policy.js`
   provides `parsePolicy`, `loadPolicy`, the `Policy` class, the
-  `registerTool` wrapper, and (after Phase 2 / #1198) the
-  composed-gate wrap. Phase 1 enforcement (class declaration and
-  session-profile gating) is unchanged. Phase 2 (#1198) added five
-  cheap-defense gates at the seam: env confirmation, dry-run
-  defaults, description redaction, idempotency keys, secret-handle
-  return-mode, and a per-call JSONL audit append via
-  `mcp/ops/audit.js`. The gates compose around every handler
-  registered through `registerTool`.
-- Higher-cost gates (two-phase plan/execute, rate caps,
-  untrusted-input fencing, apex out-of-band approval) **are not yet
-  wrapped around handlers.** They land in #1199 (Phase 3) and
-  #1200 (Phase 4).
-- The 45 tools in `mcp/ops/index.js` **are not yet registered through
-  `registerTool`** — that is Phase 5 (#1201). Until then,
-  `.shifter.yaml` and `SHIFTER_OPS_PROFILE` have **no runtime effect
-  on the live server**; the Phase 2 gate code exists at the seam but
-  the live registration path is unchanged.
+  `registerTool` wrapper, and the composed-gate wrap. Phase 1
+  enforcement (class declaration and session-profile gating) is in
+  place. Phase 2 (#1198) added five cheap-defense gates at the seam:
+  env confirmation, dry-run defaults, description redaction,
+  idempotency keys, secret-handle return-mode, and a per-call JSONL
+  audit append via `mcp/ops/audit.js`.
+- Phase 3 (#1199) wired the mid-cost gates: two-phase `plan_<name>` /
+  `execute_<name>` registration for `infra_mutation`, `ssm_arbitrary`,
+  and `db_arbitrary` tools; a 60-second TTL bounded plan store
+  (size-capped at 64 entries); per-class sliding-window rate caps
+  (`infra_mutation` default `{count: 3, window_seconds: 60}`); and
+  startup `SHIFTER_OPS_PROFILE` resolution via `profileFromEnv` →
+  `loadPolicy`.
+- Phase 4 (#1200) wired the expensive gates: untrusted-input fencing
+  (producer descriptors declare an `untrusted_source` label from the
+  `.shifter.yaml` allowlist; consumer descriptors declare which
+  free-form fields the wrapper must scan, refusing calls without
+  `acknowledge_untrusted_input: true`); and apex out-of-band operator
+  approval (configurable `apex_operations:` rules; single-use
+  60-second hex tokens emitted to stderr; a dedicated `approve` MCP
+  tool consumes them; headless / CI fails closed).
+- Phase 5 (#1201) replaced every `server.tool(...)` registration in
+  `mcp/ops/index.js` with a `registerTool(ctx, {...})` descriptor
+  tagged by capability class. `.shifter.yaml` and
+  `SHIFTER_OPS_PROFILE` are now load-bearing on the live server; the
+  default `standard` profile excludes the destructive classes, so
+  operators that need them must set
+  `SHIFTER_OPS_PROFILE=destructive` at server startup.
 - `mcp/ops/tool-surface.test.js` (the load-bearing
-  ADR-014-R3 / R5 invariant suite referenced below) is Phase 6
+  ADR-014-R3 / R5 invariant suite referenced below) is still Phase 6
   (#1202) and **does not yet exist**.
 
 The rest of this document describes the policy layer as it stands
-once every phase ships.
+today on the live server.
 
 ## Policy layer — target design (phased rollout)
 

@@ -229,6 +229,188 @@ Follow-up #1197 evolves `.shifter.yaml` from the `mcp_ops:` namespace
 into a unified repo-root runtime configuration without renaming the
 file or breaking the policy schema.
 
+## Phase 3 Preflight (#1199)
+
+Phase 3 extends the existing `registerTool` policy wrapper. It must
+not create a second registration path, second policy parser, second
+audit writer, or per-tool local rate limiter in `index.js`. The
+canonical incumbents are `mcp/ops/policy.js` for gate composition,
+`.shifter.yaml` for class defaults and per-tool overrides,
+`mcp/ops/audit.js` for sanitized JSONL records, the Zod schemas in
+`mcp/ops/index.js` for input shape, and `mcp/ops/lib.js` /
+`mcp/shared/aws-helpers.js` for AWS/DB/SSM boundaries.
+
+Two-phase execution is a policy concern, not a tool-specific command
+builder. For `infra_mutation`, `ssm_arbitrary`, and `db_arbitrary`,
+the wrapper exposes or registers the paired `plan_<name>` and
+`execute_<name>` behavior from the same descriptor and class policy.
+`plan_<name>` captures the exact sanitized plan payload, class, tool,
+env, profile, request fingerprint, and expiry metadata and returns
+only `{plan_id, summary, ttl_seconds: 60}`. `execute_<name>` accepts
+only `plan_id`, consumes the stored entry atomically, and runs the
+stored handler arguments. It must not merge new caller-supplied SQL,
+SSM command text, instance ids, env, or confirmation arguments into
+the stored plan.
+
+The plan store is intentionally in-process and volatile. It is a
+short-lived confirmation latch, not persistence or workflow state:
+single-use, 60s TTL, random unguessable ids, bounded by a configured
+or hard-coded maximum, with expired-entry reaping on every access.
+Eviction must fail closed for missing/expired/unknown ids and must not
+execute a "nearest" or recomputed plan. The audit record should include
+the `plan_id`, tool class, env, profile, result class, and sanitized
+plan summary; it must not write raw SQL or raw shell bodies.
+
+Rate caps are class-level sliding windows from
+`.shifter.yaml`'s `class_defaults.<class>.rate_cap`, with per-tool
+overrides only through `tools.<name>.overrides.rate_cap`. The
+implementation should keep a bounded in-memory window per class
+because the issue asks for per-class caps; do not key caps by tool
+name, env, profile, or plan id unless a future policy field explicitly
+adds that dimension. A dry-run preview should not consume capacity;
+real execution through `execute_<name>` should. Refusals must happen
+before the handler runs and should audit as a policy error.
+
+`SHIFTER_OPS_PROFILE` is read once at server startup by `index.js` via
+`profileFromEnv(process.env)` and passed to `loadPolicy`. Profile
+selection is startup wiring, not a request argument and not a live
+reload feature. Missing/malformed `.shifter.yaml` or an unknown
+profile must fail startup rather than silently registering raw tools.
+
+Regression coverage belongs in `mcp/ops/policy.test.js` at this
+phase: red tests for TTL expiry, single-use plan ids, bounded plan
+store size, exact stored-args execution, unknown/expired/mismatched
+plan refusal, per-class sliding-window rate limits, bounded rate-cap
+memory, dry-runs not consuming rate capacity, and startup profile
+selection through `loadPolicy({ profile: profileFromEnv(env) })`.
+
+## Phase 4 Preflight (#1200)
+
+Phase 4 extends the same `registerTool` policy wrapper with two
+expensive prompt-injection blast-radius controls: untrusted-input
+fencing and apex out-of-band operator approval. It must not add a
+second policy parser, second registration path, local allowlist in
+`index.js`, second audit writer, or a separate "approval framework"
+outside `mcp/ops/policy.js`.
+
+Input provenance is a policy-layer concern. Tools that return
+free-form text from untrusted sources wrap their MCP text response in
+`[UNTRUSTED:<source>:BEGIN] ... [UNTRUSTED:<source>:END]` fences:
+`get_log_events`, `filter_log_events`, `tail_logs`, `get_s3_object`,
+`ssm_get_command_output`, and future web-fetch tools. The wrapper
+should own fence construction so individual handlers keep returning
+the same domain payloads and do not hand-roll string sentinels. The
+`source` label must be a small validated token derived from the tool
+descriptor or `.shifter.yaml`, not raw bucket keys, log lines, S3
+object contents, shell stdout, or other attacker-controlled strings.
+
+Free-form text consumers must be declared centrally, also through the
+descriptor / resolved tool policy: `query.sql`, `execute.sql`,
+`ssm_send_command.command`, `run_manage_command.command`, and future
+text-to-command fields. Before dry-run, two-phase plan creation, rate
+cap, apex approval, or handler execution, the wrapper scans only the
+declared free-form fields. If any field contains an untrusted fence,
+the call is refused unless `acknowledge_untrusted_input: true` is
+present. This preserves composition: an acknowledged call still must
+pass profile gating, env confirmation, dry-run / plan→execute,
+rate-cap, idempotency, and apex approval. The acknowledge flag is a
+per-call control flag, not a session-level bypass and not part of the
+stored plan payload's mutable caller input.
+
+Apex approval is a policy-layer gate on top of Phase 3's two-phase
+execution, not an alternative two-phase workflow. The configurable
+apex operation list belongs in `.shifter.yaml` under `mcp_ops:` and
+should identify operations by stable policy facts such as
+tool/execute tool name, class, env, and operation kind. Defaults:
+production `terminate_ec2_instance`; production `execute_plan` for
+`db_arbitrary` write plans; production `restart_ecs_service`. The
+schema must be strict and fail closed on malformed entries or unknown
+tool/class names.
+
+Approval tokens are in-process, single-use, random, and 60s TTL. The
+server prints the confirmation token to stderr only after all earlier
+policy gates have accepted the call and immediately before the
+apex-gated execution would run. The token must not appear in MCP
+responses, audit sanitized args, error envelopes, plan summaries,
+process argv, environment variables, or `.shifter.yaml`. The
+dedicated `approve` tool consumes `{token}` only, matches an active
+pending apex request, atomically releases that one request, and then
+invalidates the token. Timeout, unknown token, duplicate approval,
+headless stdin, CI, server restart, or process crash all fail closed.
+Do not use shell prompts, command-line flags, files in `/tmp`, or
+long-lived persisted state for approval.
+
+Audit must record both sides without leaking the token or raw payload:
+the blocked/awaiting apex event and the approved/timeout/refused
+outcome should include tool, class, env, profile, plan id when
+present, source labels, result class, and sanitized args through
+`mcp/ops/audit.js`. Policy refusals should be audited as errors, but
+the handler must not run.
+
+Regression coverage belongs in `mcp/ops/policy.test.js` at this
+phase: red tests for producer fencing, source-token validation,
+consumer refusal without acknowledgment, successful acknowledged
+composition with existing gates, no handler execution on refusal,
+apex defaults from `.shifter.yaml`, malformed apex config fail-closed,
+stderr-only token emission, single-use token consumption by `approve`,
+60s timeout, duplicate/unknown token refusal, headless timeout, audit
+redaction of tokens and raw SQL/command text, and ordering with
+two-phase `execute_<name>` so stored plan args cannot be modified
+while approving.
+
+## Phase 5 Preflight (#1201)
+
+Phase 5 is a mechanical registration migration, not a policy redesign:
+each of the 45 `server.tool(...)` registrations in `mcp/ops/index.js`
+becomes one descriptor passed to `registerTool`. The descriptor is the
+authoritative source for the tool's capability class. `.shifter.yaml`
+continues to declare classes, class defaults, profiles, environment
+policy, audit config, and per-tool `overrides`; it must not grow a
+second `tools.<name>.class` source of truth.
+
+The implementation must preserve the existing handler bodies, Zod
+input schemas, return envelopes, and helper calls unless the policy
+wrapper already changes behavior by class. Keep the migration local to
+registration shape: move `(name, description, schema, handler)` into a
+descriptor, add `klass`, and pass the existing server/policy context to
+`registerTool`.
+
+Capability class assignment is semantic, not based on whether a tool
+happens to accept an `env` argument:
+
+- `observability`: CloudWatch, ECS/EC2/ASG/target-health, S3 listing
+  and read, Terraform state, cost/spend, and dashboard/matrix style
+  read-only summaries.
+- `secret_handle`: Secrets Manager listing and retrieval; raw secret
+  values must remain inside the process.
+- `ssm_arbitrary`: free-form `ssm_send_command` and command output
+  retrieval.
+- `ssm_named`: `run_manage_command`, because it uses the existing
+  allowlisted `validateManageCommand` boundary.
+- `dev_bypass_tunnel`: portal test tunnel start/stop; descriptions
+  stay redacted by class policy and the env remains dev-only.
+- `infra_mutation`: EC2 start/stop/terminate, ECS restart, and range
+  reconciliation.
+- `db_arbitrary`: table introspection plus arbitrary `query` /
+  `execute`.
+- `named_db_read`: named, parameterized risk/range reads and audit
+  views.
+- `named_db_write`: named, parameterized risk mutations and comments;
+  these inherit idempotency requirements from class policy.
+
+Startup wiring is load-bearing. `index.js` must load the repo-root
+`.shifter.yaml` via `loadPolicy`, resolve `SHIFTER_OPS_PROFILE` via
+`profileFromEnv`, and build the single registration context before any
+tools are registered. Missing or malformed policy must fail startup,
+not fall back to raw `server.tool`.
+
+Do not add a registration adapter, second descriptor schema, second
+audit writer, alternate policy file, or local class enum in
+`index.js`. The canonical incumbents are `mcp/ops/policy.js`,
+`mcp/ops/audit.js`, `.shifter.yaml`, the existing Zod schemas in
+`index.js`, and the shared helpers in `mcp/ops/lib.js` /
+`mcp/shared/aws-helpers.js`.
+
 ## Gotchas
 
 - A capability class tag is required for every registered tool. The

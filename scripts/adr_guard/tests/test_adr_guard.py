@@ -2656,5 +2656,448 @@ class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
         self.assertIn("no-tracked-generated-artifacts", ADR_GUARD.CHECK_LEVELS["fast"])
 
 
+class NoPopulatedSecretEnvFilesTests(unittest.TestCase):
+    """Tests for ADR-004-R9: forbid populated tracked ``*-secrets.env`` files.
+
+    The check guards against re-introducing the failure mode resolved by
+    PR #1207, where ``platform-runtime-secrets.env`` carried plaintext
+    runtime credentials. Synthetic placeholders are allowed so the
+    Kustomize overlay still renders for static validation, but real
+    values must be supplied at deploy time (GCP Secret Manager,
+    deploy-time Kubernetes Secret, or a gitignored local env file).
+
+    Violation messages must name only the path and variable name,
+    never the rejected value.
+    """
+
+    SECRETS_ENV_REL = (
+        "platform/k8s/gcp/overlays/gcp-dev/platform-runtime-secrets.env"
+    )
+
+    def _make_overlay(self, repo_root: Path, rel: str) -> Path:
+        d = repo_root / rel
+        d.mkdir(parents=True)
+        return d
+
+    def test_passes_when_file_is_comments_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "# header comment\n#\n# another comment line\n\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_passes_with_empty_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "DB_PASSWORD=\nAPP_TOKEN=\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_passes_with_synthetic_placeholders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "DB_PASSWORD=REPLACE_AT_DEPLOY\n"
+                "API_TOKEN=CHANGE_ME\n"
+                "SHARED_KEY=PLACEHOLDER\n"
+                "DEMO_VALUE=EXAMPLE\n"
+                "BRACKETED=<replace-at-deploy>\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_flags_populated_assignment_without_echoing_value(self) -> None:
+        # Use a distinctive value so the assertion that violation
+        # messages do NOT contain the value is unambiguous.
+        sentinel_value = "ActualSensitiveValue123XYZ"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                f"DB_PASSWORD={sentinel_value}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            v = violations[0]
+            self.assertEqual(v.rule_id, "ADR-004-R9")
+            self.assertEqual(v.path, self.SECRETS_ENV_REL)
+            self.assertIn("DB_PASSWORD", v.message)
+            self.assertNotIn(sentinel_value, v.message)
+
+    def test_skips_files_outside_path_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            other = repo_root / "tests" / "fixtures"
+            other.mkdir(parents=True)
+            (other / "platform-runtime-secrets.env").write_text(
+                "DB_PASSWORD=SomeRealValue\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_only_scans_secrets_env_basename_pattern(self) -> None:
+        # Non-secrets env files in the same overlay must NOT be scanned.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime.env").write_text(
+                "DB_HOST=postgresql.example.com\nDB_PORT=5432\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_files_arg_narrows_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            dev = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (dev / "platform-runtime-secrets.env").write_text(
+                "DB_PASSWORD=DevRealVal\n",
+                encoding="utf-8",
+            )
+            prod = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-prod"
+            )
+            (prod / "platform-runtime-secrets.env").write_text(
+                "DB_PASSWORD=ProdRealVal\n",
+                encoding="utf-8",
+            )
+
+            scoped = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root,
+                [
+                    "platform/k8s/gcp/overlays/gcp-dev/"
+                    "platform-runtime-secrets.env"
+                ],
+            )
+
+            self.assertEqual(len(scoped), 1)
+            self.assertEqual(
+                scoped[0].path,
+                "platform/k8s/gcp/overlays/gcp-dev/"
+                "platform-runtime-secrets.env",
+            )
+
+    def test_flags_only_violating_lines_not_placeholder_siblings(self) -> None:
+        # Mixed-content file: placeholders are OK, populated lines flag.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "# header\n"
+                "DB_PASSWORD=REPLACE_AT_DEPLOY\n"
+                "API_TOKEN=NotASynthetic\n"
+                "APP_KEY=\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            flagged_vars = [v.message for v in violations]
+            self.assertEqual(len(violations), 1)
+            self.assertIn("API_TOKEN", flagged_vars[0])
+
+    def test_flags_value_starting_with_hash(self) -> None:
+        # Bypass regression: `KEY=#actualsecret` must NOT be treated as
+        # an empty/commented assignment. Kustomize's env_file loader
+        # (Docker-compat) only honors `#` as a comment when it is the
+        # first non-whitespace character on a line; mid-line `#` is
+        # part of the value. Treating it otherwise would let a
+        # committer hide plaintext credentials behind an inline-
+        # comment shape. Codex review cycle 1 caught this.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "DB_PASSWORD=#actualsecret\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            v = violations[0]
+            self.assertEqual(v.rule_id, "ADR-004-R9")
+            self.assertIn("DB_PASSWORD", v.message)
+            self.assertNotIn("actualsecret", v.message)
+
+    def test_flags_value_with_inline_hash_after_placeholder(self) -> None:
+        # Bypass regression: `KEY=REPLACE_AT_DEPLOY#real` must be
+        # flagged. Inline `#` is part of the value, so the RHS is not
+        # exactly one of the approved placeholders.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "API_TOKEN=REPLACE_AT_DEPLOY#realtoken\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            v = violations[0]
+            self.assertIn("API_TOKEN", v.message)
+            self.assertNotIn("realtoken", v.message)
+
+    def test_flags_value_with_inline_hash_and_whitespace(self) -> None:
+        # Bypass regression: `KEY=actual # note` is also flagged.
+        # Treating ` # note` as a comment would allow committed values
+        # of the form `KEY=actual # note` to slip through.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "SHARED_KEY=actualvalue # not a comment\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("SHARED_KEY", violations[0].message)
+            self.assertNotIn("actualvalue", violations[0].message)
+
+    def test_flags_non_identifier_key_with_real_value(self) -> None:
+        # Bypass regression (codex review cycle 2): a key with a dot
+        # (`db.password=...`) is a valid Kubernetes Secret data key
+        # shape. The earlier strict-identifier regex silently skipped
+        # such lines; the parser now splits on the first `=` and
+        # validates the RHS regardless of key shape.
+        sentinel = "DotKeyRealValueZ9"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                f"db.password={sentinel}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R9")
+            self.assertIn("db.password", violations[0].message)
+            self.assertNotIn(sentinel, violations[0].message)
+
+    def test_flags_hyphenated_key_with_real_value(self) -> None:
+        # Hyphenated keys are also valid Kubernetes Secret data keys.
+        sentinel = "HyphenKeyRealValueQ7"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                f"api-token={sentinel}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("api-token", violations[0].message)
+            self.assertNotIn(sentinel, violations[0].message)
+
+    def test_flags_export_prefixed_assignment(self) -> None:
+        # `export KEY=value` is a shell-style assignment that the
+        # strict-identifier regex would skip. The parser now reports
+        # the full LHS (`export KEY`) so the bypass is closed.
+        sentinel = "ExportShellValueK3"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                f"export DB_PASSWORD={sentinel}\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("export DB_PASSWORD", violations[0].message)
+            self.assertNotIn(sentinel, violations[0].message)
+
+    def test_flags_non_assignment_line(self) -> None:
+        # A non-comment, non-blank line that does not contain `=` is a
+        # malformed shape. Flag it so a real value smuggled in as YAML
+        # / free text cannot slip past the value check.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "some random secret-bearing text without an equals sign\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("not a comment", violations[0].message)
+            self.assertNotIn("secret-bearing", violations[0].message)
+
+    def test_passes_non_identifier_key_with_placeholder(self) -> None:
+        # The placeholder check applies regardless of key shape, so a
+        # valid Kubernetes Secret data key with a placeholder value
+        # still passes (consistency: the rule is about values, not
+        # key shapes).
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "db.password=REPLACE_AT_DEPLOY\n"
+                "api-token=<replace-at-deploy>\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_flags_arbitrary_bracketed_value(self) -> None:
+        # Bypass regression (codex review cycle 3 security finding):
+        # the placeholder allowlist must be a fixed set, NOT a `<...>`
+        # pattern. A pattern would accept a real credential wrapped in
+        # angle brackets (e.g. `DB_PASSWORD=<attacker-known-password>`)
+        # and the deployment would consume those bracketed bytes as
+        # the literal Secret value.
+        sentinel = "AttackerKnownValueB7"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                f"DB_PASSWORD=<{sentinel}>\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-004-R9")
+            self.assertIn("DB_PASSWORD", violations[0].message)
+            self.assertNotIn(sentinel, violations[0].message)
+
+    def test_passes_only_explicit_bracketed_allowlist_entries(self) -> None:
+        # The explicit bracketed forms in the allowlist still pass
+        # (consistency: the allowlist is fixed but it does include the
+        # common bracketed example tokens).
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            overlay = self._make_overlay(
+                repo_root, "platform/k8s/gcp/overlays/gcp-dev"
+            )
+            (overlay / "platform-runtime-secrets.env").write_text(
+                "A=<replace-at-deploy>\n"
+                "B=<placeholder>\n"
+                "C=<PLACEHOLDER>\n"
+                "D=<example>\n"
+                "E=<change-me>\n",
+                encoding="utf-8",
+            )
+
+            violations = ADR_GUARD.check_no_populated_secret_env_files(
+                repo_root, None
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_check_registered_at_ci_and_fast_levels(self) -> None:
+        self.assertIn("no-populated-secret-env-files", ADR_GUARD.CHECKS)
+        self.assertIn(
+            "no-populated-secret-env-files",
+            ADR_GUARD.CHECK_LEVELS["ci"],
+        )
+        self.assertIn(
+            "no-populated-secret-env-files",
+            ADR_GUARD.CHECK_LEVELS["fast"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

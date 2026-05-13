@@ -290,6 +290,39 @@ The first slice intentionally stays small:
   through `git add -f`), and complements
   `no-plaintext-secrets-in-tfvars`. Enforces ADR-004-R8.
 
+- `no-populated-secret-env-files`
+  Architecture check that fails the build when a tracked
+  `*-secrets.env` file under `platform/k8s/` carries a real value on
+  any assignment. Comments (lines whose first non-whitespace
+  character is `#`), blank lines, empty assignments (`KEY=`), and a
+  small **fixed** synthetic-placeholder allowlist
+  (`REPLACE_AT_DEPLOY`, `CHANGE_ME`, `PLACEHOLDER`, `EXAMPLE`, plus
+  the matching bracketed forms `<replace-at-deploy>`, `<change-me>`,
+  `<placeholder>`, `<example>`) are allowed; anything else is
+  flagged. The bracket allowlist is an explicit fixed set rather
+  than a `<...>` pattern so a committer cannot hide a real credential
+  inside angle brackets (e.g. `DB_PASSWORD=<attacker-known-password>`).
+  The parser splits on the first `=` so non-identifier key shapes
+  (`db.password=...`, `api-token=...`, `export DB_PASSWORD=...`) are
+  still subject to the value check; inline `# ...` is **not**
+  honored as a comment (Kustomize / Docker env_file treats `#` as a
+  comment only when it is the first non-whitespace character on a
+  line); non-comment, non-blank lines without `=` are flagged as
+  malformed. Containment uses `git ls-files` so gitignored local-dev
+  files (e.g. `platform-runtime-secrets.local.env`) are intentionally
+  not scanned; a synthetic-tree test-mode fallback walks the
+  filesystem for unit tests. The roots and the synthetic-placeholder
+  allowlist are centralized in `scripts/adr_guard/adr_guard.py` so
+  adding a future overlay (e.g. `gcp-prod`) is automatic and adding
+  a new cluster tree is one entry. Failure reporting names the
+  repo-relative path and the variable name only; the rejected value
+  is never echoed. Real runtime secrets must flow in at deploy time
+  from GCP Secret Manager, a gitignored local env file, or a
+  deploy-time Kubernetes Secret. Backstops gitleaks for low-entropy
+  committed credentials it ignores and prevents reintroduction of
+  the failure mode resolved by PR #1207 (issue #1195). Enforces
+  ADR-004-R9.
+
 - `rds-pending-modifications`
   Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal
   Terraform outputs, then calls `aws rds describe-db-instances` for each

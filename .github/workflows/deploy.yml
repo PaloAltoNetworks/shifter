@@ -37,6 +37,7 @@ jobs:
       range: ${{ steps.filter.outputs.range }}
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
+      shifter_app: ${{ steps.filter.outputs.shifter_app }}
       mcp: ${{ steps.filter.outputs.mcp }}
       gcp: ${{ steps.filter.outputs.gcp }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
@@ -78,8 +79,9 @@ jobs:
               - 'platform/terraform/modules/portal/**'
               - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
-              - 'shifter/**'
               - '.github/workflows/_shifter-platform.yml'
+            shifter_app:
+              - 'shifter/**'
             mcp:
               - 'mcp/**'
               - '.github/workflows/_quality.yml'
@@ -216,6 +218,7 @@ jobs:
        needs.changes.outputs.range == 'true' ||
        needs.changes.outputs.shifter_engine == 'true' ||
        needs.changes.outputs.shifter_platform == 'true' ||
+       needs.changes.outputs.shifter_app == 'true' ||
        needs.changes.outputs.mcp == 'true' ||
        needs.changes.outputs.gcp == 'true' ||
        github.event_name == 'workflow_dispatch')

@@ -108,6 +108,203 @@ class AdrGuardTests(unittest.TestCase):
         self.assertEqual(filtered[0].rule_id, "ADR-002-R1")
 
 
+class DeployWorkflowPlanScopeTests(unittest.TestCase):
+    """Tests for the AWS platform plan trigger and lock-timeout guardrail."""
+
+    def _write_workflows(self, repo_root: Path, deploy: str, platform: str) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "deploy.yml").write_text(deploy, encoding="utf-8")
+        (workflow_dir / "_shifter-platform.yml").write_text(platform, encoding="utf-8")
+
+    def _deploy_text(
+        self,
+        *,
+        platform_globs: list[str] | None = None,
+        app_globs: list[str] | None = None,
+        quality_condition: str = "needs.changes.outputs.shifter_app == 'true'",
+    ) -> str:
+        platform_globs = platform_globs or ["platform/terraform/modules/portal/**"]
+        app_globs = app_globs or ["shifter/**"]
+        platform_lines = "".join(f"              - '{glob}'\n" for glob in platform_globs)
+        app_lines = "".join(f"              - '{glob}'\n" for glob in app_globs)
+        return (
+            "jobs:\n"
+            "  changes:\n"
+            "    outputs:\n"
+            "      shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+            "    steps:\n"
+            "      - id: filter\n"
+            "        with:\n"
+            "          filters: |\n"
+            "            shifter_platform:\n"
+            f"{platform_lines}"
+            "            shifter_app:\n"
+            f"{app_lines}"
+            "  quality:\n"
+            "    if: |\n"
+            f"      {quality_condition}\n"
+        )
+
+    def _platform_text(self, plan_args: str = "-no-color -lock-timeout=5m -out=tfplan") -> str:
+        return (
+            "jobs:\n"
+            "  plan:\n"
+            "    steps:\n"
+            f"      - run: terraform plan {plan_args}\n"
+        )
+
+    def test_flags_python_glob_in_platform_plan_scope(self) -> None:
+        cases = ("shifter/**", "shifter/shifter_platform/**", "shifter/**/*.py")
+        for app_glob in cases:
+            with self.subTest(app_glob=app_glob), tempfile.TemporaryDirectory() as tmp:
+                repo_root = Path(tmp)
+                self._write_workflows(
+                    repo_root,
+                    self._deploy_text(platform_globs=["platform/terraform/modules/portal/**", app_glob]),
+                    self._platform_text(),
+                )
+
+                violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+                self.assertEqual(len(violations), 1)
+                self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+                self.assertIn(app_glob, violations[0].message)
+
+    def test_flags_platform_plan_without_lock_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text("-no-color -out=tfplan"),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-003-R2")
+            self.assertIn("-lock-timeout=5m", violations[0].message)
+
+    def test_targeted_mode_runs_for_relevant_workflow_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(platform_globs=["shifter/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(
+                repo_root, [".github/workflows/deploy.yml"]
+            )
+
+            self.assertEqual(len(violations), 1)
+
+    def test_flags_missing_app_quality_scope_after_platform_scope_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                "jobs:\n"
+                "  changes:\n"
+                "    steps:\n"
+                "      - id: filter\n"
+                "        with:\n"
+                "          filters: |\n"
+                "            shifter_platform:\n"
+                "              - 'platform/terraform/modules/portal/**'\n",
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("shifter_app", violations[0].message)
+
+    def test_flags_shifter_app_filter_without_app_source_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(app_globs=["docs/**"]),
+                self._platform_text(),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("shifter/**", violations[0].message)
+
+    def test_flags_shifter_app_condition_outside_quality_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            deploy = self._deploy_text(quality_condition="needs.changes.outputs.mcp == 'true'")
+            deploy += "  gcp-dev:\n    if: needs.changes.outputs.shifter_app == 'true'\n"
+            self._write_workflows(repo_root, deploy, self._platform_text())
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("Quality", violations[0].message)
+
+    def test_flags_missing_required_workflow_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            (repo_root / ".github" / "workflows").mkdir(parents=True)
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            flagged = {violation.path for violation in violations}
+            self.assertIn(".github/workflows/deploy.yml", flagged)
+            self.assertIn(".github/workflows/_shifter-platform.yml", flagged)
+
+    def test_ignores_commented_shifter_app_output_and_quality_condition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            deploy = (
+                "jobs:\n"
+                "  changes:\n"
+                "    outputs:\n"
+                "      # shifter_app: ${{ steps.filter.outputs.shifter_app }}\n"
+                "    steps:\n"
+                "      - id: filter\n"
+                "        with:\n"
+                "          filters: |\n"
+                "            shifter_platform:\n"
+                "              - 'platform/terraform/modules/portal/**'\n"
+                "            shifter_app:\n"
+                "              - 'shifter/**'\n"
+                "  quality:\n"
+                "    if: |\n"
+                "      # needs.changes.outputs.shifter_app == 'true'\n"
+            )
+            self._write_workflows(repo_root, deploy, self._platform_text())
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("output", violations[0].message)
+
+    def test_ignores_commented_lock_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_workflows(
+                repo_root,
+                self._deploy_text(),
+                self._platform_text("-no-color -out=tfplan # -lock-timeout=5m"),
+            )
+
+            violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("-lock-timeout=5m", violations[0].message)
+
+    def test_clean_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_deploy_workflow_plan_scope(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected deploy workflow violations: {violations}")
+
+
 class CloudFactorySeamTests(unittest.TestCase):
     def _make_cloud_tree(self, tmp: str, aws_files: list[str], gcp_files: list[str]) -> Path:
         """Create a minimal cloud adapter tree under a fake repo root."""

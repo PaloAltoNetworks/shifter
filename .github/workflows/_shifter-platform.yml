@@ -46,7 +46,7 @@ jobs:
         working-directory: platform/terraform
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
-      - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
+      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -145,7 +145,7 @@ jobs:
         run: |
           # Check if Service Discovery service needs replacement
           echo "Running terraform plan to check for Service Discovery changes..."
-          terraform plan -detailed-exitcode -out=tfplan 2>&1 || PLAN_EXIT=$?
+          terraform plan -detailed-exitcode -lock-timeout=5m -out=tfplan 2>&1 || PLAN_EXIT=$?
 
           echo "Plan exit code: ${PLAN_EXIT:-0}"
 

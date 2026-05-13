@@ -55,6 +55,11 @@
         "id": "ADR-003-R1",
         "description": "ADR conformance must run in CI even when tests are skipped.",
         "checks": ["adr-registry", "layer-imports", "cross-layer-model-imports"]
+      },
+      {
+        "id": "ADR-003-R2",
+        "description": "AWS platform Terraform plan routing must stay scoped to Terraform-consumed files, while platform application changes still trigger Quality through a separate app-source filter. AWS platform Terraform plan commands must wait for the state lock before failing.",
+        "checks": ["deploy-workflow-plan-scope"]
       }
     ],
     "exceptions": [],

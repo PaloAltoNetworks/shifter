@@ -89,9 +89,20 @@ describe("ngfw MCP tool surface hardening", () => {
   });
 
   it("does not fetch firewall SSH keys from Secrets Manager", () => {
-    assert.doesNotMatch(indexSource, /secretsmanager/);
-    assert.doesNotMatch(indexSource, /get-secret-value/);
-    assert.doesNotMatch(indexSource, /list-secrets/);
+    // The intent is to catch any path back to AWS Secrets Manager,
+    // not only AWS-CLI invocations. Cover both shapes:
+    //
+    // - AWS CLI naming: `secretsmanager` service token, `get-secret-value`
+    //   / `list-secrets` operation flags (case-sensitive forms in argv).
+    // - AWS SDK naming: `SecretsManagerClient`, `GetSecretValueCommand`,
+    //   `ListSecretsCommand`, and the hyphenated SDK package import
+    //   `@aws-sdk/client-secrets-manager`. Match case-insensitively
+    //   and accept an optional `-` between words so the test catches
+    //   `secrets-manager`, `secrets_manager`, and `SecretsManager` in
+    //   one rule per concept.
+    assert.doesNotMatch(indexSource, /secrets[\s\-_]?manager/i);
+    assert.doesNotMatch(indexSource, /get[\s\-_]?secret[\s\-_]?value/i);
+    assert.doesNotMatch(indexSource, /list[\s\-_]?secrets?/i);
   });
 
   it("only registers tools via static string literals", () => {

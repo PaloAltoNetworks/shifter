@@ -150,10 +150,10 @@ function Add-GroupMemberIdempotent {
     foreach ($m in $Members) {
         try {
             Add-ADGroupMember -Identity $Group -Members $m -ErrorAction Stop
-            Write-Host "    $Group + $m"
+            Write-Output "    $Group + $m"
         } catch {
             if ($_.Exception.Message -match "already a member") {
-                Write-Host "    $Group already has $m"
+                Write-Output "    $Group already has $m"
             } else {
                 throw
             }

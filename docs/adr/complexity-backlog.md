@@ -14,9 +14,7 @@ canonical `pyproject.toml`, and the relevant table rows in one PR.
 | Package | File | Function | Complexity at introduction | Tracking issue |
 |---|---|---|---|---|
 | shifter_platform | `shifter/shifter_platform/cms/services.py` | `list_agents` | 16 | #1142 |
-| shifter_platform | `shifter/shifter_platform/cms/services.py` | `initiate_upload` | 16 | #1144 |
 | shifter_platform | `shifter/shifter_platform/ctf/services/participant.py` | `bulk_import_participants` | 16 | #1145 |
-| provisioner | `shifter/engine/provisioner/orchestrators/setup_orchestrator.py` | `_execute_step` | 22 | #1152 |
 
 `submit_flag` (was complexity 19, tracking #1146) dropped below the
 threshold when its participant→challenge availability checks were
@@ -31,9 +29,31 @@ were extracted into `_compute_hint_purchase_info`,
 `_resolve_target_connection_info`, and `_compute_attempt_state`
 helpers in `ctf/views.py`. The `# noqa: C901` was removed.
 
-Total: 3 functions in `shifter_platform` (2 in `cms/services`, 1 in
-`ctf/services`), plus 1 in
-`provisioner/orchestrators/setup_orchestrator.py`. The other six
+`initiate_upload` (was complexity 16, tracking #1144) dropped below
+the threshold when its input-validation block (user / name / filename
+/ file_size checks) was extracted into
+`_validate_initiate_upload_inputs` in `cms/services.py`. The
+`# noqa: C901` was removed.
+
+`_execute_step` (was complexity 22, tracking #1152) dropped below the
+threshold when its per-attempt body was extracted into
+`_run_one_attempt` returning an `_AttemptOutcome` discriminated union
+(`_AttemptSuccess` / `_AttemptRetry` / `_AttemptFailHard`), with the
+PAN-OS post-success block factored into `_classify_successful_attempt`
++ `_handle_panos_poll` and the per-outcome logging into
+`_log_step_success` / `_log_step_failure` /
+`_log_panos_commit_outcome`. The retry/raise/fallthrough asymmetry is
+preserved (transport-error and PAN-OS poll/commit-fail exhaustion
+raise `SetupError`; exit-nonzero exhaustion returns a failed
+`StepResult`). The `# noqa: C901` was removed. The underlying
+architectural smell — PAN-OS specifics leaking into a generic
+`Executor`/`SetupPlan` abstraction (e.g., the `SetupStep.poll_for_job`
+flag) — remains, and the long-term fix (a `StepValidator` protocol
+that pushes PAN-OS knowledge into a dedicated validator) is tracked
+on #1152 even though the C901 entry is closed.
+
+Total: 2 functions in `shifter_platform` (1 in `cms/services`, 1 in
+`ctf/services`); zero in `provisioner/`. The other six
 lint-scoped Python packages (`shifter/packer`, `shifter/installation`,
 `scripts/bootstrap`, `scripts/gcp`, `scripts/check_layer_imports`,
 `scripts/check_rds_pending_modifications`) ship with zero exemptions

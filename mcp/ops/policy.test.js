@@ -722,8 +722,7 @@ function _extractApexToken(stderrBuffer) {
  * SonarCloud's new-duplicated-lines metric above the 3% threshold.
  */
 const _DEFAULT_AUDIT_POLICY_OPTS = Object.freeze({ profile: "destructive" });
-function policyWithAudit(auditPath, extra = {}, opts) {
-  const effectiveOpts = opts ?? _DEFAULT_AUDIT_POLICY_OPTS;
+function policyWithAudit(auditPath, extra = {}, opts = _DEFAULT_AUDIT_POLICY_OPTS) {
   const { redact, ...rest } = extra;
   return parsePolicy(
     {
@@ -731,7 +730,7 @@ function policyWithAudit(auditPath, extra = {}, opts) {
       audit: { enabled: true, path: auditPath, redact: redact ?? [] },
       ...rest,
     },
-    effectiveOpts,
+    opts,
   );
 }
 
@@ -827,25 +826,25 @@ function setupTrackedTool(server, policy, name, klass, body) {
   return () => state.called;
 }
 
+function setupOkTool(server, policy, name, klass, opts = {}) {
+  const state = { called: false };
+  setupTool(server, policy, {
+    name,
+    klass,
+    handler: async () => {
+      state.called = true;
+      return opts.empty ? { content: [] } : textResponse("ok");
+    },
+  });
+  return () => state.called;
+}
+
 describe("registerTool gates (Phase 2): env policy", () => {
   let server;
   beforeEach(() => {
     server = new FakeServer();
     _resetGateCachesForTests();
   });
-
-  function setupOkTool(server, policy, name, klass, opts = {}) {
-    const state = { called: false };
-    setupTool(server, policy, {
-      name,
-      klass,
-      handler: async () => {
-        state.called = true;
-        return opts.empty ? { content: [] } : textResponse("ok");
-      },
-    });
-    return () => state.called;
-  }
 
   it("refuses prod calls without confirm_env=prod for prod-touching classes", async () => {
     // infra_mutation is two-phase, so the env-policy check fires on
@@ -1089,23 +1088,23 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
   });
 });
 
+function policyWithOverride(toolName, overrides, opts = {}) {
+  return parsePolicy(
+    {
+      ...BASE_POLICY,
+      audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
+      tools: { [toolName]: { overrides } },
+    },
+    opts,
+  );
+}
+
 describe("registerTool gates (Phase 2): per-tool overrides", () => {
   let server;
   beforeEach(() => {
     server = new FakeServer();
     _resetGateCachesForTests();
   });
-
-  function policyWithOverride(toolName, overrides, opts = {}) {
-    return parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        tools: { [toolName]: { overrides } },
-      },
-      opts,
-    );
-  }
 
   it("per-tool overrides flow into the resolved tool policy for non-two-phase classes", async () => {
     // Codex review #1180 cycle 1 finding 3: gates must consume the
@@ -1138,20 +1137,20 @@ describe("registerTool gates (Phase 2): per-tool overrides", () => {
   });
 });
 
+function setupSecretTool(server, policy, name, value) {
+  setupTool(server, policy, {
+    name,
+    klass: "secret_handle",
+    handler: async () => textResponse(value),
+  });
+}
+
 describe("registerTool gates (Phase 2): secret handles", () => {
   let server;
   beforeEach(() => {
     server = new FakeServer();
     _resetGateCachesForTests();
   });
-
-  function setupSecretTool(server, policy, name, value) {
-    setupTool(server, policy, {
-      name,
-      klass: "secret_handle",
-      handler: async () => textResponse(value),
-    });
-  }
 
   it("wraps secret_handle return values into shf-secret:<uuid> handles", async () => {
     const policy = buildPolicyAuditOff();

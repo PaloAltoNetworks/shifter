@@ -2635,7 +2635,61 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
-def initiate_upload(  # noqa: C901
+def _validate_initiate_upload_inputs(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+) -> tuple[str, str]:
+    """Validate inputs for `initiate_upload` and return normalized (name, filename)."""
+    if user is None:
+        logger.error("initiate_upload called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error(
+            "initiate_upload called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("initiate_upload called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+    if name is None:
+        logger.error("initiate_upload called with None name for user_id=%s", user.id)
+        raise ValueError("name cannot be None")
+    name = name.strip()
+    if not name:
+        logger.error("initiate_upload called with empty name for user_id=%s", user.id)
+        raise ValueError("name cannot be empty")
+    if filename is None:
+        logger.error("initiate_upload called with None filename for user_id=%s", user.id)
+        raise ValueError("filename cannot be None")
+    filename = filename.strip()
+    if not filename:
+        logger.error("initiate_upload called with empty filename for user_id=%s", user.id)
+        raise ValueError("filename cannot be empty")
+    if file_size is None:
+        logger.error("initiate_upload called with None file_size for user_id=%s", user.id)
+        raise TypeError("file_size cannot be None")
+    if not isinstance(file_size, int):
+        logger.error(
+            "initiate_upload called with invalid file_size type: %s",
+            type(file_size).__name__,
+        )
+        msg = f"file_size must be an int, got {type(file_size).__name__}"
+        raise TypeError(msg)
+    if file_size <= 0:
+        logger.error(
+            "initiate_upload called with invalid file_size=%s for user_id=%s",
+            file_size,
+            user.id,
+        )
+        raise ValueError("file_size must be positive")
+    return name, filename
+
+
+def initiate_upload(
     user: User,
     name: str,
     filename: str,
@@ -2676,78 +2730,7 @@ def initiate_upload(  # noqa: C901
     from cms.assets.validation import ValidationError, validate_file_extension
     from cms.exceptions import CMSError
 
-    # Input validation - user
-    if user is None:
-        logger.error("initiate_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "initiate_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("initiate_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - name
-    if name is None:
-        logger.error(
-            "initiate_upload called with None name for user_id=%s",
-            user.id,
-        )
-        raise ValueError("name cannot be None")
-
-    name = name.strip()
-    if not name:
-        logger.error(
-            "initiate_upload called with empty name for user_id=%s",
-            user.id,
-        )
-        raise ValueError("name cannot be empty")
-
-    # Input validation - filename
-    if filename is None:
-        logger.error(
-            "initiate_upload called with None filename for user_id=%s",
-            user.id,
-        )
-        raise ValueError("filename cannot be None")
-
-    filename = filename.strip()
-    if not filename:
-        logger.error(
-            "initiate_upload called with empty filename for user_id=%s",
-            user.id,
-        )
-        raise ValueError("filename cannot be empty")
-
-    # Input validation - file_size
-    if file_size is None:
-        logger.error(
-            "initiate_upload called with None file_size for user_id=%s",
-            user.id,
-        )
-        raise TypeError("file_size cannot be None")
-
-    if not isinstance(file_size, int):
-        logger.error(
-            "initiate_upload called with invalid file_size type: %s",
-            type(file_size).__name__,
-        )
-        msg = f"file_size must be an int, got {type(file_size).__name__}"
-        raise TypeError(msg)
-
-    if file_size <= 0:
-        logger.error(
-            "initiate_upload called with invalid file_size=%s for user_id=%s",
-            file_size,
-            user.id,
-        )
-        raise ValueError("file_size must be positive")
+    name, filename = _validate_initiate_upload_inputs(user, name, filename, file_size)
 
     logger.debug(
         "initiate_upload called for user_id=%s, filename=%s, file_size=%s",
@@ -3099,7 +3082,7 @@ def cancel_upload(user: User, upload_token: str) -> None:
         try:
             payload = verify_upload_token(upload_token, user.id)
         except ValueError as e:
-            logger.error(
+            logger.exception(
                 "cancel_upload: token verification failed for user_id=%s - %s",
                 user.id,
                 str(e),

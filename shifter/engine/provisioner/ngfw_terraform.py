@@ -233,7 +233,12 @@ def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
         try:
             storage.delete_object(bucket=bootstrap_bucket, key=key)
         except Exception as e:
-            logger.error("Failed to delete NGFW bootstrap object: bucket=%s key=%s error=%s", bootstrap_bucket, key, e)
+            logger.exception(
+                "Failed to delete NGFW bootstrap object: bucket=%s key=%s error=%s",
+                bootstrap_bucket,
+                key,
+                e,
+            )
             failures.append((key, e))
 
     if failures:

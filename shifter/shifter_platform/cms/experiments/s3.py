@@ -201,7 +201,7 @@ def read_script_header(s3_key: str, max_bytes: int) -> bytes:
             max_bytes=max_bytes,
         )
     except CloudStorageError as e:
-        logger.error(
+        logger.exception(
             "read_script_header: failed s3_key=%s error=%s",
             safe_log(s3_key),
             safe_log(str(e)),

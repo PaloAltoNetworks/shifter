@@ -1246,7 +1246,7 @@ def _scan_targets(repo_root: Path, files: list[str] | None) -> tuple[bool, bool,
     scan_chart = False
     base_files: list[Path] = []
     for f in files:
-        if f.startswith(K8S_BASE_DEPLOYMENT_DIR + "/") and (f.endswith(".yaml") or f.endswith(".yml")):
+        if f.startswith(K8S_BASE_DEPLOYMENT_DIR + "/") and f.endswith((".yaml", ".yml")):
             scan_base = True
             full = repo_root / f
             if full.exists():
@@ -1586,7 +1586,7 @@ def _strip_hcl_comments(text: str) -> str:
 
 def _is_line_commented(line: str) -> bool:
     stripped = line.lstrip()
-    return stripped.startswith("#") or stripped.startswith("//")
+    return stripped.startswith(("#", "//"))
 
 
 def _strip_trailing_line_comment(line: str) -> str:

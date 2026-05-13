@@ -115,7 +115,7 @@ class GCPObjectStorage:
             blob = client.bucket(bucket).blob(key)
             body = blob.download_as_bytes(start=0, end=max_bytes - 1)
         except Exception as e:
-            logger.error(
+            logger.exception(
                 "read_object_header: failed bucket=%s key=%s error=%s",
                 bucket,
                 key,

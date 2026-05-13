@@ -221,7 +221,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         try:
             body = read_script_header(s3_key, max_size)
         except S3Error as e:
-            logger.error(
+            logger.exception(
                 "complete_script_upload: body read failed s3_key=%s: %s",
                 safe_log(s3_key),
                 safe_log(str(e)),
@@ -240,7 +240,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             try:
                 delete_s3_object(s3_key)
             except S3Error as delete_exc:
-                logger.error(
+                logger.exception(
                     "complete_script_upload: delete after inspection failure also failed s3_key=%s: %s",
                     safe_log(s3_key),
                     safe_log(str(delete_exc)),

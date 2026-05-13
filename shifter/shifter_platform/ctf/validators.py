@@ -266,7 +266,9 @@ def _resolve_target(hostname: str, port: int, challenge_id: Any) -> list[str] | 
             safe_log(challenge_id),
         )
         return None
-    except (socket.gaierror, OSError):
+    except OSError:
+        # socket.gaierror is a subclass of OSError; this branch covers
+        # both DNS lookup failure and any other resolver-layer OSError.
         logger.warning(
             "HTTP validator hostname resolution failed for challenge %s",
             safe_log(challenge_id),
@@ -379,7 +381,9 @@ def _parse_response(resp: Any, challenge_id: Any) -> bool:
 
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
+    except ValueError:
+        # UnicodeDecodeError is a subclass of ValueError, so this also
+        # covers a non-UTF-8 response body.
         logger.warning(
             "HTTP validator response not JSON for challenge %s",
             safe_log(challenge_id),
@@ -416,6 +420,10 @@ def _try_one_address(
     conn: http.client.HTTPSConnection | None = None
     try:
         context = ssl.create_default_context()
+        # Explicit floor — Python 3.12's default is already TLS 1.2+,
+        # but pin it so a future runtime/distro lowering the default
+        # cannot silently weaken validator-egress TLS.
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         conn = _build_https_connection(
             hostname=hostname,
             pinned_ip=pinned_ip,

@@ -17,6 +17,10 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS:
+        required: false
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS:
+        required: false
 
 jobs:
   plan:
@@ -327,6 +331,8 @@ jobs:
       ENV: ${{ inputs.environment }}
       PS_PREFIX: /shifter/${{ inputs.environment }}/portal
       INSTANCE_TAG: ${{ inputs.is_dev && 'dev-portal-ec2' || 'prod-portal-ec2' }}
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
     steps:
       - uses: actions/checkout@v4
 
@@ -357,6 +363,25 @@ jobs:
             --type String \
             --overwrite
           echo "Parameter Store updated successfully"
+
+      - name: Update bootstrap admin parameters
+        run: |
+          sync_optional_secure_param() {
+            local name="$1"
+            local value="$2"
+            if [ -n "$value" ]; then
+              aws ssm put-parameter \
+                --name "$name" \
+                --value "$value" \
+                --type SecureString \
+                --overwrite
+            else
+              aws ssm delete-parameter --name "$name" 2>/dev/null || true
+            fi
+          }
+
+          sync_optional_secure_param "${PS_PREFIX}/platform-bootstrap-staff-emails" "${PLATFORM_BOOTSTRAP_STAFF_EMAILS}"
+          sync_optional_secure_param "${PS_PREFIX}/platform-bootstrap-superuser-emails" "${PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS}"
 
       - name: Get Instance ID (single instance mode)
         id: instance
@@ -409,7 +434,15 @@ jobs:
           AWS_REGION="us-east-2"
           PS_PREFIX="__PS_PREFIX__"
 
-          get_param() { aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text --region "$AWS_REGION"; }
+          get_param() { aws ssm get-parameter --name "$1" --with-decryption --query 'Parameter.Value' --output text --region "$AWS_REGION"; }
+          validate_bootstrap_email_list() {
+            local name="$1"
+            local value="$2"
+            if [[ -n "$value" && ! "$value" =~ ^[A-Za-z0-9._%+@,-]+$ ]]; then
+              echo "Invalid $name: expected a comma-separated email list"
+              exit 1
+            fi
+          }
 
           IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")
           ECR_REGISTRY=$(get_param "$PS_PREFIX/ecr-registry")
@@ -433,6 +466,10 @@ jobs:
           REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
           EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend" || echo "")
           CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email" || echo "")
+          PLATFORM_BOOTSTRAP_STAFF_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-staff-emails" || echo "")
+          PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-superuser-emails" || echo "")
+          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
+          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
 
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           echo "Deploying image: $IMAGE"
@@ -459,6 +496,8 @@ jobs:
           [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
           [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
           [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
+          [ -n "$PLATFORM_BOOTSTRAP_STAFF_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_STAFF_EMAILS=$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
+          [ -n "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
 
           docker pull "$IMAGE"
           # The DC domain password secret is Terraform-managed (created and

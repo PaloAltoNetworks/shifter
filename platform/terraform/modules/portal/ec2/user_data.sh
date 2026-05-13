@@ -112,8 +112,17 @@ fi
 echo "Reading configuration from Parameter Store..."
 
 get_param() {
-  aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text --region "$AWS_REGION"
+  aws ssm get-parameter --name "$1" --with-decryption --query 'Parameter.Value' --output text --region "$AWS_REGION"
   return 0
+}
+
+validate_bootstrap_email_list() {
+  local name="$1"
+  local value="$2"
+  if [[ -n "$value" && ! "$value" =~ ^[A-Za-z0-9._%+@,-]+$ ]]; then
+    echo "Invalid $name: expected a comma-separated email list"
+    exit 1
+  fi
 }
 
 IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")
@@ -140,6 +149,10 @@ DB_HOST_OVERRIDE=$(get_param "$PS_PREFIX/db-host-override" 2>/dev/null || echo "
 EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend")
 CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email")
 CTFD_PLATFORM_URL=$(get_param "$PS_PREFIX/ctfd-platform-url" 2>/dev/null || echo "")
+PLATFORM_BOOTSTRAP_STAFF_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-staff-emails" 2>/dev/null || echo "")
+PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-superuser-emails" 2>/dev/null || echo "")
+validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
+validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
 
 IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 echo "Deploying image: $IMAGE"
@@ -197,6 +210,13 @@ fi
 # Email configuration
 COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
 COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
+
+if [[ -n "$PLATFORM_BOOTSTRAP_STAFF_EMAILS" ]]; then
+  COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_STAFF_EMAILS=$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
+fi
+if [[ -n "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" ]]; then
+  COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
+fi
 
 if [[ -n "$CTFD_PLATFORM_URL" ]]; then
   COMMON_ENV="$COMMON_ENV -e CTFD_PLATFORM_URL=$CTFD_PLATFORM_URL"

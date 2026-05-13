@@ -98,3 +98,30 @@ mcp_ops:
       - password
       - db_password
       - secret_value
+
+  # Phase 4 (#1200): allowlist of source labels that producer tools
+  # may embed in [UNTRUSTED:<source>:BEGIN/END] fences. Adding a new
+  # producer descriptor requires its label to appear here first; this
+  # stops an accidental relabel from silently changing what the LLM
+  # treats as an untrusted boundary.
+  untrusted_sources:
+    - logs
+    - s3
+    - ssm_stdout
+
+  # Phase 4 (#1200): apex out-of-band approval rules. Each entry sets
+  # exactly one of `tool` or `class`, plus `env` + `operation_kind`.
+  # `requires_write: true` further restricts class-keyed rules to
+  # descriptors that declare `is_write: true` (so `db_arbitrary`
+  # apex'es on `execute` but not on read-only `query`/`list_tables`).
+  apex_operations:
+    - tool: terminate_ec2_instance
+      env: prod
+      operation_kind: execute
+    - tool: restart_ecs_service
+      env: prod
+      operation_kind: execute
+    - class: db_arbitrary
+      env: prod
+      operation_kind: execute
+      requires_write: true

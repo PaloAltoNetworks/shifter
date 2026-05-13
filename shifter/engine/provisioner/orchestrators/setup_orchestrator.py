@@ -54,13 +54,19 @@ class SetupResult:
 # Internal discriminated outcome of a single attempt inside `_execute_step`.
 # The retry loop dispatches on these; this keeps per-attempt control flow
 # out of the loop body so the loop itself stays trivially readable.
+class _AttemptOutcomeBase:
+    """Sealed base for the three `_execute_step` per-attempt outcomes."""
+
+
 @dataclass(frozen=True)
-class _AttemptSuccess:
+class _AttemptSuccess(_AttemptOutcomeBase):
+    """Attempt succeeded; the carried `CommandResult` flows back to the caller."""
+
     result: CommandResult
 
 
 @dataclass(frozen=True)
-class _AttemptRetry:
+class _AttemptRetry(_AttemptOutcomeBase):
     """Attempt should be retried (or, if retries exhausted, fall through to
     a failed StepResult). `last_result` carries the most recent CommandResult
     if one was produced (None for pre-execution transport errors)."""
@@ -69,7 +75,7 @@ class _AttemptRetry:
 
 
 @dataclass(frozen=True)
-class _AttemptFailHard:
+class _AttemptFailHard(_AttemptOutcomeBase):
     """Attempt failure that must propagate as `SetupError` (no fallthrough)."""
 
     error: "SetupError"
@@ -302,13 +308,15 @@ class SetupOrchestrator:
                 attempt + 1,
                 e,
             )
-            if attempt < max_retries:
-                return _AttemptRetry(last_result=None)
-            return _AttemptFailHard(
-                SetupError(
-                    f"Step '{step.name}' failed: transport error after {max_retries + 1} attempts: {e}",
-                    step_name=step.name,
-                    cause=e,
+            return (
+                _AttemptRetry(last_result=None)
+                if attempt < max_retries
+                else _AttemptFailHard(
+                    SetupError(
+                        f"Step '{step.name}' failed: transport error after {max_retries + 1} attempts: {e}",
+                        step_name=step.name,
+                        cause=e,
+                    )
                 )
             )
 
@@ -365,12 +373,14 @@ class SetupOrchestrator:
                     step.name,
                     self._mask_sensitive_output(result.stdout, context),
                 )
-            if attempt < max_retries:
-                return _AttemptRetry(last_result=result)
-            return _AttemptFailHard(
-                SetupError(
-                    f"Step '{step.name}' failed: PAN-OS commit failed after {max_retries + 1} attempts",
-                    step_name=step.name,
+            return (
+                _AttemptRetry(last_result=result)
+                if attempt < max_retries
+                else _AttemptFailHard(
+                    SetupError(
+                        f"Step '{step.name}' failed: PAN-OS commit failed after {max_retries + 1} attempts",
+                        step_name=step.name,
+                    )
                 )
             )
 
@@ -399,12 +409,14 @@ class SetupOrchestrator:
             document_name,
         )
         if not poll_success:
-            if attempt < max_retries:
-                return _AttemptRetry(last_result=result)
-            return _AttemptFailHard(
-                SetupError(
-                    f"Step '{step.name}' failed: PAN-OS job {job_id} did not complete successfully",
-                    step_name=step.name,
+            return (
+                _AttemptRetry(last_result=result)
+                if attempt < max_retries
+                else _AttemptFailHard(
+                    SetupError(
+                        f"Step '{step.name}' failed: PAN-OS job {job_id} did not complete successfully",
+                        step_name=step.name,
+                    )
                 )
             )
 

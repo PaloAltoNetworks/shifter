@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.conf import settings
+from django.core.files.base import File
 from django.db.models import QuerySet
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _run_text_stream_validation(
-    file_obj,
+    file_obj: File,
     ext: str,
     challenge_id: UUID,
     actor_id: int,
@@ -82,7 +83,7 @@ def _run_text_stream_validation(
 
 def add_challenge_file(
     challenge_id: UUID,
-    file_obj,
+    file_obj: File,
     filename: str,
     display_name: str = "",
     content_type: str = "application/octet-stream",

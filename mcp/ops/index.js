@@ -7,7 +7,7 @@ import { spawn } from "child_process";
 import pg from "pg";
 import net from "net";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   REGION,
   LOCAL_PORTS,
@@ -333,36 +333,38 @@ function cleanup() {
   }
 }
 
-process.on("SIGTERM", () => {
-  cleanup();
-  process.exit(0);
-});
-process.on("SIGINT", () => {
-  cleanup();
-  process.exit(0);
-});
-process.on("exit", cleanup);
+// Signal handlers are installed inside `main()` (codex review #1202
+// cycle 1 finding 1). Module-level registration would fire on import,
+// adding `process.exit(0)`-ing handlers and ops cleanup to any host
+// process that merely imported `registerAllOpsTools` (e.g. the
+// surface tests, or future tooling) — and that contradicts the
+// side-effect-free import contract the seam exists to provide.
+function installLiveProcessHandlers() {
+  process.on("SIGTERM", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("exit", cleanup);
+}
 
 // ==========================================================================
 // MCP Server
+//
+// Phase 6 (#1202): the descriptor-registration block lives inside the
+// exported `registerAllOpsTools(ctx)` so `mcp/ops/tool-surface.test.js`
+// can drive registration against a fake server + real `.shifter.yaml`
+// without opening stdio. The live `main()` below builds the real
+// server, loads policy, calls `registerAllOpsTools`, and connects the
+// transport; the entrypoint guard at the bottom ensures importing this
+// module from a test is side-effect-free.
 // ==========================================================================
 
-const server = new McpServer({ name: "shifter-ops", version: "1.0.0" });
-
-// Phase 5 (#1201): load .shifter.yaml at startup. The active profile
-// is `SHIFTER_OPS_PROFILE` (read once here; runtime profile flips
-// would be a confused-deputy surface). A missing or malformed
-// `.shifter.yaml` throws and the server exits before any tool is
-// registered — fail closed is the only correct path.
-const _HERE = path.dirname(fileURLToPath(import.meta.url));
-const _REPO_ROOT = path.resolve(_HERE, "..", "..");
-const policy = loadPolicy({
-  path: path.join(_REPO_ROOT, ".shifter.yaml"),
-  profile: profileFromEnv(process.env),
-});
-const ctx = { server, policy };
-
-// `approve` is the operator-confirmation MCP tool. The agent reads
+export function registerAllOpsTools(ctx) {
+  // `approve` is the operator-confirmation MCP tool. The agent reads
 // the token off the operator's terminal (which the server printed to
 // stderr just before an apex operation parked) and calls this tool
 // with it. Registered as `observability` so every profile sees it —
@@ -3033,16 +3035,43 @@ registerTool(ctx, {
   },
 });
 
+  // Codex review #1201 cycle 1 finding 4: every `apex_operations[*].tool`
+  // rule in .shifter.yaml must point at a descriptor that actually
+  // reached registerTool. Run this AFTER every registerTool call so a
+  // typo in .shifter.yaml fails startup rather than silently disabling
+  // the intended apex gate.
+  validateApexCoverage(ctx.policy);
+}
+
 // ==========================================================================
 // Start server
 // ==========================================================================
 
-// Codex review #1201 cycle 1 finding 4: every `apex_operations[*].tool`
-// rule in .shifter.yaml must point at a descriptor that actually
-// reached registerTool. Run this AFTER every registerTool call so a
-// typo in .shifter.yaml fails startup rather than silently disabling
-// the intended apex gate.
-validateApexCoverage(policy);
+// Phase 5 (#1201): load .shifter.yaml at startup. The active profile
+// is `SHIFTER_OPS_PROFILE` (read once here; runtime profile flips
+// would be a confused-deputy surface). A missing or malformed
+// `.shifter.yaml` throws and the server exits before any tool is
+// registered — fail closed is the only correct path.
+async function main() {
+  installLiveProcessHandlers();
+  const _HERE = path.dirname(fileURLToPath(import.meta.url));
+  const _REPO_ROOT = path.resolve(_HERE, "..", "..");
+  const server = new McpServer({ name: "shifter-ops", version: "1.0.0" });
+  const policy = loadPolicy({
+    path: path.join(_REPO_ROOT, ".shifter.yaml"),
+    profile: profileFromEnv(process.env),
+  });
+  registerAllOpsTools({ server, policy });
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// Codex review #1202 cycle 1 finding 2: `process.argv[1]` is undefined
+// in valid Node import contexts (e.g. `node --input-type=module -e
+// "import('./mcp/ops/index.js')"`, embedded runners, repl programmatic
+// loads). Guard the conversion so merely importing this module never
+// throws before the caller can use the exported registration seam.
+const _entrypointArg = process.argv[1];
+if (_entrypointArg && import.meta.url === pathToFileURL(_entrypointArg).href) {
+  await main();
+}

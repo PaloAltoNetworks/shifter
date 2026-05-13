@@ -1552,6 +1552,22 @@ export function registerTool(ctx, descriptor) {
   // the active subset.
   registeredDescriptorNames.add(name);
 
+  // Phase 6 (#1202) optional inspection hook for surface tests. Codex
+  // review #1202 cycle 3 finding 2: surface-suite assertions on
+  // descriptor metadata (the `klass`, `untrusted_source`,
+  // `sensitive_args`, `is_write` fields that decide which wrapper
+  // gates compose around the handler) can't be made from
+  // `server.tool(name, description, schema, handler)` alone — that
+  // signature carries only the wrapped artifacts. Production callers
+  // (`mcp/ops/index.js::main()` and its `McpServer` ctx) do not set
+  // this callback, so the live server is unchanged. Tests set it on
+  // the FakeServer ctx to capture descriptor metadata post-validation
+  // / pre-gate-composition, without copying capability maps or
+  // re-parsing index.js. Written as optional-chained invocation so
+  // the SonarCloud cognitive-complexity gate stays under threshold
+  // (S3776: optional chaining is a single expression, not a branch).
+  ctx.onRegisterDescriptor?.(descriptor);
+
   // Codex review #1201 cycle 3 finding 3: under Phase 3 the dry-run
   // gate is gone — execution-default is enforced only via the
   // two-phase plan_/execute_ pair. A resolved tool policy of

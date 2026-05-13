@@ -411,6 +411,60 @@ audit writer, alternate policy file, or local class enum in
 `index.js`, and the shared helpers in `mcp/ops/lib.js` /
 `mcp/shared/aws-helpers.js`.
 
+## Phase 6 Preflight (#1202)
+
+Phase 6 adds negative-surface tests, not another policy engine. The
+test file should exercise the live registration seam the same way an
+MCP client sees it: instantiate a fake server, load the real
+`.shifter.yaml` through `loadPolicy`, register the real `mcp/ops`
+descriptors through `registerTool`, and inspect the resulting tool
+set, descriptions, schemas, and wrapped handlers. The test must not
+derive expected behavior by copying private policy helpers or by
+parsing `index.js` as a substitute for registration.
+
+The canonical precedent is `mcp/ngfw/tool-surface.test.js`: keep an
+explicit, reviewable expected surface and fail loudly when tools are
+added, removed, or registered through a shape the test cannot
+enumerate. For `mcp/ops`, the expected surface is profile-sensitive:
+`read_only`, `standard`, and `destructive` must each be built from the
+same real descriptors and policy file so profile gating proves tools
+are actually absent from the registered set, not merely disabled at
+call time.
+
+The load-bearing assertions are the ADR-014-R3 / R5 / R6 invariants:
+
+- `read_only`, `standard`, and `destructive` profiles expose only the
+  classes declared for that profile in `.shifter.yaml`; two-phase
+  classes register `plan_<name>` / `execute_<name>` pairs rather than
+  direct mutating tools.
+- `infra_mutation`, `ssm_arbitrary`, and `db_arbitrary` operations
+  cannot execute from a missing flag path. The dry-run/default
+  contract is now the two-phase `plan_` / `execute_` wrapper, so tests
+  should prove direct original tool names are absent and execution
+  requires a valid `plan_id`.
+- `secret_handle` tools never return raw secret bytes on successful
+  response paths. Error paths may pass through `isError`, but must not
+  introduce raw secret values.
+- Prod-touching calls refuse unless the caller supplies
+  `confirm_env="prod"`.
+- `dev_bypass_tunnel` descriptions visible through registration are
+  redacted: no `/dev-login/` URLs and no bypass procedure language.
+- Consumer tools with `untrusted_inputs` refuse fenced input unless
+  `acknowledge_untrusted_input: true`; producer tools fence every text
+  response with an allowlisted source label from `.shifter.yaml`.
+- Apex-covered tools require terminal confirmation via the existing
+  stderr token + `approve` flow; tests should drive or time-box the
+  wrapper without leaking the token into MCP responses or audit
+  records.
+
+Keep the test harness narrow. If `index.js` cannot expose descriptor
+registration without starting stdio transport or real AWS/database
+side effects, add the smallest descriptor-registration seam needed
+inside `mcp/ops/index.js` and keep `policy.js` as the only gate
+composition layer. Do not introduce duplicate capability maps,
+duplicate Zod schemas, duplicate audit sanitizers, or a test-only
+policy parser.
+
 ## Gotchas
 
 - A capability class tag is required for every registered tool. The

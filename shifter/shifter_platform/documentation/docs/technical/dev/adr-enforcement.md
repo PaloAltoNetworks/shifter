@@ -96,6 +96,16 @@ The first slice intentionally stays small:
   This includes the GCP deploy workflow's Terraform state-backend hardening
   (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
 
+- `deploy-workflow-plan-scope`
+  Enforces ADR-003-R2 for the AWS platform workflow. The `shifter_platform`
+  change filter in `.github/workflows/deploy.yml` must stay scoped to
+  Terraform-consumed platform files, with application source changes routed
+  through the separate `shifter_app` filter so Quality still runs without
+  launching a platform Terraform plan. The check also requires every
+  `terraform plan` command in `_shifter-platform.yml` to include
+  `-lock-timeout=5m`, so legitimate concurrent platform plans wait on the
+  backend state lock instead of failing immediately.
+
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.
   The initial profile is intentionally narrow: it leaves existing repo-wide

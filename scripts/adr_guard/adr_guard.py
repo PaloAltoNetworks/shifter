@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -2037,6 +2038,198 @@ def check_no_tracked_generated_artifacts(
     return violations
 
 
+_DEPLOY_WORKFLOW_PATH = ".github/workflows/deploy.yml"
+_PLATFORM_WORKFLOW_PATH = ".github/workflows/_shifter-platform.yml"
+_ADR_GUARD_SCRIPT_PATH = "scripts/adr_guard/adr_guard.py"
+_PLAN_SCOPE_CHECK = "deploy-workflow-plan-scope"
+_PLAN_SCOPE_RULE = "ADR-003-R2"
+_SHIFTER_APP_OUTPUT = "shifter_app: ${{ steps.filter.outputs.shifter_app }}"
+_SHIFTER_APP_QUALITY_CONDITION = "needs.changes.outputs.shifter_app == 'true'"
+
+
+def _deploy_plan_scope_relevant(files: list[str] | None) -> bool:
+    if files is None:
+        return True
+    relevant = {_DEPLOY_WORKFLOW_PATH, _PLATFORM_WORKFLOW_PATH, _ADR_GUARD_SCRIPT_PATH}
+    return any(path in relevant for path in files)
+
+
+def _paths_filter_block(deploy_text: str, filter_name: str) -> list[str]:
+    block: list[str] = []
+    in_block = False
+    block_indent: int | None = None
+    for raw_line in deploy_text.splitlines():
+        stripped = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if stripped == f"{filter_name}:":
+            in_block = True
+            block_indent = indent
+            continue
+        if not in_block:
+            continue
+        if stripped and block_indent is not None and indent <= block_indent:
+            break
+        block.append(stripped)
+    return block
+
+
+def _workflow_job_block(workflow_text: str, job_name: str) -> list[str]:
+    block: list[str] = []
+    in_block = False
+    for raw_line in workflow_text.splitlines():
+        stripped = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent == 2 and stripped == f"{job_name}:":
+            in_block = True
+            continue
+        if in_block and stripped and indent == 2 and not stripped.startswith("- "):
+            break
+        if in_block:
+            block.append(stripped)
+    return block
+
+
+def _block_contains_glob(block: list[str], glob: str) -> bool:
+    return glob in _filter_globs(block)
+
+
+def _filter_globs(block: list[str]) -> list[str]:
+    globs: list[str] = []
+    for line in block:
+        if not line.startswith("- "):
+            continue
+        glob = line[2:].strip()
+        if len(glob) >= 2 and glob[0] == glob[-1] and glob[0] in {"'", '"'}:
+            glob = glob[1:-1]
+        if glob:
+            globs.append(glob)
+    return globs
+
+
+def _active_line_contains(block: list[str], needle: str) -> bool:
+    return any(needle in line for line in block if not line.lstrip().startswith("#"))
+
+
+def _terraform_plan_has_lock_timeout(stripped_line: str) -> bool:
+    if stripped_line.startswith("- run:"):
+        command = stripped_line.split(":", 1)[1].strip()
+    else:
+        command = stripped_line
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    return "-lock-timeout=5m" in tokens
+
+
+def _plan_scope_violation(path: str, message: str) -> Violation:
+    return Violation(_PLAN_SCOPE_CHECK, _PLAN_SCOPE_RULE, path, message)
+
+
+def _platform_app_source_globs(deploy_text: str) -> list[str]:
+    platform_block = _paths_filter_block(deploy_text, "shifter_platform")
+    return [
+        glob
+        for glob in _filter_globs(platform_block)
+        if glob == "shifter/**" or glob.startswith("shifter/")
+    ]
+
+
+def _check_deploy_workflow_plan_routing(deploy_text: str) -> list[Violation]:
+    violations: list[Violation] = []
+    app_source_globs = _platform_app_source_globs(deploy_text)
+    if app_source_globs:
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "`shifter_platform` must not include app-source globs under `shifter/`; "
+                f"found {', '.join(app_source_globs)}",
+            )
+        )
+
+    app_block = _paths_filter_block(deploy_text, "shifter_app")
+    changes_block = _workflow_job_block(deploy_text, "changes")
+    quality_block = _workflow_job_block(deploy_text, "quality")
+    if not app_block or not _active_line_contains(changes_block, _SHIFTER_APP_OUTPUT):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Platform app source changes must retain a `shifter_app` filter/output "
+                "wired into Quality after the Terraform-only `shifter_platform` split; "
+                "missing the filter or changes-job output",
+            )
+        )
+    elif not _block_contains_glob(app_block, "shifter/**"):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "`shifter_app` must include `shifter/**` so Python application changes "
+                "continue to trigger Quality after the platform plan scope split",
+            )
+        )
+    elif not _active_line_contains(quality_block, _SHIFTER_APP_QUALITY_CONDITION):
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "The Quality job must include `needs.changes.outputs.shifter_app == 'true'` "
+                "so Python application changes still run Quality",
+            )
+        )
+    return violations
+
+
+def _check_platform_plan_lock_timeout(platform_text: str) -> list[Violation]:
+    violations: list[Violation] = []
+    for lineno, line in enumerate(platform_text.splitlines(), start=1):
+        stripped = line.strip()
+        if "terraform plan" not in stripped:
+            continue
+        if stripped.startswith(("#", "echo ")):
+            continue
+        if _terraform_plan_has_lock_timeout(stripped):
+            continue
+        violations.append(
+            _plan_scope_violation(
+                f"{_PLATFORM_WORKFLOW_PATH}:{lineno}",
+                "AWS platform Terraform plan commands must include `-lock-timeout=5m` "
+                "so legitimate concurrent plans wait for the state lock instead of failing",
+            )
+        )
+    return violations
+
+
+def check_deploy_workflow_plan_scope(repo_root: Path, files: list[str] | None) -> list[Violation]:
+    """Keep AWS platform PR planning scoped to Terraform inputs."""
+    if not _deploy_plan_scope_relevant(files):
+        return []
+
+    violations: list[Violation] = []
+    deploy_path = repo_root / _DEPLOY_WORKFLOW_PATH
+    platform_path = repo_root / _PLATFORM_WORKFLOW_PATH
+
+    if not deploy_path.exists():
+        violations.append(
+            _plan_scope_violation(
+                _DEPLOY_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R2 cannot verify platform plan routing",
+            )
+        )
+    else:
+        violations.extend(_check_deploy_workflow_plan_routing(deploy_path.read_text(encoding="utf-8")))
+
+    if not platform_path.exists():
+        violations.append(
+            _plan_scope_violation(
+                _PLATFORM_WORKFLOW_PATH,
+                "Required workflow is missing; ADR-003-R2 cannot verify platform Terraform plan commands",
+            )
+        )
+    else:
+        violations.extend(_check_platform_plan_lock_timeout(platform_path.read_text(encoding="utf-8")))
+
+    return violations
+
+
 # Canonical Python packages whose pyproject.toml must enforce the per-function
 # complexity gate. Keyed off `.pre-commit-config.yaml` ruff hooks. Adding a new
 # Python package with a ruff-pre-commit hook means adding it here too.
@@ -2517,6 +2710,7 @@ CHECKS = {
     "no-tracked-generated-artifacts": check_no_tracked_generated_artifacts,
     "mcp-ops-tls-strict": check_mcp_ops_tls_strict,
     "python-complexity-gate": check_python_complexity_gate,
+    "deploy-workflow-plan-scope": check_deploy_workflow_plan_scope,
 }
 CHECK_LEVELS = {
     "fast": [
@@ -2530,6 +2724,7 @@ CHECK_LEVELS = {
         "no-tracked-generated-artifacts",
         "mcp-ops-tls-strict",
         "python-complexity-gate",
+        "deploy-workflow-plan-scope",
     ],
     "ci": [
         "adr-registry",
@@ -2543,6 +2738,7 @@ CHECK_LEVELS = {
         "no-tracked-generated-artifacts",
         "mcp-ops-tls-strict",
         "python-complexity-gate",
+        "deploy-workflow-plan-scope",
     ],
     "all": list(CHECKS),
 }

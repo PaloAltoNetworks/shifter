@@ -24,8 +24,8 @@ capabilities of the agent.
 ## Implementation status
 
 This document describes the **target policy layer**, which has now
-landed across issue #777 + sub-issues #1198–#1201 (Phase 6 / #1202 is
-still pending). Today's runtime status:
+landed across issue #777 + sub-issues #1198–#1202. Today's runtime
+status:
 
 - `.shifter.yaml` exists at the repo root and `mcp/ops/policy.js`
   provides `parsePolicy`, `loadPolicy`, the `Policy` class, the
@@ -57,9 +57,12 @@ still pending). Today's runtime status:
   default `standard` profile excludes the destructive classes, so
   operators that need them must set
   `SHIFTER_OPS_PROFILE=destructive` at server startup.
-- `mcp/ops/tool-surface.test.js` (the load-bearing
-  ADR-014-R3 / R5 invariant suite referenced below) is still Phase 6
-  (#1202) and **does not yet exist**.
+- Phase 6 (#1202) added `mcp/ops/tool-surface.test.js`, the
+  load-bearing ADR-014-R3 / R5 / R6 negative-surface suite referenced
+  below. Tools register through an exported `registerAllOpsTools(ctx)`
+  seam on `mcp/ops/index.js` so the surface tests can drive the live
+  registration path (real `.shifter.yaml`, real `loadPolicy`, real
+  `registerTool`) against a fake server without opening stdio.
 
 The rest of this document describes the policy layer as it stands
 today on the live server.
@@ -246,33 +249,43 @@ These describe the target policy layer; today only the seam exists.
 
 ## Regression coverage
 
-Current (this PR, #777):
+The shipped policy layer is covered by four test files in this
+package; all are live in the current tree.
 
 - `mcp/ops/spawn-roundtrip.test.js` proves that Node's `spawnSync`
   forwards argv elements byte-for-byte across the boundary. (Shared
-  across MCP servers via `mcp/shared/aws-helpers.js`.) Unchanged.
+  across MCP servers via `mcp/shared/aws-helpers.js`.)
 - `mcp/ops/lib.test.js` covers AWS argv builders for individual call
   sites — CloudWatch filters, SSM command parameters,
-  management-command SSM payloads, S3 bucket/key inputs. Unchanged.
-- `mcp/ops/policy.test.js` covers the **current** scope of the policy
-  wrapper: `parsePolicy` shape validation (top-level keys,
-  class-defaults coverage per declared class, profile membership,
-  version, env block), `loadPolicy` parsing the real `.shifter.yaml`,
-  the `Policy` class lookups (`classDeclared`, `classEnabled`,
-  `classDefaults`, `envDefault`, `envProdRequiresConfirm`), and
+  management-command SSM payloads, S3 bucket/key inputs.
+- `mcp/ops/policy.test.js` covers the policy wrapper end-to-end:
+  `parsePolicy` shape validation (top-level keys, class-defaults
+  coverage per declared class, profile membership, version, env
+  block); `loadPolicy` parsing the real `.shifter.yaml`; the
+  `Policy` class lookups (`classDeclared`, `classEnabled`,
+  `classDefaults`, `envDefault`, `envProdRequiresConfirm`);
   `registerTool`'s class-tag + profile gating (class-disabled tools
-  are not registered; missing / undeclared classes fail closed).
-
-Target (added by sub-issues):
-
-- `mcp/ops/policy.test.js` extended in #1198–#1200 to cover env
-  policy, dry-run gating, idempotency, rate caps, audit append,
-  secret-handle return mode, two-phase plan→execute, untrusted-input
-  fencing, description redaction. Those gates do not yet exist in
-  this PR.
+  are not registered; missing / undeclared classes fail closed); and
+  the per-gate behavior added by #1198–#1200 — env policy, dry-run
+  defaults, idempotency keys + retry caching, per-class rate caps,
+  audit append, secret-handle return mode, two-phase
+  `plan_<name>` / `execute_<name>` exchange, untrusted-input fencing
+  (producer/consumer), description redaction, and apex out-of-band
+  approval (stderr-only token, single-use consume, 60s timeout).
 - `mcp/ops/tool-surface.test.js` (added by #1202) is the
-  load-bearing surface invariant for ADR-014-R3 / R5 on this server:
-  every capability class behaves as policy declares; profile gating
-  actually removes tools from the registry; `dev_bypass_tunnel`
-  descriptions do not contain bypass procedures. The file does not
-  yet exist in this PR.
+  load-bearing surface invariant for ADR-014-R3 / R5 / R6 on this
+  server: profile gating removes tools from the registered set
+  (read_only / standard / destructive); two-phase classes
+  (`infra_mutation` / `ssm_arbitrary` / `db_arbitrary`) register
+  `plan_<name>` / `execute_<name>` pairs only — the direct name is
+  absent; `secret_handle` class defaults pin `return_mode: handle`
+  in the live policy; prod-touching tools refuse without
+  `confirm_env="prod"`; `dev_bypass_tunnel` descriptions are
+  replaced with the redacted constant; consumer tools refuse fenced
+  input without `acknowledge_untrusted_input: true`; every
+  `apex_operations[*].tool` rule in `.shifter.yaml` points at a live
+  registered `execute_<name>` (`validateApexCoverage` is the load-
+  bearing gate). The behavioral apex flow (stderr-only token, 60s
+  parking, `consumeApexToken` release) is unit-tested in
+  `mcp/ops/policy.test.js`; the surface test asserts only the
+  structural invariants that an MCP client sees.

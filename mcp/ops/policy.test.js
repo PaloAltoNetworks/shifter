@@ -733,6 +733,56 @@ function policyWithAudit(auditPath, extra = {}, opts = { profile: "destructive" 
   );
 }
 
+/**
+ * Register the standard FakeServer + tmpdir + audit-path before/after
+ * hooks used by every audit-testing describe block. Returns a context
+ * object whose `server`, `tmpDir`, `auditPath` fields are refreshed by
+ * each beforeEach. Call from inside a describe(); the hooks attach to
+ * that describe's scope.
+ *
+ * Consolidates ~12 lines of boilerplate that repeated across four
+ * describe blocks, which was the dominant source of SonarCloud's
+ * new-duplicated-lines metric (>3% of new lines).
+ */
+/**
+ * Setup helper for the Phase 3 two-phase tests: registers a
+ * `query`/`db_arbitrary` tool whose handler records its args on the
+ * returned state object. Returns `{ getReceivedArgs() }` for assertions
+ * and the standard "ran" response from the wrapped handler. Reduces
+ * the four-test boilerplate of `setupTool({name:"query", klass:"db_arbitrary", handler:...})`
+ * that SonarCloud flagged as duplicate.
+ */
+function setupQueryTool(server, policy, opts = {}) {
+  const state = { received: null };
+  setupTool(server, policy, {
+    name: "query",
+    klass: "db_arbitrary",
+    handler: async (args) => {
+      state.received = args;
+      return textResponse(opts.text ?? "ran");
+    },
+  });
+  return state;
+}
+
+function useAuditTmpDir(prefix) {
+  const ctx = { server: null, tmpDir: null, auditPath: null };
+  beforeEach(() => {
+    ctx.server = new FakeServer();
+    _resetGateCachesForTests();
+    ctx.tmpDir = mkdtempSync(join(tmpdir(), prefix));
+    ctx.auditPath = join(ctx.tmpDir, "audit.jsonl");
+  });
+  afterEach(() => {
+    try {
+      rmSync(ctx.tmpDir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
+  return ctx;
+}
+
 function textResponse(text) {
   return { content: [{ type: "text", text }] };
 }
@@ -1304,15 +1354,7 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
 
   it("execute_<name>(plan_id) runs the handler with the stored args", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    let receivedArgs = null;
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async (args) => {
-        receivedArgs = args;
-        return textResponse("real result");
-      },
-    });
+    const tool = setupQueryTool(server, policy, { text: "real result" });
     const planRes = await callRegisteredTool(server, "plan_query", {
       env: "dev",
       sql: "select 42",
@@ -1320,16 +1362,12 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
     const { plan_id } = JSON.parse(planRes.content[0].text);
     const execRes = await callRegisteredTool(server, "execute_query", { plan_id });
     assert.equal(execRes.content[0].text, "real result");
-    assert.deepEqual(receivedArgs, { env: "dev", sql: "select 42" });
+    assert.deepEqual(tool.received, { env: "dev", sql: "select 42" });
   });
 
   it("execute_<name> refuses an unknown plan_id", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async () => textResponse("never"),
-    });
+    setupQueryTool(server, policy);
     await assert.rejects(
       callRegisteredTool(server, "execute_query", { plan_id: "deadbeef" }),
       (e) => e instanceof PolicyError && /unknown plan_id|plan_id.*not found/.test(e.message),
@@ -1338,11 +1376,7 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
 
   it("execute_<name> refuses a plan_id with a missing arg shape", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async () => textResponse("never"),
-    });
+    setupQueryTool(server, policy);
     await assert.rejects(
       callRegisteredTool(server, "execute_query", {}),
       (e) => e instanceof PolicyError && /plan_id/.test(e.message),
@@ -1351,11 +1385,7 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
 
   it("plan_id is single-use (second execute is refused)", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async () => textResponse("ok"),
-    });
+    setupQueryTool(server, policy);
     const planRes = await callRegisteredTool(server, "plan_query", {
       env: "dev",
       sql: "select 1",
@@ -1370,11 +1400,7 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
 
   it("plan_id expires after 60s (TTL)", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async () => textResponse("never"),
-    });
+    setupQueryTool(server, policy);
     const planRes = await callRegisteredTool(server, "plan_query", {
       env: "dev",
       sql: "select 1",
@@ -1395,11 +1421,7 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
 
   it("plan store evicts oldest entries when size cap is exceeded", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async () => textResponse("ok"),
-    });
+    setupQueryTool(server, policy);
     // Create the first plan and remember its id, then create 64 more
     // to push the first out of the bounded store (cap=64).
     const firstPlan = JSON.parse(
@@ -1416,15 +1438,7 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
 
   it("execute_<name> ignores caller-supplied overrides (only plan_id is honored)", async () => {
     const policy = buildPolicyAuditOff({}, { profile: "destructive" });
-    let receivedArgs = null;
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async (args) => {
-        receivedArgs = args;
-        return textResponse("ran");
-      },
-    });
+    const tool = setupQueryTool(server, policy);
     const planRes = await callRegisteredTool(server, "plan_query", {
       env: "dev",
       sql: "select stored",
@@ -1435,22 +1449,12 @@ describe("registerTool gates (Phase 3): two-phase plan/execute", () => {
       sql: "drop table users",
       env: "prod",
     });
-    assert.deepEqual(receivedArgs, { env: "dev", sql: "select stored" });
+    assert.deepEqual(tool.received, { env: "dev", sql: "select stored" });
   });
 
   it("plan_<name> redacts sensitive args in the summary", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: ["password"] },
-      },
-      { profile: "destructive" },
-    );
-    setupTool(server, policy, {
-      name: "query",
-      klass: "db_arbitrary",
-      handler: async () => textResponse("never"),
-    });
+    const policy = policyWithAudit(_SHARED_AUDIT_PATH, { redact: ["password"] });
+    setupQueryTool(server, policy);
     const res = await callRegisteredTool(server, "plan_query", {
       env: "dev",
       password: "leaked",
@@ -2180,24 +2184,10 @@ describe("review cycle 1 fix: apex_operations.tool typos fail closed at startup"
 });
 
 describe("review cycle 1 fix: apex lifecycle is audited", () => {
-  let server;
-  let tmpDir;
-  let auditPath;
-  beforeEach(() => {
-    server = new FakeServer();
-    _resetGateCachesForTests();
-    tmpDir = mkdtempSync(join(tmpdir(), "policy-apex-audit-"));
-    auditPath = join(tmpDir, "audit.jsonl");
-  });
-  afterEach(() => {
-    try {
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      // best-effort
-    }
-  });
+  const ctx = useAuditTmpDir("policy-apex-audit-");
 
   it("writes an awaiting_approval audit record before parking", async () => {
+    const { server, auditPath } = ctx;
     const policy = policyWithAudit(auditPath, {
       apex_operations: [
         { tool: "terminate_ec2_instance", env: "prod", operation_kind: "execute" },
@@ -2344,24 +2334,10 @@ describe("review cycle 1 fix: producer fence escapes attacker-controlled body co
 // ===========================================================================
 
 describe("review cycle 2 fix: handler isError=true audits as error", () => {
-  let server;
-  let tmpDir;
-  let auditPath;
-  beforeEach(() => {
-    server = new FakeServer();
-    _resetGateCachesForTests();
-    tmpDir = mkdtempSync(join(tmpdir(), "policy-iserr-audit-"));
-    auditPath = join(tmpDir, "audit.jsonl");
-  });
-  afterEach(() => {
-    try {
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      // best-effort
-    }
-  });
+  const ctx = useAuditTmpDir("policy-iserr-audit-");
 
   it("non-two-phase tool returning {isError: true} produces audit result_class=error", async () => {
+    const { server, auditPath } = ctx;
     const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "list_logs",
@@ -2378,6 +2354,7 @@ describe("review cycle 2 fix: handler isError=true audits as error", () => {
   });
 
   it("two-phase execute_<name> returning {isError: true} audits as error", async () => {
+    const { server, auditPath } = ctx;
     const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
@@ -2402,28 +2379,11 @@ describe("review cycle 2 fix: handler isError=true audits as error", () => {
 });
 
 describe("review cycle 2 fix: execute-side audit includes plan_id and uses stored args on error", () => {
-  let server;
-  let tmpDir;
-  let auditPath;
-  beforeEach(() => {
-    server = new FakeServer();
-    _resetGateCachesForTests();
-    tmpDir = mkdtempSync(join(tmpdir(), "policy-plan-corr-"));
-    auditPath = join(tmpDir, "audit.jsonl");
-  });
-  afterEach(() => {
-    try {
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      // best-effort
-    }
-  });
-
-  function buildAuditPolicy(extra = {}) {
-    return policyWithAudit(auditPath, extra);
-  }
+  const ctx = useAuditTmpDir("policy-plan-corr-");
+  const buildAuditPolicy = (extra = {}) => policyWithAudit(ctx.auditPath, extra);
 
   it("success path audit on execute_<name> carries plan_id", async () => {
+    const { server, auditPath } = ctx;
     const policy = buildAuditPolicy();
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
@@ -2444,6 +2404,7 @@ describe("review cycle 2 fix: execute-side audit includes plan_id and uses store
   });
 
   it("error AFTER plan consumption uses stored plan args (env, sanitized payload) not transient {plan_id}", async () => {
+    const { server, auditPath } = ctx;
     const policy = buildAuditPolicy();
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
@@ -2476,22 +2437,7 @@ describe("review cycle 2 fix: execute-side audit includes plan_id and uses store
 });
 
 describe("review cycle 2 fix: approve token is never written to audit", () => {
-  let server;
-  let tmpDir;
-  let auditPath;
-  beforeEach(() => {
-    server = new FakeServer();
-    _resetGateCachesForTests();
-    tmpDir = mkdtempSync(join(tmpdir(), "policy-approve-audit-"));
-    auditPath = join(tmpDir, "audit.jsonl");
-  });
-  afterEach(() => {
-    try {
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      // best-effort
-    }
-  });
+  const ctx = useAuditTmpDir("policy-approve-audit-");
 
   it("rejects requires_write on a tool-keyed apex rule", () => {
     assert.throws(
@@ -2579,6 +2525,7 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   });
 
   it("_wrapSecretReturn passes through isError envelopes unmodified", async () => {
+    const { server, auditPath } = ctx;
     const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "get_secret",
@@ -2624,6 +2571,7 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   it("apex pending queue is bounded — over-cap requests fail closed", async () => {
     // Use a db_arbitrary-class tool: two-phase but no rate cap, so
     // the apex queue cap is what bounds parallel parked apex flows.
+    const { server } = ctx;
     const policy = policyWithAudit(_SHARED_AUDIT_PATH, {
       apex_operations: [
         { tool: "test_apex_tool", env: "prod", operation_kind: "execute" },
@@ -2674,6 +2622,7 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   });
 
   it("approve audit record redacts the token field via sensitive_args", async () => {
+    const { server, auditPath } = ctx;
     const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "approve",

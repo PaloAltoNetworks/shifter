@@ -790,11 +790,11 @@ function _enforceUntrustedInputGate(args, descriptor) {
 // body by replacing the leading bracket-keyword pair with a sentinel
 // that preserves the text visually but does not lex as a fence
 // boundary. Codex review #1201 cycle 1 finding 7 (security/class).
-const UNTRUSTED_BODY_RE = /\[UNTRUSTED:/g;
+const UNTRUSTED_BODY_LITERAL = "[UNTRUSTED:";
 const UNTRUSTED_BODY_ESCAPE = "[UNTRUSTED-ESC:";
 
 function _escapeUntrustedBody(text) {
-  return text.replace(UNTRUSTED_BODY_RE, UNTRUSTED_BODY_ESCAPE);
+  return text.replaceAll(UNTRUSTED_BODY_LITERAL, UNTRUSTED_BODY_ESCAPE);
 }
 
 function _wrapUntrustedSource(result, descriptor) {
@@ -1146,35 +1146,35 @@ function _resultClass(result, error, opts) {
 //     are not "secrets" but MUST NOT appear in plan summaries or
 //     audit records per the Phase 3/4 design).
 // Codex review #1201 cycle 1 finding 3.
+function _applyFieldRedaction(target, fields, placeholderFor) {
+  if (!Array.isArray(fields) || !target) return;
+  for (const field of fields) {
+    if (target[field] !== undefined) {
+      target[field] = placeholderFor(field);
+    }
+  }
+}
+
+function _isPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
 function _safeOutputArgs(args, descriptor, policy) {
   if (args === null || args === undefined) return args;
   const sanitized = sanitizeArgs(args, policy.auditConfig().redact ?? []);
-  if (
-    sanitized &&
-    typeof sanitized === "object" &&
-    !Array.isArray(sanitized)
-  ) {
-    if (Array.isArray(descriptor?.untrusted_inputs)) {
-      for (const field of descriptor.untrusted_inputs) {
-        if (sanitized[field] !== undefined) {
-          sanitized[field] = `<redacted: operative ${field}>`;
-        }
-      }
-    }
-    // Codex review #1201 cycle 2: `sensitive_args` is the descriptor
-    // escape hatch for fields that aren't free-form operative payloads
-    // (handled by untrusted_inputs) and aren't covered by audit.redact's
-    // suffix classifier, but still must not appear in plan summaries
-    // or audit records. The `approve` tool uses this for its `token`
-    // arg — the apex design says the token MUST NEVER appear in audit.
-    if (Array.isArray(descriptor?.sensitive_args)) {
-      for (const field of descriptor.sensitive_args) {
-        if (sanitized[field] !== undefined) {
-          sanitized[field] = "<redacted>";
-        }
-      }
-    }
-  }
+  if (!_isPlainObject(sanitized)) return sanitized;
+  _applyFieldRedaction(
+    sanitized,
+    descriptor?.untrusted_inputs,
+    (field) => `<redacted: operative ${field}>`,
+  );
+  // Codex review #1201 cycle 2: `sensitive_args` is the descriptor
+  // escape hatch for fields that aren't free-form operative payloads
+  // (handled by untrusted_inputs) and aren't covered by audit.redact's
+  // suffix classifier, but still must not appear in plan summaries
+  // or audit records. The `approve` tool uses this for its `token`
+  // arg — the apex design says the token MUST NEVER appear in audit.
+  _applyFieldRedaction(sanitized, descriptor?.sensitive_args, () => "<redacted>");
   return sanitized;
 }
 
@@ -1215,7 +1215,7 @@ function _isTwoPhaseClass(descriptor, policy) {
 // domain fields) is preserved verbatim; this helper adds policy
 // control fields on top.
 function _augmentSchemaWithControlKeys(baseSchema, descriptor, policy) {
-  const augmented = { ...(baseSchema ?? {}) };
+  const augmented = baseSchema ? { ...baseSchema } : {};
   const tp = _toolPolicy(descriptor, policy);
   if (policy.envProdRequiresConfirm()) {
     augmented.confirm_env = z

@@ -701,6 +701,38 @@ function setupTool(server, policy, opts) {
  * in tests. Sharing the constructor avoids re-asserting the response
  * shape in every test.
  */
+/**
+ * Extract the apex token from a buffer of captured stderr writes.
+ * Returns the 32-char hex token captured from a `token=<...>` line,
+ * or null when no token line was emitted. Centralizes the regex so
+ * SonarCloud's S6594 (prefer RegExp.exec over String.match) only
+ * fires on one site if the rule changes again.
+ */
+const _APEX_TOKEN_LINE_RE = /token=([a-f0-9]{32})/;
+function _extractApexToken(stderrBuffer) {
+  const m = _APEX_TOKEN_LINE_RE.exec(stderrBuffer);
+  return m ? m[1] : null;
+}
+
+/**
+ * Build a Policy bound to the named audit path with optional extra
+ * top-level fields. Consolidates the boilerplate
+ *   parsePolicy({ ...BASE_POLICY, audit: { ... }, ...extra }, opts)
+ * pattern that the per-describe blocks were repeating, which kept
+ * SonarCloud's new-duplicated-lines metric above the 3% threshold.
+ */
+function policyWithAudit(auditPath, extra = {}, opts = { profile: "destructive" }) {
+  const { redact, ...rest } = extra;
+  return parsePolicy(
+    {
+      ...BASE_POLICY,
+      audit: { enabled: true, path: auditPath, redact: redact ?? [] },
+      ...rest,
+    },
+    opts,
+  );
+}
+
 function textResponse(text) {
   return { content: [{ type: "text", text }] };
 }
@@ -1743,15 +1775,7 @@ describe("registerTool gates (Phase 4): apex out-of-band approval", () => {
   });
 
   function buildApexPolicy(extra = {}) {
-    return parsePolicy(
-      {
-        ...BASE_POLICY,
-        ...baseApex,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        ...extra,
-      },
-      { profile: "destructive" },
-    );
+    return policyWithAudit(_SHARED_AUDIT_PATH, { ...baseApex, ...extra });
   }
 
   it("apex tool against prod blocks for operator approval before running the handler", async () => {
@@ -1786,9 +1810,9 @@ describe("registerTool gates (Phase 4): apex out-of-band approval", () => {
       await new Promise((r) => setTimeout(r, 10));
       assert.equal(handlerRan, false, "handler must not run before approval");
       const stderr = stderrWrites.join("");
-      const match = stderr.match(/token=([a-f0-9]{32})/);
-      assert.ok(match, `expected an apex token line on stderr; saw: ${stderr}`);
-      const ok = consumeApexToken(match[1]);
+      const token = _extractApexToken(stderr);
+      assert.ok(token, `expected an apex token line on stderr; saw: ${stderr}`);
+      const ok = consumeApexToken(token);
       assert.equal(ok, true);
       const res = await execPromise;
       assert.equal(res.content[0].text, "terminated");
@@ -1908,9 +1932,9 @@ describe("registerTool gates (Phase 4): apex out-of-band approval", () => {
       const { plan_id } = JSON.parse(planExec.content[0].text);
       const execPromise = callRegisteredTool(server, "execute_execute", { plan_id });
       await new Promise((r) => setTimeout(r, 10));
-      const match = stderrWrites.join("").match(/token=([a-f0-9]{32})/);
-      assert.ok(match, "expected token on stderr for prod execute");
-      consumeApexToken(match[1]);
+      const token = _extractApexToken(stderrWrites.join(""));
+      assert.ok(token, "expected token on stderr for prod execute");
+      consumeApexToken(token);
       const res = await execPromise;
       assert.equal(res.content[0].text, "wrote");
     } finally {
@@ -1962,9 +1986,7 @@ describe("registerTool gates (Phase 4): apex out-of-band approval", () => {
 // ===========================================================================
 
 describe("Phase 5: approve MCP tool", () => {
-  let server;
   beforeEach(() => {
-    server = new FakeServer();
     _resetGateCachesForTests();
   });
 
@@ -2118,14 +2140,9 @@ describe("review cycle 1 fix: apex_operations.tool typos fail closed at startup"
   });
 
   it("validateApexCoverage throws when apex_operations references an unregistered tool", () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        apex_operations: [{ tool: "no_such_tool", env: "prod", operation_kind: "execute" }],
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(_SHARED_AUDIT_PATH, {
+      apex_operations: [{ tool: "no_such_tool", env: "prod", operation_kind: "execute" }],
+    });
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
       klass: "infra_mutation",
@@ -2138,16 +2155,11 @@ describe("review cycle 1 fix: apex_operations.tool typos fail closed at startup"
   });
 
   it("validateApexCoverage passes when every apex_operations.tool is registered", () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        apex_operations: [
-          { tool: "terminate_ec2_instance", env: "prod", operation_kind: "execute" },
-        ],
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(_SHARED_AUDIT_PATH, {
+      apex_operations: [
+        { tool: "terminate_ec2_instance", env: "prod", operation_kind: "execute" },
+      ],
+    });
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
       klass: "infra_mutation",
@@ -2157,16 +2169,11 @@ describe("review cycle 1 fix: apex_operations.tool typos fail closed at startup"
   });
 
   it("class-keyed apex rules do not need a tool descriptor", () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        apex_operations: [
-          { class: "db_arbitrary", env: "prod", operation_kind: "execute", requires_write: true },
-        ],
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(_SHARED_AUDIT_PATH, {
+      apex_operations: [
+        { class: "db_arbitrary", env: "prod", operation_kind: "execute", requires_write: true },
+      ],
+    });
     // No descriptor registered yet — class rules should still validate.
     validateApexCoverage(policy);
   });
@@ -2191,16 +2198,11 @@ describe("review cycle 1 fix: apex lifecycle is audited", () => {
   });
 
   it("writes an awaiting_approval audit record before parking", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-        apex_operations: [
-          { tool: "terminate_ec2_instance", env: "prod", operation_kind: "execute" },
-        ],
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(auditPath, {
+      apex_operations: [
+        { tool: "terminate_ec2_instance", env: "prod", operation_kind: "execute" },
+      ],
+    });
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
       klass: "infra_mutation",
@@ -2222,8 +2224,8 @@ describe("review cycle 1 fix: apex lifecycle is audited", () => {
     try {
       const execPromise = callRegisteredTool(server, "execute_terminate_ec2_instance", { plan_id });
       await new Promise((r) => setTimeout(r, 10));
-      const match = stderrWrites.join("").match(/token=([a-f0-9]{32})/);
-      consumeApexToken(match[1]);
+      const token = _extractApexToken(stderrWrites.join(""));
+      consumeApexToken(token);
       await execPromise;
     } finally {
       process.stderr.write = realWrite;
@@ -2360,13 +2362,7 @@ describe("review cycle 2 fix: handler isError=true audits as error", () => {
   });
 
   it("non-two-phase tool returning {isError: true} produces audit result_class=error", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "list_logs",
       klass: "observability",
@@ -2382,13 +2378,7 @@ describe("review cycle 2 fix: handler isError=true audits as error", () => {
   });
 
   it("two-phase execute_<name> returning {isError: true} audits as error", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "terminate_ec2_instance",
       klass: "infra_mutation",
@@ -2430,14 +2420,7 @@ describe("review cycle 2 fix: execute-side audit includes plan_id and uses store
   });
 
   function buildAuditPolicy(extra = {}) {
-    return parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-        ...extra,
-      },
-      { profile: "destructive" },
-    );
+    return policyWithAudit(auditPath, extra);
   }
 
   it("success path audit on execute_<name> carries plan_id", async () => {
@@ -2596,13 +2579,7 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   });
 
   it("_wrapSecretReturn passes through isError envelopes unmodified", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "get_secret",
       klass: "secret_handle",
@@ -2621,17 +2598,12 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   });
 
   it("registerTool fails closed when execute_default:false is paired without two_phase:true", () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        // Per-tool override on a non-two-phase class — the runtime
-        // would silently treat execute_default:false as a no-op
-        // before this guard landed.
-        tools: { touchy_read: { overrides: { execute_default: false } } },
-      },
-      { profile: "destructive" },
-    );
+    // Per-tool override on a non-two-phase class — the runtime would
+    // silently treat execute_default:false as a no-op before this
+    // guard landed.
+    const policy = policyWithAudit(_SHARED_AUDIT_PATH, {
+      tools: { touchy_read: { overrides: { execute_default: false } } },
+    });
     const server2 = new FakeServer();
     assert.throws(
       () =>
@@ -2652,16 +2624,11 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   it("apex pending queue is bounded — over-cap requests fail closed", async () => {
     // Use a db_arbitrary-class tool: two-phase but no rate cap, so
     // the apex queue cap is what bounds parallel parked apex flows.
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: _SHARED_AUDIT_PATH, redact: [] },
-        apex_operations: [
-          { tool: "test_apex_tool", env: "prod", operation_kind: "execute" },
-        ],
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(_SHARED_AUDIT_PATH, {
+      apex_operations: [
+        { tool: "test_apex_tool", env: "prod", operation_kind: "execute" },
+      ],
+    });
     setupTool(server, policy, {
       name: "test_apex_tool",
       klass: "db_arbitrary",
@@ -2673,8 +2640,10 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
       // Park 16 apex flows (the cap). Each execute_<name> calls
       // _enforceApexApproval which awaits on a token-resolution
       // promise. We don't resolve any of them; they pile up in the
-      // pendingApex map.
-      const parkedPromises = [];
+      // pendingApex map. The .catch silences the unhandled-rejection
+      // warning when _resetGateCachesForTests clears the timers; we
+      // don't await the promises because they only resolve once an
+      // approve() call lands, which this test deliberately never makes.
       for (let i = 0; i < 16; i++) {
         const planRes = await callRegisteredTool(server, "plan_test_apex_tool", {
           env: "prod",
@@ -2682,10 +2651,7 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
           sql: `select ${i}`,
         });
         const { plan_id } = JSON.parse(planRes.content[0].text);
-        // Kick off the execute but DON'T await — let it park.
-        parkedPromises.push(
-          callRegisteredTool(server, "execute_test_apex_tool", { plan_id }).catch(() => null),
-        );
+        callRegisteredTool(server, "execute_test_apex_tool", { plan_id }).catch(() => null);
         await new Promise((r) => setTimeout(r, 1));
       }
       // The 17th plan/execute pair must be refused by the apex queue cap.
@@ -2708,13 +2674,7 @@ describe("review cycle 2 fix: approve token is never written to audit", () => {
   });
 
   it("approve audit record redacts the token field via sensitive_args", async () => {
-    const policy = parsePolicy(
-      {
-        ...BASE_POLICY,
-        audit: { enabled: true, path: auditPath, redact: [] },
-      },
-      { profile: "destructive" },
-    );
+    const policy = policyWithAudit(auditPath);
     setupTool(server, policy, {
       name: "approve",
       klass: "observability",

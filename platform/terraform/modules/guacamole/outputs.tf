@@ -56,7 +56,10 @@ output "rds_security_group_id" {
 
 output "db_instance_id" {
   description = "DBInstanceIdentifier of the Guacamole RDS instance"
-  value       = aws_db_instance.guacamole.id
+  # `.identifier`, not `.id`: under AWS provider v5+ `aws_db_instance.id` is the
+  # DbiResourceId (db-XXXX), but consumers (the post-apply RDS check) need the
+  # DBInstanceIdentifier name.
+  value = aws_db_instance.guacamole.identifier
 }
 
 output "db_instance_address" {

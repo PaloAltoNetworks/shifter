@@ -37,6 +37,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _validate_caller_user(user: Any, fn_name: str) -> None:
+    """Reject None/wrong-type/unsaved User; raise the canonical TypeError/ValueError.
+
+    Used by every service entrypoint that takes `user: User` so the
+    boilerplate user-input gate lives in one place. Keeps callers below the
+    per-function complexity ceiling.
+    """
+    if user is None:
+        logger.error("%s called with None user", fn_name)
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error("%s called with invalid user type: %s", fn_name, type(user).__name__)
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("%s called with unsaved user (id=None)", fn_name)
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _validate_nonneg_int_id(value: Any, name: str, fn_name: str, user_id: Any) -> None:
+    """Reject None/wrong-type/negative int IDs; raise canonical TypeError/ValueError."""
+    if value is None:
+        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        raise TypeError(f"{name} cannot be None")
+    if not isinstance(value, int):
+        logger.error(
+            "%s called with invalid %s type: %s",
+            fn_name,
+            name,
+            type(value).__name__,
+        )
+        msg = f"{name} must be an int, got {type(value).__name__}"
+        raise TypeError(msg)
+    if value < 0:
+        logger.error(
+            "%s called with negative %s=%s for user_id=%s",
+            fn_name,
+            name,
+            value,
+            user_id,
+        )
+        raise ValueError(f"{name} must be non-negative")
+
+
 # =============================================================================
 # Agents
 # =============================================================================
@@ -67,21 +111,7 @@ def create_agent(user: User, **kwargs: Any) -> AgentConfig:
         AssetError: If the operating system is not found
     """
     # Input validation - user
-    if user is None:
-        logger.error("create_agent called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "create_agent called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("create_agent called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "create_agent")
 
     logger.debug("create_agent called for user_id=%s", user.id)
 
@@ -141,21 +171,7 @@ def delete_agent(user: User, agent_id: int) -> None:
         AssetError: If S3 delete fails
     """
     # Input validation - user
-    if user is None:
-        logger.error("delete_agent called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "delete_agent called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("delete_agent called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "delete_agent")
 
     # Input validation - agent_id
     if agent_id is None:
@@ -322,46 +338,8 @@ def get_agent(user: User, agent_id: int) -> AgentConfig:
     """
     from cms.exceptions import CMSError
 
-    # Input validation - user
-    if user is None:
-        logger.error("get_agent called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_agent called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_agent called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - agent_id
-    if agent_id is None:
-        logger.error(
-            "get_agent called with None agent_id for user_id=%s",
-            user.id,
-        )
-        raise TypeError("agent_id cannot be None")
-
-    if not isinstance(agent_id, int):
-        logger.error(
-            "get_agent called with invalid agent_id type: %s",
-            type(agent_id).__name__,
-        )
-        msg = f"agent_id must be an int, got {type(agent_id).__name__}"
-        raise TypeError(msg)
-
-    if agent_id < 0:
-        logger.error(
-            "get_agent called with negative agent_id=%s for user_id=%s",
-            agent_id,
-            user.id,
-        )
-        raise ValueError("agent_id must be non-negative")
+    _validate_caller_user(user, "get_agent")
+    _validate_nonneg_int_id(agent_id, "agent_id", "get_agent", user.id)
 
     logger.debug(
         "get_agent called for user_id=%s, agent_id=%s",
@@ -473,21 +451,7 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
     from shared.schemas import CredentialRef
 
     # Input validation - user
-    if user is None:
-        logger.error("create_credential called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "create_credential called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("create_credential called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "create_credential")
 
     # Input validation - credential_type_slug
     if credential_type_slug is None:
@@ -601,21 +565,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
     from shared.schemas import CredentialRef
 
     # Input validation - user
-    if user is None:
-        logger.error("delete_credential called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "delete_credential called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("delete_credential called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "delete_credential")
 
     # Input validation - credential_id
     if credential_id is None:
@@ -728,21 +678,7 @@ def list_credentials(user: User) -> list[CredentialContext]:
     )
 
     # Input validation
-    if user is None:
-        logger.error("list_credentials called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_credentials called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_credentials called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "list_credentials")
 
     logger.debug("list_credentials called for user_id=%s", user.id)
 
@@ -836,21 +772,7 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     from shared.schemas import DeploymentProfileContext, SCMCredentialContext
 
     # Input validation - user
-    if user is None:
-        logger.error("get_credential called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_credential called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_credential called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "get_credential")
 
     # Input validation - credential_id
     if credential_id is None:
@@ -969,21 +891,7 @@ def list_ranges(user: User) -> list[RangeInstance]:
         ValueError: If user has no ID (unsaved)
     """
     # Input validation
-    if user is None:
-        logger.error("list_ranges called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_ranges called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_ranges called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "list_ranges")
 
     logger.debug("list_ranges called for user_id=%s", user.id)
 
@@ -1045,21 +953,7 @@ def get_range(user: User, range_id: int) -> RangeInstance:
     from cms.exceptions import CMSError
 
     # Input validation - user
-    if user is None:
-        logger.error("get_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "get_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -1304,19 +1198,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     from shared.enums import ResourceStatus
     from shared.schemas import InstanceContext, RangeContext
 
-    # Input validation
-    if user is None:
-        logger.error("get_range_by_request_id called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_range_by_request_id called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
+    _validate_caller_user(user, "get_range_by_request_id")
     if not request_id:
         logger.error("get_range_by_request_id called with empty request_id")
         raise CMSError("request_id is required")
@@ -1345,35 +1227,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     if instance.request is None:
         raise CMSError("Range has no associated request")
 
-    # Build instance contexts from range_spec
-    # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
-    # Legacy format: instances directly at range_spec["instances"]
-    instance_contexts = []
-    if instance.range_spec:
-        if "subnets" in instance.range_spec:
-            for subnet in instance.range_spec["subnets"]:
-                for spec in subnet.get("instances", []):
-                    instance_contexts.append(
-                        InstanceContext(
-                            uuid=spec.get("uuid"),
-                            name=spec.get("name", ""),
-                            role=spec["role"],
-                            os_type=spec["os_type"],
-                            join_domain=spec.get("join_domain", False),
-                        )
-                    )
-        elif "instances" in instance.range_spec:
-            # Legacy flat format for backward compatibility with existing prod data
-            for spec in instance.range_spec["instances"]:
-                instance_contexts.append(
-                    InstanceContext(
-                        uuid=spec.get("uuid"),
-                        name=spec.get("name", ""),
-                        role=spec["role"],
-                        os_type=spec["os_type"],
-                        join_domain=spec.get("join_domain", False),
-                    )
-                )
+    instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext)
 
     # Get agent_name from FK if exists
     agent_name = instance.agent.name if instance.agent else None
@@ -1683,21 +1537,7 @@ def destroy_range(user: User, range_id: int) -> None:
     """
 
     # Input validation - user
-    if user is None:
-        logger.error("destroy_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "destroy_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("destroy_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "destroy_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -1822,21 +1662,7 @@ def cancel_range(user: User, range_id: int) -> None:
     """
 
     # Input validation - user
-    if user is None:
-        logger.error("cancel_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "cancel_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("cancel_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "cancel_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -2145,21 +1971,7 @@ def pause_range(user: User, range_id: int) -> None:
         CMSError: If range not found, not owned by user, or not in pausable state
     """
     # Input validation - user
-    if user is None:
-        logger.error("pause_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "pause_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("pause_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "pause_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -2382,21 +2194,7 @@ def resume_range(user: User, range_id: int) -> None:
         CMSError: If range not found, not owned by user, or not in resumable state
     """
     # Input validation - user
-    if user is None:
-        logger.error("resume_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "resume_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("resume_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "resume_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -2605,6 +2403,37 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
+def _validate_nonempty_str(value: Any, name: str, fn_name: str, user_id: Any) -> str:
+    """Strip and validate a required non-empty string parameter."""
+    if value is None:
+        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        raise ValueError(f"{name} cannot be None")
+    stripped: str = value.strip()
+    if not stripped:
+        logger.error("%s called with empty %s for user_id=%s", fn_name, name, user_id)
+        raise ValueError(f"{name} cannot be empty")
+    return stripped
+
+
+def _validate_positive_int(value: Any, name: str, fn_name: str, user_id: Any) -> None:
+    """Validate a required positive int (> 0); raise canonical TypeError/ValueError."""
+    if value is None:
+        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        raise TypeError(f"{name} cannot be None")
+    if not isinstance(value, int):
+        logger.error(
+            "%s called with invalid %s type: %s",
+            fn_name,
+            name,
+            type(value).__name__,
+        )
+        msg = f"{name} must be an int, got {type(value).__name__}"
+        raise TypeError(msg)
+    if value <= 0:
+        logger.error("%s called with invalid %s=%s for user_id=%s", fn_name, name, value, user_id)
+        raise ValueError(f"{name} must be positive")
+
+
 def _validate_initiate_upload_inputs(
     user: User,
     name: str,
@@ -2612,50 +2441,10 @@ def _validate_initiate_upload_inputs(
     file_size: int,
 ) -> tuple[str, str]:
     """Validate inputs for `initiate_upload` and return normalized (name, filename)."""
-    if user is None:
-        logger.error("initiate_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-    if not hasattr(user, "id"):
-        logger.error(
-            "initiate_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-    if user.id is None:
-        logger.error("initiate_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-    if name is None:
-        logger.error("initiate_upload called with None name for user_id=%s", user.id)
-        raise ValueError("name cannot be None")
-    name = name.strip()
-    if not name:
-        logger.error("initiate_upload called with empty name for user_id=%s", user.id)
-        raise ValueError("name cannot be empty")
-    if filename is None:
-        logger.error("initiate_upload called with None filename for user_id=%s", user.id)
-        raise ValueError("filename cannot be None")
-    filename = filename.strip()
-    if not filename:
-        logger.error("initiate_upload called with empty filename for user_id=%s", user.id)
-        raise ValueError("filename cannot be empty")
-    if file_size is None:
-        logger.error("initiate_upload called with None file_size for user_id=%s", user.id)
-        raise TypeError("file_size cannot be None")
-    if not isinstance(file_size, int):
-        logger.error(
-            "initiate_upload called with invalid file_size type: %s",
-            type(file_size).__name__,
-        )
-        msg = f"file_size must be an int, got {type(file_size).__name__}"
-        raise TypeError(msg)
-    if file_size <= 0:
-        logger.error(
-            "initiate_upload called with invalid file_size=%s for user_id=%s",
-            file_size,
-            user.id,
-        )
-        raise ValueError("file_size must be positive")
+    _validate_caller_user(user, "initiate_upload")
+    name = _validate_nonempty_str(name, "name", "initiate_upload", user.id)
+    filename = _validate_nonempty_str(filename, "filename", "initiate_upload", user.id)
+    _validate_positive_int(file_size, "file_size", "initiate_upload", user.id)
     return name, filename
 
 
@@ -2851,43 +2640,12 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
         validate_magic_bytes as _validate_magic_bytes,
     )
 
-    # Input validation - user
-    if user is None:
-        logger.error("complete_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "complete_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("complete_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - upload_token
-    if upload_token is None:
-        logger.error(
-            "complete_upload called with None upload_token for user_id=%s",
-            user.id,
-        )
-        raise ValueError("upload_token cannot be None")
-
-    upload_token = upload_token.strip()
-    if not upload_token:
-        logger.error(
-            "complete_upload called with empty upload_token for user_id=%s",
-            user.id,
-        )
-        raise ValueError("upload_token cannot be empty")
+    _validate_caller_user(user, "complete_upload")
+    upload_token = _validate_nonempty_str(upload_token, "upload_token", "complete_upload", user.id)
 
     logger.debug("complete_upload called for user_id=%s", user.id)
 
     try:
-        # Verify upload token
         try:
             payload = verify_upload_token(upload_token, user.id)
         except ValueError as e:
@@ -3027,21 +2785,7 @@ def cancel_upload(user: User, upload_token: str) -> None:
     from cms.exceptions import CMSError
 
     # Input validation - user
-    if user is None:
-        logger.error("cancel_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "cancel_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("cancel_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "cancel_upload")
 
     # Input validation - upload_token
     if upload_token is None:
@@ -3122,21 +2866,7 @@ def get_storage_used(user: User) -> int:
     from cms.assets.services import get_storage_used as assets_get_storage_used
 
     # Input validation - user
-    if user is None:
-        logger.error("get_storage_used called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_storage_used called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_storage_used called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "get_storage_used")
 
     logger.debug("get_storage_used called for user_id=%s", user.id)
 
@@ -3183,21 +2913,7 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
     from cms.scenarios.registry import list_all_scenarios
 
     # Input validation - user
-    if user is None:
-        logger.error("list_scenarios called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_scenarios called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_scenarios called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "list_scenarios")
 
     logger.debug("list_scenarios called for user_id=%s", user.id)
 
@@ -3335,6 +3051,59 @@ def _validate_ngfw_user(user: User) -> None:
     if not hasattr(user, "id") or user.id is None:
         logger.error("NGFW operation called with unsaved user")
         raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _validate_ngfw_name(name: str) -> str:
+    """Strip and require a non-empty NGFW display name."""
+    if not name or not name.strip():
+        raise ValueError("name is required")
+    return name.strip()
+
+
+def _resolve_ngfw_deployment_profile(user: User, deployment_profile_id: int, Credential: Any) -> Any:
+    """Load and type-check the deployment-profile credential for `create_ngfw`."""
+    if not deployment_profile_id:
+        raise ValueError("deployment_profile_id is required")
+    try:
+        deployment_profile = Credential.objects.select_related("credential_type").get(
+            id=deployment_profile_id,
+            user=user,
+        )
+    except Credential.DoesNotExist:
+        raise CMSError("Deployment profile not found") from None
+    if deployment_profile.credential_type.slug != "deployment_profile":
+        raise CMSError("deployment_profile_id must reference a deployment profile credential")
+    return deployment_profile
+
+
+def _resolve_ngfw_registration(
+    user: User,
+    registration_method: str,
+    scm_credential_id: int | None,
+    otp_value: str | None,
+    otp_folder: str | None,
+    Credential: Any,
+) -> Any:
+    """Validate registration-method-specific inputs; return the SCM credential or None."""
+    if registration_method not in ("pin", "otp"):
+        raise ValueError("registration_method must be 'pin' or 'otp'")
+    if registration_method == "otp":
+        if not otp_value or not otp_folder:
+            raise ValueError("otp_value and otp_folder are required for OTP registration")
+        return None
+    # pin
+    if not scm_credential_id:
+        raise ValueError("scm_credential_id is required for PIN registration")
+    try:
+        scm_credential = Credential.objects.select_related("credential_type").get(
+            id=scm_credential_id,
+            user=user,
+        )
+    except Credential.DoesNotExist:
+        raise CMSError("SCM credential not found") from None
+    if scm_credential.credential_type.slug != "scm":
+        raise CMSError("scm_credential_id must reference an SCM credential")
+    return scm_credential
 
 
 def _validate_app_id(app_id: UUID | str) -> UUID:
@@ -3476,46 +3245,16 @@ def create_ngfw(
         )
         raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
 
-    # Validate name
-    if not name or not name.strip():
-        raise ValueError("name is required")
-    name = name.strip()
-
-    # Validate deployment_profile_id
-    if not deployment_profile_id:
-        raise ValueError("deployment_profile_id is required")
-    try:
-        deployment_profile = Credential.objects.select_related("credential_type").get(
-            id=deployment_profile_id,
-            user=user,
-        )
-        if deployment_profile.credential_type.slug != "deployment_profile":
-            raise CMSError("deployment_profile_id must reference a deployment profile credential")
-    except Credential.DoesNotExist:
-        raise CMSError("Deployment profile not found") from None
-
-    # Validate registration_method
-    if registration_method not in ("pin", "otp"):
-        raise ValueError("registration_method must be 'pin' or 'otp'")
-
-    # Validate registration-specific fields
-    scm_credential = None  # Initialize outside if-block
-    if registration_method == "pin":
-        if not scm_credential_id:
-            raise ValueError("scm_credential_id is required for PIN registration")
-        # Validate SCM credential exists and is owned by user
-        try:
-            scm_credential = Credential.objects.select_related("credential_type").get(
-                id=scm_credential_id,
-                user=user,
-            )
-            if scm_credential.credential_type.slug != "scm":
-                raise CMSError("scm_credential_id must reference an SCM credential")
-        except Credential.DoesNotExist:
-            raise CMSError("SCM credential not found") from None
-    else:  # otp
-        if not otp_value or not otp_folder:
-            raise ValueError("otp_value and otp_folder are required for OTP registration")
+    name = _validate_ngfw_name(name)
+    deployment_profile = _resolve_ngfw_deployment_profile(user, deployment_profile_id, Credential)
+    scm_credential = _resolve_ngfw_registration(
+        user,
+        registration_method,
+        scm_credential_id,
+        otp_value,
+        otp_folder,
+        Credential,
+    )
 
     logger.debug(
         "create_ngfw called for user_id=%s, name=%s, method=%s",

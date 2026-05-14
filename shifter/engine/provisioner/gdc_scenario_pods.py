@@ -229,26 +229,36 @@ def _get_runtime_metadata(state: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _first_non_empty_str(*candidates: object) -> str:
+    """Return the first stringifiable non-empty (after strip) candidate, or ''."""
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        value = str(candidate).strip()
+        if value:
+            return value
+    return ""
+
+
 def _resolve_power_target(instance: dict[str, Any]) -> dict[str, Any]:
     raw_state = instance.get("state")
     state: dict[str, Any] = raw_state if isinstance(raw_state, dict) else {}
     metadata = _get_runtime_metadata(state)
 
-    namespace = str(metadata.get("namespace") or state.get("gdc_namespace") or "").strip()
-    pod_name = str(metadata.get("pod_name") or state.get("gdc_pod_name") or state.get("instance_id") or "").strip()
-    network_name = str(
-        metadata.get("nad_name")
-        or metadata.get("network_name")
-        or state.get("gdc_nad_name")
-        or state.get("gdc_network_name")
-        or ""
-    ).strip()
-    static_ip = str(metadata.get("ip") or state.get("gdc_ip") or state.get("private_ip") or "").strip()
-    image = str(metadata.get("container_image") or state.get("gdc_container_image") or "").strip()
-    subnet_name = str(state.get("subnet_name") or instance.get("subnet_name") or "").strip()
-    hostname = _sanitize_name(str(instance.get("name", "")).strip() or pod_name, max_length=63)
+    namespace = _first_non_empty_str(metadata.get("namespace"), state.get("gdc_namespace"))
+    pod_name = _first_non_empty_str(metadata.get("pod_name"), state.get("gdc_pod_name"), state.get("instance_id"))
+    network_name = _first_non_empty_str(
+        metadata.get("nad_name"),
+        metadata.get("network_name"),
+        state.get("gdc_nad_name"),
+        state.get("gdc_network_name"),
+    )
+    static_ip = _first_non_empty_str(metadata.get("ip"), state.get("gdc_ip"), state.get("private_ip"))
+    image = _first_non_empty_str(metadata.get("container_image"), state.get("gdc_container_image"))
+    subnet_name = _first_non_empty_str(state.get("subnet_name"), instance.get("subnet_name"))
+    hostname = _sanitize_name(_first_non_empty_str(instance.get("name"), pod_name), max_length=63)
 
-    if not namespace or not pod_name or not network_name or not static_ip or not image:
+    if not all([namespace, pod_name, network_name, static_ip, image]):
         raise RuntimeError(
             "Scenario Pod lifecycle state is incomplete for power operation: "
             f"namespace={namespace!r} pod_name={pod_name!r} network_name={network_name!r} "

@@ -13,8 +13,6 @@ canonical `pyproject.toml`, and the relevant table rows in one PR.
 
 | Package | File | Function | Complexity at introduction | Tracking issue |
 |---|---|---|---|---|
-| shifter_platform | `shifter/shifter_platform/cms/services.py` | `list_agents` | 16 | #1142 |
-| shifter_platform | `shifter/shifter_platform/ctf/services/participant.py` | `bulk_import_participants` | 16 | #1145 |
 
 `submit_flag` (was complexity 19, tracking #1146) dropped below the
 threshold when its participant→challenge availability checks were
@@ -52,12 +50,31 @@ flag) — remains, and the long-term fix (a `StepValidator` protocol
 that pushes PAN-OS knowledge into a dedicated validator) is tracked
 on #1152 even though the C901 entry is closed.
 
-Total: 2 functions in `shifter_platform` (1 in `cms/services`, 1 in
-`ctf/services`); zero in `provisioner/`. The other six
-lint-scoped Python packages (`shifter/packer`, `shifter/installation`,
-`scripts/bootstrap`, `scripts/gcp`, `scripts/check_layer_imports`,
-`scripts/check_rds_pending_modifications`) ship with zero exemptions
-and must stay clean.
+`list_agents` (was complexity 16, tracking #1142) dropped below the
+threshold when its user-input gate was factored into
+`_validate_listing_user` and the per-agent projection-shape contract
+(seven type assertions for id/name/os/file_size_mb/original_filename/
+created_at) was factored into `_agent_projection_dict` +
+`_assert_agent_projection_shape`. The loop body collapses to a list
+comprehension; the outer function is just orchestrate-validate-log.
+The `# noqa: C901` was removed.
+
+`bulk_import_participants` (was complexity 16, tracking #1145) dropped
+below the threshold when its CSV parsing, intra-import duplicate
+detection, and event acceptance gate were each factored into a
+dedicated helper (`_parse_participants_csv`,
+`_emails_or_raise_on_duplicate`, `_assert_event_accepts_import`).
+The outer function reads top-to-bottom as: lookup → parse → dedupe →
+gate → existence-check → create. The `# noqa: C901` was removed.
+
+Total: 0 functions in any lint-scoped Python package carry a
+`# noqa: C901` exemption. The eight lint-scoped Python packages
+(`shifter_platform`, `provisioner`, `packer`, `installation`,
+`bootstrap`, `gcp`, `check_layer_imports`,
+`check_rds_pending_modifications`) are clean. The repo-wide
+McCabe-15 threshold can ratchet down to parity with SonarCloud's
+cognitive-complexity default; no exemptions remain to gate the
+ratchet on.
 
 The five originally-exempted functions in `cms/services.py::create_range`
 and `provisioner/main.py` (`_run_single_instance_setup`,

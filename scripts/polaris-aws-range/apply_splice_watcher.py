@@ -303,6 +303,20 @@ def send_hotfix_batch(
     return resp["Command"]["CommandId"]
 
 
+def _summarize_plugin_output(inv: dict) -> tuple[str, str]:
+    """Collapse an invocation's CommandPlugins into (stdout_tail, stderr_tail).
+
+    SSM exposes per-plugin output; we want the last non-empty value of each
+    stream so the caller can trim to a tail without inspecting plugin shape.
+    """
+    plugin_out = ""
+    plugin_err = ""
+    for plugin in inv.get("CommandPlugins") or []:
+        plugin_out = plugin.get("Output", "") or plugin_out
+        plugin_err = plugin.get("StandardErrorContent", "") or plugin_err
+    return plugin_out, plugin_err
+
+
 def wait_for_batch(ssm_client, command_id: str, poll_s: float = 5.0) -> dict[str, dict]:
     """Block until every invocation under command_id is in a terminal state.
 
@@ -318,24 +332,16 @@ def wait_for_batch(ssm_client, command_id: str, poll_s: float = 5.0) -> dict[str
     while True:
         results.clear()
         paginator = ssm_client.get_paginator("list_command_invocations")
-        for page in paginator.paginate(
-            CommandId=command_id, Details=True, MaxResults=50
-        ):
+        for page in paginator.paginate(CommandId=command_id, Details=True, MaxResults=50):
             for inv in page["CommandInvocations"]:
-                plugin_out = ""
-                plugin_err = ""
-                for plugin in inv.get("CommandPlugins") or []:
-                    plugin_out = plugin.get("Output", "") or plugin_out
-                    plugin_err = plugin.get("StandardErrorContent", "") or plugin_err
+                plugin_out, plugin_err = _summarize_plugin_output(inv)
                 results[inv["InstanceId"]] = {
                     "Status": inv["Status"],
                     "StatusDetails": inv.get("StatusDetails", ""),
                     "StandardOutputContent": plugin_out[-500:],
                     "StandardErrorContent": plugin_err[-500:],
                 }
-        pending = [
-            iid for iid, r in results.items() if r["Status"] not in terminal
-        ]
+        pending = [iid for iid, r in results.items() if r["Status"] not in terminal]
         if not pending and results:
             return results
         time.sleep(poll_s)
@@ -383,6 +389,60 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _resolve_target_instances(args, ec2, ssm) -> list[Target]:
+    if args.instance_ids:
+        ids = [s.strip() for s in args.instance_ids.split(",") if s.strip()]
+        return [Target(instance_id=i, vpc_id="?", name="?") for i in ids]
+    ami_id = args.ami_id or resolve_polaris_ami_id(ssm)
+    print(f"discovering instances: ami_id={ami_id} vpc_id={args.vpc_id or '(any)'}")
+    return discover_targets(ec2, ami_id, args.vpc_id)
+
+
+def _send_hotfix_batches(
+    ssm, instance_ids: list[str], *, batch_size: int, max_concurrency: int, timeout_s: int
+) -> dict[str, dict]:
+    overall: dict[str, dict] = {}
+    for batch_num, chunk in enumerate(batched(instance_ids, batch_size), start=1):
+        print(f"\nbatch {batch_num}: {len(chunk)} instance(s) -> SendCommand")
+        try:
+            command_id = send_hotfix_batch(
+                ssm,
+                instance_ids=chunk,
+                script=HOTFIX_SCRIPT,
+                max_concurrency=max_concurrency,
+                timeout_s=timeout_s,
+            )
+        except ClientError as e:
+            print(f"  SendCommand failed: {e}", file=sys.stderr)
+            for iid in chunk:
+                overall[iid] = {"Status": "SendFailed", "StatusDetails": str(e)}
+            continue
+        print(f"  command_id={command_id}, waiting...")
+        results = wait_for_batch(ssm, command_id)
+        overall.update(results)
+        succeeded = sum(1 for r in results.values() if r["Status"] == "Success")
+        failed = sum(1 for r in results.values() if r["Status"] != "Success")
+        print(f"  batch {batch_num} done: {succeeded} success, {failed} non-success")
+    return overall
+
+
+def _print_summary(overall: dict[str, dict]) -> int:
+    print("\n=== summary ===")
+    succeeded = [iid for iid, r in overall.items() if r["Status"] == "Success"]
+    failed = {iid: r for iid, r in overall.items() if r["Status"] != "Success"}
+    print(f"success: {len(succeeded)} / {len(overall)}")
+    if not failed:
+        return 0
+    print("\nfailures:")
+    for iid, r in failed.items():
+        err = r.get("StandardErrorContent", "")[-200:].strip()
+        details = r.get("StatusDetails", "")
+        print(f"  {iid}  status={r['Status']}  details={details}")
+        if err:
+            print(f"    stderr: {err}")
+    return 1
+
+
 def main() -> int:
     args = parse_args()
     if args.batch_size < 1 or args.batch_size > 50:
@@ -393,15 +453,7 @@ def main() -> int:
     ec2 = session.client("ec2")
     ssm = session.client("ssm")
 
-    # --- Resolve targets ---
-    if args.instance_ids:
-        ids = [s.strip() for s in args.instance_ids.split(",") if s.strip()]
-        targets = [Target(instance_id=i, vpc_id="?", name="?") for i in ids]
-    else:
-        ami_id = args.ami_id or resolve_polaris_ami_id(ssm)
-        print(f"discovering instances: ami_id={ami_id} vpc_id={args.vpc_id or '(any)'}")
-        targets = discover_targets(ec2, ami_id, args.vpc_id)
-
+    targets = _resolve_target_instances(args, ec2, ssm)
     if not targets:
         print("no targets found.")
         return 0
@@ -417,55 +469,21 @@ def main() -> int:
         return 0
 
     if not args.yes:
-        confirm = input(f"\napply splice-watcher hotfix to {len(targets)} instance(s)? [yes/NO] ").strip()
+        confirm = input(
+            f"\napply splice-watcher hotfix to {len(targets)} instance(s)? [yes/NO] "
+        ).strip()
         if confirm.lower() not in {"yes", "y"}:
             print("aborted.")
             return 1
 
-    # --- Send in batches ---
-    instance_ids = [t.instance_id for t in targets]
-    overall: dict[str, dict] = {}
-
-    for batch_num, chunk in enumerate(batched(instance_ids, args.batch_size), start=1):
-        print(f"\nbatch {batch_num}: {len(chunk)} instance(s) -> SendCommand")
-        try:
-            command_id = send_hotfix_batch(
-                ssm,
-                instance_ids=chunk,
-                script=HOTFIX_SCRIPT,
-                max_concurrency=args.max_concurrency,
-                timeout_s=args.timeout,
-            )
-        except ClientError as e:
-            print(f"  SendCommand failed: {e}", file=sys.stderr)
-            for iid in chunk:
-                overall[iid] = {"Status": "SendFailed", "StatusDetails": str(e)}
-            continue
-        print(f"  command_id={command_id}, waiting...")
-        results = wait_for_batch(ssm, command_id)
-        overall.update(results)
-
-        succeeded = sum(1 for r in results.values() if r["Status"] == "Success")
-        failed = sum(1 for r in results.values() if r["Status"] != "Success")
-        print(f"  batch {batch_num} done: {succeeded} success, {failed} non-success")
-
-    # --- Summary ---
-    print("\n=== summary ===")
-    succeeded = [iid for iid, r in overall.items() if r["Status"] == "Success"]
-    failed = {iid: r for iid, r in overall.items() if r["Status"] != "Success"}
-    print(f"success: {len(succeeded)} / {len(overall)}")
-
-    if failed:
-        print("\nfailures:")
-        for iid, r in failed.items():
-            err = r.get("StandardErrorContent", "")[-200:].strip()
-            details = r.get("StatusDetails", "")
-            print(f"  {iid}  status={r['Status']}  details={details}")
-            if err:
-                print(f"    stderr: {err}")
-        return 1
-
-    return 0
+    overall = _send_hotfix_batches(
+        ssm,
+        [t.instance_id for t in targets],
+        batch_size=args.batch_size,
+        max_concurrency=args.max_concurrency,
+        timeout_s=args.timeout,
+    )
+    return _print_summary(overall)
 
 
 if __name__ == "__main__":

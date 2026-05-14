@@ -209,7 +209,63 @@ def delete_agent(user: User, agent_id: int) -> None:
         raise
 
 
-def list_agents(user: User) -> list[dict[str, Any]]:  # noqa: C901
+def _validate_listing_user(user: User, fn_name: str) -> None:
+    """Validate `user` is suitable for a list-style query; raise on failure."""
+    if user is None:
+        logger.error("%s called with None user", fn_name)
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error("%s called with invalid user type: %s", fn_name, type(user).__name__)
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("%s called with unsaved user (id=None)", fn_name)
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _agent_projection_dict(agent: Any) -> dict[str, Any]:
+    """Build the agent projection dict; verify the model shape on the way out.
+
+    Centralizes the per-agent type-shape contract that `list_agents` enforces
+    on its return rows, keeping the caller below the per-function complexity
+    ceiling.
+    """
+    if not (hasattr(agent, "id") and hasattr(agent, "name") and hasattr(agent, "os")):
+        raise TypeError("Model returned invalid agent object")
+    projection = {
+        "id": agent.id,
+        "name": agent.name,
+        "os_name": agent.os.name,
+        "os_slug": agent.os.slug,
+        "file_size_mb": agent.file_size_mb,
+        "original_filename": agent.original_filename,
+        "created_at": agent.created_at,
+        "agent_type": agent.agent_type,
+        "agent_type_display": agent.get_agent_type_display(),
+    }
+    _assert_agent_projection_shape(projection)
+    return projection
+
+
+def _assert_agent_projection_shape(projection: dict[str, Any]) -> None:
+    """Assert the projection dict satisfies the documented downstream contract."""
+    if not isinstance(projection["id"], int):
+        raise TypeError("agent.id must be int")
+    if not isinstance(projection["name"], str) or not projection["name"]:
+        raise TypeError("agent.name must be non-empty str")
+    if not isinstance(projection["os_name"], str) or not projection["os_name"]:
+        raise TypeError("agent.os.name must be non-empty str")
+    if not isinstance(projection["os_slug"], str) or not projection["os_slug"]:
+        raise TypeError("agent.os.slug must be non-empty str")
+    if not isinstance(projection["file_size_mb"], (int, float)):
+        raise TypeError("agent.file_size_mb must be number")
+    if not isinstance(projection["original_filename"], str) or not projection["original_filename"]:
+        raise TypeError("agent.original_filename must be non-empty str")
+    if projection["created_at"] is None:
+        raise TypeError("agent.created_at must not be None")
+
+
+def list_agents(user: User) -> list[dict[str, Any]]:
     """Get user's agents as projection dicts.
 
     Args:
@@ -223,108 +279,17 @@ def list_agents(user: User) -> list[dict[str, Any]]:  # noqa: C901
         TypeError: If user is None or invalid type
         ValueError: If user has no ID (unsaved)
     """
-    # Input validation
-    if user is None:
-        logger.error("list_agents called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_agents called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_agents called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_listing_user(user, "list_agents")
 
     logger.debug("list_agents called for user_id=%s", user.id)
 
     try:
         result = AgentConfig.active_for_user(user).select_related("os")
-
-        # Validate response from model
         if result is None:
-            logger.error(
-                "list_agents: model returned None for user_id=%s",
-                user.id,
-            )
+            logger.error("list_agents: model returned None for user_id=%s", user.id)
             raise TypeError("Model returned None instead of iterable")
 
-        # Convert to projection dicts with validation
-        agents = []
-        for agent in result:
-            # Validate agent has required attributes
-            has_id = hasattr(agent, "id")
-            has_name = hasattr(agent, "name")
-            has_os = hasattr(agent, "os")
-            if not (has_id and has_name and has_os):
-                logger.error(
-                    "list_agents: invalid agent object in result for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("Model returned invalid agent object")
-
-            agent_dict = {
-                "id": agent.id,
-                "name": agent.name,
-                "os_name": agent.os.name,
-                "os_slug": agent.os.slug,
-                "file_size_mb": agent.file_size_mb,
-                "original_filename": agent.original_filename,
-                "created_at": agent.created_at,
-                "agent_type": agent.agent_type,
-                "agent_type_display": agent.get_agent_type_display(),
-            }
-
-            # Validate dict values are non-empty and correct types
-            if not isinstance(agent_dict["id"], int):
-                logger.error(
-                    "list_agents: agent.id is not int for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.id must be int")
-            if not isinstance(agent_dict["name"], str) or not agent_dict["name"]:
-                logger.error(
-                    "list_agents: agent.name is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.name must be non-empty str")
-            if not isinstance(agent_dict["os_name"], str) or not agent_dict["os_name"]:
-                logger.error(
-                    "list_agents: agent.os.name is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.os.name must be non-empty str")
-            if not isinstance(agent_dict["os_slug"], str) or not agent_dict["os_slug"]:
-                logger.error(
-                    "list_agents: agent.os.slug is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.os.slug must be non-empty str")
-            if not isinstance(agent_dict["file_size_mb"], (int, float)):
-                logger.error(
-                    "list_agents: agent.file_size_mb is not number for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.file_size_mb must be number")
-            if not isinstance(agent_dict["original_filename"], str) or not agent_dict["original_filename"]:
-                logger.error(
-                    "list_agents: agent.original_filename is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                msg = "agent.original_filename must be non-empty str"
-                raise TypeError(msg)
-            if agent_dict["created_at"] is None:
-                logger.error(
-                    "list_agents: agent.created_at is None for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.created_at must not be None")
-
-            agents.append(agent_dict)
+        agents = [_agent_projection_dict(agent) for agent in result]
 
         logger.debug(
             "list_agents returning %d agents for user_id=%s",
@@ -334,13 +299,9 @@ def list_agents(user: User) -> list[dict[str, Any]]:  # noqa: C901
         return agents
 
     except TypeError:
-        # Re-raise TypeErrors (our validation errors)
         raise
     except Exception:
-        logger.exception(
-            "Error in list_agents for user_id=%s",
-            user.id,
-        )
+        logger.exception("Error in list_agents for user_id=%s", user.id)
         raise
 
 

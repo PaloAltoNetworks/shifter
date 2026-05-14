@@ -117,7 +117,83 @@ def invite_participant(
     return participant
 
 
-def bulk_import_participants(  # noqa: C901
+def _parse_participants_csv(csv_content: str) -> list[tuple[str, str]]:
+    """Parse a CSV string into (name, email) tuples; raise on per-row errors.
+
+    Empty rows are skipped. Per-row failures are accumulated and reported in
+    one `CTFValidationError` so the caller can present every issue at once.
+    """
+    reader = csv.reader(io.StringIO(csv_content))
+    participants_data: list[tuple[str, str]] = []
+    errors: list[str] = []
+    for line_num, row in enumerate(reader, start=1):
+        if not row or (len(row) == 1 and not row[0].strip()):
+            continue
+        if len(row) < 2:
+            errors.append(f"Line {line_num}: Expected name,email format")
+            continue
+        name = row[0].strip()
+        email = row[1].strip().lower()
+        if not name:
+            errors.append(f"Line {line_num}: Name is required")
+            continue
+        if not email or "@" not in email:
+            errors.append(f"Line {line_num}: Invalid email format")
+            continue
+        participants_data.append((name, email))
+    if errors:
+        raise CTFValidationError(
+            "CSV validation errors",
+            code="CTF_CSV_VALIDATION_ERROR",
+            details={"errors": errors},
+        )
+    return participants_data
+
+
+def _emails_or_raise_on_duplicate(participants_data: list[tuple[str, str]]) -> set[str]:
+    """Return the set of unique emails; raise if any duplicate appears in input."""
+    seen_emails: set[str] = set()
+    duplicates: list[str] = []
+    for _name, email in participants_data:
+        if email in seen_emails:
+            duplicates.append(email)
+        seen_emails.add(email)
+    if duplicates:
+        raise CTFValidationError(
+            "Duplicate emails in import",
+            code="CTF_DUPLICATE_EMAILS",
+            details={"duplicates": duplicates},
+        )
+    return seen_emails
+
+
+def _assert_event_accepts_import(event: CTFEvent, participants_data: list[tuple[str, str]]) -> None:
+    """Reject the import if the event is past deadline or would exceed cap."""
+    if event.registration_deadline and timezone.now() > event.registration_deadline:
+        raise CTFValidationError(
+            "Registration deadline has passed",
+            code="CTF_REGISTRATION_DEADLINE_PASSED",
+            details={
+                "event_id": str(event.pk),
+                "deadline": event.registration_deadline.isoformat(),
+            },
+        )
+    if not event.max_participants:
+        return
+    current_count = event.participants.count()
+    if current_count + len(participants_data) > event.max_participants:
+        raise CTFValidationError(
+            f"Import would exceed maximum participants ({event.max_participants})",
+            code="CTF_MAX_PARTICIPANTS_EXCEEDED",
+            details={
+                "current": current_count,
+                "importing": len(participants_data),
+                "max": event.max_participants,
+            },
+        )
+
+
+def bulk_import_participants(
     event_id: UUID,
     csv_content: str,
 ) -> list[CTFParticipant]:
@@ -146,71 +222,14 @@ def bulk_import_participants(  # noqa: C901
             details={"event_id": str(event_id)},
         ) from None
 
-    # Check registration deadline
-    if event.registration_deadline and timezone.now() > event.registration_deadline:
-        raise CTFValidationError(
-            "Registration deadline has passed",
-            code="CTF_REGISTRATION_DEADLINE_PASSED",
-            details={
-                "event_id": str(event_id),
-                "deadline": event.registration_deadline.isoformat(),
-            },
-        )
+    participants_data = _parse_participants_csv(csv_content)
+    seen_emails = _emails_or_raise_on_duplicate(participants_data)
+    _assert_event_accepts_import(event, participants_data)
 
-    # Parse CSV
-    reader = csv.reader(io.StringIO(csv_content))
-    participants_data: list[tuple[str, str]] = []
-    errors: list[str] = []
-
-    for line_num, row in enumerate(reader, start=1):
-        if not row or (len(row) == 1 and not row[0].strip()):
-            continue  # Skip empty lines
-
-        if len(row) < 2:
-            errors.append(f"Line {line_num}: Expected name,email format")
-            continue
-
-        name = row[0].strip()
-        email = row[1].strip().lower()
-
-        if not name:
-            errors.append(f"Line {line_num}: Name is required")
-            continue
-
-        if not email or "@" not in email:
-            errors.append(f"Line {line_num}: Invalid email format")
-            continue
-
-        participants_data.append((name, email))
-
-    if errors:
-        raise CTFValidationError(
-            "CSV validation errors",
-            code="CTF_CSV_VALIDATION_ERROR",
-            details={"errors": errors},
-        )
-
-    # Check for duplicates within the import
-    seen_emails: set[str] = set()
-    duplicates: list[str] = []
-    for _name, email in participants_data:
-        if email in seen_emails:
-            duplicates.append(email)
-        seen_emails.add(email)
-
-    if duplicates:
-        raise CTFValidationError(
-            "Duplicate emails in import",
-            code="CTF_DUPLICATE_EMAILS",
-            details={"duplicates": duplicates},
-        )
-
-    # Check for existing participants
     existing = CTFParticipant.objects.filter(
         event=event,
         email__in=seen_emails,
     ).values_list("email", flat=True)
-
     if existing:
         raise CTFValidationError(
             "Some participants already exist",
@@ -218,23 +237,7 @@ def bulk_import_participants(  # noqa: C901
             details={"existing": list(existing)},
         )
 
-    # Check max participants
-    if event.max_participants:
-        current_count = event.participants.count()
-        if current_count + len(participants_data) > event.max_participants:
-            raise CTFValidationError(
-                f"Import would exceed maximum participants ({event.max_participants})",
-                code="CTF_MAX_PARTICIPANTS_EXCEEDED",
-                details={
-                    "current": current_count,
-                    "importing": len(participants_data),
-                    "max": event.max_participants,
-                },
-            )
-
-    # Create participants
     created: list[CTFParticipant] = []
-
     with transaction.atomic():
         for name, email in participants_data:
             participant = CTFParticipant.objects.create(
@@ -243,7 +246,6 @@ def bulk_import_participants(  # noqa: C901
                 name=name,
                 status=ParticipantStatus.INVITED.value,
             )
-            # Auto-register: create Django user and link to participant
             _auto_register_participant(participant)
             created.append(participant)
 
@@ -252,7 +254,6 @@ def bulk_import_participants(  # noqa: C901
         len(created),
         event_id,
     )
-
     return created
 
 

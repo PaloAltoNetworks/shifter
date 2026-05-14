@@ -426,55 +426,45 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    if args.batch_size < 1 or args.batch_size > 50:
-        print("--batch-size must be 1..50", file=sys.stderr)
-        return 2
-    if args.force_shard is not None and not (0 <= args.force_shard < len(SHARD_TABLE)):
-        print(f"--force-shard must be 0..{len(SHARD_TABLE)-1}", file=sys.stderr)
-        return 2
-
-    session = boto3.Session(region_name=args.region, profile_name=args.profile)
-    ec2 = session.client("ec2")
-    ssm = session.client("ssm")
-
-    # --- Resolve targets ---
+def _resolve_targets(args, ec2, ssm) -> list[Target]:
+    """Resolve --instance-ids/--ami-id args into the list of Target rows."""
     if args.instance_ids:
         ids = [s.strip() for s in args.instance_ids.split(",") if s.strip()]
         targets = [Target(instance_id=i, vpc_id="?", name="?", user_id="") for i in ids]
         if args.force_shard is None:
-            # need user_id to shard; look up tags
             targets = hydrate_user_ids(ec2, targets)
-    else:
-        ami_id = args.ami_id or resolve_polaris_ami_id(ssm)
-        print(f"discovering instances: ami_id={ami_id} vpc_id={args.vpc_id or '(any)'}")
-        targets = discover_targets(ec2, ami_id, args.vpc_id)
+        return targets
+    ami_id = args.ami_id or resolve_polaris_ami_id(ssm)
+    print(f"discovering instances: ami_id={ami_id} vpc_id={args.vpc_id or '(any)'}")
+    return discover_targets(ec2, ami_id, args.vpc_id)
 
-    if not targets:
-        print("no targets found.")
-        return 0
 
-    # --- Assign shards + group ---
+def _group_by_shard(
+    targets: list[Target], *, force_shard: int | None, account_b_only: bool
+) -> dict[int, list[Target]]:
+    """Group targets by their assigned shard; print and skip targets that fail to assign."""
     grouped: dict[int, list[Target]] = {}
     assign_errors: list[str] = []
     for t in targets:
         try:
-            shard = assign_shard(t.user_id, args.force_shard, args.account_b_only)
+            shard = assign_shard(t.user_id, force_shard, account_b_only)
         except ValueError as e:
             assign_errors.append(f"  {t.instance_id} name={t.name!r} user_id={t.user_id!r}: {e}")
             continue
         grouped.setdefault(shard, []).append(t)
-
     if assign_errors:
         print("shard-assignment errors (these targets will be skipped):")
         for line in assign_errors:
             print(line)
+    return grouped
 
+
+def _print_shard_layout(grouped: dict[int, list[Target]]) -> None:
+    """Echo a per-shard preview of the grouped targets."""
     total_assigned = sum(len(v) for v in grouped.values())
     print(f"\n{total_assigned} target(s) across {len(grouped)} shard(s):\n")
     for shard_idx in sorted(grouped):
-        account_id, model, fast_model = SHARD_TABLE[shard_idx]
+        account_id, model, _fast_model = SHARD_TABLE[shard_idx]
         acct = "A" if account_id == ACCOUNT_A_ID else "B"
         print(f"  shard {shard_idx} [{acct} {model}]  -> {len(grouped[shard_idx])} range(s)")
         for t in grouped[shard_idx][:5]:
@@ -482,38 +472,34 @@ def main() -> int:
         if len(grouped[shard_idx]) > 5:
             print(f"      ... +{len(grouped[shard_idx]) - 5} more")
 
-    if args.dry_run:
-        print("\n--dry-run: no commands sent.")
-        return 0
 
-    if not args.yes:
-        ans = input(f"\napply kali bedrock shard to {total_assigned} range(s)? [yes/NO] ").strip()
-        if ans.lower() not in {"yes", "y"}:
-            print("aborted.")
-            return 1
+def _bump_imds_hop_limit(ec2, all_ids: list[str]) -> None:
+    """Raise IMDSv2 hop limit on every target so Docker-bridge IMDS calls succeed.
 
-    # --- Raise IMDSv2 hop limit to 3 on every target before SSM ---
-    # Account A shards use the EC2 instance profile via IMDS; Docker
-    # bridge adds one hop, so the default EC2 hop_limit=1 blocks token
-    # PUTs and Claude Code silently has no creds. 3 gives one extra
-    # hop of insurance over the proven minimum (2). Idempotent.
-    all_ids = [t.instance_id for shard in grouped.values() for t in shard]
+    Account A shards use the EC2 instance profile via IMDS; Docker bridge adds
+    one hop, so the default hop_limit=1 blocks token PUTs and Claude Code
+    silently has no creds. 3 gives one extra hop of insurance over the proven
+    minimum (2). Idempotent.
+    """
     print(f"\nbumping IMDSv2 hop limit to 3 on {len(all_ids)} instance(s)...")
     imds_errors = ensure_imds_hop_limit(ec2, all_ids)
-    if imds_errors:
-        print(f"  {len(imds_errors)} instance(s) failed IMDS modify:")
-        for iid, err in list(imds_errors.items())[:10]:
-            print(f"    {iid}: {err}")
-    else:
+    if not imds_errors:
         print("  done.")
+        return
+    print(f"  {len(imds_errors)} instance(s) failed IMDS modify:")
+    for iid, err in list(imds_errors.items())[:10]:
+        print(f"    {iid}: {err}")
 
-    # --- Send per-shard batches ---
+
+def _send_shard_batches(
+    ssm, grouped: dict[int, list[Target]], *, batch_size: int, max_concurrency: int, timeout_s: int
+) -> dict[str, dict]:
+    """Send the per-shard SSM batches and collect per-instance results."""
     overall: dict[str, dict] = {}
     for shard_idx in sorted(grouped):
-        shard_targets = grouped[shard_idx]
         script = render_script(shard_idx)
-        instance_ids = [t.instance_id for t in shard_targets]
-        for batch_num, chunk in enumerate(batched(instance_ids, args.batch_size), start=1):
+        instance_ids = [t.instance_id for t in grouped[shard_idx]]
+        for batch_num, chunk in enumerate(batched(instance_ids, batch_size), start=1):
             comment = f"kali bedrock shard {shard_idx} batch {batch_num}"
             print(f"\n{comment}: {len(chunk)} instance(s) -> SendCommand")
             try:
@@ -521,8 +507,8 @@ def main() -> int:
                     ssm,
                     instance_ids=chunk,
                     script=script,
-                    max_concurrency=args.max_concurrency,
-                    timeout_s=args.timeout,
+                    max_concurrency=max_concurrency,
+                    timeout_s=timeout_s,
                     comment=comment,
                 )
             except ClientError as e:
@@ -536,21 +522,70 @@ def main() -> int:
             succ = sum(1 for r in results.values() if r["Status"] == "Success")
             fail = sum(1 for r in results.values() if r["Status"] != "Success")
             print(f"  shard {shard_idx} batch {batch_num} done: {succ} ok, {fail} non-success")
+    return overall
 
-    # --- Summary ---
+
+def _print_summary(overall: dict[str, dict]) -> int:
     print("\n=== summary ===")
     ok = [iid for iid, r in overall.items() if r["Status"] == "Success"]
     fail = {iid: r for iid, r in overall.items() if r["Status"] != "Success"}
     print(f"success: {len(ok)} / {len(overall)}")
-    if fail:
-        print("\nfailures:")
-        for iid, r in fail.items():
-            print(f"  {iid}: {r['Status']} / {r.get('StatusDetails','')}")
-            err = (r.get("StandardErrorContent") or "").strip()
-            if err:
-                print(f"    stderr (last 1k): {err[-500:]}")
+    if not fail:
+        return 0
+    print("\nfailures:")
+    for iid, r in fail.items():
+        print(f"  {iid}: {r['Status']} / {r.get('StatusDetails', '')}")
+        err = (r.get("StandardErrorContent") or "").strip()
+        if err:
+            print(f"    stderr (last 1k): {err[-500:]}")
+    return 1
 
-    return 0 if not fail else 1
+
+def main() -> int:
+    args = parse_args()
+    if args.batch_size < 1 or args.batch_size > 50:
+        print("--batch-size must be 1..50", file=sys.stderr)
+        return 2
+    if args.force_shard is not None and not (0 <= args.force_shard < len(SHARD_TABLE)):
+        print(f"--force-shard must be 0..{len(SHARD_TABLE) - 1}", file=sys.stderr)
+        return 2
+
+    session = boto3.Session(region_name=args.region, profile_name=args.profile)
+    ec2 = session.client("ec2")
+    ssm = session.client("ssm")
+
+    targets = _resolve_targets(args, ec2, ssm)
+    if not targets:
+        print("no targets found.")
+        return 0
+
+    grouped = _group_by_shard(
+        targets, force_shard=args.force_shard, account_b_only=args.account_b_only
+    )
+    _print_shard_layout(grouped)
+
+    if args.dry_run:
+        print("\n--dry-run: no commands sent.")
+        return 0
+
+    if not args.yes:
+        total_assigned = sum(len(v) for v in grouped.values())
+        ans = input(f"\napply kali bedrock shard to {total_assigned} range(s)? [yes/NO] ").strip()
+        if ans.lower() not in {"yes", "y"}:
+            print("aborted.")
+            return 1
+
+    all_ids = [t.instance_id for shard in grouped.values() for t in shard]
+    _bump_imds_hop_limit(ec2, all_ids)
+
+    overall = _send_shard_batches(
+        ssm,
+        grouped,
+        batch_size=args.batch_size,
+        max_concurrency=args.max_concurrency,
+        timeout_s=args.timeout,
+    )
+    return _print_summary(overall)
 
 
 if __name__ == "__main__":

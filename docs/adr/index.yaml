@@ -421,12 +421,18 @@
         "id": "ADR-011-R6",
         "description": "This repository models one standalone OSS Shifter deployment; cross-install orchestration concepts are outside the OSS app model.",
         "checks": []
+      },
+      {
+        "id": "ADR-011-R7",
+        "description": "AWS deploy workflows whose committed terraform.tfvars is an example.com baseline must render the deployment-owned override from GitHub Actions secrets into a gitignored local.auto.tfvars before terraform init/validate/plan/apply. Committed AWS terraform.tfvars files remain non-operational example baselines; the render step fails loud when the active environment's secret is missing.",
+        "checks": ["aws-platform-renders-deploy-tfvars"]
       }
     ],
     "exceptions": [],
     "enforcement": ["agent-policy", "ci"],
     "evidence": [
       "docs/architecture/root-configured-backend-bundles.md",
+      "docs/architecture/aws-deploy-tfvars-preflight-1249.md",
       "docs/adr/index.yaml",
       "shifter/installation/__init__.py",
       "shifter/installation/schema.py",
@@ -437,6 +443,8 @@
       "shifter/engine/provisioner/cloud/__init__.py",
       ".github/workflows/deploy.yml",
       ".github/workflows/_gcp-dev.yml",
+      ".github/workflows/_shifter-platform.yml",
+      "docs/dev/deploy-secrets.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md",
       "shifter/shifter_platform/documentation/docs/technical/architecture.md"
     ]

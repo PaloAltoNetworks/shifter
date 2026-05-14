@@ -21,6 +21,15 @@ on:
         required: false
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS:
         required: false
+      # Whole-file local.auto.tfvars payload per environment. The committed
+      # terraform.tfvars is an example.com baseline; the real per-deployment
+      # values are rendered from these secrets before plan/apply. Declared
+      # required: false — the render step fails loud when the active
+      # environment's secret is empty. See docs/dev/deploy-secrets.md.
+      TF_VARS_DEV_PORTAL:
+        required: false
+      TF_VARS_PROD_PORTAL:
+        required: false
 
 jobs:
   plan:
@@ -44,6 +53,34 @@ jobs:
           terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
         working-directory: platform/terraform
+      - name: Render local.auto.tfvars from deployment secret
+        # The committed terraform.tfvars ships an example.com baseline that
+        # fails-loud on apply. Each deployment provides its real values via the
+        # TF_VARS_<ENV>_PORTAL GitHub secret; this step renders that payload
+        # into a gitignored local.auto.tfvars that Terraform auto-loads over
+        # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
+        env:
+          IS_DEV: ${{ inputs.is_dev }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: |
+          # Select strictly on inputs.is_dev. A GitHub Actions
+          # `is_dev && DEV_SECRET || PROD_SECRET` expression is unsafe: an
+          # empty active-environment secret is falsy and falls through to
+          # the other environment's secret. Selecting in shell keeps an
+          # empty active secret empty so the check below trips fail-loud.
+          if [ "${IS_DEV}" = "true" ]; then
+            PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
+          else
+            PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
+          fi
+          if [ -z "${TF_VARS_PORTAL}" ]; then
+            echo "::error::Required secret ${PORTAL_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
       - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
@@ -138,6 +175,34 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
+      - name: Render local.auto.tfvars from deployment secret
+        # The committed terraform.tfvars ships an example.com baseline that
+        # fails-loud on apply. Each deployment provides its real values via the
+        # TF_VARS_<ENV>_PORTAL GitHub secret; this step renders that payload
+        # into a gitignored local.auto.tfvars that Terraform auto-loads over
+        # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
+        env:
+          IS_DEV: ${{ inputs.is_dev }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: |
+          # Select strictly on inputs.is_dev. A GitHub Actions
+          # `is_dev && DEV_SECRET || PROD_SECRET` expression is unsafe: an
+          # empty active-environment secret is falsy and falls through to
+          # the other environment's secret. Selecting in shell keeps an
+          # empty active secret empty so the check below trips fail-loud.
+          if [ "${IS_DEV}" = "true" ]; then
+            PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
+          else
+            PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
+          fi
+          if [ -z "${TF_VARS_PORTAL}" ]; then
+            echo "::error::Required secret ${PORTAL_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - name: Handle Service Discovery replacement
         env:

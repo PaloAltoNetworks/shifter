@@ -128,7 +128,7 @@ def _run_local_provisioner(command: list[str]) -> str | None:
 
     main_py = os.path.join(provisioner_path, "main.py")
     if not os.path.exists(main_py):
-        logger.error(f"Provisioner not found at {main_py}")
+        logger.error("Provisioner not found at %s", main_py)
         return None
 
     # Build environment for provisioner
@@ -164,7 +164,7 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
 
     full_command = ["python", main_py, *command]
-    logger.info(f"Starting local provisioner: {' '.join(full_command)}")
+    logger.info("Starting local provisioner: %s", " ".join(full_command))
 
     try:
         # Run in background (non-blocking)
@@ -176,11 +176,11 @@ def _run_local_provisioner(command: list[str]) -> str | None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        logger.info(f"Local provisioner started with PID {process.pid}")
+        logger.info("Local provisioner started with PID %s", process.pid)
         return f"local-{process.pid}"
 
     except Exception as e:
-        logger.error(f"Failed to start local provisioner: {e}")
+        logger.error("Failed to start local provisioner: %s", e)
         raise RuntimeError(f"Local provisioner failed: {e}") from e
 
 
@@ -312,7 +312,7 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
 
     cluster, task_definition, network_config = task_config
 
-    logger.info(f"Starting ECS task for range_id={range_id} command={command}")
+    logger.info("Starting ECS task for range_id=%s command=%s", range_id, command)
 
     command_list = [
         ResourceType.RANGE.value,
@@ -333,10 +333,15 @@ def _start_ecs_task(range_id: int, user_id: int, command: str) -> str | None:
             env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
-        logger.info(f"Started ECS task: range_id={range_id} command={command} task_arn={task_arn}")
+        logger.info(
+            "Started ECS task: range_id=%s command=%s task_arn=%s",
+            range_id,
+            command,
+            task_arn,
+        )
         return task_arn
     except CloudTaskError as e:
-        logger.error(f"Failed to start ECS task for range_id={range_id}: {e}")
+        logger.error("Failed to start ECS task for range_id=%s: %s", range_id, e)
         raise
 
 
@@ -410,7 +415,11 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
 
     # Check for local provisioner mode first
     if _is_local_provisioner_enabled():
-        logger.info(f"Using local provisioner for Range request_id={request_id} command={command}")
+        logger.info(
+            "Using local provisioner for Range request_id=%s command=%s",
+            request_id,
+            command,
+        )
         command_list = ["range", command, "--request-id", str(request_id)]
         return _run_local_provisioner(command_list)
 
@@ -421,7 +430,7 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
     cluster, task_definition, network_config = task_config
 
     command_list = ["range", command, "--request-id", str(request_id)]
-    logger.info(f"Starting Range ECS task for request_id={request_id} command={command}")
+    logger.info("Starting Range ECS task for request_id=%s command=%s", request_id, command)
 
     try:
         runner = get_task_runner()
@@ -433,10 +442,10 @@ def _start_range_ecs_task(request_id: UUID, command: str) -> str | None:
             env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
-        logger.info(f"Started Range ECS task: request_id={request_id} task_arn={task_arn}")
+        logger.info("Started Range ECS task: request_id=%s task_arn=%s", request_id, task_arn)
         return task_arn
     except CloudTaskError as e:
-        logger.error(f"Failed to start Range ECS task for request_id={request_id}: {e}")
+        logger.error("Failed to start Range ECS task for request_id=%s: %s", request_id, e)
         raise
 
 
@@ -527,7 +536,11 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
 
     # Check for local provisioner mode first
     if _is_local_provisioner_enabled():
-        logger.info(f"Using local provisioner for NGFW request_id={request_id} command={command}")
+        logger.info(
+            "Using local provisioner for NGFW request_id=%s command=%s",
+            request_id,
+            command,
+        )
         return _run_local_provisioner(command)
 
     task_config = _get_engine_task_config()
@@ -536,7 +549,7 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
 
     cluster, task_definition, network_config = task_config
 
-    logger.info(f"Starting NGFW ECS task for request_id={request_id} command={command}")
+    logger.info("Starting NGFW ECS task for request_id=%s command=%s", request_id, command)
 
     try:
         runner = get_task_runner()
@@ -548,10 +561,10 @@ def _start_ngfw_ecs_task(request_id: UUID, command: list[str]) -> str | None:
             env_overrides=_get_gcp_provisioner_env_overrides(),
             network_config=network_config,
         )
-        logger.info(f"Started NGFW ECS task: request_id={request_id} task_arn={task_arn}")
+        logger.info("Started NGFW ECS task: request_id=%s task_arn=%s", request_id, task_arn)
         return task_arn
     except CloudTaskError as e:
-        logger.error(f"Failed to start NGFW ECS task for request_id={request_id}: {e}")
+        logger.error("Failed to start NGFW ECS task for request_id=%s: %s", request_id, e)
         raise
 
 
@@ -650,5 +663,5 @@ def get_task_status(task_arn: str) -> dict | None:
             "stopped_reason": result.get("stopped_reason"),
         }
     except CloudTaskError as e:
-        logger.error(f"Failed to get task status: {e}")
+        logger.error("Failed to get task status: %s", e)
         return None

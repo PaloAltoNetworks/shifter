@@ -244,6 +244,14 @@ def resolve_polaris_ami_id(ssm_client) -> str:
     return resp["Parameter"]["Value"]
 
 
+def _extract_name_tag(inst: dict) -> str:
+    """Return the `Name` tag value for an EC2 instance, or empty string."""
+    for tag in inst.get("Tags") or []:
+        if tag["Key"] == "Name":
+            return tag["Value"]
+    return ""
+
+
 def discover_targets(ec2_client, ami_id: str, vpc_id: str | None) -> list[Target]:
     """List all running instances matching the polaris-vm AMI (and VPC)."""
     filters = [
@@ -258,16 +266,11 @@ def discover_targets(ec2_client, ami_id: str, vpc_id: str | None) -> list[Target
     for page in paginator.paginate(Filters=filters):
         for reservation in page["Reservations"]:
             for inst in reservation["Instances"]:
-                name = ""
-                for tag in inst.get("Tags") or []:
-                    if tag["Key"] == "Name":
-                        name = tag["Value"]
-                        break
                 targets.append(
                     Target(
                         instance_id=inst["InstanceId"],
                         vpc_id=inst["VpcId"],
-                        name=name,
+                        name=_extract_name_tag(inst),
                     )
                 )
     return targets

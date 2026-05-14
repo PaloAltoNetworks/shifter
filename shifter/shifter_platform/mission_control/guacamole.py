@@ -201,13 +201,13 @@ def get_guacamole_auth_token(base_url: str, encrypted_data: str) -> str:
             result = json.loads(response.read().decode("utf-8"))
             return result["authToken"]
     except urllib.error.HTTPError as e:
-        logger.error(f"Guacamole token request failed: {e.code} {e.reason}")
+        logger.error("Guacamole token request failed: %s %s", e.code, e.reason)
         raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
     except urllib.error.URLError as e:
-        logger.error(f"Guacamole token request failed: {e.reason}")
+        logger.error("Guacamole token request failed: %s", e.reason)
         raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
     except (KeyError, json.JSONDecodeError) as e:
-        logger.error(f"Invalid Guacamole token response: {e}")
+        logger.error("Invalid Guacamole token response: %s", e)
         raise ValueError("Invalid response from Guacamole") from e
 
 

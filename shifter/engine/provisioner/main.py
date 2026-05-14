@@ -243,6 +243,20 @@ def get_db_connection() -> psycopg.Connection:
     )
 
 
+def _append_kwarg_assignment(assignments: list, values: list, key: str, value) -> None:
+    """Append one SET-clause fragment for an UPDATE, handling NOW() specially.
+
+    `value is None` is filtered by the caller; this helper expects a
+    real value. Splits the loop body out so `update_range_status` stays
+    within the nesting-depth budget.
+    """
+    if value == "NOW()":
+        assignments.append(sql.SQL("{} = NOW()").format(sql.Identifier(key)))
+        return
+    assignments.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
+    values.append(value)
+
+
 def update_range_status(range_id: int, status: str, **kwargs: str | int | None) -> None:
     """Update range status in database.
 
@@ -261,13 +275,9 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
             values: list = [status]
 
             for key, value in kwargs.items():
-                if value is not None:
-                    # Handle special SQL expressions
-                    if value == "NOW()":
-                        assignments.append(sql.SQL("{} = NOW()").format(sql.Identifier(key)))
-                    else:
-                        assignments.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
-                        values.append(value)
+                if value is None:
+                    continue
+                _append_kwarg_assignment(assignments, values, key, value)
 
             values.append(range_id)
             query = sql.SQL("UPDATE mission_control_range SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments))
@@ -3390,8 +3400,8 @@ if __name__ == "__main__":
 
     # Handle resource-based dispatch
     if args.resource == "ngfw":
-        logger.info(f"Starting NGFW {args.operation} for request_id={args.request_id}")
-        logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+        logger.info("Starting NGFW %s for request_id=%s", args.operation, args.request_id)
+        logger.info("Environment: %s", os.environ.get("ENVIRONMENT", "unknown"))
 
         # Infrastructure operations use Terraform, runtime operations use boto3
         if args.operation in ("provision", "deprovision"):
@@ -3405,14 +3415,14 @@ if __name__ == "__main__":
 
             run_ngfw_operation(args.operation, args.request_id, **kwargs)
 
-        logger.info(f"Completed NGFW {args.operation} for request_id={args.request_id}")
+        logger.info("Completed NGFW %s for request_id=%s", args.operation, args.request_id)
 
     elif args.resource == "range":
         request_id = args.request_id
         tf_op = "up" if args.operation == "provision" else "destroy"
 
-        logger.info(f"Starting range {args.operation} for request_id={request_id}")
-        logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+        logger.info("Starting range %s for request_id=%s", args.operation, request_id)
+        logger.info("Environment: %s", os.environ.get("ENVIRONMENT", "unknown"))
 
         if args.operation in ("provision", "destroy"):
             # Use Terraform for ranges
@@ -3426,4 +3436,4 @@ if __name__ == "__main__":
 
             run_range_resume(request_id)
 
-        logger.info(f"Completed range {args.operation} for request_id={request_id}")
+        logger.info("Completed range %s for request_id=%s", args.operation, request_id)

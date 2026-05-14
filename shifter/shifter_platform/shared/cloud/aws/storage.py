@@ -128,7 +128,7 @@ class AWSObjectStorage:
             finally:
                 stream.close()
         except (ClientError, BotoCoreError) as e:
-            logger.error(
+            logger.exception(
                 "read_object_header: failed bucket=%s key=%s error=%s",
                 bucket,
                 key,

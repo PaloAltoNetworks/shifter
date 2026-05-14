@@ -87,7 +87,8 @@ _ZIP_ALTERNATIVES = (
 )
 _BZIP2 = _fmt("bzip2", (MagicSignature(0, b"BZh"),))
 _7Z = _fmt("7-Zip", (MagicSignature(0, b"\x37\x7a\xbc\xaf\x27\x1c"),))
-_SQLITE = _fmt("SQLite database", (MagicSignature(0, b"SQLite format 3\x00"),))
+_SQLITE_DESC = "SQLite database"
+_SQLITE = _fmt(_SQLITE_DESC, (MagicSignature(0, b"SQLite format 3\x00"),))
 _PCAP_ALTERNATIVES = (
     _fmt("libpcap (LE, microseconds)", (MagicSignature(0, b"\xd4\xc3\xb2\xa1"),)),
     _fmt("libpcap (BE, microseconds)", (MagicSignature(0, b"\xa1\xb2\xc3\xd4"),)),
@@ -159,8 +160,8 @@ _RULES: dict[str, _CTFRule] = {
     ".pcapng": _CTFRule(_Category.MAGIC, "pcapng capture", (_PCAPNG,)),
     ".cap": _CTFRule(_Category.MAGIC, "packet capture", (*_PCAP_ALTERNATIVES, _PCAPNG)),
     # Databases
-    ".sqlite": _CTFRule(_Category.MAGIC, "SQLite database", (_SQLITE,)),
-    ".db": _CTFRule(_Category.MAGIC, "SQLite database", (_SQLITE,)),
+    ".sqlite": _CTFRule(_Category.MAGIC, _SQLITE_DESC, (_SQLITE,)),
+    ".db": _CTFRule(_Category.MAGIC, _SQLITE_DESC, (_SQLITE,)),
     ".sql": _CTFRule(_Category.TEXT, "SQL script"),
     # Crypto / certs — PKCS#12 archives are DER binary; .crt and .key
     # legitimately ship in either PEM or DER encoding.

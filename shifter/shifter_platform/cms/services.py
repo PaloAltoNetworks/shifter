@@ -2635,7 +2635,159 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
-def initiate_upload(  # noqa: C901
+def _validate_initiate_upload_inputs(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+) -> tuple[str, str]:
+    """Validate inputs for `initiate_upload` and return normalized (name, filename)."""
+    if user is None:
+        logger.error("initiate_upload called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error(
+            "initiate_upload called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("initiate_upload called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+    if name is None:
+        logger.error("initiate_upload called with None name for user_id=%s", user.id)
+        raise ValueError("name cannot be None")
+    name = name.strip()
+    if not name:
+        logger.error("initiate_upload called with empty name for user_id=%s", user.id)
+        raise ValueError("name cannot be empty")
+    if filename is None:
+        logger.error("initiate_upload called with None filename for user_id=%s", user.id)
+        raise ValueError("filename cannot be None")
+    filename = filename.strip()
+    if not filename:
+        logger.error("initiate_upload called with empty filename for user_id=%s", user.id)
+        raise ValueError("filename cannot be empty")
+    if file_size is None:
+        logger.error("initiate_upload called with None file_size for user_id=%s", user.id)
+        raise TypeError("file_size cannot be None")
+    if not isinstance(file_size, int):
+        logger.error(
+            "initiate_upload called with invalid file_size type: %s",
+            type(file_size).__name__,
+        )
+        msg = f"file_size must be an int, got {type(file_size).__name__}"
+        raise TypeError(msg)
+    if file_size <= 0:
+        logger.error(
+            "initiate_upload called with invalid file_size=%s for user_id=%s",
+            file_size,
+            user.id,
+        )
+        raise ValueError("file_size must be positive")
+    return name, filename
+
+
+def _initiate_upload_inner(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+    agent_type: str,
+) -> dict[str, Any]:
+    """Quota check, extension validation, presigned-URL + upload-token issuance.
+
+    Split out of `initiate_upload` so that function carries only input
+    validation and exception-translation, keeping each below the per-function
+    complexity ceiling.
+    """
+    from django.conf import settings
+
+    from cms.assets.s3 import S3Error, generate_presigned_upload_url
+    from cms.assets.services import get_storage_used
+    from cms.assets.upload_token import generate_upload_token
+    from cms.assets.validation import ValidationError, validate_file_extension
+    from cms.exceptions import CMSError
+
+    current_usage = get_storage_used(user)
+    quota_bytes = settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
+    if current_usage + file_size > quota_bytes:
+        available_mb = (quota_bytes - current_usage) / 1024 / 1024
+        logger.error(
+            "initiate_upload: quota exceeded for user_id=%s - current=%s, requested=%s, quota=%s",
+            user.id,
+            current_usage,
+            file_size,
+            quota_bytes,
+        )
+        msg = (
+            f"Storage quota exceeded. You have {available_mb:.1f} MB "
+            f"available of {settings.AGENT_USER_STORAGE_QUOTA_MB} "
+            f"MB total."
+        )
+        raise CMSError(msg)
+
+    try:
+        file_format = validate_file_extension(filename)
+    except ValidationError as e:
+        logger.error(
+            "initiate_upload: validation error for user_id=%s - %s",
+            user.id,
+            str(e),
+        )
+        raise CMSError(str(e)) from e
+
+    try:
+        presigned_url, s3_key = generate_presigned_upload_url(
+            user_id=user.id,
+            filename=filename,
+        )
+    except S3Error as e:
+        logger.error(
+            "initiate_upload: S3 error for user_id=%s - %s",
+            user.id,
+            str(e),
+        )
+        raise CMSError("Failed to initiate upload") from e
+
+    # Agent installer formats always carry an os_slug — the shared FileFormat
+    # dataclass makes the field Optional for non-installer consumers (CTF),
+    # so narrow here.
+    os_slug = file_format.os_slug
+    if os_slug is None:
+        logger.error(
+            "initiate_upload: installer format missing os_slug for filename=%s",
+            filename,
+        )
+        raise CMSError("Internal error: installer format misconfigured")
+
+    upload_token = generate_upload_token(
+        user_id=user.id,
+        s3_key=s3_key,
+        name=name,
+        filename=filename,
+        os_slug=os_slug,
+        file_size=file_size,
+        agent_type=agent_type,
+    )
+
+    logger.debug(
+        "initiate_upload completed for user_id=%s, filename=%s, s3_key=%s",
+        user.id,
+        filename,
+        s3_key,
+    )
+
+    return {
+        "presigned_url": presigned_url,
+        "s3_key": s3_key,
+        "upload_token": upload_token,
+        "expected_os": file_format.os_slug,
+    }
+
+
+def initiate_upload(
     user: User,
     name: str,
     filename: str,
@@ -2668,86 +2820,9 @@ def initiate_upload(  # noqa: C901
             file_size is invalid
         CMSError: If quota exceeded, invalid extension, or S3 error
     """
-    from django.conf import settings
-
-    from cms.assets.s3 import S3Error, generate_presigned_upload_url
-    from cms.assets.services import get_storage_used
-    from cms.assets.upload_token import generate_upload_token
-    from cms.assets.validation import ValidationError, validate_file_extension
     from cms.exceptions import CMSError
 
-    # Input validation - user
-    if user is None:
-        logger.error("initiate_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "initiate_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("initiate_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - name
-    if name is None:
-        logger.error(
-            "initiate_upload called with None name for user_id=%s",
-            user.id,
-        )
-        raise ValueError("name cannot be None")
-
-    name = name.strip()
-    if not name:
-        logger.error(
-            "initiate_upload called with empty name for user_id=%s",
-            user.id,
-        )
-        raise ValueError("name cannot be empty")
-
-    # Input validation - filename
-    if filename is None:
-        logger.error(
-            "initiate_upload called with None filename for user_id=%s",
-            user.id,
-        )
-        raise ValueError("filename cannot be None")
-
-    filename = filename.strip()
-    if not filename:
-        logger.error(
-            "initiate_upload called with empty filename for user_id=%s",
-            user.id,
-        )
-        raise ValueError("filename cannot be empty")
-
-    # Input validation - file_size
-    if file_size is None:
-        logger.error(
-            "initiate_upload called with None file_size for user_id=%s",
-            user.id,
-        )
-        raise TypeError("file_size cannot be None")
-
-    if not isinstance(file_size, int):
-        logger.error(
-            "initiate_upload called with invalid file_size type: %s",
-            type(file_size).__name__,
-        )
-        msg = f"file_size must be an int, got {type(file_size).__name__}"
-        raise TypeError(msg)
-
-    if file_size <= 0:
-        logger.error(
-            "initiate_upload called with invalid file_size=%s for user_id=%s",
-            file_size,
-            user.id,
-        )
-        raise ValueError("file_size must be positive")
+    name, filename = _validate_initiate_upload_inputs(user, name, filename, file_size)
 
     logger.debug(
         "initiate_upload called for user_id=%s, filename=%s, file_size=%s",
@@ -2757,86 +2832,8 @@ def initiate_upload(  # noqa: C901
     )
 
     try:
-        # Check storage quota
-        current_usage = get_storage_used(user)
-        quota_bytes = settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
-        if current_usage + file_size > quota_bytes:
-            available_mb = (quota_bytes - current_usage) / 1024 / 1024
-            logger.error(
-                "initiate_upload: quota exceeded for user_id=%s - current=%s, requested=%s, quota=%s",
-                user.id,
-                current_usage,
-                file_size,
-                quota_bytes,
-            )
-            msg = (
-                f"Storage quota exceeded. You have {available_mb:.1f} MB "
-                f"available of {settings.AGENT_USER_STORAGE_QUOTA_MB} "
-                f"MB total."
-            )
-            raise CMSError(msg)
-
-        # Validate file extension
-        try:
-            file_format = validate_file_extension(filename)
-        except ValidationError as e:
-            logger.error(
-                "initiate_upload: validation error for user_id=%s - %s",
-                user.id,
-                str(e),
-            )
-            raise CMSError(str(e)) from e
-
-        # Generate presigned URL
-        try:
-            presigned_url, s3_key = generate_presigned_upload_url(
-                user_id=user.id,
-                filename=filename,
-            )
-        except S3Error as e:
-            logger.error(
-                "initiate_upload: S3 error for user_id=%s - %s",
-                user.id,
-                str(e),
-            )
-            raise CMSError("Failed to initiate upload") from e
-
-        # Generate upload token. Agent installer formats always carry an
-        # os_slug — the shared FileFormat dataclass makes the field Optional
-        # for non-installer consumers (CTF), so narrow here.
-        os_slug = file_format.os_slug
-        if os_slug is None:
-            logger.error(
-                "initiate_upload: installer format missing os_slug for filename=%s",
-                filename,
-            )
-            raise CMSError("Internal error: installer format misconfigured")
-        upload_token = generate_upload_token(
-            user_id=user.id,
-            s3_key=s3_key,
-            name=name,
-            filename=filename,
-            os_slug=os_slug,
-            file_size=file_size,
-            agent_type=agent_type,
-        )
-
-        logger.debug(
-            "initiate_upload completed for user_id=%s, filename=%s, s3_key=%s",
-            user.id,
-            filename,
-            s3_key,
-        )
-
-        return {
-            "presigned_url": presigned_url,
-            "s3_key": s3_key,
-            "upload_token": upload_token,
-            "expected_os": file_format.os_slug,
-        }
-
+        return _initiate_upload_inner(user, name, filename, file_size, agent_type)
     except (TypeError, ValueError, CMSError):
-        # Re-raise known errors
         raise
     except Exception:
         logger.exception("Error in initiate_upload for user_id=%s", user.id)
@@ -3099,7 +3096,7 @@ def cancel_upload(user: User, upload_token: str) -> None:
         try:
             payload = verify_upload_token(upload_token, user.id)
         except ValueError as e:
-            logger.error(
+            logger.exception(
                 "cancel_upload: token verification failed for user_id=%s - %s",
                 user.id,
                 str(e),

@@ -25,6 +25,9 @@ import codecs
 import re
 from dataclasses import dataclass
 
+_EMPTY_CONTENT_MSG = "Uploaded content is empty"
+_INVALID_UTF8_MSG = "Uploaded content is not valid UTF-8 text."
+
 
 class InspectionError(Exception):
     """Raised when an uploaded file's header fails server-side inspection."""
@@ -256,7 +259,7 @@ def validate_text_header(header: bytes, *, complete: bool = False) -> None:
     full file may complete it.
     """
     if not header:
-        raise InspectionError("Uploaded content is empty")
+        raise InspectionError(_EMPTY_CONTENT_MSG)
 
     body = header[len(_UTF8_BOM) :] if header.startswith(_UTF8_BOM) else header
 
@@ -267,7 +270,7 @@ def validate_text_header(header: bytes, *, complete: bool = False) -> None:
     try:
         decoder.decode(body, final=complete)
     except UnicodeDecodeError as exc:
-        raise InspectionError("Uploaded content is not valid UTF-8 text.") from exc
+        raise InspectionError(_INVALID_UTF8_MSG) from exc
 
 
 def make_text_stream_validator() -> TextStreamValidator:
@@ -315,21 +318,21 @@ class TextStreamValidator:
             try:
                 self._decoder.decode(body, final=False)
             except UnicodeDecodeError as exc:
-                raise InspectionError("Uploaded content is not valid UTF-8 text.") from exc
+                raise InspectionError(_INVALID_UTF8_MSG) from exc
             return
         assert self._decoder is not None
         try:
             self._decoder.decode(chunk, final=False)
         except UnicodeDecodeError as exc:
-            raise InspectionError("Uploaded content is not valid UTF-8 text.") from exc
+            raise InspectionError(_INVALID_UTF8_MSG) from exc
 
     def finalize(self) -> None:
         if not self._seen_first_chunk or self._decoder is None:
-            raise InspectionError("Uploaded content is empty")
+            raise InspectionError(_EMPTY_CONTENT_MSG)
         try:
             self._decoder.decode(b"", final=True)
         except UnicodeDecodeError as exc:
-            raise InspectionError("Uploaded content is not valid UTF-8 text.") from exc
+            raise InspectionError(_INVALID_UTF8_MSG) from exc
 
 
 def validate_pem_or_der_header(header: bytes) -> None:
@@ -343,7 +346,7 @@ def validate_pem_or_der_header(header: bytes) -> None:
     ASN.1 SEQUENCE prefix.
     """
     if not header:
-        raise InspectionError("Uploaded content is empty")
+        raise InspectionError(_EMPTY_CONTENT_MSG)
 
     # PEM branch: anchored armor at the start of normalized text.
     body = header[len(_UTF8_BOM) :] if header.startswith(_UTF8_BOM) else header

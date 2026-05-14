@@ -22,6 +22,10 @@ AWS_REGION="${AWS_REGION:-us-east-2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 A2_ID="${1:-}"
 
+readonly SSM_PS_DOC="AWS-RunPowerShellScript"
+readonly SSM_QUERY_COMMAND_ID="Command.CommandId"
+readonly SSM_QUERY_STDOUT="StandardOutputContent"
+
 if [[ -z "$A2_ID" ]]; then
     A2_ID="$(terraform -chdir="${SCRIPT_DIR}" output -raw a2_dc_instance_id 2>/dev/null || true)"
 fi
@@ -85,10 +89,8 @@ wait_for_ssm() {
             # point, this is the post-reboot recovery — return.
             # If we never saw stale (caller invoked wait_for_ssm without
             # an outstanding reboot), still return — bootstrap entry path.
-            if [[ "$age" -lt 30 ]]; then
-                if [[ -n "$prev_last" && "$prev_last" != "$last" ]] || [[ "$saw_stale" -eq 0 ]]; then
-                    return 0
-                fi
+            if [[ "$age" -lt 30 && ( ( -n "$prev_last" && "$prev_last" != "$last" ) || "$saw_stale" -eq 0 ) ]]; then
+                return 0
             fi
             prev_last="$last"
         fi
@@ -141,10 +143,10 @@ PY
     local command_id
     command_id="$(aws_ssm ssm send-command \
         --instance-ids "$target" \
-        --document-name "AWS-RunPowerShellScript" \
+        --document-name "$SSM_PS_DOC" \
         --parameters "file://${params_json}" \
         --timeout-seconds "$timeout" \
-        --query 'Command.CommandId' --output text)"
+        --query "$SSM_QUERY_COMMAND_ID" --output text)"
     rm -f "$params_json"
 
     log "${description}: command_id=${command_id}, polling..."
@@ -160,7 +162,7 @@ PY
                 log "${description}: SUCCESS"
                 aws_ssm ssm get-command-invocation \
                     --command-id "$command_id" --instance-id "$target" \
-                    --query 'StandardOutputContent' --output text | tail -30
+                    --query "$SSM_QUERY_STDOUT" --output text | tail -30
                 return 0
                 ;;
             Failed|Cancelled|TimedOut)
@@ -211,10 +213,10 @@ log "SSM agent online on ${A2_ID}"
 # reliable bring-up.
 log "phase 1.5/4: DISM restorehealth + reboot to clear pending sysprep state"
 RESTORE_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-    --document-name "AWS-RunPowerShellScript" \
+    --document-name "$SSM_PS_DOC" \
     --parameters 'commands=["dism.exe /online /cleanup-image /restorehealth /english 2>&1 | Select-Object -Last 5; shutdown /r /t 5 /f /d p:0:0"]' \
     --timeout-seconds 1200 \
-    --query 'Command.CommandId' --output text)"
+    --query "$SSM_QUERY_COMMAND_ID" --output text)"
 log "phase 1.5/4: DISM cmd ${RESTORE_CMD_ID}, polling..."
 deadline=$((SECONDS + 1200))
 while (( SECONDS < deadline )); do
@@ -403,34 +405,34 @@ set -e
 # present = wrapper got past install (good), absent = real bug.
 log "phase 2/4: validating wrapper progress markers"
 MARKER_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-    --document-name "AWS-RunPowerShellScript" \
+    --document-name "$SSM_PS_DOC" \
     --parameters 'commands=["Test-Path C:\\polaris-markers\\02-features-installed; Test-Path C:\\polaris-markers\\03-task-scheduled"]' \
-    --query 'Command.CommandId' --output text)"
+    --query "$SSM_QUERY_COMMAND_ID" --output text)"
 sleep 6
 marker_out="$(aws_ssm ssm get-command-invocation \
     --command-id "$MARKER_CMD_ID" --instance-id "$A2_ID" \
-    --query 'StandardOutputContent' --output text 2>/dev/null || echo missing)"
+    --query "$SSM_QUERY_STDOUT" --output text 2>/dev/null || echo missing)"
 log "phase 2/4: markers: ${marker_out//$'\n'/ }"
 if [[ "$marker_out" != *"True"*"True"* ]]; then
     log "[FATAL] phase 2 features-installed and/or task-scheduled markers missing — wrapper run silently failed"
     log "[FATAL] wrapper SSM exit code was: $WRAPPER_EXIT"
     log "[FATAL] dumping install-adds.log:"
     DUMP_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-        --document-name "AWS-RunPowerShellScript" \
+        --document-name "$SSM_PS_DOC" \
         --parameters 'commands=["Get-Content C:\\polaris-install-adds.log -Tail 80"]' \
-        --query 'Command.CommandId' --output text)"
+        --query "$SSM_QUERY_COMMAND_ID" --output text)"
     sleep 5
     aws_ssm ssm get-command-invocation \
         --command-id "$DUMP_CMD_ID" --instance-id "$A2_ID" \
-        --query 'StandardOutputContent' --output text 2>&1 | tail -80
+        --query "$SSM_QUERY_STDOUT" --output text 2>&1 | tail -80
     exit 1
 fi
 
 log "phase 2/4: reboot to apply computer rename"
 aws_ssm ssm send-command --instance-ids "$A2_ID" \
-    --document-name "AWS-RunPowerShellScript" \
+    --document-name "$SSM_PS_DOC" \
     --parameters 'commands=["Restart-Computer -Force"]' \
-    --query 'Command.CommandId' --output text >/dev/null
+    --query "$SSM_QUERY_COMMAND_ID" --output text >/dev/null
 
 sleep 60
 wait_for_ssm "$A2_ID"
@@ -445,13 +447,13 @@ log "SSM agent back online after rename reboot"
 log "phase 3/4: assert hostname == DC01 before promote"
 # shellcheck disable=SC2016  # $env:COMPUTERNAME is PowerShell, not bash
 NAME_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-    --document-name "AWS-RunPowerShellScript" \
+    --document-name "$SSM_PS_DOC" \
     --parameters 'commands=["$env:COMPUTERNAME"]' \
-    --query 'Command.CommandId' --output text)"
+    --query "$SSM_QUERY_COMMAND_ID" --output text)"
 sleep 5
 hostname_now="$(aws_ssm ssm get-command-invocation \
     --command-id "$NAME_CMD_ID" --instance-id "$A2_ID" \
-    --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')"
+    --query "$SSM_QUERY_STDOUT" --output text 2>/dev/null | tr -d '[:space:]')"
 log "phase 3/4: hostname=${hostname_now}"
 if [[ "$hostname_now" != "DC01" ]]; then
     log "[FATAL] hostname is '${hostname_now}', expected 'DC01' — rename reboot didn't take. Cannot promote."
@@ -521,13 +523,13 @@ ad_ready=0
 while (( SECONDS < deadline )); do
     # shellcheck disable=SC2016  # PowerShell expressions, not bash
     AD_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-        --document-name "AWS-RunPowerShellScript" \
+        --document-name "$SSM_PS_DOC" \
         --parameters 'commands=["(Get-Service ADWS,KDC,NTDS | Where-Object {$_.Status -ne \"Running\"} | Measure-Object).Count"]' \
-        --query 'Command.CommandId' --output text)"
+        --query "$SSM_QUERY_COMMAND_ID" --output text)"
     sleep 5
     ad_status="$(aws_ssm ssm get-command-invocation \
         --command-id "$AD_CMD_ID" --instance-id "$A2_ID" \
-        --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')"
+        --query "$SSM_QUERY_STDOUT" --output text 2>/dev/null | tr -d '[:space:]')"
     if [[ "$ad_status" == "0" ]]; then
         log "phase 3/4: AD services running (ADWS+KDC+NTDS)"
         ad_ready=1
@@ -540,13 +542,13 @@ if (( ad_ready == 0 )); then
     log "[FATAL] AD services did not start within 10 minutes after Install-ADDSForest reboot"
     log "[FATAL] dumping promote.log:"
     DUMP_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-        --document-name "AWS-RunPowerShellScript" \
+        --document-name "$SSM_PS_DOC" \
         --parameters 'commands=["Get-Content C:\\polaris-promote.log -Tail 40 -ErrorAction SilentlyContinue"]' \
-        --query 'Command.CommandId' --output text)"
+        --query "$SSM_QUERY_COMMAND_ID" --output text)"
     sleep 5
     aws_ssm ssm get-command-invocation \
         --command-id "$DUMP_CMD_ID" --instance-id "$A2_ID" \
-        --query 'StandardOutputContent' --output text 2>&1 | tail -40
+        --query "$SSM_QUERY_STDOUT" --output text 2>&1 | tail -40
     exit 1
 fi
 
@@ -560,13 +562,13 @@ run_powershell_file "$A2_ID" "$SETUP_PS1" "a2_setup.ps1" 900
 # Verify a2_setup actually populated the domain by counting users.
 # shellcheck disable=SC2016  # PowerShell expression
 SETUP_CMD_ID="$(aws_ssm ssm send-command --instance-ids "$A2_ID" \
-    --document-name "AWS-RunPowerShellScript" \
+    --document-name "$SSM_PS_DOC" \
     --parameters 'commands=["try { (Get-ADUser -Filter * | Measure-Object).Count } catch { 0 }"]' \
-    --query 'Command.CommandId' --output text)"
+    --query "$SSM_QUERY_COMMAND_ID" --output text)"
 sleep 5
 user_count="$(aws_ssm ssm get-command-invocation \
     --command-id "$SETUP_CMD_ID" --instance-id "$A2_ID" \
-    --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')"
+    --query "$SSM_QUERY_STDOUT" --output text 2>/dev/null | tr -d '[:space:]')"
 log "phase 4/4: domain user count=${user_count}"
 # 17 = 15 a2_setup users + Administrator + Guest + krbtgt = 18; tolerate >=15
 if [[ -z "$user_count" ]] || (( user_count < 15 )); then

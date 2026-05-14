@@ -1183,6 +1183,40 @@ def get_range(user: User, range_id: int) -> RangeInstance:
         raise
 
 
+def _instance_contexts_from_range_spec(
+    range_spec: dict[str, Any] | None,
+    instance_context_cls: type,
+) -> list[Any]:
+    """Flatten a stored range_spec into a list of `InstanceContext` rows.
+
+    Accepts two on-disk shapes:
+    - Current: instances nested under subnets (`range_spec["subnets"][*]["instances"]`)
+    - Legacy: a flat `range_spec["instances"]` list (preserved for backward
+      compatibility with existing prod rows)
+
+    The `instance_context_cls` is passed in so this helper has no
+    cross-layer model import; the caller already imports it from
+    `shared.schemas`.
+    """
+    if not range_spec:
+        return []
+
+    def to_context(spec: dict[str, Any]) -> Any:
+        return instance_context_cls(
+            uuid=spec.get("uuid"),
+            name=spec.get("name", ""),
+            role=spec["role"],
+            os_type=spec["os_type"],
+            join_domain=spec.get("join_domain", False),
+        )
+
+    if "subnets" in range_spec:
+        return [to_context(spec) for subnet in range_spec["subnets"] for spec in subnet.get("instances", [])]
+    if "instances" in range_spec:
+        return [to_context(spec) for spec in range_spec["instances"]]
+    return []
+
+
 def get_active_range(user: User) -> RangeContext | None:
     """Get user's active (non-deleted) range as a RangeContext projection.
 
@@ -1258,32 +1292,7 @@ def get_active_range(user: User) -> RangeContext | None:
         # Get instance data from stored range_spec
         # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
         # Legacy format: instances directly at range_spec["instances"]
-        instance_contexts = []
-        if instance.range_spec:
-            if "subnets" in instance.range_spec:
-                for subnet in instance.range_spec["subnets"]:
-                    for spec in subnet.get("instances", []):
-                        instance_contexts.append(
-                            InstanceContext(
-                                uuid=spec.get("uuid"),
-                                name=spec.get("name", ""),
-                                role=spec["role"],
-                                os_type=spec["os_type"],
-                                join_domain=spec.get("join_domain", False),
-                            )
-                        )
-            elif "instances" in instance.range_spec:
-                # Legacy flat format for backward compatibility with existing prod data
-                for spec in instance.range_spec["instances"]:
-                    instance_contexts.append(
-                        InstanceContext(
-                            uuid=spec.get("uuid"),
-                            name=spec.get("name", ""),
-                            role=spec["role"],
-                            os_type=spec["os_type"],
-                            join_domain=spec.get("join_domain", False),
-                        )
-                    )
+        instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext)
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None

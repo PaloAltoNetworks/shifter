@@ -256,7 +256,7 @@ def guacamole_rdp_url(request):
             sftp_private_key=conn_info.get("ssh_key"),
         )
     except ValueError as e:
-        logger.error(f"Failed to generate Guacamole URL: {e}")
+        logger.error("Failed to generate Guacamole URL: %s", e)
         return JsonResponse({"error": "Failed to generate RDP URL"}, status=500)
 
     logger.info(

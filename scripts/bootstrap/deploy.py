@@ -3888,6 +3888,23 @@ def walkthrough_git_commit(bootstrap_result: dict, dry_run: bool = False) -> Non
         warn(f"Skipping push — run 'git push origin {branch}' manually when ready")
 
 
+def _capture_terraform_outputs() -> dict:
+    """Return parsed `terraform output -json`, or empty dict on failure.
+
+    Used by the post-apply portal step; isolated from the deploy loop so
+    the loop body stays at a reasonable nesting depth.
+    """
+    result = subprocess.run(  # nosec B603 B607
+        ["terraform", "output", "-json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return {}
+    return json.loads(result.stdout)
+
+
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
@@ -3974,11 +3991,7 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
 
                 # Capture outputs for portal
                 if component == "portal":
-                    result = subprocess.run(  # nosec B603 B607
-                        ["terraform", "output", "-json"], capture_output=True, text=True, check=False
-                    )
-                    if result.returncode == 0:
-                        outputs = json.loads(result.stdout)
+                    outputs = _capture_terraform_outputs()
         finally:
             os.chdir(original_dir)
 

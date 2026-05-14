@@ -101,18 +101,20 @@ jobs:
             exit 0
           }
 
-          # Update the image in container definitions
-          NEW_CONTAINER_DEFS=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '.containerDefinitions[0].image = $IMAGE | .containerDefinitions')
+          # Swap the image into the existing task definition and strip the
+          # read-only fields AWS rejects on register. Re-registering the whole
+          # definition (rather than cherry-picking individual fields) carries
+          # every Terraform-managed field forward verbatim — volumes,
+          # mountPoints, runtimePlatform, ephemeralStorage, etc. Cherry-picking
+          # silently dropped `volumes` once Terraform added them (#1103),
+          # breaking every deploy with "Unknown volume 'provisioner-workspace'".
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+            --arg IMAGE "$NEW_IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE
+             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy)')
 
           # Register new task definition revision
-          aws ecs register-task-definition \
-            --family "${TASK_FAMILY}" \
-            --task-role-arn "$(echo "$TASK_DEF" | jq -r '.taskRoleArn')" \
-            --execution-role-arn "$(echo "$TASK_DEF" | jq -r '.executionRoleArn')" \
-            --network-mode "$(echo "$TASK_DEF" | jq -r '.networkMode')" \
-            --container-definitions "$NEW_CONTAINER_DEFS" \
-            --requires-compatibilities FARGATE \
-            --cpu "$(echo "$TASK_DEF" | jq -r '.cpu')" \
-            --memory "$(echo "$TASK_DEF" | jq -r '.memory')"
+          aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF"
 
           echo "Registered new task definition with image: ${NEW_IMAGE}"

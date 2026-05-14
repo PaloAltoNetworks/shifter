@@ -28,6 +28,13 @@
     color: #94a3b8;
 }
 
+.info-list li::before {
+    content: "\2022";
+    position: absolute;
+    left: 0;
+    color: var(--theme-text-secondary);
+}
+
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
@@ -82,13 +89,6 @@
     font-size: 13px;
     color: var(--theme-text);
     margin-bottom: 4px;
-}
-
-.info-list li::before {
-    content: "\2022";
-    position: absolute;
-    left: 0;
-    color: var(--theme-text-secondary);
 }
 
 .info-note {

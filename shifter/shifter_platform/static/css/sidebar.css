@@ -70,8 +70,8 @@ body.nav-lock {
 }
 
 /* Expanded/locked state */
-body.nav-lock .left-nav .left-nav-body,
-.left-nav:not(.minimized) .left-nav-body {
+.left-nav:not(.minimized) .left-nav-body,
+body.nav-lock .left-nav .left-nav-body {
   min-width: 270px;
   max-width: 270px;
 }
@@ -116,9 +116,7 @@ body.nav-lock .left-nav .left-nav-body,
   text-decoration: none;
 }
 
-.header-link:hover,
-.nav-menu-item:hover,
-.nav-profile:hover {
+.header-link:hover {
   text-decoration: none;
 }
 
@@ -153,22 +151,6 @@ body.nav-lock .left-nav .left-nav-body,
   padding: 0;
 }
 
-/* Show main lock when expanded but NOT when submenu is open */
-.left-nav:not(.minimized, .submenu-open) .lock-button {
-  display: flex;
-}
-
-.lock-button:hover,
-.submenu-lock-button:hover {
-  background-color: var(--nav-lock-button-bg-color-hover);
-  color: #fff;
-}
-
-.lock-button.active,
-.submenu-lock-button.active {
-  color: #fff;
-}
-
 /* Lock button inside submenu panel */
 .submenu-lock-button {
   position: absolute;
@@ -185,6 +167,22 @@ body.nav-lock .left-nav .left-nav-body,
   justify-content: center;
   border-radius: 4px;
   padding: 0;
+}
+
+.lock-button:hover,
+.submenu-lock-button:hover {
+  background-color: var(--nav-lock-button-bg-color-hover);
+  color: #fff;
+}
+
+.lock-button.active,
+.submenu-lock-button.active {
+  color: #fff;
+}
+
+/* Show main lock when expanded but NOT when submenu is open */
+.left-nav:not(.minimized, .submenu-open) .lock-button {
+  display: flex;
 }
 
 /* Reset button base styles */
@@ -214,6 +212,10 @@ body.nav-lock .left-nav .left-nav-body,
   cursor: pointer;
 }
 
+.nav-menu-item:hover {
+  text-decoration: none;
+}
+
 /* Level 0 items (main nav) */
 .nav-menu-item.nav-menu-item-level-0 {
   height: 32px;
@@ -234,10 +236,6 @@ body.nav-lock .left-nav .left-nav-body,
   font-weight: 700;
 }
 
-.nav-menu-item.nav-menu-item-level-0.active-link .nav-icon {
-  color: var(--nav-item-active-icon-color);
-}
-
 /* Icon wrapper */
 .nav-menu-item .nav-icon {
   margin: 0 4px;
@@ -247,9 +245,8 @@ body.nav-lock .left-nav .left-nav-body,
   flex-shrink: 0;
 }
 
-.nav-menu-item .nav-icon svg {
-  width: 24px;
-  height: 24px;
+.nav-menu-item.nav-menu-item-level-0.active-link .nav-icon {
+  color: var(--nav-item-active-icon-color);
 }
 
 /* Nav menu item content (text) */
@@ -306,6 +303,7 @@ body.nav-lock .left-nav .left-nav-body,
 }
 
 .nav-profile:hover {
+  text-decoration: none;
   background-color: var(--nav-profile-hover-bg);
 }
 
@@ -618,4 +616,9 @@ button.nav-profile {
 
 .nav-user-menu-item svg {
   flex-shrink: 0;
+}
+
+.nav-menu-item .nav-icon svg {
+  width: 24px;
+  height: 24px;
 }

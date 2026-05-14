@@ -8,10 +8,6 @@
     gap: 0;
 }
 
-.terminal-page .terminal-header {
-    margin-bottom: 0.5rem;
-}
-
 /* Header */
 .terminal-header {
     display: flex;
@@ -19,6 +15,10 @@
     align-items: center;
     padding: 0.5rem 0;
     flex-shrink: 0;
+}
+
+.terminal-page .terminal-header {
+    margin-bottom: 0.5rem;
 }
 
 .terminal-header-left {
@@ -338,10 +338,6 @@
    Tab Mode Styles
    ============================================================================= */
 
-.terminal-container.mode-tabs .terminal-tabs {
-    display: flex;
-}
-
 .terminal-container.mode-tabs ~ .terminal-tabs {
     display: flex;
 }
@@ -374,6 +370,13 @@
 .mode-split ~ .terminal-tabs,
 .terminal-page:has(.mode-split) .terminal-tabs {
     display: none;
+}
+
+/* Show tabs bar via the more-specific .terminal-container.mode-tabs descendant
+   path (placed AFTER the sibling-combinator rules so source order matches
+   specificity order). */
+.terminal-container.mode-tabs .terminal-tabs {
+    display: flex;
 }
 
 /* Hide regular panes in split mode */

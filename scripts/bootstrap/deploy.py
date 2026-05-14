@@ -3888,6 +3888,13 @@ def walkthrough_git_commit(bootstrap_result: dict, dry_run: bool = False) -> Non
         warn(f"Skipping push — run 'git push origin {branch}' manually when ready")
 
 
+_COMPONENT_REQUIREMENT_REASON = {
+    "core": "Core creates ECR repositories needed for container images",
+    "range": "Range VPC is required for isolated attack/defense environments",
+    "portal": "Portal is the main application infrastructure",
+}
+
+
 def _capture_terraform_outputs() -> dict:
     """Return parsed `terraform output -json`, or empty dict on failure.
 
@@ -3905,6 +3912,80 @@ def _capture_terraform_outputs() -> dict:
     return json.loads(result.stdout)
 
 
+def _terraform_init_or_exit(env: str, component: str, tf_dir, dry_run: bool) -> None:
+    """Run `terraform init -reconfigure -backend-config=<env>.s3.tfbackend`."""
+    backend_config = f"{env}.s3.tfbackend"
+    info(f"Running terraform init -backend-config={backend_config}...")
+    init_result = run_cmd(
+        ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
+        dry_run=dry_run,
+    )
+    if not dry_run and init_result and init_result.returncode != 0:
+        error(f"Terraform init failed for {component}")
+        error(f"Check that {backend_config} exists in {tf_dir} and has the real bucket name")
+        sys.exit(1)
+
+
+def _terraform_plan_or_exit(component: str, dry_run: bool) -> None:
+    """Run `terraform plan -out=tfplan`."""
+    info("Running terraform plan...")
+    plan_result = run_cmd(["terraform", "plan", "-out=tfplan"], dry_run=dry_run)
+    if not dry_run and plan_result and plan_result.returncode != 0:
+        error(f"Terraform plan failed for {component}")
+        error("Review errors above and fix before continuing")
+        sys.exit(1)
+
+
+def _terraform_apply_or_exit(component: str) -> dict:
+    """Show plan, confirm, apply, and capture outputs (for portal). Exits on failure."""
+    print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
+    subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
+
+    if not confirm("\nApply this plan?"):
+        error(f"Terraform apply for {component} is required")
+        error("All infrastructure components are mandatory for Shifter to function")
+        sys.exit(1)
+
+    info("Running terraform apply...")
+    apply_result = run_cmd(["terraform", "apply", "tfplan"])
+    if apply_result and apply_result.returncode != 0:
+        error(f"Terraform apply failed for {component}")
+        error("Infrastructure deployment incomplete")
+        sys.exit(1)
+
+    success(f"{component} deployed successfully")
+    if component == "portal":
+        return _capture_terraform_outputs()
+    return {}
+
+
+def _deploy_terraform_component(env: str, component: str, dry_run: bool) -> dict:
+    """Run init/plan/apply for one Terraform component; return any captured outputs."""
+    if not dry_run and not confirm(f"Deploy {component}?"):
+        error(f"{component.title()} deployment is required")
+        reason = _COMPONENT_REQUIREMENT_REASON.get(component)
+        if reason:
+            error(reason)
+        sys.exit(1)
+
+    base_path = get_repo_root() / "platform" / "terraform" / "environments" / env
+    tf_dir = base_path if component == "core" else base_path / component
+    if not tf_dir.exists():
+        error(f"Directory not found: {tf_dir}")
+        return {}
+
+    original_dir = os.getcwd()
+    os.chdir(tf_dir)
+    try:
+        _terraform_init_or_exit(env, component, tf_dir, dry_run)
+        _terraform_plan_or_exit(component, dry_run)
+        if dry_run:
+            return {}
+        return _terraform_apply_or_exit(component)
+    finally:
+        os.chdir(original_dir)
+
+
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
@@ -3918,83 +3999,13 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         ("portal", "Portal infrastructure (VPC, RDS, EC2, ALB, Cognito)"),
     ]
 
-    outputs = {}
-
+    outputs: dict = {}
     for i, (component, description) in enumerate(components, 1):
         header(f"Step {i}/{len(components)}: {description}")
         info(f"Component: {component}")
-
-        if not dry_run and not confirm(f"Deploy {component}?"):
-            error(f"{component.title()} deployment is required")
-            if component == "core":
-                error("Core creates ECR repositories needed for container images")
-            elif component == "range":
-                error("Range VPC is required for isolated attack/defense environments")
-            elif component == "portal":
-                error("Portal is the main application infrastructure")
-            sys.exit(1)
-
-        base_path = get_repo_root() / "platform" / "terraform" / "environments" / env
-        tf_dir = base_path if component == "core" else base_path / component
-
-        if not tf_dir.exists():
-            error(f"Directory not found: {tf_dir}")
-            continue
-
-        # Change to terraform directory
-        original_dir = os.getcwd()
-        os.chdir(tf_dir)
-
-        try:
-            # Init with -reconfigure + -backend-config to fill in the partial
-            # backend (bucket/key are placeholders in backend.tf; real values
-            # come from <env>.s3.tfbackend).
-            backend_config = f"{env}.s3.tfbackend"
-            info(f"Running terraform init -backend-config={backend_config}...")
-            init_result = run_cmd(
-                ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
-                dry_run=dry_run,
-            )
-            if not dry_run and init_result and init_result.returncode != 0:
-                error(f"Terraform init failed for {component}")
-                error(f"Check that {backend_config} exists in {tf_dir} and has the real bucket name")
-                sys.exit(1)
-
-            # Plan
-            info("Running terraform plan...")
-            plan_result = run_cmd(["terraform", "plan", "-out=tfplan"], dry_run=dry_run)
-            if not dry_run and plan_result and plan_result.returncode != 0:
-                error(f"Terraform plan failed for {component}")
-                error("Review errors above and fix before continuing")
-                sys.exit(1)
-
-            if not dry_run:
-                # Show plan summary
-                print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
-                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
-
-                if not confirm("\nApply this plan?"):
-                    error(f"Terraform apply for {component} is required")
-                    error("All infrastructure components are mandatory for Shifter to function")
-                    sys.exit(1)
-
-                # Apply
-                info("Running terraform apply...")
-                apply_result = run_cmd(["terraform", "apply", "tfplan"])
-
-                if apply_result and apply_result.returncode != 0:
-                    error(f"Terraform apply failed for {component}")
-                    error("Infrastructure deployment incomplete")
-                    sys.exit(1)
-
-                success(f"{component} deployed successfully")
-
-                # Capture outputs for portal
-                if component == "portal":
-                    outputs = _capture_terraform_outputs()
-        finally:
-            os.chdir(original_dir)
-
+        captured = _deploy_terraform_component(env, component, dry_run)
+        if captured:
+            outputs = captured
     return outputs
 
 

@@ -14,6 +14,28 @@ from shared.messages.events import EVENT_TYPE_STATUS_UPDATED
 logger = logging.getLogger(__name__)
 
 
+def _lookup_range_instance(request_id, range_id):
+    """Resolve a `RangeInstance` from request_id (new pattern) or range_id (legacy).
+
+    Returns the instance or None; the caller is responsible for short-circuiting
+    when this returns None (it has already logged the reason).
+    """
+    if request_id:
+        try:
+            return RangeInstance.objects.get(request__request_id=request_id)
+        except RangeInstance.DoesNotExist:
+            logger.warning("RangeInstance not found: request_id=%s", request_id)
+            return None
+    if range_id is not None:
+        try:
+            return RangeInstance.objects.get(range_id=range_id)
+        except RangeInstance.DoesNotExist:
+            logger.warning("RangeInstance not found: range_id=%s", range_id)
+            return None
+    logger.warning("Missing both request_id and range_id in event")
+    return None
+
+
 def process_range_event(message: str | dict) -> None:
     """Process range event from SNS/SQS - updates RangeInstance.status.
 
@@ -57,22 +79,8 @@ def process_range_event(message: str | dict) -> None:
         logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
         return
 
-    # Look up RangeInstance - prefer request_id (new pattern), fall back to range_id (legacy)
-    instance = None
-    try:
-        if request_id:
-            instance = RangeInstance.objects.get(request__request_id=request_id)
-        elif range_id is not None:
-            instance = RangeInstance.objects.get(range_id=range_id)
-        else:
-            logger.warning("Missing both request_id and range_id in event")
-            return
-    except RangeInstance.DoesNotExist:
-        logger.warning(
-            "RangeInstance not found: request_id=%s range_id=%s",
-            request_id,
-            range_id,
-        )
+    instance = _lookup_range_instance(request_id, range_id)
+    if instance is None:
         return
 
     if instance.user_id != user_id:

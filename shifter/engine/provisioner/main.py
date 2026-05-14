@@ -285,6 +285,23 @@ def update_range_status(range_id: int, status: str, **kwargs: str | int | None) 
         conn.commit()
 
 
+def _assert_subnet_output(subnet_name: str, subnet_data: dict) -> None:
+    """Reject a Pulumi subnet record missing any required field."""
+    for field in ("uuid", "subnet_id", "subnet_cidr"):
+        if not subnet_data.get(field):
+            raise ValueError(f"Subnet '{subnet_name}' missing '{field}'")
+
+
+def _assert_instance_output(index: int, inst: dict) -> None:
+    """Reject a Pulumi instance record missing any required field."""
+    if not inst.get("uuid"):
+        raise ValueError(f"Instance[{index}] (role={inst.get('role')}) missing 'uuid'")
+    if not inst.get("instance_id"):
+        raise ValueError(f"Instance[{index}] missing 'instance_id'")
+    if not inst.get("private_ip"):
+        raise ValueError(f"Instance[{index}] (role={inst.get('role')}, os={inst.get('os')}) missing 'private_ip'")
+
+
 def _validate_provisioned_outputs(
     subnets: dict[str, dict],
     instances: list[dict],
@@ -300,41 +317,16 @@ def _validate_provisioned_outputs(
     Raises:
         ValueError: If required fields are missing or empty.
     """
-    # Validate subnet data
     for subnet_name, subnet_data in subnets.items():
-        subnet_uuid = subnet_data.get("uuid")
-        if not subnet_uuid:
-            raise ValueError(f"Subnet '{subnet_name}' missing required 'uuid'")
-
-        subnet_id = subnet_data.get("subnet_id")
-        if not subnet_id:
-            raise ValueError(f"Subnet '{subnet_name}' missing 'subnet_id'")
-
-        subnet_cidr = subnet_data.get("subnet_cidr")
-        if not subnet_cidr:
-            raise ValueError(f"Subnet '{subnet_name}' missing 'subnet_cidr'")
-
-    # Validate instance data
+        _assert_subnet_output(subnet_name, subnet_data)
     for i, inst in enumerate(instances):
-        instance_uuid = inst.get("uuid")
-        if not instance_uuid:
-            raise ValueError(f"Instance[{i}] (role={inst.get('role')}) missing 'uuid'")
+        _assert_instance_output(i, inst)
 
-        instance_id = inst.get("instance_id")
-        if not instance_id:
-            raise ValueError(f"Instance[{i}] missing 'instance_id'")
-
-        private_ip = inst.get("private_ip")
-        if not private_ip:
-            raise ValueError(f"Instance[{i}] (role={inst.get('role')}, os={inst.get('os')}) missing 'private_ip'")
-
-    # Validate expected subnets were created
     if expected_subnet_names:
         actual_subnets = set(subnets.keys())
         missing = expected_subnet_names - actual_subnets
         if missing:
             raise ValueError(f"Expected subnets not created: {missing}")
-
         extra = actual_subnets - expected_subnet_names
         if extra:
             logger.warning("Unexpected subnets in output: %s", extra)
@@ -2940,6 +2932,72 @@ def _install_dc_xdr(
     logger.info("No XDR agent URL provided for DC (not required)")
 
 
+def _remove_ngfw_attachments_for_destroy(user_id: int, range_id: int, range_spec: dict) -> None:
+    """Best-effort detach of NGFW subnets / range attachment before terraform destroy.
+
+    Failures are logged and swallowed; terraform destroy runs regardless.
+    """
+    spec_subnets = range_spec.get("subnets", [])
+    if not spec_subnets:
+        return
+    try:
+        ngfw_data = get_user_ngfw_data(user_id) if range_spec.get("ngfw", False) else None
+        remove_ngfw_subnets(user_id, spec_subnets, range_id)
+        if ngfw_data:
+            _remove_ngfw_range_attachment(
+                ngfw_request_id=ngfw_data["ngfw_request_id"],
+                ngfw_status=ngfw_data["status"],
+                range_id=range_id,
+            )
+    except Exception as e:
+        logger.warning("NGFW subnet removal failed (continuing): %s", e)
+
+
+def _recover_missing_subnet_cidrs(range_id: int, range_spec: dict) -> None:
+    """If range_spec lost its subnet CIDRs, repopulate from the allocation table."""
+    spec_subnets = range_spec.get("subnets", [])
+    if not spec_subnets or spec_subnets[0].get("cidr"):
+        return
+    logger.warning("range_config missing CIDRs for range %d, recovering from allocation table", range_id)
+    from components.network import get_allocated_cidrs
+
+    allocated = get_allocated_cidrs(range_id)
+    for i, subnet in enumerate(spec_subnets):
+        if i < len(allocated):
+            subnet["cidr"] = allocated[i]
+
+
+def _post_destroy_cleanup(request_id: str, range_id: int, user_id: int) -> None:
+    """Mark range destroyed, release subnet allocations, optionally pause NGFW.
+
+    Called only if terraform destroy succeeded. All steps are best-effort.
+    """
+    try:
+        mark_range_instances_destroyed(range_id)
+    except Exception as e:
+        logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
+
+    try:
+        from components.network import release_subnet_allocations
+
+        release_subnet_allocations(request_id)
+    except Exception as e:
+        logger.warning("Failed to release subnet allocations: %s", e)
+
+
+def _maybe_pause_user_ngfw(user_id: int, range_id: int) -> None:
+    """If this range was the user's last active range, pause their AWS NGFW."""
+    try:
+        if user_has_active_ranges(user_id, range_id):
+            return
+        ngfw_data = get_user_ngfw_data(user_id)
+        if ngfw_data and ngfw_data["status"] == "ready" and ngfw_data.get("cloud_provider") == "aws":
+            logger.info("No other active ranges, pausing NGFW")
+            run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
+    except Exception as e:
+        logger.warning("Failed to pause NGFW (non-fatal): %s", e)
+
+
 def _run_terraform_destroy(
     request_id: str,
     range_id: int,
@@ -2947,78 +3005,31 @@ def _run_terraform_destroy(
     range_spec: dict,
 ) -> None:
     """Run Terraform destroy for range."""
-    # Pre-destroy validation
     try:
         range_data = get_range_data_by_request_id(request_id)
     except ValueError as e:
         logger.warning("Range not found for request %s, skipping destroy: %s", request_id, e)
         return
 
-    current_status = range_data.get("status")
-    if current_status == "destroyed":
+    if range_data.get("status") == "destroyed":
         logger.info("Range %d already destroyed, skipping", range_id)
         return
 
-    # Remove NGFW subnet config
-    spec_subnets = range_spec.get("subnets", [])
-    if spec_subnets:
-        try:
-            ngfw_data = get_user_ngfw_data(user_id) if range_spec.get("ngfw", False) else None
-            remove_ngfw_subnets(user_id, spec_subnets, range_id)
-            if ngfw_data:
-                _remove_ngfw_range_attachment(
-                    ngfw_request_id=ngfw_data["ngfw_request_id"],
-                    ngfw_status=ngfw_data["status"],
-                    range_id=range_id,
-                )
-        except Exception as e:
-            logger.warning("NGFW subnet removal failed (continuing): %s", e)
-
-    # Recover CIDRs from subnet allocations if missing from range_config
-    if spec_subnets and not spec_subnets[0].get("cidr"):
-        logger.warning("range_config missing CIDRs for range %d, recovering from allocation table", range_id)
-        from components.network import get_allocated_cidrs
-
-        allocated = get_allocated_cidrs(range_id)
-        for i, subnet in enumerate(spec_subnets):
-            if i < len(allocated):
-                subnet["cidr"] = allocated[i]
+    _remove_ngfw_attachments_for_destroy(user_id, range_id, range_spec)
+    _recover_missing_subnet_cidrs(range_id, range_spec)
 
     logger.info("Running terraform destroy for range...")
-
     terraform_succeeded = False
     try:
         tf_variables = _build_range_terraform_variables(request_id, range_id, user_id, range_spec)
         range_terraform_runner.destroy_range(request_id, variables=tf_variables)
         terraform_succeeded = True
-
         logger.info("Cleaning up Terraform state...")
         range_terraform_runner.cleanup_range_state(request_id)
-
     finally:
         if terraform_succeeded:
-            try:
-                mark_range_instances_destroyed(range_id)
-            except Exception as e:
-                logger.error("Failed to mark range %d as destroyed: %s", range_id, e)
-
-            # Release subnet allocations now that AWS subnets are gone (best-effort)
-            try:
-                from components.network import release_subnet_allocations
-
-                release_subnet_allocations(request_id)
-            except Exception as e:
-                logger.warning("Failed to release subnet allocations: %s", e)
-
-        # Auto-pause NGFW if no other active ranges
-        try:
-            if not user_has_active_ranges(user_id, range_id):
-                ngfw_data = get_user_ngfw_data(user_id)
-                if ngfw_data and ngfw_data["status"] == "ready" and ngfw_data.get("cloud_provider") == "aws":
-                    logger.info("No other active ranges, pausing NGFW")
-                    run_ngfw_operation("stop", ngfw_data["ngfw_request_id"])
-        except Exception as e:
-            logger.warning("Failed to pause NGFW (non-fatal): %s", e)
+            _post_destroy_cleanup(request_id, range_id, user_id)
+        _maybe_pause_user_ngfw(user_id, range_id)
 
     publish_destroyed(request_id=request_id, range_id=range_id, user_id=user_id)
 

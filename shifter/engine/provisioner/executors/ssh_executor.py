@@ -162,64 +162,8 @@ class SSHExecutor:
             channel.send("exit\n")
             channel.shutdown_write()
 
-            # Read output until channel closes naturally
-            # We send 'exit' and shutdown_write(), so PAN-OS will close the channel
-            # when all commands complete. This is more reliable than prompt detection
-            # since commits can take 30+ seconds.
-            #
-            # IMPORTANT: We must wait for eof_received, NOT exit_status_ready.
-            # exit_status_ready() can return True before all data arrives, causing
-            # truncated output. eof_received is the authoritative signal that the
-            # server has finished sending all data.
-            output = ""
-            start_time = time.time()
-            chunk_count = 0
-
-            logger.info("Reading output until channel EOF")
-
-            while True:
-                # Read any available data
-                if channel.recv_ready():
-                    chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                    chunk_count += 1
-                    logger.info("Chunk %d: %d bytes", chunk_count, len(chunk))
-                    logger.debug("Chunk %d content: %r", chunk_count, chunk)
-                    output += chunk
-
-                # Check if channel EOF (server finished sending all data)
-                # This is the ONLY reliable way to know all output has been received
-                if channel.eof_received:
-                    logger.info("Channel EOF received - draining remaining data")
-                    drained, drain_chunks = self._drain_channel(channel, chunk_count)
-                    output += drained
-                    chunk_count += drain_chunks
-                    break
-
-                # Overall timeout check
-                elapsed = time.time() - start_time
-                if elapsed > timeout_seconds:
-                    logger.error(
-                        "Command timed out after %.1fs (received %d chunks, %d bytes)",
-                        elapsed,
-                        chunk_count,
-                        len(output),
-                    )
-                    raise TimeoutError(f"Command timed out after {timeout_seconds}s")
-
-                time.sleep(0.1)
-
-            # Get exit code - wait briefly if not ready yet
-            # After EOF, exit status should arrive shortly
-            exit_code = -1
-            for _ in range(10):  # Wait up to 1 second
-                if channel.exit_status_ready():
-                    exit_code = channel.recv_exit_status()
-                    logger.info("Exit code: %s", exit_code)
-                    break
-                time.sleep(0.1)
-            else:
-                logger.info("Exit status not ready after 1s - using -1")
-
+            output, chunk_count, start_time = self._read_until_eof(channel, timeout_seconds)
+            exit_code = self._wait_for_exit_status(channel)
             elapsed = time.time() - start_time
             logger.info(
                 "Command completed in %.1fs, received %d bytes in %d chunks",
@@ -249,6 +193,55 @@ class SSHExecutor:
             raise TimeoutError(f"SSH command timed out on {host}: {e}") from e
         finally:
             client.close()
+
+    def _read_until_eof(self, channel, timeout_seconds: int) -> tuple[str, int, float]:
+        """Read from `channel` until EOF or timeout.
+
+        PAN-OS closes the channel when our `exit` finishes; `eof_received` is
+        the authoritative signal that all data has arrived (exit-status can
+        flip ready before output finishes draining, leading to truncation).
+        Returns `(output, chunk_count, start_time)`; raises TimeoutError on
+        overall timeout.
+        """
+        output = ""
+        start_time = time.time()
+        chunk_count = 0
+        logger.info("Reading output until channel EOF")
+        while True:
+            if channel.recv_ready():
+                chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                chunk_count += 1
+                logger.info("Chunk %d: %d bytes", chunk_count, len(chunk))
+                logger.debug("Chunk %d content: %r", chunk_count, chunk)
+                output += chunk
+            if channel.eof_received:
+                logger.info("Channel EOF received - draining remaining data")
+                drained, drain_chunks = self._drain_channel(channel, chunk_count)
+                output += drained
+                chunk_count += drain_chunks
+                return output, chunk_count, start_time
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                logger.error(
+                    "Command timed out after %.1fs (received %d chunks, %d bytes)",
+                    elapsed,
+                    chunk_count,
+                    len(output),
+                )
+                raise TimeoutError(f"Command timed out after {timeout_seconds}s")
+            time.sleep(0.1)
+
+    @staticmethod
+    def _wait_for_exit_status(channel) -> int:
+        """Poll briefly for the SSH channel's exit status; return -1 if not delivered."""
+        for _ in range(10):  # Wait up to 1 second
+            if channel.exit_status_ready():
+                exit_code = channel.recv_exit_status()
+                logger.info("Exit code: %s", exit_code)
+                return exit_code
+            time.sleep(0.1)
+        logger.info("Exit status not ready after 1s - using -1")
+        return -1
 
     def _drain_channel(self, channel, prior_chunk_count: int) -> tuple[str, int]:
         """Drain remaining data from an EOF'd channel until close or timeout.

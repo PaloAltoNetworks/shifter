@@ -98,3 +98,12 @@ The `python-complexity-gate` adr_guard check parses this table cell-by-cell
 is intact, so the table can grow new columns without code edits to the
 parser. The file and function cells must be backtick-fenced; the
 complexity cell must be a positive integer.
+
+`check_adr_registry` in `scripts/adr_guard/adr_guard.py` was refactored
+below the ruff McCabe-10 threshold during the SonarCloud HIGH burn-down
+(issue #1236): per-entry validation moved into
+`_check_adr_entry(entry, adr_ids, rule_ids, violations)`, and the
+repeated `Violation("adr-registry", "ADR-REGISTRY", path, msg)`
+constructor calls were collapsed into a `_registry_violation` shorthand.
+The check's behavior — what it rejects and what it emits — is unchanged;
+the adr_guard test suite (`scripts/adr_guard/tests/`) is the guard.

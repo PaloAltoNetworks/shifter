@@ -84,6 +84,24 @@ def _title_from_filename(filename: str) -> str:
     return filename.replace("-", " ").replace("_", " ").title()
 
 
+def _partition_nav_entries(base_path: Path) -> tuple[list[Path], list[Path]]:
+    """Sort directory entries into (folders, markdown files), filtering hidden / excluded."""
+    try:
+        entries = sorted(base_path.iterdir())
+    except (PermissionError, FileNotFoundError):
+        return [], []
+    folders: list[Path] = []
+    files: list[Path] = []
+    for entry in entries:
+        if entry.name in EXCLUDED_FOLDERS or entry.name.startswith("."):
+            continue
+        if entry.is_dir():
+            folders.append(entry)
+        elif entry.suffix == ".md":
+            files.append(entry)
+    return folders, files
+
+
 def _build_nav_tree(base_path: Path, current_path: str = "") -> list[dict]:
     """Build navigation tree from directory structure.
 
@@ -101,30 +119,8 @@ def _build_nav_tree(base_path: Path, current_path: str = "") -> list[dict]:
     - Empty folders (no .md files)
     """
     items: list[dict[str, object]] = []
+    folders, files = _partition_nav_entries(base_path)
 
-    try:
-        entries = sorted(base_path.iterdir())
-    except (PermissionError, FileNotFoundError):
-        return items
-
-    # Separate folders and files
-    folders = []
-    files = []
-
-    for entry in entries:
-        # Skip excluded folders
-        if entry.name in EXCLUDED_FOLDERS:
-            continue
-        # Skip hidden files/folders
-        if entry.name.startswith("."):
-            continue
-
-        if entry.is_dir():
-            folders.append(entry)
-        elif entry.suffix == ".md":
-            files.append(entry)
-
-    # Process folders first
     for folder in folders:
         folder_path = f"{current_path}/{folder.name}" if current_path else folder.name
         children = _build_nav_tree(folder, folder_path)
@@ -138,7 +134,6 @@ def _build_nav_tree(base_path: Path, current_path: str = "") -> list[dict]:
                 }
             )
 
-    # Process markdown files
     for md_file in files:
         # Skip index.md from direct listing - it's the folder's landing page
         if md_file.name == "index.md":

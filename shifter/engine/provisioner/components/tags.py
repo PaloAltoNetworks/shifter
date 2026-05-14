@@ -33,6 +33,37 @@ logger = logging.getLogger(__name__)
 UnitType = Literal["subnet", "instance"]
 
 
+def _validate_common_tag_inputs(
+    user_id: object,
+    environment: object,
+    request_uuid: object,
+    unit_type: object,
+    unit_uuid: object,
+) -> None:
+    """Reject the missing/wrong-type combinations `build_common_tags` cannot tolerate."""
+    if user_id is None:
+        raise ValueError("user_id is required")
+    if not isinstance(user_id, int) or user_id < 0:
+        raise ValueError(f"user_id must be a non-negative integer, got {user_id!r}")
+
+    if not environment:
+        raise ValueError("environment is required")
+    if not isinstance(environment, str):
+        raise ValueError(f"environment must be a string, got {type(environment).__name__}")
+
+    if not request_uuid:
+        raise ValueError("request_uuid is required")
+    if not isinstance(request_uuid, str):
+        raise ValueError(f"request_uuid must be a string, got {type(request_uuid).__name__}")
+
+    if unit_type is not None and not unit_uuid:
+        raise ValueError(f"unit_uuid is required when unit_type is set (unit_type={unit_type!r})")
+    if unit_uuid is not None and not unit_type:
+        raise ValueError(f"unit_type is required when unit_uuid is set (unit_uuid={unit_uuid!r})")
+    if unit_type is not None and unit_type not in ("subnet", "instance"):
+        raise ValueError(f"unit_type must be 'subnet' or 'instance', got {unit_type!r}")
+
+
 def build_common_tags(
     user_id: int,
     environment: str,
@@ -87,29 +118,7 @@ def build_common_tags(
             component="ngfw",
         )
     """
-    # Input validation
-    if user_id is None:
-        raise ValueError("user_id is required")
-    if not isinstance(user_id, int) or user_id < 0:
-        raise ValueError(f"user_id must be a non-negative integer, got {user_id!r}")
-
-    if not environment:
-        raise ValueError("environment is required")
-    if not isinstance(environment, str):
-        raise ValueError(f"environment must be a string, got {type(environment).__name__}")
-
-    if not request_uuid:
-        raise ValueError("request_uuid is required")
-    if not isinstance(request_uuid, str):
-        raise ValueError(f"request_uuid must be a string, got {type(request_uuid).__name__}")
-
-    # Validate unit_type and unit_uuid together
-    if unit_type is not None and not unit_uuid:
-        raise ValueError(f"unit_uuid is required when unit_type is set (unit_type={unit_type!r})")
-    if unit_uuid is not None and not unit_type:
-        raise ValueError(f"unit_type is required when unit_uuid is set (unit_uuid={unit_uuid!r})")
-    if unit_type is not None and unit_type not in ("subnet", "instance"):
-        raise ValueError(f"unit_type must be 'subnet' or 'instance', got {unit_type!r}")
+    _validate_common_tag_inputs(user_id, environment, request_uuid, unit_type, unit_uuid)
 
     # Build base tags (always present)
     tags: dict[str, str] = {

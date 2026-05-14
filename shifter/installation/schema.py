@@ -54,7 +54,8 @@ def _validate_deployment_name(value: str) -> str:
     return value
 
 
-def _validate_domain(value: str) -> str:
+def _assert_domain_surface(value: str) -> None:
+    """Reject whole-string formatting problems: empty/whitespace/case/trailing-dot/IP."""
     if not value or value != value.strip():
         raise ValueError("must be a non-empty hostname with no surrounding whitespace")
     if value != value.lower():
@@ -64,10 +65,12 @@ def _validate_domain(value: str) -> str:
     try:
         ipaddress.ip_address(value)
     except ValueError:
-        pass
-    else:
-        raise ValueError("must be a DNS hostname, not an IP address")
-    labels = value.split(".")
+        return
+    raise ValueError("must be a DNS hostname, not an IP address")
+
+
+def _assert_domain_labels(value: str, labels: list[str]) -> None:
+    """Reject label-shape problems: too few labels, oversize total, malformed labels, invalid TLD."""
     if len(labels) < 2:
         raise ValueError("must be a fully qualified hostname with at least two labels (e.g. shifter.example.com)")
     if len(value) > _MAX_DOMAIN_LEN:
@@ -84,6 +87,11 @@ def _validate_domain(value: str) -> str:
             f"the rightmost label {tld!r} is not a valid public DNS suffix; the hostname must end in a "
             "registry-style TLD (e.g. shifter.example.com)"
         )
+
+
+def _validate_domain(value: str) -> str:
+    _assert_domain_surface(value)
+    _assert_domain_labels(value, value.split("."))
     return value
 
 

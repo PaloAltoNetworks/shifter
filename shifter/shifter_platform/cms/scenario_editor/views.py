@@ -109,6 +109,58 @@ def scenario_detail_view(request, scenario_id):
 # =============================================================================
 
 
+def _parse_scenario_form_post(request, *, require_id: bool) -> tuple[dict, list[str]]:
+    """Extract scenario fields from a form POST; return (fields, errors).
+
+    `require_id` toggles the scenario-id field validation (creation needs it;
+    edit takes the id from the URL).
+    """
+    scenario_id = request.POST.get("scenario_id", "").strip()
+    name = request.POST.get("name", "").strip()
+    description = request.POST.get("description", "").strip()
+    ngfw = request.POST.get("ngfw") == "on"
+    instances_json = request.POST.get("instances_json", "[]")
+    subnets_json = request.POST.get("subnets_json", "[]")
+
+    errors: list[str] = []
+    if require_id:
+        if not scenario_id:
+            errors.append("Scenario ID is required")
+        elif not SLUG_RE.match(scenario_id):
+            errors.append("Scenario ID must contain only lowercase letters, numbers, hyphens, and underscores")
+    if not name:
+        errors.append("Name is required")
+    if not description:
+        errors.append("Description is required")
+
+    try:
+        instances = json.loads(instances_json)
+    except json.JSONDecodeError:
+        instances = []
+        errors.append("Invalid instances JSON")
+
+    try:
+        subnets = json.loads(subnets_json)
+    except json.JSONDecodeError:
+        subnets = []
+        errors.append("Invalid subnets JSON")
+
+    if not instances:
+        errors.append("At least one instance is required")
+
+    return (
+        {
+            "id": scenario_id,
+            "name": name,
+            "description": description,
+            "ngfw": ngfw,
+            "instances": instances,
+            "subnets": subnets,
+        },
+        errors,
+    )
+
+
 @threat_research_required
 @require_http_methods(["GET", "POST"])
 def scenario_create_form(request):
@@ -125,38 +177,13 @@ def scenario_create_form(request):
                 },
             )
 
-        # POST - handle form submission
-        scenario_id = request.POST.get("scenario_id", "").strip()
-        name = request.POST.get("name", "").strip()
-        description = request.POST.get("description", "").strip()
-        ngfw = request.POST.get("ngfw") == "on"
-        instances_json = request.POST.get("instances_json", "[]")
-        subnets_json = request.POST.get("subnets_json", "[]")
-
-        errors = []
-        if not scenario_id:
-            errors.append("Scenario ID is required")
-        elif not SLUG_RE.match(scenario_id):
-            errors.append("Scenario ID must contain only lowercase letters, numbers, hyphens, and underscores")
-        if not name:
-            errors.append("Name is required")
-        if not description:
-            errors.append("Description is required")
-
-        try:
-            instances = json.loads(instances_json)
-        except json.JSONDecodeError:
-            instances = []
-            errors.append("Invalid instances JSON")
-
-        try:
-            subnets = json.loads(subnets_json)
-        except json.JSONDecodeError:
-            subnets = []
-            errors.append("Invalid subnets JSON")
-
-        if not instances:
-            errors.append("At least one instance is required")
+        fields, errors = _parse_scenario_form_post(request, require_id=True)
+        scenario_id = fields["id"]
+        name = fields["name"]
+        description = fields["description"]
+        ngfw = fields["ngfw"]
+        instances = fields["instances"]
+        subnets = fields["subnets"]
 
         if errors:
             return render(
@@ -262,33 +289,12 @@ def scenario_edit_form(request, scenario_id):
                 },
             )
 
-        # POST - handle form submission
-        name = request.POST.get("name", "").strip()
-        description = request.POST.get("description", "").strip()
-        ngfw = request.POST.get("ngfw") == "on"
-        instances_json = request.POST.get("instances_json", "[]")
-        subnets_json = request.POST.get("subnets_json", "[]")
-
-        errors = []
-        if not name:
-            errors.append("Name is required")
-        if not description:
-            errors.append("Description is required")
-
-        try:
-            instances = json.loads(instances_json)
-        except json.JSONDecodeError:
-            instances = []
-            errors.append("Invalid instances JSON")
-
-        try:
-            subnets = json.loads(subnets_json)
-        except json.JSONDecodeError:
-            subnets = []
-            errors.append("Invalid subnets JSON")
-
-        if not instances:
-            errors.append("At least one instance is required")
+        fields, errors = _parse_scenario_form_post(request, require_id=False)
+        name = fields["name"]
+        description = fields["description"]
+        ngfw = fields["ngfw"]
+        instances = fields["instances"]
+        subnets = fields["subnets"]
 
         if errors:
             scenario.update(

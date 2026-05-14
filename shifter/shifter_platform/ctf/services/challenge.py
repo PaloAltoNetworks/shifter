@@ -18,7 +18,15 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFChallengePrerequisite, CTFChallengeTag, CTFEvent, CTFFlag, CTFTopic
+from ctf.models import (
+    CTFChallenge,
+    CTFChallengePrerequisite,
+    CTFChallengeTag,
+    CTFEvent,
+    CTFFlag,
+    CTFParticipant,
+    CTFTopic,
+)
 
 if TYPE_CHECKING:
     pass
@@ -967,7 +975,7 @@ from ctf.services.authorization import assert_actor_owns_event as _assert_actor_
 
 
 def assert_challenge_available_for_participant(
-    participant: CTFParticipant,  # type: ignore[name-defined]  # noqa: F821 — forward-ref docs only
+    participant: CTFParticipant,
     challenge: CTFChallenge,
 ) -> None:
     """Raise if `participant` cannot legitimately interact with `challenge`.
@@ -1056,7 +1064,7 @@ def assert_challenge_available_for_participant(
 
 
 def assert_challenge_readable_for_participant(
-    participant: CTFParticipant,  # type: ignore[name-defined]  # noqa: F821 — forward-ref docs only
+    participant: CTFParticipant,
     challenge: CTFChallenge,
 ) -> None:
     """Raise if `participant` cannot READ this challenge's content.
@@ -1116,7 +1124,7 @@ def assert_challenge_readable_for_participant(
 
 def _assert_prerequisites_met(
     challenge: CTFChallenge,
-    participant,  # CTFParticipant — typing as Any to avoid the import dance in this module
+    participant: CTFParticipant,
 ) -> None:
     """Raise CTFStateError if any of `challenge`'s prerequisites are unmet."""
     prereqs_met, unmet_challenges = check_prerequisites_met(challenge.id, participant.id)

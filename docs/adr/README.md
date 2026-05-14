@@ -53,6 +53,11 @@ Current mechanisms:
   hard-fail on current signal without immediately breaking on unrelated
   legacy Terraform debt.
 - `.gitleaks.toml`: secret scanning configuration
+- `sonar-project.properties`: SonarCloud project configuration.
+  `sonar.html.fileHeader` enforces the ADR-015 file-header convention
+  on HTML templates by failing `Web:HeaderCheck` on any template that
+  does not begin with the canonical two-line SPDX Django-comment
+  header.
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
 - `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:

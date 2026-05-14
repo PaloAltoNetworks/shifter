@@ -588,5 +588,41 @@
       "shifter/shifter_platform/config/settings.py",
       "shifter/shifter_platform/shared/log_sanitize.py"
     ]
+  },
+  {
+    "id": "ADR-015",
+    "title": "Source files carry SPDX copyright and license headers",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Source files in this repository start with a two-line SPDX-formatted header naming the copyright holder (Palo Alto Networks, Inc., 2026) and the SPDX license identifier (MIT). The format follows the REUSE specification so license scanners (REUSE, ScanCode, ClearlyDefined, SonarCloud) read it without per-project rules. The literal header text is centralized in `sonar-project.properties` (`sonar.html.fileHeader`) and `LICENSE`; per-language comment syntax wraps the same payload (e.g. `# ` for Python/shell, `{# #}` for Django templates, `// ` for JS/CSS). Django HTML templates use Django server-side comments rather than HTML `<!-- -->` so the header never appears in rendered responses. Adoption is enforced on HTML templates via SonarCloud's `Web:HeaderCheck`; other languages adopt the convention for new files immediately, with batched cleanups for legacy files as tooling catches up.",
+    "rules": [
+      {
+        "id": "ADR-015-R1",
+        "description": "Project source files use the SPDX REUSE header form: `SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc.` followed by `SPDX-License-Identifier: MIT`. Per-language comment syntax wraps the lines (Python `# `, Django `{# #}`, JS/CSS `// `, shell `# `, etc.). The canonical header text and per-language examples live in `docs/architecture/file-headers.md`.",
+        "checks": []
+      },
+      {
+        "id": "ADR-015-R2",
+        "description": "Django HTML templates use `{# ... #}` server-side comments for the header. HTML `<!-- -->` comments are NOT acceptable because they render to the client and leak the copyright payload into every served response body.",
+        "checks": []
+      },
+      {
+        "id": "ADR-015-R3",
+        "description": "SonarCloud's `Web:HeaderCheck` rule is configured via `sonar.html.fileHeader` in `sonar-project.properties` with the canonical two-line Django-comment header text. The configured value is the single source of enforcement for HTML templates; new templates without the header fail the SonarCloud quality gate.",
+        "checks": []
+      },
+      {
+        "id": "ADR-015-R4",
+        "description": "Year and license text are maintained in exactly two places: `LICENSE` (legal artifact) and `sonar-project.properties` (enforcement). Roll-forward edits (new year, license switch, organization rename) update both files and then mechanically propagate to all source files in a single change. The header is not duplicated in per-file ADRs or per-package READMEs.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["ci", "sonarcloud", "agent-policy"],
+    "evidence": [
+      "LICENSE",
+      "docs/architecture/file-headers.md",
+      "sonar-project.properties"
+    ]
   }
 ]

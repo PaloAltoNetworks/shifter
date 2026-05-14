@@ -194,3 +194,18 @@ who participated in this project.
   [Palo Alto Networks open-source README template](https://github.com/PaloAltoNetworks/.github/blob/master/docs/README.example.md).
 - CyberScript range topology drew on the practical experience of operators
   running attack/defend exercises in the wild.
+
+## Citation
+
+If you use Shifter in academic work or publications, please cite it:
+
+```bibtex
+@software{shifter,
+  author       = {Edwards, Brad},
+  title        = {Shifter: Self-Service Agentic Cyber Range Platform},
+  year         = {2026},
+  organization = {Palo Alto Networks},
+  license      = {MIT},
+  url          = {https://github.com/PaloAltoNetworks/shifter}
+}
+```

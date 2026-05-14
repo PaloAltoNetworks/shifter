@@ -305,6 +305,200 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         self.assertEqual(violations, [], msg=f"Unexpected deploy workflow violations: {violations}")
 
 
+class PlatformRendersDeployTfvarsTests(unittest.TestCase):
+    """Tests for the AWS platform deploy tfvars-render guardrail (ADR-011-R7)."""
+
+    _RENDER_STEP = (
+        "      - name: Render local.auto.tfvars from deployment secret\n"
+        "        run: printf '%s\\n' \"${TF_VARS_PORTAL}\" > local.auto.tfvars\n"
+    )
+    _FMT_STEP = "      - run: terraform fmt -check -recursive\n"
+    _INIT_STEP = "      - run: terraform init -backend-config=dev.s3.tfbackend\n"
+    # A step whose *name* mentions local.auto.tfvars but whose `run:` never
+    # writes the file — a label, not a render.
+    _NAME_ONLY_STEP = (
+        "      - name: Render local.auto.tfvars from deployment secret\n"
+        "        run: echo 'no write here'\n"
+    )
+
+    def _write_platform(self, repo_root: Path, platform_text: str) -> None:
+        workflow_dir = repo_root / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        (workflow_dir / "_shifter-platform.yml").write_text(platform_text, encoding="utf-8")
+
+    def _platform_text(self, *, plan_steps: str, apply_steps: str) -> str:
+        return (
+            "name: Platform\n"
+            "jobs:\n"
+            "  plan:\n"
+            "    runs-on: self-hosted\n"
+            "    steps:\n"
+            f"{plan_steps}"
+            "  apply:\n"
+            "    runs-on: self-hosted\n"
+            "    steps:\n"
+            f"{apply_steps}"
+            "  build:\n"
+            "    runs-on: self-hosted\n"
+        )
+
+    def test_passes_when_both_jobs_render_before_terraform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + self._RENDER_STEP + self._INIT_STEP,
+                    apply_steps=self._RENDER_STEP + self._INIT_STEP,
+                ),
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+    def test_flags_job_missing_render(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + self._INIT_STEP,
+                    apply_steps=self._RENDER_STEP + self._INIT_STEP,
+                ),
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+            self.assertIn("plan", violations[0].message)
+
+    def test_flags_render_after_terraform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + self._RENDER_STEP + self._INIT_STEP,
+                    apply_steps=self._INIT_STEP + self._RENDER_STEP,
+                ),
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+            self.assertIn("apply", violations[0].message)
+
+    def test_flags_missing_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                "name: Platform\n"
+                "jobs:\n"
+                "  plan:\n"
+                "    runs-on: self-hosted\n"
+                "    steps:\n"
+                f"{self._RENDER_STEP}{self._INIT_STEP}",
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+            self.assertIn("apply", violations[0].message)
+
+    def test_flags_missing_workflow_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            (repo_root / ".github" / "workflows").mkdir(parents=True)
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+            self.assertEqual(violations[0].path, ".github/workflows/_shifter-platform.yml")
+
+    def test_ignores_commented_render_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            commented_render = "      # run: printf '%s' x > local.auto.tfvars\n"
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + commented_render + self._INIT_STEP,
+                    apply_steps=self._RENDER_STEP + self._INIT_STEP,
+                ),
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+            self.assertIn("plan", violations[0].message)
+
+    def test_flags_step_name_without_render_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + self._NAME_ONLY_STEP + self._INIT_STEP,
+                    apply_steps=self._RENDER_STEP + self._INIT_STEP,
+                ),
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+            self.assertIn("plan", violations[0].message)
+
+    def test_targeted_mode_runs_for_relevant_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + self._INIT_STEP,
+                    apply_steps=self._RENDER_STEP + self._INIT_STEP,
+                ),
+            )
+
+            for relevant in (
+                [".github/workflows/_shifter-platform.yml"],
+                ["scripts/adr_guard/adr_guard.py"],
+            ):
+                with self.subTest(files=relevant):
+                    violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, relevant)
+                    self.assertEqual(len(violations), 1)
+                    self.assertEqual(violations[0].rule_id, "ADR-011-R7")
+                    self.assertIn("plan", violations[0].message)
+
+    def test_targeted_mode_skips_unrelated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write_platform(
+                repo_root,
+                self._platform_text(
+                    plan_steps=self._FMT_STEP + self._INIT_STEP,
+                    apply_steps=self._RENDER_STEP + self._INIT_STEP,
+                ),
+            )
+
+            violations = ADR_GUARD.check_platform_renders_deploy_tfvars(
+                repo_root, ["shifter/shifter_platform/config/settings.py"]
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_clean_real_repo_passes(self) -> None:
+        violations = ADR_GUARD.check_platform_renders_deploy_tfvars(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected platform render violations: {violations}")
+
+
 class CloudFactorySeamTests(unittest.TestCase):
     def _make_cloud_tree(self, tmp: str, aws_files: list[str], gcp_files: list[str]) -> Path:
         """Create a minimal cloud adapter tree under a fake repo root."""
@@ -416,90 +610,57 @@ class McpNoShellExecTests(unittest.TestCase):
             )
             self.assertEqual(self._run(repo_root), [])
 
-    def test_named_esm_import_with_node_prefix_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+    def test_child_process_exec_import_forms_are_flagged(self) -> None:
+        """Every child_process import + exec-call shape trips ADR-010-R1.
+
+        Parameterized so each import variant asserts the same contract —
+        exactly one violation *and* the right rule_id — and adding a new
+        import shape is atomic (one table row, both assertions inherited).
+        """
+        cases = {
+            "named ESM import, node: prefix": (
                 "mcp/foo/index.js",
                 'import { execSync } from "node:child_process";\n'
                 "execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
-            self.assertEqual(violations[0].rule_id, "ADR-010-R1")
-
-    def test_named_esm_import_without_node_prefix_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+            ),
+            "named ESM import, no node: prefix": (
                 "mcp/foo/index.js",
                 "import { execSync } from 'child_process';\n"
                 "execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
-
-    def test_namespace_esm_import_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+            ),
+            "namespace ESM import": (
                 "mcp/foo/index.js",
                 'import * as cp from "node:child_process";\n'
                 "cp.execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
-
-    def test_default_esm_import_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+            ),
+            "default ESM import": (
                 "mcp/foo/index.js",
                 'import cp from "node:child_process";\n'
                 "cp.execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
-
-    def test_destructured_cjs_require_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+            ),
+            "destructured CJS require, .cjs": (
                 "mcp/foo/index.cjs",
                 'const { execSync } = require("child_process");\n'
                 "execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
-
-    def test_bare_cjs_require_with_property_access_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+            ),
+            "bare CJS require with property access, .cjs": (
                 "mcp/foo/index.cjs",
                 'const cp = require("node:child_process");\n'
                 "cp.execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
-
-    def test_mjs_extension_is_scanned(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write(
-                repo_root,
+            ),
+            "named ESM import, .mjs extension": (
                 "mcp/foo/index.mjs",
                 'import { execSync } from "child_process";\n'
                 "execSync('aws s3 ls');\n",
-            )
-            violations = self._run(repo_root)
-            self.assertEqual(len(violations), 1)
+            ),
+        }
+        for label, (rel, body) in cases.items():
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as tmp:
+                repo_root = Path(tmp)
+                self._write(repo_root, rel, body)
+                violations = self._run(repo_root)
+                self.assertEqual(len(violations), 1)
+                self.assertEqual(violations[0].rule_id, "ADR-010-R1")
 
     def test_execSync_in_a_comment_does_not_trip_the_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

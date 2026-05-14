@@ -44,22 +44,25 @@ When Terraform outputs are not available yet, it uses
 
 ## AWS portal (`dev` / `prod`)
 
-Consumed by `.github/workflows/_shifter-platform.yml`. The portal stack
-binds many values via `terraform.tfvars`; only those that differ between
-deployers need to be supplied as secrets/variables. The remainder live
-in the committed baseline (instance types, capacity defaults, alarm
-thresholds, etc.).
+Consumed by `.github/workflows/_shifter-platform.yml`. The committed
+`platform/terraform/environments/<env>/portal/terraform.tfvars` is an
+`example.com` baseline. The workflow's `Render local.auto.tfvars from
+deployment secret` step — present in both the `plan` and `apply` jobs —
+writes the real per-deployment values into a gitignored
+`local.auto.tfvars` before Terraform runs, so deploys never plan or apply
+against the baseline. The step picks the secret by environment and fails
+loud (`::error::`) when the active environment's secret is empty.
 
 | Name | Kind | Required | Notes |
 |---|---|---|---|
 | `AWS_ROLE_ARN_DEV` / `AWS_ROLE_ARN` | secret | yes | OIDC role assumed by the deploy job. |
+| `TF_VARS_DEV_PORTAL` | secret | yes (dev) | Whole-file `local.auto.tfvars` payload for the dev portal root, rendered verbatim over the committed baseline before `terraform plan` / `apply`. |
+| `TF_VARS_PROD_PORTAL` | secret | yes (prod) | As above, for the prod portal root. |
 | `AWS_PORTAL_ENABLE_AUTOSCALING` | variable | no | Default `false`. Enables ASG scaling steps in the deploy job. |
 
-Additional values live in the committed `terraform.tfvars` baseline. To
-override them per deployment, add a `local.auto.tfvars` next to the
-corresponding `terraform.tfvars`; Terraform merges it automatically. The
-`.local`/`.auto` file is gitignored. The minimum set to override before a real
-deploy:
+The `TF_VARS_<ENV>_PORTAL` secret holds plain Terraform HCL — the same
+content you would put in a `local.auto.tfvars`. At minimum it must set the
+values the `example.com` baseline deliberately leaves non-operational:
 
 - `domain_name`, `ses_domain`, `ctfd_domain`, `ctf_from_email`
 - `alarm_email`
@@ -67,11 +70,13 @@ deploy:
   closed)
 - `ctfd_ssh_public_key`, `ctfd_ssh_allowed_cidrs` (empty in baseline —
   CTFd SSH ingress closed)
-- `user_storage_bucket`
-- AWS-account-suffixed bucket names that vary per environment
+- `user_storage_bucket` and any other AWS-account-suffixed bucket names
+  that vary per environment
 
-For AWS local deploys, run `terraform apply` with a gitignored
-`local.auto.tfvars` from a workstation that has the target role.
+For AWS local deploys, write the same HCL to a gitignored
+`local.auto.tfvars` next to the environment's `terraform.tfvars` and run
+`terraform apply` from a workstation that has the target role (see
+**Local development** below).
 
 ## Local development
 

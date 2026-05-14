@@ -265,6 +265,60 @@ def get_changed_files(repo_root: Path) -> list[str]:
     return []
 
 
+def _registry_violation(path: str, message: str) -> Violation:
+    """Shorthand: build an adr-registry / ADR-REGISTRY Violation at `path`."""
+    return Violation("adr-registry", "ADR-REGISTRY", path, message)
+
+
+def _check_adr_entry(
+    entry: dict,
+    adr_ids: set[str],
+    rule_ids: set[str],
+    violations: list[Violation],
+) -> None:
+    """Validate one registry entry; append any per-entry violations.
+
+    Also mutates `adr_ids` / `rule_ids` with the names this entry contributes
+    so later entries can detect duplicates.
+    """
+    missing = REQUIRED_ADR_KEYS - set(entry)
+    if missing:
+        violations.append(
+            _registry_violation(
+                "docs/adr/index.yaml",
+                f"ADR entry {entry.get('id', '<missing-id>')} is missing keys: {sorted(missing)}",
+            )
+        )
+        return
+
+    adr_id = entry["id"]
+    if adr_id in adr_ids:
+        violations.append(_registry_violation("docs/adr/index.yaml", f"Duplicate ADR id: {adr_id}"))
+    adr_ids.add(adr_id)
+
+    rules = entry.get("rules", [])
+    if not isinstance(rules, list):
+        violations.append(
+            _registry_violation("docs/adr/index.yaml", f"{adr_id} rules must be a list")
+        )
+        return
+
+    for rule in rules:
+        rule_id = rule.get("id")
+        if not rule_id:
+            violations.append(
+                _registry_violation(
+                    "docs/adr/index.yaml", f"{adr_id} has a rule without an id"
+                )
+            )
+            continue
+        if rule_id in rule_ids:
+            violations.append(
+                _registry_violation("docs/adr/index.yaml", f"Duplicate rule id: {rule_id}")
+            )
+        rule_ids.add(rule_id)
+
+
 def check_adr_registry(repo_root: Path, files: list[str] | None) -> list[Violation]:
     """Validate the ADR registry and exception references."""
     violations: list[Violation] = []
@@ -276,84 +330,18 @@ def check_adr_registry(repo_root: Path, files: list[str] | None) -> list[Violati
         return [Violation("adr-registry", "ADR-REGISTRY", "docs/adr", str(err))]
 
     for error in validate_adr_exceptions(exceptions):
-        violations.append(
-            Violation(
-                "adr-registry",
-                "ADR-REGISTRY",
-                "docs/adr/exceptions.yaml",
-                error,
-            )
-        )
+        violations.append(_registry_violation("docs/adr/exceptions.yaml", error))
 
     adr_ids: set[str] = set()
     rule_ids: set[str] = set()
     for entry in registry:
-        missing = REQUIRED_ADR_KEYS - set(entry)
-        if missing:
-            violations.append(
-                Violation(
-                    "adr-registry",
-                    "ADR-REGISTRY",
-                    "docs/adr/index.yaml",
-                    f"ADR entry {entry.get('id', '<missing-id>')} is missing keys: {sorted(missing)}",
-                )
-            )
-            continue
-
-        adr_id = entry["id"]
-        if adr_id in adr_ids:
-            violations.append(
-                Violation(
-                    "adr-registry",
-                    "ADR-REGISTRY",
-                    "docs/adr/index.yaml",
-                    f"Duplicate ADR id: {adr_id}",
-                )
-            )
-        adr_ids.add(adr_id)
-
-        rules = entry.get("rules", [])
-        if not isinstance(rules, list):
-            violations.append(
-                Violation(
-                    "adr-registry",
-                    "ADR-REGISTRY",
-                    "docs/adr/index.yaml",
-                    f"{adr_id} rules must be a list",
-                )
-            )
-            continue
-
-        for rule in rules:
-            rule_id = rule.get("id")
-            if not rule_id:
-                violations.append(
-                    Violation(
-                        "adr-registry",
-                        "ADR-REGISTRY",
-                        "docs/adr/index.yaml",
-                        f"{adr_id} has a rule without an id",
-                    )
-                )
-                continue
-            if rule_id in rule_ids:
-                violations.append(
-                    Violation(
-                        "adr-registry",
-                        "ADR-REGISTRY",
-                        "docs/adr/index.yaml",
-                        f"Duplicate rule id: {rule_id}",
-                    )
-                )
-            rule_ids.add(rule_id)
+        _check_adr_entry(entry, adr_ids, rule_ids, violations)
 
     for exception in exceptions:
         rule_id = exception.get("rule_id")
         if not rule_id or rule_id not in rule_ids:
             violations.append(
-                Violation(
-                    "adr-registry",
-                    "ADR-REGISTRY",
+                _registry_violation(
                     "docs/adr/exceptions.yaml",
                     f"Exception references unknown rule id: {rule_id!r}",
                 )

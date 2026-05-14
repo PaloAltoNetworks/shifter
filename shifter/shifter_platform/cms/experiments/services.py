@@ -157,6 +157,43 @@ def initiate_script_upload(user: User, name: str, filename: str, file_size: int)
         raise
 
 
+def _inspect_uploaded_script_body(user: User, s3_key: str, max_size: int) -> None:
+    """Read the full S3 object and reject if it isn't valid UTF-8 / has a binary signature.
+
+    Scripts are capped at 1 MB, so we inspect the entire body, not just a header,
+    which blocks the "valid text prefix + binary tail" bypass. Cleans up the
+    rejected object on failure (best-effort).
+    """
+    try:
+        body = read_script_header(s3_key, max_size)
+    except S3Error as e:
+        logger.exception(
+            "complete_script_upload: body read failed s3_key=%s: %s",
+            safe_log(s3_key),
+            safe_log(str(e)),
+        )
+        raise ScriptUploadError("Upload content inspection failed") from e
+
+    try:
+        _validate_script_text_header(body, complete=True)
+    except _ScriptInspectionError as e:
+        logger.warning(
+            "complete_script_upload: header inspection rejected upload user_id=%s s3_key=%s reason=%s",
+            user.pk,
+            safe_log(s3_key),
+            e,
+        )
+        try:
+            delete_s3_object(s3_key)
+        except S3Error as delete_exc:
+            logger.exception(
+                "complete_script_upload: delete after inspection failure also failed s3_key=%s: %s",
+                safe_log(s3_key),
+                safe_log(str(delete_exc)),
+            )
+        raise ScriptUploadError("Uploaded content is not a valid script (binary or non-UTF-8 header)") from e
+
+
 def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
     """Finalize script upload: verify token, verify S3 object, create DB record.
 
@@ -218,34 +255,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
         # require it to be valid UTF-8 with no binary signature anywhere in
         # the stream. This blocks the "valid text prefix + binary tail" bypass
         # the bounded-header check by itself cannot detect.
-        try:
-            body = read_script_header(s3_key, max_size)
-        except S3Error as e:
-            logger.exception(
-                "complete_script_upload: body read failed s3_key=%s: %s",
-                safe_log(s3_key),
-                safe_log(str(e)),
-            )
-            raise ScriptUploadError("Upload content inspection failed") from e
-
-        try:
-            _validate_script_text_header(body, complete=True)
-        except _ScriptInspectionError as e:
-            logger.warning(
-                "complete_script_upload: header inspection rejected upload user_id=%s s3_key=%s reason=%s",
-                user.pk,
-                safe_log(s3_key),
-                e,
-            )
-            try:
-                delete_s3_object(s3_key)
-            except S3Error as delete_exc:
-                logger.exception(
-                    "complete_script_upload: delete after inspection failure also failed s3_key=%s: %s",
-                    safe_log(s3_key),
-                    safe_log(str(delete_exc)),
-                )
-            raise ScriptUploadError("Uploaded content is not a valid script (binary or non-UTF-8 header)") from e
+        _inspect_uploaded_script_body(user, s3_key, max_size)
 
         script = ScriptAsset(
             user=user,
@@ -387,6 +397,47 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
         raise
 
 
+def _resolve_experiment_scenario(scenario_id, user):
+    """Verify access and load the scenario template; raise ExperimentValidationError on either failure."""
+    try:
+        check_scenario_access(scenario_id, user)
+        return load_scenario_template(scenario_id)
+    except ValueError as e:
+        logger.warning("create_experiment: invalid scenario_id=%s: %s", scenario_id, e)
+        raise ExperimentValidationError(f"Invalid scenario: {e}") from e
+
+
+def _validate_script_assignments(scripts, scenario, user, scenario_id):
+    """Reject assignments that don't match an existing instance or aren't owned scripts."""
+    instance_names = {inst.name for inst in scenario.instances}
+    for script_input in scripts:
+        if script_input.instance_name not in instance_names:
+            raise ExperimentValidationError(
+                f"Instance '{script_input.instance_name}' not found in scenario '{scenario_id}'"
+            )
+    script_ids = [s.script_id for s in scripts if s.script_id]
+    if not script_ids:
+        return
+    existing_scripts = set(ScriptAsset.objects.filter(pk__in=script_ids, user=user).values_list("pk", flat=True))
+    missing = set(script_ids) - existing_scripts
+    if missing:
+        raise ExperimentValidationError(f"Script(s) not found: {missing}")
+
+
+def _resolve_experiment_agent(agent_id, user):
+    """Return the user's agent or None; raise ExperimentValidationError if the id is unknown."""
+    if not agent_id:
+        return None
+    from cms.models import AgentConfig
+
+    try:
+        agent = AgentConfig.objects.get(pk=agent_id, user=user)
+    except AgentConfig.DoesNotExist:
+        raise ExperimentValidationError(f"Agent not found: {agent_id}") from None
+    _check_result_type(agent, AgentConfig, "create_experiment")
+    return agent
+
+
 def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     """Create an experiment with script assignments.
 
@@ -403,45 +454,9 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     _validate_user(user, "create_experiment")
     logger.debug("create_experiment called for user_id=%s scenario=%s", user.id, data.scenario_id)
     try:
-        # Validate scenario exists and user has access
-        try:
-            check_scenario_access(data.scenario_id, user)
-            scenario = load_scenario_template(data.scenario_id)
-        except ValueError as e:
-            logger.warning("create_experiment: invalid scenario_id=%s: %s", data.scenario_id, e)
-            raise ExperimentValidationError(f"Invalid scenario: {e}") from e
-
-        # Validate script assignments reference real instances
-        instance_names = {inst.name for inst in scenario.instances}
-        for script_input in data.scripts:
-            if script_input.instance_name not in instance_names:
-                raise ExperimentValidationError(
-                    f"Instance '{script_input.instance_name}' not found in scenario '{data.scenario_id}'"
-                )
-
-        # Validate referenced script assets exist and belong to user
-        script_ids = [s.script_id for s in data.scripts if s.script_id]
-        if script_ids:
-            existing_scripts = set(
-                ScriptAsset.objects.filter(
-                    pk__in=script_ids,
-                    user=user,
-                ).values_list("pk", flat=True)
-            )
-            missing = set(script_ids) - existing_scripts
-            if missing:
-                raise ExperimentValidationError(f"Script(s) not found: {missing}")
-
-        # Validate agent exists if specified
-        agent = None
-        if data.agent_id:
-            from cms.models import AgentConfig
-
-            try:
-                agent = AgentConfig.objects.get(pk=data.agent_id, user=user)
-            except AgentConfig.DoesNotExist:
-                raise ExperimentValidationError(f"Agent not found: {data.agent_id}") from None
-            _check_result_type(agent, AgentConfig, "create_experiment")
+        scenario = _resolve_experiment_scenario(data.scenario_id, user)
+        _validate_script_assignments(data.scripts, scenario, user, data.scenario_id)
+        agent = _resolve_experiment_agent(data.agent_id, user)
 
         with transaction.atomic():
             experiment = Experiment(

@@ -650,6 +650,49 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
     return challenge
 
 
+def _build_safe_update_payload(data: dict[str, Any], challenge: CTFChallenge) -> dict[str, Any]:
+    """Resolve `next_challenge`, hash any new `flag`, then filter to allowed fields.
+
+    Mass-assignment safety: only `_CHALLENGE_MUTABLE_FIELDS` is allowed, plus
+    explicit pass-throughs for `flag_hash` and `next_challenge` (which are kept
+    out of the generic allowlist so JSON callers can't crash FK assignment).
+    """
+    if "next_challenge" in data:
+        data["next_challenge"] = _resolve_next_challenge(
+            data["next_challenge"],
+            event=challenge.event,
+            self_id=challenge.pk,
+        )
+    if "flag" in data:
+        plaintext_flag = data.pop("flag")
+        data["flag_hash"] = hash_flag(plaintext_flag)
+
+    safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
+    if "flag_hash" in data:
+        safe_data["flag_hash"] = data["flag_hash"]
+    if "next_challenge" in data:
+        safe_data["next_challenge"] = data["next_challenge"]
+    return safe_data
+
+
+def _apply_optional_challenge_associations(
+    challenge: CTFChallenge,
+    flags_list,
+    tag_names,
+    topic_names,
+    actor_id: int,
+) -> None:
+    """Apply optional flag/tag/topic updates inside the existing transaction."""
+    if flags_list is not None:
+        challenge.flags.all().delete()
+        for i, fd in enumerate(flags_list):
+            add_flag(challenge.id, {**fd, "order": fd.get("order", i)}, actor_id=actor_id)
+    if tag_names is not None:
+        challenge.tags.set(_resolve_tags(challenge.event, tag_names))
+    if topic_names is not None:
+        challenge.topics.set(_resolve_topics(topic_names))
+
+
 def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any], *, actor_id: int) -> CTFChallenge:
     """Update an existing challenge.
 
@@ -695,51 +738,13 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any], *, acto
     tag_names = data.pop("tags", None)
     topic_names = data.pop("topics", None)
 
-    # Resolve next_challenge before allowlist filtering (codex cycle 6).
-    if "next_challenge" in data:
-        data["next_challenge"] = _resolve_next_challenge(
-            data["next_challenge"],
-            event=challenge.event,
-            self_id=challenge.pk,
-        )
-
-    # Hash new flag if provided
-    if "flag" in data:
-        plaintext_flag = data.pop("flag")
-        data["flag_hash"] = hash_flag(plaintext_flag)
-
-    # Filter to allowed fields only — prevent mass assignment of event,
-    # id, timestamps, etc.
-    safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
-    if "flag_hash" in data:
-        safe_data["flag_hash"] = data["flag_hash"]
-    # next_challenge: same explicit pass-through as create_challenge — kept
-    # OUT of the generic allowlist so JSON callers can't crash FK
-    # assignment with a 500.
-    if "next_challenge" in data:
-        safe_data["next_challenge"] = data["next_challenge"]
+    safe_data = _build_safe_update_payload(data, challenge)
 
     with transaction.atomic():
         for key, value in safe_data.items():
             setattr(challenge, key, value)
         challenge.save()
-
-        # Replace flags if provided
-        if flags_list is not None:
-            challenge.flags.all().delete()
-            for i, fd in enumerate(flags_list):
-                add_flag(challenge.id, {**fd, "order": fd.get("order", i)}, actor_id=actor_id)
-
-        # Update tags if provided
-        if tag_names is not None:
-            tag_objects = _resolve_tags(challenge.event, tag_names)
-            challenge.tags.set(tag_objects)
-
-        # Update topics if provided
-        if topic_names is not None:
-            topic_objects = _resolve_topics(topic_names)
-            challenge.topics.set(topic_objects)
-
+        _apply_optional_challenge_associations(challenge, flags_list, tag_names, topic_names, actor_id)
         logger.info("Updated challenge %s", challenge_id)
 
     _sync_release_task(challenge)

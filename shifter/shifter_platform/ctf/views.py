@@ -1099,28 +1099,21 @@ def admin_event_detail(request: HttpRequest, event_id: UUID) -> HttpResponse:
     if event.created_by_id != request.user.pk:
         return HttpResponse("Forbidden: You do not have access to this event", status=403)
 
-    # Handle status change POST
     if request.method == "POST":
         status_form = EventStatusForm(request.POST, event=event)
         if status_form.is_valid():
             action = status_form.cleaned_data["action"]
-            success = False
-
-            if action == "schedule":
-                success = schedule_event(event)
-            elif action == "activate":
-                success = activate_event(event)
-            elif action == "pause":
-                success = pause_event(event)
-            elif action == "resume":
-                success = resume_event(event)
-            elif action == "complete":
-                success = complete_event(event)
-            elif action == "archive":
-                success = archive_event(event)
-            elif action == "cancel":
-                success = cancel_event(event)
-
+            action_table = {
+                "schedule": schedule_event,
+                "activate": activate_event,
+                "pause": pause_event,
+                "resume": resume_event,
+                "complete": complete_event,
+                "archive": archive_event,
+                "cancel": cancel_event,
+            }
+            handler = action_table.get(action)
+            success = handler(event) if handler else False
             if success:
                 logger.info(
                     "User %s changed event %s status via action: %s",
@@ -2364,6 +2357,44 @@ def api_event_list(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": "; ".join(e.messages)}, status=400)
 
 
+def _event_detail_payload(event) -> dict:
+    """Render the GET-event JSON payload for `api_event_detail`."""
+    return {
+        "id": str(event.id),
+        "name": event.name,
+        "description": event.description,
+        "status": event.status,
+        "event_start": event.event_start.isoformat(),
+        "event_end": event.event_end.isoformat(),
+        "registration_deadline": event.registration_deadline.isoformat() if event.registration_deadline else None,
+        "scenario_id": event.scenario_id,
+        "auto_cleanup": event.auto_cleanup,
+        "cleanup_delay_hours": event.cleanup_delay_hours,
+        "max_participants": event.max_participants,
+        "team_mode": event.team_mode,
+        "team_size_limit": event.team_size_limit,
+        "range_config": event.range_config,
+        "range_spinup_minutes": event.range_spinup_minutes,
+        "submission_cooldown_seconds": event.submission_cooldown_seconds,
+        "attempt_limit_mode": event.attempt_limit_mode,
+        "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
+        "rating_visibility": event.rating_visibility,
+        "scoreboard_visible": event.scoreboard_visible,
+        "scoreboard_freeze_at": event.scoreboard_freeze_at.isoformat() if event.scoreboard_freeze_at else None,
+    }
+
+
+def _coerce_event_datetime_fields(body: dict) -> None:
+    """In-place: parse ISO datetime strings on the four scheduling fields."""
+    from django.utils.dateparse import parse_datetime
+
+    for field in ("event_start", "event_end", "registration_deadline", "scoreboard_freeze_at"):
+        if field in body and isinstance(body[field], str):
+            parsed = parse_datetime(body[field])
+            if parsed:
+                body[field] = parsed
+
+
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "PUT", "DELETE"])
@@ -2388,33 +2419,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
     from ctf.services import delete_event, update_event
 
     if request.method == "GET":
-        return JsonResponse(
-            {
-                "id": str(event.id),
-                "name": event.name,
-                "description": event.description,
-                "status": event.status,
-                "event_start": event.event_start.isoformat(),
-                "event_end": event.event_end.isoformat(),
-                "registration_deadline": event.registration_deadline.isoformat()
-                if event.registration_deadline
-                else None,
-                "scenario_id": event.scenario_id,
-                "auto_cleanup": event.auto_cleanup,
-                "cleanup_delay_hours": event.cleanup_delay_hours,
-                "max_participants": event.max_participants,
-                "team_mode": event.team_mode,
-                "team_size_limit": event.team_size_limit,
-                "range_config": event.range_config,
-                "range_spinup_minutes": event.range_spinup_minutes,
-                "submission_cooldown_seconds": event.submission_cooldown_seconds,
-                "attempt_limit_mode": event.attempt_limit_mode,
-                "attempt_limit_cooldown_seconds": event.attempt_limit_cooldown_seconds,
-                "rating_visibility": event.rating_visibility,
-                "scoreboard_visible": event.scoreboard_visible,
-                "scoreboard_freeze_at": event.scoreboard_freeze_at.isoformat() if event.scoreboard_freeze_at else None,
-            }
-        )
+        return JsonResponse(_event_detail_payload(event))
 
     if request.method == "DELETE":
         delete_event(event_id)
@@ -2425,16 +2430,7 @@ def api_event_detail(request: HttpRequest, event_id: UUID) -> JsonResponse:
         body = _parse_body_object(request)
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    # Parse datetime strings to datetime objects for the service layer
-    from django.utils.dateparse import parse_datetime
-
-    for field in ("event_start", "event_end", "registration_deadline", "scoreboard_freeze_at"):
-        if field in body and isinstance(body[field], str):
-            parsed = parse_datetime(body[field])
-            if parsed:
-                body[field] = parsed
-
+    _coerce_event_datetime_fields(body)
     try:
         updated = update_event(event_id, body)
         return JsonResponse(
@@ -3342,6 +3338,49 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
 @login_required
 @ctf_organizer_required
 @require_http_methods(["GET", "PUT", "DELETE"])
+def _handle_get_email_template(event, notification_type: str) -> JsonResponse:
+    """Return the per-event custom template or 404."""
+    from ctf.models import CTFEmailTemplate
+
+    template = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).first()
+    if template is None:
+        return JsonResponse({"error": "No custom template"}, status=404)
+    return JsonResponse(
+        {
+            "id": str(template.id),
+            "notification_type": template.notification_type,
+            "subject": template.subject,
+            "html_body": template.html_body,
+            "text_body": template.text_body,
+        }
+    )
+
+
+def _handle_delete_email_template(event, notification_type: str) -> JsonResponse:
+    """Soft-delete the per-event template; revert to default."""
+    from ctf.models import CTFEmailTemplate
+
+    template = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).first()
+    if template is None:
+        return JsonResponse({"error": "No custom template to delete"}, status=404)
+    template.delete(soft=True)
+    return JsonResponse({"status": "reverted_to_default"})
+
+
+def _validate_template_bodies(html_body: str, text_body: str) -> JsonResponse | None:
+    """Validate the two template bodies; return a 400 JsonResponse or None on success."""
+    if not html_body or not text_body:
+        return JsonResponse({"error": "html_body and text_body are required"}, status=400)
+    from django.template import Template, TemplateSyntaxError
+
+    for label, source in (("html_body", html_body), ("text_body", text_body)):
+        try:
+            Template(source)
+        except TemplateSyntaxError as exc:
+            return JsonResponse({"error": f"Invalid template syntax in {label}: {exc}"}, status=400)
+    return None
+
+
 def api_event_email_template(request: HttpRequest, event_id: UUID, notification_type: str) -> JsonResponse:
     """API: Get, update, or delete a per-event email template override.
 
@@ -3372,25 +3411,9 @@ def api_event_email_template(request: HttpRequest, event_id: UUID, notification_
         return JsonResponse({"error": "Forbidden"}, status=403)
 
     if request.method == "GET":
-        template = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).first()
-        if template is None:
-            return JsonResponse({"error": "No custom template"}, status=404)
-        return JsonResponse(
-            {
-                "id": str(template.id),
-                "notification_type": template.notification_type,
-                "subject": template.subject,
-                "html_body": template.html_body,
-                "text_body": template.text_body,
-            }
-        )
-
+        return _handle_get_email_template(event, notification_type)
     if request.method == "DELETE":
-        template = CTFEmailTemplate.objects.filter(event=event, notification_type=notification_type).first()
-        if template is None:
-            return JsonResponse({"error": "No custom template to delete"}, status=404)
-        template.delete(soft=True)
-        return JsonResponse({"status": "reverted_to_default"})
+        return _handle_delete_email_template(event, notification_type)
 
     # PUT — create or update
     try:
@@ -3401,17 +3424,9 @@ def api_event_email_template(request: HttpRequest, event_id: UUID, notification_
     except _BodyParseError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    if not html_body or not text_body:
-        return JsonResponse({"error": "html_body and text_body are required"}, status=400)
-
-    # Validate Django template syntax before saving
-    from django.template import Template, TemplateSyntaxError
-
-    for label, source in [("html_body", html_body), ("text_body", text_body)]:
-        try:
-            Template(source)
-        except TemplateSyntaxError as exc:
-            return JsonResponse({"error": f"Invalid template syntax in {label}: {exc}"}, status=400)
+    syntax_error = _validate_template_bodies(html_body, text_body)
+    if syntax_error is not None:
+        return syntax_error
 
     template, _created = CTFEmailTemplate.objects.update_or_create(
         event=event,

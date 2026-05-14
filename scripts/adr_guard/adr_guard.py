@@ -2480,10 +2480,12 @@ _TF_CONSUMING_SUBCOMMANDS = ("init", "validate", "plan", "apply")
 
 
 def _tfvars_render_violation(path: str, message: str) -> Violation:
+    """Build an ADR-011-R7 violation for the deploy-tfvars-render check."""
     return Violation(_TFVARS_RENDER_CHECK, _TFVARS_RENDER_RULE, path, message)
 
 
 def _is_terraform_consuming_command(stripped_line: str) -> bool:
+    """True when the line runs a terraform subcommand that consumes variables."""
     if stripped_line.lstrip().startswith("#"):
         return False
     return any(f"terraform {sub}" in stripped_line for sub in _TF_CONSUMING_SUBCOMMANDS)

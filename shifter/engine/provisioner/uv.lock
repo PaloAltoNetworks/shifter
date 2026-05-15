@@ -892,7 +892,7 @@ requires-dist = [
     { name = "protobuf", specifier = ">=5.29.6" },
     { name = "psycopg", specifier = ">=3.3.2" },
     { name = "psycopg-binary", specifier = ">=3.3.2" },
-    { name = "pycparser", specifier = ">=2.23" },
+    { name = "pycparser", specifier = ">=3.0" },
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=5.2.1" },

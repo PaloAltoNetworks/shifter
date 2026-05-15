@@ -56,7 +56,7 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.7.1"
-      - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
         with:
           version: v1.34.1
       - name: Install kubeconform

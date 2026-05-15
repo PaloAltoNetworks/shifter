@@ -20,12 +20,12 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Skip conventional title on dev PRs
-        if: github.base_ref == 'dev'
+        if: github.base_ref == 'dev' || github.head_ref == 'dev'
         run: |
-          echo "PRs targeting dev are exempt from conventional title lint."
+          echo "PRs to or from dev are exempt from conventional title lint."
 
       - name: Validate conventional-commit title
-        if: github.base_ref != 'dev'
+        if: github.base_ref != 'dev' && github.head_ref != 'dev'
         # amannn/action-semantic-pull-request v5.5.3
         uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017
         env:

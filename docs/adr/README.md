@@ -30,7 +30,12 @@ Current mechanisms:
   - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
     keeps engine-provisioner EC2 instance lifecycle actions scoped to
     Shifter-owned, Terraform-managed instances.
-- `.github/workflows/_quality.yml`: CI architecture gate
+- `.github/workflows/deploy.yml` and `.github/workflows/_quality.yml`:
+  CI quality gate. `deploy.yml` owns path detection and passes subsystem
+  booleans into `_quality.yml`; `_quality.yml` gates lint, SAST, type,
+  architecture, and test jobs by the relevant subsystem so unrelated
+  package checks do not fan out on every PR. Guardrail and quality-workflow
+  edits still run the enforcement jobs needed to validate the guardrails.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
   runs on push to `dev`, on pull requests against `dev`, and on a

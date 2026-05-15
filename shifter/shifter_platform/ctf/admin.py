@@ -406,18 +406,49 @@ class CTFTeamAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     ]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        """Annotate queryset with member count and score (submissions + awards)."""
+        """Annotate queryset with member count and score (submissions + awards).
+
+        Codex review (#765/#768/#769 cycle 5 + cycle 7):
+          - Cycle 5: aggregating submissions and awards on the same
+            `members__*` relation in one annotate() produced a cartesian
+            product when a member had both a solve and an award.
+            Pre-aggregate via independent subqueries on CTFSubmission
+            and CTFAward.
+          - Cycle 7: apply `eligible_participant_q()` so disqualified or
+            unregistered members' solves/awards are excluded from the
+            admin team list — same eligibility predicate used by the
+            scoreboard.
+        """
+        from django.db.models import IntegerField, OuterRef, Subquery
+
+        from ctf.models import CTFAward, CTFSubmission
+        from ctf.services.participant import eligible_participant_q
+
         qs = super().get_queryset(request)
+        member_eligibility_via_participant = eligible_participant_q("participant__")
+        submission_subq = (
+            CTFSubmission.objects.filter(
+                participant__team_id=OuterRef("pk"),
+                is_correct=True,
+            )
+            .filter(member_eligibility_via_participant)
+            .order_by()
+            .values("participant__team_id")
+            .annotate(t=Coalesce(Sum("points_awarded"), 0))
+            .values("t")
+        )
+        award_subq = (
+            CTFAward.objects.filter(participant__team_id=OuterRef("pk"))
+            .filter(member_eligibility_via_participant)
+            .order_by()
+            .values("participant__team_id")
+            .annotate(t=Coalesce(Sum("points"), 0))
+            .values("t")
+        )
         return qs.annotate(
-            _member_count=Count("members", distinct=True),
-            _submission_score=Coalesce(
-                Sum(
-                    "members__submissions__points_awarded",
-                    filter=Q(members__submissions__is_correct=True),
-                ),
-                0,
-            ),
-            _award_score=Coalesce(Sum("members__awards__points"), 0),
+            _member_count=Count("members", filter=eligible_participant_q("members__"), distinct=True),
+            _submission_score=Coalesce(Subquery(submission_subq, output_field=IntegerField()), 0),
+            _award_score=Coalesce(Subquery(award_subq, output_field=IntegerField()), 0),
             _total_score=F("_submission_score") + F("_award_score"),
         )
 
@@ -515,22 +546,44 @@ class CTFParticipantAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     inlines = [CTFSubmissionInline, CTFAwardInline]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        """Annotate queryset with score (submissions + awards) and solve count."""
+        """Annotate queryset with score (submissions + awards) and solve count.
+
+        Codex review (#765 cycle 6): same cartesian-product fix as the
+        team admin and team scoreboard — pre-aggregate submissions and
+        awards via subqueries so a participant with both a solve and an
+        award doesn't get double-counted via the join.
+        """
+        from django.db.models import IntegerField, OuterRef, Subquery
+
+        from ctf.models import CTFAward, CTFSubmission
+
         qs = super().get_queryset(request)
+        submission_subq = (
+            CTFSubmission.objects.filter(participant_id=OuterRef("pk"), is_correct=True)
+            .order_by()
+            .values("participant_id")
+            .annotate(t=Coalesce(Sum("points_awarded"), 0))
+            .values("t")
+        )
+        solved_subq = (
+            CTFSubmission.objects.filter(participant_id=OuterRef("pk"), is_correct=True)
+            .order_by()
+            .values("participant_id")
+            .annotate(c=Count("id"))
+            .values("c")
+        )
+        award_subq = (
+            CTFAward.objects.filter(participant_id=OuterRef("pk"))
+            .order_by()
+            .values("participant_id")
+            .annotate(t=Coalesce(Sum("points"), 0))
+            .values("t")
+        )
         return qs.annotate(
-            _submission_score=Coalesce(
-                Sum(
-                    "submissions__points_awarded",
-                    filter=Q(submissions__is_correct=True),
-                ),
-                0,
-            ),
-            _award_score=Coalesce(Sum("awards__points"), 0),
+            _submission_score=Coalesce(Subquery(submission_subq, output_field=IntegerField()), 0),
+            _award_score=Coalesce(Subquery(award_subq, output_field=IntegerField()), 0),
             _total_score=F("_submission_score") + F("_award_score"),
-            _solved_count=Count(
-                "submissions",
-                filter=Q(submissions__is_correct=True),
-            ),
+            _solved_count=Coalesce(Subquery(solved_subq, output_field=IntegerField()), 0),
         )
 
     @admin.display(description="Score", ordering="_total_score")

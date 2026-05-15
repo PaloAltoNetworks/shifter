@@ -196,6 +196,7 @@ def _build_tf_variables(
         "instance_uuid": instance_id,
         "request_uuid": request_id,
         "environment": os.environ.get("ENVIRONMENT", "dev"),
+        "secrets_kms_key_arn": os.environ["SECRETS_KMS_KEY_ARN"],
         "subnet_id": os.environ.get("NGFW_SUBNET_ID", ""),
         "mgmt_security_group_id": os.environ.get("NGFW_MGMT_SECURITY_GROUP_ID", ""),
         "data_security_group_id": os.environ.get("NGFW_DATA_SECURITY_GROUP_ID", ""),
@@ -208,6 +209,100 @@ def _build_tf_variables(
         "scm_folder_name": app_spec.get("scm_folder_name", ""),
         "authcode": app_spec.get("authcode", ""),
     }
+
+
+def _cleanup_ngfw_bootstrap_objects(instance_id: str) -> None:
+    """Delete sensitive AWS S3 bootstrap objects after NGFW readiness."""
+    if os.environ.get("CLOUD_PROVIDER", "aws") != "aws":
+        return
+
+    bootstrap_bucket = os.environ.get("NGFW_BOOTSTRAP_BUCKET", "").strip()
+    if not bootstrap_bucket:
+        raise RuntimeError("NGFW_BOOTSTRAP_BUCKET is required for bootstrap object cleanup")
+
+    from cloud import get_object_storage
+
+    storage = get_object_storage()
+    bootstrap_prefix = f"bootstrap/ngfw/{instance_id}"
+    failures: list[tuple[str, Exception]] = []
+    for key in (
+        f"{bootstrap_prefix}/config/init-cfg.txt",
+        f"{bootstrap_prefix}/license/authcodes",
+    ):
+        logger.info("Deleting NGFW bootstrap object: bucket=%s key=%s", bootstrap_bucket, key)
+        try:
+            storage.delete_object(bucket=bootstrap_bucket, key=key)
+        except Exception as e:
+            logger.exception(
+                "Failed to delete NGFW bootstrap object: bucket=%s key=%s error=%s",
+                bootstrap_bucket,
+                key,
+                e,
+            )
+            failures.append((key, e))
+
+    if failures:
+        failed_keys = [key for key, _ in failures]
+        raise RuntimeError(f"Failed to delete NGFW bootstrap object(s): {', '.join(failed_keys)}") from failures[-1][1]
+
+
+def _build_ngfw_ssh_executor_from_output(output_data: dict[str, Any]) -> tuple[str, "NGFWExecutor"]:
+    """Resolve `management_ip` + load the SSH key from Secrets Manager.
+
+    Returns:
+        (management_ip, NGFWExecutor) ready to talk to the device.
+
+    Raises:
+        RuntimeError: if either output field is missing or the secret fetch fails.
+    """
+    management_ip = output_data.get("management_ip")
+    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn")
+    if not ssh_key_secret_arn:
+        raise RuntimeError("NGFW provisioning output missing ssh_key_secret_arn")
+    if not management_ip:
+        raise RuntimeError("NGFW provisioning output missing management_ip")
+
+    from cloud import get_secrets_store
+
+    try:
+        private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
+    except Exception as e:
+        raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
+
+    return management_ip, NGFWExecutor(private_key=private_key)
+
+
+def _short_circuit_local_dev_post_provision(
+    *,
+    request_id: str,
+    instance_id: str,
+    app_id: str,
+    output_data: dict[str, Any],
+    update_instance_state,
+) -> None:
+    """Mark a local-dev NGFW as ready-then-paused without touching the device.
+
+    Local dev mode (presence of `DB_PASSWORD` in the env) bypasses the live
+    PAN-OS SSH bring-up because it isn't reachable. We still emit the ready
+    and paused state transitions so the platform UI reflects the expected
+    lifecycle.
+    """
+    logger.info("LOCAL DEV MODE: Skipping post-infrastructure NGFW configuration")
+    update_instance_state(request_id, STATUS_READY, **output_data, **_build_provider_state(output_data))
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status=STATUS_READY,
+    )
+    logger.info("LOCAL DEV MODE: Setting NGFW status to paused")
+    update_instance_state(request_id, "paused")
+    publish_ngfw_event(
+        request_id=request_id,
+        instance_id=instance_id,
+        app_id=app_id,
+        status="paused",
+    )
 
 
 def _run_pan_os_post_provision(
@@ -225,43 +320,19 @@ def _run_pan_os_post_provision(
         update_instance_state,
     )
 
-    # Skip post-infrastructure config in local dev mode.
     if os.environ.get("DB_PASSWORD"):
-        logger.info("LOCAL DEV MODE: Skipping post-infrastructure NGFW configuration")
-        update_instance_state(request_id, STATUS_READY, **output_data, **_build_provider_state(output_data))
-        publish_ngfw_event(
+        _short_circuit_local_dev_post_provision(
             request_id=request_id,
             instance_id=instance_id,
             app_id=app_id,
-            status=STATUS_READY,
-        )
-        logger.info("LOCAL DEV MODE: Setting NGFW status to paused")
-        update_instance_state(request_id, "paused")
-        publish_ngfw_event(
-            request_id=request_id,
-            instance_id=instance_id,
-            app_id=app_id,
-            status="paused",
+            output_data=output_data,
+            update_instance_state=update_instance_state,
         )
         return
 
     logger.info("Running post-infrastructure NGFW configuration...")
 
-    management_ip = output_data.get("management_ip")
-    ssh_key_secret_arn = output_data.get("ssh_key_secret_arn")
-    if not ssh_key_secret_arn:
-        raise RuntimeError("NGFW provisioning output missing ssh_key_secret_arn")
-    if not management_ip:
-        raise RuntimeError("NGFW provisioning output missing management_ip")
-
-    from cloud import get_secrets_store
-
-    try:
-        private_key = get_secrets_store().get_secret(ssh_key_secret_arn)
-    except Exception as e:
-        raise RuntimeError(f"Failed to retrieve SSH key from Secrets Manager: {e}") from e
-
-    ssh_executor = NGFWExecutor(private_key=private_key)
+    management_ip, ssh_executor = _build_ngfw_ssh_executor_from_output(output_data)
 
     # Wait for SSH availability (VM-Series can take 15-25 min to boot).
     ssh_timeout = int(os.environ.get("NGFW_SSH_WAIT_TIMEOUT", NGFW_SSH_WAIT_TIMEOUT_DEFAULT))
@@ -347,6 +418,12 @@ def _run_pan_os_post_provision(
         status=STATUS_READY,
         serial_number=serial_number,
     )
+    bootstrap_cleanup_error = None
+    try:
+        _cleanup_ngfw_bootstrap_objects(instance_id)
+    except Exception as e:
+        logger.exception("NGFW bootstrap object cleanup failed: request_id=%s", request_id)
+        bootstrap_cleanup_error = e
     logger.info("NGFW provisioning complete, serial=%s: request_id=%s", serial_number, request_id)
 
     logger.info("Auto-stopping NGFW: request_id=%s", request_id)
@@ -358,6 +435,9 @@ def _run_pan_os_post_provision(
             "Auto-stop failed (non-fatal) - NGFW remains running: request_id=%s",
             request_id,
         )
+
+    if bootstrap_cleanup_error:
+        raise RuntimeError("NGFW bootstrap object cleanup failed") from bootstrap_cleanup_error
 
 
 def _run_provision(

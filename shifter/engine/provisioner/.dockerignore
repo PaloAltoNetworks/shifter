@@ -1,14 +1,45 @@
+# Python build / cache artifacts
 venv/
+.venv/
 __pycache__/
 *.pyc
-.pulumi/
+*.pyo
 *.egg-info/
-.git/
 .pytest_cache/
 .mypy_cache/
-*.pyo
+.ruff_cache/
+
+# Test coverage artifacts (kept locally for IDE / CI; not needed in image)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Terraform / Pulumi local state and plans (must NEVER ship in the image)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+terraform.tfvars
+terraform.tfvars.json
+.pulumi/
+
+# VCS metadata
+.git/
+.gitignore
+
+# Local environment / secrets — never bake into the image
 .env
 .env.*
+*.pem
+*.key
+id_rsa
+id_rsa.*
+.aws/
+.gcloud/
+.kube/
+.ssh/
 
 # Mock pulumi CLI (local dev only - real pulumi is installed in container)
 pulumi

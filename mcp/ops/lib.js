@@ -1,6 +1,24 @@
 // Shared constants and helpers for the shifter-ops MCP server.
+//
+// AWS-CLI argv-array helpers (`buildAwsArgv`, `awsExec`, `awsJson`,
+// `awsText`, `buildSsmSendCommandArgs`, plus `REGION` and
+// `getProfile`) live in `mcp/shared/aws-helpers.js` and are
+// re-exported here so existing call sites in this package — and the
+// per-tool argv builders below — keep working unchanged. The shared
+// module governs the argv-array contract that ADR-010 enforces;
+// see `mcp/ngfw/lib.js` and `mcp/ops/SECURITY.md` for context.
 
-export const REGION = "us-east-2";
+import { buildSsmSendCommandArgs } from "../shared/aws-helpers.js";
+
+export {
+  REGION,
+  getProfile,
+  buildAwsArgv,
+  awsExec,
+  awsJson,
+  awsText,
+  buildSsmSendCommandArgs,
+} from "../shared/aws-helpers.js";
 
 // --- AWS ---
 
@@ -206,14 +224,103 @@ export function validateManageCommand(command) {
   return parts;
 }
 
-// --- Shared ---
+// --- Per-tool argv builders for the named-vulnerable paths in #763 ---
+//
+// These exist as pure functions so tests can assert that
+// user-controlled values land as literal argv elements without ever
+// spawning aws. The handlers in index.js call these and pass the
+// result straight to aws()/awsText(). Adding a new
+// metacharacter-containing payload to a regression test means
+// extending the per-tool test cases in lib.test.js, not editing
+// index.js.
 
-export function getProfile(profiles, env) {
-  const profile = profiles[env];
-  if (!profile) {
-    throw new Error(
-      `AWS profile not set for ${env}. Export PANW_SHIFTER_${env.toUpperCase()}_PROFILE`
+/**
+ * CloudWatch `logs filter-log-events` argv. The user-supplied
+ * `filterPattern` becomes a single argv element; no JSON.stringify
+ * wrapping is needed because there is no shell to interpret it.
+ */
+export function buildFilterLogEventsArgs({ logGroup, filterPattern, limit }) {
+  return [
+    "logs",
+    "filter-log-events",
+    "--log-group-name",
+    logGroup,
+    "--filter-pattern",
+    filterPattern,
+    "--limit",
+    String(limit),
+  ];
+}
+
+/**
+ * SSM `send-command` argv for the Django manage.py wrapper. The user's
+ * `command` is concatenated into the docker-exec invocation that runs
+ * inside the remote shell on the EC2 host. That remote shell IS
+ * intentional (the tool's contract is to forward a command for remote
+ * execution); the security boundary protected here is the LOCAL host
+ * shell, which never sees the payload because the wrapped string
+ * lands inside the JSON parameters argv element.
+ */
+export function buildRunManageArgs({ targetId, command }) {
+  const dockerCmd = `docker exec portal python manage.py ${command}`;
+  return buildSsmSendCommandArgs({
+    instanceId: targetId,
+    docName: "AWS-RunShellScript",
+    commands: [dockerCmd],
+  });
+}
+
+/**
+ * Build the `pg.Pool` config for the env-scoped Postgres connection that
+ * tunnels through SSM. Issue #1190 — TLS verification was previously
+ * disabled (`rejectUnauthorized: false`) to work around the cert/host
+ * mismatch caused by tunneling: the cert presented by RDS carries the
+ * RDS endpoint in its CN/SAN, but the local node-postgres client
+ * connects to `localhost`. The fix preserves verification by setting
+ * `servername` on the TLS options to the captured `rdsHost`; Node's
+ * `tls.connect` then performs SNI and hostname verification against
+ * the real RDS endpoint instead of `localhost`, while the TCP stream
+ * still rides the local SSM port forward.
+ *
+ * The function fails closed: callers must pass a non-empty `rdsHost`
+ * captured at tunnel-start time. Reintroducing `rejectUnauthorized:
+ * false` requires editing this single helper; the
+ * `mcp-ops-tls-strict` adr_guard check backstops accidental
+ * regression in any other `mcp/ops/*.js` file.
+ *
+ * RDS Postgres servers send the full intermediate chain rooted at
+ * Amazon Root CA 1, which is present in every mainstream OS root
+ * store, so Node's default trust store verifies the chain without a
+ * bundled CA. See `mcp/ops/SECURITY.md` § "Database TLS" for the trust
+ * model and the procedure to switch to a pinned `ca:` bundle if the
+ * default trust store ever proves insufficient.
+ */
+export function buildPoolConfig({ rdsHost, creds, port }) {
+  if (typeof rdsHost !== "string" || rdsHost.trim() === "") {
+    throw new TypeError(
+      "buildPoolConfig: rdsHost is required (captured at tunnel-start time)",
     );
   }
-  return profile;
+  if (!creds || typeof creds !== "object") {
+    throw new TypeError("buildPoolConfig: creds is required");
+  }
+  if (typeof port !== "number" || !Number.isInteger(port) || port <= 0) {
+    throw new TypeError("buildPoolConfig: port must be a positive integer");
+  }
+  return {
+    host: "localhost",
+    port,
+    user: creds.username,
+    password: creds.password,
+    database: creds.dbname,
+    ssl: {
+      rejectUnauthorized: true,
+      // SNI + hostname check fire against the real RDS endpoint, not
+      // the localhost target of the SSM port forward.
+      servername: rdsHost,
+    },
+    max: 3,
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+  };
 }

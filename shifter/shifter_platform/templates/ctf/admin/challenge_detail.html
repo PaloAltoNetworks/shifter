@@ -1,8 +1,12 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}{{ challenge.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    {{ challenge.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .detail-layout {
     display: grid;
     grid-template-columns: 1fr 360px;
@@ -14,7 +18,7 @@
     display: flex;
     gap: 4px;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
     list-style: none;
     padding: 0;
@@ -22,13 +26,13 @@
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .challenge-badges {
@@ -47,13 +51,13 @@
 }
 
 .badge-category {
-    background: rgba(18, 141, 243, 0.15);
-    color: #128df3;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
 }
 
 .badge-easy {
-    background: rgba(0, 210, 106, 0.15);
-    color: #00d26a;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
 }
 
 .badge-medium {
@@ -77,8 +81,8 @@
 }
 
 .badge-correct {
-    background: rgba(0, 210, 106, 0.15);
-    color: #00d26a;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
 }
 
 .badge-incorrect {
@@ -100,22 +104,22 @@
 }
 
 .detail-row + .detail-row {
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
 }
 
 .detail-label {
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .detail-value {
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .challenge-description {
     font-size: 14px;
     line-height: 1.6;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .challenge-description p {
@@ -125,8 +129,13 @@
 .empty-message {
     padding: 24px;
     text-align: center;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     font-size: 13px;
+}
+
+.hint-empty-note {
+    font-size: 13px;
+    margin: 0;
 }
 
 @media (max-width: 960px) {
@@ -134,455 +143,682 @@
         grid-template-columns: 1fr;
     }
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <nav>
-        <ol class="breadcrumb">
-            <li><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
-            <li><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
-            <li><a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}">Challenges</a></li>
-            <li>{{ challenge.name }}</li>
-        </ol>
-    </nav>
-    <div class="flex-between">
+    <!-- Header -->
+    <div class="page-header">
+        <nav>
+            <ol class="breadcrumb">
+                <li>
+                    <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}">{% trans "Challenges" %}</a>
+                </li>
+                <li>
+                    {{ challenge.name }}
+                </li>
+            </ol>
+        </nav>
+        <div class="flex-between">
+            <div>
+                <h1 class="page-title">
+                    {{ challenge.name }}
+                </h1>
+                <div class="challenge-badges">
+                    <span class="badge badge-category">{{ challenge.category|title }}</span>
+                    {% if challenge.difficulty == 'easy' %}
+                        <span class="badge badge-easy">{% trans "Easy" %}</span>
+                    {% elif challenge.difficulty == 'medium' %}
+                        <span class="badge badge-medium">{% trans "Medium" %}</span>
+                    {% elif challenge.difficulty == 'hard' %}
+                        <span class="badge badge-hard">{% trans "Hard" %}</span>
+                    {% elif challenge.difficulty == 'expert' %}
+                        <span class="badge badge-expert">{% trans "Expert" %}</span>
+                    {% endif %}
+                    <span class="badge badge-points">
+                        {% blocktrans with v1=challenge.points %}
+                            {{ v1 }} pts
+                        {% endblocktrans %}
+                    </span>
+                </div>
+            </div>
+            {% if event.is_modifiable %}
+                <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}"
+                   class="btn btn-primary">{% trans "Edit" %}</a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="detail-layout">
+        <!-- Main Column -->
         <div>
-            <h1 class="page-title">{{ challenge.name }}</h1>
-            <div class="challenge-badges">
-                <span class="badge badge-category">{{ challenge.category|title }}</span>
-                {% if challenge.difficulty == 'easy' %}
-                <span class="badge badge-easy">Easy</span>
-                {% elif challenge.difficulty == 'medium' %}
-                <span class="badge badge-medium">Medium</span>
-                {% elif challenge.difficulty == 'hard' %}
-                <span class="badge badge-hard">Hard</span>
-                {% elif challenge.difficulty == 'expert' %}
-                <span class="badge badge-expert">Expert</span>
-                {% endif %}
-                <span class="badge badge-points">{{ challenge.points }} pts</span>
+            <!-- Description -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Description" %}
+                </div>
+                <div class="challenge-description">
+                    {{ challenge.description|linebreaks }}
+                </div>
             </div>
-        </div>
-        {% if event.is_modifiable %}
-        <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}" class="btn btn-primary">
-            Edit
-        </a>
-        {% endif %}
-    </div>
-</div>
-
-<div class="detail-layout">
-    <!-- Main Column -->
-    <div>
-        <!-- Description -->
-        <div class="card">
-            <div class="card-title">Description</div>
-            <div class="challenge-description">{{ challenge.description|linebreaks }}</div>
-        </div>
-
-        <!-- Hints -->
-        <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                Hints ({{ challenge.hints.count }})
+            <!-- Hints -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Hints (" %}{{ challenge.hints.count }})
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                onclick="document.getElementById('add-hint-form').classList.add('is-open')">
+                            {% trans "Add Hint" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if challenge.hints.count > 0 %}
+                    <table class="table-compact">
+                        <thead>
+                            <tr class="border-bottom">
+                                <th class="p-xs text-left">
+                                    #
+                                </th>
+                                <th class="p-xs text-left">
+                                    {% trans "Text" %}
+                                </th>
+                                <th class="p-xs text-left">
+                                    {% trans "Penalty" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th class="p-xs">
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for hint in challenge.hints.all %}
+                                <tr class="border-bottom">
+                                    <td class="p-xs">
+                                        {{ hint.order }}
+                                    </td>
+                                    <td class="p-xs">
+                                        {{ hint.text|truncatechars:80 }}
+                                    </td>
+                                    <td class="p-xs">
+                                        {% blocktrans with v1=hint.penalty %}
+                                            {{ v1 }}%
+                                        {% endblocktrans %}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td class="p-xs text-right">
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-danger"
+                                                    onclick="removeHint('{{ hint.id }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p class="text-muted hint-empty-note">
+                        {% trans "No hints added yet." %}
+                    </p>
+                {% endif %}
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-outline-primary" onclick="document.getElementById('add-hint-form').style.display='block'">Add Hint</button>
+                    <div id="add-hint-form" class="collapse-panel-mt">
+                        <div class="mb-sm">
+                            <label for="new-hint-text" class="label-compact">
+                                {% trans "Hint Text" %}
+                            </label>
+                            <textarea id="new-hint-text" class="form-input w-full" rows="2"></textarea>
+                        </div>
+                        <div class="flex-fields-md">
+                            <div>
+                                <label for="new-hint-penalty" class="label-compact">
+                                    {% trans "Penalty (%)" %}
+                                </label>
+                                <input type="number"
+                                       id="new-hint-penalty"
+                                       class="form-input w-100px"
+                                       min="0"
+                                       max="100"
+                                       value="0">
+                            </div>
+                            <div>
+                                <label for="new-hint-order" class="label-compact">
+                                    {% trans "Order" %}
+                                </label>
+                                <input type="number"
+                                       id="new-hint-order"
+                                       class="form-input w-100px"
+                                       min="0"
+                                       value="{{ challenge.hints.count }}">
+                            </div>
+                        </div>
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="addHint()">
+                            {% trans "Add" %}
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                onclick="document.getElementById('add-hint-form').classList.remove('is-open')">
+                            {% trans "Cancel" %}
+                        </button>
+                    </div>
                 {% endif %}
             </div>
-            {% if challenge.hints.count > 0 %}
-            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
-                <thead>
-                    <tr style="border-bottom: 1px solid var(--xdr-border);">
-                        <th style="padding: 6px; text-align: left;">#</th>
-                        <th style="padding: 6px; text-align: left;">Text</th>
-                        <th style="padding: 6px; text-align: left;">Penalty</th>
-                        {% if event.is_content_modifiable %}<th style="padding: 6px;"></th>{% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for hint in challenge.hints.all %}
-                    <tr style="border-bottom: 1px solid var(--xdr-border);">
-                        <td style="padding: 6px;">{{ hint.order }}</td>
-                        <td style="padding: 6px;">{{ hint.text|truncatechars:80 }}</td>
-                        <td style="padding: 6px;">{{ hint.penalty }}%</td>
-                        {% if event.is_content_modifiable %}
-                        <td style="padding: 6px; text-align: right;">
-                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeHint('{{ hint.id }}')">Remove</button>
-                        </td>
-                        {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p class="text-muted" style="font-size: 13px; margin: 0;">No hints added yet.</p>
-            {% endif %}
-            {% if event.is_content_modifiable %}
-            <div id="add-hint-form" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--xdr-border);">
-                <div style="margin-bottom: 8px;">
-                    <label style="font-size: 12px; font-weight: 600;">Hint Text</label>
-                    <textarea id="new-hint-text" class="form-input" rows="2" style="width: 100%;"></textarea>
-                </div>
-                <div style="display: flex; gap: 12px; margin-bottom: 8px;">
-                    <div>
-                        <label style="font-size: 12px; font-weight: 600;">Penalty (%)</label>
-                        <input type="number" id="new-hint-penalty" class="form-input" min="0" max="100" value="0" style="width: 100px;">
+            <!-- Solution -->
+            {% if challenge.solution %}
+                <div class="card">
+                    <div class="card-title">
+                        {% trans "Solution Writeup" %}
                     </div>
-                    <div>
-                        <label style="font-size: 12px; font-weight: 600;">Order</label>
-                        <input type="number" id="new-hint-order" class="form-input" min="0" value="{{ challenge.hints.count }}" style="width: 100px;">
-                    </div>
-                </div>
-                <button type="button" class="btn btn-sm btn-primary" onclick="addHint()">Add</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('add-hint-form').style.display='none'">Cancel</button>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Solution -->
-        {% if challenge.solution %}
-        <div class="card">
-            <div class="card-title">Solution Writeup</div>
-            <div class="challenge-description">{{ challenge.solution|linebreaks }}</div>
-        </div>
-        {% endif %}
-
-        <!-- Flags -->
-        <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                Flags
-                {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('add-flag-form').style.display = document.getElementById('add-flag-form').style.display === 'none' ? 'block' : 'none'">
-                    Add Flag
-                </button>
-                {% endif %}
-            </div>
-            {% if flags %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Type</th>
-                        <th>Case Sensitive</th>
-                        {% if event.is_content_modifiable %}
-                        <th>Actions</th>
-                        {% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for flag in flags %}
-                    <tr>
-                        <td>{{ flag.order }}</td>
-                        <td><span class="badge badge-secondary">{{ flag.flag_type }}</span></td>
-                        <td>{% if flag.case_sensitive %}Yes{% else %}No{% endif %}</td>
-                        {% if event.is_content_modifiable %}
-                        <td>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="removeFlag('{{ flag.pk }}')">Remove</button>
-                        </td>
-                        {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty-message">
-                No flag records. Using legacy flag_hash field.
-            </div>
-            {% endif %}
-
-            {% if event.is_content_modifiable %}
-            <div id="add-flag-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
-                <div style="margin-bottom: 8px;">
-                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Flag Value</label>
-                    <input type="text" id="new-flag-value" class="form-control" placeholder="Enter flag value or regex pattern">
-                </div>
-                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                    <div style="flex: 1;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Type</label>
-                        <select id="new-flag-type" class="form-control">
-                            <option value="static">Static</option>
-                            <option value="regex">Regex</option>
-                        </select>
-                    </div>
-                    <div style="flex: 1;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Case Sensitive</label>
-                        <select id="new-flag-case-sensitive" class="form-control">
-                            <option value="true">Yes</option>
-                            <option value="false">No</option>
-                        </select>
+                    <div class="challenge-description">
+                        {{ challenge.solution|linebreaks }}
                     </div>
                 </div>
-                <button type="button" class="btn btn-primary" onclick="addFlag()">Save Flag</button>
-            </div>
             {% endif %}
-        </div>
-
-        <!-- Files -->
-        <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                Files
+            <!-- Flags -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Flags" %}
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="document.getElementById('add-flag-form').classList.toggle('is-open')">
+                            {% trans "Add Flag" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if flags %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    #
+                                </th>
+                                <th>
+                                    {% trans "Type" %}
+                                </th>
+                                <th>
+                                    {% trans "Case Sensitive" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th>
+                                        {% trans "Actions" %}
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for flag in flags %}
+                                <tr>
+                                    <td>
+                                        {{ flag.order }}
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-secondary">{{ flag.flag_type }}</span>
+                                    </td>
+                                    <td>
+                                        {% if flag.case_sensitive %}
+                                            {% trans "Yes" %}
+                                        {% else %}
+                                            {% trans "No" %}
+                                        {% endif %}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    onclick="removeFlag('{{ flag.pk }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No flag records. Using legacy flag_hash field." %}
+                    </div>
+                {% endif %}
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('upload-file-form').style.display = document.getElementById('upload-file-form').style.display === 'none' ? 'block' : 'none'">
-                    Upload File
-                </button>
+                    <div id="add-flag-form" class="collapse-panel">
+                        <div class="mb-sm">
+                            <label for="new-flag-value" class="field-label">
+                                {% trans "Flag Value" %}
+                            </label>
+                            <input type="text"
+                                   id="new-flag-value"
+                                   class="form-control"
+                                   placeholder='{% trans "Enter flag value or regex pattern" %}'>
+                        </div>
+                        <div class="flex-fields-sm">
+                            <div class="flex-1">
+                                <label for="new-flag-type" class="field-label">
+                                    {% trans "Type" %}
+                                </label>
+                                <select id="new-flag-type" class="form-control">
+                                    <option value='{% trans "static" %}'>
+                                        {% trans "Static" %}
+                                    </option>
+                                    <option value='{% trans "regex" %}'>
+                                        {% trans "Regex" %}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="flex-1">
+                                <label for="new-flag-case-sensitive" class="field-label">
+                                    {% trans "Case Sensitive" %}
+                                </label>
+                                <select id="new-flag-case-sensitive" class="form-control">
+                                    <option value="true">
+                                        {% trans "Yes" %}
+                                    </option>
+                                    <option value="false">
+                                        {% trans "No" %}
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="addFlag()">
+                            {% trans "Save Flag" %}
+                        </button>
+                    </div>
                 {% endif %}
             </div>
-            {% if challenge_files %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Size</th>
-                        <th>Type</th>
-                        {% if event.is_content_modifiable %}
-                        <th>Actions</th>
-                        {% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for file in challenge_files %}
-                    <tr>
-                        <td>
-                            <a href="#" onclick="downloadFile('{% url 'ctf:api_file_download' file_id=file.pk %}'); return false;">{{ file.display }}</a>
-                        </td>
-                        <td>{{ file.file_size_display }}</td>
-                        <td>{{ file.content_type }}</td>
-                        {% if event.is_content_modifiable %}
-                        <td>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="removeFile('{{ file.pk }}')">Remove</button>
-                        </td>
-                        {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty-message">
-                No files attached.
-            </div>
-            {% endif %}
-
-            {% if event.is_content_modifiable %}
-            <div id="upload-file-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
-                <form method="post" enctype="multipart/form-data" action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
-                    {% csrf_token %}
-                    <div style="margin-bottom: 8px;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">File</label>
-                        <input type="file" name="file" class="form-control" required>
+            <!-- Files -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Files" %}
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="document.getElementById('upload-file-form').classList.toggle('is-open')">
+                            {% trans "Upload File" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if challenge_files %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    {% trans "Name" %}
+                                </th>
+                                <th>
+                                    {% trans "Size" %}
+                                </th>
+                                <th>
+                                    {% trans "Type" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th>
+                                        {% trans "Actions" %}
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in challenge_files %}
+                                <tr>
+                                    <td>
+                                        <a href="#"
+                                           data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
+                                           {{ file.display }}
+                                           </a>
+                                    </td>
+                                    <td>
+                                        {{ file.file_size_display }}
+                                    </td>
+                                    <td>
+                                        {{ file.content_type }}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    onclick="removeFile('{{ file.pk }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No files attached." %}
                     </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Display Name (optional)</label>
-                        <input type="text" name="display_name" class="form-control" placeholder="Friendly name for download">
-                    </div>
-                    <button type="submit" class="btn btn-primary">Upload</button>
-                    <span class="text-muted text-small" style="margin-left: 8px;">Max 50 MB</span>
-                </form>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Prerequisites -->
-        <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                Prerequisites
+                {% endif %}
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('add-prereq-form').style.display = document.getElementById('add-prereq-form').style.display === 'none' ? 'block' : 'none'">
-                    Add Prerequisite
-                </button>
+                    <div id="upload-file-form" class="collapse-panel">
+                        <form method="post"
+                              enctype="multipart/form-data"
+                              action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
+                            {% csrf_token %}
+                            <div class="mb-sm">
+                                <label for="upload-file-input" class="field-label">
+                                    {% trans "File" %}
+                                </label>
+                                <input type="file"
+                                       id="upload-file-input"
+                                       name="file"
+                                       class="form-control"
+                                       required>
+                            </div>
+                            <div class="mb-sm">
+                                <label for="upload-display-name" class="field-label">
+                                    {% trans "Display Name (optional)" %}
+                                </label>
+                                <input type="text"
+                                       id="upload-display-name"
+                                       name="display_name"
+                                       class="form-control"
+                                       placeholder='{% trans "Friendly name for download" %}'>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                {% trans "Upload" %}
+                            </button>
+                            <span class="text-muted text-small ml-sm">{% trans "Max 50 MB" %}</span>
+                        </form>
+                    </div>
                 {% endif %}
             </div>
-            {% if prerequisites %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Required Challenge</th>
-                        <th>Category</th>
-                        <th>Points</th>
-                        {% if event.is_content_modifiable %}
-                        <th>Actions</th>
-                        {% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for prereq in prerequisites %}
-                    <tr>
-                        <td>{{ prereq.required_challenge.name }}</td>
-                        <td><span class="badge badge-category">{{ prereq.required_challenge.category|title }}</span></td>
-                        <td>{{ prereq.required_challenge.points }}</td>
-                        {% if event.is_content_modifiable %}
-                        <td>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="removePrerequisite('{{ prereq.pk }}')">Remove</button>
-                        </td>
-                        {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty-message">
-                No prerequisites. This challenge is available immediately.
+            <!-- Prerequisites -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Prerequisites" %}
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="document.getElementById('add-prereq-form').classList.toggle('is-open')">
+                            {% trans "Add Prerequisite" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if prerequisites %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    {% trans "Required Challenge" %}
+                                </th>
+                                <th>
+                                    {% trans "Category" %}
+                                </th>
+                                <th>
+                                    {% trans "Points" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th>
+                                        {% trans "Actions" %}
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for prereq in prerequisites %}
+                                <tr>
+                                    <td>
+                                        {{ prereq.required_challenge.name }}
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-category">
+                                        {{ prereq.required_challenge.category|title }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {{ prereq.required_challenge.points }}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    onclick="removePrerequisite('{{ prereq.pk }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No prerequisites. This challenge is available immediately." %}
+                    </div>
+                {% endif %}
+                {% if event.is_content_modifiable %}
+                    <div id="add-prereq-form" class="collapse-panel">
+                        <div class="mb-sm">
+                            <label for="prereq-challenge-select" class="field-label">
+                                {% trans "Required Challenge" %}
+                            </label>
+                            <select id="prereq-challenge-select" class="form-control">
+                                <option value="">
+                                    {% trans "Select a challenge..." %}
+                                </option>
+                                {% for ch in other_challenges %}
+                                    <option value="{{ ch.pk }}">
+                                        {% blocktrans with v1=ch.name v2=ch.category|title v3=ch.points %}
+                                            {{ v1 }} ({{ v2 }}, {{ v3 }} pts)
+                                        {% endblocktrans %}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="button"
+                                class="btn btn-primary"
+                                onclick="addPrerequisite()">
+                            {% trans "Add" %}
+                        </button>
+                    </div>
+                {% endif %}
             </div>
-            {% endif %}
-
-            {% if event.is_content_modifiable %}
-            <div id="add-prereq-form" style="display: none; padding: 12px; border-top: 1px solid var(--xdr-border);">
-                <div style="margin-bottom: 8px;">
-                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Required Challenge</label>
-                    <select id="prereq-challenge-select" class="form-control">
-                        <option value="">Select a challenge...</option>
-                        {% for ch in other_challenges %}
-                        <option value="{{ ch.pk }}">{{ ch.name }} ({{ ch.category|title }}, {{ ch.points }} pts)</option>
+            <!-- Recent Submissions -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Recent Submissions" %}
+                </div>
+                {% if recent_submissions %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    {% trans "Participant" %}
+                                </th>
+                                <th>
+                                    {% trans "Time" %}
+                                </th>
+                                <th>
+                                    {% trans "Result" %}
+                                </th>
+                                <th>
+                                    {% trans "Points" %}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sub in recent_submissions %}
+                                <tr>
+                                    <td>
+                                        {{ sub.participant.name }}
+                                    </td>
+                                    <td>
+                                        {{ sub.submitted_at|date:"M d, H:i:s" }}
+                                    </td>
+                                    <td>
+                                        {% if sub.is_correct %}
+                                            <span class="badge badge-correct">{% trans "Correct" %}</span>
+                                        {% else %}
+                                            <span class="badge badge-incorrect">{% trans "Incorrect" %}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {{ sub.points_awarded }}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No submissions yet." %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        <!-- Sidebar -->
+        <div>
+            <!-- Statistics -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Statistics" %}
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Total Submissions" %}</span>
+                    <span class="detail-value">{{ total_submissions }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Correct Submissions" %}</span>
+                    <span class="detail-value">{{ correct_submissions }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Solve Rate" %}</span>
+                    <span class="detail-value">
+                        {% if total_submissions > 0 %}
+                            {{ correct_submissions|floatformat:0 }}%
+                        {% else %}
+                            {% trans "N/A" %}
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "First Blood" %}</span>
+                    <span class="detail-value">
+                        {% if first_blood %}
+                            {{ first_blood.participant.name }}
+                        {% else %}
+                            {% trans "None yet" %}
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            <!-- Settings -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Settings" %}
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Category" %}</span>
+                    <span class="detail-value">{{ challenge.category|title }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Points" %}</span>
+                    <span class="detail-value">{{ challenge.points }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Difficulty" %}</span>
+                    <span class="detail-value">{{ challenge.difficulty|title }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Flag Format" %}</span>
+                    <span class="detail-value">
+                        {% if challenge.flag_format %}
+                            {{ challenge.flag_format }}
+                        {% else %}
+                            <span class="text-muted">{% trans "Not set" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Max Attempts" %}</span>
+                    <span class="detail-value">
+                        {% if challenge.max_attempts %}
+                            {{ challenge.max_attempts }}
+                        {% else %}
+                            {% trans "Unlimited" %}
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Release Time" %}</span>
+                    <span class="detail-value">
+                        {% if challenge.release_time %}
+                            {{ challenge.release_time|date:"M d, H:i" }}
+                        {% else %}
+                            {% trans "Immediate" %}
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Target Instance" %}</span>
+                    <span class="detail-value">
+                        {% if challenge.target_instance_name %}
+                            {{ challenge.target_instance_name }}
+                        {% else %}
+                            <span class="text-muted">{% trans "Not set" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Target Port" %}</span>
+                    <span class="detail-value">
+                        {% if challenge.target_port %}
+                            {{ challenge.target_port }}
+                        {% else %}
+                            <span class="text-muted">{% trans "Not set" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Tags" %}</span>
+                    <span class="detail-value">
+                        {% for tag in challenge.tags.all %}
+                            <span class="badge bg-secondary">{{ tag.name }}</span>
+                        {% empty %}
+                            <span class="text-muted">{% trans "None" %}</span>
                         {% endfor %}
-                    </select>
+                    </span>
                 </div>
-                <button type="button" class="btn btn-primary" onclick="addPrerequisite()">Add</button>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Recent Submissions -->
-        <div class="card">
-            <div class="card-title">Recent Submissions</div>
-            {% if recent_submissions %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Participant</th>
-                        <th>Time</th>
-                        <th>Result</th>
-                        <th>Points</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for sub in recent_submissions %}
-                    <tr>
-                        <td>{{ sub.participant.name }}</td>
-                        <td>{{ sub.submitted_at|date:"M d, H:i:s" }}</td>
-                        <td>
-                            {% if sub.is_correct %}
-                            <span class="badge badge-correct">Correct</span>
-                            {% else %}
-                            <span class="badge badge-incorrect">Incorrect</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ sub.points_awarded }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty-message">
-                No submissions yet.
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Sidebar -->
-    <div>
-        <!-- Statistics -->
-        <div class="card">
-            <div class="card-title">Statistics</div>
-            <div class="detail-row">
-                <span class="detail-label">Total Submissions</span>
-                <span class="detail-value">{{ total_submissions }}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Correct Submissions</span>
-                <span class="detail-value">{{ correct_submissions }}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Solve Rate</span>
-                <span class="detail-value">
-                    {% if total_submissions > 0 %}
-                    {{ correct_submissions|floatformat:0 }}%
-                    {% else %}
-                    N/A
-                    {% endif %}
-                </span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">First Blood</span>
-                <span class="detail-value">
-                    {% if first_blood %}
-                    {{ first_blood.participant.name }}
-                    {% else %}
-                    None yet
-                    {% endif %}
-                </span>
-            </div>
-        </div>
-
-        <!-- Settings -->
-        <div class="card">
-            <div class="card-title">Settings</div>
-            <div class="detail-row">
-                <span class="detail-label">Category</span>
-                <span class="detail-value">{{ challenge.category|title }}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Points</span>
-                <span class="detail-value">{{ challenge.points }}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Difficulty</span>
-                <span class="detail-value">{{ challenge.difficulty|title }}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Flag Format</span>
-                <span class="detail-value">{% if challenge.flag_format %}{{ challenge.flag_format }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Max Attempts</span>
-                <span class="detail-value">{% if challenge.max_attempts %}{{ challenge.max_attempts }}{% else %}Unlimited{% endif %}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Release Time</span>
-                <span class="detail-value">{% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}{% else %}Immediate{% endif %}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Target Instance</span>
-                <span class="detail-value">{% if challenge.target_instance_name %}{{ challenge.target_instance_name }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Target Port</span>
-                <span class="detail-value">{% if challenge.target_port %}{{ challenge.target_port }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Tags</span>
-                <span class="detail-value">
-                    {% for tag in challenge.tags.all %}
-                    <span class="badge bg-secondary">{{ tag.name }}</span>
-                    {% empty %}
-                    <span class="text-muted">None</span>
-                    {% endfor %}
-                </span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Topics</span>
-                <span class="detail-value">
-                    {% for topic in challenge.topics.all %}
-                    <span class="badge bg-info">{{ topic.name }}</span>
-                    {% empty %}
-                    <span class="text-muted">None</span>
-                    {% endfor %}
-                </span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Rating</span>
-                <span class="detail-value">
-                    {% if rating.average %}{{ rating.average }}/5 ({{ rating.count }} rating{{ rating.count|pluralize }}){% else %}No ratings yet{% endif %}
-                </span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Display Order</span>
-                <span class="detail-value">{{ challenge.order }}</span>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Topics" %}</span>
+                    <span class="detail-value">
+                        {% for topic in challenge.topics.all %}
+                            <span class="badge bg-info">{{ topic.name }}</span>
+                        {% empty %}
+                            <span class="text-muted">{% trans "None" %}</span>
+                        {% endfor %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Rating" %}</span>
+                    <span class="detail-value">
+                        {% if rating.average %}
+                            {{ rating.average }}/5 ({{ rating.count }}
+                            {% trans "rating" %}{{ rating.count|pluralize }})
+                        {% else %}
+                            {% trans "No ratings yet" %}
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Display Order" %}</span>
+                    <span class="detail-value">{{ challenge.order }}</span>
+                </div>
             </div>
         </div>
     </div>
-</div>
-<script>
+    <script>
 function downloadFile(apiUrl) {
     fetch(apiUrl, {headers: {'X-CSRFToken': '{{ csrf_token }}'}})
         .then(function(r) { return r.json(); })
@@ -592,9 +828,16 @@ function downloadFile(apiUrl) {
         })
         .catch(function() { alert('Download failed.'); });
 }
-</script>
-{% if event.is_content_modifiable %}
-<script>
+
+document.querySelectorAll('[data-download-url]').forEach(function(link) {
+    link.addEventListener('click', function(event) {
+        event.preventDefault();
+        downloadFile(link.dataset.downloadUrl);
+    });
+});
+    </script>
+    {% if event.is_content_modifiable %}
+        <script>
 function addFlag() {
     const flagValue = document.getElementById('new-flag-value').value.trim();
     if (!flagValue) { alert('Flag value is required'); return; }
@@ -645,7 +888,8 @@ function addPrerequisite() {
     });
 }
 
-const REMOVE_PREREQ_URL = "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_PREREQ_URL =
+    "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
 function removePrerequisite(prereqId) {
     if (!confirm('Remove this prerequisite?')) return;
     const url = REMOVE_PREREQ_URL.replace('00000000-0000-0000-0000-000000000000', prereqId);
@@ -683,6 +927,6 @@ function removeHint(hintId) {
         if (r.ok) { location.reload(); } else { r.json().then(d => alert(d.error)); }
     });
 }
-</script>
-{% endif %}
+        </script>
+    {% endif %}
 {% endblock %}

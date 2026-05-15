@@ -3,12 +3,30 @@
 These tests verify the security-critical logic that controls access to dev_login/dev_logout.
 """
 
+from pathlib import Path
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from django.urls import reverse
 
 User = get_user_model()
+
+
+def test_environment_setting_default_is_fail_closed():
+    """settings.ENVIRONMENT must not default to 'development' (issue #761).
+
+    A 'development' default means any deployment that omits the ENVIRONMENT
+    env var silently activates /dev-login/. The safe default is fail-closed
+    ('production'), forcing dev environments to opt in explicitly.
+    """
+    settings_path = Path(__file__).resolve().parents[2] / "config" / "settings.py"
+    source = settings_path.read_text()
+    forbidden = 'os.environ.get("ENVIRONMENT", "development")'
+    assert forbidden not in source, (
+        f"settings.ENVIRONMENT must not default to 'development' (regression of #761). "
+        f"Found {forbidden!r} in {settings_path}"
+    )
 
 
 @pytest.fixture
@@ -36,11 +54,11 @@ class TestDevLoginSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_blocks_public_access_even_in_development(self, client):
         """Deployed dev auth must not be reachable from the public ingress host."""
-        response = client.get("/dev-login/", HTTP_HOST="shifter.keplerops.com")
+        response = client.get("/dev-login/", HTTP_HOST="shifter.example.com")
         assert response.status_code == 403
         assert b"local or admin access paths" in response.content
 
@@ -76,7 +94,7 @@ class TestDevLoginSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_allows_access_over_localhost_in_development(self, client):
         """Deployed dev auth stays available through loopback/admin tunnels."""
@@ -98,7 +116,7 @@ class TestDevLogoutSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_allows_access_when_environment_development(self, client, user):
         """dev_logout stays available through localhost/admin paths only."""
@@ -109,11 +127,11 @@ class TestDevLogoutSecurity:
     @override_settings(
         DEBUG=False,
         ENVIRONMENT="development",
-        ALLOWED_HOSTS=["testserver", "shifter.keplerops.com", "localhost"],
+        ALLOWED_HOSTS=["testserver", "shifter.example.com", "localhost"],
     )
     def test_blocks_public_access_in_development(self, client, user):
         client.force_login(user)
-        response = client.get("/dev-logout/", HTTP_HOST="shifter.keplerops.com")
+        response = client.get("/dev-logout/", HTTP_HOST="shifter.example.com")
         assert response.status_code == 403
         assert b"local or admin access paths" in response.content
 

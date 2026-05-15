@@ -1,18 +1,21 @@
-{% load static %}
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load static i18n %}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shifter Access</title>
-    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
-    <link
-        rel="stylesheet"
-        href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css"
-        integrity="sha384-0Wcwu737HAMd4dc+eWTBlwaXSABrcAJUjPk7K58aPdKIR9y7gexKB+CGg/2C8U35"
-        crossorigin="anonymous"
-    >
-    <style>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1.0">
+        <title>{% trans "Shifter Access" %}</title>
+        <link rel="icon"
+              type="image/svg+xml"
+              href="{% static 'images/favicon.svg' %}">
+        <link rel="stylesheet"
+              href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css"
+              integrity="sha384-0Wcwu737HAMd4dc+eWTBlwaXSABrcAJUjPk7K58aPdKIR9y7gexKB+CGg/2C8U35"
+              crossorigin="anonymous">
+        <style>
         :root {
             --bg: #0f172a;
             --panel: #111827;
@@ -189,79 +192,115 @@
             font-size: 0.92rem;
             color: var(--muted);
         }
-    </style>
-</head>
-<body>
-    <main class="panel">
-        <div id="auth-banner" class="banner" role="alert"></div>
-
-        <section id="identity-auth-section" class="section visible">
-            <h1>Access Shifter</h1>
-            <p>
-                Corporate access is restricted to <code>@{{ allowed_email_domain }}</code>. Sign-in and registration use
-                Google Identity Platform's prebuilt web UI. Shifter only creates an application session after the
-                provider confirms the identity token, verified email, and enrolled MFA state.
-            </p>
-            <div id="identity-auth-loader">Loading authentication…</div>
-            <div id="firebaseui-auth-container"></div>
-            <p class="help">
-                CTF participant access still uses range invitation magic links and does not go through this page.
-            </p>
-        </section>
-
-        <section id="identity-verify-email-section" class="section">
-            <h1>Verify your email</h1>
-            <p id="identity-verify-email-copy"></p>
-            <button id="identity-back-to-login" class="secondary-button" type="button">Back to sign in</button>
-        </section>
-
-        <section id="identity-totp-enrollment-section" class="section">
-            <h1>Set up multi-factor authentication</h1>
-            <p>
-                Add the secret below to your authenticator app, then enter the current six-digit code to finish sign-in.
-            </p>
-            <div class="meta">
-                <strong>Authenticator URI</strong>
-                <div id="identity-totp-qr-url" class="secret-block"></div>
+        </style>
+    </head>
+    <body>
+        <main class="panel">
+            <div id="auth-banner" class="banner" role="alert">
             </div>
-            <div class="meta">
-                <strong>Secret key</strong>
-                <div id="identity-totp-secret" class="secret-block"></div>
-            </div>
-            <div class="field">
-                <label for="identity-totp-enrollment-code">Verification code</label>
-                <input id="identity-totp-enrollment-code" type="text" inputmode="numeric" autocomplete="one-time-code">
-            </div>
-            <button id="identity-totp-enrollment-submit" type="button">Complete MFA setup</button>
-        </section>
-
-        <section id="identity-totp-signin-section" class="section">
-            <h1>Enter your authentication code</h1>
-            <p>Enter the code from your authenticator app to finish signing in.</p>
-            <div class="field">
-                <label for="identity-totp-signin-code">Verification code</label>
-                <input id="identity-totp-signin-code" type="text" inputmode="numeric" autocomplete="one-time-code">
-            </div>
-            <button id="identity-totp-signin-submit" type="button">Verify and sign in</button>
-        </section>
-    </main>
-
-    {{ identity_platform_config_json|json_script:"identity-platform-config" }}
-    <script
-        src="https://www.gstatic.com/firebasejs/12.12.0/firebase-app-compat.js"
-        integrity="sha384-BWLdxLZH5wCOzUfOIXVAUxPbSf0ufGVklbRP7rYw1K8t6xJkrTV6mRq3bD5IdSs2"
-        crossorigin="anonymous"
-    ></script>
-    <script
-        src="https://www.gstatic.com/firebasejs/12.12.0/firebase-auth-compat.js"
-        integrity="sha384-CYdpfP3gOKgSLevsNvb4KfaGRzR6mjdBfJIYh7t7wgL3ytSv0uqWzDpLcupTgQNf"
-        crossorigin="anonymous"
-    ></script>
-    <script
-        src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"
-        integrity="sha384-O425GKlvfdVtWnpoZspwu5pNL0Jkn34NVeyhT7t+rBULDlHAqjf/na9J0fSkwo6J"
-        crossorigin="anonymous"
-    ></script>
-    <script src="{% static 'js/identity_platform_auth.js' %}"></script>
-</body>
+            <section id="identity-auth-section" class="section visible">
+                <h1>
+                    {% trans "Access Shifter" %}
+                </h1>
+                <p>
+                    {% trans "Corporate access is restricted to" %}
+                    <code>
+                    {% blocktrans %}@{{ allowed_email_domain }}{% endblocktrans %}
+                    </code>
+                    {% blocktrans trimmed %}
+                        . Sign-in and registration use Google Identity Platform's prebuilt web UI. Shifter only
+                        creates an application session after the provider confirms the identity token, verified
+                        email, and enrolled MFA state.
+                    {% endblocktrans %}
+                </p>
+                <div id="identity-auth-loader">
+                    {% trans "Loading authentication\u2026" %}
+                </div>
+                <div id="firebaseui-auth-container">
+                </div>
+                <p class="help">
+                    {% blocktrans trimmed %}
+                        CTF participant access still uses range invitation magic links and does not go through
+                        this page.
+                    {% endblocktrans %}
+                </p>
+            </section>
+            <section id="identity-verify-email-section" class="section">
+                <h1>
+                    {% trans "Verify your email" %}
+                </h1>
+                <p id="identity-verify-email-copy">
+                </p>
+                <button id="identity-back-to-login"
+                        class="secondary-button"
+                        type="button">
+                    {% trans "Back to sign in" %}
+                </button>
+            </section>
+            <section id="identity-totp-enrollment-section" class="section">
+                <h1>
+                    {% trans "Set up multi-factor authentication" %}
+                </h1>
+                <p>
+                    {% blocktrans trimmed %}
+                        Add the secret below to your authenticator app, then enter the current six-digit code to
+                        finish sign-in.
+                    {% endblocktrans %}
+                </p>
+                <div class="meta">
+                    <strong>{% trans "Authenticator URI" %}</strong>
+                    <div id="identity-totp-qr-url" class="secret-block">
+                    </div>
+                </div>
+                <div class="meta">
+                    <strong>{% trans "Secret key" %}</strong>
+                    <div id="identity-totp-secret" class="secret-block">
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="identity-totp-enrollment-code">
+                        {% trans "Verification code" %}
+                    </label>
+                    <input id="identity-totp-enrollment-code"
+                           type="text"
+                           inputmode="numeric"
+                           autocomplete="one-time-code">
+                </div>
+                <button id="identity-totp-enrollment-submit" type="button">
+                    {% trans "Complete MFA setup" %}
+                </button>
+            </section>
+            <section id="identity-totp-signin-section" class="section">
+                <h1>
+                    {% trans "Enter your authentication code" %}
+                </h1>
+                <p>
+                    {% trans "Enter the code from your authenticator app to finish signing in." %}
+                </p>
+                <div class="field">
+                    <label for="identity-totp-signin-code">
+                        {% trans "Verification code" %}
+                    </label>
+                    <input id="identity-totp-signin-code"
+                           type="text"
+                           inputmode="numeric"
+                           autocomplete="one-time-code">
+                </div>
+                <button id="identity-totp-signin-submit" type="button">
+                    {% trans "Verify and sign in" %}
+                </button>
+            </section>
+        </main>
+        {{ identity_platform_config_json|json_script:"identity-platform-config" }}
+        <script src="https://www.gstatic.com/firebasejs/12.12.0/firebase-app-compat.js"
+                integrity="sha384-BWLdxLZH5wCOzUfOIXVAUxPbSf0ufGVklbRP7rYw1K8t6xJkrTV6mRq3bD5IdSs2"
+                crossorigin="anonymous"></script>
+        <script src="https://www.gstatic.com/firebasejs/12.12.0/firebase-auth-compat.js"
+                integrity="sha384-CYdpfP3gOKgSLevsNvb4KfaGRzR6mjdBfJIYh7t7wgL3ytSv0uqWzDpLcupTgQNf"
+                crossorigin="anonymous"></script>
+        <script src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"
+                integrity="sha384-O425GKlvfdVtWnpoZspwu5pNL0Jkn34NVeyhT7t+rBULDlHAqjf/na9J0fSkwo6J"
+                crossorigin="anonymous"></script>
+        <script src="{% static 'js/identity_platform_auth.js' %}"></script>
+    </body>
 </html>

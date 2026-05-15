@@ -35,7 +35,7 @@ Security posture:
 
 - Portal and Guacamole are the only intended public backends.
 - Both public backends attach to a Cloud Armor policy through `BackendConfig`.
-- The public hostname for `gcp-dev` is `shifter.keplerops.com`.
+- The public hostname for `gcp-dev` is `shifter.example.com`.
 - Managed TLS is required for bootstrap.
 - DNS is currently expected to be managed outside this tree, so the hostname must be pointed at the ingress IP for certificate activation.
 

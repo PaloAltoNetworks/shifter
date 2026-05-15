@@ -5,18 +5,23 @@ FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
 
 WORKDIR /app
 
-# Copy cyberscript library first (better layer caching)
+# Copy the Django-free shared packages first (better layer caching)
 COPY cyberscript /cyberscript
+COPY installation /installation
 
 # Copy dependency files
 COPY shifter_platform/pyproject.toml shifter_platform/uv.lock shifter_platform/requirements-gcp.txt ./
 
-# Export requirements and install dependencies into system Python
-# Install cyberscript as a local package
+# Export the platform's frozen lock to requirements.txt and install everything from
+# it (this pins pydantic, pyyaml, etc. at the locked versions). The local shared
+# packages — cyberscript (data contracts) and installation (root installation config;
+# Django/workers/provisioner derive runtime config from it) — are then installed with
+# --no-deps so their dependencies stay resolved by the frozen lock rather than by an
+# unpinned rebuild-time resolution.
 RUN uv export --no-hashes --no-emit-project --frozen > requirements.txt && \
     uv pip install --system --no-cache -r requirements.txt && \
     uv pip install --system --no-cache -r requirements-gcp.txt && \
-    uv pip install --system --no-cache /cyberscript
+    uv pip install --system --no-cache --no-deps /cyberscript /installation
 
 # Production stage
 FROM python:3.12-slim-trixie AS production

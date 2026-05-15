@@ -4,12 +4,17 @@ SetupOrchestrator runs SetupPlans using an SSMExecutor.
 It handles step sequencing, reboots, and verification.
 """
 
+import logging
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 
-from executors.base import CommandResult
+from executors.base import (
+    CommandResult,
+    ExecutorConnectionError,
+    ExecutorTimeoutError,
+)
 from executors.ssm_executor import (
     CommandError,
     SSMExecutor,
@@ -336,6 +341,173 @@ class TestStepExecution:
             script = call_obj.kwargs.get("script") or call_obj[1].get("script")
             scripts.append(script)
         assert scripts == ["echo first", "echo second", "echo third", "echo verify"]
+
+
+class TestSensitiveOutputMasking:
+    """Test secret masking for command output logs."""
+
+    def test_masks_dc_domain_password_from_success_logs(self, caplog, monkeypatch):
+        """DC_DOMAIN_PASSWORD is redacted from stdout/stderr log lines."""
+        secret = "DomainPass123!"
+        monkeypatch.setenv("DC_DOMAIN_PASSWORD", secret)
+        mock_executor = MagicMock(spec=SSMExecutor)
+        mock_executor.run_command.return_value = CommandResult(
+            success=True,
+            exit_code=0,
+            stdout=f"Joined domain with {secret}",
+            stderr=f"Warning included {secret}",
+        )
+        plan = MockSetupPlan(
+            steps=[SetupStep(name="join_domain", script="join", timeout_seconds=60)],
+            verify_step=None,
+        )
+        orchestrator = SetupOrchestrator(executor=mock_executor)
+
+        caplog.set_level(logging.INFO, logger="orchestrators.setup_orchestrator")
+        orchestrator.orchestrate("i-12345", plan, {})
+
+        assert secret not in caplog.text
+        assert "[REDACTED]" in caplog.text
+
+    def test_masks_sensitive_context_value_from_failed_output_logs(self, caplog):
+        """Sensitive context values are redacted from failed stdout/stderr logs."""
+        secret = "DomainPass456!"
+        mock_executor = MagicMock(spec=SSMExecutor)
+        mock_executor.run_command.return_value = CommandResult(
+            success=False,
+            exit_code=1,
+            stdout=f"Failure stdout contained {secret}",
+            stderr=f"Failure stderr contained {secret}",
+        )
+        orchestrator = SetupOrchestrator(executor=mock_executor)
+        step = SetupStep(name="join_domain", script="join", timeout_seconds=60)
+
+        caplog.set_level(logging.WARNING, logger="orchestrators.setup_orchestrator")
+        result = orchestrator._execute_step(
+            "i-12345",
+            step,
+            {"domain_admin_password": secret},
+            "AWS-RunPowerShellScript",
+            max_retries=0,
+        )
+
+        assert result.success is False
+        assert secret not in caplog.text
+        assert "[REDACTED]" in caplog.text
+
+
+class TestExecuteStepRetryAsymmetry:
+    """Pin asymmetric exit paths in `_execute_step` so any refactor preserves them.
+
+    The function has three retry-exhaustion outcomes that MUST stay distinct:
+    1. Transport error exhausted -> raise SetupError
+    2. Exit-nonzero exhausted    -> return failed StepResult (NO raise)
+    3. PAN-OS commit-fail / poll-fail exhausted -> raise SetupError
+
+    Mixing these up (e.g. raising on exit-nonzero exhaustion, or returning on
+    transport-error exhaustion) would change the contract the outer
+    `orchestrate()` method depends on.
+    """
+
+    def _step(self, **overrides) -> SetupStep:
+        return SetupStep(
+            name=overrides.pop("name", "s"),
+            script=overrides.pop("script", "echo hi"),
+            timeout_seconds=overrides.pop("timeout_seconds", 10),
+            **overrides,
+        )
+
+    def test_transport_error_retries_then_succeeds(self, monkeypatch):
+        """Transport error on first attempt + success on second -> success."""
+        monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+        executor = MagicMock(spec=SSMExecutor)
+        executor.run_command.side_effect = [
+            ExecutorConnectionError("conn reset"),
+            CommandResult(success=True, exit_code=0, stdout="ok", stderr=""),
+        ]
+        orch = SetupOrchestrator(executor=executor)
+
+        result = orch._execute_step("i-1", self._step(), {}, "AWS-RunPowerShellScript", max_retries=1)
+
+        assert result.success is True
+        assert executor.run_command.call_count == 2
+
+    def test_transport_error_exhausted_raises_setup_error(self, monkeypatch):
+        """All attempts hit transport errors -> SetupError raised (not returned)."""
+        monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+        executor = MagicMock(spec=SSMExecutor)
+        executor.run_command.side_effect = ExecutorTimeoutError("timeout")
+        orch = SetupOrchestrator(executor=executor)
+
+        with pytest.raises(SetupError) as exc:
+            orch._execute_step("i-1", self._step(), {}, "AWS-RunPowerShellScript", max_retries=2)
+
+        assert "transport error" in str(exc.value).lower()
+        assert exc.value.step_name == "s"
+        # max_retries=2 means 3 attempts (initial + 2 retries)
+        assert executor.run_command.call_count == 3
+
+    def test_exit_nonzero_exhausted_returns_failed_step_result(self, monkeypatch):
+        """All attempts exit non-zero -> failed StepResult returned (NOT raised).
+
+        This asymmetry matters: `orchestrate()` distinguishes the two by
+        checking `result.success` and raising itself. A refactor that raises
+        from `_execute_step` on exit-nonzero exhaustion would double-wrap
+        the error and could change exception types observed downstream.
+        """
+        monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+        executor = MagicMock(spec=SSMExecutor)
+        executor.run_command.return_value = CommandResult(success=False, exit_code=2, stdout="boom", stderr="err")
+        orch = SetupOrchestrator(executor=executor)
+
+        result = orch._execute_step("i-1", self._step(), {}, "AWS-RunPowerShellScript", max_retries=2)
+
+        assert result.success is False
+        assert result.stdout == "boom"
+        assert result.stderr == "err"
+        assert executor.run_command.call_count == 3
+
+    def test_panos_poll_failure_exhausted_raises(self, monkeypatch):
+        """`poll_for_job` with persistent poll failure -> SetupError raised."""
+        monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+        executor = MagicMock(spec=SSMExecutor)
+        executor.run_command.return_value = CommandResult(
+            success=True, exit_code=0, stdout="job enqueued with jobid 42", stderr=""
+        )
+        orch = SetupOrchestrator(executor=executor)
+        # Stub the poll to always say the job failed; counts as exhaustion.
+        monkeypatch.setattr(orch, "_poll_panos_job", lambda *_a, **_k: (False, "FIN err"))
+        step = self._step(poll_for_job=True)
+
+        with pytest.raises(SetupError) as exc:
+            orch._execute_step("i-1", step, {}, "AWS-RunPowerShellScript", max_retries=1)
+
+        assert "job 42" in str(exc.value)
+        assert exc.value.step_name == "s"
+
+    def test_panos_silent_commit_failure_exhausted_raises(self, monkeypatch):
+        """Exit-0 with `commit` in stdout but no success marker -> SetupError after retries.
+
+        SSH commit sessions return success even when the commit failed; the
+        orchestrator detects this via `_check_commit_success` and treats it
+        as a hard failure when retries are exhausted. The asymmetry vs. plain
+        exit-nonzero is intentional: a "silent failure" SHOULD raise.
+        """
+        monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+        executor = MagicMock(spec=SSMExecutor)
+        executor.run_command.return_value = CommandResult(
+            success=True,
+            exit_code=0,
+            stdout="commit issued but rejected by device",
+            stderr="",
+        )
+        orch = SetupOrchestrator(executor=executor)
+
+        with pytest.raises(SetupError) as exc:
+            orch._execute_step("i-1", self._step(), {}, "AWS-RunPowerShellScript", max_retries=1)
+
+        assert "commit failed" in str(exc.value).lower()
+        assert exc.value.step_name == "s"
 
 
 class TestRebootTimeout:

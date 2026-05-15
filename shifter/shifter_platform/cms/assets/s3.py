@@ -185,6 +185,33 @@ def verify_s3_object_exists(s3_key: str) -> tuple[int, str]:
         raise S3Error(str(e)) from e
 
 
+def read_agent_header(s3_key: str, max_bytes: int) -> bytes:
+    """Read up to `max_bytes` from the start of an agent upload object.
+
+    Used by `complete_upload` to inspect magic bytes server-side before
+    finalization (issue #696). Bridges `CloudStorageError` to `S3Error`.
+
+    Raises:
+        S3Error: If the object cannot be read.
+    """
+    logger.debug("read_agent_header: s3_key=%s max_bytes=%d", s3_key, max_bytes)
+
+    if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("read_agent_header: AWS_S3_BUCKET_NAME is not configured")
+        raise S3Error("AWS_S3_BUCKET_NAME is not configured")
+
+    try:
+        storage = get_object_storage()
+        return storage.read_object_header(
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            max_bytes=max_bytes,
+        )
+    except CloudStorageError as e:
+        logger.exception("read_agent_header: failed s3_key=%s error=%s", s3_key, e)
+        raise S3Error(str(e)) from e
+
+
 def tag_s3_object(s3_key: str, tags: dict[str, str]) -> None:
     """
     Add tags to an S3 object (used to mark uploads as completed).

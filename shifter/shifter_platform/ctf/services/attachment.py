@@ -10,9 +10,17 @@ import os
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from django.conf import settings
+from django.core.files.base import File
 from django.db.models import QuerySet
 
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
+from ctf.inspection import (
+    CTFInspectionError,
+    inspect_attachment_header,
+    is_text_extension,
+    new_text_stream_validator,
+)
 from ctf.models import CTFChallenge, CTFChallengeFile
 from ctf.s3 import (
     ALLOWED_EXTENSIONS,
@@ -30,12 +38,57 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _run_text_stream_validation(
+    file_obj: File,
+    ext: str,
+    challenge_id: UUID,
+    actor_id: int,
+    filename: str,
+) -> None:
+    """Full-body text validation for TEXT-category extensions.
+
+    Feeds the whole file through a UTF-8 incremental decoder so any binary
+    bytes in the tail of an otherwise-text-looking upload are rejected before
+    S3.
+    """
+    from shared.uploads.inspection import InspectionError as _Inspect
+
+    stream_validator = new_text_stream_validator()
+    try:
+        file_obj.seek(0)
+        while True:
+            chunk = file_obj.read(8192)
+            if not chunk:
+                break
+            stream_validator.feed(chunk)
+        stream_validator.finalize()
+    except _Inspect as exc:
+        # `feed`/`finalize` raise InspectionError on bad bytes; surface as
+        # CTFValidationError so the API contract matches the bounded
+        # rejection path above.
+        logger.warning(
+            "add_challenge_file: streaming text inspection rejected challenge=%s ext=%s actor=%s reason=%s",
+            challenge_id,
+            ext,
+            actor_id,
+            exc,
+        )
+        raise CTFValidationError(
+            f"File content inspection failed: {exc}",
+            details={"filename": filename, "extension": ext},
+        ) from exc
+    finally:
+        file_obj.seek(0)
+
+
 def add_challenge_file(
     challenge_id: UUID,
-    file_obj,
+    file_obj: File,
     filename: str,
     display_name: str = "",
     content_type: str = "application/octet-stream",
+    *,
+    actor_id: int,
 ) -> CTFChallengeFile:
     """Add a file attachment to a challenge.
 
@@ -45,15 +98,19 @@ def add_challenge_file(
         filename: Original filename.
         display_name: Optional friendly display name.
         content_type: MIME type of the file.
+        actor_id: User pk of the caller. Required (issue #765 DiD).
 
     Returns:
         The created CTFChallengeFile instance.
 
     Raises:
         CTFNotFoundError: If challenge doesn't exist.
+        CTFPermissionError: If actor does not own the challenge's event.
         CTFStateError: If event is not content-modifiable.
         CTFValidationError: If file fails validation.
     """
+    from ctf.services.authorization import assert_actor_owns_event
+
     try:
         challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
     except CTFChallenge.DoesNotExist:
@@ -61,6 +118,8 @@ def add_challenge_file(
             f"Challenge {challenge_id} not found",
             details={"challenge_id": str(challenge_id)},
         ) from None
+
+    assert_actor_owns_event(actor_id, challenge.event)
 
     if not challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -90,6 +149,32 @@ def add_challenge_file(
             "File is empty",
             details={"filename": filename},
         )
+
+    # Server-side header inspection (issue #696). Run before S3 PutObject so a
+    # mismatch never leaves a rejected object behind in the bucket. For TEXT-
+    # category extensions we additionally stream-validate the entire body
+    # below (during the SHA256 loop) so a `valid text prefix + binary tail`
+    # upload cannot bypass the bounded-header check.
+    file_obj.seek(0)
+    header = file_obj.read(settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES)
+    file_obj.seek(0)
+    try:
+        inspect_attachment_header(header, ext)
+    except CTFInspectionError as exc:
+        logger.warning(
+            "add_challenge_file: header inspection failed challenge=%s ext=%s actor=%s reason=%s",
+            challenge_id,
+            ext,
+            actor_id,
+            exc,
+        )
+        raise CTFValidationError(
+            f"File content inspection failed: {exc}",
+            details={"filename": filename, "extension": ext},
+        ) from exc
+
+    if is_text_extension(ext):
+        _run_text_stream_validation(file_obj, ext, challenge_id, actor_id, filename)
 
     # Check file count limit
     current_count = CTFChallengeFile.objects.filter(challenge=challenge).count()
@@ -135,18 +220,22 @@ def add_challenge_file(
     return challenge_file
 
 
-def remove_challenge_file(file_id: UUID) -> None:
+def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
     """Remove a file attachment from a challenge.
 
     Deletes from S3 and soft-deletes the database record.
 
     Args:
         file_id: UUID of the file to remove.
+        actor_id: User pk of the caller. Required (issue #765 DiD).
 
     Raises:
         CTFNotFoundError: If file doesn't exist.
+        CTFPermissionError: If actor does not own the file's event.
         CTFStateError: If event is not content-modifiable.
     """
+    from ctf.services.authorization import assert_actor_owns_event
+
     try:
         challenge_file = CTFChallengeFile.objects.select_related("challenge__event").get(pk=file_id)
     except CTFChallengeFile.DoesNotExist:
@@ -154,6 +243,8 @@ def remove_challenge_file(file_id: UUID) -> None:
             f"Challenge file {file_id} not found",
             details={"file_id": str(file_id)},
         ) from None
+
+    assert_actor_owns_event(actor_id, challenge_file.challenge.event)
 
     if not challenge_file.challenge.event.is_content_modifiable:
         raise CTFStateError(

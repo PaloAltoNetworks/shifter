@@ -28,6 +28,11 @@ output "portal_network_cidrs" {
   value       = module.platform_core.portal_network_cidrs
 }
 
+output "gke_services_cidr" {
+  description = "GKE service CIDR used by in-cluster clients to reach Kubernetes service IPs."
+  value       = module.platform_core.gke_services_cidr
+}
+
 output "gke_cluster_name" {
   description = "Name of the GKE cluster."
   value       = module.platform_core.gke_cluster_name
@@ -82,6 +87,16 @@ output "identity_platform_api_key" {
 output "identity_platform_project_id" {
   description = "Project ID backing Identity Platform for this environment."
   value       = module.platform_core.identity_platform_project_id
+}
+
+output "identity_allowed_email_domain" {
+  description = "Email domain enforced by the Identity Platform blocking function and the portal allow-list."
+  value       = module.platform_core.identity_allowed_email_domain
+}
+
+output "identity_allowed_emails" {
+  description = "Explicit allow-listed emails enforced by the Identity Platform blocking function and the portal."
+  value       = module.platform_core.identity_allowed_emails
 }
 
 output "public_hostname" {

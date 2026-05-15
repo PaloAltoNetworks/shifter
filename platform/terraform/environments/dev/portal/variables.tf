@@ -97,6 +97,11 @@ variable "db_skip_final_snapshot" {
   type        = bool
 }
 
+variable "db_apply_immediately" {
+  description = "Apply portal RDS modifications during the deploy instead of queueing them for the maintenance window."
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
@@ -195,7 +200,7 @@ variable "ctfd_ssh_allowed_cidrs" {
 # ------------------------------------------------------------------------------
 
 variable "domain_name" {
-  description = "Domain name for ACM certificate (e.g., shifter.keplerops.com)"
+  description = "Domain name for ACM certificate (e.g., shifter.example.com)"
   type        = string
 }
 
@@ -363,12 +368,12 @@ variable "dc_domain_name" {
   default     = "internal.shifter"
 }
 
-variable "dc_domain_password" {
-  description = "Domain admin password for prebaked DC"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
+# The DC Administrator password is intentionally not a Terraform variable.
+# It lives in aws_secretsmanager_secret.dc_domain_password (created by
+# the engine-provisioner module) with the value managed out-of-band, and
+# is plumbed to the engine task via ECS `secrets = [...]` and to the
+# portal Django container via the portal/ssm + ec2 modules and
+# entrypoint.sh.
 
 # ------------------------------------------------------------------------------
 # Guacamole
@@ -451,6 +456,11 @@ variable "guacamole_db_deletion_protection" {
 
 variable "guacamole_db_skip_final_snapshot" {
   description = "Skip final snapshot for Guacamole RDS"
+  type        = bool
+}
+
+variable "guacamole_db_apply_immediately" {
+  description = "Apply Guacamole RDS modifications during the deploy instead of queueing them for the maintenance window."
   type        = bool
 }
 
@@ -556,11 +566,11 @@ variable "email_backend" {
 variable "ctf_from_email" {
   description = "From address for CTF emails"
   type        = string
-  default     = "ctf@keplerops.com"
+  default     = "ctf@example.com"
 }
 
 variable "ses_domain" {
-  description = "Domain for SES email sending (e.g., keplerops.com)"
+  description = "Domain for SES email sending (e.g., example.com)"
   type        = string
 }
 

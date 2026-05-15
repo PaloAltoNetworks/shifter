@@ -1,8 +1,12 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}CTF Admin Dashboard{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    CTF Admin Dashboard
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -16,13 +20,13 @@
 .stat-card .stat-value {
     font-size: 28px;
     font-weight: 700;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .stat-card .stat-label {
     font-size: 12px;
     font-weight: 600;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
@@ -49,18 +53,18 @@
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    border-bottom: 1px solid var(--xdr-border);
+    border-bottom: 1px solid var(--theme-border);
 }
 .quick-controls-row:last-child { border-bottom: none; }
 
 .quick-controls-info { flex: 1; }
 .quick-controls-info .event-name {
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 .quick-controls-info .event-meta {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 2px;
 }
 
@@ -72,189 +76,286 @@
 .quick-controls-actions select {
     padding: 4px 8px;
     font-size: 13px;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
-    background: var(--xdr-bg);
-    color: var(--xdr-text);
+    background: var(--theme-bg);
+    color: var(--theme-text);
 }
 .quick-controls-actions button {
     padding: 4px 12px;
     font-size: 13px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="page-header flex-between">
-    <h1 class="page-title">CTF Admin Dashboard</h1>
-    <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary">
-        Create Event
-    </a>
-</div>
-
-<!-- Stats Cards -->
-<div class="stats-grid mb-lg">
-    <div class="card stat-card">
-        <div class="stat-label">Active Events</div>
-        <div class="stat-value">{{ active_count }}</div>
+    <div class="page-header flex-between">
+        <h1 class="page-title">
+            {% trans "CTF Admin Dashboard" %}
+        </h1>
+        <a href="{% url 'ctf:admin_event_create' %}"
+           class="btn btn-primary">{% trans "Create Event" %}</a>
     </div>
-    <div class="card stat-card">
-        <div class="stat-label">Upcoming Events</div>
-        <div class="stat-value">{{ upcoming_count }}</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-label">Draft Events</div>
-        <div class="stat-value">{{ draft_count }}</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-label">Total Events</div>
-        <div class="stat-value">{{ total_events }}</div>
-    </div>
-</div>
-
-<!-- Active Events Quick Controls -->
-{% if active_events_data %}
-<div class="card mb-lg" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">Active Events</div>
-    </div>
-    {% for item in active_events_data %}
-    <div class="quick-controls-row">
-        <div class="quick-controls-info">
-            <div class="event-name">
-                <a href="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}">{{ item.event.name }}</a>
+    <!-- Stats Cards -->
+    <div class="stats-grid mb-lg">
+        <div class="card stat-card">
+            <div class="stat-label">
+                {% trans "Active Events" %}
             </div>
-            <div class="event-meta">
-                {{ item.stats.participant_count }} participants
-                ({{ item.stats.registered_count }} registered, {{ item.stats.invited_count }} invited)
-                &middot;
-                {{ item.stats.correct_submissions }}/{{ item.stats.total_submissions }} solves
-                {% if item.range_ready or item.range_provisioning or item.range_error %}
-                &middot;
-                Ranges:
-                {% if item.range_ready %}<span class="status-badge ready">{{ item.range_ready }} ready</span>{% endif %}
-                {% if item.range_provisioning %}<span class="status-badge provisioning">{{ item.range_provisioning }} provisioning</span>{% endif %}
-                {% if item.range_error %}<span class="status-badge error">{{ item.range_error }} error</span>{% endif %}
-                {% endif %}
+            <div class="stat-value">
+                {{ active_count }}
             </div>
         </div>
-        {% if item.status_form.fields.action.choices %}
-        <form method="post" action="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}" class="quick-controls-actions">
-            {% csrf_token %}
-            <select name="action">
-                {% for value, label in item.status_form.fields.action.choices %}
-                <option value="{{ value }}">{{ label }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" class="btn btn-secondary">Apply</button>
-        </form>
+        <div class="card stat-card">
+            <div class="stat-label">
+                {% trans "Upcoming Events" %}
+            </div>
+            <div class="stat-value">
+                {{ upcoming_count }}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-label">
+                {% trans "Draft Events" %}
+            </div>
+            <div class="stat-value">
+                {{ draft_count }}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-label">
+                {% trans "Total Events" %}
+            </div>
+            <div class="stat-value">
+                {{ total_events }}
+            </div>
+        </div>
+    </div>
+    <!-- Active Events Quick Controls -->
+    {% if active_events_data %}
+        <div class="card mb-lg p-0">
+            <div class="p-lg">
+                <div class="card-title mb-0">
+                    {% trans "Active Events" %}
+                </div>
+            </div>
+            {% for item in active_events_data %}
+                <div class="quick-controls-row">
+                    <div class="quick-controls-info">
+                        <div class="event-name">
+                            <a href="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}">
+                            {{ item.event.name }}
+                            </a>
+                        </div>
+                        <div class="event-meta">
+                            {{ item.stats.participant_count }}
+                            {% trans "participants (" %}{{ item.stats.registered_count }}
+                            {% trans "registered," %}
+                            {{ item.stats.invited_count }}
+                            {% trans "invited) &middot;" %}
+                            {{ item.stats.correct_submissions }}/{{ item.stats.total_submissions }} {% trans "solves" %}
+                            {% if item.range_ready or item.range_provisioning or item.range_error %}
+                                {% trans "&middot; Ranges:" %}
+                                {% if item.range_ready %}
+                                    <span class="status-badge ready">
+                                        {% blocktrans with v1=item.range_ready %}
+                                            {{ v1 }} ready
+                                        {% endblocktrans %}
+                                    </span>
+                                {% endif %}
+                                {% if item.range_provisioning %}
+                                    <span class="status-badge provisioning">
+                                        {% blocktrans with v1=item.range_provisioning %}
+                                            {{ v1 }} provisioning
+                                        {% endblocktrans %}
+                                    </span>
+                                {% endif %}
+                                {% if item.range_error %}
+                                    <span class="status-badge error">
+                                        {% blocktrans with v1=item.range_error %}
+                                            {{ v1 }} error
+                                        {% endblocktrans %}
+                                    </span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if item.status_form.fields.action.choices %}
+                        <form method="post"
+                              action="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}"
+                              class="quick-controls-actions">
+                            {% csrf_token %}
+                            <label for="event-action-{{ item.event.pk }}"
+                                   class="label-compact">
+                                {% trans "Status action" %}
+                            </label>
+                            <select name="action" id="event-action-{{ item.event.pk }}">
+                                {% for value, label in item.status_form.fields.action.choices %}
+                                    <option value="{{ value }}">
+                                        {{ label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-secondary">
+                                {% trans "Apply" %}
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    <!-- Range Provisioning Overview -->
+    {% if range_ready or range_provisioning or range_error %}
+        <div class="stats-grid mb-lg grid-cols-3">
+            <div class="card stat-card">
+                <div class="stat-label">
+                    {% trans "Ranges Ready" %}
+                </div>
+                <div class="stat-value">
+                    {{ range_ready }}
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-label">
+                    {% trans "Ranges Provisioning" %}
+                </div>
+                <div class="stat-value">
+                    {{ range_provisioning }}
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-label">
+                    {% trans "Ranges Error" %}
+                </div>
+                <div class="stat-value">
+                    {{ range_error }}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+    <!-- Recent Activity Feed -->
+    {% if recent_activity %}
+        <div class="card mb-lg p-0">
+            <div class="p-lg">
+                <div class="card-title mb-0">
+                    {% trans "Recent Activity" %}
+                </div>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Time" %}
+                        </th>
+                        <th>
+                            {% trans "Participant" %}
+                        </th>
+                        <th>
+                            {% trans "Challenge" %}
+                        </th>
+                        <th>
+                            {% trans "Result" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sub in recent_activity %}
+                        <tr>
+                            <td>
+                                {{ sub.submitted_at|date:"M d, H:i:s" }}
+                            </td>
+                            <td>
+                                {{ sub.participant.name }}
+                            </td>
+                            <td>
+                                {{ sub.challenge.name }}
+                            </td>
+                            <td>
+                                {% if sub.is_correct %}
+                                    <span class="status-badge ready">
+                                        {% blocktrans with v1=sub.points_awarded %}
+                                            Correct (+{{ v1 }})
+                                        {% endblocktrans %}
+                                    </span>
+                                {% else %}
+                                    <span class="status-badge error">{% trans "Incorrect" %}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+    <!-- Recent Events -->
+    <div class="card p-0">
+        <div class="p-lg">
+            <div class="recent-header">
+                <div class="card-title mb-0">
+                    {% trans "Recent Events" %}
+                </div>
+                <a href="{% url 'ctf:admin_event_list' %}"
+                   class="btn btn-secondary">{% trans "View All" %}</a>
+            </div>
+        </div>
+        {% if recent_events %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        <th>
+                            {% trans "Status" %}
+                        </th>
+                        <th>
+                            {% trans "Start" %}
+                        </th>
+                        <th>
+                            {% trans "End" %}
+                        </th>
+                        <th>
+                            {% trans "Participants" %}
+                        </th>
+                        <th>
+                            {% trans "Actions" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in recent_events %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                            </td>
+                            <td>
+                                {% include "ctf/includes/event_status_badge.html" %}
+                            </td>
+                            <td>
+                                {{ event.event_start|date:"M d, Y H:i" }}
+                            </td>
+                            <td>
+                                {{ event.event_end|date:"M d, Y H:i" }}
+                            </td>
+                            <td>
+                                {{ event.participant_count }}
+                            </td>
+                            <td>
+                                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}"
+                                   class="btn btn-secondary">{% trans "View" %}</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>
+                    {% trans "No events yet." %}
+                </p>
+                <a href="{% url 'ctf:admin_event_create' %}"
+                   class="btn btn-primary mt-md">{% trans "Create Your First Event" %}</a>
+            </div>
         {% endif %}
     </div>
-    {% endfor %}
-</div>
-{% endif %}
-
-<!-- Range Provisioning Overview -->
-{% if range_ready or range_provisioning or range_error %}
-<div class="stats-grid mb-lg" style="grid-template-columns: repeat(3, 1fr);">
-    <div class="card stat-card">
-        <div class="stat-label">Ranges Ready</div>
-        <div class="stat-value">{{ range_ready }}</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-label">Ranges Provisioning</div>
-        <div class="stat-value">{{ range_provisioning }}</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-label">Ranges Error</div>
-        <div class="stat-value">{{ range_error }}</div>
-    </div>
-</div>
-{% endif %}
-
-<!-- Recent Activity Feed -->
-{% if recent_activity %}
-<div class="card mb-lg" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">Recent Activity</div>
-    </div>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Time</th>
-                <th>Participant</th>
-                <th>Challenge</th>
-                <th>Result</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for sub in recent_activity %}
-            <tr>
-                <td>{{ sub.submitted_at|date:"M d, H:i:s" }}</td>
-                <td>{{ sub.participant.name }}</td>
-                <td>{{ sub.challenge.name }}</td>
-                <td>
-                    {% if sub.is_correct %}
-                    <span class="status-badge ready">Correct (+{{ sub.points_awarded }})</span>
-                    {% else %}
-                    <span class="status-badge error">Incorrect</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
-
-<!-- Recent Events -->
-<div class="card" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="recent-header">
-            <div class="card-title" style="margin-bottom: 0;">Recent Events</div>
-            <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-secondary">View All</a>
-        </div>
-    </div>
-    {% if recent_events %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Start</th>
-                <th>End</th>
-                <th>Participants</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for event in recent_events %}
-            <tr>
-                <td>
-                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">
-                        {{ event.name }}
-                    </a>
-                </td>
-                <td>
-                    {% include "ctf/includes/event_status_badge.html" %}
-                </td>
-                <td>{{ event.event_start|date:"M d, Y H:i" }}</td>
-                <td>{{ event.event_end|date:"M d, Y H:i" }}</td>
-                <td>{{ event.participant_count }}</td>
-                <td>
-                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary">
-                        View
-                    </a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <p>No events yet.</p>
-        <a href="{% url 'ctf:admin_event_create' %}" class="btn btn-primary mt-md">Create Your First Event</a>
-    </div>
-    {% endif %}
-</div>
 {% endblock %}

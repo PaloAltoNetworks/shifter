@@ -62,6 +62,7 @@ resource "aws_secretsmanager_secret" "ssh_key" {
   name                    = "shifter/${var.environment}/ngfw/${var.instance_uuid}/ssh-key"
   description             = "SSH private key for NGFW instance ${var.instance_uuid}"
   recovery_window_in_days = 0 # Immediate delete for cleanup
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = local.common_tags
 }

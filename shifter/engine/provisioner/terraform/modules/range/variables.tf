@@ -20,6 +20,11 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "secrets_kms_key_arn" {
+  description = "ARN of the portal Secrets Manager CMK used to encrypt range instance SSH-key secrets at runtime (CKV_AWS_149). Sourced from the engine-provisioner ECS task env (SECRETS_KMS_KEY_ARN) which is wired from the platform env root."
+  type        = string
+}
+
 # VPC configuration
 variable "vpc_id" {
   description = "Range VPC ID"
@@ -104,14 +109,14 @@ variable "subnets" {
     cidr         = string # Pre-allocated CIDR from allocate_subnets()
     connected_to = list(string)
     instances = list(object({
-      uuid              = string
-      name              = string # Instance name from scenario template (e.g., "webdev01", "kali")
-      role              = string # attacker, victim, dc
-      os_type           = string # kali, ubuntu, windows
-      instance_type     = string
+      uuid                = string
+      name                = string # Instance name from scenario template (e.g., "webdev01", "kali")
+      role                = string # attacker, victim, dc
+      os_type             = string # kali, ubuntu, windows
+      instance_type       = string
       agent_presigned_url = string
-      join_domain       = bool
-      ami_id            = string # Per-instance AMI override; empty = use os_type lookup
+      join_domain         = bool
+      ami_id              = string # Per-instance AMI override; empty = use os_type lookup
     }))
   }))
 }

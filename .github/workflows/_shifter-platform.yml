@@ -17,6 +17,19 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS:
+        required: false
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS:
+        required: false
+      # Whole-file local.auto.tfvars payload per environment. The committed
+      # terraform.tfvars is an example.com baseline; the real per-deployment
+      # values are rendered from these secrets before plan/apply. Declared
+      # required: false — the render step fails loud when the active
+      # environment's secret is empty. See docs/dev/deploy-secrets.md.
+      TF_VARS_DEV_PORTAL:
+        required: false
+      TF_VARS_PROD_PORTAL:
+        required: false
 
 jobs:
   plan:
@@ -40,9 +53,37 @@ jobs:
           terraform_version: "1.13.3"
       - run: terraform fmt -check -recursive
         working-directory: platform/terraform
+      - name: Render local.auto.tfvars from deployment secret
+        # The committed terraform.tfvars ships an example.com baseline that
+        # fails-loud on apply. Each deployment provides its real values via the
+        # TF_VARS_<ENV>_PORTAL GitHub secret; this step renders that payload
+        # into a gitignored local.auto.tfvars that Terraform auto-loads over
+        # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
+        env:
+          IS_DEV: ${{ inputs.is_dev }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: |
+          # Select strictly on inputs.is_dev. A GitHub Actions
+          # `is_dev && DEV_SECRET || PROD_SECRET` expression is unsafe: an
+          # empty active-environment secret is falsy and falls through to
+          # the other environment's secret. Selecting in shell keeps an
+          # empty active secret empty so the check below trips fail-loud.
+          if [ "${IS_DEV}" = "true" ]; then
+            PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
+          else
+            PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
+          fi
+          if [ -z "${TF_VARS_PORTAL}" ]; then
+            echo "::error::Required secret ${PORTAL_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - run: terraform validate
-      - run: terraform plan -no-color -out=tfplan && terraform show -no-color tfplan > plan.txt
+      - run: terraform plan -no-color -lock-timeout=5m -out=tfplan && terraform show -no-color tfplan > plan.txt
       - name: Comment PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -134,6 +175,34 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
+      - name: Render local.auto.tfvars from deployment secret
+        # The committed terraform.tfvars ships an example.com baseline that
+        # fails-loud on apply. Each deployment provides its real values via the
+        # TF_VARS_<ENV>_PORTAL GitHub secret; this step renders that payload
+        # into a gitignored local.auto.tfvars that Terraform auto-loads over
+        # the baseline before plan and apply. See docs/dev/deploy-secrets.md.
+        env:
+          IS_DEV: ${{ inputs.is_dev }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
+        run: |
+          # Select strictly on inputs.is_dev. A GitHub Actions
+          # `is_dev && DEV_SECRET || PROD_SECRET` expression is unsafe: an
+          # empty active-environment secret is falsy and falls through to
+          # the other environment's secret. Selecting in shell keeps an
+          # empty active secret empty so the check below trips fail-loud.
+          if [ "${IS_DEV}" = "true" ]; then
+            PORTAL_SECRET_NAME="TF_VARS_DEV_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_DEV_PORTAL}"
+          else
+            PORTAL_SECRET_NAME="TF_VARS_PROD_PORTAL"
+            TF_VARS_PORTAL="${TF_VARS_PROD_PORTAL}"
+          fi
+          if [ -z "${TF_VARS_PORTAL}" ]; then
+            echo "::error::Required secret ${PORTAL_SECRET_NAME} is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          printf '%s\n' "${TF_VARS_PORTAL}" > local.auto.tfvars
       - run: terraform init -backend-config=${{ inputs.environment }}.s3.tfbackend
       - name: Handle Service Discovery replacement
         env:
@@ -141,7 +210,7 @@ jobs:
         run: |
           # Check if Service Discovery service needs replacement
           echo "Running terraform plan to check for Service Discovery changes..."
-          terraform plan -detailed-exitcode -out=tfplan 2>&1 || PLAN_EXIT=$?
+          terraform plan -detailed-exitcode -lock-timeout=5m -out=tfplan 2>&1 || PLAN_EXIT=$?
 
           echo "Plan exit code: ${PLAN_EXIT:-0}"
 
@@ -198,6 +267,19 @@ jobs:
 
           rm -f tfplan
       - run: terraform apply -auto-approve
+      - name: Verify RDS pending modifications applied (dev only)
+        # Dev opts into apply_immediately=true so any post-apply
+        # PendingModifiedValues means the deploy is incomplete. Prod
+        # deliberately keeps apply_immediately=false so RDS changes flow
+        # through the configured maintenance window — running the check
+        # there would fail every legitimate prod deploy.
+        # See scripts/check_rds_pending_modifications/check_rds_pending_modifications.py
+        # and dev/terraform.md "RDS Change Application".
+        if: inputs.is_dev
+        working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/check_rds_pending_modifications/check_rds_pending_modifications.py" \
+            --tf-outputs-from .
       - name: Wait for Guacamole ECS services to stabilize
         env:
           ENV: ${{ inputs.environment }}
@@ -314,6 +396,8 @@ jobs:
       ENV: ${{ inputs.environment }}
       PS_PREFIX: /shifter/${{ inputs.environment }}/portal
       INSTANCE_TAG: ${{ inputs.is_dev && 'dev-portal-ec2' || 'prod-portal-ec2' }}
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
     steps:
       - uses: actions/checkout@v4
 
@@ -324,10 +408,13 @@ jobs:
 
       - name: Get deployment config
         id: config
+        env:
+          # `vars` are repository / environment variables managed in
+          # GitHub settings; this avoids parsing the committed example
+          # tfvars baseline. Default `false` for safety — autoscaling
+          # opts in explicitly per environment.
+          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}
         run: |
-          TFVARS_FILE="platform/terraform/environments/${ENV}/portal/terraform.tfvars"
-          # Check if autoscaling is enabled
-          ENABLE_AUTOSCALING=$(grep '^enable_autoscaling' "$TFVARS_FILE" | sed 's/.*= *\([^ ]*\).*/\1/' | tr -d ' ')
           echo "enable_autoscaling=${ENABLE_AUTOSCALING}" >> "$GITHUB_OUTPUT"
 
       - name: Update Parameter Store with new image tag
@@ -341,6 +428,25 @@ jobs:
             --type String \
             --overwrite
           echo "Parameter Store updated successfully"
+
+      - name: Update bootstrap admin parameters
+        run: |
+          sync_optional_secure_param() {
+            local name="$1"
+            local value="$2"
+            if [ -n "$value" ]; then
+              aws ssm put-parameter \
+                --name "$name" \
+                --value "$value" \
+                --type SecureString \
+                --overwrite
+            else
+              aws ssm delete-parameter --name "$name" 2>/dev/null || true
+            fi
+          }
+
+          sync_optional_secure_param "${PS_PREFIX}/platform-bootstrap-staff-emails" "${PLATFORM_BOOTSTRAP_STAFF_EMAILS}"
+          sync_optional_secure_param "${PS_PREFIX}/platform-bootstrap-superuser-emails" "${PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS}"
 
       - name: Get Instance ID (single instance mode)
         id: instance
@@ -393,7 +499,15 @@ jobs:
           AWS_REGION="us-east-2"
           PS_PREFIX="__PS_PREFIX__"
 
-          get_param() { aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text --region "$AWS_REGION"; }
+          get_param() { aws ssm get-parameter --name "$1" --with-decryption --query 'Parameter.Value' --output text --region "$AWS_REGION"; }
+          validate_bootstrap_email_list() {
+            local name="$1"
+            local value="$2"
+            if [[ -n "$value" && ! "$value" =~ ^[A-Za-z0-9._%+@,-]+$ ]]; then
+              echo "Invalid $name: expected a comma-separated email list"
+              exit 1
+            fi
+          }
 
           IMAGE_TAG=$(get_param "$PS_PREFIX/image-tag")
           ECR_REGISTRY=$(get_param "$PS_PREFIX/ecr-registry")
@@ -404,6 +518,7 @@ jobs:
           APP_SECRET_ARN=$(get_param "$PS_PREFIX/app-secret-arn")
           COGNITO_SECRET_ARN=$(get_param "$PS_PREFIX/cognito-secret-arn")
           GUACAMOLE_SECRET_ARN=$(get_param "$PS_PREFIX/guacamole-secret-arn" || echo "")
+          DC_DOMAIN_PASSWORD_SECRET_ARN=$(get_param "$PS_PREFIX/dc-domain-password-secret-arn" || echo "")
           GUACAMOLE_BASE_URL=$(get_param "$PS_PREFIX/guacamole-base-url" || echo "")
           GUACAMOLE_API_BASE_URL=$(get_param "$PS_PREFIX/guacamole-api-base-url" || echo "")
           ENGINE_ECS_CLUSTER_ARN=$(get_param "$PS_PREFIX/engine-ecs-cluster-arn")
@@ -416,6 +531,10 @@ jobs:
           REDIS_ENDPOINT=$(get_param "$PS_PREFIX/redis-endpoint" || echo "")
           EMAIL_BACKEND=$(get_param "$PS_PREFIX/email-backend" || echo "")
           CTF_FROM_EMAIL=$(get_param "$PS_PREFIX/ctf-from-email" || echo "")
+          PLATFORM_BOOTSTRAP_STAFF_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-staff-emails" || echo "")
+          PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$(get_param "$PS_PREFIX/platform-bootstrap-superuser-emails" || echo "")
+          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_STAFF_EMAILS" "$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
+          validate_bootstrap_email_list "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
 
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           echo "Deploying image: $IMAGE"
@@ -425,6 +544,7 @@ jobs:
           [ -n "$GUACAMOLE_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_SECRET_ARN=$GUACAMOLE_SECRET_ARN"
           [ -n "$GUACAMOLE_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_BASE_URL=$GUACAMOLE_BASE_URL"
           [ -n "$GUACAMOLE_API_BASE_URL" ] && COMMON_ENV="$COMMON_ENV -e GUACAMOLE_API_BASE_URL=$GUACAMOLE_API_BASE_URL"
+          [ -n "$DC_DOMAIN_PASSWORD_SECRET_ARN" ] && COMMON_ENV="$COMMON_ENV -e DC_DOMAIN_PASSWORD_SECRET_ARN=$DC_DOMAIN_PASSWORD_SECRET_ARN"
           # Add localhost to ALLOWED_HOSTS for dev (enables SSM tunnel testing)
           # PS_PREFIX comes from Parameter Store, not user input - safe to use
           if [[ "$PS_PREFIX" == *"/dev/"* ]]; then
@@ -441,8 +561,14 @@ jobs:
           [ -n "$REDIS_ENDPOINT" ] && COMMON_ENV="$COMMON_ENV -e REDIS_HOST=$REDIS_ENDPOINT"
           [ -n "$EMAIL_BACKEND" ] && COMMON_ENV="$COMMON_ENV -e EMAIL_BACKEND=$EMAIL_BACKEND"
           [ -n "$CTF_FROM_EMAIL" ] && COMMON_ENV="$COMMON_ENV -e CTF_FROM_EMAIL=$CTF_FROM_EMAIL"
+          [ -n "$PLATFORM_BOOTSTRAP_STAFF_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_STAFF_EMAILS=$PLATFORM_BOOTSTRAP_STAFF_EMAILS"
+          [ -n "$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS" ] && COMMON_ENV="$COMMON_ENV -e PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=$PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS"
 
           docker pull "$IMAGE"
+          # The DC domain password secret is Terraform-managed (created and
+          # seeded by the engine-provisioner module), so it always carries an
+          # AWSCURRENT value — no pre-deploy populate check needed, same as the
+          # DB / app / Cognito secret ARNs above.
           docker stop portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           docker rm portal worker-cms worker-engine worker-mc ctf-scheduler 2>/dev/null || true
           eval docker run -d --name portal --restart unless-stopped -p 8000:8000 $COMMON_ENV "$IMAGE"

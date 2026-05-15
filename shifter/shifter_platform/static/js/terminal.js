@@ -41,14 +41,14 @@ class TerminalManager {
             theme: {
                 background: '#0d0d0d',
                 foreground: '#eaebeb',
-                cursor: '#128df3',
+                cursor: '#94a3b8',
                 cursorAccent: '#0d0d0d',
-                selectionBackground: 'rgba(18, 141, 243, 0.3)',
+                selectionBackground: 'rgba(148, 163, 184, 0.3)',
                 black: '#000000',
                 red: '#ff5555',
                 green: '#50fa7b',
                 yellow: '#f1fa8c',
-                blue: '#128df3',
+                blue: '#5391e6',
                 magenta: '#ff79c6',
                 cyan: '#8be9fd',
                 white: '#eaebeb',
@@ -160,6 +160,27 @@ class TerminalManager {
             terminal.loadAddon(fitAddon);
             terminal.loadAddon(webLinksAddon);
             terminal.open(container);
+
+            // Wire clipboard: Ctrl+Shift+C copies selection, Ctrl+Shift+V pastes.
+            // Without this xterm.js shows highlighting but never reaches the
+            // system clipboard, so participants can't copy command output.
+            terminal.attachCustomKeyEventHandler((ev) => {
+                if (ev.type !== 'keydown') return true;
+                if (ev.ctrlKey && ev.shiftKey && (ev.key === 'C' || ev.key === 'c')) {
+                    const sel = terminal.getSelection();
+                    if (sel) {
+                        navigator.clipboard.writeText(sel).catch(() => {});
+                    }
+                    return false;
+                }
+                if (ev.ctrlKey && ev.shiftKey && (ev.key === 'V' || ev.key === 'v')) {
+                    navigator.clipboard.readText().then((txt) => {
+                        if (txt) this.sendInput(instance.uuid, txt);
+                    }).catch(() => {});
+                    return false;
+                }
+                return true;
+            });
 
             // Store terminal data
             this.terminals.set(instance.uuid, {

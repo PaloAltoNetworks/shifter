@@ -12,7 +12,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Seed the standalone workshop CTFd with challenges, flags, and baseline config."
     )
-    parser.add_argument("--base-url", required=True, help="CTFd base URL, e.g. https://ctf.shifter.keplerops.com")
+    parser.add_argument("--base-url", required=True, help="CTFd base URL, e.g. https://ctf.shifter.example.com")
     parser.add_argument(
         "--token",
         default=os.environ.get("CTFD_TOKEN"),

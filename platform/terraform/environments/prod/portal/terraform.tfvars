@@ -1,3 +1,10 @@
+# terraform.tfvars — committed example.com baseline for OSS deployers.
+# This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
+# a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
+# `*.auto.tfvars` and the local values win. CI deploys render the overrides
+# from GitHub secrets/repository variables; see docs/dev/deploy-secrets.md.
+
+
 # ------------------------------------------------------------------------------
 # General
 # ------------------------------------------------------------------------------
@@ -34,6 +41,7 @@ db_multi_az              = true
 db_backup_retention_days = 7
 db_deletion_protection   = true
 db_skip_final_snapshot   = false
+db_apply_immediately     = false
 
 # ------------------------------------------------------------------------------
 # EC2
@@ -48,7 +56,7 @@ ec2_root_volume_size = 50
 # ALB
 # ------------------------------------------------------------------------------
 
-domain_name       = "shifter.keplerops.com"
+domain_name       = "shifter.example.com"
 app_port          = 8000
 health_check_path = "/health"
 
@@ -57,14 +65,18 @@ health_check_path = "/health"
 # ------------------------------------------------------------------------------
 
 cognito_domain_prefix = "shifter-portal"
-allowed_email_domains = ["paloaltonetworks.com"]
+# REPLACE: the email domains permitted to self-register via Cognito pre-signup.
+# Leaving this empty fails closed — no domain-wide self-signup. Add only domains
+# your tenancy owns; do NOT ship a third-party domain in an example.
+allowed_email_domains = []
 allowed_emails        = []
 
 # ------------------------------------------------------------------------------
 # S3
 # ------------------------------------------------------------------------------
 
-user_storage_bucket = "shifter-user-storage-7a3f9c2e"
+# REPLACE: your S3 bucket name for user-uploaded artifacts.
+user_storage_bucket = "shifter-user-storage-REPLACE_WITH_ACCOUNT_ID"
 
 # ------------------------------------------------------------------------------
 # Provisioner
@@ -126,8 +138,11 @@ engine_container_tag = "latest"
 # Windows/DC AMIs also managed via SSM Parameter Store
 
 dc_domain_name = "internal.shifter"
-# nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
+# Domain Controller Administrator password is sourced from
+# aws_secretsmanager_secret.dc_domain_password (engine-provisioner module)
+# at runtime; the value is managed out-of-band and is intentionally not
+# present in Terraform configuration. See
+# shifter/shifter_platform/documentation/docs/technical/dev/secrets.md.
 
 # ------------------------------------------------------------------------------
 # Guacamole
@@ -151,6 +166,7 @@ guacamole_db_multi_az              = true
 guacamole_db_backup_retention_days = 14
 guacamole_db_deletion_protection   = true
 guacamole_db_skip_final_snapshot   = false
+guacamole_db_apply_immediately     = false
 
 # Autoscaling (disabled for initial testing)
 guacamole_enable_autoscaling       = false
@@ -188,15 +204,15 @@ messaging_alarm_actions               = [] # Populated by main.tf from shared SN
 # SES
 # ------------------------------------------------------------------------------
 
-ses_domain     = "keplerops.com"
+ses_domain     = "example.com"
 email_backend  = "django_ses.SESBackend"
-ctf_from_email = "ctf@keplerops.com"
+ctf_from_email = "ctf@example.com"
 
 # ------------------------------------------------------------------------------
 # Alerting
 # ------------------------------------------------------------------------------
 
-alarm_email = "bedwards@paloaltonetworks.com"
+alarm_email = "admin@example.com"
 
 # ------------------------------------------------------------------------------
 # Bedrock Logging

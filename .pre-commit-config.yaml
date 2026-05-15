@@ -72,12 +72,33 @@ repos:
         name: ruff-format (bootstrap)
         files: ^scripts/bootstrap/
       - id: ruff
+        name: ruff (gcp scripts)
+        args: [--fix]
+        files: ^scripts/gcp/
+      - id: ruff-format
+        name: ruff-format (gcp scripts)
+        files: ^scripts/gcp/
+      - id: ruff
         name: ruff (check_layer_imports)
         args: [--fix]
         files: ^scripts/check_layer_imports/
       - id: ruff-format
         name: ruff-format (check_layer_imports)
         files: ^scripts/check_layer_imports/
+      - id: ruff
+        name: ruff (check_rds_pending_modifications)
+        args: [--fix]
+        files: ^scripts/check_rds_pending_modifications/
+      - id: ruff-format
+        name: ruff-format (check_rds_pending_modifications)
+        files: ^scripts/check_rds_pending_modifications/
+      - id: ruff
+        name: ruff (installation)
+        args: [--fix]
+        files: ^shifter/installation/
+      - id: ruff-format
+        name: ruff-format (installation)
+        files: ^shifter/installation/
 
   # JavaScript/CSS linting
   - repo: local
@@ -152,6 +173,12 @@ repos:
         language: system
         files: ^(scripts/polaris-aws-range/|shifter/engine/provisioner/terraform/modules/range/).*\.tf$
 
+      - id: check-tf-iam-ec2-scope
+        name: AWS EC2 lifecycle IAM scoping (engine provisioner)
+        entry: python3 scripts/check_tf_iam_ec2_scope/check_tf_iam_ec2_scope.py
+        language: system
+        files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
+
   # Kubernetes schema validation
   - repo: local
     hooks:
@@ -168,7 +195,14 @@ repos:
         entry: kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
         language: system
         files: ^platform/k8s/.*\.yaml$
-        exclude: kustomization\.yaml$
+        # Kustomize patch files (patch-*.yaml) are partial strategic-merge
+        # patches, not full manifests; strict schema validation is for
+        # fully-rendered resources, not patches. The base manifests under
+        # platform/k8s/gcp/base/ are still validated. The CI workflow
+        # (`.github/workflows/_quality.yml`) additionally renders every
+        # kustomize root via `kustomize build` and re-runs kubeconform on
+        # the rendered output. See ADR-004-R5.
+        exclude: (kustomization\.yaml|patch-.*\.yaml)$
         types: [yaml]
 
   # =============================================================================
@@ -204,10 +238,21 @@ repos:
         files: ^scripts/bootstrap/
         exclude: ^scripts/bootstrap/(tests|\.venv)/
       - id: bandit
+        name: bandit (gcp scripts)
+        # B101: assert. B108: fixed /tmp path the deploy workflow writes/reads.
+        args: [-r, --skip, "B101,B108"]
+        files: ^scripts/gcp/
+        exclude: ^scripts/gcp/(tests|\.venv)/
+      - id: bandit
         name: bandit (check_layer_imports)
         args: [-r, --skip, "B101,B112"]
         files: ^scripts/check_layer_imports/
         exclude: ^scripts/check_layer_imports/(tests|\.venv)/
+      - id: bandit
+        name: bandit (installation)
+        args: [-r, --skip, B101]
+        files: ^shifter/installation/
+        exclude: ^shifter/installation/(tests|\.venv)/
 
   # IaC Security (Terraform, Dockerfile)
   - repo: https://github.com/bridgecrewio/checkov
@@ -224,7 +269,13 @@ repos:
     hooks:
       - id: kube-linter
         name: kube-linter (k8s security)
-        entry: kube-linter lint --config .kube-linter.yaml platform/k8s/
+        # Kustomize patch files (patch-*.yaml) are partial strategic-merge
+        # patches and don't carry full Deployment fields; kube-linter's
+        # security checks are for fully-rendered resources, not patches.
+        # Base manifests and the rest of platform/k8s/ remain checked.
+        # CI (`.github/workflows/_quality.yml`) additionally renders every
+        # kustomize root and runs kube-linter on the result. See ADR-004-R5.
+        entry: kube-linter lint --config .kube-linter.yaml --ignore-paths "**/patch-*.yaml" platform/k8s/
         language: system
         files: ^platform/k8s/
         pass_filenames: false
@@ -275,8 +326,18 @@ repos:
         name: architecture (adr guard fast)
         entry: python3 scripts/adr_guard/adr_guard.py --changed --level fast
         language: system
-        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$)
+        files: ^(docs/adr/|scripts/adr_guard/|\.github/workflows/|\.github/(CODEOWNERS|pull_request_template\.md|copilot-instructions\.md)$|\.claude/|shifter/shifter_platform/.*\.py$|shifter/engine/provisioner/cloud/.*\.py$|platform/terraform/environments/.*\.tfvars$|\.pre-commit-config\.yaml$|AGENTS\.md$|\.importlinter$|\.tflint\.hcl$|\.gitleaks\.toml$|\.kube-linter\.yaml$|\.shifter\.yaml$|mcp/.*\.(js|mjs|cjs)$)
         pass_filenames: false
+        verbose: true
+
+      - id: adr-guard-k8s
+        name: architecture (adr guard k8s deployments)
+        entry: python3 scripts/adr_guard/adr_guard.py --checks k8s-deployment-security-context --files
+        language: python
+        additional_dependencies:
+          - pyyaml>=6.0
+        files: ^(platform/k8s/gcp/base/.*\.ya?ml$|platform/charts/shifter/.*)
+        pass_filenames: true
         verbose: true
 
       - id: import-linter-shifter-platform
@@ -361,6 +422,16 @@ repos:
         files: ^scripts/bootstrap/
         pass_filenames: false
 
+  # GCP deploy-time rendering script tests
+  - repo: local
+    hooks:
+      - id: pytest-gcp-scripts
+        name: pytest (gcp scripts)
+        entry: bash -c 'cd scripts/gcp && uv run pytest tests/ -q'
+        language: system
+        files: ^scripts/gcp/
+        pass_filenames: false
+
   # Check layer imports tests
   - repo: local
     hooks:
@@ -373,6 +444,28 @@ repos:
           --cov-report=term-missing:skip-covered'
         language: system
         files: ^scripts/check_layer_imports/
+        pass_filenames: false
+
+      - id: pytest-check-rds-pending-modifications
+        name: pytest (check_rds_pending_modifications)
+        entry: >-
+          bash -c 'cd scripts/check_rds_pending_modifications && uv run pytest tests/ -q'
+        language: system
+        files: ^scripts/check_rds_pending_modifications/
+        pass_filenames: false
+
+  # Installation config tests
+  - repo: local
+    hooks:
+      - id: pytest-installation
+        name: pytest (installation)
+        entry: >-
+          bash -c 'cd shifter/installation && uv run pytest tests/ -q --cov=.
+          --cov-report=html:../../coverage/installation
+          --cov-report=xml:coverage.xml
+          --cov-report=term-missing:skip-covered'
+        language: system
+        files: ^shifter/installation/
         pass_filenames: false
 
   # Jest tests (JS)
@@ -407,6 +500,13 @@ repos:
         entry: bash -c 'cd mcp/aws && npm test'
         language: system
         files: ^mcp/aws/
+        pass_filenames: false
+
+      - id: test-mcp-ops
+        name: test (mcp/ops)
+        entry: bash -c 'cd mcp/ops && npm test'
+        language: system
+        files: ^mcp/ops/
         pass_filenames: false
 
   # Shifter Platform tests (largest test suite - run last)

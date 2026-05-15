@@ -369,6 +369,74 @@ def pause_ngfw_for_range(request_id: str, range_data: dict) -> None:
     )
 
 
+def _wait_for_ngfw_pause_to_complete(ngfw_info: dict) -> None:
+    """If the NGFW is mid-`pausing`, block until EC2 reports stopped before resuming."""
+    logger.info("ensure_ngfw_running: NGFW is pausing, waiting for paused...")
+    executor = AWSExecutor()
+    wait_result = executor.wait_for_stopped(ngfw_info["ec2_instance_id"])
+    if not wait_result.success:
+        raise RuntimeError(f"NGFW failed to reach paused state: {wait_result.stderr}")
+    logger.info("ensure_ngfw_running: NGFW is now paused, proceeding to resume")
+
+
+def _publish_ngfw_status(ngfw_info: dict, status: str) -> None:
+    """Persist `status` and emit the matching event for an NGFW lifecycle transition."""
+    _update_ngfw_status(ngfw_info["ngfw_instance_id"], status)
+    publish_ngfw_event(
+        request_id=ngfw_info["ngfw_request_id"],
+        instance_id=ngfw_info["instance_uuid"],
+        app_id=ngfw_info["app_id"],
+        status=status,
+    )
+
+
+def _run_ngfw_start_with_retry(ngfw_info: dict, request_id: str) -> None:
+    """Run NGFWStartPlan with bounded retries; raise RuntimeError on permanent failure.
+
+    Returns early without raising if a parallel resume marks the NGFW ready
+    between attempts.
+    """
+    executor = AWSExecutor()
+    orchestrator = OpsOrchestrator(executor)
+    plan = NGFWStartPlan()
+
+    class _InstanceRef:
+        def __init__(self, instance_id: str):
+            self.instance_id = instance_id
+
+    context = plan.get_context(_InstanceRef(ngfw_info["ec2_instance_id"]))
+
+    for attempt in range(NGFW_START_MAX_RETRIES):
+        result = orchestrator.orchestrate(ngfw_info["ec2_instance_id"], plan, context)
+        if result.success:
+            return
+
+        if attempt == NGFW_START_MAX_RETRIES - 1:
+            error_msg = result.error or "NGFW start failed"
+            logger.error("ensure_ngfw_running: %s", error_msg)
+            _publish_ngfw_status(ngfw_info, "failed")
+            raise RuntimeError(error_msg)
+
+        delay = NGFW_START_RETRY_DELAYS[attempt]
+        logger.warning(
+            "ensure_ngfw_running: attempt %d/%d failed, retrying in %ds request_id=%s error=%s",
+            attempt + 1,
+            NGFW_START_MAX_RETRIES,
+            delay,
+            request_id,
+            result.error,
+        )
+        time.sleep(delay)
+
+        refreshed = get_range_ngfw_info(request_id)
+        if refreshed and refreshed["status"] == "ready":
+            logger.info(
+                "ensure_ngfw_running: NGFW became ready during retry wait, request_id=%s",
+                request_id,
+            )
+            return
+
+
 def ensure_ngfw_running(request_id: str) -> None:
     """Ensure NGFW is running before resuming range instances.
 
@@ -385,119 +453,33 @@ def ensure_ngfw_running(request_id: str) -> None:
     """
     logger.info("ensure_ngfw_running: starting request_id=%s", request_id)
 
-    # Get NGFW info
     ngfw_info = get_range_ngfw_info(request_id)
     if not ngfw_info:
         logger.info("ensure_ngfw_running: no NGFW attached, skipping")
         return
 
     status = ngfw_info["status"]
-
-    # Already running
     if status == "ready":
         logger.info("ensure_ngfw_running: NGFW already ready, skipping")
         return
-
-    # Failed state - cannot proceed
     if status == "failed":
         raise RuntimeError("NGFW is in failed state, cannot resume range")
-
-    # Resuming - wait for it (another resume may have triggered it)
     if status == "resuming":
         logger.info("ensure_ngfw_running: NGFW is resuming, waiting...")
-        # For now, proceed with the start operation which will wait
-        # The AWSExecutor.wait_for_running will handle this
-
-    # If pausing, wait for EC2 stop to complete before resuming
+        # Fall through; AWSExecutor.wait_for_running will block.
     if status == "pausing":
-        logger.info("ensure_ngfw_running: NGFW is pausing, waiting for paused...")
-        executor = AWSExecutor()
-        wait_result = executor.wait_for_stopped(ngfw_info["ec2_instance_id"])
-        if not wait_result.success:
-            raise RuntimeError(f"NGFW failed to reach paused state: {wait_result.stderr}")
-        logger.info("ensure_ngfw_running: NGFW is now paused, proceeding to resume")
+        _wait_for_ngfw_pause_to_complete(ngfw_info)
+    if status not in ("paused", "pausing", "resuming"):
+        return
 
-    # Paused or pausing - need to resume
-    if status in ("paused", "pausing", "resuming"):
-        # Update status to resuming
-        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "resuming")
-
-        # Publish event
-        publish_ngfw_event(
-            request_id=ngfw_info["ngfw_request_id"],
-            instance_id=ngfw_info["instance_uuid"],
-            app_id=ngfw_info["app_id"],
-            status="resuming",
-        )
-
-        # Execute start plan with retry
-        executor = AWSExecutor()
-        orchestrator = OpsOrchestrator(executor)
-        plan = NGFWStartPlan()
-
-        # Create a simple object with instance_id attribute for get_context
-        class InstanceRef:
-            def __init__(self, instance_id: str):
-                self.instance_id = instance_id
-
-        context = plan.get_context(InstanceRef(ngfw_info["ec2_instance_id"]))
-
-        for attempt in range(NGFW_START_MAX_RETRIES):
-            result = orchestrator.orchestrate(ngfw_info["ec2_instance_id"], plan, context)
-
-            if result.success:
-                break
-
-            # Last attempt - fail permanently
-            if attempt == NGFW_START_MAX_RETRIES - 1:
-                error_msg = result.error or "NGFW start failed"
-                logger.error("ensure_ngfw_running: %s", error_msg)
-                _update_ngfw_status(ngfw_info["ngfw_instance_id"], "failed")
-                publish_ngfw_event(
-                    request_id=ngfw_info["ngfw_request_id"],
-                    instance_id=ngfw_info["instance_uuid"],
-                    app_id=ngfw_info["app_id"],
-                    status="failed",
-                )
-                raise RuntimeError(error_msg)
-
-            # Not the last attempt - log, sleep, re-query status, and retry
-            delay = NGFW_START_RETRY_DELAYS[attempt]
-            logger.warning(
-                "ensure_ngfw_running: attempt %d/%d failed, retrying in %ds request_id=%s error=%s",
-                attempt + 1,
-                NGFW_START_MAX_RETRIES,
-                delay,
-                request_id,
-                result.error,
-            )
-            time.sleep(delay)
-
-            # Re-query NGFW status before retrying
-            refreshed = get_range_ngfw_info(request_id)
-            if refreshed and refreshed["status"] == "ready":
-                logger.info(
-                    "ensure_ngfw_running: NGFW became ready during retry wait, request_id=%s",
-                    request_id,
-                )
-                return
-
-        # Update status to ready
-        _update_ngfw_status(ngfw_info["ngfw_instance_id"], "ready")
-
-        # Publish success event
-        publish_ngfw_event(
-            request_id=ngfw_info["ngfw_request_id"],
-            instance_id=ngfw_info["instance_uuid"],
-            app_id=ngfw_info["app_id"],
-            status="ready",
-        )
-
-        logger.info(
-            "ensure_ngfw_running: NGFW resumed ec2=%s request_id=%s",
-            ngfw_info["ec2_instance_id"],
-            request_id,
-        )
+    _publish_ngfw_status(ngfw_info, "resuming")
+    _run_ngfw_start_with_retry(ngfw_info, request_id)
+    _publish_ngfw_status(ngfw_info, "ready")
+    logger.info(
+        "ensure_ngfw_running: NGFW resumed ec2=%s request_id=%s",
+        ngfw_info["ec2_instance_id"],
+        request_id,
+    )
 
 
 def _execute_instance_operation(

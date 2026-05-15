@@ -17,6 +17,21 @@ let it deploy to both dev and prod.
 State backend: `<env>.s3.tfbackend` (partial; bucket/key supplied at
 `terraform init` time).
 
+## Scheduling policy
+
+GitHub Actions does not support a single `runs-on` target that uses
+GitHub-hosted runners first, then self-hosted runners, then waits for
+whichever runner frees up next. Standard GitHub-hosted labels such as
+`ubuntu-latest` and self-hosted labels are separate scheduling targets.
+
+Shifter splits work across both capacity pools instead:
+
+- Portable quality jobs run on `ubuntu-latest`, using the repository's
+  GitHub-hosted runner allotment.
+- Deployment, image build, Packer, and environment-mutating jobs remain
+  on `self-hosted`, using the EC2 runner pool that has the expected
+  long-lived tooling and account access patterns.
+
 ## Deploying
 
 From repo root:

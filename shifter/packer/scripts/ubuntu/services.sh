@@ -21,8 +21,9 @@ echo "=== Installing OpenSSH Server ==="
 # Usually pre-installed, but ensure it's there
 apt-get install -y openssh-server
 
-# Set ubuntu user password for SSH/SFTP
-echo "ubuntu:ubuntu" | chpasswd
+# Issue #762: no shared static password baked into the AMI. The
+# per-range Terraform user_data sets a per-instance password on first
+# boot.
 
 # Enable SSH password authentication for SFTP file transfers via Guacamole
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config

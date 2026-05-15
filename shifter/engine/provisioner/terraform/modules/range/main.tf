@@ -70,9 +70,9 @@ resource "aws_subnet" "range" {
   availability_zone = var.availability_zone
 
   tags = merge(local.common_tags, {
-    Name                   = "shifter-${each.key}-${var.user_id}"
-    "shifter:subnet_name"  = each.key
-    "shifter:subnet_uuid"  = each.value.uuid
+    Name                  = "shifter-${each.key}-${var.user_id}"
+    "shifter:subnet_name" = each.key
+    "shifter:subnet_uuid" = each.value.uuid
   })
 }
 
@@ -120,10 +120,10 @@ resource "aws_security_group_rule" "connected_subnet" {
     for pair in flatten([
       for subnet in var.subnets : [
         for connected_name in subnet.connected_to : {
-          key             = "${connected_name}-from-${subnet.name}"
-          security_group  = connected_name
-          source_cidr     = subnet.cidr
-          source_name     = subnet.name
+          key            = "${connected_name}-from-${subnet.name}"
+          security_group = connected_name
+          source_cidr    = subnet.cidr
+          source_name    = subnet.name
         } if contains(keys(local.subnet_map), connected_name)
       ]
     ]) : pair.key => pair
@@ -247,6 +247,7 @@ resource "aws_secretsmanager_secret" "ssh_key" {
   name                    = "shifter/${var.environment}/range/${var.range_id}/${each.value.role}-${substr(each.value.instance_uuid, 0, 8)}-ssh-key"
   description             = "SSH private key for ${each.value.role} instance ${each.value.instance_uuid}"
   recovery_window_in_days = 0 # Immediate delete for cleanup
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(local.common_tags, {
     "shifter:instance_uuid" = each.value.instance_uuid
@@ -259,6 +260,85 @@ resource "aws_secretsmanager_secret_version" "ssh_key" {
 
   secret_id     = aws_secretsmanager_secret.ssh_key[each.key].id
   secret_string = tls_private_key.instance[each.key].private_key_pem
+}
+
+#------------------------------------------------------------------------------
+# Per-instance RDP/desktop passwords (#762)
+#
+# Generates a unique random password per instance so a compromise of one
+# range (or one image build artifact, or one source checkout) does not
+# leak credentials valid for any other environment. Mirrors the SSH key
+# pattern above; the password value is written into user_data so the
+# guest OS can apply it during first-boot setup, and the ARN is exposed
+# via outputs so the portal's engine.services can resolve the value
+# through shared.cloud at access time.
+#
+# Character set excludes shell- and YAML-quoting hazards (backtick,
+# single-quote, double-quote, dollar, backslash, whitespace) so the
+# password round-trips safely through Windows ``net user`` and Linux
+# ``chpasswd``.
+#------------------------------------------------------------------------------
+resource "random_password" "guest" {
+  for_each = local.instance_map
+
+  length           = 24
+  special          = true
+  override_special = "!#%&*+,-./:;<=>?@[]^_{|}~"
+  # Enforce all four character classes so the value always satisfies
+  # Windows password policy. A letters-only or digits-only draw would
+  # otherwise pass through and the guest's `net user` call would fail
+  # the NT complexity check. The minimums sum to 4 of 24, leaving 20
+  # characters drawn from the full alphabet for entropy.
+  min_lower   = 1
+  min_upper   = 1
+  min_numeric = 1
+  min_special = 1
+}
+
+resource "aws_secretsmanager_secret" "guest_password" {
+  for_each = local.instance_map
+
+  name                    = "shifter/${var.environment}/range/${var.range_id}/${each.value.role}-${substr(each.value.instance_uuid, 0, 8)}-rdp-password"
+  description             = "Per-instance local desktop / RDP password for ${each.value.role} instance ${each.value.instance_uuid}"
+  recovery_window_in_days = 0 # Immediate delete for cleanup, matches ssh_key
+  kms_key_id              = var.secrets_kms_key_arn
+
+  tags = merge(local.common_tags, {
+    "shifter:instance_uuid" = each.value.instance_uuid
+    "shifter:role"          = each.value.role
+    "shifter:credential"    = "rdp-password"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "guest_password" {
+  for_each = local.instance_map
+
+  secret_id     = aws_secretsmanager_secret.guest_password[each.key].id
+  secret_string = random_password.guest[each.key].result
+}
+
+# Mirror the per-instance password to SSM Parameter Store SecureString
+# so the engine provisioner can use ``{{ssm-secure:<name>}}``
+# substitution in SSM Run Command bodies (#762 codex cycle 3 finding).
+# The SSM service substitutes the placeholder on the way to the agent;
+# the command record holds the placeholder, not the resolved value, so
+# the password never lands in ``GetCommandInvocation`` history. The
+# Secrets Manager copy above continues to back the portal's
+# access-time lookup via ``shared.cloud``.
+resource "aws_ssm_parameter" "guest_password" {
+  for_each = local.instance_map
+
+  name        = "/shifter/${var.environment}/range/${var.range_id}/${each.value.role}-${substr(each.value.instance_uuid, 0, 8)}-rdp-password"
+  type        = "SecureString"
+  value       = random_password.guest[each.key].result
+  key_id      = var.secrets_kms_key_arn
+  description = "Per-instance RDP password (SSM SecureString) for ${each.value.role} ${each.value.instance_uuid} — mirrors the Secrets Manager copy; consumed by SSM Run Command substitution at push time"
+
+  tags = merge(local.common_tags, {
+    "shifter:instance_uuid" = each.value.instance_uuid
+    "shifter:role"          = each.value.role
+    "shifter:credential"    = "rdp-password"
+  })
 }
 
 #------------------------------------------------------------------------------
@@ -281,7 +361,7 @@ resource "aws_ssm_parameter" "dc_config" {
 resource "aws_instance" "range" {
   for_each = local.instance_map
 
-  ami           = each.value.ami_id != "" ? each.value.ami_id : lookup({
+  ami = each.value.ami_id != "" ? each.value.ami_id : lookup({
     "kali"    = var.kali_ami_id
     "ubuntu"  = var.victim_ami_id
     "windows" = each.value.role == "dc" ? var.dc_ami_id : var.windows_ami_id
@@ -292,7 +372,11 @@ resource "aws_instance" "range" {
   vpc_security_group_ids = [aws_security_group.subnet[each.value.subnet_name].id]
   iam_instance_profile   = var.instance_profile_name != "" ? var.instance_profile_name : null
 
-  # User data based on role and OS
+  # User data based on role and OS. Issue #762: the per-instance local
+  # password is NOT rendered into user_data. The engine provisioner ECS
+  # task sets it via SSM Run Command after the instance reports
+  # SSMAvailable (see plans/set_local_password_plan.py). user_data
+  # carries only hostname and the SSH public key.
   user_data_base64 = base64encode(
     each.value.role == "attacker" ? templatefile("${path.module}/templates/kali.sh.tpl", {
       hostname   = each.value.name != "" ? each.value.name : "shifter-kali-${var.range_id}"
@@ -324,6 +408,7 @@ resource "aws_instance" "range" {
 
   depends_on = [
     aws_secretsmanager_secret_version.ssh_key,
+    aws_secretsmanager_secret_version.guest_password,
     aws_security_group.subnet,
     aws_subnet.range,
   ]

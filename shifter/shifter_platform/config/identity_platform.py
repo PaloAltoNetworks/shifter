@@ -14,6 +14,7 @@ from django.contrib.auth.backends import BaseBackend
 from django.http import HttpRequest
 from firebase_admin import auth as firebase_auth
 
+from config.bootstrap_admin import apply_bootstrap_admin_flags
 from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
 from risk_register.services import audit_auth_event
@@ -149,24 +150,6 @@ def identity_platform_client_config() -> dict[str, Any]:
     }
 
 
-def _apply_bootstrap_admin_flags(user: Any, email: str) -> None:
-    """Apply env-configured bootstrap admin flags to the matching user."""
-    normalized_email = email.strip().lower()
-    is_superuser = normalized_email in getattr(settings, "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", [])
-    is_staff = is_superuser or normalized_email in getattr(settings, "PLATFORM_BOOTSTRAP_STAFF_EMAILS", [])
-
-    updates: list[str] = []
-    if user.is_staff != is_staff:
-        user.is_staff = is_staff
-        updates.append("is_staff")
-    if user.is_superuser != is_superuser:
-        user.is_superuser = is_superuser
-        updates.append("is_superuser")
-
-    if updates:
-        user.save(update_fields=updates)
-
-
 def verify_identity_token(id_token: str) -> dict[str, Any]:
     """Verify the Identity Platform ID token using Firebase Admin SDK."""
     _ensure_firebase_app()
@@ -226,7 +209,7 @@ class IdentityPlatformBackend(BaseBackend):
             user.email = claims.email
             user.save(update_fields=["email"])
 
-        _apply_bootstrap_admin_flags(user, claims.email)
+        apply_bootstrap_admin_flags(user, claims.email)
         update_cognito_sub(user, claims.sub)
         _sync_user_type_from_claims(user, identity_claims)
 

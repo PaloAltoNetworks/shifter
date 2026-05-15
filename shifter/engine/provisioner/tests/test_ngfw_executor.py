@@ -86,17 +86,24 @@ class TestBuildSSHArgs:
             assert "22" in args
             assert "admin@10.0.0.1" in args
 
-    def test_strict_host_key_checking_off(self):
+    def test_strict_host_key_checking_enforced(self):
         with NGFWExecutor(private_key=FAKE_PEM_KEY) as executor:
             args = executor._build_ssh_args("10.0.0.1")
             args_str = " ".join(args)
-            assert "StrictHostKeyChecking=no" in args_str
+            assert "StrictHostKeyChecking=yes" in args_str
+            assert "StrictHostKeyChecking=no" not in args_str
 
-    def test_user_known_hosts_devnull(self):
+    def test_user_known_hosts_not_disabled(self):
         with NGFWExecutor(private_key=FAKE_PEM_KEY) as executor:
             args = executor._build_ssh_args("10.0.0.1")
             args_str = " ".join(args)
-            assert "UserKnownHostsFile=/dev/null" in args_str
+            assert "UserKnownHostsFile=/dev/null" not in args_str
+
+    def test_batch_mode_in_args(self):
+        with NGFWExecutor(private_key=FAKE_PEM_KEY) as executor:
+            args = executor._build_ssh_args("10.0.0.1")
+            args_str = " ".join(args)
+            assert "BatchMode=yes" in args_str
 
     def test_connect_timeout(self):
         with NGFWExecutor(private_key=FAKE_PEM_KEY) as executor:

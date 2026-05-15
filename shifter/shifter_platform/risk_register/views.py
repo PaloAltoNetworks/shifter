@@ -48,10 +48,9 @@ def risk_list(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status")
     severity_filter = request.GET.get("severity")
 
-    risks = Risk.objects.all()
-
-    if not include_deleted:
-        risks = risks.filter(deleted_at__isnull=True)
+    # ``Risk.objects`` is a SoftDeleteManager (active-only by default);
+    # ``Risk.all_objects`` is the unfiltered manager for the include_deleted flag.
+    risks = (Risk.all_objects if include_deleted else Risk.objects).all()
 
     if status_filter:
         risks = risks.filter(status=status_filter)
@@ -73,9 +72,14 @@ def risk_list(request: HttpRequest) -> HttpResponse:
 
 @staff_member_required
 def risk_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    """Display risk details with comments."""
-    risk = get_object_or_404(Risk, pk=pk)
-    comments = risk.comments.filter(deleted_at__isnull=True).order_by("created_at")
+    """Display risk details with comments.
+
+    Uses ``Risk.all_objects`` so soft-deleted risks remain viewable
+    (matches pre-refactor behavior — staff need to inspect deleted
+    risks for audit and restore decisions).
+    """
+    risk = get_object_or_404(Risk.all_objects, pk=pk)
+    comments = Comment.objects.filter(risk=risk).order_by("created_at")
 
     context = {
         "risk": risk,
@@ -207,10 +211,22 @@ def risk_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
 @staff_member_required
 def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
-    """Soft-delete a risk."""
-    risk = get_object_or_404(Risk, pk=pk)
+    """Soft-delete a risk.
+
+    Uses ``Risk.all_objects`` so a re-delete attempt for an
+    already-deleted risk does not 404. The actual soft-delete is
+    idempotent: calling ``soft_delete()`` again would overwrite the
+    original ``deleted_at`` and write a duplicate DELETE audit entry,
+    so already-deleted risks are short-circuited with a no-op
+    confirmation message.
+    """
+    risk = get_object_or_404(Risk.all_objects, pk=pk)
 
     if request.method == "POST":
+        if risk.is_deleted:
+            messages.info(request, f"Risk '{risk.title}' was already deleted.")
+            return redirect("risk_register:risk_list")
+
         previous_state = _risk_to_dict(risk)
         risk.soft_delete()
 
@@ -232,8 +248,12 @@ def risk_delete(request: HttpRequest, pk: int) -> HttpResponse:
 
 @staff_member_required
 def risk_restore(request: HttpRequest, pk: int) -> HttpResponse:
-    """Restore a soft-deleted risk."""
-    risk = get_object_or_404(Risk, pk=pk)
+    """Restore a soft-deleted risk.
+
+    Uses ``Risk.all_objects`` because the target is by definition a
+    soft-deleted row — the default ``Risk.objects`` would 404.
+    """
+    risk = get_object_or_404(Risk.all_objects, pk=pk)
 
     if request.method == "POST" and risk.is_deleted:
         previous_state = _risk_to_dict(risk)

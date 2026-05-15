@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from ctf.enums import ParticipantStatus
@@ -117,6 +117,82 @@ def invite_participant(
     return participant
 
 
+def _parse_participants_csv(csv_content: str) -> list[tuple[str, str]]:
+    """Parse a CSV string into (name, email) tuples; raise on per-row errors.
+
+    Empty rows are skipped. Per-row failures are accumulated and reported in
+    one `CTFValidationError` so the caller can present every issue at once.
+    """
+    reader = csv.reader(io.StringIO(csv_content))
+    participants_data: list[tuple[str, str]] = []
+    errors: list[str] = []
+    for line_num, row in enumerate(reader, start=1):
+        if not row or (len(row) == 1 and not row[0].strip()):
+            continue
+        if len(row) < 2:
+            errors.append(f"Line {line_num}: Expected name,email format")
+            continue
+        name = row[0].strip()
+        email = row[1].strip().lower()
+        if not name:
+            errors.append(f"Line {line_num}: Name is required")
+            continue
+        if not email or "@" not in email:
+            errors.append(f"Line {line_num}: Invalid email format")
+            continue
+        participants_data.append((name, email))
+    if errors:
+        raise CTFValidationError(
+            "CSV validation errors",
+            code="CTF_CSV_VALIDATION_ERROR",
+            details={"errors": errors},
+        )
+    return participants_data
+
+
+def _emails_or_raise_on_duplicate(participants_data: list[tuple[str, str]]) -> set[str]:
+    """Return the set of unique emails; raise if any duplicate appears in input."""
+    seen_emails: set[str] = set()
+    duplicates: list[str] = []
+    for _name, email in participants_data:
+        if email in seen_emails:
+            duplicates.append(email)
+        seen_emails.add(email)
+    if duplicates:
+        raise CTFValidationError(
+            "Duplicate emails in import",
+            code="CTF_DUPLICATE_EMAILS",
+            details={"duplicates": duplicates},
+        )
+    return seen_emails
+
+
+def _assert_event_accepts_import(event: CTFEvent, participants_data: list[tuple[str, str]]) -> None:
+    """Reject the import if the event is past deadline or would exceed cap."""
+    if event.registration_deadline and timezone.now() > event.registration_deadline:
+        raise CTFValidationError(
+            "Registration deadline has passed",
+            code="CTF_REGISTRATION_DEADLINE_PASSED",
+            details={
+                "event_id": str(event.pk),
+                "deadline": event.registration_deadline.isoformat(),
+            },
+        )
+    if not event.max_participants:
+        return
+    current_count = event.participants.count()
+    if current_count + len(participants_data) > event.max_participants:
+        raise CTFValidationError(
+            f"Import would exceed maximum participants ({event.max_participants})",
+            code="CTF_MAX_PARTICIPANTS_EXCEEDED",
+            details={
+                "current": current_count,
+                "importing": len(participants_data),
+                "max": event.max_participants,
+            },
+        )
+
+
 def bulk_import_participants(
     event_id: UUID,
     csv_content: str,
@@ -146,71 +222,14 @@ def bulk_import_participants(
             details={"event_id": str(event_id)},
         ) from None
 
-    # Check registration deadline
-    if event.registration_deadline and timezone.now() > event.registration_deadline:
-        raise CTFValidationError(
-            "Registration deadline has passed",
-            code="CTF_REGISTRATION_DEADLINE_PASSED",
-            details={
-                "event_id": str(event_id),
-                "deadline": event.registration_deadline.isoformat(),
-            },
-        )
+    participants_data = _parse_participants_csv(csv_content)
+    seen_emails = _emails_or_raise_on_duplicate(participants_data)
+    _assert_event_accepts_import(event, participants_data)
 
-    # Parse CSV
-    reader = csv.reader(io.StringIO(csv_content))
-    participants_data: list[tuple[str, str]] = []
-    errors: list[str] = []
-
-    for line_num, row in enumerate(reader, start=1):
-        if not row or (len(row) == 1 and not row[0].strip()):
-            continue  # Skip empty lines
-
-        if len(row) < 2:
-            errors.append(f"Line {line_num}: Expected name,email format")
-            continue
-
-        name = row[0].strip()
-        email = row[1].strip().lower()
-
-        if not name:
-            errors.append(f"Line {line_num}: Name is required")
-            continue
-
-        if not email or "@" not in email:
-            errors.append(f"Line {line_num}: Invalid email format")
-            continue
-
-        participants_data.append((name, email))
-
-    if errors:
-        raise CTFValidationError(
-            "CSV validation errors",
-            code="CTF_CSV_VALIDATION_ERROR",
-            details={"errors": errors},
-        )
-
-    # Check for duplicates within the import
-    seen_emails: set[str] = set()
-    duplicates: list[str] = []
-    for _name, email in participants_data:
-        if email in seen_emails:
-            duplicates.append(email)
-        seen_emails.add(email)
-
-    if duplicates:
-        raise CTFValidationError(
-            "Duplicate emails in import",
-            code="CTF_DUPLICATE_EMAILS",
-            details={"duplicates": duplicates},
-        )
-
-    # Check for existing participants
     existing = CTFParticipant.objects.filter(
         event=event,
         email__in=seen_emails,
     ).values_list("email", flat=True)
-
     if existing:
         raise CTFValidationError(
             "Some participants already exist",
@@ -218,23 +237,7 @@ def bulk_import_participants(
             details={"existing": list(existing)},
         )
 
-    # Check max participants
-    if event.max_participants:
-        current_count = event.participants.count()
-        if current_count + len(participants_data) > event.max_participants:
-            raise CTFValidationError(
-                f"Import would exceed maximum participants ({event.max_participants})",
-                code="CTF_MAX_PARTICIPANTS_EXCEEDED",
-                details={
-                    "current": current_count,
-                    "importing": len(participants_data),
-                    "max": event.max_participants,
-                },
-            )
-
-    # Create participants
     created: list[CTFParticipant] = []
-
     with transaction.atomic():
         for name, email in participants_data:
             participant = CTFParticipant.objects.create(
@@ -243,7 +246,6 @@ def bulk_import_participants(
                 name=name,
                 status=ParticipantStatus.INVITED.value,
             )
-            # Auto-register: create Django user and link to participant
             _auto_register_participant(participant)
             created.append(participant)
 
@@ -252,25 +254,95 @@ def bulk_import_participants(
         len(created),
         event_id,
     )
-
     return created
 
 
 def get_participant_by_user(user: User, event_id: UUID | None = None) -> CTFParticipant | None:
-    """Get participant record for a user.
+    """Get an eligible participant record for a user.
+
+    Codex review (issue #765/#768/#769) cycle 4: this helper is the entry
+    point for every challenge-, hint-, scoreboard-, and dashboard-scoped
+    view that resolves "the participant for this request." It now filters
+    by `eligible_participant_q()` so a user with mixed eligibility across
+    events can never act as a disqualified row in event A just because
+    they are also eligible in event B. Callers MUST pass `event_id` when
+    the route names a specific event (or a challenge belonging to one),
+    so a multi-event user resolves to the correct participant.
 
     Args:
         user: The Django user.
-        event_id: Optional event UUID to filter by.
+        event_id: Event UUID to filter by. Strongly recommended for
+            challenge- or event-scoped surfaces; without it, the helper
+            returns the first eligible row across any event, which is
+            only the right semantic for surfaces that are platform-wide
+            (the active-event dashboard pulls its event from
+            `UserProfile.active_ctf_event_id` and passes it here).
 
     Returns:
         The CTFParticipant instance or None.
     """
-    qs = CTFParticipant.objects.filter(user=user)
+    qs = CTFParticipant.objects.filter(eligible_participant_q(), user=user)
     if event_id:
         qs = qs.filter(event_id=event_id)
 
     return qs.select_related("event", "team").first()
+
+
+# Participant statuses considered "playing" for access-control AND scoring.
+# DISQUALIFIED is intentionally excluded — a disqualified participant must
+# be invisible to scoring AND blocked from access-control surfaces. Codex
+# review #765/#768/#769 caught the predicate divergence between scoring
+# and access checks; `eligible_participant_q` below is now the single
+# source of truth and is reused by both layers.
+_PLAYING_PARTICIPANT_STATUSES: tuple[str, ...] = (
+    ParticipantStatus.ACTIVE.value,
+    ParticipantStatus.REGISTERED.value,
+    ParticipantStatus.COMPLETED.value,
+)
+
+
+def eligible_participant_q(field_prefix: str = "") -> Q:
+    """Return a `Q` predicate matching participants eligible for scoring/access.
+
+    A participant is eligible iff they have completed registration
+    (`registered_at` is set) AND their status is one of ACTIVE / REGISTERED
+    / COMPLETED — i.e. NOT disqualified. This is the single shared
+    predicate used by `is_active_participant` (access control), by
+    `get_scoreboard` (individual rankings), and by `get_team_scoreboard`
+    (team aggregates) so the three layers cannot drift apart.
+
+    Args:
+        field_prefix: Django ORM lookup prefix to prepend, e.g. `""` when
+            filtering on `CTFParticipant` directly, or `"members__"` when
+            filtering on `CTFTeam` and reaching across the team→members
+            relation. Must end in `__` when non-empty.
+
+    Returns:
+        A `Q` object combining the registration and status checks.
+    """
+    p = field_prefix
+    return Q(**{f"{p}registered_at__isnull": False, f"{p}status__in": _PLAYING_PARTICIPANT_STATUSES})
+
+
+def is_active_participant(user: User, event: CTFEvent | None = None) -> bool:
+    """Return True if `user` is a non-disqualified registered participant.
+
+    Used by `@ctf_participant_required`, the scoreboard endpoint, the
+    challenge-file download endpoint, and any other surface that needs the
+    same predicate as the scoring service. Without this, a disqualified
+    participant whose `registered_at` is still set could pass the gate even
+    though scoring excludes their rows.
+
+    Args:
+        user: The Django user to check.
+        event: When supplied, scope the check to a single event; otherwise
+            "is participant of any event" (e.g. for the platform-wide
+            participant role decorator).
+    """
+    qs = CTFParticipant.objects.filter(eligible_participant_q(), user=user)
+    if event is not None:
+        qs = qs.filter(event=event)
+    return qs.exists()
 
 
 def disqualify_participant(participant_id: UUID, reason: str | None = None) -> CTFParticipant:

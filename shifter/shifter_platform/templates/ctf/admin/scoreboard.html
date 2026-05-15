@@ -1,21 +1,25 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Scoreboard - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Scoreboard - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb .separator {
     margin: 0 6px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .stats-grid {
@@ -32,14 +36,14 @@
 .stat-card .stat-value {
     font-size: 28px;
     font-weight: 700;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .stat-card .stat-label {
     font-size: 11px;
     text-transform: uppercase;
     font-weight: 600;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
@@ -60,139 +64,213 @@
     text-decoration: none;
     font-size: 13px;
     font-weight: 500;
-    color: var(--xdr-text-secondary);
-    background: var(--xdr-surface);
-    border: 1px solid var(--xdr-border);
+    color: var(--theme-text-secondary);
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
 }
 
 .bracket-tabs a.active {
-    color: #128df3;
-    background: rgba(18, 141, 243, 0.1);
-    border-color: #128df3;
+    color: #94a3b8;
+    background: rgba(148, 163, 184, 0.1);
+    border-color: #94a3b8;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <div class="breadcrumb">
-        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-        <span class="separator">/</span>
-        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-        <span class="separator">/</span>
-        <span>Scoreboard</span>
+    <!-- Header -->
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+            <span class="separator">/</span>
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+            <span class="separator">/</span>
+            <span>{% trans "Scoreboard" %}</span>
+        </div>
+        <h1 class="page-title">
+            {% trans "Scoreboard" %}
+        </h1>
     </div>
-    <h1 class="page-title">Scoreboard</h1>
-</div>
-
-{% if not event.scoreboard_visible %}
-<div class="card" style="padding: 12px 16px; margin-bottom: 16px; border-left: 3px solid #ff4d4f;">
-    Scoreboard is hidden from participants. They cannot see rankings until you enable visibility in event settings.
-</div>
-{% endif %}
-
-{% if frozen %}
-<div class="card" style="padding: 12px 16px; margin-bottom: 16px; border-left: 3px solid #faad14;">
-    Scoreboard is frozen for participants. You are viewing real-time standings.
-</div>
-{% endif %}
-
-<!-- Statistics Cards -->
-<div class="stats-grid mb-lg">
-    <div class="card stat-card">
-        <div class="stat-value">{{ stats.participant_count }}</div>
-        <div class="stat-label">Participants</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ stats.correct_submissions }}</div>
-        <div class="stat-label">Correct Submissions</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ stats.total_submissions }}</div>
-        <div class="stat-label">Total Submissions</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ stats.challenge_count }}</div>
-        <div class="stat-label">Challenges</div>
-    </div>
-</div>
-
-{% if brackets %}
-<div class="bracket-tabs">
-    <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}" {% if not selected_bracket %}class="active"{% endif %}>Overall</a>
-    {% for bracket in brackets %}
-    <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}?bracket={{ bracket.id }}"
-       {% if selected_bracket and selected_bracket.id == bracket.id %}class="active"{% endif %}>{{ bracket.name }}</a>
-    {% endfor %}
-</div>
-{% endif %}
-
-{% if selected_bracket and bracket_rankings is not None %}
-<!-- Bracket Rankings Table -->
-<div class="card" style="padding: 0; margin-bottom: 16px;">
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">
-            {{ selected_bracket.name }} Bracket
+    {% if not event.scoreboard_visible %}
+        <div class="card"
+             style="padding: 12px 16px;
+                    margin-bottom: 16px;
+                    border-left: 3px solid #ff4d4f">
+            {% blocktrans trimmed %}
+                Scoreboard is hidden from participants. They cannot see rankings until you enable
+                visibility in event settings.
+            {% endblocktrans %}
+        </div>
+    {% endif %}
+    {% if frozen %}
+        <div class="card"
+             style="padding: 12px 16px;
+                    margin-bottom: 16px;
+                    border-left: 3px solid #faad14">
+            {% trans "Scoreboard is frozen for participants. You are viewing real-time standings." %}
+        </div>
+    {% endif %}
+    <!-- Statistics Cards -->
+    <div class="stats-grid mb-lg">
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ stats.participant_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Participants" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ stats.correct_submissions }}
+            </div>
+            <div class="stat-label">
+                {% trans "Correct Submissions" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ stats.total_submissions }}
+            </div>
+            <div class="stat-label">
+                {% trans "Total Submissions" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ stats.challenge_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Challenges" %}
+            </div>
         </div>
     </div>
-    {% if bracket_rankings %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Rank</th>
-                <th>Name</th>
-                {% if team_mode %}<th>Members</th>{% else %}<th>Team</th>{% endif %}
-                <th>Score</th>
-                <th>Solves</th>
-                <th>Last Solve</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% include "ctf/includes/admin_scoreboard_rows.html" with entries=bracket_rankings %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <p>No scores yet in this bracket.</p>
-    </div>
-    {% endif %}
-</div>
-
-<div class="card" style="padding: 16px 16px 4px; margin-bottom: 8px;">
-    <div class="card-title" style="margin-bottom: 0;">Overall Rankings</div>
-</div>
-{% endif %}
-
-<!-- Overall Rankings Table -->
-<div class="card" style="padding: 0;">
-    {% if not selected_bracket %}
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">
-            {% if team_mode %}Team Rankings{% else %}Individual Rankings{% endif %}
+    {% if brackets %}
+        <div class="bracket-tabs">
+            <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}"
+               {% if not selected_bracket %}
+                   class="active"
+               {% endif %}>{% trans "Overall" %}</a>
+            {% for bracket in brackets %}
+                <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}?bracket={{ bracket.id }}"
+                   {% if selected_bracket and selected_bracket.id == bracket.id %}
+                       class="active"
+                   {% endif %}>{{ bracket.name }}</a>
+            {% endfor %}
         </div>
-    </div>
     {% endif %}
-    {% if rankings %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Rank</th>
-                <th>Name</th>
-                {% if team_mode %}<th>Members</th>{% else %}<th>Team</th>{% endif %}
-                <th>Score</th>
-                <th>Solves</th>
-                <th>Last Solve</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% include "ctf/includes/admin_scoreboard_rows.html" with entries=rankings %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <p>No scores yet.</p>
-    </div>
+    {% if selected_bracket and bracket_rankings is not None %}
+        <!-- Bracket Rankings Table -->
+        <div class="card" style="padding: 0; margin-bottom: 16px;">
+            <div style="padding: 16px;">
+                <div class="card-title" style="margin-bottom: 0;">
+                    {% blocktrans with v1=selected_bracket.name %}
+                        {{ v1 }} Bracket
+                    {% endblocktrans %}
+                </div>
+            </div>
+            {% if bracket_rankings %}
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>
+                                {% trans "Rank" %}
+                            </th>
+                            <th>
+                                {% trans "Name" %}
+                            </th>
+                            {% if team_mode %}
+                                <th>
+                                    {% trans "Members" %}
+                                </th>
+                            {% else %}
+                                <th>
+                                    {% trans "Team" %}
+                                </th>
+                            {% endif %}
+                            <th>
+                                {% trans "Score" %}
+                            </th>
+                            <th>
+                                {% trans "Solves" %}
+                            </th>
+                            <th>
+                                {% trans "Last Solve" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% include "ctf/includes/admin_scoreboard_rows.html" with entries=bracket_rankings %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="empty-state">
+                    <p>
+                        {% trans "No scores yet in this bracket." %}
+                    </p>
+                </div>
+            {% endif %}
+        </div>
+        <div class="card"
+             style="padding: 16px 16px 4px;
+                    margin-bottom: 8px">
+            <div class="card-title" style="margin-bottom: 0;">
+                {% trans "Overall Rankings" %}
+            </div>
+        </div>
     {% endif %}
-</div>
+    <!-- Overall Rankings Table -->
+    <div class="card" style="padding: 0;">
+        {% if not selected_bracket %}
+            <div style="padding: 16px;">
+                <div class="card-title" style="margin-bottom: 0;">
+                    {% if team_mode %}
+                        {% trans "Team Rankings" %}
+                    {% else %}
+                        {% trans "Individual Rankings" %}
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+        {% if rankings %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Rank" %}
+                        </th>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        {% if team_mode %}
+                            <th>
+                                {% trans "Members" %}
+                            </th>
+                        {% else %}
+                            <th>
+                                {% trans "Team" %}
+                            </th>
+                        {% endif %}
+                        <th>
+                            {% trans "Score" %}
+                        </th>
+                        <th>
+                            {% trans "Solves" %}
+                        </th>
+                        <th>
+                            {% trans "Last Solve" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% include "ctf/includes/admin_scoreboard_rows.html" with entries=rankings %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>
+                    {% trans "No scores yet." %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}

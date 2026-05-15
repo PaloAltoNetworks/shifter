@@ -6,12 +6,13 @@ Getting started as a Shifter developer.
 
 1. [Local Setup](local-setup) - Clone, dependencies, run locally
 2. [Setup](setup) - Deploy to AWS or GCP from scratch
-3. [CI/CD](ci-cd) - How deployments work
-4. [Secrets](secrets) - What secrets exist, where they live
-5. [Terraform](terraform) - Infrastructure patterns
-6. [Cloud Adapters](cloud-adapters) - Cloud abstraction layer
-7. [Principles](principles) - Engineering philosophy
-8. [ADR Enforcement](adr-enforcement) - Architecture guardrails and policy checks
+3. [Installation Config](installation-config) - `shifter.yaml` schema and validation
+4. [CI/CD](ci-cd) - How deployments work
+5. [Secrets](secrets) - What secrets exist, where they live
+6. [Terraform](terraform) - Infrastructure patterns
+7. [Cloud Adapters](cloud-adapters) - Cloud abstraction layer
+8. [Principles](principles) - Engineering philosophy
+9. [ADR Enforcement](adr-enforcement) - Architecture guardrails and policy checks
 
 ## Prerequisites
 
@@ -56,6 +57,7 @@ shifter/
 │   ├── charts/shifter/        # Helm chart for the GCP control plane
 │   └── k8s/gcp/               # GCP deployment assets and base manifests
 ├── scripts/                    # Bootstrap and utility scripts
+├── shifter/installation/        # shifter.yaml parser, validator, backend registry
 └── .github/workflows/          # CI/CD pipelines (AWS + GCP)
 ```
 

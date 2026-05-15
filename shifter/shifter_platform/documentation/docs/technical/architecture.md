@@ -1,22 +1,13 @@
 # Shifter Architecture
 
-Enterprise, multi-user, extensible cyber range platform. Deploys to AWS or GCP.
+Shifter is a Django application for managing cyber ranges. It deploys to AWS or
+GCP.
 
 ## Platform Infrastructure
 
-Infrastructure is defined per cloud provider. A `CLOUD_PROVIDER` environment variable selects the active provider at runtime.
-
-```mermaid
-graph TB
-    subgraph Platform["Platform Infrastructure"]
-        Global["Global<br/>(IAM, identity federation)"]
-        Core["Core<br/>(Container registry, base resources)"]
-        Range["Range<br/>(Networking, guest isolation)"]
-    end
-
-    Global --> Core
-    Core --> Range
-```
+Infrastructure is defined per cloud provider. `shifter.yaml` selects the backend
+bundle for installation. The backend emits runtime configuration, including
+`CLOUD_PROVIDER`, for Django, workers, and the provisioner.
 
 | Component | Purpose |
 |-----------|---------|
@@ -57,28 +48,13 @@ Common operator requirements:
 
 ### Hosting
 
-CI/CD via GitHub Actions with self-hosted runners. Separate workflow per cloud target.
+CI/CD runs through GitHub Actions on self-hosted runners. AWS and GCP have
+separate deployment paths.
 
 ## Shifter (Django)
 
-Django monorepo. Users interact via Mission Control; backend apps expose service interfaces.
-
-```mermaid
-graph TB
-    subgraph Shifter["Shifter Platform"]
-        MC["Mission Control<br/>(Presentation)"]
-        SE["Shifter Engine<br/>(Range Management)"]
-        CMS["Shifter CMS<br/>(Content Management)"]
-        SA["Shifter Admin<br/>(Platform Management)"]
-    end
-
-    Users((Users)) --> MC
-
-    MC -->|service calls| SE
-    MC -->|service calls| CMS
-    MC -->|service calls| SA
-    SE -.->|references models| CMS
-```
+Django monorepo. Users interact through Mission Control. Backend apps expose
+service interfaces.
 
 | Element | App | Purpose |
 |---------|-----|---------|
@@ -89,7 +65,8 @@ graph TB
 
 ### Event-Driven Communication
 
-Provisioner publishes status events to a message topic. All domains subscribe via per-domain queues and process events through domain-specific handlers.
+The provisioner publishes status events to a message topic. Domains subscribe
+through per-domain queues and process events through domain-specific handlers.
 
 On AWS this is SNS → SQS. On GCP this is Pub/Sub topic → subscriptions. The application code uses cloud adapter interfaces (see [Cloud Adapters](dev/cloud-adapters)) and does not reference provider APIs directly.
 
@@ -121,7 +98,14 @@ sequenceDiagram
 
 ## Cloud Adapters
 
-The platform and provisioner use protocol-based abstractions to isolate cloud-specific code. `CLOUD_PROVIDER` selects the implementation at runtime via factory functions.
+The platform and provisioner use protocol-based abstractions to isolate
+cloud-specific code. `CLOUD_PROVIDER` selects the implementation at runtime via
+factory functions.
+
+The installation backend registry declares the supported backends, required
+tools, required secrets, generated outputs, validation checks, health checks,
+owned files, and cloud-neutral capabilities. See
+[Installation Config](dev/installation-config).
 
 See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
 
@@ -130,7 +114,7 @@ See [Cloud Adapters](dev/cloud-adapters) for the full interface reference.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | UI separation | Mission Control is presentation only | Clean separation of presentation from domain logic. Views handle HTTP; services own business rules. |
-| API style | REST via Django REST Framework | Proven, simple, mature Django ecosystem support. |
+| API style | REST via Django REST Framework | Uses the existing Django application stack. |
 | Cloud abstraction | Protocol-based adapters per provider | Same Django app runs on AWS or GCP. Cloud-specific code isolated behind interfaces. |
 | Identity | Provider seam with per-cloud implementations | AWS keeps Cognito/OIDC. GCP uses Identity Platform with FirebaseUI/browser auth. Both require MFA, email-based usernames, and keep provider-specific auth details behind the app auth seam. |
-| Domains | keplerops.com | Operator-owned domain. DNS may be hosted externally or in cloud-managed DNS. Current `gcp-dev` hostname is `shifter.keplerops.com`. |
+| Domains | Operator-owned hostname | DNS may be hosted externally or in cloud-managed DNS. |

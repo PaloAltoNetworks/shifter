@@ -1,46 +1,63 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-
-{% block title %}Import from YAML{% endblock %}
-
-{% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Create from YAML</h1>
-        <p class="page-subtitle">Write or paste a YAML scenario definition</p>
-    </div>
-    <div class="flex-row gap-sm">
-        <button type="button" class="btn btn-secondary" onclick="validateYAML()">Validate</button>
-        <a href="{% url 'scenario_editor:create' %}" class="btn btn-secondary">Form Editor</a>
-    </div>
-</div>
-
-{% if errors %}
-<ul class="error-list">
-    {% for error in errors %}
-    <li>{{ error }}</li>
-    {% endfor %}
-</ul>
-{% endif %}
-
-<div id="validationResult" class="validation-result"></div>
-
-<form method="post">
-    {% csrf_token %}
-
-    <div class="card" style="margin-bottom: 16px; padding: 0;">
-        <textarea name="yaml_content" id="yamlEditor" class="yaml-editor"
-                  spellcheck="false">{{ yaml_content }}</textarea>
-    </div>
-
-    <div class="flex-row gap-sm">
-        <button type="submit" class="btn btn-primary">Create Scenario</button>
-        <a href="{% url 'scenario_editor:list' %}" class="btn btn-secondary">Cancel</a>
-    </div>
-</form>
+{% load i18n %}
+{% block title %}
+    Import from YAML
 {% endblock %}
-
+{% block content %}
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {% trans "Create from YAML" %}
+            </h1>
+            <p class="page-subtitle">
+                {% trans "Write or paste a YAML scenario definition" %}
+            </p>
+        </div>
+        <div class="flex-row gap-sm">
+            <button type="button"
+                    class="btn btn-secondary"
+                    onclick="validateYAML()">
+                {% trans "Validate" %}
+            </button>
+            <a href="{% url 'scenario_editor:create' %}"
+               class="btn btn-secondary">{% trans "Form Editor" %}</a>
+        </div>
+    </div>
+    {% if errors %}
+        <ul class="error-list">
+            {% for error in errors %}
+                <li>
+                    {{ error }}
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    <div id="validationResult" class="validation-result">
+    </div>
+    <form method="post">
+        {% csrf_token %}
+        <label for="yamlEditor" class="form-label">
+            {% trans "Scenario YAML" %}
+        </label>
+        <div class="card mb-lg p-0">
+            <textarea name="yaml_content"
+                      id="yamlEditor"
+                      class="yaml-editor"
+                      spellcheck="false">{{ yaml_content }}</textarea>
+        </div>
+        <div class="flex-row gap-sm">
+            <button type="submit" class="btn btn-primary">
+                {% trans "Create Scenario" %}
+            </button>
+            <a href="{% url 'scenario_editor:list' %}"
+               class="btn btn-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+{% endblock %}
 {% block extra_js %}
-<script>
+    <script>
 document.getElementById('yamlEditor').addEventListener('keydown', function(e) {
     if (e.key === 'Tab') {
         e.preventDefault();
@@ -91,5 +108,5 @@ function validateYAML() {
         resultDiv.textContent = 'Error validating: ' + err.message;
     });
 }
-</script>
+    </script>
 {% endblock %}

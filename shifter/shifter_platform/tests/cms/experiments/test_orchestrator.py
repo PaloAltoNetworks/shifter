@@ -487,7 +487,7 @@ class TestBuildExecutionPlan:
         MockScript.objects.filter.return_value = mock_qs
 
         provisioned_instances = {
-            "Workstation": {"instance_id": "i-abc123", "hostname": "ws01"},
+            "Workstation": {"instance_id": "i-0abcdef12", "hostname": "ws01"},
         }
 
         orch = ExperimentOrchestrator(experiment_id=1)
@@ -497,7 +497,7 @@ class TestBuildExecutionPlan:
 
         assert plan.run_id == run.pk
         assert len(plan.victim_commands) == 1
-        assert plan.victim_commands[0].instance_id == "i-abc123"
+        assert plan.victim_commands[0].instance_id == "i-0abcdef12"
 
 
 # ---------------------------------------------------------------------------

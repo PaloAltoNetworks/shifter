@@ -63,10 +63,15 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 "db": f"projects/{project_id}/secrets/shifter-gcp-dev-db",
                 "guacamole-db": f"projects/{project_id}/secrets/shifter-gcp-dev-guacamole-db",
                 "guacamole-json-auth": f"projects/{project_id}/secrets/shifter-gcp-dev-guacamole-json-auth",
+                # ADR-008-R6 (#963): the GCP runtime renderer fails closed
+                # without the Memorystore Secret Manager bundle ID.
+                "redis": f"projects/{project_id}/secrets/shifter-gcp-dev-redis",
             }
         },
         "identity_platform_api_key": {"value": "identity-platform-api-key"},
         "identity_platform_project_id": {"value": project_id},
+        "identity_allowed_email_domain": {"value": "paloaltonetworks.com"},
+        "identity_allowed_emails": {"value": []},
         "control_plane_database": {
             "value": {
                 "private_ip": "10.40.0.10",
@@ -75,7 +80,10 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 "user_name": "shifter",
             }
         },
-        "control_plane_cache": {"value": {"host": "10.40.0.20", "port": 6379}},
+        # ADR-008-R6 (#963): Memorystore runs with TLS on the GCP runtime,
+        # so the cache payload must carry tls_enabled or the renderer fails
+        # closed.
+        "control_plane_cache": {"value": {"host": "10.40.0.20", "port": 6378, "tls_enabled": True}},
         "guacamole_database": {
             "value": {
                 "host": "10.40.0.10",
@@ -93,6 +101,7 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
         "range_network_cidr": {"value": "10.50.0.0/16"},
         "range_network_region": {"value": "us-central1"},
         "portal_network_cidrs": {"value": ["10.40.0.0/20", "10.44.0.0/16"]},
+        "gke_services_cidr": {"value": "10.48.0.0/20"},
         "workload_service_accounts": {
             "value": {
                 "portal": f"shiftergcpdev-portal@{project_id}.iam.gserviceaccount.com",
@@ -860,7 +869,7 @@ class TestGdcRenderers:
         config = deploy.GDCBootstrapConfig(
             project_id="prod-rwctxzl6shxk",
             cluster_id="cluster1",
-            google_account_email="bedwards@paloaltonetworks.com",
+            google_account_email="admin@example.com",
         )
 
         rendered = deploy.render_gdc_cluster_config(config)
@@ -869,7 +878,7 @@ class TestGdcRenderers:
         assert "controlPlaneVIP: 10.200.0.49" in rendered
         assert "ingressVIP: 10.200.0.50" in rendered
         assert "clusterAdmin:" in rendered
-        assert "bedwards@paloaltonetworks.com" in rendered
+        assert "admin@example.com" in rendered
 
     def test_prepare_hosts_script_bakes_in_vxlan_and_inotify_fix(self):
         """The host prep script should contain both the vxlan setup and the inotify hardening."""
@@ -880,6 +889,9 @@ class TestGdcRenderers:
         assert "ip link add vxlan0 type vxlan id 42" in rendered
         assert "fs.inotify.max_user_instances = 1024" in rendered
         assert 'configure_remote_host "10.240.0.3" "10.200.0.3"' in rendered
+        assert "StrictHostKeyChecking=yes" in rendered
+        assert "StrictHostKeyChecking=no" not in rendered
+        assert "UserKnownHostsFile=/dev/null" not in rendered
 
     def test_prepare_workstation_script_installs_staged_bmctl(self):
         """The workstation prep must install the pinned staged bmctl binary, not curl it remotely."""
@@ -889,6 +901,9 @@ class TestGdcRenderers:
 
         assert f"install -m 755 {config.staging_bundle_dir}/bmctl /usr/local/sbin/bmctl" in rendered
         assert "anthos-baremetal-release" not in rendered
+        assert "StrictHostKeyChecking yes" in rendered
+        assert "StrictHostKeyChecking no" not in rendered
+        assert "UserKnownHostsFile /dev/null" not in rendered
 
     def test_rendered_gdc_shell_scripts_parse_with_bash(self, tmp_path):
         """Rendered bootstrap shell scripts must be syntactically valid bash."""
@@ -1094,6 +1109,66 @@ gke_master_authorized_cidrs = []
 
         with pytest.raises(ValueError, match="public hostname"):
             deploy.validate_gcp_control_plane_security_inputs(tf_dir)
+
+    @staticmethod
+    def _write_secure_tfvars(tf_dir, cidrs):
+        """Write a terraform.tfvars whose hostname/TLS pass, so a test isolates the CIDR allowlist check."""
+        tf_dir.mkdir()
+        cidr_lines = "".join(f'  "{cidr}",\n' for cidr in cidrs)
+        (tf_dir / "terraform.tfvars").write_text(
+            'public_hostname = "portal.example.test"\n'
+            "enable_managed_tls = true\n"
+            f"gke_master_authorized_cidrs = [\n{cidr_lines}]\n"
+        )
+
+    @pytest.mark.parametrize(
+        ("cidrs", "expected_match"),
+        [
+            # The same contract the Terraform `validation` block on
+            # `gke_master_authorized_cidrs` enforces — keep these in lockstep.
+            (["0.0.0.0/0"], r"/0 range"),
+            (["::/0"], r"/0 range"),
+            (["198.51.100.0/24", "0.0.0.0/0"], r"/0 range"),
+            (["203.0.113.10"], r"explicit /N prefix"),
+            (["not-a-cidr"], r"explicit /N prefix"),
+            (["not/a/cidr"], r"not a valid CIDR"),
+            (["198.51.100.999/32"], r"not a valid CIDR"),
+            (["198.51.100.0/33"], r"not a valid CIDR"),
+        ],
+        ids=[
+            "ipv4_world_open",
+            "ipv6_world_open",
+            "mixed_with_world_open",
+            "bare_ip_no_prefix",
+            "no_prefix_garbage",
+            "garbage_with_slashes",
+            "bad_octet",
+            "bad_prefix",
+        ],
+    )
+    def test_validate_security_inputs_rejects_unsafe_authorized_cidrs(self, tmp_path, cidrs, expected_match):
+        """Bootstrap must reject malformed CIDR entries and world-open /0 ranges in the admin allowlist."""
+        tf_dir = tmp_path / "gcp-dev"
+        self._write_secure_tfvars(tf_dir, cidrs)
+
+        with pytest.raises(ValueError, match=expected_match):
+            deploy.validate_gcp_control_plane_security_inputs(tf_dir)
+
+    def test_validate_security_inputs_accepts_specific_admin_cidrs(self, tmp_path):
+        """A non-empty allowlist of specific, well-formed v4/v6 CIDRs passes the preflight.
+
+        The validator is a side-effect-only contract (raise on bad input, return
+        None on good input), so the assertions cover both halves: the documented
+        None return and a round-trip parse that proves the test fixture's input
+        was actually consumed (so a future refactor that silently skipped the
+        CIDR loop would still be caught here, not just by the negative cases).
+        """
+        tf_dir = tmp_path / "gcp-dev"
+        cidrs = ["198.51.100.10/32", "203.0.113.0/24", "2001:db8::/48"]
+        self._write_secure_tfvars(tf_dir, cidrs)
+
+        assert deploy.validate_gcp_control_plane_security_inputs(tf_dir) is None
+        assert deploy.read_gcp_control_plane_security_inputs(tf_dir)["gke_master_authorized_cidrs"] == cidrs
 
 
 class TestGdcTerraformBootstrapCredentials:
@@ -1496,6 +1571,18 @@ class TestGdcControlPlaneHelmValues:
         assert values["services"]["guacamoleClient"]["backendConfig"]["enabled"] is True
         assert values["services"]["guacamoleClient"]["backendConfig"]["name"] == "guacamole-client"
         assert values["services"]["guacamoleClient"]["backendConfig"]["securityPolicyName"] == "shifter-gcp-dev-edge"
+        assert values["networkPolicy"] == {
+            "enabled": True,
+            "gclbSourceRanges": [
+                "35.191.0.0/16",  # NOSONAR - Google Cloud Load Balancer range.
+                "130.211.0.0/22",  # NOSONAR - Google Cloud Load Balancer range.
+            ],
+            "googleApiCidrs": [
+                "199.36.153.4/30",  # NOSONAR - restricted.googleapis.com VIP.
+                "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP.
+            ],
+            "privateServiceCidrs": ["10.40.0.10/32", "10.40.0.20/32", "10.48.0.0/20"],
+        }
 
     def test_rejects_insecure_public_bootstrap_values(self):
         """The Helm values renderer must refuse public bare-IP debug deployments on GCP."""
@@ -1570,6 +1657,11 @@ class TestGdcControlPlaneHelmChart:
         assert "runAsGroup: 1001" in output
         assert "kind: Namespace" not in output
         assert "kind: BackendConfig" in output
+        assert "kind: NetworkPolicy" in output
+        assert "name: default-deny-platform" in output
+        assert "name: default-deny-jobs" in output
+        assert "199.36.153.4/30" in output
+        assert "10.40.0.10/32" in output
         assert 'requestPath: "/health/"' in output
         assert "securityPolicy:" in output
         assert "name: shifter-gcp-dev-edge" in output
@@ -2560,13 +2652,13 @@ class TestGcpBootstrapIdentityPlatform:
         with (
             patch(
                 "deploy.resolve_gcp_bootstrap_operator_credentials",
-                return_value=("bedwards@paloaltonetworks.com", "correct-horse-battery-staple"),
+                return_value=("analyst@paloaltonetworks.com", "correct-horse-battery-staple"),
             ),
             patch("deploy._gcp_identity_admin_request", return_value={"localId": "user-123"}),
         ):
             email = deploy.ensure_gcp_identity_platform_operator(config, outputs)
 
-        assert email == "bedwards@paloaltonetworks.com"
+        assert email == "analyst@paloaltonetworks.com"
 
     def test_ensure_gcp_identity_platform_operator_skips_existing_user(self):
         """Bootstrap should treat an existing operator account as success."""
@@ -2602,9 +2694,14 @@ class TestGcpBootstrapIdentityPlatform:
         mock_prompt.assert_called_once_with()
 
     def test_ensure_gcp_identity_platform_operator_rejects_non_corporate_email(self):
-        """Bootstrap must fail before touching Identity Platform when the operator email is not corporate."""
+        """Bootstrap must reject an operator email outside the
+        identity_allowed_email_domain Terraform output before touching
+        Identity Platform — that domain is the same allow-list the
+        Identity Platform beforeCreate hook enforces."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        # _sample_gcp_control_plane_outputs sets identity_allowed_email_domain
+        # to "paloaltonetworks.com"; an email outside that domain must fail.
 
         with (
             patch(
@@ -2615,6 +2712,38 @@ class TestGcpBootstrapIdentityPlatform:
         ):
             deploy.ensure_gcp_identity_platform_operator(config, outputs)
 
+    def test_ensure_gcp_identity_platform_operator_env_fallback(self, monkeypatch):
+        """When no identity_allowed_email_domain output is supplied (e.g., a dry
+        run before terraform apply), SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN is the
+        fallback enforcement seam."""
+        monkeypatch.setenv("SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN", "example.org")
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        outputs.pop("identity_allowed_email_domain")  # simulate no terraform output
+
+        with (
+            patch(
+                "deploy.resolve_gcp_bootstrap_operator_credentials",
+                return_value=("intruder@example.com", "correct-horse-battery-staple"),
+            ),
+            pytest.raises(ValueError, match=r"example\.org"),
+        ):
+            deploy.ensure_gcp_identity_platform_operator(config, outputs)
+
+    def test_ensure_gcp_identity_platform_operator_rejects_malformed_email(self):
+        """Bootstrap must fail before touching Identity Platform when the operator email is malformed."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+
+        with (
+            patch(
+                "deploy.resolve_gcp_bootstrap_operator_credentials",
+                return_value=("not-an-email", "correct-horse-battery-staple"),
+            ),
+            pytest.raises(ValueError, match=r"@"),
+        ):
+            deploy.ensure_gcp_identity_platform_operator(config, outputs)
+
     def test_render_gcp_platform_runtime_env_elevates_bootstrap_operator(self):
         """The generated runtime env should elevate the first operator without hardcoding an email in the repo."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
@@ -2622,11 +2751,11 @@ class TestGcpBootstrapIdentityPlatform:
         with patch("deploy.load_bootstrap_env_values", return_value={}):
             rendered = deploy.render_gcp_platform_runtime_env(
                 config,
-                bootstrap_operator_email="bedwards@paloaltonetworks.com",
+                bootstrap_operator_email="admin@example.com",
             )
 
-        assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
-        assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=bedwards@paloaltonetworks.com\n" in rendered
+        assert "PLATFORM_BOOTSTRAP_STAFF_EMAILS=admin@example.com\n" in rendered
+        assert "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS=admin@example.com\n" in rendered
 
     def test_render_gcp_platform_runtime_env_uses_blank_guest_password_samples(self):
         """The generated env contract must not embed sample guest passwords in source-controlled output."""
@@ -2635,13 +2764,18 @@ class TestGcpBootstrapIdentityPlatform:
         with patch("deploy.load_bootstrap_env_values", return_value={}):
             rendered = deploy.render_gcp_platform_runtime_env(
                 config,
-                bootstrap_operator_email="bedwards@paloaltonetworks.com",
+                bootstrap_operator_email="admin@example.com",
             )
 
-        assert "GDC_WINDOWS_ADMIN_PASSWORD=\n" in rendered
-        assert "GDC_KALI_PASSWORD=\n" in rendered
-        assert "GDC_UBUNTU_PASSWORD=\n" in rendered
+        # Issue #762: per-instance guest passwords replace shared env
+        # entries. The bootstrap-rendered platform-runtime env file must
+        # not advertise these legacy keys, and never the legacy literal.
+        assert "GDC_WINDOWS_ADMIN_PASSWORD" not in rendered
+        assert "GDC_KALI_PASSWORD" not in rendered
+        assert "GDC_UBUNTU_PASSWORD" not in rendered
         assert "CortexSavesTheDay!" not in rendered
+        assert "kali:kali" not in rendered
+        assert "ubuntu:ubuntu" not in rendered
 
 
 class TestGcpIdentityAdminApi:

@@ -70,7 +70,7 @@ from ctf.services.participant import invite_participant  # noqa: E402
 EVENT_NAME = os.environ.get("POLARIS_CTF_EVENT_NAME", "POLARIS Cold-Rebuild Smoke")
 SCENARIO_ID = os.environ.get("POLARIS_CTF_SCENARIO_ID", "polaris_manual_test")
 ADMIN_EMAIL = os.environ.get(
-    "POLARIS_CTF_ADMIN_EMAIL", "bedwards@paloaltonetworks.com"
+    "POLARIS_CTF_ADMIN_EMAIL", "admin@example.com"
 )
 PARTICIPANT_EMAIL = os.environ.get(
     "POLARIS_CTF_PARTICIPANT_EMAIL", "polaris-smoke-01@example.com"

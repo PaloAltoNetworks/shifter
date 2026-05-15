@@ -1,3 +1,10 @@
+# terraform.tfvars — committed example.com baseline for OSS deployers.
+# This file IS `terraform.tfvars` (committed). Deployment-specific overrides go in
+# a sibling `local.auto.tfvars` (gitignored) — Terraform auto-loads
+# `*.auto.tfvars` and the local values win. CI deploys render the overrides
+# from GitHub secrets/repository variables; see docs/dev/deploy-secrets.md.
+
+
 # ------------------------------------------------------------------------------
 # General
 # ------------------------------------------------------------------------------
@@ -34,6 +41,7 @@ db_multi_az              = true
 db_backup_retention_days = 1
 db_deletion_protection   = false
 db_skip_final_snapshot   = true
+db_apply_immediately     = true
 
 # ------------------------------------------------------------------------------
 # EC2
@@ -52,22 +60,25 @@ ctfd_root_volume_size       = 50
 ctfd_root_volume_type       = "gp3"
 ctfd_root_volume_iops       = 3000
 ctfd_root_volume_throughput = 125
-ctfd_domain                 = "polaris.keplerops.com"
+ctfd_domain                 = "polaris.example.com"
 ctfd_repo_url               = "https://github.com/CTFd/CTFd.git"
 ctfd_git_ref                = "b5f0cf2b7f0e29f72c9227ea9bc08024230b4f06"
 ctfd_docker_compose_version = "v5.1.0"
 ctfd_docker_buildx_version  = "v0.21.2"
-ctfd_ssh_public_key         = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC3byh0s9saNGhlaIscoH+sD0Zg2dEtSDOdh8BaCEOjGCF5mm2SHPYV7ipEz2cf5Wwx/LxMWGfOiSF2h6CGBf8KCi1syDyOYVmG41AQqubVFPES0Vf6rVDTgLVqQx7IowupLmfa4MZE75kFjvRqK12jrCkFE1W9zIUAVUTnVZ9bZnVONyTsPs2GvjqJMKo6gYVdB9Dlt67uYlYiIgjYgyOmPUhY4DPg6o/pjLABLwVMDogHFZ6GLhy/EnGyks+PnpfnmLzNE/RSM65fR2FTk7h9rpjEZASf89cw6kF8NsFjkcx9jsBra4KFsRQY8AGsH7I1nyBKBncx6pqvFvycaeo5lxE3BGZRVvvnMbo/vwuwPVLtBHpQJWVhOqk75u5ACIlbjD7TYysLOuhY2/dp9F5yC00CBjlCJ/X1Qv2MOhenj2ljDQO6eBpSKvk9U0prDTWcIysn9eT9kNh6bj4dFqGiZRG+DxpolqgVgGRxJLOfJPH0WW7z0R+F/efrpaaBVcB5xqBOJ3fP6ur+JforJEtvdjIG7Dmk0TKTMU4DS4ftwFIZVnL7nJn7DcFG8K51Bf4EyZOL2kqfB+4K+9dN5IaVO6EOyP4KeJYPoOhSnxHEJyMdAQwrCmS9NwPOeEwrYoOETWaZ8/yrkTbqMdGHi5vMpajmfNTQMtzWVvaIbihf3w== j.bradley.edwards@gmail.com"
-ctfd_ssh_allowed_cidrs = {
-  workstation = "173.181.31.170/32"
-}
+# REPLACE: paste your own SSH public key (an empty string disables CTFd SSH and
+# the corresponding security-group rule); never commit a real private-key holder's
+# public key into the example.
+ctfd_ssh_public_key = ""
+# REPLACE: per-operator /32 CIDRs from which you allow SSH to the CTFd host;
+# leaving this empty disables CTFd SSH ingress.
+ctfd_ssh_allowed_cidrs = {}
 
 # ------------------------------------------------------------------------------
 # ALB
 # ------------------------------------------------------------------------------
 
 # TODO: Update with your dev domain
-domain_name       = "dev.shifter.keplerops.com"
+domain_name       = "dev.shifter.example.com"
 app_port          = 8000
 health_check_path = "/health"
 
@@ -76,14 +87,19 @@ health_check_path = "/health"
 # ------------------------------------------------------------------------------
 
 cognito_domain_prefix = "shifter-dev-portal"
-allowed_email_domains = ["paloaltonetworks.com"]
+# REPLACE: the email domains permitted to self-register via Cognito pre-signup.
+# Leaving this empty fails closed — no domain-wide self-signup. Add only domains
+# your tenancy owns; do NOT ship a third-party domain in an example.
+allowed_email_domains = []
 allowed_emails        = []
 
 # ------------------------------------------------------------------------------
 # S3
 # ------------------------------------------------------------------------------
 
-user_storage_bucket = "shifter-dev-user-storage-788327019743"
+# REPLACE: your S3 bucket name for user-uploaded artifacts. Convention is
+# "shifter-<env>-user-storage-<account-id>" but the actual name is up to you.
+user_storage_bucket = "shifter-dev-user-storage-REPLACE_WITH_ACCOUNT_ID"
 
 # ------------------------------------------------------------------------------
 # Provisioner
@@ -145,8 +161,11 @@ engine_container_tag = "latest"
 # Windows/DC AMIs also managed via SSM Parameter Store
 
 dc_domain_name = "internal.shifter"
-# nosec B105 - Ephemeral isolated range, not a production credential
-dc_domain_password = "Sh1fterDC2026" # pragma: allowlist secret
+# Domain Controller Administrator password is sourced from
+# aws_secretsmanager_secret.dc_domain_password (engine-provisioner module)
+# at runtime; the value is managed out-of-band and is intentionally not
+# present in Terraform configuration. See
+# shifter/shifter_platform/documentation/docs/technical/dev/secrets.md.
 
 # ------------------------------------------------------------------------------
 # Guacamole
@@ -162,7 +181,7 @@ guacd_desired_count            = 4
 guacamole_client_desired_count = 3
 
 # Database
-guacamole_db_instance_class        = "db.t3.small"
+guacamole_db_instance_class        = "db.m5.xlarge"
 guacamole_db_allocated_storage     = 20
 guacamole_db_max_allocated_storage = 50
 guacamole_db_engine_version        = "16"
@@ -170,6 +189,7 @@ guacamole_db_multi_az              = false
 guacamole_db_backup_retention_days = 7
 guacamole_db_deletion_protection   = false
 guacamole_db_skip_final_snapshot   = true
+guacamole_db_apply_immediately     = true
 
 # Autoscaling (disabled for initial testing)
 guacamole_enable_autoscaling       = false
@@ -207,15 +227,15 @@ messaging_alarm_actions               = [] # Populated by main.tf from shared SN
 # SES
 # ------------------------------------------------------------------------------
 
-ses_domain     = "keplerops.com"
+ses_domain     = "example.com"
 email_backend  = "django_ses.SESBackend"
-ctf_from_email = "ctf@keplerops.com"
+ctf_from_email = "ctf@example.com"
 
 # ------------------------------------------------------------------------------
 # Alerting
 # ------------------------------------------------------------------------------
 
-alarm_email = "bedwards@paloaltonetworks.com"
+alarm_email = "admin@example.com"
 
 # ------------------------------------------------------------------------------
 # Bedrock Logging

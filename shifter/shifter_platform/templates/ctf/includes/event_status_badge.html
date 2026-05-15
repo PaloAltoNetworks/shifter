@@ -1,16 +1,19 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
 {% comment %}Event status badge. Expects `event` in context.{% endcomment %}
 {% if event.status == 'draft' %}
-<span class="status status-provisioning"><span class="status-dot"></span> Draft</span>
+    <span class="status status-provisioning"><span class="status-dot"></span> {% trans "Draft" %}</span>
 {% elif event.status == 'registration' %}
-<span class="status status-paused"><span class="status-dot"></span> Registration</span>
+    <span class="status status-paused"><span class="status-dot"></span> {% trans "Registration" %}</span>
 {% elif event.status == 'active' %}
-<span class="status status-active"><span class="status-dot"></span> Active</span>
+    <span class="status status-active"><span class="status-dot"></span> {% trans "Active" %}</span>
 {% elif event.status == 'paused' %}
-<span class="status status-paused"><span class="status-dot"></span> Paused</span>
+    <span class="status status-paused"><span class="status-dot"></span> {% trans "Paused" %}</span>
 {% elif event.status == 'ended' %}
-<span class="status status-offline"><span class="status-dot"></span> Ended</span>
+    <span class="status status-offline"><span class="status-dot"></span> {% trans "Ended" %}</span>
 {% elif event.status == 'cancelled' %}
-<span class="status status-error"><span class="status-dot"></span> Cancelled</span>
+    <span class="status status-error"><span class="status-dot"></span> {% trans "Cancelled" %}</span>
 {% elif event.status == 'archived' %}
-<span class="status status-offline"><span class="status-dot"></span> Archived</span>
+    <span class="status status-offline"><span class="status-dot"></span> {% trans "Archived" %}</span>
 {% endif %}

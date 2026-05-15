@@ -1,0 +1,70 @@
+[tool.towncrier]
+# Project name shown in any default templates (we override the title in the
+# custom Markdown template, so this is mostly informational).
+name = "shifter"
+
+# CHANGELOG.md lives at the repo root and follows Keep a Changelog.
+filename = "CHANGELOG.md"
+
+# Where fragment files live. Each fragment is a tiny Markdown file the PR
+# adds; towncrier collates them into CHANGELOG.md at release time. Because
+# every PR creates a *new* file, fragments cannot conflict between PRs.
+directory = "changelog.d"
+
+# Custom Markdown template that produces the existing
+# "## [X.Y.Z] - YYYY-MM-DD\n\n### Section\n\n- bullet" structure.
+template = "changelog.d/_template.md.jinja"
+
+# Suppress towncrier's default title rendering — the template writes it.
+title_format = false
+
+# Where in CHANGELOG.md to insert each new release block. Everything below
+# this marker is preserved as-is; new releases are prepended just after it.
+start_string = "<!-- towncrier release notes start -->\n"
+
+# Empty file at the bottom that towncrier appends (mirrors filename).
+# We don't use a trailing fragment file, so leave default.
+
+# Append "(#NNN)" to each bullet using the fragment filename's leading
+# integer (e.g. 1136.security.md -> "(#1136)"). For entries with no
+# issue/PR number, prefix the fragment name with "+" (e.g.
+# +typo-fix.fixed.md) to suppress the suffix.
+issue_format = "(#{issue})"
+
+# Wrap rendered bullets at this column. 0 = no wrapping (we hand-format).
+wrap = false
+
+# Single-section changelog: don't split by package/component.
+all_bullets = true
+
+# Fragment types map to Keep a Changelog sections. The order here is the
+# order they appear under each release heading.
+[[tool.towncrier.type]]
+directory = "security"
+name = "Security"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true

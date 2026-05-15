@@ -113,8 +113,41 @@ class TestCTFChallengeForm:
         assert not form.is_valid()
         assert "release_time" in form.errors
 
-    def test_form_save_hashes_flag(self, ctf_event_draft):
-        """Form hashes flag on save."""
+    def test_form_save_is_blocked(self, ctf_event_draft):
+        """`CTFChallengeForm.save()` must raise — codex cycle 7 trap.
+
+        ModelForm's default save() bypasses the service-layer actor check,
+        field allowlist, flag hashing, multi-flag handling, tag/topic
+        resolution, and release-task sync. The override raises so callers
+        cannot silently regress to that path.
+        """
+        form = CTFChallengeForm(
+            data={
+                "name": "Should Not Save",
+                "description": "x",
+                "category": ChallengeCategory.WEB.value,
+                "points": 100,
+                "difficulty": ChallengeDifficulty.EASY.value,
+                "flag": "FLAG{nope}",
+                "max_attempts": 0,
+                "order": 0,
+            },
+            event=ctf_event_draft,
+        )
+        assert form.is_valid(), form.errors
+        with pytest.raises(NotImplementedError, match="create_challenge"):
+            form.save()
+
+    def test_form_to_service_data_includes_flag(self, ctf_event_draft):
+        """Form's `to_service_data()` returns the dict the service expects.
+
+        Codex review (#765 cycle 5) routed admin POSTs through
+        `create_challenge`/`update_challenge` so all challenge writes
+        share one actor-checked service contract. The form is now a
+        pure validation/DTO layer; persistence (including flag hashing)
+        is the service's job. This test pins the DTO shape so the wiring
+        between form and service can't silently drift.
+        """
         form = CTFChallengeForm(
             data={
                 "name": "Test Challenge",
@@ -126,14 +159,17 @@ class TestCTFChallengeForm:
                 "hint_penalty": 0,
                 "max_attempts": 0,
                 "order": 0,
+                "tag_list": "XDR, Linux",
+                "topic_list": "SQL Injection",
             },
             event=ctf_event_draft,
         )
         assert form.is_valid(), form.errors
-        challenge = form.save()
-        # Flag should be hashed (bcrypt or pbkdf2, not plaintext)
-        assert challenge.flag_hash != "FLAG{test_flag}"
-        assert challenge.flag_hash.startswith(("$2", "pbkdf2:"))
+        data = form.to_service_data()
+        assert data["name"] == "Test Challenge"
+        assert data["flag"] == "FLAG{test_flag}"  # plaintext — service hashes
+        assert data["tags"] == ["XDR", "Linux"]
+        assert data["topics"] == ["SQL Injection"]
 
 
 # =============================================================================
@@ -383,6 +419,7 @@ class TestChallengeServices:
                 "difficulty": ChallengeDifficulty.EASY.value,
                 "flag": "FLAG{service_test}",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.pk is not None
         assert challenge.name == "Service Test Challenge"
@@ -404,6 +441,7 @@ class TestChallengeServices:
                     "difficulty": ChallengeDifficulty.EASY.value,
                     "flag": "FLAG{test}",
                 },
+                actor_id=ctf_event_active.created_by_id,
             )
 
     def test_create_challenge_requires_flag(self, ctf_event_draft):
@@ -421,6 +459,7 @@ class TestChallengeServices:
                     "difficulty": ChallengeDifficulty.EASY.value,
                     # No flag provided
                 },
+                actor_id=ctf_event_draft.created_by_id,
             )
 
     def test_update_challenge_success(self, ctf_challenge):
@@ -436,6 +475,7 @@ class TestChallengeServices:
                 "target_instance_name": "windows-target",
                 "target_port": 3389,
             },
+            actor_id=ctf_challenge.event.created_by_id,
         )
         assert updated.points == 250
         assert updated.target_instance_name == "windows-target"
@@ -450,6 +490,7 @@ class TestChallengeServices:
         updated = update_challenge(
             challenge_id=ctf_challenge.pk,
             challenge_data={"flag": "FLAG{new_flag}"},
+            actor_id=ctf_challenge.event.created_by_id,
         )
         assert updated.flag_hash != old_hash
 
@@ -464,6 +505,7 @@ class TestChallengeServices:
             update_challenge(
                 challenge_id=ctf_challenge.pk,
                 challenge_data={"points": 999},
+                actor_id=ctf_challenge.event.created_by_id,
             )
 
     def test_delete_challenge_soft_deletes(self, ctf_event_draft):
@@ -479,7 +521,7 @@ class TestChallengeServices:
         )
         challenge_id = challenge.pk
 
-        delete_challenge(challenge_id)
+        delete_challenge(challenge_id, actor_id=ctf_event_draft.created_by_id)
 
         # Should be soft-deleted
         assert not CTFChallenge.objects.filter(pk=challenge_id).exists()
@@ -493,7 +535,7 @@ class TestChallengeServices:
         ctf_challenge.event.save()
 
         with pytest.raises(CTFStateError):
-            delete_challenge(ctf_challenge.pk)
+            delete_challenge(ctf_challenge.pk, actor_id=ctf_challenge.event.created_by_id)
 
     def test_get_challenge_returns_challenge(self, ctf_challenge):
         """get_challenge returns the challenge."""
@@ -531,8 +573,75 @@ class TestChallengeServices:
             flag_hash="hash2",
         )
 
-        challenges = list_challenges_for_event(ctf_event_draft.pk)
+        challenges = list_challenges_for_event(ctf_event_draft.pk, actor_id=ctf_event_draft.created_by_id)
         assert challenges.count() == 2
+
+
+# =============================================================================
+# Issue #765 — Service-layer defense-in-depth ownership checks
+# =============================================================================
+
+
+class TestChallengeServiceOwnership:
+    """Direct service callers must be subject to the same ownership policy
+    as the API/HTML view layer.
+
+    Issue #765: a future caller that bypasses the views (an internal job, an
+    administrative script, a new endpoint that forgets the `_check_event_ownership`
+    helper) must not be able to mutate another organizer's event content.
+    """
+
+    def test_list_challenges_for_event_rejects_other_organizer(self, ctf_event_draft, second_organizer_user):
+        from ctf.exceptions import CTFPermissionError
+
+        with pytest.raises(CTFPermissionError):
+            list_challenges_for_event(ctf_event_draft.pk, actor_id=second_organizer_user.pk)
+
+    def test_create_challenge_rejects_other_organizer(self, ctf_event_draft, second_organizer_user):
+        from ctf.exceptions import CTFPermissionError
+
+        with pytest.raises(CTFPermissionError):
+            create_challenge(
+                event_id=ctf_event_draft.pk,
+                challenge_data={
+                    "name": "Should Be Refused",
+                    "description": "Created by non-owner",
+                    "category": ChallengeCategory.WEB.value,
+                    "points": 100,
+                    "difficulty": ChallengeDifficulty.EASY.value,
+                    "flag": "FLAG{nope}",
+                },
+                actor_id=second_organizer_user.pk,
+            )
+
+    def test_update_challenge_rejects_other_organizer(self, ctf_challenge, second_organizer_user):
+        from ctf.exceptions import CTFPermissionError
+
+        ctf_challenge.event.status = EventStatus.DRAFT.value
+        ctf_challenge.event.save()
+
+        with pytest.raises(CTFPermissionError):
+            update_challenge(
+                challenge_id=ctf_challenge.pk,
+                challenge_data={"points": 999},
+                actor_id=second_organizer_user.pk,
+            )
+
+    def test_delete_challenge_rejects_other_organizer(self, ctf_event_draft, second_organizer_user):
+        from ctf.exceptions import CTFPermissionError
+
+        challenge = CTFChallenge.objects.create(
+            event=ctf_event_draft,
+            name="Owned",
+            description="x",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.EASY.value,
+            flag_hash="hash",
+        )
+
+        with pytest.raises(CTFPermissionError):
+            delete_challenge(challenge.pk, actor_id=second_organizer_user.pk)
 
 
 # =============================================================================
@@ -712,7 +821,7 @@ class TestFlagServiceFunctions:
             difficulty=ChallengeDifficulty.EASY.value,
             flag_hash="placeholder",
         )
-        flag_obj = add_flag(challenge.pk, {"flag": "FLAG{added}"})
+        flag_obj = add_flag(challenge.pk, {"flag": "FLAG{added}"}, actor_id=challenge.event.created_by_id)
 
         assert flag_obj.pk is not None
         assert flag_obj.flag_type == "static"
@@ -737,6 +846,7 @@ class TestFlagServiceFunctions:
                 "flag": r"FLAG\{[a-z]+\}",
                 "flag_type": "regex",
             },
+            actor_id=challenge.event.created_by_id,
         )
 
         assert flag_obj.flag_type == "regex"
@@ -759,6 +869,7 @@ class TestFlagServiceFunctions:
                 "flag": "FLAG{TestValue}",
                 "case_sensitive": False,
             },
+            actor_id=challenge.event.created_by_id,
         )
 
         assert flag_obj.case_sensitive is False
@@ -788,6 +899,7 @@ class TestFlagServiceFunctions:
                     "flag": r"FLAG\{[invalid",  # unclosed bracket
                     "flag_type": "regex",
                 },
+                actor_id=challenge.event.created_by_id,
             )
 
     def test_add_flag_rejects_active_event(self, ctf_event_active):
@@ -804,7 +916,7 @@ class TestFlagServiceFunctions:
             flag_hash="placeholder",
         )
         with pytest.raises(CTFStateError):
-            add_flag(challenge.pk, {"flag": "FLAG{test}"})
+            add_flag(challenge.pk, {"flag": "FLAG{test}"}, actor_id=challenge.event.created_by_id)
 
     def test_add_flag_requires_flag_value(self, ctf_event_draft):
         """add_flag requires non-empty flag value."""
@@ -820,7 +932,7 @@ class TestFlagServiceFunctions:
             flag_hash="placeholder",
         )
         with pytest.raises(CTFValidationError):
-            add_flag(challenge.pk, {"flag": ""})
+            add_flag(challenge.pk, {"flag": ""}, actor_id=challenge.event.created_by_id)
 
     def test_remove_flag(self, ctf_event_draft):
         """remove_flag soft-deletes a flag."""
@@ -833,10 +945,10 @@ class TestFlagServiceFunctions:
             difficulty=ChallengeDifficulty.EASY.value,
             flag_hash="placeholder",
         )
-        flag_obj = add_flag(challenge.pk, {"flag": "FLAG{to_remove}"})
+        flag_obj = add_flag(challenge.pk, {"flag": "FLAG{to_remove}"}, actor_id=challenge.event.created_by_id)
         flag_id = flag_obj.pk
 
-        remove_flag(flag_id)
+        remove_flag(flag_id, actor_id=challenge.event.created_by_id)
 
         # Should be soft-deleted
         assert not CTFFlag.objects.filter(pk=flag_id).exists()
@@ -855,14 +967,14 @@ class TestFlagServiceFunctions:
             difficulty=ChallengeDifficulty.EASY.value,
             flag_hash="placeholder",
         )
-        flag_obj = add_flag(challenge.pk, {"flag": "FLAG{test}"})
+        flag_obj = add_flag(challenge.pk, {"flag": "FLAG{test}"}, actor_id=challenge.event.created_by_id)
 
         # Change event to active
         ctf_event_draft.status = EventStatus.ACTIVE.value
         ctf_event_draft.save()
 
         with pytest.raises(CTFStateError):
-            remove_flag(flag_obj.pk)
+            remove_flag(flag_obj.pk, actor_id=flag_obj.challenge.event.created_by_id)
 
     def test_remove_flag_not_found(self, db):
         """remove_flag raises CTFNotFoundError for missing flag."""
@@ -871,7 +983,7 @@ class TestFlagServiceFunctions:
         from ctf.exceptions import CTFNotFoundError
 
         with pytest.raises(CTFNotFoundError):
-            remove_flag(uuid4())
+            remove_flag(uuid4(), actor_id=1)
 
 
 class TestCreateChallengeWithFlags:
@@ -892,6 +1004,7 @@ class TestCreateChallengeWithFlags:
                     {"flag": r"FLAG\{user_\d+\}", "flag_type": "regex"},
                 ],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.pk is not None
         assert challenge.flags.count() == 2
@@ -913,6 +1026,7 @@ class TestCreateChallengeWithFlags:
                 "difficulty": ChallengeDifficulty.EASY.value,
                 "flag": "FLAG{single}",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         # No CTFFlag records created by create_challenge with single flag
         assert challenge.flags.count() == 0
@@ -1067,6 +1181,7 @@ class TestChallengeTags:
                 "flag": "FLAG{tagged}",
                 "tags": ["XDR", "Linux"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         tag_names = list(challenge.tags.values_list("name", flat=True))
         assert sorted(tag_names) == ["linux", "xdr"]
@@ -1083,8 +1198,9 @@ class TestChallengeTags:
                 "flag": "FLAG{update}",
                 "tags": ["Linux", "Windows"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
-        updated = update_challenge(challenge.id, {"tags": ["XDR"]})
+        updated = update_challenge(challenge.id, {"tags": ["XDR"]}, actor_id=challenge.event.created_by_id)
         assert list(updated.tags.values_list("name", flat=True)) == ["xdr"]
 
     def test_tags_reusable_across_challenges(self, ctf_event_draft):
@@ -1099,6 +1215,7 @@ class TestChallengeTags:
                 "flag": "FLAG{a}",
                 "tags": ["XDR"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         c2 = create_challenge(
             ctf_event_draft.id,
@@ -1110,6 +1227,7 @@ class TestChallengeTags:
                 "flag": "FLAG{b}",
                 "tags": ["XDR"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         # Both challenges share the same tag object
         assert c1.tags.first().pk == c2.tags.first().pk
@@ -1128,6 +1246,7 @@ class TestChallengeTags:
                 "flag": "FLAG{1}",
                 "tags": ["XDR", "XDR"],  # duplicate in same call
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert CTFChallengeTag.objects.filter(event=ctf_event_draft, name="xdr").count() == 1
 
@@ -1142,6 +1261,7 @@ class TestChallengeTags:
                 "points": 100,
                 "flag": "FLAG{notags}",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.tags.count() == 0
 
@@ -1157,9 +1277,10 @@ class TestChallengeTags:
                 "flag": "FLAG{clear}",
                 "tags": ["XDR", "Linux"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.tags.count() == 2
-        updated = update_challenge(challenge.id, {"tags": []})
+        updated = update_challenge(challenge.id, {"tags": []}, actor_id=challenge.event.created_by_id)
         assert updated.tags.count() == 0
 
 
@@ -1185,6 +1306,7 @@ class TestChallengeSolutions:
                 "flag": "FLAG{solved}",
                 "solution": "Step 1: inspect the HTML source.\nStep 2: find the flag in comments.",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert "Step 1" in challenge.solution
 
@@ -1199,6 +1321,7 @@ class TestChallengeSolutions:
                 "points": 100,
                 "flag": "FLAG{nosol}",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.solution == ""
 
@@ -1220,8 +1343,13 @@ class TestChallengeSolutions:
                 "flag": "FLAG{updsol}",
                 "solution": "Original solution.",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
-        updated = update_challenge(challenge.id, {"solution": "Updated solution with ```code blocks```."})
+        updated = update_challenge(
+            challenge.id,
+            {"solution": "Updated solution with ```code blocks```."},
+            actor_id=challenge.event.created_by_id,
+        )
         assert "Updated solution" in updated.solution
 
     def test_solution_visibility_by_event_status(self, ctf_event_draft):
@@ -1236,6 +1364,7 @@ class TestChallengeSolutions:
                 "flag": "FLAG{vis}",
                 "solution": "The answer is 42.",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         event = ctf_event_draft
 
@@ -1269,6 +1398,7 @@ class TestChallengeSolutions:
                 "points": 100,
                 "flag": "FLAG{empty}",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         ctf_event_draft.status = "ended"
         assert not bool(challenge.solution and ctf_event_draft.status in ("ended", "archived"))
@@ -1296,6 +1426,7 @@ class TestChallengeTopics:
                 "flag": "FLAG{topic}",
                 "topics": ["SQL Injection", "XSS"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         topic_names = sorted(challenge.topics.values_list("name", flat=True))
         assert topic_names == ["sql injection", "xss"]
@@ -1312,8 +1443,11 @@ class TestChallengeTopics:
                 "flag": "FLAG{topicupd}",
                 "topics": ["SQL Injection"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
-        updated = update_challenge(challenge.id, {"topics": ["Privilege Escalation"]})
+        updated = update_challenge(
+            challenge.id, {"topics": ["Privilege Escalation"]}, actor_id=challenge.event.created_by_id
+        )
         assert list(updated.topics.values_list("name", flat=True)) == ["privilege escalation"]
 
     def test_topics_reusable_across_events(self, ctf_event_draft, organizer_user):
@@ -1342,6 +1476,7 @@ class TestChallengeTopics:
                 "flag": "FLAG{e1}",
                 "topics": ["SQL Injection"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         c2 = create_challenge(
             event2.id,
@@ -1353,6 +1488,7 @@ class TestChallengeTopics:
                 "flag": "FLAG{e2}",
                 "topics": ["SQL Injection"],
             },
+            actor_id=event2.created_by_id,
         )
         # Both share the same global topic object
         assert c1.topics.first().pk == c2.topics.first().pk
@@ -1372,6 +1508,7 @@ class TestChallengeTopics:
                 "flag": "FLAG{uniq}",
                 "topics": ["Network Analysis", "Network Analysis"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert CTFTopic.objects.filter(name="network analysis").count() == 1
 
@@ -1386,6 +1523,7 @@ class TestChallengeTopics:
                 "points": 100,
                 "flag": "FLAG{notopic}",
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.topics.count() == 0
 
@@ -1401,9 +1539,10 @@ class TestChallengeTopics:
                 "flag": "FLAG{cleartopic}",
                 "topics": ["SQL Injection", "XSS"],
             },
+            actor_id=ctf_event_draft.created_by_id,
         )
         assert challenge.topics.count() == 2
-        updated = update_challenge(challenge.id, {"topics": []})
+        updated = update_challenge(challenge.id, {"topics": []}, actor_id=challenge.event.created_by_id)
         assert updated.topics.count() == 0
 
 

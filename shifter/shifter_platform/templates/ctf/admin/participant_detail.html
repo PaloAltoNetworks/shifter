@@ -1,9 +1,12 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-{% block title %}{{ participant.name }} - {{ event.name }}{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    {{ participant.name }} - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .detail-layout {
     display: grid;
     grid-template-columns: 360px 1fr;
@@ -15,7 +18,7 @@
     display: flex;
     gap: 4px;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
     list-style: none;
     padding: 0;
@@ -23,13 +26,13 @@
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .header-actions {
@@ -52,16 +55,16 @@
 }
 
 .detail-row + .detail-row {
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
 }
 
 .detail-label {
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .detail-value {
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .badge {
@@ -79,13 +82,13 @@
 }
 
 .badge-registered {
-    background: rgba(18, 141, 243, 0.15);
-    color: #128df3;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
 }
 
 .badge-active {
-    background: rgba(0, 210, 106, 0.15);
-    color: #00d26a;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
 }
 
 .badge-completed {
@@ -99,8 +102,8 @@
 }
 
 .badge-correct {
-    background: rgba(0, 210, 106, 0.15);
-    color: #00d26a;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
 }
 
 .badge-incorrect {
@@ -128,24 +131,24 @@
 .stat-value {
     font-size: 24px;
     font-weight: 700;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     line-height: 1;
 }
 
-.stat-value.stat-score { color: #128df3; }
-.stat-value.stat-solved { color: #00d26a; }
-.stat-value.stat-attempts { color: var(--xdr-text-secondary); }
+.stat-value.stat-score { color: #94a3b8; }
+.stat-value.stat-solved { color: #22c55e; }
+.stat-value.stat-attempts { color: var(--theme-text-secondary); }
 
 .stat-label {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
 .empty-message {
     padding: 24px;
     text-align: center;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     font-size: 13px;
 }
 
@@ -154,200 +157,258 @@
         grid-template-columns: 1fr;
     }
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <nav>
-        <ol class="breadcrumb">
-            <li><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
-            <li><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
-            <li><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
-            <li>{{ participant.name }}</li>
-        </ol>
-    </nav>
-    <div class="flex-between">
-        <h1 class="page-title">{{ participant.name }}</h1>
-        <div class="header-actions">
-            {% if participant.status == 'invited' %}
-            <button type="button" class="btn btn-secondary" onclick="resendInvite('{{ participant.pk }}')">
-                Resend Invite
-            </button>
-            {% endif %}
-            {% if participant.status not in 'disqualified,completed' %}
-            <button type="button" class="btn btn-danger" onclick="disqualifyParticipant('{{ participant.pk }}')">
-                Disqualify
-            </button>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<div class="detail-layout">
-    <!-- Left Column: Profile & Stats -->
-    <div>
-        <!-- Profile Card -->
-        <div class="card">
-            <div class="card-title">Profile</div>
-            <div class="detail-row">
-                <span class="detail-label">Email</span>
-                <span class="detail-value">{{ participant.email }}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Status</span>
-                <span class="detail-value">
-                    {% if participant.status == 'invited' %}
-                    <span class="badge badge-invited">Invited</span>
-                    {% elif participant.status == 'registered' %}
-                    <span class="badge badge-registered">Registered</span>
-                    {% elif participant.status == 'active' %}
-                    <span class="badge badge-active">Active</span>
-                    {% elif participant.status == 'completed' %}
-                    <span class="badge badge-completed">Completed</span>
-                    {% elif participant.status == 'disqualified' %}
-                    <span class="badge badge-disqualified">Disqualified</span>
-                    {% endif %}
-                </span>
-            </div>
-            {% if event.team_mode %}
-            <div class="detail-row">
-                <span class="detail-label">Team</span>
-                <span class="detail-value">
-                    {% if participant.team %}
-                    {{ participant.team.name }}
-                    {% else %}
-                    <span class="text-muted">No team</span>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
-            <div class="detail-row">
-                <span class="detail-label">Invited</span>
-                <span class="detail-value">
-                    {% if participant.invited_at %}
-                    {{ participant.invited_at|date:"M d, Y H:i" }}
-                    {% else %}
-                    <span class="text-muted">N/A</span>
-                    {% endif %}
-                </span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Registered</span>
-                <span class="detail-value">
-                    {% if participant.registered_at %}
-                    {{ participant.registered_at|date:"M d, Y H:i" }}
-                    {% else %}
-                    <span class="text-muted">Not registered</span>
-                    {% endif %}
-                </span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Last Active</span>
-                <span class="detail-value">
-                    {% if participant.last_active_at %}
-                    {{ participant.last_active_at|date:"M d, Y H:i" }}
-                    {% else %}
-                    <span class="text-muted">Never</span>
-                    {% endif %}
-                </span>
-            </div>
-        </div>
-
-        <!-- Stats Card -->
-        <div class="card">
-            <div class="card-title">Statistics</div>
-            <div class="stats-grid">
-                <div>
-                    <div class="stat-value stat-score">{{ total_score }}</div>
-                    <div class="stat-label">Score</div>
-                </div>
-                <div>
-                    <div class="stat-value stat-solved">{{ solved_count }}</div>
-                    <div class="stat-label">Solved</div>
-                </div>
-                <div>
-                    <div class="stat-value stat-attempts">{{ total_attempts }}</div>
-                    <div class="stat-label">Attempts</div>
-                </div>
+    <!-- Header -->
+    <div class="page-header">
+        <nav>
+            <ol class="breadcrumb">
+                <li>
+                    <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">{% trans "Participants" %}</a>
+                </li>
+                <li>
+                    {{ participant.name }}
+                </li>
+            </ol>
+        </nav>
+        <div class="flex-between">
+            <h1 class="page-title">
+                {{ participant.name }}
+            </h1>
+            <div class="header-actions">
+                {% if participant.status == 'invited' %}
+                    <button type="button"
+                            class="btn btn-secondary"
+                            onclick="resendInvite('{{ participant.pk }}')">
+                        {% trans "Resend Invite" %}
+                    </button>
+                {% endif %}
+                {% if participant.status not in 'disqualified,completed' %}
+                    <button type="button"
+                            class="btn btn-danger"
+                            onclick="disqualifyParticipant('{{ participant.pk }}')">
+                        {% trans "Disqualify" %}
+                    </button>
+                {% endif %}
             </div>
         </div>
     </div>
-
-    <!-- Right Column: Timeline & Submission History -->
-    <div>
-        <!-- Score Timeline Chart -->
-        <div class="card" style="margin-bottom: 16px;">
-            <div class="card-title">Score Timeline</div>
-            <div style="position: relative; height: 250px; padding: 0 16px 16px;">
-                <canvas id="score-timeline-chart"></canvas>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-title">Submission History</div>
-            {% if submissions %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Challenge</th>
-                        <th>Result</th>
-                        <th>Points</th>
-                        <th>Attempt</th>
-                        <th>Time</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for submission in submissions %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'ctf:admin_challenge_detail' challenge_id=submission.challenge.pk %}">
-                                {{ submission.challenge.name }}
-                            </a>
-                            <span class="badge badge-secondary" style="margin-left: 4px;">{{ submission.challenge.category }}</span>
-                        </td>
-                        <td>
-                            {% if submission.is_correct %}
-                            <span class="badge badge-correct">Correct</span>
-                            {% if submission.hint_used %}
-                            <span class="badge badge-warning" style="margin-left: 4px;">Hint Used</span>
-                            {% endif %}
+    <div class="detail-layout">
+        <!-- Left Column: Profile & Stats -->
+        <div>
+            <!-- Profile Card -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Profile" %}
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Email" %}</span>
+                    <span class="detail-value">{{ participant.email }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Status" %}</span>
+                    <span class="detail-value">
+                        {% if participant.status == 'invited' %}
+                            <span class="badge badge-invited">{% trans "Invited" %}</span>
+                        {% elif participant.status == 'registered' %}
+                            <span class="badge badge-registered">{% trans "Registered" %}</span>
+                        {% elif participant.status == 'active' %}
+                            <span class="badge badge-active">{% trans "Active" %}</span>
+                        {% elif participant.status == 'completed' %}
+                            <span class="badge badge-completed">{% trans "Completed" %}</span>
+                        {% elif participant.status == 'disqualified' %}
+                            <span class="badge badge-disqualified">{% trans "Disqualified" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                {% if event.team_mode %}
+                    <div class="detail-row">
+                        <span class="detail-label">{% trans "Team" %}</span>
+                        <span class="detail-value">
+                            {% if participant.team %}
+                                {{ participant.team.name }}
                             {% else %}
-                            <span class="badge badge-incorrect">Incorrect</span>
+                                <span class="text-muted">{% trans "No team" %}</span>
                             {% endif %}
-                        </td>
-                        <td>
-                            {% if submission.is_correct %}
-                            +{{ submission.points_awarded }}
-                            {% else %}
-                            -
-                            {% endif %}
-                        </td>
-                        <td>#{{ submission.attempt_number }}</td>
-                        <td>{{ submission.submitted_at|date:"M d, H:i:s" }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty-message">
-                No submissions yet.
+                        </span>
+                    </div>
+                {% endif %}
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Invited" %}</span>
+                    <span class="detail-value">
+                        {% if participant.invited_at %}
+                            {{ participant.invited_at|date:"M d, Y H:i" }}
+                        {% else %}
+                            <span class="text-muted">{% trans "N/A" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Registered" %}</span>
+                    <span class="detail-value">
+                        {% if participant.registered_at %}
+                            {{ participant.registered_at|date:"M d, Y H:i" }}
+                        {% else %}
+                            <span class="text-muted">{% trans "Not registered" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Last Active" %}</span>
+                    <span class="detail-value">
+                        {% if participant.last_active_at %}
+                            {{ participant.last_active_at|date:"M d, Y H:i" }}
+                        {% else %}
+                            <span class="text-muted">{% trans "Never" %}</span>
+                        {% endif %}
+                    </span>
+                </div>
             </div>
-            {% endif %}
+            <!-- Stats Card -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Statistics" %}
+                </div>
+                <div class="stats-grid">
+                    <div>
+                        <div class="stat-value stat-score">
+                            {{ total_score }}
+                        </div>
+                        <div class="stat-label">
+                            {% trans "Score" %}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="stat-value stat-solved">
+                            {{ solved_count }}
+                        </div>
+                        <div class="stat-label">
+                            {% trans "Solved" %}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="stat-value stat-attempts">
+                            {{ total_attempts }}
+                        </div>
+                        <div class="stat-label">
+                            {% trans "Attempts" %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Right Column: Timeline & Submission History -->
+        <div>
+            <!-- Score Timeline Chart -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-title">
+                    {% trans "Score Timeline" %}
+                </div>
+                <div style="position: relative;
+                            height: 250px;
+                            padding: 0 16px 16px">
+                    <canvas id="score-timeline-chart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Submission History" %}
+                </div>
+                {% if submissions %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    {% trans "Challenge" %}
+                                </th>
+                                <th>
+                                    {% trans "Result" %}
+                                </th>
+                                <th>
+                                    {% trans "Points" %}
+                                </th>
+                                <th>
+                                    {% trans "Attempt" %}
+                                </th>
+                                <th>
+                                    {% trans "Time" %}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for submission in submissions %}
+                            {% url 'ctf:admin_challenge_detail' challenge_id=submission.challenge.pk as challenge_url %}
+                                <tr>
+                                    <td>
+                                        <a href="{{ challenge_url }}">
+                                            {{ submission.challenge.name }}
+                                        </a>
+                                        <span class="badge badge-secondary" style="margin-left: 4px;">
+                                        {{ submission.challenge.category }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {% if submission.is_correct %}
+                                            <span class="badge badge-correct">{% trans "Correct" %}</span>
+                                            {% if submission.hint_used %}
+<span class="badge badge-warning" style="margin-left: 4px;">
+    {% blocktrans trimmed %}
+        Hint Used
+    {% endblocktrans %}
+</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="badge badge-incorrect">{% trans "Incorrect" %}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if submission.is_correct %}
+                                            +{{ submission.points_awarded }}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% blocktrans with v1=submission.attempt_number %}
+                                            #{{ v1 }}
+                                        {% endblocktrans %}
+                                    </td>
+                                    <td>
+                                        {{ submission.submitted_at|date:"M d, H:i:s" }}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No submissions yet." %}
+                    </div>
+                {% endif %}
+            </div>
         </div>
     </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
-<script src="{% static 'js/score-timeline.js' %}"></script>
-<script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
+            integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
+            crossorigin="anonymous"></script>
+<script
+src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
+integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
+crossorigin="anonymous"></script>
+    <script src="{% static 'js/score-timeline.js' %}"></script>
+    <script>
 initScoreTimeline('score-timeline-chart', '/ctf/api/participants/{{ participant.pk }}/score-timeline/');
-</script>
-<script>
+    </script>
+    <script>
 function resendInvite(participantId) {
     if (!confirm('Resend invitation email to this participant?')) return;
 
@@ -378,5 +439,5 @@ function disqualifyParticipant(participantId) {
     // This would call a disqualify API endpoint (to be implemented)
     alert('Disqualify functionality not yet implemented via API.');
 }
-</script>
+    </script>
 {% endblock %}

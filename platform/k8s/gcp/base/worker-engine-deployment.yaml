@@ -22,6 +22,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       serviceAccountName: workers
+      automountServiceAccountToken: true
       containers:
         - name: worker-engine
           image: us-docker.pkg.dev/placeholder-project/shifter/portal:0.0.0

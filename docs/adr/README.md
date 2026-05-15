@@ -27,7 +27,31 @@ Current mechanisms:
 
 - `scripts/adr_guard/adr_guard.py`: repo-native policy runner
 - `.pre-commit-config.yaml`: local fast checks
-- `.github/workflows/_quality.yml`: CI architecture gate
+  - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
+    keeps engine-provisioner EC2 instance lifecycle actions scoped to
+    Shifter-owned, Terraform-managed instances.
+- `.github/workflows/deploy.yml` and `.github/workflows/_quality.yml`:
+  CI quality gate. `deploy.yml` owns path detection and passes subsystem
+  booleans into `_quality.yml`; `_quality.yml` gates lint, SAST, type,
+  architecture, and test jobs by the relevant subsystem so unrelated
+  package checks do not fan out on every PR. Guardrail and quality-workflow
+  edits still run the enforcement jobs needed to validate the guardrails.
+- `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
+  with the `security-extended` query suite for Python and JavaScript;
+  runs on push to `dev`, on pull requests against `dev`, and on a
+  weekly schedule. Least-privilege permissions (`contents: read`,
+  `security-events: write`, `actions: read`); no `pull_request_target`.
+- `.github/workflows/pr-title-lint.yml`: pull-request title validation
+  against the conventional-commit shape used by towncrier and the
+  release-drafter conventions. PRs to or from the `dev` integration
+  branch are exempt; release/environment promotion PRs that do not
+  involve `dev` are validated. Allowed types: `security`, `added`, `changed`,
+  `deprecated`, `removed`, `fixed`, `feat`, `fix`, `chore`, `docs`,
+  `refactor`, `test`, `ci`, `build`, `perf`, `revert`. Subject must
+  start with a lowercase letter.
+- `.github/dependabot.yml`: weekly dependency PRs across every uv,
+  npm, github-actions, and pre-commit package root in the repo; every
+  block targets the `dev` integration branch.
 - `.claude/hooks/adr_guard_hook.py`: Claude post-edit validation
 - `AGENTS.md`: Codex repo-local policy. Points at `.ground-control.yaml` and `.gc/plan-rules.md` for Ground Control workflow context (requirements and plan rules); enforcement of ADR rules still lives here.
 - `.importlinter`: Python package-level architecture contracts
@@ -36,8 +60,34 @@ Current mechanisms:
   hard-fail on current signal without immediately breaking on unrelated
   legacy Terraform debt.
 - `.gitleaks.toml`: secret scanning configuration
+- `sonar-project.properties`: SonarCloud project configuration.
+  `sonar.html.fileHeader` enforces the ADR-015 file-header convention
+  on HTML templates by failing `Web:HeaderCheck` on any template that
+  does not begin with the canonical two-line SPDX Django-comment
+  header.
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
+- `scripts/adr_guard/adr_guard.py` `mcp-no-shell-exec` check:
+  flags any file under `mcp/` (`.js`, `.mjs`, `.cjs`) that imports
+  `child_process` (any shape — named, default, namespace, CommonJS
+  destructure, or bare-`require` property access, with or without
+  the `node:` prefix) AND uses one of the shell-string call shapes:
+  `execSync(...)`, `exec(...)`, an `execSync as <alias>` rename
+  used as `<alias>(`, or `spawn`/`spawnSync`/`execFile`/
+  `execFileSync` invoked with `{ shell: true }`. String literals
+  and comments are flattened to whitespace by a small per-state
+  consumer (one helper per state — code / line-comment /
+  block-comment / string, preserving newlines), so
+  `"https://..."` URLs do not accidentally erase a real call site,
+  and so commented-out call sites or strings containing
+  `execSync as run` do not trip the check or synthesise fake
+  aliases. The check is a cheap pre-commit
+  backstop; motivated bypasses such as `const run = cp.execSync;
+  run(...)` are outside its reach by design and rely on code
+  review. Enforces ADR-010-R1 with no current exceptions —
+  `mcp/ngfw/*` migrated to argv-array helpers via the shared
+  `mcp/shared/aws-helpers.js` module in #759, alongside the
+  original `mcp/ops/*` migration in #763.
 
 ## Adding A Rule
 

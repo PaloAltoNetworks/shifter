@@ -55,6 +55,11 @@
         "id": "ADR-003-R1",
         "description": "ADR conformance must run in CI even when tests are skipped.",
         "checks": ["adr-registry", "layer-imports", "cross-layer-model-imports"]
+      },
+      {
+        "id": "ADR-003-R2",
+        "description": "AWS platform Terraform plan routing must stay scoped to Terraform-consumed files, while platform application changes still trigger Quality through a separate app-source filter. AWS platform Terraform plan commands must wait for the state lock before failing.",
+        "checks": ["deploy-workflow-plan-scope"]
       }
     ],
     "exceptions": [],
@@ -93,13 +98,28 @@
       },
       {
         "id": "ADR-004-R5",
-        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter.",
+        "description": "Kubernetes manifests are validated with kubeconform and linted with kube-linter on two tiers. Local pre-commit hooks scan platform/k8s/ but exclude Kustomize patch files (patch-*.yaml) from both validators because patches are partial strategic-merge documents and cannot satisfy standalone Deployment schema/lint checks (no selector, no image, no securityContext). CI (.github/workflows/_quality.yml) runs `kustomize build` on every kustomization.yaml root under platform/k8s/ and runs both validators against the rendered output, which catches overlay-introduced regressions on the manifests that actually deploy.",
         "checks": []
       },
       {
         "id": "ADR-004-R6",
         "description": "GCP Terraform is linted with the tflint-ruleset-google plugin.",
         "checks": []
+      },
+      {
+        "id": "ADR-004-R7",
+        "description": "Committed Terraform variable files under platform/terraform/environments/ must not assign string literals to *_password / *_secret / *_token / *_key / *_credentials variables; reference an out-of-band secret store (Secrets Manager, SSM, environment) instead. Backstops gitleaks for low-entropy committed credentials it ignores.",
+        "checks": ["no-plaintext-secrets-in-tfvars"]
+      },
+      {
+        "id": "ADR-004-R8",
+        "description": "Generated and pre-staging sensitive artifacts must not be tracked in source: Terraform plan outputs (tfplan, tfplan.binary, plan.out, *.tfplan) under platform/terraform/environments/ and platform/terraform/gcp/environments/, and license/authcode bootstrap material (authcodes, *.authcodes) under temp/bootstrap/. The blocked path/name set is centralized in scripts/adr_guard/adr_guard.py; the guardrail fails closed and emits repo-relative paths only, never file contents.",
+        "checks": ["no-tracked-generated-artifacts"]
+      },
+      {
+        "id": "ADR-004-R9",
+        "description": "Tracked *-secrets.env files under platform/k8s/ must contain only comments, blank lines, empty assignments (KEY=), or a small fixed synthetic-placeholder allowlist (REPLACE_AT_DEPLOY, CHANGE_ME, PLACEHOLDER, EXAMPLE, plus the matching bracketed forms <replace-at-deploy>, <change-me>, <placeholder>, <example>). The bracketed forms are an explicit fixed set, NOT a <...> pattern, to prevent hiding a real credential as <attacker-known-password>. Real runtime secrets must flow in at deploy time from GCP Secret Manager, a gitignored local env file, or a deploy-time Kubernetes Secret. Containment uses git ls-files so gitignored local-dev files (e.g. *.local.env) are intentionally not scanned. The parser splits on the first '=' so non-identifier key shapes (db.password=..., api-token=..., export DB_PASSWORD=...) still flow through the value check. Inline '# comment' is NOT honored (Kustomize env_file format treats '#' as a comment only at the start of a line). Non-comment lines without '=' are flagged as malformed. The blocked condition is centralized in scripts/adr_guard/adr_guard.py; violation messages name the repo-relative path and the variable name only, never the rejected value. Backstops gitleaks for low-entropy committed credentials it ignores and prevents reintroduction of the failure mode resolved by #1207 / #1195.",
+        "checks": ["no-populated-secret-env-files"]
       }
     ],
     "exceptions": [],
@@ -110,7 +130,8 @@
       ".gitleaks.toml",
       ".kube-linter.yaml",
       ".pre-commit-config.yaml",
-      ".github/workflows/_quality.yml"
+      ".github/workflows/_quality.yml",
+      "scripts/adr_guard/adr_guard.py"
     ]
   },
   {
@@ -118,7 +139,7 @@
     "title": "Cloud expansion must preserve provider seams and AWS continuity",
     "status": "accepted",
     "scope": "repository",
-    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths. Deploy-branch behavior may be provider-specific when the integration branch still carries the full validation burden.",
+    "decision": "New cloud-provider support must go through the shared cloud abstraction layers and must not silently change the current AWS deployment paths. The original deploy-branch routing rules are superseded by ADR-011; provider selection for new OSS architecture work is driven by root configuration and backend bundles.",
     "rules": [
       {
         "id": "ADR-005-R1",
@@ -127,12 +148,12 @@
       },
       {
         "id": "ADR-005-R2",
-        "description": "Deployment branch routing must keep deploy branches provider-specific (`aws-dev`, `gcp-dev`) while reserving `dev` for validation-only integration and preserving AWS prod behavior on `main`.",
+        "description": "Superseded by ADR-011: branch names are no longer the architectural source of deployment target selection for OSS Shifter.",
         "checks": []
       },
       {
         "id": "ADR-005-R3",
-        "description": "Non-production deploy branches may use provider-local fast paths only when the shared integration branch still runs the broad validation matrix before promotion.",
+        "description": "Superseded by ADR-011: backend validation should move to explicit backend-bundle checks rather than provider-local deploy-branch fast paths.",
         "checks": []
       }
     ],
@@ -146,6 +167,7 @@
       ".github/workflows/deploy.yml",
       ".github/workflows/_gcp-dev.yml",
       "platform/terraform/gcp/modules/platform-core/main.tf",
+      "docs/architecture/root-configured-backend-bundles.md",
       "platform/terraform/gcp/README.md",
       "platform/k8s/gcp/README.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md"
@@ -165,21 +187,28 @@
       },
       {
         "id": "ADR-006-R2",
-        "description": "Containers must define securityContext with non-root and read-only root filesystem.",
-        "checks": []
+        "description": "Pod, container, and init-container securityContext on every Deployment (in base manifests under platform/k8s/gcp/base/ AND in helm-template-rendered output of platform/charts/shifter for each supported values file) must enforce the restricted PSS profile: pod-level seccompProfile RuntimeDefault; per container/initContainer allowPrivilegeEscalation false, capabilities drop ALL with no capabilities.add, readOnlyRootFilesystem true, runAsNonRoot true, privileged not true, container-level seccompProfile (when set) equal to RuntimeDefault, and positive runAsUser/runAsGroup integers (booleans rejected). Pod-level inheritance for runAsNonRoot/runAsUser/runAsGroup is honored.",
+        "checks": ["k8s-deployment-security-context"]
       },
       {
         "id": "ADR-006-R3",
-        "description": "Each namespace must have at least one NetworkPolicy (deferred until policies are authored).",
-        "checks": []
+        "description": "Each Shifter Kubernetes namespace must have a default-deny NetworkPolicy covering both ingress and egress, and Shifter NetworkPolicies must use explicit service CIDRs instead of broad internet egress ranges.",
+        "checks": ["k8s-network-policy-coverage"]
       }
     ],
     "exceptions": [],
     "enforcement": ["pre-commit", "ci"],
     "evidence": [
       "platform/k8s/gcp/base/namespaces.yaml",
+      "platform/k8s/gcp/base/networkpolicies.yaml",
+      "platform/charts/shifter/templates/networkpolicies.yaml",
       ".kube-linter.yaml",
-      ".pre-commit-config.yaml"
+      ".pre-commit-config.yaml",
+      "scripts/adr_guard/adr_guard.py",
+      "shifter/shifter_platform/shared/cloud/gcp/task_runner.py",
+      "shifter/engine/provisioner/Dockerfile",
+      "shifter/engine/provisioner/terraform_base.py",
+      "platform/terraform/modules/engine-provisioner/task_definition.tf"
     ]
   },
   {
@@ -219,16 +248,36 @@
     "title": "GCP bootstrap fails closed and uses private operator access",
     "status": "accepted",
     "scope": "gcp",
-    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, Cloud Armor on public backends, and IAP-based access to private GDC operator hosts.",
+    "decision": "Internet-facing GCP Shifter deployments must start in the secure posture: production Django DEBUG disabled independently of edge certificate readiness, managed TLS, a real public hostname, authorized admin CIDRs for the public GKE control-plane endpoint, explicit least-privilege VPC firewall policy for platform/range networks, Cloud Armor on public backends, secure session/CSRF cookies, and IAP-based access to private GDC operator hosts.",
     "rules": [
       {
         "id": "ADR-008-R1",
-        "description": "Bootstrap must reject insecure GCP inputs instead of falling back to public debug or dev-login behavior.",
+        "description": "Bootstrap and runtime renderers must reject insecure GCP inputs instead of falling back to public debug or dev-login behavior.",
         "checks": []
       },
       {
         "id": "ADR-008-R2",
         "description": "GDC operator hosts must be private-only and reached through IAP rather than public SSH.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R3",
+        "description": "Production DJANGO_DEBUG and secure session/CSRF cookie settings must not be derived from managed TLS certificate readiness, DNS convergence, or identity secret availability.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R4",
+        "description": "GCP platform and range VPC reachability must be explicit, least-privilege Terraform policy: range ingress defaults closed, platform-to-range access is limited to documented provisioner/participant paths, and SSH/RDP are never opened from world or broad external CIDRs.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R5",
+        "description": "GCP GCS bucket encryption stays on Google-managed keys for the current scope; CMEK is deferred until a compliance driver justifies the operational cost of bucket-role-specific KMS keys, KMS service-agent IAM, and a state-bucket bootstrap KMS contract. Owner: platform infra. Review trigger: an external compliance requirement (FedRAMP, SOC 2 Type II contract, GovCloud-style customer asks, or an explicit security review). Recorded 2026-05-11 from issue #962.",
+        "checks": []
+      },
+      {
+        "id": "ADR-008-R6",
+        "description": "GCP Memorystore for the platform control-plane cache must run with auth_enabled = true and transit_encryption_mode = SERVER_AUTHENTICATION. The AUTH token and the Memorystore server CA both flow through Secret Manager and are hydrated by the runtime entrypoint exactly like the DB and app secrets; neither value may appear in ConfigMaps, generated env files, or process argv. Django Channels consumes the cache via a TLS (rediss://) channels_redis dict-form host carrying ssl_cert_reqs=required and ssl_ca_data set to the Memorystore CA. STANDARD_HA is the default production tier (high-availability posture); auth/TLS posture is independent of tier and is always-on at the module level.",
         "checks": []
       }
     ],
@@ -244,7 +293,49 @@
       "platform/charts/shifter/templates/guacamole-backendconfig.yaml",
       "platform/terraform/gcp/README.md",
       "platform/k8s/gcp/README.md",
-      "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/networking.md"
+      "shifter/shifter_platform/documentation/docs/technical/platform_infrastructure/networking.md",
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/entrypoint.sh",
+      "docs/architecture/gke-control-plane-access-preflight.md",
+      "docs/architecture/gcp-vpc-firewall-preflight.md",
+      "docs/architecture/gcp-cloud-sql-deletion-protection-preflight.md",
+      "docs/architecture/gcp-gcs-cmek-preflight.md",
+      "docs/architecture/gcp-redis-auth-tls-preflight.md"
+    ]
+  },
+  {
+    "id": "ADR-010",
+    "title": "MCP servers invoke external CLIs via argv arrays, never shell strings",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Every MCP server (mcp/*) that shells out to an external CLI (aws, kubectl, gcloud, docker, etc.) executes the binary via spawn/spawnSync/execFile with an argv array. Shell strings concatenated into execSync are forbidden. Tool-argument values that must be interpreted as remote shell content (e.g. ssm send-command --parameters) ride as a single argv element, not as a quoted shell substring.",
+    "rules": [
+      {
+        "id": "ADR-010-R1",
+        "description": "MCP servers must not import execSync from child_process; AWS CLI invocations run through argv-array helpers (e.g. mcp/ops/lib.js buildAwsArgv/awsExec/awsJson/awsText).",
+        "checks": ["mcp-no-shell-exec"]
+      },
+      {
+        "id": "ADR-010-R2",
+        "description": "JSON payloads for CLI parameters (e.g. ssm send-command --parameters) are JSON.stringify'd into a single argv element. Shell escaping is not an acceptable remediation strategy for command-execution boundaries.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "mcp/shared/aws-helpers.js",
+      "mcp/ops/SECURITY.md",
+      "mcp/ops/lib.js",
+      "mcp/ops/index.js",
+      "mcp/ops/lib.test.js",
+      "mcp/ops/spawn-roundtrip.test.js",
+      "mcp/ngfw/SECURITY.md",
+      "mcp/ngfw/lib.js",
+      "mcp/ngfw/index.js",
+      "mcp/ngfw/lib.test.js",
+      "mcp/ngfw/script-execution.test.js",
+      "scripts/adr_guard/adr_guard.py"
     ]
   },
   {
@@ -252,16 +343,16 @@
     "title": "AWS and GCP keep provider-specific identity stacks behind a shared auth seam",
     "status": "accepted",
     "scope": "repository",
-    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with FirebaseUI/browser-side Google auth flows, domain allowlisting, required email verification, required TOTP MFA before app-session creation, and bootstrap-owned first-operator seeding. The Django app selects the provider through configuration without changing shared business workflows.",
+    "decision": "AWS keeps the Cognito/OIDC flow. GCP uses Identity Platform with FirebaseUI/browser-side Google auth flows, domain allowlisting, required email verification, required TOTP MFA before app-session creation, and bootstrap-owned first-operator seeding. The selected backend bundle chooses the provider-specific identity implementation through validated configuration without changing shared business workflows.",
     "rules": [
       {
         "id": "ADR-009-R1",
-        "description": "AWS deployments continue to use the existing OIDC redirect flow and must not depend on GCP identity configuration.",
+        "description": "AWS backend deployments continue to use the existing OIDC redirect flow and must not depend on GCP identity configuration.",
         "checks": []
       },
       {
         "id": "ADR-009-R2",
-        "description": "GCP bootstrap must provision Identity Platform and seed the first corporate operator instead of relying on a manually managed OIDC runtime secret.",
+        "description": "GCP backend bootstrap must provision Identity Platform and seed the first corporate operator instead of relying on a manually managed OIDC runtime secret.",
         "checks": []
       },
       {
@@ -289,8 +380,291 @@
       "platform/terraform/gcp/modules/platform-core/main.tf",
       "platform/terraform/gcp/modules/platform-core/outputs.tf",
       ".github/workflows/_gcp-dev.yml",
+      "docs/architecture/root-configured-backend-bundles.md",
       "shifter/shifter_platform/documentation/docs/technical/architecture.md",
       "shifter/shifter_platform/documentation/docs/technical/dev/secrets.md"
+    ]
+  },
+  {
+    "id": "ADR-011",
+    "title": "OSS deployments use root-configured backend bundles",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "OSS Shifter deployment intent is selected by a root installation configuration and a backend bundle. A backend bundle is the public OSS unit of backend selection and owns its runtime settings, infrastructure entrypoints, validation checks, required secrets, health checks, and setup documentation. Branch names must not be the architectural source of deployment target selection.",
+    "rules": [
+      {
+        "id": "ADR-011-R1",
+        "description": "One root installation config is the authoritative source for backend selection and deployment-level settings.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R2",
+        "description": "Backend bundles are the default OSS selection unit; low-level provider capability composition remains an internal implementation detail unless a later ADR introduces an advanced public mode.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R3",
+        "description": "Branch names must not determine deployment targets. CI may validate backend bundles, but deployment behavior is selected by explicit config or invocation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R4",
+        "description": "Runtime provider and capability adapter selection must be derived from validated backend configuration while preserving shared service boundaries and adapter protocols.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R5",
+        "description": "AWS and GCP backend migrations must preserve existing security controls, identity boundaries, network isolation, and architecture guardrails unless a later ADR records an intentional change.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R6",
+        "description": "This repository models one standalone OSS Shifter deployment; cross-install orchestration concepts are outside the OSS app model.",
+        "checks": []
+      },
+      {
+        "id": "ADR-011-R7",
+        "description": "AWS deploy workflows whose committed terraform.tfvars is an example.com baseline must render the deployment-owned override from GitHub Actions secrets into a gitignored local.auto.tfvars before terraform init/validate/plan/apply. Committed AWS terraform.tfvars files remain non-operational example baselines; the render step fails loud when the active environment's secret is missing.",
+        "checks": ["aws-platform-renders-deploy-tfvars"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/root-configured-backend-bundles.md",
+      "docs/architecture/aws-deploy-tfvars-preflight-1249.md",
+      "docs/adr/index.yaml",
+      "shifter/installation/__init__.py",
+      "shifter/installation/schema.py",
+      "shifter/installation/contract.py",
+      "shifter/installation/registry.py",
+      "shifter/installation/README.md",
+      "shifter/shifter_platform/shared/cloud/__init__.py",
+      "shifter/engine/provisioner/cloud/__init__.py",
+      ".github/workflows/deploy.yml",
+      ".github/workflows/_gcp-dev.yml",
+      ".github/workflows/_shifter-platform.yml",
+      "docs/dev/deploy-secrets.md",
+      "shifter/shifter_platform/documentation/docs/technical/dev/ci-cd.md",
+      "shifter/shifter_platform/documentation/docs/technical/architecture.md"
+    ]
+  },
+  {
+    "id": "ADR-012",
+    "title": "Python per-function complexity is bounded by Ruff C901",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Every lint-scoped Python package enforces a hard per-function McCabe complexity limit via Ruff's C901 rule. The repo-wide threshold is 15 (matching SonarCloud's default cognitive-complexity threshold). Existing offenders carry explicit per-function `# noqa: C901` exemptions and are tracked as a backlog; the threshold ratchets down as the backlog shrinks. The complexity gate is Ruff itself, running in both pre-commit and CI; an adr_guard check verifies the config is in place so the gate cannot be silently removed.",
+    "rules": [
+      {
+        "id": "ADR-012-R1",
+        "description": "Each canonical Python package pyproject.toml must enable C901 in [tool.ruff.lint].select and set [tool.ruff.lint.mccabe].max-complexity to the repo-wide threshold.",
+        "checks": ["python-complexity-gate"]
+      },
+      {
+        "id": "ADR-012-R2",
+        "description": "Existing high-complexity functions are exempted with per-function `# noqa: C901` comments. New violations are not exempted by default; they must be refactored or the gate fails. The function-level backlog (one row per exemption, with current complexity) lives at docs/adr/complexity-backlog.md and shrinks as the threshold ratchets.",
+        "checks": []
+      },
+      {
+        "id": "ADR-012-R3",
+        "description": "The threshold ratchets down toward parity with SonarCloud as the exemption backlog shrinks. Ratchet edits update PYTHON_COMPLEXITY_THRESHOLD in scripts/adr_guard/adr_guard.py and every canonical pyproject.toml in a single PR.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["pre-commit", "ci", "agent-policy"],
+    "evidence": [
+      "scripts/adr_guard/adr_guard.py",
+      "docs/adr/complexity-backlog.md",
+      "docs/architecture/python-complexity-gate-preflight.md",
+      "shifter/shifter_platform/pyproject.toml",
+      "shifter/engine/provisioner/pyproject.toml",
+      "shifter/packer/pyproject.toml",
+      "shifter/installation/pyproject.toml",
+      "scripts/bootstrap/pyproject.toml",
+      "scripts/gcp/pyproject.toml",
+      "scripts/check_layer_imports/pyproject.toml",
+      "scripts/check_rds_pending_modifications/pyproject.toml",
+      "shifter/shifter_platform/cms/services.py",
+      "shifter/shifter_platform/ctf/services/participant.py",
+      "shifter/shifter_platform/ctf/services/submission.py",
+      "shifter/shifter_platform/ctf/views.py",
+      "shifter/engine/provisioner/main.py",
+      "shifter/engine/provisioner/orchestrators/setup_orchestrator.py"
+    ]
+  },
+  {
+    "id": "ADR-013",
+    "title": "Unified platform information architecture uses a shared navigation contract",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Shifter treats CTF, Mission Control, Scenario Editor, Risk Register, and Documentation as one platform information architecture. Future navigation implementation must use a shared, role-aware navigation contract derived from the maintained IA and taxonomy artifacts rather than duplicating app-local navigation schemas.",
+    "rules": [
+      {
+        "id": "ADR-013-R1",
+        "description": "Surface names, audience placement, and cross-surface taxonomy must stay aligned with the maintained UX-003 IA and sitemap artifact.",
+        "checks": []
+      },
+      {
+        "id": "ADR-013-R2",
+        "description": "Future navigation data must be centralized behind the shared platform boundary instead of being duplicated independently by CTF, Mission Control, Scenario Editor, Risk Register, and Documentation.",
+        "checks": []
+      },
+      {
+        "id": "ADR-013-R3",
+        "description": "Navigation visibility may improve orientation, but authorization must continue to come from existing role and permission policies rather than display-only links.",
+        "checks": []
+      },
+      {
+        "id": "ADR-013-R4",
+        "description": "Participant and organizer surfaces must remain structurally distinct even when a user has access to both modes.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "pre-commit", "ci"],
+    "evidence": [
+      "docs/design/ux-003-information-architecture-sitemap.md",
+      "docs/design/ux-003-oss-shifter-research-personas.md",
+      "shifter/shifter_platform/shared/auth.py",
+      "shifter/shifter_platform/templates/partials/icon_sidebar.html",
+      "shifter/shifter_platform/templates/partials/ctf_participant_sidebar.html"
+    ]
+  },
+  {
+    "id": "ADR-014",
+    "title": "MCP servers expose either least-privilege general surfaces or policy-gated operator agent surfaces",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "MCP servers in this repo fall into two classes. General-purpose MCP servers (where the client is not a trusted operator agent loop) must default to non-secret, non-mutating observability; privileged operations on those surfaces require a separate approved operator workflow with authenticated actor context, per-tool RBAC, environment allowlisting, and auditability, and otherwise must not be registered as tools. Operator agent surfaces (e.g. `mcp/ops`, where the intended client IS the operator's own agent loop and agents are meant to perform writes, mutations, secret retrieval, and remote execution as routine work) MAY expose privileged capability, but MUST gate it through a structured per-tool policy layer with capability classes, environment policy with explicit prod confirmation, dry-run defaults for destructive and arbitrary classes, secret references instead of raw values in MCP responses, structured per-call audit, session profile gating, and out-of-band confirmation for apex operations. Neither class may advertise auth-bypass procedures in tool descriptions reachable via MCP `list_tools`. Phased rollout for `mcp/ops`: this ADR is accepted at the design level; the runtime enforcement invariant of R5/R6 is delivered incrementally across issue #777 (introduces the policy seam in `mcp/ops/policy.js` + `.shifter.yaml`) and sub-issues #1198 (cheap defenses), #1199 (mid-cost), #1200 (expensive), #1201 (convert all 45 tool registrations), and #1202 (surface invariant tests). The invariant is fully enforced on the live server only when every sub-issue has shipped. Until then, the policy seam exists but `mcp/ops/index.js` still calls `server.tool(...)` directly, and `.shifter.yaml` / `SHIFTER_OPS_PROFILE` have no runtime effect on the registered tool surface.",
+    "rules": [
+      {
+        "id": "ADR-014-R1",
+        "description": "General-purpose MCP tool surfaces (those whose intended client is not a trusted operator agent loop) must not expose plaintext secret retrieval, arbitrary SQL, arbitrary SSM/shell/PowerShell execution, infrastructure termination, auth-bypass tunnel helpers, or other privileged production administration directly to any connected client. Operator agent surfaces are governed by ADR-014-R5, not R1.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R2",
+        "description": "MCP argument schemas, environment selectors, and local AWS profiles are validation and credential-selection mechanisms, not authorization boundaries. They are inputs to the policy layer required by ADR-014-R5 on operator agent surfaces, and they do not substitute for the separate approved operator workflow required by ADR-014-R1 on general-purpose surfaces.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R3",
+        "description": "MCP surface hardening changes must include negative surface tests or equivalent review evidence that the surface invariants hold: forbidden tool names absent (R1 surfaces), or capability-class gates intact (R5 surfaces).",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R4",
+        "description": "MCP outputs, error envelopes, and logs must not return raw secret values, private keys, DB passwords, OIDC client secrets, full secret-bearing URLs, raw SQL payloads, shell command bodies, or multiline user input. On operator agent surfaces, secret-bearing tools must return references resolvable only inside the server process.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R5",
+        "description": "Operator agent MCP surfaces (servers whose intended client IS the operator's own trusted agent loop) MAY expose privileged capability but MUST gate every tool through a structured per-tool policy layer declaring its capability class (observability, named_db_read, named_db_write, secret_handle, ssm_named, ssm_arbitrary, db_arbitrary, infra_mutation, dev_bypass_tunnel, or equivalent). The policy layer MUST enforce: environment policy with no implicit prod and explicit prod confirmation for prod-touching calls; dry-run defaults for destructive and arbitrary classes; secret references (not raw values) in MCP responses; structured per-call audit; session profile gating that suppresses class registration at startup; out-of-band operator confirmation for apex operations (prod termination, drop-table, secret rotation, equivalent).",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R6",
+        "description": "MCP tool descriptions reachable via `list_tools` must not advertise auth-bypass procedures, bypass URLs, or step-by-step authentication-circumvention instructions, regardless of server class. Policy layers MAY support a description-redaction flag for bypass-class tools so the capability can remain registered while the description text is sanitized.",
+        "checks": []
+      },
+      {
+        "id": "ADR-014-R7",
+        "description": "Operator agent MCP surfaces that connect to managed databases through transport-layer tunneling MUST preserve TLS verification end-to-end. `mcp/ops` connects to RDS Postgres via an SSM port forward; the pg.Pool configuration MUST keep `rejectUnauthorized: true` and target the real DB endpoint for SNI / hostname verification (via `ssl.servername` or an equivalent verified path). Disabling verification (`rejectUnauthorized: false`) — even with a documented exception — is not an acceptable answer to the hostname-mismatch problem the tunnel creates.",
+        "checks": ["mcp-ops-tls-strict"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["agent-policy", "ci"],
+    "evidence": [
+      "docs/architecture/mcp-ops-privileged-surface-preflight-777.md",
+      ".shifter.yaml",
+      "mcp/ops/policy.js",
+      "mcp/ops/policy.test.js",
+      "mcp/ops/SECURITY.md",
+      "mcp/ops/lib.js",
+      "mcp/shared/aws-helpers.js",
+      "mcp/ngfw/SECURITY.md",
+      "mcp/ngfw/tool-surface.test.js",
+      "shifter/installation/schema.py",
+      "shifter/installation/contract.py",
+      "shifter/installation/errors.py",
+      "shifter/shifter_platform/shared/auth.py",
+      "shifter/shifter_platform/risk_register/services.py",
+      "shifter/shifter_platform/config/dev_auth.py",
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/shared/log_sanitize.py"
+    ]
+  },
+  {
+    "id": "ADR-015",
+    "title": "Source files carry SPDX copyright and license headers",
+    "status": "accepted",
+    "scope": "repository",
+    "decision": "Source files in this repository start with a two-line SPDX-formatted header naming the copyright holder (Palo Alto Networks, Inc., 2026) and the SPDX license identifier (MIT). The format follows the REUSE specification so license scanners (REUSE, ScanCode, ClearlyDefined, SonarCloud) read it without per-project rules. The literal header text is centralized in `sonar-project.properties` (`sonar.html.fileHeader`) and `LICENSE`; per-language comment syntax wraps the same payload (e.g. `# ` for Python/shell, `{# #}` for Django templates, `// ` for JS/CSS). Django HTML templates use Django server-side comments rather than HTML `<!-- -->` so the header never appears in rendered responses. Adoption is enforced on HTML templates via SonarCloud's `Web:HeaderCheck`; other languages adopt the convention for new files immediately, with batched cleanups for legacy files as tooling catches up.",
+    "rules": [
+      {
+        "id": "ADR-015-R1",
+        "description": "Project source files use the SPDX REUSE header form: `SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc.` followed by `SPDX-License-Identifier: MIT`. Per-language comment syntax wraps the lines (Python `# `, Django `{# #}`, JS/CSS `// `, shell `# `, etc.). The canonical header text and per-language examples live in `docs/architecture/file-headers.md`.",
+        "checks": []
+      },
+      {
+        "id": "ADR-015-R2",
+        "description": "Django HTML templates use `{# ... #}` server-side comments for the header. HTML `<!-- -->` comments are NOT acceptable because they render to the client and leak the copyright payload into every served response body.",
+        "checks": []
+      },
+      {
+        "id": "ADR-015-R3",
+        "description": "SonarCloud's `Web:HeaderCheck` rule is configured via `sonar.html.fileHeader` in `sonar-project.properties` with the canonical two-line Django-comment header text. The configured value is the single source of enforcement for HTML templates; new templates without the header fail the SonarCloud quality gate.",
+        "checks": []
+      },
+      {
+        "id": "ADR-015-R4",
+        "description": "Year and license text are maintained in exactly two places: `LICENSE` (legal artifact) and `sonar-project.properties` (enforcement). Roll-forward edits (new year, license switch, organization rename) update both files and then mechanically propagate to all source files in a single change. The header is not duplicated in per-file ADRs or per-package READMEs.",
+        "checks": []
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["ci", "sonarcloud", "agent-policy"],
+    "evidence": [
+      "LICENSE",
+      "docs/architecture/file-headers.md",
+      "sonar-project.properties"
+    ]
+  },
+  {
+    "id": "ADR-016",
+    "title": "Django templates use native gettext for user-facing literals",
+    "status": "accepted",
+    "scope": "shifter_platform",
+    "decision": "Django-rendered user-facing template literals are routed through Django's native gettext template tags and the platform-owned English catalog. Shifter adopts the minimum i18n infrastructure needed for template analysis and future catalog growth: `LocaleMiddleware` sits between session and common middleware, `LOCALE_PATHS` points at `shifter/shifter_platform/locale`, templates use `{% trans %}` / `{% blocktrans %}`, and runtime startup compiles message catalogs before static collection. English remains the only catalog for now; URL locale prefixes, locale-switching UX, translator workflow, RTL support, and locale-aware formatting are explicitly out of scope until a separate requirement adopts them.",
+    "rules": [
+      {
+        "id": "ADR-016-R1",
+        "description": "Django templates with user-facing literals load `i18n` and wrap literal text or translatable attributes with Django-native `{% trans %}` / `{% blocktrans %}`. Custom translation helpers, JSON catalogs, frontend i18n abstractions, and SonarCloud false-positive scoping are not substitutes for the template convention.",
+        "checks": ["django-template-i18n-coverage"]
+      },
+      {
+        "id": "ADR-016-R2",
+        "description": "The platform keeps `LocaleMiddleware` after `SessionMiddleware` and before `CommonMiddleware`, and keeps `LOCALE_PATHS` pinned to the repo-owned platform locale directory. `i18n_patterns` is not used unless a future ADR explicitly accepts URL-shape changes.",
+        "checks": ["django-i18n-settings"]
+      },
+      {
+        "id": "ADR-016-R3",
+        "description": "Container startup compiles Django message catalogs before static collection or application startup so runtime `.mo` files are present without committing generated binaries.",
+        "checks": ["django-compilemessages-runtime"]
+      }
+    ],
+    "exceptions": [],
+    "enforcement": ["tests", "sonarcloud", "agent-policy"],
+    "evidence": [
+      "shifter/shifter_platform/config/settings.py",
+      "shifter/shifter_platform/entrypoint.sh",
+      "shifter/shifter_platform/locale/en/LC_MESSAGES/django.po",
+      "shifter/shifter_platform/tests/config/test_i18n_configuration.py",
+      "shifter/shifter_platform/templates",
+      "shifter/shifter_platform/cms/experiments/templates"
     ]
   }
 ]

@@ -35,6 +35,7 @@ from cms.experiments.s3 import (
     generate_presigned_download_url,
     generate_script_upload_url,
     generate_upload_token,
+    read_script_header,
     verify_s3_object,
     verify_upload_token,
 )
@@ -47,8 +48,14 @@ from cms.experiments.schemas import (
 from cms.scenarios.registry import check_scenario_access, load_scenario_template
 from risk_register.models import AuditLog
 from risk_register.services import audit_log
-from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
+from shared.auth import validate_cms_authoring_user
 from shared.log_sanitize import safe_log
+from shared.uploads.inspection import (
+    InspectionError as _ScriptInspectionError,
+)
+from shared.uploads.inspection import (
+    validate_text_header as _validate_script_text_header,
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -58,20 +65,8 @@ logger = logging.getLogger(__name__)
 
 
 def _validate_user(user: User, func_name: str) -> None:
-    """Validate user parameter — matches cms/services.py pattern."""
-    if user is None:
-        logger.error("%s called with None user", func_name)
-        raise TypeError(USER_CANNOT_BE_NONE)
-    if not hasattr(user, "id"):
-        logger.error(
-            "%s called with invalid user type: %s",
-            func_name,
-            type(user).__name__,
-        )
-        raise TypeError(f"user must be a User instance, got {type(user).__name__}")
-    if user.id is None:
-        logger.error("%s called with unsaved user (id=None)", func_name)
-        raise ValueError(USER_MUST_BE_SAVED)
+    """Delegate to the shared CMS authoring user validator (see shared.auth)."""
+    validate_cms_authoring_user(user, func_name)
 
 
 def _check_result_type(result: object, expected_type: type, func_name: str) -> None:
@@ -103,7 +98,7 @@ def list_scripts(user: User) -> QuerySet[ScriptAsset]:
     _validate_user(user, "list_scripts")
     logger.debug("list_scripts called for user_id=%s", user.id)
     try:
-        return ScriptAsset.objects.filter(user=user, deleted_at__isnull=True).order_by("-created_at")
+        return ScriptAsset.objects.filter(user=user).order_by("-created_at")
     except (TypeError, ValueError, ExperimentError):
         raise
     except Exception:
@@ -162,6 +157,43 @@ def initiate_script_upload(user: User, name: str, filename: str, file_size: int)
         raise
 
 
+def _inspect_uploaded_script_body(user: User, s3_key: str, max_size: int) -> None:
+    """Read the full S3 object and reject if it isn't valid UTF-8 / has a binary signature.
+
+    Scripts are capped at 1 MB, so we inspect the entire body, not just a header,
+    which blocks the "valid text prefix + binary tail" bypass. Cleans up the
+    rejected object on failure (best-effort).
+    """
+    try:
+        body = read_script_header(s3_key, max_size)
+    except S3Error as e:
+        logger.exception(
+            "complete_script_upload: body read failed s3_key=%s: %s",
+            safe_log(s3_key),
+            safe_log(str(e)),
+        )
+        raise ScriptUploadError("Upload content inspection failed") from e
+
+    try:
+        _validate_script_text_header(body, complete=True)
+    except _ScriptInspectionError as e:
+        logger.warning(
+            "complete_script_upload: header inspection rejected upload user_id=%s s3_key=%s reason=%s",
+            user.pk,
+            safe_log(s3_key),
+            e,
+        )
+        try:
+            delete_s3_object(s3_key)
+        except S3Error as delete_exc:
+            logger.exception(
+                "complete_script_upload: delete after inspection failure also failed s3_key=%s: %s",
+                safe_log(s3_key),
+                safe_log(str(delete_exc)),
+            )
+        raise ScriptUploadError("Uploaded content is not a valid script (binary or non-UTF-8 header)") from e
+
+
 def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
     """Finalize script upload: verify token, verify S3 object, create DB record.
 
@@ -185,6 +217,7 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             raise ScriptUploadError(f"Invalid upload token: {e}") from e
 
         s3_key = payload["s3_key"]
+        expected_size = payload["file_size"]
 
         try:
             actual_size, etag = verify_s3_object(s3_key)
@@ -202,6 +235,27 @@ def complete_script_upload(user: User, upload_token: str) -> ScriptAsset:
             )
             delete_s3_object(s3_key)
             raise ScriptUploadError(f"File size {actual_size} exceeds maximum {max_size} bytes")
+
+        # Enforce the signed upload contract: actual object size must match
+        # the size signed into the upload token. Matches the agent
+        # `complete_upload` invariant; without it a caller could initiate a
+        # small-size upload and PUT a different-size object to the same key.
+        if actual_size != expected_size:
+            logger.warning(
+                "complete_script_upload: size mismatch s3_key=%s expected=%d actual=%d",
+                safe_log(s3_key),
+                expected_size,
+                actual_size,
+            )
+            delete_s3_object(s3_key)
+            raise ScriptUploadError(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+        # Server-side full-body content inspection (issue #696). Scripts are
+        # capped at 1 MB, so we read the entire body — not just a header — and
+        # require it to be valid UTF-8 with no binary signature anywhere in
+        # the stream. This blocks the "valid text prefix + binary tail" bypass
+        # the bounded-header check by itself cannot detect.
+        _inspect_uploaded_script_body(user, s3_key, max_size)
 
         script = ScriptAsset(
             user=user,
@@ -253,7 +307,7 @@ def delete_script(user: User, script_id: int) -> None:
     logger.debug("delete_script called for user_id=%s script_id=%s", user.id, script_id)
     try:
         try:
-            script = ScriptAsset.objects.get(pk=script_id, user=user, deleted_at__isnull=True)
+            script = ScriptAsset.objects.get(pk=script_id, user=user)
         except ScriptAsset.DoesNotExist:
             logger.warning("delete_script: not found script_id=%s user_id=%s", script_id, user.pk)
             raise ScriptUploadError("Script not found or you don't have access") from None
@@ -343,6 +397,47 @@ def get_experiment(user: User, experiment_id: int) -> Experiment:
         raise
 
 
+def _resolve_experiment_scenario(scenario_id, user):
+    """Verify access and load the scenario template; raise ExperimentValidationError on either failure."""
+    try:
+        check_scenario_access(scenario_id, user)
+        return load_scenario_template(scenario_id)
+    except ValueError as e:
+        logger.warning("create_experiment: invalid scenario_id=%s: %s", scenario_id, e)
+        raise ExperimentValidationError(f"Invalid scenario: {e}") from e
+
+
+def _validate_script_assignments(scripts, scenario, user, scenario_id):
+    """Reject assignments that don't match an existing instance or aren't owned scripts."""
+    instance_names = {inst.name for inst in scenario.instances}
+    for script_input in scripts:
+        if script_input.instance_name not in instance_names:
+            raise ExperimentValidationError(
+                f"Instance '{script_input.instance_name}' not found in scenario '{scenario_id}'"
+            )
+    script_ids = [s.script_id for s in scripts if s.script_id]
+    if not script_ids:
+        return
+    existing_scripts = set(ScriptAsset.objects.filter(pk__in=script_ids, user=user).values_list("pk", flat=True))
+    missing = set(script_ids) - existing_scripts
+    if missing:
+        raise ExperimentValidationError(f"Script(s) not found: {missing}")
+
+
+def _resolve_experiment_agent(agent_id, user):
+    """Return the user's agent or None; raise ExperimentValidationError if the id is unknown."""
+    if not agent_id:
+        return None
+    from cms.models import AgentConfig
+
+    try:
+        agent = AgentConfig.objects.get(pk=agent_id, user=user)
+    except AgentConfig.DoesNotExist:
+        raise ExperimentValidationError(f"Agent not found: {agent_id}") from None
+    _check_result_type(agent, AgentConfig, "create_experiment")
+    return agent
+
+
 def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     """Create an experiment with script assignments.
 
@@ -359,46 +454,9 @@ def create_experiment(user: User, data: ExperimentCreateInput) -> Experiment:
     _validate_user(user, "create_experiment")
     logger.debug("create_experiment called for user_id=%s scenario=%s", user.id, data.scenario_id)
     try:
-        # Validate scenario exists and user has access
-        try:
-            check_scenario_access(data.scenario_id, user)
-            scenario = load_scenario_template(data.scenario_id)
-        except ValueError as e:
-            logger.warning("create_experiment: invalid scenario_id=%s: %s", data.scenario_id, e)
-            raise ExperimentValidationError(f"Invalid scenario: {e}") from e
-
-        # Validate script assignments reference real instances
-        instance_names = {inst.name for inst in scenario.instances}
-        for script_input in data.scripts:
-            if script_input.instance_name not in instance_names:
-                raise ExperimentValidationError(
-                    f"Instance '{script_input.instance_name}' not found in scenario '{data.scenario_id}'"
-                )
-
-        # Validate referenced script assets exist and belong to user
-        script_ids = [s.script_id for s in data.scripts if s.script_id]
-        if script_ids:
-            existing_scripts = set(
-                ScriptAsset.objects.filter(
-                    pk__in=script_ids,
-                    user=user,
-                    deleted_at__isnull=True,
-                ).values_list("pk", flat=True)
-            )
-            missing = set(script_ids) - existing_scripts
-            if missing:
-                raise ExperimentValidationError(f"Script(s) not found: {missing}")
-
-        # Validate agent exists if specified
-        agent = None
-        if data.agent_id:
-            from cms.models import AgentConfig
-
-            try:
-                agent = AgentConfig.objects.get(pk=data.agent_id, user=user, deleted_at__isnull=True)
-            except AgentConfig.DoesNotExist:
-                raise ExperimentValidationError(f"Agent not found: {data.agent_id}") from None
-            _check_result_type(agent, AgentConfig, "create_experiment")
+        scenario = _resolve_experiment_scenario(data.scenario_id, user)
+        _validate_script_assignments(data.scripts, scenario, user, data.scenario_id)
+        agent = _resolve_experiment_agent(data.agent_id, user)
 
         with transaction.atomic():
             experiment = Experiment(
@@ -690,6 +748,8 @@ def get_scenario_instances(scenario_id: str, user: User | None = None) -> list[d
         ExperimentValidationError: If scenario not found or access denied.
     """
     logger.debug("get_scenario_instances called for scenario_id=%s", scenario_id)
+    if user is not None:
+        _validate_user(user, "get_scenario_instances")
     try:
         try:
             if user is not None:

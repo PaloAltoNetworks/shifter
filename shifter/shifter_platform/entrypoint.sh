@@ -45,6 +45,7 @@ DB_SECRET_ID="${DB_SECRET_ID:-${DB_SECRET_ARN:-}}"
 APP_SECRET_ID="${APP_SECRET_ID:-${APP_SECRET_ARN:-}}"
 OIDC_SECRET_ID="${OIDC_SECRET_ID:-${OIDC_SECRET_ARN:-${COGNITO_SECRET_ARN:-}}}"
 GUACAMOLE_SECRET_ID="${GUACAMOLE_SECRET_ID:-${GUACAMOLE_SECRET_ARN:-}}"
+DC_DOMAIN_PASSWORD_SECRET_ID="${DC_DOMAIN_PASSWORD_SECRET_ID:-${DC_DOMAIN_PASSWORD_SECRET_ARN:-}}"
 
 if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
     echo "Fetching runtime secrets from ${CLOUD_PROVIDER:-aws} secret manager..."
@@ -94,6 +95,33 @@ print(key + '=' * padding)
     echo "Secrets loaded successfully"
 fi
 
+# Fetch the prebaked DC Administrator password if provided. Guarded
+# independently of the DB/app outer block so deployments that supply
+# DC_DOMAIN_PASSWORD_SECRET_ARN without DB_SECRET_ID / APP_SECRET_ID
+# (direct env-var configurations, non-portal entrypoint commands)
+# still hydrate the value. The Windows-DC RDP credential lookup in
+# engine.services depends on this env var being exported.
+if [[ -n "${DC_DOMAIN_PASSWORD_SECRET_ID:-}" ]]; then
+    export DC_DOMAIN_PASSWORD=$(fetch_runtime_secret "$DC_DOMAIN_PASSWORD_SECRET_ID")
+fi
+
+# Hydrate the Redis AUTH token and Memorystore server CA from Secret
+# Manager when the GCP runtime advertises it (ADR-008-R6, #963).
+# REDIS_SECRET_ID is rendered into the pod env by
+# scripts/gcp/render_runtime_env.py; the token itself never travels via
+# the runtime ConfigMap or generated env file. The payload is JSON (same
+# shape as the DB bundle) and flows through stdin into `python -c` so
+# the secret value is not exposed in process argv. The CA PEM is needed
+# by Django Channels to verify the Memorystore server certificate when
+# negotiating SERVER_AUTHENTICATION TLS — without it, the channels_redis
+# connection would fail certificate verification.
+if [[ -n "${REDIS_SECRET_ID:-}" ]]; then
+    REDIS_SECRET=$(fetch_runtime_secret "$REDIS_SECRET_ID")
+    export REDIS_PASSWORD=$(echo "$REDIS_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
+    export REDIS_CA_PEM=$(echo "$REDIS_SECRET" | python -c "import sys, json; print(json.load(sys.stdin).get('server_ca_cert', ''))")
+    unset REDIS_SECRET
+fi
+
 # ------------------------------------------------------------------------------
 # Wait for database
 # ------------------------------------------------------------------------------
@@ -133,6 +161,9 @@ else
 fi
 
 # Collect static files
+echo "Compiling message catalogs..."
+python manage.py compilemessages
+
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 

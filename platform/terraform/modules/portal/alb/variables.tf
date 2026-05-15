@@ -14,7 +14,7 @@ variable "public_subnet_ids" {
 }
 
 variable "domain_name" {
-  description = "Domain name for ACM certificate (e.g., shifter.keplerops.com)"
+  description = "Domain name for ACM certificate (e.g., shifter.example.com)"
   type        = string
 }
 
@@ -40,6 +40,12 @@ variable "enable_stickiness" {
 
 variable "enable_waf" {
   description = "Enable AWS WAF Web ACL for the ALB"
+  type        = bool
+  default     = true
+}
+
+variable "enable_deletion_protection" {
+  description = "Enable ALB deletion protection (CKV_AWS_150). Mirrors the `db_deletion_protection` convention: secure default is `true` in prod; dev environments that need intentional teardown set this to `false` and re-apply before destroying."
   type        = bool
   default     = true
 }

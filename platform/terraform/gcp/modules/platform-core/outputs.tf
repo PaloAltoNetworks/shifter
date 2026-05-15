@@ -28,6 +28,11 @@ output "portal_network_cidrs" {
   value       = local.portal_network_cidrs
 }
 
+output "gke_services_cidr" {
+  description = "GKE service CIDR used by in-cluster clients to reach Kubernetes service IPs."
+  value       = var.gke_services_cidr
+}
+
 output "gke_subnetwork_name" {
   description = "Name of the GKE subnetwork."
   value       = google_compute_subnetwork.gke.name
@@ -93,6 +98,16 @@ output "identity_platform_api_key" {
 output "identity_platform_project_id" {
   description = "Project ID backing the Identity Platform configuration."
   value       = var.project_id
+}
+
+output "identity_allowed_email_domain" {
+  description = "Email domain enforced by the Identity Platform blocking function and the portal allow-list."
+  value       = var.identity_allowed_email_domain
+}
+
+output "identity_allowed_emails" {
+  description = "Explicit allow-listed emails (beyond the domain) enforced by the Identity Platform blocking function and the portal."
+  value       = var.identity_allowed_emails
 }
 
 output "public_hostname" {
@@ -161,10 +176,11 @@ output "control_plane_database" {
 }
 
 output "control_plane_cache" {
-  description = "Control-plane Redis connection metadata."
+  description = "Control-plane Redis connection metadata. tls_enabled signals to the runtime renderer that the channel layer must build a rediss:// host; the AUTH token itself is held in Secret Manager and surfaced via `runtime_secret_ids[\"redis\"]` (ADR-008-R6)."
   value = {
-    host = google_redis_instance.platform.host
-    port = google_redis_instance.platform.port
+    host        = google_redis_instance.platform.host
+    port        = google_redis_instance.platform.port
+    tls_enabled = google_redis_instance.platform.transit_encryption_mode != "DISABLED"
   }
 }
 

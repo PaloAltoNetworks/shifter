@@ -3,72 +3,83 @@
 Covers destroy_ngfw variable passing and _build_tf_variables helper.
 """
 
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+import os
+import sys
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 
 class TestDestroyNgfw:
-    """Test destroy_ngfw passes variables correctly."""
+    """Test destroy_ngfw passes variables correctly.
 
+    Issue #1103: destroy() stages a writable workspace under TERRAFORM_WORKSPACE_DIR,
+    runs terraform from the staged path, and cleans the staged tree up on success and
+    failure. NGFW Terraform shares the same image as range Terraform — the staging
+    contract MUST cover both paths or NGFW provision/deprovision breaks under
+    readOnlyRootFilesystem.
+    """
+
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
     @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_with_variables_writes_tfvars(self, mock_init, mock_run, tmp_path):
+    def test_destroy_with_variables_writes_tfvars(self, mock_run, tmp_path, monkeypatch):
         """When variables are provided, destroy should write tfvars and pass -var-file."""
         from terraform_runner import destroy_ngfw
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
+        source = tmp_path / "src" / "modules" / "ngfw"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
+
         variables = {"name_prefix": "ngfw-user-1", "user_id": 1}
+        destroy_ngfw("req-123", source, variables=variables)
 
-        with patch("builtins.open", mock_open()) as mocked_file, patch.object(Path, "unlink"):
-            destroy_ngfw("req-123", working_dir, variables=variables)
-
-        # Verify tfvars file was written
-        mocked_file.assert_called_once_with(working_dir / "terraform.tfvars.json", "w")
-        written_data = mocked_file().write.call_args_list
-        # json.dump writes in chunks; just verify it was called
-        assert len(written_data) > 0
-
-        # Verify -var-file was passed to terraform
         destroy_args = mock_run.call_args[0][0]
         assert any("-var-file=" in arg for arg in destroy_args)
+        assert not (workspace_root / "req-123").exists()
 
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
     @patch("terraform_base.run_terraform")
-    @patch("terraform_base.init_workspace")
-    def test_destroy_without_variables_no_var_file(self, mock_init, mock_run, tmp_path):
+    def test_destroy_without_variables_no_var_file(self, mock_run, tmp_path, monkeypatch):
         """When no variables provided, destroy should not pass -var-file."""
         from terraform_runner import destroy_ngfw
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
+        source = tmp_path / "src" / "modules" / "ngfw"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
 
-        destroy_ngfw("req-123", working_dir)
+        destroy_ngfw("req-123", source)
 
         destroy_args = mock_run.call_args[0][0]
         assert not any("-var-file=" in arg for arg in destroy_args)
         assert "-auto-approve" in destroy_args
+        assert not (workspace_root / "req-123").exists()
 
-    @patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed"))
-    @patch("terraform_base.init_workspace")
-    def test_destroy_cleans_up_tfvars_on_failure(self, mock_init, mock_run, tmp_path):
-        """Tfvars file should be cleaned up even if destroy fails."""
+    @patch.dict(os.environ, {"TF_STATE_BUCKET": "shifter-dev-pulumi-state"}, clear=True)
+    def test_destroy_cleans_up_workspace_on_failure(self, tmp_path, monkeypatch):
+        """Staged workspace must be removed even when terraform destroy fails."""
         from terraform_runner import destroy_ngfw
 
-        working_dir = tmp_path / "test-module"
-        working_dir.mkdir()
-        variables = {"name_prefix": "ngfw-user-1"}
-        mock_unlink = MagicMock()
+        source = tmp_path / "src" / "modules" / "ngfw"
+        source.mkdir(parents=True)
+        (source / "main.tf").write_text("# main\n")
+        workspace_root = tmp_path / "workspace"
+        monkeypatch.setenv("TERRAFORM_WORKSPACE_DIR", str(workspace_root))
+        monkeypatch.setenv("TF_STATE_BUCKET", "shifter-dev-pulumi-state")
 
         with (
-            patch("builtins.open", mock_open()),
-            patch.object(Path, "unlink", mock_unlink),
+            patch("terraform_base.run_terraform", side_effect=RuntimeError("destroy failed")),
             pytest.raises(RuntimeError, match="destroy failed"),
         ):
-            destroy_ngfw("req-123", working_dir, variables=variables)
+            destroy_ngfw("req-123", source, variables={"name_prefix": "ngfw-user-1"})
 
-        mock_unlink.assert_called_once_with(missing_ok=True)
+        assert not (workspace_root / "req-123").exists()
 
 
 class TestBuildTfVariables:
@@ -78,6 +89,7 @@ class TestBuildTfVariables:
         "os.environ",
         {
             "ENVIRONMENT": "prod",
+            "SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234",
             "NGFW_SUBNET_ID": "subnet-abc",
             "NGFW_MGMT_SECURITY_GROUP_ID": "sg-mgmt",
             "NGFW_DATA_SECURITY_GROUP_ID": "sg-data",
@@ -107,15 +119,20 @@ class TestBuildTfVariables:
         assert result["instance_uuid"] == "inst-555"
         assert result["request_uuid"] == "req-999"
         assert result["environment"] == "prod"
+        assert result["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
         assert result["subnet_id"] == "subnet-abc"
         assert result["ami_id"] == "ami-123"
         assert result["instance_profile_name"] == "my-profile"
         assert result["scm_pin_id"] == "pin-1"
         assert result["authcode"] == "auth-abc"
 
-    @patch.dict("os.environ", {}, clear=True)
-    def test_defaults_when_env_vars_missing(self):
-        """Should use defaults when env vars are not set."""
+    @patch.dict(
+        "os.environ",
+        {"SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"},
+        clear=True,
+    )
+    def test_defaults_when_optional_env_vars_missing(self):
+        """Should use defaults for optional env vars; mandatory KMS ARN is supplied."""
         from ngfw_terraform import _build_tf_variables
 
         result = _build_tf_variables("req-1", "inst-1", {})
@@ -123,9 +140,153 @@ class TestBuildTfVariables:
         assert result["user_id"] == 0
         assert result["name_prefix"] == "ngfw-user-0"
         assert result["environment"] == "dev"
+        assert result["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
         assert result["subnet_id"] == ""
         assert result["instance_type"] == "m5.xlarge"
         assert result["instance_profile_name"] is None
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_raises_keyerror_when_secrets_kms_key_arn_missing(self):
+        """Fail-fast on missing SECRETS_KMS_KEY_ARN.
+
+        Mandatory env var; runtime tfvars must not silently fall back to
+        AWS-managed keys (CKV_AWS_149 / #213).
+        """
+        import pytest
+
+        from ngfw_terraform import _build_tf_variables
+
+        with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
+            _build_tf_variables("req-1", "inst-1", {})
+
+
+class TestCleanupNgfwBootstrapObjects:
+    """Test post-ready cleanup of sensitive NGFW S3 bootstrap objects."""
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket",
+        },
+        clear=False,
+    )
+    @patch("cloud.get_object_storage")
+    def test_deletes_sensitive_bootstrap_objects(self, mock_get_object_storage):
+        """Cleanup removes init-cfg.txt and authcodes from the instance bootstrap prefix."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        storage = mock_get_object_storage.return_value
+
+        _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        assert storage.delete_object.call_args_list == [
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/config/init-cfg.txt"),
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/license/authcodes"),
+        ]
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp", "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket"}, clear=False)
+    @patch("cloud.get_object_storage")
+    def test_skips_non_aws_provider(self, mock_get_object_storage):
+        """Cleanup is S3-specific and should not run for GCP VM-Series provisioning."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        mock_get_object_storage.assert_not_called()
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_BOOTSTRAP_BUCKET": "bootstrap-bucket",
+        },
+        clear=False,
+    )
+    @patch("cloud.get_object_storage")
+    def test_attempts_all_sensitive_bootstrap_objects_before_raising(self, mock_get_object_storage):
+        """Cleanup should try every sensitive key even when one delete fails."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        storage = mock_get_object_storage.return_value
+        storage.delete_object.side_effect = [RuntimeError("denied"), None]
+
+        with pytest.raises(RuntimeError, match=r"config/init-cfg\.txt"):
+            _cleanup_ngfw_bootstrap_objects("inst-555")
+
+        assert storage.delete_object.call_args_list == [
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/config/init-cfg.txt"),
+            call(bucket="bootstrap-bucket", key="bootstrap/ngfw/inst-555/license/authcodes"),
+        ]
+
+    @patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True)
+    def test_requires_bootstrap_bucket_for_aws_cleanup(self):
+        """AWS cleanup should fail loudly rather than silently retaining bootstrap secrets."""
+        from ngfw_terraform import _cleanup_ngfw_bootstrap_objects
+
+        with pytest.raises(RuntimeError, match="NGFW_BOOTSTRAP_BUCKET"):
+            _cleanup_ngfw_bootstrap_objects("inst-555")
+
+
+class TestRunPanOsPostProvision:
+    """Test PAN-OS post-provision lifecycle behavior."""
+
+    @patch.dict(
+        "os.environ",
+        {
+            "CLOUD_PROVIDER": "aws",
+            "NGFW_SSH_WAIT_TIMEOUT": "1",
+            "NGFW_CERT_POLL_TIMEOUT": "1",
+        },
+        clear=False,
+    )
+    @patch("ngfw_terraform.publish_ngfw_event")
+    @patch("ngfw_terraform._cleanup_ngfw_bootstrap_objects", side_effect=RuntimeError("cleanup failed"))
+    @patch("ngfw_terraform.time.sleep")
+    @patch("ngfw_terraform.SetupOrchestrator")
+    @patch("ngfw_terraform.NGFWExecutor")
+    @patch("cloud.get_secrets_store")
+    def test_cleanup_failure_does_not_skip_auto_stop(
+        self,
+        mock_get_secrets_store,
+        mock_ngfw_executor_class,
+        mock_setup_orchestrator_class,
+        _mock_sleep,
+        _mock_cleanup,
+        _mock_publish_ngfw_event,
+        monkeypatch,
+    ):
+        """Bootstrap cleanup failures should surface only after auto-stop is attempted."""
+        from ngfw_terraform import _run_pan_os_post_provision
+
+        fake_main = SimpleNamespace(
+            NGFW_SSH_WAIT_TIMEOUT_DEFAULT=1,
+            poll_for_serial_number=MagicMock(return_value="serial-1"),
+            poll_for_serial_and_cert=MagicMock(return_value="serial-2"),
+            run_ngfw_operation=MagicMock(),
+            update_instance_state=MagicMock(),
+        )
+        monkeypatch.setitem(sys.modules, "main", fake_main)
+        mock_get_secrets_store.return_value.get_secret.return_value = "private-key"
+        mock_ngfw_executor = mock_ngfw_executor_class.return_value
+        mock_ngfw_executor.run_command.return_value = MagicMock(success=True, stdout="", stderr="")
+        mock_setup_orchestrator_class.return_value.orchestrate.return_value = MagicMock(success=True)
+
+        with pytest.raises(RuntimeError, match="bootstrap object cleanup failed"):
+            _run_pan_os_post_provision(
+                request_id="req-1",
+                instance_id="inst-1",
+                app_id="app-1",
+                output_data={
+                    "management_ip": "10.1.1.10",
+                    "dataplane_ip": "10.1.2.10",
+                    "data_eni_id": "eni-1",
+                    "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
+                },
+                sls_region="americas",
+            )
+
+        fake_main.run_ngfw_operation.assert_called_once_with("stop", "req-1")
 
 
 class TestBuildProviderState:

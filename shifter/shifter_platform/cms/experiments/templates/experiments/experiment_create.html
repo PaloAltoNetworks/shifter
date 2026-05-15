@@ -1,10 +1,10 @@
 {% extends "experiments/base.html" %}
-{% load static %}
-
-{% block title %}Create Experiment{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    Create Experiment
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
     .form-container { max-width: 720px; }
     .form-section { margin-bottom: 24px; }
     .form-section-title {
@@ -94,99 +94,160 @@
         font-size: 16px;
         padding: 4px;
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<a href="{% url 'experiments:experiment_list' %}" class="back-link">&larr; Back to Experiments</a>
-
-<div class="form-container">
-    <div class="page-header-row">
-        <div class="page-header-content">
-            <h1 class="page-title">Create Experiment</h1>
-            <p class="page-subtitle">Configure a new experiment with scenario, runs, and scripts</p>
+    <a href="{% url 'experiments:experiment_list' %}"
+       class="back-link">{% trans "&larr; Back to Experiments" %}</a>
+    <div class="form-container">
+        <div class="page-header-row">
+            <div class="page-header-content">
+                <h1 class="page-title">
+                    {% trans "Create Experiment" %}
+                </h1>
+                <p class="page-subtitle">
+                    {% trans "Configure a new experiment with scenario, runs, and scripts" %}
+                </p>
+            </div>
         </div>
-    </div>
-
-    {% if messages %}
-    <div class="mb-lg">
-        {% for message in messages %}
-        <div class="message message-{{ message.tags }}">{{ message }}</div>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    <form method="post" id="experiment-form">
-        {% csrf_token %}
-
-        <div class="card">
-            <div class="form-section">
-                <div class="form-section-title">Basic Information</div>
-                <div class="form-group">
-                    <label for="name">Name <span class="required">*</span></label>
-                    <input type="text" id="name" name="name" required maxlength="255" placeholder="e.g., XDR Detection Test">
-                </div>
-                <div class="form-group">
-                    <label for="description">Description</label>
-                    <textarea id="description" name="description" rows="3" maxlength="2000" placeholder="Optional description"></textarea>
-                </div>
+        {% if messages %}
+            <div class="mb-lg">
+                {% for message in messages %}
+                    <div class="message message-{{ message.tags }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
             </div>
-
-            <div class="form-section">
-                <div class="form-section-title">Scenario & Execution</div>
-                <div class="form-group">
-                    <label for="scenario_id">Scenario <span class="required">*</span></label>
-                    <select id="scenario_id" name="scenario_id" required>
-                        <option value="">-- Select scenario --</option>
-                        {% for scenario in scenarios %}
-                        <option value="{{ scenario.id }}">{{ scenario.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <div class="form-hint">Select the infrastructure scenario template</div>
-                </div>
-                <div class="form-group">
-                    <label for="agent_id">Windows Agent <span class="required">*</span></label>
-                    <select id="agent_id" name="agent_id" required>
-                        <option value="">-- Select agent --</option>
-                    </select>
-                    <div class="form-hint">XDR agent for Windows instances</div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="total_runs">Total Runs <span class="required">*</span></label>
-                        <input type="number" id="total_runs" name="total_runs" value="1" min="1" max="10">
-                        <div class="form-hint">1-10 runs per experiment</div>
+        {% endif %}
+        <form method="post" id="experiment-form">
+            {% csrf_token %}
+            <div class="card">
+                <div class="form-section">
+                    <div class="form-section-title">
+                        {% trans "Basic Information" %}
                     </div>
                     <div class="form-group">
-                        <label for="max_parallel_runs">Max Parallel <span class="required">*</span></label>
-                        <input type="number" id="max_parallel_runs" name="max_parallel_runs" value="1" min="1" max="5">
-                        <div class="form-hint">1-5 concurrent runs</div>
+                        <label for="name">
+                            {% trans "Name" %} <span class="required">*</span>
+                        </label>
+                        <input type="text"
+                               id="name"
+                               name="name"
+                               required
+                               maxlength="255"
+                               placeholder='{% trans "e.g., XDR Detection Test" %}'>
+                    </div>
+                    <div class="form-group">
+                        <label for="description">
+                            {% trans "Description" %}
+                        </label>
+                        <textarea id="description"
+                                  name="description"
+                                  rows="3"
+                                  maxlength="2000"
+                                  placeholder='{% trans "Optional description" %}'></textarea>
                     </div>
                 </div>
+                <div class="form-section">
+                    <div class="form-section-title">
+                        {% trans "Scenario & Execution" %}
+                    </div>
+                    <div class="form-group">
+                        <label for="scenario_id">
+                            {% trans "Scenario" %} <span class="required">*</span>
+                        </label>
+                        <select id="scenario_id" name="scenario_id" required>
+                            <option value="">
+                                {% trans "-- Select scenario --" %}
+                            </option>
+                            {% for scenario in scenarios %}
+                                <option value="{{ scenario.id }}">
+                                    {{ scenario.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-hint">
+                            {% trans "Select the infrastructure scenario template" %}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="agent_id">
+                            {% trans "Windows Agent" %} <span class="required">*</span>
+                        </label>
+                        <select id="agent_id" name="agent_id" required>
+                            <option value="">
+                                {% trans "-- Select agent --" %}
+                            </option>
+                        </select>
+                        <div class="form-hint">
+                            {% trans "XDR agent for Windows instances" %}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="total_runs">
+                                {% trans "Total Runs" %} <span class="required">*</span>
+                            </label>
+                            <input type="number"
+                                   id="total_runs"
+                                   name="total_runs"
+                                   value="1"
+                                   min="1"
+                                   max="10">
+                            <div class="form-hint">
+                                {% trans "1-10 runs per experiment" %}
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="max_parallel_runs">
+                                {% trans "Max Parallel" %} <span class="required">*</span>
+                            </label>
+                            <input type="number"
+                                   id="max_parallel_runs"
+                                   name="max_parallel_runs"
+                                   value="1"
+                                   min="1"
+                                   max="5">
+                            <div class="form-hint">
+                                {% trans "1-5 concurrent runs" %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-section">
+                    <div class="form-section-title">
+                        {% trans "Script Assignments" %}
+                    </div>
+                    <div class="form-hint mb-sm">
+                        {% trans "Assign scripts to scenario instances (loaded when you select a scenario)" %}
+                    </div>
+                    <div id="script-assignments">
+                    </div>
+                    <button type="button"
+                            id="add-script-btn"
+                            class="btn btn-secondary btn-small"
+                            style="margin-top: 8px"
+                            disabled>
+                        {% trans "+ Add Script" %}
+                    </button>
+                </div>
             </div>
-
-            <div class="form-section">
-                <div class="form-section-title">Script Assignments</div>
-                <div class="form-hint mb-sm">Assign scripts to scenario instances (loaded when you select a scenario)</div>
-                <div id="script-assignments"></div>
-                <button type="button" id="add-script-btn" class="btn btn-secondary btn-small" style="margin-top: 8px;" disabled>
-                    + Add Script
+            <input type="hidden"
+                   name="scripts_json"
+                   id="scripts_json"
+                   value="[]">
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    {% trans "Create Experiment" %}
                 </button>
+                <a href="{% url 'experiments:experiment_list' %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
             </div>
-        </div>
-
-        <input type="hidden" name="scripts_json" id="scripts_json" value="[]">
-
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Create Experiment</button>
-            <a href="{% url 'experiments:experiment_list' %}" class="btn btn-secondary">Cancel</a>
-        </div>
-    </form>
-</div>
+        </form>
+    </div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 (function() {
     const scenarioSelect = document.getElementById('scenario_id');
     const agentSelect = document.getElementById('agent_id');
@@ -275,7 +336,8 @@
             return;
         }
 
-        fetch('{% url "experiments:scenario_instances" scenario_id="__SCENARIO__" %}'.replace('__SCENARIO__', scenarioId))
+        const instancesUrl = '{% url "experiments:scenario_instances" scenario_id="__SCENARIO__" %}';
+        fetch(instancesUrl.replace('__SCENARIO__', scenarioId))
             .then(r => r.json())
             .then(data => {
                 if (data.instances) {
@@ -333,12 +395,22 @@
         row.querySelector('.script-type-select').addEventListener('change', function() {
             const configDiv = row.querySelector('.script-config');
             if (this.value === 'claude_code') {
-                configDiv.innerHTML = '<label class="text-small text-muted">Prompt</label><input type="text" class="claude-prompt" placeholder="Attack {{Workstation.ip}}">';
+                configDiv.innerHTML = `
+                    <label class="text-small text-muted">Prompt</label>
+                    <input type="text"
+                           class="claude-prompt"
+                           placeholder="Attack {{Workstation.ip}}">
+                `;
                 configDiv.querySelector('.claude-prompt').addEventListener('blur', function() {
                     validatePrompt(this);
                 });
             } else {
-                configDiv.innerHTML = '<label class="text-small text-muted">Script</label><select class="script-id-select"><option value="">-- Select script --</option></select>';
+                configDiv.innerHTML = `
+                    <label class="text-small text-muted">Script</label>
+                    <select class="script-id-select">
+                        <option value="">-- Select script --</option>
+                    </select>
+                `;
                 populateScriptSelect(configDiv.querySelector('.script-id-select'));
             }
         });
@@ -373,5 +445,5 @@
         scriptsJsonInput.value = JSON.stringify(data);
     });
 })();
-</script>
+    </script>
 {% endblock %}

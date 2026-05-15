@@ -1,21 +1,25 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}{{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb .separator {
     margin: 0 6px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .detail-layout {
@@ -59,7 +63,7 @@
 
 .stat-divider {
     border: none;
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
     margin: 8px 0;
 }
 
@@ -72,205 +76,250 @@
     width: 100%;
     margin-top: 12px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="flex-between mb-lg">
-    <div>
-        <div class="breadcrumb">
-            <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-            <span class="separator">/</span>
-            <span>{{ event.name }}</span>
-        </div>
-        <h1 class="page-title">{{ event.name }}</h1>
-        <div class="mt-sm flex-row gap-sm">
-            {% include "ctf/includes/event_status_badge.html" %}
-            {% if event.team_mode %}
-            <span class="status status-paused"><span class="status-dot"></span> Team Mode</span>
-            {% endif %}
-        </div>
-    </div>
-    <div>
-        {% if event.is_modifiable %}
-        <a href="{% url 'ctf:admin_event_edit' event_id=event.pk %}" class="btn btn-primary">
-            Edit
-        </a>
-        {% endif %}
-    </div>
-</div>
-
-<div class="detail-layout">
-    <!-- Main Info -->
-    <div>
-        <!-- Description -->
-        <div class="card">
-            <div class="card-title">Description</div>
-            {% if event.description %}
-            <div>{{ event.description|linebreaks }}</div>
-            {% else %}
-            <p class="text-muted">No description provided.</p>
-            {% endif %}
-        </div>
-
-        <!-- Schedule -->
-        <div class="card">
-            <div class="card-title">Schedule</div>
-            <div class="schedule-grid">
-                <div class="schedule-item">
-                    <strong>Event Start:</strong>
-                    {{ event.event_start|date:"M d, Y H:i" }}
-                </div>
-                <div class="schedule-item">
-                    <strong>Event End:</strong>
-                    {{ event.event_end|date:"M d, Y H:i" }}
-                </div>
-                <div class="schedule-item">
-                    <strong>Duration:</strong>
-                    {{ event.duration_hours|floatformat:1 }} hours
-                </div>
+    <!-- Header -->
+    <div class="flex-between mb-lg">
+        <div>
+            <div class="breadcrumb">
+                <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                <span class="separator">/</span>
+                <span>{{ event.name }}</span>
             </div>
-            {% if event.registration_deadline %}
-            <div class="schedule-grid mt-md">
-                <div class="schedule-item">
-                    <strong>Registration Deadline:</strong>
-                    {{ event.registration_deadline|date:"M d, Y H:i" }}
-                </div>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Quick Links -->
-        <div class="card">
-            <div class="card-title">Event Management</div>
-            <div class="mgmt-grid">
-                <a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}" class="btn btn-secondary">
-                    Challenges ({{ stats.challenge_count }})
-                </a>
-                <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-secondary">
-                    Participants ({{ stats.participant_count }})
-                </a>
+            <h1 class="page-title">
+                {{ event.name }}
+            </h1>
+            <div class="mt-sm flex-row gap-sm">
+                {% include "ctf/includes/event_status_badge.html" %}
                 {% if event.team_mode %}
-                <a href="{% url 'ctf:admin_team_list' event_id=event.pk %}" class="btn btn-secondary">
-                    Teams ({{ stats.team_count }})
-                </a>
+                    <span class="status status-paused"><span class="status-dot"></span> {% trans "Team Mode" %}</span>
                 {% endif %}
-                <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}" class="btn btn-secondary">
-                    Scoreboard
-                </a>
-                <a href="{% url 'ctf:admin_range_list' event_id=event.pk %}" class="btn btn-secondary">
-                    Ranges
-                </a>
-                <a href="{% url 'ctf:admin_notification_list' event_id=event.pk %}" class="btn btn-secondary">
-                    Notifications
-                </a>
             </div>
         </div>
-    </div>
-
-    <!-- Sidebar -->
-    <div>
-        <!-- Stats -->
-        <div class="card">
-            <div class="card-title">Statistics</div>
-            <div class="stat-row">
-                <span>Participants:</span>
-                <strong>{{ stats.participant_count }}</strong>
-            </div>
-            <div class="stat-row">
-                <span>- Registered:</span>
-                <strong>{{ stats.registered_count }}</strong>
-            </div>
-            <div class="stat-row">
-                <span>- Invited:</span>
-                <strong>{{ stats.invited_count }}</strong>
-            </div>
-            <hr class="stat-divider">
-            <div class="stat-row">
-                <span>Challenges:</span>
-                <strong>{{ stats.challenge_count }}</strong>
-            </div>
-            <div class="stat-row">
-                <span>Total Points:</span>
-                <strong>{{ stats.total_points }}</strong>
-            </div>
-            <hr class="stat-divider">
-            <div class="stat-row">
-                <span>Total Submissions:</span>
-                <strong>{{ stats.total_submissions }}</strong>
-            </div>
-            <div class="stat-row">
-                <span>Correct Submissions:</span>
-                <strong>{{ stats.correct_submissions }}</strong>
-            </div>
-        </div>
-
-        <!-- Status Actions -->
-        {% if status_form.fields.action.choices %}
-        <div class="card">
-            <div class="card-title">Status Actions</div>
-            <form method="post" class="status-form">
-                {% csrf_token %}
-                <div class="form-group">
-                    <label for="action" class="form-label">Change Status:</label>
-                    <select name="action" id="action" class="form-input">
-                        {% for value, label in status_form.fields.action.choices %}
-                        <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <button type="submit" class="btn btn-primary">
-                    Apply
-                </button>
-            </form>
-        </div>
-        {% endif %}
-
-        <!-- Settings -->
-        <div class="card">
-            <div class="card-title">Settings</div>
-            <div class="stat-row">
-                <span>Scenario:</span>
-                <strong>{{ event.scenario_id }}</strong>
-            </div>
-            <div class="stat-row">
-                <span>Max Participants:</span>
-                <strong>{% if event.max_participants %}{{ event.max_participants }}{% else %}Unlimited{% endif %}</strong>
-            </div>
-            {% if event.team_mode %}
-            <div class="stat-row">
-                <span>Team Size Limit:</span>
-                <strong>{{ event.team_size_limit }}</strong>
-            </div>
+        <div>
+            {% if event.is_modifiable %}
+                <a href="{% url 'ctf:admin_event_edit' event_id=event.pk %}"
+                   class="btn btn-primary">{% trans "Edit" %}</a>
             {% endif %}
-            <hr class="stat-divider">
-            <div class="stat-row">
-                <span>Auto Cleanup:</span>
-                <strong>{% if event.auto_cleanup %}Yes{% else %}No{% endif %}</strong>
-            </div>
-            <div class="stat-row">
-                <span>Cleanup Delay:</span>
-                <strong>{{ event.cleanup_delay_hours }} hours</strong>
-            </div>
-            <div class="stat-row">
-                <span>Range Spinup:</span>
-                <strong>{{ event.range_spinup_minutes }} min</strong>
-            </div>
-        </div>
-
-        <!-- Danger Zone -->
-        <div class="card" style="border: 1px solid #dc3545;">
-            <div class="card-title" style="color: #dc3545;">Danger Zone</div>
-            <p style="font-size: 13px; color: var(--xdr-text-secondary); margin-bottom: 12px;">
-                Permanently delete this event and all associated data.
-                This action cannot be undone.
-            </p>
-            <a href="{% url 'ctf:admin_event_force_delete' event_id=event.pk %}"
-               class="btn" style="background: #dc3545; color: #fff; width: 100%;">
-                Force Delete Event
-            </a>
         </div>
     </div>
-</div>
+    <div class="detail-layout">
+        <!-- Main Info -->
+        <div>
+            <!-- Description -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Description" %}
+                </div>
+                {% if event.description %}
+                    <div>
+                        {{ event.description|linebreaks }}
+                    </div>
+                {% else %}
+                    <p class="text-muted">
+                        {% trans "No description provided." %}
+                    </p>
+                {% endif %}
+            </div>
+            <!-- Schedule -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Schedule" %}
+                </div>
+                <div class="schedule-grid">
+                    <div class="schedule-item">
+                        <strong>{% trans "Event Start:" %}</strong>
+                        {{ event.event_start|date:"M d, Y H:i" }}
+                    </div>
+                    <div class="schedule-item">
+                        <strong>{% trans "Event End:" %}</strong>
+                        {{ event.event_end|date:"M d, Y H:i" }}
+                    </div>
+                    <div class="schedule-item">
+                        <strong>{% trans "Duration:" %}</strong>
+                        {% blocktrans with v1=event.duration_hours|floatformat:1 %}
+                            {{ v1 }} hours
+                        {% endblocktrans %}
+                    </div>
+                </div>
+                {% if event.registration_deadline %}
+                    <div class="schedule-grid mt-md">
+                        <div class="schedule-item">
+                            <strong>{% trans "Registration Deadline:" %}</strong>
+                            {{ event.registration_deadline|date:"M d, Y H:i" }}
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+            <!-- Quick Links -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Event Management" %}
+                </div>
+                <div class="mgmt-grid">
+                    <a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}"
+                       class="btn btn-secondary">
+                        {% blocktrans with v1=stats.challenge_count %}
+                            Challenges ({{ v1 }})
+                        {% endblocktrans %}
+                    </a>
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}"
+                       class="btn btn-secondary">
+                        {% blocktrans with v1=stats.participant_count %}
+                            Participants ({{ v1 }})
+                        {% endblocktrans %}
+                    </a>
+                    {% if event.team_mode %}
+                        <a href="{% url 'ctf:admin_team_list' event_id=event.pk %}"
+                           class="btn btn-secondary">
+                            {% blocktrans with v1=stats.team_count %}
+                                Teams ({{ v1 }})
+                            {% endblocktrans %}
+                        </a>
+                    {% endif %}
+                    <a href="{% url 'ctf:admin_scoreboard' event_id=event.pk %}"
+                       class="btn btn-secondary">{% trans "Scoreboard" %}</a>
+                    <a href="{% url 'ctf:admin_range_list' event_id=event.pk %}"
+                       class="btn btn-secondary">{% trans "Ranges" %}</a>
+                    <a href="{% url 'ctf:admin_notification_list' event_id=event.pk %}"
+                       class="btn btn-secondary">{% trans "Notifications" %}</a>
+                </div>
+            </div>
+        </div>
+        <!-- Sidebar -->
+        <div>
+            <!-- Stats -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Statistics" %}
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Participants:" %}</span>
+                    <strong>{{ stats.participant_count }}</strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "- Registered:" %}</span>
+                    <strong>{{ stats.registered_count }}</strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "- Invited:" %}</span>
+                    <strong>{{ stats.invited_count }}</strong>
+                </div>
+                <hr class="stat-divider">
+                <div class="stat-row">
+                    <span>{% trans "Challenges:" %}</span>
+                    <strong>{{ stats.challenge_count }}</strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Total Points:" %}</span>
+                    <strong>{{ stats.total_points }}</strong>
+                </div>
+                <hr class="stat-divider">
+                <div class="stat-row">
+                    <span>{% trans "Total Submissions:" %}</span>
+                    <strong>{{ stats.total_submissions }}</strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Correct Submissions:" %}</span>
+                    <strong>{{ stats.correct_submissions }}</strong>
+                </div>
+            </div>
+            <!-- Status Actions -->
+            {% if status_form.fields.action.choices %}
+                <div class="card">
+                    <div class="card-title">
+                        {% trans "Status Actions" %}
+                    </div>
+                    <form method="post" class="status-form">
+                        {% csrf_token %}
+                        <div class="form-group">
+                            <label for="action" class="form-label">
+                                {% trans "Change Status:" %}
+                            </label>
+                            <select name="action" id="action" class="form-input">
+                                {% for value, label in status_form.fields.action.choices %}
+                                    <option value="{{ value }}">
+                                        {{ label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            {% trans "Apply" %}
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
+            <!-- Settings -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Settings" %}
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Scenario:" %}</span>
+                    <strong>{{ event.scenario_id }}</strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Max Participants:" %}</span>
+                    <strong>
+                        {% if event.max_participants %}
+                            {{ event.max_participants }}
+                        {% else %}
+                            {% trans "Unlimited" %}
+                        {% endif %}
+                    </strong>
+                </div>
+                {% if event.team_mode %}
+                    <div class="stat-row">
+                        <span>{% trans "Team Size Limit:" %}</span>
+                        <strong>{{ event.team_size_limit }}</strong>
+                    </div>
+                {% endif %}
+                <hr class="stat-divider">
+                <div class="stat-row">
+                    <span>{% trans "Auto Cleanup:" %}</span>
+                    <strong>
+                        {% if event.auto_cleanup %}
+                            {% trans "Yes" %}
+                        {% else %}
+                            {% trans "No" %}
+                        {% endif %}
+                    </strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Cleanup Delay:" %}</span>
+                    <strong>
+                        {% blocktrans with v1=event.cleanup_delay_hours %}
+                            {{ v1 }} hours
+                        {% endblocktrans %}
+                    </strong>
+                </div>
+                <div class="stat-row">
+                    <span>{% trans "Range Spinup:" %}</span>
+                    <strong>
+                        {% blocktrans with v1=event.range_spinup_minutes %}
+                            {{ v1 }} min
+                        {% endblocktrans %}
+                    </strong>
+                </div>
+            </div>
+            <!-- Danger Zone -->
+            <div class="card" style="border: 1px solid #dc3545;">
+                <div class="card-title" style="color: #dc3545;">
+                    {% trans "Danger Zone" %}
+                </div>
+                <p style="font-size: 13px;
+                          color: var(--theme-text-secondary);
+                          margin-bottom: 12px">
+                    {% trans "Permanently delete this event and all associated data. This action cannot be undone." %}
+                </p>
+                <a href="{% url 'ctf:admin_event_force_delete' event_id=event.pk %}"
+                   class="btn"
+                   style="background: #dc3545;
+                          color: #fff;
+                          width: 100%">{% trans "Force Delete Event" %}</a>
+            </div>
+        </div>
+    </div>
 {% endblock %}

@@ -1,21 +1,25 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Force Delete - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Force Delete - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb .separator {
     margin: 0 6px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .warning-banner {
@@ -36,7 +40,7 @@
 
 .impact-list li {
     padding: 6px 0;
-    border-bottom: 1px solid var(--xdr-border);
+    border-bottom: 1px solid var(--theme-border);
     display: flex;
     justify-content: space-between;
 }
@@ -48,10 +52,10 @@
 .confirm-input {
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
-    background: var(--xdr-bg-secondary);
-    color: var(--xdr-text-primary);
+    background: var(--theme-bg-secondary);
+    color: var(--theme-text-primary);
     font-size: 14px;
     margin-top: 8px;
 }
@@ -86,93 +90,115 @@
     align-items: center;
     padding: 4px 0;
 }
-</style>
+
+.page-title-danger {
+    color: #dc3545;
+}
+
+.confirm-hint {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+}
+
+.confirm-target {
+    font-weight: 600;
+    margin: 8px 0;
+    font-size: 15px;
+}
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="mb-lg">
-    <div class="breadcrumb">
-        <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-        <span class="separator">/</span>
-        <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-        <span class="separator">/</span>
-        <span>Force Delete</span>
+    <!-- Header -->
+    <div class="mb-lg">
+        <div class="breadcrumb">
+            <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+            <span class="separator">/</span>
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+            <span class="separator">/</span>
+            <span>{% trans "Force Delete" %}</span>
+        </div>
+        <h1 class="page-title page-title-danger">
+            {% trans "Force Delete Event" %}
+        </h1>
     </div>
-    <h1 class="page-title" style="color: #dc3545;">Force Delete Event</h1>
-</div>
-
-<!-- Warning -->
-<div class="warning-banner">
-    This action will permanently delete the event and ALL associated data.
-    This cannot be undone. All range instances will be destroyed immediately.
-</div>
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-    <!-- Impact Summary -->
-    <div class="card">
-        <div class="card-title">Data To Be Deleted</div>
-        <ul class="impact-list">
-            <li>
-                <span>Event</span>
-                <strong>{{ event.name }}</strong>
-            </li>
-            <li>
-                <span>Status</span>
-                <strong>{{ event.get_status_display }}</strong>
-            </li>
-            <li>
-                <span>Participants</span>
-                <strong>{{ stats.participant_count }}</strong>
-            </li>
-            <li>
-                <span>Challenges</span>
-                <strong>{{ stats.challenge_count }}</strong>
-            </li>
-            <li>
-                <span>Total Submissions</span>
-                <strong>{{ stats.total_submissions }}</strong>
-            </li>
-        </ul>
+    <!-- Warning -->
+    <div class="warning-banner">
+        {% blocktrans trimmed %}
+            This action will permanently delete the event and ALL associated data. This cannot be
+            undone. All range instances will be destroyed immediately.
+        {% endblocktrans %}
     </div>
-
-    <!-- Confirmation Form -->
-    <div class="card">
-        <div class="card-title">Confirm Deletion</div>
-        <p style="font-size: 13px; color: var(--xdr-text-secondary);">
-            To confirm, type the event name exactly as shown:
-        </p>
-        <p style="font-weight: 600; margin: 8px 0; font-size: 15px;">{{ event.name }}</p>
-
-        {% if error %}
-        <div class="error-msg">{{ error }}</div>
-        {% endif %}
-
-        <form method="post" id="force-delete-form">
-            {% csrf_token %}
-            <input type="text"
-                   name="confirmation_name"
-                   class="confirm-input"
-                   id="confirmation-name"
-                   placeholder="Type the event name here"
-                   autocomplete="off"
-                   required>
-            <button type="submit" class="btn btn-danger" id="delete-btn" disabled>
-                Permanently Delete Event
-            </button>
-        </form>
-
-        <div style="margin-top: 12px;">
-            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary" style="width: 100%;">
-                Cancel
-            </a>
+    <div class="grid-2">
+        <!-- Impact Summary -->
+        <div class="card">
+            <div class="card-title">
+                {% trans "Data To Be Deleted" %}
+            </div>
+            <ul class="impact-list">
+                <li>
+                    <span>{% trans "Event" %}</span>
+                    <strong>{{ event.name }}</strong>
+                </li>
+                <li>
+                    <span>{% trans "Status" %}</span>
+                    <strong>{{ event.get_status_display }}</strong>
+                </li>
+                <li>
+                    <span>{% trans "Participants" %}</span>
+                    <strong>{{ stats.participant_count }}</strong>
+                </li>
+                <li>
+                    <span>{% trans "Challenges" %}</span>
+                    <strong>{{ stats.challenge_count }}</strong>
+                </li>
+                <li>
+                    <span>{% trans "Total Submissions" %}</span>
+                    <strong>{{ stats.total_submissions }}</strong>
+                </li>
+            </ul>
+        </div>
+        <!-- Confirmation Form -->
+        <div class="card">
+            <div class="card-title">
+                {% trans "Confirm Deletion" %}
+            </div>
+            <p class="confirm-hint">
+                {% trans "To confirm, type the event name exactly as shown:" %}
+            </p>
+            <p class="confirm-target">
+                {{ event.name }}
+            </p>
+            {% if error %}
+                <div class="error-msg">
+                    {{ error }}
+                </div>
+            {% endif %}
+            <form method="post" id="force-delete-form">
+                {% csrf_token %}
+                <input type="text"
+                       name="confirmation_name"
+                       class="confirm-input"
+                       id="confirmation-name"
+                       aria-label='{% trans "Event name confirmation" %}'
+                       placeholder='{% trans "Type the event name here" %}'
+                       autocomplete="off"
+                       required>
+                <button type="submit"
+                        class="btn btn-danger"
+                        id="delete-btn"
+                        disabled>
+                    {% trans "Permanently Delete Event" %}
+                </button>
+            </form>
+            <div class="mt-md">
+                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}"
+                   class="btn btn-secondary w-full">{% trans "Cancel" %}</a>
+            </div>
         </div>
     </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 (function() {
     var expectedName = "{{ event.name|escapejs }}";
     var input = document.getElementById('confirmation-name');
@@ -182,5 +208,5 @@
         btn.disabled = (input.value !== expectedName);
     });
 })();
-</script>
+    </script>
 {% endblock %}

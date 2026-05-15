@@ -6,6 +6,7 @@ Provides business logic for flag submission and scoring.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -13,8 +14,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from ctf.enums import EventStatus
-from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFStateError, CTFValidationError
+from ctf.exceptions import CTFNotFoundError, CTFRateLimitError, CTFValidationError
 from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
 from ctf.services.challenge import verify_flag
 
@@ -51,6 +51,80 @@ def _count_attempts_in_current_window(
         count += 1
 
     return count
+
+
+def _check_attempt_limit_or_raise(all_submissions, event, challenge, challenge_id) -> int:
+    """Enforce per-challenge max-attempts (timeout or lockout mode); return the count to record.
+
+    Returns the attempt count that the eventual `CTFSubmission` row should be
+    one-based against. Raises `CTFRateLimitError` if the participant is over
+    the cap. `challenge.max_attempts <= 0` disables the check.
+    """
+    total_attempt_count = all_submissions.count()
+    if not (challenge.max_attempts > 0 and event.attempt_limit_mode == "timeout"):
+        if challenge.max_attempts > 0 and total_attempt_count >= challenge.max_attempts:
+            raise CTFRateLimitError(
+                f"Maximum attempts ({challenge.max_attempts}) exceeded",
+                details={
+                    "challenge_id": str(challenge_id),
+                    "max_attempts": challenge.max_attempts,
+                    "attempts_used": total_attempt_count,
+                    "attempt_limit_mode": "lockout",
+                },
+            )
+        return total_attempt_count
+
+    # Timeout mode: count only submissions in the current window.
+    attempt_cooldown = event.attempt_limit_cooldown_seconds
+    attempt_count = _count_attempts_in_current_window(all_submissions, attempt_cooldown)
+    if attempt_count < challenge.max_attempts:
+        return attempt_count
+
+    last_submission_time = all_submissions.order_by("-submitted_at").values_list("submitted_at", flat=True).first()
+    if last_submission_time is None:
+        # Defensive: should be unreachable since attempt_count > 0
+        return 0
+    elapsed = (timezone.now() - last_submission_time).total_seconds()
+    retry_after = int(attempt_cooldown - elapsed) + 1
+    raise CTFRateLimitError(
+        f"Maximum attempts ({challenge.max_attempts}) reached. Try again in {retry_after} seconds.",
+        details={
+            "challenge_id": str(challenge_id),
+            "max_attempts": challenge.max_attempts,
+            "attempts_used": attempt_count,
+            "retry_after_seconds": retry_after,
+            "attempt_limit_mode": "timeout",
+        },
+    )
+
+
+def _check_submission_cooldown_or_raise(participant, challenge, challenge_id) -> None:
+    """Enforce the time-based submission cooldown; raise `CTFRateLimitError` if active."""
+    cooldown = participant.event.submission_cooldown_seconds
+    if cooldown <= 0:
+        return
+    last_submission_time = (
+        CTFSubmission.objects.filter(participant=participant, challenge=challenge)
+        .order_by("-submitted_at")
+        .values_list("submitted_at", flat=True)
+        .first()
+    )
+    if last_submission_time is None:
+        return
+    elapsed = (timezone.now() - last_submission_time).total_seconds()
+    if elapsed >= cooldown:
+        return
+    retry_after = int(cooldown - elapsed) + 1
+    retry_at = last_submission_time + timedelta(seconds=cooldown)
+    raise CTFRateLimitError(
+        f"Please wait {retry_after} seconds before submitting again (retry at {retry_at.isoformat()})",
+        details={
+            "challenge_id": str(challenge_id),
+            "retry_after_seconds": retry_after,
+            "retry_at": retry_at.isoformat(),
+            "cooldown_seconds": cooldown,
+        },
+    )
 
 
 def submit_flag(
@@ -99,71 +173,15 @@ def submit_flag(
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    # Validate event state
-    if challenge.event_id != participant.event_id:
-        raise CTFValidationError(
-            "Challenge does not belong to participant's event",
-            details={
-                "participant_event": str(participant.event_id),
-                "challenge_event": str(challenge.event_id),
-            },
-        )
+    # Issue #769: shared participant→challenge availability policy. Same
+    # contract as use_hint(), so hints can never be easier to obtain than
+    # flag submission. Covers event match, ACTIVE status, competition
+    # window (CTF-702), visibility, release state, and prerequisites.
+    from ctf.services.challenge import assert_challenge_available_for_participant
+
+    assert_challenge_available_for_participant(participant, challenge)
 
     event = participant.event
-    if event.status != EventStatus.ACTIVE.value:
-        raise CTFStateError(
-            f"Event is not active (status: {event.status})",
-            details={"event_id": str(event.id), "status": event.status},
-        )
-
-    # Enforce time boundaries regardless of state (CTF-702)
-    now = timezone.now()
-    if now < event.event_start or now > event.event_end:
-        raise CTFStateError(
-            "Event is not within its competition window",
-            details={
-                "event_id": str(event.id),
-                "event_start": event.event_start.isoformat(),
-                "event_end": event.event_end.isoformat(),
-                "server_time": now.isoformat(),
-            },
-        )
-
-    # Check visibility state
-    if challenge.visibility == "hidden":
-        raise CTFStateError(
-            "Challenge is not available",
-            details={"challenge_id": str(challenge_id)},
-        )
-    if challenge.visibility == "locked":
-        raise CTFStateError(
-            "Challenge is locked",
-            details={"challenge_id": str(challenge_id)},
-        )
-
-    # Check if challenge is released (time-based)
-    if not challenge.is_released:
-        raise CTFStateError(
-            "Challenge has not been released yet",
-            details={
-                "challenge_id": str(challenge_id),
-                "release_time": challenge.release_time.isoformat() if challenge.release_time else None,
-            },
-        )
-
-    # Check prerequisites
-    from ctf.services.challenge import check_prerequisites_met
-
-    prereqs_met, unmet_challenges = check_prerequisites_met(challenge_id, participant_id)
-    if not prereqs_met:
-        unmet_names = [c.name for c in unmet_challenges]
-        raise CTFStateError(
-            f"Prerequisites not met. Complete first: {', '.join(unmet_names)}",
-            details={
-                "challenge_id": str(challenge_id),
-                "unmet_prerequisites": [str(c.id) for c in unmet_challenges],
-            },
-        )
 
     # Check if already solved
     existing_correct = CTFSubmission.objects.filter(
@@ -179,77 +197,12 @@ def submit_flag(
             details={"challenge_id": str(challenge_id)},
         )
 
-    # Check attempt limit
     all_submissions = CTFSubmission.objects.filter(
         participant=participant,
         challenge=challenge,
     )
-    total_attempt_count = all_submissions.count()
-
-    if challenge.max_attempts > 0 and event.attempt_limit_mode == "timeout":
-        # Timeout mode: count only submissions in the current window.
-        # A gap >= cooldown between submissions resets the window.
-        attempt_cooldown = event.attempt_limit_cooldown_seconds
-        attempt_count = _count_attempts_in_current_window(all_submissions, attempt_cooldown)
-
-        if attempt_count >= challenge.max_attempts:
-            last_submission_time = (
-                all_submissions.order_by("-submitted_at").values_list("submitted_at", flat=True).first()
-            )
-            if last_submission_time is None:
-                # Defensive: should be unreachable since attempt_count > 0
-                attempt_count = 0
-            else:
-                elapsed = (timezone.now() - last_submission_time).total_seconds()
-                retry_after = int(attempt_cooldown - elapsed) + 1
-                raise CTFRateLimitError(
-                    f"Maximum attempts ({challenge.max_attempts}) reached. Try again in {retry_after} seconds.",
-                    details={
-                        "challenge_id": str(challenge_id),
-                        "max_attempts": challenge.max_attempts,
-                        "attempts_used": attempt_count,
-                        "retry_after_seconds": retry_after,
-                        "attempt_limit_mode": "timeout",
-                    },
-                )
-    else:
-        attempt_count = total_attempt_count
-        if challenge.max_attempts > 0 and attempt_count >= challenge.max_attempts:
-            # Lockout mode — permanent block
-            raise CTFRateLimitError(
-                f"Maximum attempts ({challenge.max_attempts}) exceeded",
-                details={
-                    "challenge_id": str(challenge_id),
-                    "max_attempts": challenge.max_attempts,
-                    "attempts_used": total_attempt_count,
-                    "attempt_limit_mode": "lockout",
-                },
-            )
-
-    # Check submission rate limit (time-based cooldown)
-    cooldown = participant.event.submission_cooldown_seconds
-    if cooldown > 0:
-        last_submission_time = (
-            CTFSubmission.objects.filter(
-                participant=participant,
-                challenge=challenge,
-            )
-            .order_by("-submitted_at")
-            .values_list("submitted_at", flat=True)
-            .first()
-        )
-        if last_submission_time is not None:
-            elapsed = (timezone.now() - last_submission_time).total_seconds()
-            if elapsed < cooldown:
-                retry_after = int(cooldown - elapsed) + 1
-                raise CTFRateLimitError(
-                    f"Please wait {retry_after} seconds before submitting again",
-                    details={
-                        "challenge_id": str(challenge_id),
-                        "retry_after_seconds": retry_after,
-                        "cooldown_seconds": cooldown,
-                    },
-                )
+    attempt_count = _check_attempt_limit_or_raise(all_submissions, event, challenge, challenge_id)
+    _check_submission_cooldown_or_raise(participant, challenge, challenge_id)
 
     # Calculate hint penalty
     from ctf.services.hint import get_total_hint_penalty
@@ -382,6 +335,20 @@ def rate_challenge(
             f"Participant {participant_id} not found",
             details={"participant_id": str(participant_id)},
         ) from None
+
+    # Codex review (#765 cycle 6): an internal caller passing a raw
+    # participant_id for an INVITED or DISQUALIFIED row would otherwise
+    # bypass the access predicate the views apply via
+    # `is_active_participant`. Mirror that here.
+    from ctf.services.participant import _PLAYING_PARTICIPANT_STATUSES
+
+    if participant.registered_at is None or participant.status not in _PLAYING_PARTICIPANT_STATUSES:
+        from ctf.exceptions import CTFStateError as _CTFStateError
+
+        raise _CTFStateError(
+            "Participant is not eligible",
+            details={"participant_id": str(participant.id), "status": participant.status},
+        )
 
     try:
         challenge = CTFChallenge.objects.get(pk=challenge_id)

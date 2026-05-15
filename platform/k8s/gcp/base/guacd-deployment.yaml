@@ -22,6 +22,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       serviceAccountName: workers
+      automountServiceAccountToken: false
       containers:
         - name: guacd
           image: us-docker.pkg.dev/placeholder-project/shifter/guacd:0.0.0

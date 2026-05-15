@@ -1,127 +1,255 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "risk_register/base.html" %}
-
+{% load i18n %}
 {% block content %}
-<!-- T039: Risk form with XDR input styles -->
-<div class="page-header">
-    <div>
-        <h1 class="page-title">{% if editing %}Edit Risk{% else %}New Risk{% endif %}</h1>
-        <p class="page-subtitle">{% if editing %}Update risk details{% else %}Create a new security risk entry{% endif %}</p>
-    </div>
-</div>
-
-<form method="post">
-    {% csrf_token %}
-
-    <div class="card">
-        <h3 class="card-title">Basic Information</h3>
-
-        <div class="form-group">
-            <label class="form-label">Title *</label>
-            <input type="text" name="title" class="form-input" required maxlength="200"
-                   value="{% if risk %}{{ risk.title }}{% endif %}"
-                   placeholder="Brief title for this risk">
-        </div>
-
-        <div class="form-group">
-            <label class="form-label">Description *</label>
-            <textarea name="description" class="form-textarea" required
-                      placeholder="Detailed description of the risk...">{% if risk %}{{ risk.description }}{% endif %}</textarea>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Severity *</label>
-                <select name="severity" class="form-select" required>
-                    {% for value, label in severity_choices %}
-                    <option value="{{ value }}" {% if risk and risk.severity == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Status</label>
-                <select name="status" class="form-select">
-                    {% for value, label in status_choices %}
-                    <option value="{{ value }}" {% if risk and risk.status == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {% if editing %}
+                    {% trans "Edit Risk" %}
+                {% else %}
+                    {% trans "New Risk" %}
+                {% endif %}
+            </h1>
+            <p class="page-subtitle">
+                {% if editing %}
+                    {% trans "Update risk details" %}
+                {% else %}
+                    {% trans "Create a new security risk entry" %}
+                {% endif %}
+            </p>
         </div>
     </div>
-
-    <div class="card">
-        <h3 class="card-title">Threat Modeling</h3>
-
-        <div class="form-group">
-            <label class="form-label">STRIDE Categories</label>
-            <div class="checkbox-group">
-                {% for code, name in stride_choices %}
-                <label class="checkbox-label">
-                    <input type="checkbox" name="stride_categories" value="{{ code }}"
-                           {% if risk and code in risk.stride_categories %}checked{% endif %}>
-                    <span>{{ name }}</span>
+    <form method="post">
+        {% csrf_token %}
+        <div class="card">
+            <h3 class="card-title">
+                {% trans "Basic Information" %}
+            </h3>
+            <div class="form-group">
+                <label class="form-label" for="risk-title">
+                    {% trans "Title *" %}
                 </label>
-                {% endfor %}
+                <input type="text"
+                       id="risk-title"
+                       name="title"
+                       class="form-input"
+                       required
+                       maxlength="200"
+                       value="{% if risk %}
+                                  {{ risk.title }}
+                              {% endif %}"
+                       placeholder='{% trans "Brief title for this risk" %}'>
             </div>
-            <p class="form-hint">Select all that apply</p>
-        </div>
-
-        <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Likelihood Score</label>
-                <select name="likelihood_score" class="form-select">
-                    <option value="">Not specified</option>
-                    {% for i in "12345" %}
-                    <option value="{{ i }}" {% if risk and risk.likelihood_score|stringformat:"s" == i %}selected{% endif %}>{{ i }} - {% if i == "1" %}Very Low{% elif i == "2" %}Low{% elif i == "3" %}Medium{% elif i == "4" %}High{% else %}Very High{% endif %}</option>
-                    {% endfor %}
-                </select>
+                <label class="form-label" for="risk-description">
+                    {% trans "Description *" %}
+                </label>
+                <textarea id="risk-description"
+                          name="description"
+                          class="form-textarea"
+                          required
+                          placeholder='{% trans "Detailed description of the risk..." %}'>
+                          {% if risk %}{{ risk.description }}{% endif %}
+                          </textarea>
             </div>
-
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="risk-severity">
+                        {% trans "Severity *" %}
+                    </label>
+                    <select id="risk-severity"
+                            name="severity"
+                            class="form-select"
+                            required>
+                        {% for value, label in severity_choices %}
+                            <option value="{{ value }}"
+                                    {% if risk and risk.severity == value %}
+                                        selected
+                                    {% endif %}>
+                                {{ label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="risk-status">
+                        {% trans "Status" %}
+                    </label>
+                    <select id="risk-status" name="status" class="form-select">
+                        {% for value, label in status_choices %}
+                            <option value="{{ value }}"
+                                    {% if risk and risk.status == value %}
+                                        selected
+                                    {% endif %}>
+                                {{ label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h3 class="card-title">
+                {% trans "Threat Modeling" %}
+            </h3>
             <div class="form-group">
-                <label class="form-label">Impact Score</label>
-                <select name="impact_score" class="form-select">
-                    <option value="">Not specified</option>
-                    {% for i in "12345" %}
-                    <option value="{{ i }}" {% if risk and risk.impact_score|stringformat:"s" == i %}selected{% endif %}>{{ i }} - {% if i == "1" %}Negligible{% elif i == "2" %}Minor{% elif i == "3" %}Moderate{% elif i == "4" %}Major{% else %}Severe{% endif %}</option>
+                <label class="form-label">
+                    {% trans "STRIDE Categories" %}
+                </label>
+                <div class="checkbox-group">
+                    {% for code, name in stride_choices %}
+                        <label class="checkbox-label">
+                            <input type="checkbox"
+                                   name="stride_categories"
+                                   value="{{ code }}"
+                                   {% if risk and code in risk.stride_categories %}
+                                       checked
+                                   {% endif %}>
+                            <span>{{ name }}</span>
+                        </label>
                     {% endfor %}
-                </select>
+                </div>
+                <p class="form-hint">
+                    {% trans "Select all that apply" %}
+                </p>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="risk-likelihood-score">
+                        {% trans "Likelihood Score" %}
+                    </label>
+                    <select id="risk-likelihood-score"
+                            name="likelihood_score"
+                            class="form-select">
+                        <option value="">
+                            {% trans "Not specified" %}
+                        </option>
+                        {% for i in "12345" %}
+                            <option value="{{ i }}"
+                                    {% if risk and risk.likelihood_score|stringformat:"s" == i %}
+                                        selected
+                                    {% endif %}>
+                                {{ i }} -
+                                {% if i == "1" %}
+                                    {% trans "Very Low" %}
+                                {% elif i == "2" %}
+                                    {% trans "Low" %}
+                                {% elif i == "3" %}
+                                    {% trans "Medium" %}
+                                {% elif i == "4" %}
+                                    {% trans "High" %}
+                                {% else %}
+                                    {% trans "Very High" %}
+                                {% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="risk-impact-score">
+                        {% trans "Impact Score" %}
+                    </label>
+                    <select id="risk-impact-score"
+                            name="impact_score"
+                            class="form-select">
+                        <option value="">
+                            {% trans "Not specified" %}
+                        </option>
+                        {% for i in "12345" %}
+                            <option value="{{ i }}"
+                                    {% if risk and risk.impact_score|stringformat:"s" == i %}
+                                        selected
+                                    {% endif %}>
+                                {{ i }} -
+                                {% if i == "1" %}
+                                    {% trans "Negligible" %}
+                                {% elif i == "2" %}
+                                    {% trans "Minor" %}
+                                {% elif i == "3" %}
+                                    {% trans "Moderate" %}
+                                {% elif i == "4" %}
+                                    {% trans "Major" %}
+                                {% else %}
+                                    {% trans "Severe" %}
+                                {% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="risk-attack-vector">
+                    {% trans "Attack Vector" %}
+                </label>
+                <textarea id="risk-attack-vector"
+                          name="attack_vector"
+                          class="form-textarea"
+                          rows="2"
+                          placeholder='{% trans "How could this risk be exploited?" %}'>
+                          {% if risk %}{{ risk.attack_vector }}{% endif %}
+                          </textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="risk-affected-assets">
+                    {% trans "Affected Assets" %}
+                </label>
+                <textarea id="risk-affected-assets"
+                          name="affected_assets"
+                          class="form-textarea"
+                          rows="2"
+                          placeholder='{% trans "What systems, data, or components are affected?" %}'>
+                          {% if risk %}{{ risk.affected_assets }}{% endif %}
+                          </textarea>
             </div>
         </div>
-
-        <div class="form-group">
-            <label class="form-label">Attack Vector</label>
-            <textarea name="attack_vector" class="form-textarea" rows="2"
-                      placeholder="How could this risk be exploited?">{% if risk %}{{ risk.attack_vector }}{% endif %}</textarea>
+        <div class="card">
+            <h3 class="card-title">
+                {% trans "Mitigation" %}
+            </h3>
+            <div class="form-group">
+                <label class="form-label" for="risk-mitigation-status">
+                    {% trans "Mitigation Status" %}
+                </label>
+                <textarea id="risk-mitigation-status"
+                          name="mitigation_status"
+                          class="form-textarea"
+                          rows="2"
+                          placeholder='{% trans "Current mitigation efforts or plans..." %}'>
+                          {% if risk %}{{ risk.mitigation_status }}{% endif %}
+                          </textarea>
+            </div>
+            {% if editing %}
+                <div class="form-group">
+                    <label class="form-label" for="risk-resolution-reason">
+                        {% trans "Resolution Reason" %}
+                    </label>
+                    <textarea id="risk-resolution-reason"
+                              name="resolution_reason"
+                              class="form-textarea"
+                              rows="2"
+                              placeholder='{% trans "Reason for closing this risk (if applicable)..." %}'>
+                              {% if risk %}{{ risk.resolution_reason }}{% endif %}
+                              </textarea>
+                </div>
+            {% endif %}
         </div>
-
-        <div class="form-group">
-            <label class="form-label">Affected Assets</label>
-            <textarea name="affected_assets" class="form-textarea" rows="2"
-                      placeholder="What systems, data, or components are affected?">{% if risk %}{{ risk.affected_assets }}{% endif %}</textarea>
+        <div class="flex-row gap-md mt-md">
+            <button type="submit" class="btn btn-primary">
+                {% if editing %}
+                    {% trans "Save Changes" %}
+                {% else %}
+                    {% trans "Create Risk" %}
+                {% endif %}
+            </button>
+            {% if editing %}
+                <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
+            {% else %}
+                <a href="{% url 'risk_register:risk_list' %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
+            {% endif %}
         </div>
-    </div>
-
-    <div class="card">
-        <h3 class="card-title">Mitigation</h3>
-
-        <div class="form-group">
-            <label class="form-label">Mitigation Status</label>
-            <textarea name="mitigation_status" class="form-textarea" rows="2"
-                      placeholder="Current mitigation efforts or plans...">{% if risk %}{{ risk.mitigation_status }}{% endif %}</textarea>
-        </div>
-
-        {% if editing %}
-        <div class="form-group">
-            <label class="form-label">Resolution Reason</label>
-            <textarea name="resolution_reason" class="form-textarea" rows="2"
-                      placeholder="Reason for closing this risk (if applicable)...">{% if risk %}{{ risk.resolution_reason }}{% endif %}</textarea>
-        </div>
-        {% endif %}
-    </div>
-
-    <div class="flex-row gap-md mt-md">
-        <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Risk{% endif %}</button>
-        <a href="{% if editing %}{% url 'risk_register:risk_detail' pk=risk.pk %}{% else %}{% url 'risk_register:risk_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
-    </div>
-</form>
+    </form>
 {% endblock %}

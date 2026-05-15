@@ -28,34 +28,15 @@ try {
     Log-Message "Not a Domain Controller yet (AD cmdlets not available or not promoted)"
 }
 
-# Set Administrator password for RDP/SSH access
-# TODO: Move to CMS-managed instance credentials (#542)
-$AdminPassword = "{{ admin_password }}"
-
-if ($isDC) {
-    # On a DC, Administrator is a domain account - use AD cmdlet
-    Log-Message "Attempting to set domain Administrator password via Set-ADAccountPassword..."
-    try {
-        $securePassword = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
-        Set-ADAccountPassword -Identity Administrator -Reset -NewPassword $securePassword -ErrorAction Stop
-        Log-Message "SUCCESS: Domain Administrator password set via Set-ADAccountPassword"
-    } catch {
-        Log-Message "FAILED: Set-ADAccountPassword error: $($_.Exception.Message)"
-        Log-Message "SSM setup will retry password configuration"
-    }
-} else {
-    # Not a DC yet - use net user for local account
-    Log-Message "Attempting to set local Administrator password via net user..."
-    $netUserResult = net user Administrator $AdminPassword 2>&1
-    $netUserExitCode = $LASTEXITCODE
-    Log-Message "net user exit code: $netUserExitCode"
-    Log-Message "net user output: $netUserResult"
-    if ($netUserExitCode -eq 0) {
-        Log-Message "SUCCESS: Local Administrator password set via net user"
-    } else {
-        Log-Message "FAILED: net user failed with exit code $netUserExitCode"
-    }
-}
+# Issue #762: the per-instance local Administrator password (used for
+# pre-domain-promote access) is set by the engine provisioner after
+# the host is reachable — not in user_data. After Ansible promotes the
+# host to a Domain Controller, the local Administrator account becomes
+# the domain Administrator and its password is replaced by
+# ``DC_DOMAIN_PASSWORD`` (deployment-scoped, sourced from Secrets
+# Manager via the engine provisioner ECS task). See
+# shifter/engine/provisioner/plans/set_local_password_plan.py.
+Log-Message "Local Administrator password will be set by the engine provisioner post-boot"
 
 # Configure SSH key for Terminal UI (OpenSSH is baked into AMI)
 $PublicKey = "{{ public_key }}"

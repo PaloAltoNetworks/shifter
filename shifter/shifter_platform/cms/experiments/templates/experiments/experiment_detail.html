@@ -1,10 +1,10 @@
 {% extends "experiments/base.html" %}
-{% load static %}
-
-{% block title %}{{ experiment.name }}{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    {{ experiment.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
     .status-badge {
         display: inline-flex;
         align-items: center;
@@ -118,167 +118,210 @@
     .ws-dot.connected {
         background: #00d26a;
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<a href="{% url 'experiments:experiment_list' %}" class="back-link">&larr; Back to Experiments</a>
-
-<div class="page-header-row">
-    <div class="page-header-content">
-        <h1 class="page-title">{{ experiment.name }}</h1>
-        <div class="page-subtitle">
-            <span class="status-badge status-badge-{{ experiment.status }}" id="experiment-status">{{ experiment.status }}</span>
-            <span class="ws-indicator" id="ws-indicator">
-                <span class="ws-dot" id="ws-dot"></span>
-                <span id="ws-label">connecting...</span>
-            </span>
+    <a href="{% url 'experiments:experiment_list' %}"
+       class="back-link">{% trans "&larr; Back to Experiments" %}</a>
+    <div class="page-header-row">
+        <div class="page-header-content">
+            <h1 class="page-title">
+                {{ experiment.name }}
+            </h1>
+            <div class="page-subtitle">
+                <span class="status-badge status-badge-{{ experiment.status }}"
+                      id="experiment-status">{{ experiment.status }}</span>
+                <span class="ws-indicator" id="ws-indicator">
+                    <span class="ws-dot" id="ws-dot"></span>
+                    <span id="ws-label">{% trans "connecting..." %}</span>
+                </span>
+            </div>
         </div>
-    </div>
-    <div class="action-buttons">
-        {% if experiment.status == "draft" %}
-        <form method="post" action="{% url 'experiments:experiment_start' experiment.pk %}">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-primary">Start Experiment</button>
-        </form>
-        {% endif %}
-        {% if experiment.status == "queued" or experiment.status == "running" %}
-        <form method="post" action="{% url 'experiments:experiment_cancel' experiment.pk %}">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-danger" onclick="return confirm('Cancel this experiment? This cannot be undone.')">Cancel</button>
-        </form>
-        {% endif %}
-        {% if experiment.status == "completed" %}
-        <a href="{% url 'experiments:experiment_download' experiment.pk %}" class="btn btn-primary">Download Bundle</a>
-        {% endif %}
-    </div>
-</div>
-
-{% if messages %}
-<div class="mb-lg">
-    {% for message in messages %}
-    <div class="message message-{{ message.tags }}">{{ message }}</div>
-    {% endfor %}
-</div>
-{% endif %}
-
-<div class="card">
-    <h2 class="section-title">Overview</h2>
-    <div class="details-grid">
-        <div class="detail-item">
-            <span class="detail-label">Scenario</span>
-            <span class="detail-value">{{ experiment.scenario_id }}</span>
-        </div>
-        <div class="detail-item">
-            <span class="detail-label">Total Runs</span>
-            <span class="detail-value">{{ experiment.total_runs }}</span>
-        </div>
-        <div class="detail-item">
-            <span class="detail-label">Max Parallel</span>
-            <span class="detail-value">{{ experiment.max_parallel_runs }}</span>
-        </div>
-        <div class="detail-item">
-            <span class="detail-label">Created</span>
-            <span class="detail-value">{{ experiment.created_at|date:"M d, Y H:i" }}</span>
-        </div>
-        {% if experiment.started_at %}
-        <div class="detail-item">
-            <span class="detail-label">Started</span>
-            <span class="detail-value">{{ experiment.started_at|date:"M d, Y H:i" }}</span>
-        </div>
-        {% endif %}
-        {% if experiment.completed_at %}
-        <div class="detail-item">
-            <span class="detail-label">Completed</span>
-            <span class="detail-value">{{ experiment.completed_at|date:"M d, Y H:i" }}</span>
-        </div>
-        {% endif %}
-    </div>
-    {% if experiment.description %}
-    <div class="mt-lg">
-        <span class="detail-label">Description</span>
-        <p class="detail-value">{{ experiment.description }}</p>
-    </div>
-    {% endif %}
-</div>
-
-{% with scripts=experiment.scripts.all %}
-{% if scripts %}
-<div class="card">
-    <h2 class="section-title">Script Assignments</h2>
-    <ul class="scripts-list">
-        {% for script in scripts %}
-        <li>
-            <span class="script-type script-type-{{ script.script_type }}">{{ script.script_type }}</span>
-            <strong>{{ script.instance_name }}</strong>
-            {% if script.script %}
-            &mdash; {{ script.script.name }}
-            {% elif script.claude_prompt %}
-            &mdash; <span class="text-muted text-small">{{ script.claude_prompt|truncatechars:80 }}</span>
+        <div class="action-buttons">
+            {% if experiment.status == "draft" %}
+                <form method="post"
+                      action="{% url 'experiments:experiment_start' experiment.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary">
+                        {% trans "Start Experiment" %}
+                    </button>
+                </form>
             {% endif %}
-            <span class="text-muted text-small">(order: {{ script.execution_order }})</span>
-        </li>
-        {% endfor %}
-    </ul>
-</div>
-{% endif %}
-{% endwith %}
-
-{% with runs=experiment.runs.all %}
-{% if runs %}
-<div class="card">
-    <h2 class="section-title">Runs</h2>
-    <table class="runs-table" id="runs-table">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Status</th>
-                <th>Error</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for run in runs %}
-            <tr id="run-{{ run.pk }}" data-run-id="{{ run.pk }}">
-                <td>{{ run.run_number }}</td>
-                <td>
-                    <span class="status-badge status-badge-{{ run.status }}" data-field="status">{{ run.status }}</span>
-                </td>
-                <td>
-                    <span class="run-error" data-field="error">{{ run.error_message|default:"" }}</span>
-                </td>
-                <td>
-                    {% if run.status == "completed" %}
-                    {% for artifact in run.artifacts.all %}
-                    <a href="{% url 'experiments:artifact_download' experiment.pk run.run_number artifact.pk %}" class="btn btn-secondary btn-small">
-                        {{ artifact.get_artifact_type_display }}
-                    </a>
-                    {% endfor %}
-                    {% endif %}
-                </td>
-            </tr>
+            {% if experiment.status == "queued" or experiment.status == "running" %}
+                <form method="post"
+                      action="{% url 'experiments:experiment_cancel' experiment.pk %}">
+                    {% csrf_token %}
+                    <button type="submit"
+                            class="btn btn-danger"
+                            onclick="return confirm('Cancel this experiment? This cannot be undone.')">
+                        {% trans "Cancel" %}
+                    </button>
+                </form>
+            {% endif %}
+            {% if experiment.status == "completed" %}
+                <a href="{% url 'experiments:experiment_download' experiment.pk %}"
+                   class="btn btn-primary">{% trans "Download Bundle" %}</a>
+            {% endif %}
+        </div>
+    </div>
+    {% if messages %}
+        <div class="mb-lg">
+            {% for message in messages %}
+                <div class="message message-{{ message.tags }}">
+                    {{ message }}
+                </div>
             {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% elif experiment.status == "draft" %}
-<div class="card">
-    <h2 class="section-title">Runs</h2>
-    <p style="color: var(--xdr-text-secondary, #b8b8b8);">Runs will be created when the experiment is started.</p>
-</div>
-{% endif %}
-{% endwith %}
-
-{% if experiment.error_message %}
-<div class="card danger-zone">
-    <h2 class="section-title">Error</h2>
-    <p style="color: #ff4d4f;">{{ experiment.error_message }}</p>
-</div>
-{% endif %}
+        </div>
+    {% endif %}
+    <div class="card">
+        <h2 class="section-title">
+            {% trans "Overview" %}
+        </h2>
+        <div class="details-grid">
+            <div class="detail-item">
+                <span class="detail-label">{% trans "Scenario" %}</span>
+                <span class="detail-value">{{ experiment.scenario_id }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">{% trans "Total Runs" %}</span>
+                <span class="detail-value">{{ experiment.total_runs }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">{% trans "Max Parallel" %}</span>
+                <span class="detail-value">{{ experiment.max_parallel_runs }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">{% trans "Created" %}</span>
+                <span class="detail-value">{{ experiment.created_at|date:"M d, Y H:i" }}</span>
+            </div>
+            {% if experiment.started_at %}
+                <div class="detail-item">
+                    <span class="detail-label">{% trans "Started" %}</span>
+                    <span class="detail-value">{{ experiment.started_at|date:"M d, Y H:i" }}</span>
+                </div>
+            {% endif %}
+            {% if experiment.completed_at %}
+                <div class="detail-item">
+                    <span class="detail-label">{% trans "Completed" %}</span>
+                    <span class="detail-value">{{ experiment.completed_at|date:"M d, Y H:i" }}</span>
+                </div>
+            {% endif %}
+        </div>
+        {% if experiment.description %}
+            <div class="mt-lg">
+                <span class="detail-label">{% trans "Description" %}</span>
+                <p class="detail-value">
+                    {{ experiment.description }}
+                </p>
+            </div>
+        {% endif %}
+    </div>
+    {% with scripts=experiment.scripts.all %}
+        {% if scripts %}
+            <div class="card">
+                <h2 class="section-title">
+                    {% trans "Script Assignments" %}
+                </h2>
+                <ul class="scripts-list">
+                    {% for script in scripts %}
+                        <li>
+                            <span class="script-type script-type-{{ script.script_type }}">
+                            {{ script.script_type }}
+                            </span>
+                            <strong>{{ script.instance_name }}</strong>
+                            {% if script.script %}
+                                {% trans "&mdash;" %} {{ script.script.name }}
+                            {% elif script.claude_prompt %}
+                                {% trans "&mdash;" %}
+                                <span class="text-muted text-small">{{ script.claude_prompt|truncatechars:80 }}</span>
+                            {% endif %}
+                            <span class="text-muted text-small">
+                                {% blocktrans with v1=script.execution_order %}
+                                    (order: {{ v1 }})
+                                {% endblocktrans %}
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+    {% endwith %}
+    {% with runs=experiment.runs.all %}
+        {% if runs %}
+            <div class="card">
+                <h2 class="section-title">
+                    {% trans "Runs" %}
+                </h2>
+                <table class="runs-table" id="runs-table">
+                    <thead>
+                        <tr>
+                            <th>
+                                #
+                            </th>
+                            <th>
+                                {% trans "Status" %}
+                            </th>
+                            <th>
+                                {% trans "Error" %}
+                            </th>
+                            <th>
+                                {% trans "Actions" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for run in runs %}
+                            <tr id="run-{{ run.pk }}" data-run-id="{{ run.pk }}">
+                                <td>
+                                    {{ run.run_number }}
+                                </td>
+                                <td>
+                                    <span class="status-badge status-badge-{{ run.status }}"
+                                          data-field="status">{{ run.status }}</span>
+                                </td>
+                                <td>
+                                    <span class="run-error" data-field="error">{{ run.error_message|default:"" }}</span>
+                                </td>
+                                <td>
+                                    {% if run.status == "completed" %}
+                                        {% for artifact in run.artifacts.all %}
+{% url 'experiments:artifact_download' experiment.pk run.run_number artifact.pk as artifact_url %}
+                                            <a href="{{ artifact_url }}"
+                                               class="btn btn-secondary btn-small">
+                                                {{ artifact.get_artifact_type_display }}
+                                            </a>
+                                        {% endfor %}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% elif experiment.status == "draft" %}
+            <div class="card">
+                <h2 class="section-title">
+                    {% trans "Runs" %}
+                </h2>
+                <p style="color: var(--xdr-text-secondary, #b8b8b8);">
+                    {% trans "Runs will be created when the experiment is started." %}
+                </p>
+            </div>
+        {% endif %}
+    {% endwith %}
+    {% if experiment.error_message %}
+        <div class="card danger-zone">
+            <h2 class="section-title">
+                {% trans "Error" %}
+            </h2>
+            <p style="color: #ff4d4f;">
+                {{ experiment.error_message }}
+            </p>
+        </div>
+    {% endif %}
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 (function() {
     const experimentId = {{ experiment.pk }};
     const experimentStatus = '{{ experiment.status }}';
@@ -367,5 +410,5 @@
 
     connect();
 })();
-</script>
+    </script>
 {% endblock %}

@@ -103,8 +103,9 @@ enablement tool, not a product—but it is used in front of customers and MUST b
 - Customer-facing: UI/UX MUST be professional and consistent with Cortex product suite
 - NOT for product/stress testing PANW products or services
 - NOT a replacement for BYOS, shared demo tenants, or official enablement tools
-- Domain: `keplerops.com` (temporary; will migrate to `paloaltonetworks.com` if adopted)
-- Identity: Cognito (temporary; will migrate to PANW SSO if adopted)
+- Domain: deployment-specific — each environment supplies its own DNS name via
+  `local.auto.tfvars` (or the equivalent CI secret per `docs/dev/deploy-secrets.md`).
+- Identity: Cognito on AWS, Identity Platform on GCP — both per-deployment configured.
 
 ### Ethics
 

@@ -1,212 +1,207 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-
+{% load static i18n %}
 {% block extra_css %}
-<style>
-    /* Upload progress UI - specific to this page */
-    .upload-progress {
-        display: none;
-        margin-top: 1rem;
-    }
-
-    .upload-progress.active {
-        display: block;
-    }
-
-    .progress-bar-container {
-        background: var(--xdr-border);
-        border-radius: 4px;
-        height: 8px;
-        overflow: hidden;
-        margin-bottom: 0.5rem;
-    }
-
-    .progress-bar {
-        background: var(--xdr-primary);
-        height: 100%;
-        width: 0%;
-        transition: width 0.3s ease;
-    }
-
-    .progress-bar.error {
-        background: var(--xdr-error);
-    }
-
-    .progress-status {
-        font-size: 0.875rem;
-        color: var(--xdr-secondary-text);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .btn-cancel-upload {
-        background: transparent;
-        border: 1px solid var(--xdr-error);
-        color: var(--xdr-error);
-        padding: 0.25rem 0.75rem;
-        font-size: 0.75rem;
-        border-radius: 20px;
-        cursor: pointer;
-        font-family: inherit;
-    }
-
-    .btn-cancel-upload:hover {
-        background: rgba(255, 68, 68, 0.15);
-    }
-
-    .upload-error {
-        color: var(--xdr-error);
-        font-size: 0.875rem;
-        margin-top: 0.5rem;
-        display: none;
-    }
-
-    .upload-error.visible {
-        display: block;
-    }
-
-    /* Disable form during upload */
-    .upload-form.uploading input,
-    .upload-form.uploading button[type="submit"] {
-        pointer-events: none;
-        opacity: 0.5;
-    }
-</style>
+    <link rel="stylesheet" href="{% static 'css/upload-ui.css' %}">
 {% endblock %}
-
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Agents</h1>
-    <p class="page-subtitle">Manage your XDR, XDR Collector, and Cloud Identity Engine agents</p>
-</div>
-
-<!-- Messages -->
-{% if messages %}
-<div class="mb-lg">
-    {% for message in messages %}
-    <div class="message message-{{ message.tags }}">
-        {{ message }}
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Agents" %}
+        </h1>
+        <p class="page-subtitle">
+            {% trans "Manage your XDR, XDR Collector, and Cloud Identity Engine agents" %}
+        </p>
     </div>
-    {% endfor %}
-</div>
-{% endif %}
-
-<!-- Upload Card -->
-<div class="card">
-    <div class="card-title">Upload Agent</div>
-    <form id="upload-form" class="upload-form">
-        {% csrf_token %}
-        <div class="form-group">
-            <label class="form-label" for="agent-name">Agent Name</label>
-            <input type="text" class="form-input" placeholder="e.g., Acme Corp XSIAM" id="agent-name" name="name" required maxlength="100">
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="agent-type">Agent Type</label>
-            <select class="form-input" id="agent-type" name="agent_type" required>
-                <option value="xdr">XDR/XSIAM Agent</option>
-                <option value="xdr_collector">XDR Collector</option>
-                <option value="cloud_identity_engine">Cloud Identity Engine</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="agent-file">Installer File</label>
-            <input type="file" class="form-input" id="agent-file" name="file" accept=".msi,.zip,.gz,.tgz,.tar.gz,.deb,.rpm,application/zip,application/x-zip-compressed,application/gzip,application/x-gzip,application/octet-stream" required>
-            <p class="text-small text-muted mt-sm">
-                Supported formats: {{ allowed_extensions }} (max 2GB per file, 5GB total)
-            </p>
-        </div>
-
-        <!-- Progress indicator -->
-        <div id="upload-progress" class="upload-progress">
-            <div class="progress-bar-container">
-                <div id="progress-bar" class="progress-bar"></div>
-            </div>
-            <div class="progress-status">
-                <span id="progress-text">Preparing...</span>
-                <button type="button" id="cancel-btn" class="btn-cancel-upload">Cancel</button>
-            </div>
-        </div>
-
-        <div id="upload-error" class="upload-error"></div>
-
-        <button type="submit" class="btn btn-primary" id="upload-btn">Upload Agent</button>
-    </form>
-</div>
-
-<!-- Agent List -->
-<div class="card">
-    <div class="card-title">Your Agents</div>
-
-    {% if agents %}
-    <!-- Agent list -->
-    <table class="table">
-        <thead>
-            <tr>
-                <th>NAME</th>
-                <th>TYPE</th>
-                <th>OS</th>
-                <th>FILE</th>
-                <th>UPLOADED</th>
-                <th class="text-right">ACTIONS</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for agent in agents %}
-            <tr>
-                <td>
-                    <span class="text-bold">{{ agent.name }}</span>
-                </td>
-                <td>
-                    <span class="badge">{{ agent.agent_type_display }}</span>
-                </td>
-                <td>
-                    <span class="badge">{{ agent.os_name }}</span>
-                </td>
-                <td>
-                    <span class="text-muted">{{ agent.original_filename }}</span>
-                    <br>
-                    <span class="text-small text-muted">{{ agent.file_size_mb }} MB</span>
-                </td>
-                <td>
-                    <span class="text-muted">{{ agent.created_at|date:"M d, Y" }}</span>
-                    <br>
-                    <span class="text-small text-muted">{{ agent.created_at|time:"H:i" }}</span>
-                </td>
-                <td class="text-right">
-                    <form method="post" action="{% url 'mission_control:delete_agent' agent.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this agent?');">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-secondary btn-small">Delete</button>
-                    </form>
-                </td>
-            </tr>
+    <!-- Messages -->
+    {% if messages %}
+        <div class="mb-lg">
+            {% for message in messages %}
+                <div class="message message-{{ message.tags }}">
+                    {{ message }}
+                </div>
             {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <!-- Empty state with graphical element -->
-    <div class="empty-state">
-        <div class="empty-state-graphic">
-            <div class="empty-state-graphic-arc"></div>
-            <div class="empty-state-graphic-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <rect x="2" y="2" width="20" height="8" rx="2"/>
-                    <rect x="2" y="14" width="20" height="8" rx="2"/>
-                    <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/>
-                    <circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/>
-                </svg>
-            </div>
         </div>
-        <h3>No agents uploaded yet</h3>
-        <p>Upload an XDR, XDR Collector, or Cloud Identity Engine agent to get started</p>
-    </div>
     {% endif %}
-</div>
+    <!-- Upload Card -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Upload Agent" %}
+        </div>
+        <form id="upload-form" class="upload-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label class="form-label" for="agent-name">
+                    {% trans "Agent Name" %}
+                </label>
+                <input type="text"
+                       class="form-input"
+                       placeholder='{% trans "e.g., Acme Corp XSIAM" %}'
+                       id="agent-name"
+                       name="name"
+                       required
+                       maxlength="100">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="agent-type">
+                    {% trans "Agent Type" %}
+                </label>
+                <select class="form-input"
+                        id="agent-type"
+                        name="agent_type"
+                        required>
+                    <option value='{% trans "xdr" %}'>
+                        {% trans "XDR/XSIAM Agent" %}
+                    </option>
+                    <option value='{% trans "xdr_collector" %}'>
+                        {% trans "XDR Collector" %}
+                    </option>
+                    <option value='{% trans "cloud_identity_engine" %}'>
+                        {% trans "Cloud Identity Engine" %}
+                    </option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="agent-file">
+                    {% trans "Installer File" %}
+                </label>
+                <input type="file"
+                       class="form-input"
+                       id="agent-file"
+                       name="file"
+                       accept=".msi,.zip,.gz,.tgz,.tar.gz,.deb,.rpm,application/zip
+                           application/x-zip-compressed,application/gzip,application/x-gzip
+                           application/octet-stream"
+                       required>
+                <p class="text-small text-muted mt-sm">
+                    {% blocktrans %}
+                        Supported formats: {{ allowed_extensions }} (max 2GB per file, 5GB total)
+                    {% endblocktrans %}
+                </p>
+            </div>
+            <!-- Progress indicator -->
+            <div id="upload-progress" class="upload-progress">
+                <div class="progress-bar-container">
+                    <div id="progress-bar" class="progress-bar">
+                    </div>
+                </div>
+                <div class="progress-status">
+                    <span id="progress-text">{% trans "Preparing..." %}</span>
+                    <button type="button" id="cancel-btn" class="btn-cancel-upload">
+                        {% trans "Cancel" %}
+                    </button>
+                </div>
+            </div>
+            <div id="upload-error" class="upload-error">
+            </div>
+            <button type="submit" class="btn btn-primary" id="upload-btn">
+                {% trans "Upload Agent" %}
+            </button>
+        </form>
+    </div>
+    <!-- Agent List -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Your Agents" %}
+        </div>
+        {% if agents %}
+            <!-- Agent list -->
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "NAME" %}
+                        </th>
+                        <th>
+                            {% trans "TYPE" %}
+                        </th>
+                        <th>
+                            {% trans "OS" %}
+                        </th>
+                        <th>
+                            {% trans "FILE" %}
+                        </th>
+                        <th>
+                            {% trans "UPLOADED" %}
+                        </th>
+                        <th class="text-right">
+                            {% trans "ACTIONS" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agent in agents %}
+                        <tr>
+                            <td>
+                                <span class="text-bold">{{ agent.name }}</span>
+                            </td>
+                            <td>
+                                <span class="badge">{{ agent.agent_type_display }}</span>
+                            </td>
+                            <td>
+                                <span class="badge">{{ agent.os_name }}</span>
+                            </td>
+                            <td>
+                                <span class="text-muted">{{ agent.original_filename }}</span>
+                                <br>
+                                <span class="text-small text-muted">
+                                    {% blocktrans with v1=agent.file_size_mb %}
+                                        {{ v1 }} MB
+                                    {% endblocktrans %}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="text-muted">{{ agent.created_at|date:"M d, Y" }}</span>
+                                <br>
+                                <span class="text-small text-muted">{{ agent.created_at|time:"H:i" }}</span>
+                            </td>
+                            <td class="text-right">
+                                <form method="post"
+                                      action="{% url 'mission_control:delete_agent' agent.id %}"
+                                      style="display: inline"
+                                      onsubmit="return confirm('Are you sure you want to delete this agent?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-secondary btn-small">
+                                        {% trans "Delete" %}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <!-- Empty state with graphical element -->
+            <div class="empty-state">
+                <div class="empty-state-graphic">
+                    <div class="empty-state-graphic-arc">
+                    </div>
+                    <div class="empty-state-graphic-icon">
+                        <svg viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             stroke-width="1.5">
+                            <rect x="2" y="2" width="20" height="8" rx="2" />
+                            <rect x="2" y="14" width="20" height="8" rx="2" />
+                            <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none" />
+                            <circle cx="6" cy="18" r="1" fill="currentColor" stroke="none" />
+                        </svg>
+                    </div>
+                </div>
+                <h3>
+                    {% trans "No agents uploaded yet" %}
+                </h3>
+                <p>
+                    {% trans "Upload an XDR, XDR Collector, or Cloud Identity Engine agent to get started" %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}
-
 {% block extra_js %}
-<script src="{% static 'js/upload.js' %}"></script>
-<script>
+    <script src="{% static 'js/upload.js' %}"></script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('upload-form');
     const fileInput = document.getElementById('agent-file');
@@ -296,5 +291,5 @@ document.addEventListener('DOMContentLoaded', function() {
         uploader = null;
     }
 });
-</script>
+    </script>
 {% endblock %}

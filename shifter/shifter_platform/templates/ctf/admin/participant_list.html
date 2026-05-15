@@ -1,21 +1,25 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Participants - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Participants - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb .separator {
     margin: 0 6px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .stats-grid {
@@ -32,14 +36,14 @@
 .stat-card .stat-value {
     font-size: 28px;
     font-weight: 700;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 .stat-card .stat-label {
     font-size: 11px;
     text-transform: uppercase;
     font-weight: 600;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
@@ -54,166 +58,226 @@
     gap: 8px;
     align-items: center;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="flex-between mb-lg">
-    <div>
-        <div class="breadcrumb">
-            <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-            <span class="separator">/</span>
-            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-            <span class="separator">/</span>
-            <span>Participants</span>
+    <!-- Header -->
+    <div class="flex-between mb-lg">
+        <div>
+            <div class="breadcrumb">
+                <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                <span class="separator">/</span>
+                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                <span class="separator">/</span>
+                <span>{% trans "Participants" %}</span>
+            </div>
+            <h1 class="page-title">
+                {% trans "Participants" %}
+            </h1>
         </div>
-        <h1 class="page-title">Participants</h1>
+        <div class="header-actions">
+            <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}"
+               class="btn btn-primary">{% trans "Add Participant" %}</a>
+            <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}"
+               class="btn btn-secondary">{% trans "Import CSV" %}</a>
+            {% if total_count > 0 %}
+                <button type="button"
+                        class="btn btn-primary"
+                        onclick="sendAllInvites()">
+                    {% blocktrans %}Send All Links ({{ total_count }}){% endblocktrans %}
+                </button>
+            {% endif %}
+        </div>
     </div>
-    <div class="header-actions">
-        <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}" class="btn btn-primary">
-            Add Participant
-        </a>
-        <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-secondary">
-            Import CSV
-        </a>
-        {% if total_count > 0 %}
-        <button type="button" class="btn btn-primary" onclick="sendAllInvites()">
-            Send All Links ({{ total_count }})
-        </button>
-        {% endif %}
+    <!-- Statistics Cards -->
+    <div class="stats-grid mb-lg">
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ total_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Total Participants" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ invited_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Invited (Pending)" %}
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">
+                {{ registered_count }}
+            </div>
+            <div class="stat-label">
+                {% trans "Registered" %}
+            </div>
+        </div>
     </div>
-</div>
-
-<!-- Statistics Cards -->
-<div class="stats-grid mb-lg">
-    <div class="card stat-card">
-        <div class="stat-value">{{ total_count }}</div>
-        <div class="stat-label">Total Participants</div>
+    <!-- Filter -->
+    <div class="card">
+        <form method="get" class="filter-bar">
+            <label for="status" class="form-label" style="margin-bottom: 0;">
+                {% trans "Filter by Status:" %}
+            </label>
+            <select name="status"
+                    id="status"
+                    class="form-input"
+                    style="width: auto;
+                           min-width: 180px"
+                    onchange="this.form.submit()">
+                <option value="">
+                    {% trans "All Statuses" %}
+                </option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"
+                            {% if status_filter == value %}
+                                selected
+                            {% endif %}>
+                        {{ label }}
+                    </option>
+                {% endfor %}
+            </select>
+            {% if status_filter %}
+                <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}"
+                   class="btn btn-secondary">{% trans "Clear Filter" %}</a>
+            {% endif %}
+        </form>
     </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ invited_count }}</div>
-        <div class="stat-label">Invited (Pending)</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-value">{{ registered_count }}</div>
-        <div class="stat-label">Registered</div>
-    </div>
-</div>
-
-<!-- Filter -->
-<div class="card">
-    <form method="get" class="filter-bar">
-        <label for="status" class="form-label" style="margin-bottom: 0;">Filter by Status:</label>
-        <select name="status" id="status" class="form-input" style="width: auto; min-width: 180px;" onchange="this.form.submit()">
-            <option value="">All Statuses</option>
-            {% for value, label in status_choices %}
-            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        {% if status_filter %}
-        <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-secondary">Clear Filter</a>
-        {% endif %}
-    </form>
-</div>
-
-<!-- Participants Table -->
-<div class="card" style="padding: 0;">
-    {% if participants %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Status</th>
-                {% if event.team_mode %}
-                <th>Team</th>
-                {% endif %}
-                <th>Bracket</th>
-                <th>Registered</th>
-                <th>Score</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for participant in participants %}
-            <tr>
-                <td>
-                    <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}">
-                        {{ participant.name }}
-                    </a>
-                </td>
-                <td>{{ participant.email }}</td>
-                <td>
-                    {% if participant.status == 'invited' %}
-                    <span class="status status-provisioning"><span class="status-dot"></span> Invited</span>
-                    {% elif participant.status == 'registered' %}
-                    <span class="status status-paused"><span class="status-dot"></span> Registered</span>
-                    {% elif participant.status == 'active' %}
-                    <span class="status status-active"><span class="status-dot"></span> Active</span>
-                    {% elif participant.status == 'completed' %}
-                    <span class="status status-offline"><span class="status-dot"></span> Completed</span>
-                    {% elif participant.status == 'disqualified' %}
-                    <span class="status status-error"><span class="status-dot"></span> Disqualified</span>
-                    {% endif %}
-                </td>
-                {% if event.team_mode %}
-                <td>
-                    {% if participant.team %}
-                    {{ participant.team.name }}
-                    {% else %}
-                    <span class="text-muted">No team</span>
-                    {% endif %}
-                </td>
-                {% endif %}
-                <td>
-                    {% if participant.bracket %}
-                    {{ participant.bracket.name }}
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if participant.registered_at %}
-                    {{ participant.registered_at|date:"M d, Y H:i" }}
-                    {% else %}
-                    <span class="text-muted">Not registered</span>
-                    {% endif %}
-                </td>
-                <td>{{ participant.total_score }}</td>
-                <td>
-                    <div class="flex-row gap-sm">
-                        <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}" class="btn btn-secondary" title="View">
-                            View
-                        </a>
-                        <button type="button" class="btn btn-secondary" title="Send Link" onclick="resendInvite('{{ participant.pk }}')">
-                            Send Link
-                        </button>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        {% if status_filter %}
-        <p>No participants with status "{{ status_filter }}".</p>
-        <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-secondary mt-md">View All Participants</a>
+    <!-- Participants Table -->
+    <div class="card" style="padding: 0;">
+        {% if participants %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        <th>
+                            {% trans "Email" %}
+                        </th>
+                        <th>
+                            {% trans "Status" %}
+                        </th>
+                        {% if event.team_mode %}
+                            <th>
+                                {% trans "Team" %}
+                            </th>
+                        {% endif %}
+                        <th>
+                            {% trans "Bracket" %}
+                        </th>
+                        <th>
+                            {% trans "Registered" %}
+                        </th>
+                        <th>
+                            {% trans "Score" %}
+                        </th>
+                        <th>
+                            {% trans "Actions" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for participant in participants %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}">
+                                {{ participant.name }}
+                                </a>
+                            </td>
+                            <td>
+                                {{ participant.email }}
+                            </td>
+                            <td>
+                                {% if participant.status == 'invited' %}
+                                    <span class="status status-provisioning"><span class="status-dot"></span>
+                                    {% trans "Invited" %}</span>
+                                {% elif participant.status == 'registered' %}
+                                    <span class="status status-paused"><span class="status-dot"></span>
+                                    {% trans "Registered" %}</span>
+                                {% elif participant.status == 'active' %}
+                                    <span class="status status-active"><span class="status-dot"></span>
+                                    {% trans "Active" %}</span>
+                                {% elif participant.status == 'completed' %}
+                                    <span class="status status-offline"><span class="status-dot"></span>
+                                    {% trans "Completed" %}</span>
+                                {% elif participant.status == 'disqualified' %}
+                                    <span class="status status-error"><span class="status-dot"></span>
+                                    {% trans "Disqualified" %}</span>
+                                {% endif %}
+                            </td>
+                            {% if event.team_mode %}
+                                <td>
+                                    {% if participant.team %}
+                                        {{ participant.team.name }}
+                                    {% else %}
+                                        <span class="text-muted">{% trans "No team" %}</span>
+                                    {% endif %}
+                                </td>
+                            {% endif %}
+                            <td>
+                                {% if participant.bracket %}
+                                    {{ participant.bracket.name }}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if participant.registered_at %}
+                                    {{ participant.registered_at|date:"M d, Y H:i" }}
+                                {% else %}
+                                    <span class="text-muted">{% trans "Not registered" %}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {{ participant.total_score }}
+                            </td>
+                            <td>
+                                <div class="flex-row gap-sm">
+                                    <a href="{% url 'ctf:admin_participant_detail' participant_id=participant.pk %}"
+                                       class="btn btn-secondary"
+                                       title='{% trans "View" %}'>{% trans "View" %}</a>
+                                    <button type="button"
+                                            class="btn btn-secondary"
+                                            title='{% trans "Send Link" %}'
+                                            onclick="resendInvite('{{ participant.pk }}')">
+                                        {% trans "Send Link" %}
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         {% else %}
-        <p>No participants yet.</p>
-        <div class="flex-row gap-sm mt-md" style="justify-content: center;">
-            <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}" class="btn btn-primary">Add Participant</a>
-            <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-secondary">Import from CSV</a>
-        </div>
+            <div class="empty-state">
+                {% if status_filter %}
+                    <p>
+                        {% blocktrans %}No participants with status "{{ status_filter }}".{% endblocktrans %}
+                    </p>
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}"
+                       class="btn btn-secondary mt-md">{% trans "View All Participants" %}</a>
+                {% else %}
+                    <p>
+                        {% trans "No participants yet." %}
+                    </p>
+                    <div class="flex-row gap-sm mt-md"
+                         style="justify-content: center">
+                        <a href="{% url 'ctf:admin_participant_add' event_id=event.pk %}"
+                           class="btn btn-primary">{% trans "Add Participant" %}</a>
+                        <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}"
+                           class="btn btn-secondary">{% trans "Import from CSV" %}</a>
+                    </div>
+                {% endif %}
+            </div>
         {% endif %}
     </div>
-    {% endif %}
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 function sendAllInvites() {
     if (!confirm('Send magic link emails to all participants?')) return;
 
@@ -260,5 +324,5 @@ function resendInvite(participantId) {
         alert('Error resending invite: ' + err.message);
     });
 }
-</script>
+    </script>
 {% endblock %}

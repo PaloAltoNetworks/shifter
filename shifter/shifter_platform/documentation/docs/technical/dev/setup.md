@@ -1,17 +1,30 @@
 # Setup
 
-Deploying Shifter from a bare cloud account to a running environment.
+Deploy Shifter from a cloud account to a running environment.
 
 ## Prerequisites
 
 - Python 3.12+
+- `uv`
 - Terraform 1.7+
 - GitHub CLI (`gh`) authenticated
 - Docker
 - **AWS**: AWS CLI v2 configured with SSO or IAM credentials
 - **GCP**: `gcloud` CLI authenticated with appropriate project
 
-## Cold-Start Deployment (New AWS Account)
+## Root Installation Config
+
+Create and validate `shifter.yaml` before deployment:
+
+```bash
+cp shifter/installation/examples/aws.yaml shifter.yaml
+uv run --project shifter/installation shifter-config validate shifter.yaml
+```
+
+Use `shifter/installation/examples/gcp.yaml` for GCP. See
+[Installation Config](installation-config) for the field reference.
+
+## AWS Deployment
 
 Use the deployment CLI which walks you through each step with confirmations:
 
@@ -26,7 +39,7 @@ Use the deployment CLI which walks you through each step with confirmations:
 Or run phases separately:
 
 ```bash
-# Phase 1: Bootstrap AWS account (S3, DynamoDB, IAM)
+# Phase 1: Bootstrap AWS account (S3 state backend, GitHub OIDC, IAM)
 ./scripts/bootstrap/deploy.py bootstrap --env prod --profile <your-prod-profile>
 
 # Or use standalone bash scripts:
@@ -39,8 +52,7 @@ Or run phases separately:
 ### 1. Bootstrap AWS Account
 
 The `bootstrap` command creates:
-- S3 bucket for Terraform state
-- DynamoDB table for state locking
+- S3 bucket for Terraform state with S3 native locking (`use_lockfile = true`)
 - GitHub OIDC provider (keyless CI/CD auth)
 - IAM role with all required permissions
 
@@ -67,24 +79,27 @@ Copy the backend config from bootstrap output to these files:
 | `platform/terraform/environments/prod/portal/backend.tf` | `prod/portal/terraform.tfstate` |
 | `platform/terraform/environments/prod/range/backend.tf` | `prod/range/terraform.tfstate` |
 
-### 4. Configure terraform.tfvars
+### 4. Configure deployment-specific values
 
-Copy and fill in the example:
+The committed `terraform.tfvars` files ship an `example.com` baseline.
+Override per-deployment values with a `local.auto.tfvars` (gitignored)
+alongside each baseline — Terraform auto-loads `*.auto.tfvars` and the
+local overrides win:
 
 ```bash
-cp platform/terraform/environments/prod/portal/terraform.tfvars.example \
-   platform/terraform/environments/prod/portal/terraform.tfvars
+cat > platform/terraform/environments/prod/portal/local.auto.tfvars <<EOF
+domain_name           = "shifter.your-domain.example"
+ses_domain            = "your-domain.example"
+alarm_email           = "your-team@your-domain.example"
+allowed_email_domains = ["your-domain.example"]
+user_storage_bucket   = "shifter-user-storage-<your-account-id>"
+EOF
 ```
 
-Edit `terraform.tfvars` with your values. Key settings:
-
-```hcl
-environment  = "prod"
-aws_region   = "us-east-2"
-domain_name  = "shifter.yourdomain.com"
-```
-
-Terraform variables are committed to the repo (they're config, not secrets).
+`local.auto.tfvars` is gitignored — never commit one. The full list of
+required values, plus the CI-deploy equivalent via GitHub secrets and
+repository variables, is documented in
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### 5. Deploy Infrastructure
 
@@ -122,7 +137,8 @@ The CLI walks through each component, shows the plan, and asks for confirmation 
 
 **Via CI/CD:**
 
-Push to `main` branch to trigger deployment (after bootstrap and backend.tf are configured).
+Push to `main` to deploy the AWS production environment after bootstrap and
+backend configuration are complete.
 
 **Manual deployment:**
 
@@ -196,7 +212,7 @@ The first deploy creates empty ECR repos. Push the portal container:
 
 Cognito is fully configured by Terraform. You only need to:
 
-1. **Set `cognito_domain_prefix`** in `terraform.tfvars` (must be globally unique):
+1. **Set `cognito_domain_prefix`** in `local.auto.tfvars` (must be globally unique):
    ```hcl
    cognito_domain_prefix = "shifter-prod-yourorg"
    ```
@@ -285,17 +301,13 @@ aws ecr describe-images --repository-name shifter-prod-portal
 
 If empty, push a container first.
 
-## GCP Cold-Start Deployment
+## GCP Deployment
 
 GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus a Helm-packaged control plane (`platform/charts/shifter/`).
 
 ### 1. GCP Project Setup
 
-Create a GCP project and enable required APIs. The bootstrap script handles this:
-
-```bash
-# See scripts/gcp/ for bootstrap tooling
-```
+Create a GCP project and enable the APIs required by the bootstrap path.
 
 ### 2. Configure Workload Identity Federation
 
@@ -310,29 +322,30 @@ Set up OIDC federation for GitHub Actions:
 | `GCP_SERVICE_ACCOUNT` | Service account email |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name |
 
-### 3. Configure terraform.tfvars
+### 3. Configure deployment-specific values
+
+The committed `terraform.tfvars` ships an `example.com` baseline; supply
+the real values via a gitignored `local.auto.tfvars` (Terraform auto-loads
+`*.auto.tfvars`):
 
 ```bash
-cd platform/terraform/gcp/environments/gcp-dev
+cat > platform/terraform/gcp/environments/gcp-dev/local.auto.tfvars <<'EOF'
+project_id                  = "<your-gcp-project-id>"
+public_hostname             = "shifter.<your-domain>"
+enable_managed_tls          = true
+gke_master_authorized_cidrs = ["<your-operator-egress>/32"]
+EOF
 ```
 
-Edit `terraform.tfvars` with the real project/environment values. At minimum the secure bootstrap requires:
-
-```hcl
-project_id                 = "prod-rwctxzl6shxk"
-public_hostname            = "shifter.keplerops.com"
-enable_managed_tls         = true
-gke_master_authorized_cidrs = ["173.181.31.170/32"]
-```
-
-Update `gke_master_authorized_cidrs` if the operator egress IP changes.
+For CI deploys the equivalent values come from GitHub secrets — see
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### 4. Deploy
 
-Normal GCP deployments happen through CI/CD on `gcp-dev`. The bootstrap entrypoint remains available for first-time setup and controlled recovery:
+GCP deployments run through CI/CD on `gcp-dev`. The bootstrap entrypoint is:
 
 ```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <your-gcp-project-id> --cluster-id cluster1
 ```
 
 That flow:
@@ -345,4 +358,6 @@ That flow:
 
 ### 5. DNS and TLS
 
-The secure bootstrap path expects a real hostname and managed TLS from the start. Point `shifter.keplerops.com` to the reserved global ingress IP so the Google-managed certificate can become active. The GCP path no longer uses the old debug-auth fallback as an acceptable first-boot mode.
+The GCP path requires a real hostname and managed TLS. Point the configured
+hostname to the reserved global ingress IP so the Google-managed certificate can
+become active.

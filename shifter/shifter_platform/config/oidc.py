@@ -9,6 +9,7 @@ from uuid import UUID
 from django.contrib.auth.models import Group
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
+from config.bootstrap_admin import apply_bootstrap_admin_flags
 from management.services import get_user_profile, update_cognito_sub
 from risk_register.models import AuditLog
 from risk_register.services import audit_auth_event
@@ -109,6 +110,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
     def create_user(self, claims):
         """Create user and populate cognito_sub and user_type from claims."""
         user = super().create_user(claims)
+        apply_bootstrap_admin_flags(user, claims.get("email") or user.email)
         self._update_cognito_sub(user, claims)
         self._update_user_type(user, claims)
 
@@ -127,6 +129,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
     def update_user(self, user, claims):
         """Update user and ensure cognito_sub and user_type are set."""
         user = super().update_user(user, claims)
+        apply_bootstrap_admin_flags(user, claims.get("email") or user.email)
         self._update_cognito_sub(user, claims)
         self._update_user_type(user, claims)
         return user

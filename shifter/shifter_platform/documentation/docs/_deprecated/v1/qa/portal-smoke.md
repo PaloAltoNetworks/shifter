@@ -4,10 +4,10 @@
 
 ```bash
 # Dev
-export ENV=dev DOMAIN=dev.shifter.keplerops.com AWS_PROFILE=<dev account profile>
+export ENV=dev DOMAIN=dev.shifter.example.com AWS_PROFILE=<dev account profile>
 
 # Prod
-export ENV=prod DOMAIN=shifter.keplerops.com AWS_PROFILE=<prod account profile>
+export ENV=prod DOMAIN=shifter.example.com AWS_PROFILE=<prod account profile>
 ```
 
 ## CLI Checks (Claude)

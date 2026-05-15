@@ -129,6 +129,11 @@ variable "engine_secrets_kms_key_alias" {
   type        = string
 }
 
+variable "secrets_manager_kms_key_arn" {
+  description = "ARN of the portal Secrets Manager CMK used to encrypt the DC domain password and any future module-owned Secrets Manager secrets (CKV_AWS_149). Distinct from engine_secrets_kms_key_arn, which is the Pulumi state CMK and must not be reused for Secrets Manager. Required input — no default."
+  type        = string
+}
+
 # ------------------------------------------------------------------------------
 # Range VPC Configuration
 # ------------------------------------------------------------------------------
@@ -200,12 +205,13 @@ variable "dc_domain_name" {
   default     = "internal.shifter"
 }
 
-variable "dc_domain_password" {
-  description = "Domain admin password for prebaked DC"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
+# The DC Administrator password is intentionally NOT a Terraform variable.
+# It lives in aws_secretsmanager_secret.dc_domain_password (see secrets.tf)
+# with the value managed out-of-band, and is injected into the engine
+# provisioner ECS task via the `secrets = [...]` block in
+# task_definition.tf. The portal Django container receives the value
+# through the same secret, plumbed through the portal/ssm and portal/ec2
+# modules and resolved at startup by entrypoint.sh.
 
 # ------------------------------------------------------------------------------
 # Instance Types

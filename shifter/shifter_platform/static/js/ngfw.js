@@ -80,9 +80,9 @@ class NGFWWizardManager {
         const dropdown = document.getElementById(id);
         if (!dropdown) return;
 
-        const trigger = dropdown.querySelector('.xdr-dropdown-trigger');
-        const items = dropdown.querySelectorAll('.xdr-dropdown-item');
-        const valueDisplay = dropdown.querySelector('.xdr-dropdown-value');
+        const trigger = dropdown.querySelector('.shifter-dropdown-trigger');
+        const items = dropdown.querySelectorAll('.shifter-dropdown-item');
+        const valueDisplay = dropdown.querySelector('.shifter-dropdown-value');
         const hiddenInput = dropdown.querySelector('input[type="hidden"]');
 
         trigger?.addEventListener('click', (e) => {

@@ -2,6 +2,7 @@
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 
 from cms.models import Scenario, ScenarioMetadata
 from cms.scenario_editor.services import (
@@ -198,7 +199,9 @@ class TestUpdateScenario:
 class TestDeleteScenario:
     def test_delete_custom(self, staff_user, custom_scenario):
         delete_scenario(staff_user, "custom-test")
-        scenario = Scenario.objects.get(pk=custom_scenario.pk)
+        # Scenario.objects (SoftDeleteManager) excludes deleted rows; use
+        # all_objects to verify the soft-delete actually landed.
+        scenario = Scenario.all_objects.get(pk=custom_scenario.pk)
         assert scenario.deleted_at is not None
 
     def test_cannot_delete_default(self, staff_user):
@@ -292,7 +295,69 @@ class TestExportScenarioYaml:
 
 
 class TestUserValidation:
-    """Tests for _validate_user enforcement on all service functions."""
+    """Tests for _validate_user enforcement on all service functions.
+
+    The canonical CMS authoring policy (see shared.auth.can_edit_cms_authoring)
+    admits active staff users and active Threat Research group members. Other
+    authenticated users are rejected at the service layer regardless of how
+    they reached it.
+    """
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            "create",
+            "update",
+            "delete",
+            "clone",
+            "metadata",
+        ],
+    )
+    def test_unrelated_user_denied_by_service_layer(self, operation, regular_user, valid_definition):
+        calls = {
+            "create": lambda: create_scenario(
+                regular_user,
+                scenario_id="regular-create",
+                name="Denied",
+                description="Denied",
+                definition=valid_definition,
+            ),
+            "update": lambda: update_scenario(regular_user, "some-id", name="Denied"),
+            "delete": lambda: delete_scenario(regular_user, "some-id"),
+            "clone": lambda: clone_scenario(regular_user, "some-id", new_scenario_id="clone"),
+            "metadata": lambda: update_metadata(regular_user, "some-id", enabled=False),
+        }
+
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            calls[operation]()
+
+    def test_threat_research_user_admitted_by_service_layer(self, threat_research_user, valid_definition):
+        """A non-staff Threat Research user must pass the service auth gate.
+
+        Calls ``create_scenario`` because it is the simplest success path that
+        terminates inside the service module (no downstream registry access);
+        seeing the scenario persisted proves the auth check did not raise.
+        """
+        scenario = create_scenario(
+            threat_research_user,
+            scenario_id="tr-create",
+            name="TR Create",
+            description="Created by a Threat Research user.",
+            definition=valid_definition,
+        )
+        assert scenario.scenario_id == "tr-create"
+
+    def test_inactive_threat_research_user_denied(self, threat_research_user, valid_definition):
+        threat_research_user.is_active = False
+        threat_research_user.save(update_fields=["is_active"])
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            create_scenario(
+                threat_research_user,
+                scenario_id="inactive-tr",
+                name="Inactive",
+                description="Inactive Threat Research user attempt.",
+                definition=valid_definition,
+            )
 
     def test_create_none_user(self, valid_definition):
         with pytest.raises(TypeError, match="cannot be None"):

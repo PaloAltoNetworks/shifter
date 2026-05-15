@@ -21,6 +21,8 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      serviceAccountName: portal
+      automountServiceAccountToken: true
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -31,7 +33,6 @@ spec:
                     app.kubernetes.io/part-of: shifter
                     app.kubernetes.io/component: portal
                 topologyKey: kubernetes.io/hostname
-      serviceAccountName: portal
       containers:
         - name: portal
           image: us-docker.pkg.dev/placeholder-project/shifter/portal:0.0.0

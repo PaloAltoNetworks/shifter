@@ -1,43 +1,69 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-
+{% load i18n %}
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Help</h1>
-    <p class="page-subtitle">Get started with Shifter</p>
-</div>
-
-<!-- Documentation Links -->
-<div class="card">
-    <div class="card-title">Documentation</div>
-    <p class="text-muted mb-md">
-        Full guides for using Shifter.
-    </p>
-    <div class="flex-row gap-md">
-        <a href="{% url 'documentation:page' 'getting-started/quickstart' %}" class="btn btn-primary">Quickstart Guide</a>
-        <a href="{% url 'documentation:index' %}" class="btn btn-secondary">All Documentation</a>
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Help" %}
+        </h1>
+        <p class="page-subtitle">
+            {% trans "Get started with Shifter" %}
+        </p>
     </div>
-</div>
-
-<!-- Quick Links -->
-<div class="card">
-    <div class="card-title">Quick Links</div>
-    <ul class="text-muted list-styled">
-        <li><a href="{% url 'documentation:page' 'getting-started/concepts' %}" class="link">Key Concepts</a> - Agents, ranges, scenarios</li>
-        <li><a href="{% url 'documentation:page' 'features/agents' %}" class="link">Agents Guide</a> - Upload and manage installers</li>
-        <li><a href="{% url 'documentation:page' 'features/ranges' %}" class="link">Ranges Guide</a> - Launch and manage environments</li>
-        <li><a href="{% url 'documentation:page' 'features/terminal' %}" class="link">Terminal Guide</a> - SSH and RDP access</li>
-        <li><a href="{% url 'documentation:page' 'reference/faq' %}" class="link">FAQ</a> - Common questions</li>
-    </ul>
-</div>
-
-<!-- Contact -->
-<div class="card">
-    <div class="card-title">Need More Help?</div>
-    <p class="text-muted">
-        Contact the Shifter team for support or to report issues.
-    </p>
-    <p class="mt-md">
-        <a href="mailto:{{ support_email }}" class="btn btn-secondary">Contact Support</a>
-    </p>
-</div>
+    <!-- Documentation Links -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Documentation" %}
+        </div>
+        <p class="text-muted mb-md">
+            {% trans "Full guides for using Shifter." %}
+        </p>
+        <div class="flex-row gap-md">
+            <a href="{% url 'documentation:page' 'getting-started/quickstart' %}"
+               class="btn btn-primary">{% trans "Quickstart Guide" %}</a>
+            <a href="{% url 'documentation:index' %}"
+               class="btn btn-secondary">{% trans "All Documentation" %}</a>
+        </div>
+    </div>
+    <!-- Quick Links -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Quick Links" %}
+        </div>
+        <ul class="text-muted list-styled">
+            <li>
+                <a href="{% url 'documentation:page' 'getting-started/concepts' %}"
+                   class="link">{% trans "Key Concepts" %}</a> {% trans "- Agents, ranges, scenarios" %}
+            </li>
+            <li>
+                <a href="{% url 'documentation:page' 'features/agents' %}"
+                   class="link">{% trans "Agents Guide" %}</a> {% trans "- Upload and manage installers" %}
+            </li>
+            <li>
+                <a href="{% url 'documentation:page' 'features/ranges' %}"
+                   class="link">{% trans "Ranges Guide" %}</a> {% trans "- Launch and manage environments" %}
+            </li>
+            <li>
+                <a href="{% url 'documentation:page' 'features/terminal' %}"
+                   class="link">{% trans "Terminal Guide" %}</a> {% trans "- SSH and RDP access" %}
+            </li>
+            <li>
+                <a href="{% url 'documentation:page' 'reference/faq' %}"
+                   class="link">{% trans "FAQ" %}</a> {% trans "- Common questions" %}
+            </li>
+        </ul>
+    </div>
+    <!-- Contact -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Need More Help?" %}
+        </div>
+        <p class="text-muted">
+            {% trans "Contact the Shifter team for support or to report issues." %}
+        </p>
+        <p class="mt-md">
+            <a href="mailto:{{ support_email }}" class="btn btn-secondary">{% trans "Contact Support" %}</a>
+        </p>
+    </div>
 {% endblock %}

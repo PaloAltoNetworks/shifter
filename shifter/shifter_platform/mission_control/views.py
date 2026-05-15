@@ -45,6 +45,8 @@ from mission_control.upload_session import (
     set_upload_in_progress,
 )
 from mission_control.utils import build_connection_urls
+from risk_register.models import AuditLog
+from risk_register.services import audit_log_from_request
 from shared.exceptions import AssetError, CMSError
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,38 @@ def _get_user(request: HttpRequest) -> User:
     """Get authenticated user from request. Use only in @login_required views."""
     assert request.user.is_authenticated, "View must use @login_required"
     return cast(User, request.user)
+
+
+def _audit_range_lifecycle(
+    request: HttpRequest,
+    action: str,
+    *,
+    range_id: int | None = None,
+    range_request_id: str | None = None,
+    extra_state: dict | None = None,
+) -> None:
+    """Record an HTTP-layer audit entry for a range lifecycle action.
+
+    Captures source IP, user agent, and HTTP request ID from the request via
+    risk_register.services.audit_log_from_request. Complements the CMS
+    service-layer audit entries by attaching request context.
+
+    range_id (legacy) or range_request_id (UUID) identifies the range.
+    """
+    new_state: dict = {}
+    if range_request_id:
+        new_state["request_id"] = range_request_id
+    if range_id is not None:
+        new_state["range_id"] = range_id
+    if extra_state:
+        new_state.update(extra_state)
+    audit_log_from_request(
+        request,
+        entity_type=AuditLog.EntityType.RANGE,
+        entity_id=range_id or 0,
+        action=action,
+        new_state=new_state or None,
+    )
 
 
 @login_required
@@ -222,7 +256,7 @@ def guacamole_rdp_url(request):
             sftp_private_key=conn_info.get("ssh_key"),
         )
     except ValueError as e:
-        logger.error(f"Failed to generate Guacamole URL: {e}")
+        logger.error("Failed to generate Guacamole URL: %s", e)
         return JsonResponse({"error": "Failed to generate RDP URL"}, status=500)
 
     logger.info(
@@ -437,7 +471,7 @@ def walkthrough(request: HttpRequest) -> HttpResponse:
         "ctfd_url": getattr(
             django_settings,
             "CTFD_PLATFORM_URL",
-            "https://ctf.shifter.keplerops.com/login",
+            "https://ctf.shifter.example.com/login",
         ),
     }
     return render(request, "mission_control/walkthrough.html", context)
@@ -696,6 +730,13 @@ def launch_range(request: HttpRequest) -> JsonResponse:
         scenario,
     )
 
+    _audit_range_lifecycle(
+        request,
+        AuditLog.Action.PROVISION,
+        range_request_id=str(range_ctx.request_id),
+        extra_state={"scenario": scenario, "agents": agents_by_os},
+    )
+
     return JsonResponse(
         {
             "success": True,
@@ -742,6 +783,12 @@ def cancel_range(request: HttpRequest) -> JsonResponse:
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+    _audit_range_lifecycle(
+        request,
+        AuditLog.Action.CANCEL,
+        range_id=range_id,
+        range_request_id=request_id,
+    )
     return JsonResponse({"success": True})
 
 
@@ -783,6 +830,12 @@ def destroy_range(request: HttpRequest) -> JsonResponse:
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+    _audit_range_lifecycle(
+        request,
+        AuditLog.Action.DEPROVISION,
+        range_id=range_id,
+        range_request_id=request_id,
+    )
     return JsonResponse({"success": True})
 
 
@@ -824,6 +877,12 @@ def pause_range(request: HttpRequest) -> JsonResponse:
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+    _audit_range_lifecycle(
+        request,
+        AuditLog.Action.PAUSE,
+        range_id=range_id,
+        range_request_id=request_id,
+    )
     return JsonResponse({"success": True})
 
 
@@ -865,6 +924,12 @@ def resume_range(request: HttpRequest) -> JsonResponse:
     except CMSError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+    _audit_range_lifecycle(
+        request,
+        AuditLog.Action.RESUME,
+        range_id=range_id,
+        range_request_id=request_id,
+    )
     return JsonResponse({"success": True})
 
 

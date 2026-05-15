@@ -20,6 +20,7 @@ Usage:
 import argparse
 import getpass
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -173,12 +174,15 @@ def _format_sample_env_assignment(key: str, value: str = "") -> str:
 
 
 def _sample_guest_access_defaults() -> list[str]:
-    """Return placeholder guest credential env entries without baked-in secrets."""
-    return [
-        _format_sample_env_assignment("GDC_WINDOWS_ADMIN_PASSWORD"),
-        _format_sample_env_assignment("GDC_KALI_PASSWORD"),
-        _format_sample_env_assignment("GDC_UBUNTU_PASSWORD"),
-    ]
+    """Return placeholder guest credential env entries.
+
+    Issue #762: GDC_KALI_PASSWORD / GDC_UBUNTU_PASSWORD /
+    GDC_WINDOWS_ADMIN_PASSWORD were dropped. Guest passwords are now
+    per-instance GCP Secret Manager secrets created at provisioning
+    time. The DC role keeps its deployment-scoped DC_DOMAIN_PASSWORD
+    contract (set elsewhere in the deploy pipeline).
+    """
+    return []
 
 
 def run_cmd(
@@ -636,11 +640,35 @@ def validate_gcp_control_plane_security_inputs(tf_dir: Path) -> None:
             "GCP bootstrap requires managed TLS for the public ingress. "
             "Set enable_managed_tls = true in terraform.tfvars."
         )
-    if not settings["gke_master_authorized_cidrs"]:
+    authorized_cidrs = settings["gke_master_authorized_cidrs"]
+    if not authorized_cidrs:
         raise ValueError(
             "GCP bootstrap requires gke_master_authorized_cidrs so the public GKE control-plane endpoint "
             "is restricted to admin networks."
         )
+    # Same contract the Terraform variable validation enforces (see
+    # platform/terraform/gcp/modules/platform-core/variables.tf::gke_master_authorized_cidrs):
+    #   1. an explicit "/N" suffix is present (rejects bare IPs).
+    #   2. the entry parses as a CIDR (rejects garbage / bad octets / bad prefixes).
+    #   3. the parsed prefix length is > 0 (rejects /0 from the parsed prefix
+    #      number, not from a string-suffix check).
+    for cidr in authorized_cidrs:
+        if "/" not in cidr:
+            raise ValueError(
+                f"GCP bootstrap rejected gke_master_authorized_cidrs entry {cidr!r}: must include an "
+                "explicit /N prefix (e.g. 203.0.113.10/32)."
+            )
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+        except ValueError as exc:
+            raise ValueError(
+                f"GCP bootstrap rejected gke_master_authorized_cidrs entry {cidr!r}: not a valid CIDR ({exc})."
+            ) from exc
+        if network.prefixlen == 0:
+            raise ValueError(
+                f"GCP bootstrap rejected gke_master_authorized_cidrs entry {cidr!r}: a /0 range opens the "
+                "public GKE control-plane endpoint to the entire internet. List specific admin networks instead."
+            )
 
 
 def get_default_gdc_project_id() -> str:
@@ -794,7 +822,7 @@ def render_gdc_prepare_workstation_script(config: GDCBootstrapConfig) -> str:
         install -m 644 {config.staging_bundle_dir}/id_rsa.pub /root/.ssh/id_rsa.pub
         install -m 600 {config.staging_bundle_dir}/bm-gcr.json /root/bm-gcr.json
         install -m 755 {config.staging_bundle_dir}/bmctl /usr/local/sbin/bmctl
-        printf 'Host *\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n' >/root/.ssh/config
+        printf 'Host *\\n  StrictHostKeyChecking yes\\n  BatchMode yes\\n' >/root/.ssh/config
         chmod 600 /root/.ssh/config
         """
     )
@@ -831,7 +859,7 @@ def render_gdc_prepare_hosts_script(config: GDCBootstrapConfig) -> str:
         "configure_remote_host() {",
         '  local host_ip="$1"',
         '  local vxlan_ip="$2"',
-        "  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\",
+        "  ssh -o StrictHostKeyChecking=yes -o BatchMode=yes \\",
         '    "root@${host_ip}" "bash -s" -- "${vxlan_ip}" <<\'EOF\'',
         "set -euo pipefail",
         'vxlan_ip="$1"',
@@ -1726,6 +1754,36 @@ def _merge_csv_env_values(*groups: list[str]) -> str:
     return ",".join(ordered)
 
 
+def _unique_nonempty_strings(values: list[str | None]) -> list[str]:
+    """Return non-empty strings in first-seen order."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        value = (raw_value or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _host_as_single_address_cidr(value: object) -> str | None:
+    """Convert a Terraform host/IP output into a /32 or /128 CIDR."""
+    if value is None:
+        return None
+    host = str(value).strip()
+    if not host:
+        return None
+    if "/" in host:
+        return host
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise ValueError(f"Expected IP address Terraform output, got {host!r}") from exc
+    prefix = 32 if address.version == 4 else 128
+    return f"{address}/{prefix}"
+
+
 def render_gcp_platform_runtime_env(
     config: GDCBootstrapConfig,
     *,
@@ -1875,9 +1933,51 @@ def prompt_for_gcp_bootstrap_operator_credentials() -> tuple[str, str]:
     return email, password
 
 
-def _validate_gcp_bootstrap_operator_email(email: str) -> None:
-    if not email.endswith("@paloaltonetworks.com"):
-        raise ValueError("GCP operator email must use the paloaltonetworks.com domain")
+def _validate_gcp_bootstrap_operator_email(
+    email: str,
+    outputs: dict[str, dict[str, object]] | None = None,
+) -> None:
+    """Validate the bootstrap operator email against the Identity Platform allow-list.
+
+    The shape check (must contain a single `@`, non-empty local + domain parts)
+    is always enforced. The domain restriction is derived, in order:
+
+    1. The ``identity_allowed_email_domain`` Terraform output (when ``outputs``
+       is supplied) — this is the same value the Identity Platform
+       ``beforeCreate`` hook uses, so the bootstrap operator the bootstrap
+       script writes into ``PLATFORM_BOOTSTRAP_*`` will actually be able to
+       sign in to the deployed portal.
+    2. The ``SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN`` environment variable as a
+       fallback for callers that have not yet run Terraform (e.g., unit tests
+       or dry-run flows). Unset means "accept any well-formed email" — only
+       legitimate when no Identity Platform deployment is in scope.
+    """
+    if email.count("@") != 1:
+        raise ValueError("GCP operator email must contain exactly one '@' character")
+    local, _, domain = email.partition("@")
+    if not local or not domain:
+        raise ValueError("GCP operator email must have a non-empty local part and domain")
+
+    required_domain = ""
+    source = ""
+    if outputs is not None:
+        tf_value = outputs.get("identity_allowed_email_domain", {}).get("value")
+        if isinstance(tf_value, str) and tf_value.strip():
+            required_domain = tf_value.strip().lower()
+            source = "Terraform output identity_allowed_email_domain"
+    if not required_domain:
+        env_value = os.environ.get("SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN", "").strip().lower()
+        if env_value:
+            required_domain = env_value
+            source = "SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN"
+
+    if required_domain and not email.lower().endswith(f"@{required_domain}"):
+        raise ValueError(
+            f"GCP operator email must use the {required_domain} domain "
+            f"(constraint from {source}). Bootstrap-time validation matches the "
+            "Identity Platform allow-list, so an operator whose domain fails "
+            "here cannot subsequently sign in to the deployed portal."
+        )
 
 
 def _gcp_identity_access_token() -> str:
@@ -1944,7 +2044,7 @@ def ensure_gcp_identity_platform_operator(
         credentials = prompt_for_gcp_bootstrap_operator_credentials()
 
     email, password = credentials
-    _validate_gcp_bootstrap_operator_email(email)
+    _validate_gcp_bootstrap_operator_email(email, outputs=outputs)
 
     if dry_run:
         info(f"[DRY-RUN] Would create or verify the Identity Platform operator account for {email}")
@@ -1992,9 +2092,20 @@ def render_gcp_helm_values(
         **parse_env_contract(
             render_gcp_platform_runtime_env(config, bootstrap_operator_email=bootstrap_operator_email)
         ),
-        **parse_env_contract(runtime_renderer.render_env(outputs, secure_portal_mode=True)),
+        **parse_env_contract(runtime_renderer.render_env(outputs)),
     }
     edge_policy_name = str(_get_output_value(outputs, "cloud_armor_security_policy_name")).strip()
+    control_plane_database = _get_output_value(outputs, "control_plane_database")
+    control_plane_cache = _get_output_value(outputs, "control_plane_cache")
+    guacamole_database = _get_output_value(outputs, "guacamole_database")
+    private_service_cidrs = _unique_nonempty_strings(
+        [
+            _host_as_single_address_cidr(control_plane_database.get("private_ip")),
+            _host_as_single_address_cidr(control_plane_cache.get("host")),
+            _host_as_single_address_cidr(guacamole_database.get("host")),
+            str(_get_output_value(outputs, "gke_services_cidr")).strip(),
+        ]
+    )
 
     return {
         "releaseNamespace": "shifter-system",
@@ -2068,6 +2179,18 @@ def render_gcp_helm_values(
                     "securityPolicyName": edge_policy_name,
                 }
             },
+        },
+        "networkPolicy": {
+            "enabled": True,
+            "gclbSourceRanges": [
+                "35.191.0.0/16",  # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+                "130.211.0.0/22",  # NOSONAR - Google Cloud Load Balancer health check/proxy range.
+            ],
+            "googleApiCidrs": [
+                "199.36.153.4/30",  # NOSONAR - restricted.googleapis.com VIP range.
+                "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP range.
+            ],
+            "privateServiceCidrs": private_service_cidrs,
         },
     }
 
@@ -3765,6 +3888,104 @@ def walkthrough_git_commit(bootstrap_result: dict, dry_run: bool = False) -> Non
         warn(f"Skipping push — run 'git push origin {branch}' manually when ready")
 
 
+_COMPONENT_REQUIREMENT_REASON = {
+    "core": "Core creates ECR repositories needed for container images",
+    "range": "Range VPC is required for isolated attack/defense environments",
+    "portal": "Portal is the main application infrastructure",
+}
+
+
+def _capture_terraform_outputs() -> dict:
+    """Return parsed `terraform output -json`, or empty dict on failure.
+
+    Used by the post-apply portal step; isolated from the deploy loop so
+    the loop body stays at a reasonable nesting depth.
+    """
+    result = subprocess.run(  # nosec B603 B607
+        ["terraform", "output", "-json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return {}
+    return json.loads(result.stdout)
+
+
+def _terraform_init_or_exit(env: str, component: str, tf_dir, dry_run: bool) -> None:
+    """Run `terraform init -reconfigure -backend-config=<env>.s3.tfbackend`."""
+    backend_config = f"{env}.s3.tfbackend"
+    info(f"Running terraform init -backend-config={backend_config}...")
+    init_result = run_cmd(
+        ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
+        dry_run=dry_run,
+    )
+    if not dry_run and init_result and init_result.returncode != 0:
+        error(f"Terraform init failed for {component}")
+        error(f"Check that {backend_config} exists in {tf_dir} and has the real bucket name")
+        sys.exit(1)
+
+
+def _terraform_plan_or_exit(component: str, dry_run: bool) -> None:
+    """Run `terraform plan -out=tfplan`."""
+    info("Running terraform plan...")
+    plan_result = run_cmd(["terraform", "plan", "-out=tfplan"], dry_run=dry_run)
+    if not dry_run and plan_result and plan_result.returncode != 0:
+        error(f"Terraform plan failed for {component}")
+        error("Review errors above and fix before continuing")
+        sys.exit(1)
+
+
+def _terraform_apply_or_exit(component: str) -> dict:
+    """Show plan, confirm, apply, and capture outputs (for portal). Exits on failure."""
+    print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
+    subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
+
+    if not confirm("\nApply this plan?"):
+        error(f"Terraform apply for {component} is required")
+        error("All infrastructure components are mandatory for Shifter to function")
+        sys.exit(1)
+
+    info("Running terraform apply...")
+    apply_result = run_cmd(["terraform", "apply", "tfplan"])
+    if apply_result and apply_result.returncode != 0:
+        error(f"Terraform apply failed for {component}")
+        error("Infrastructure deployment incomplete")
+        sys.exit(1)
+
+    success(f"{component} deployed successfully")
+    if component == "portal":
+        return _capture_terraform_outputs()
+    return {}
+
+
+def _deploy_terraform_component(env: str, component: str, dry_run: bool) -> dict:
+    """Run init/plan/apply for one Terraform component; return any captured outputs."""
+    if not dry_run and not confirm(f"Deploy {component}?"):
+        error(f"{component.title()} deployment is required")
+        reason = _COMPONENT_REQUIREMENT_REASON.get(component)
+        if reason:
+            error(reason)
+        sys.exit(1)
+
+    base_path = get_repo_root() / "platform" / "terraform" / "environments" / env
+    tf_dir = base_path if component == "core" else base_path / component
+    if not tf_dir.exists():
+        error(f"Directory not found: {tf_dir}")
+        return {}
+
+    original_dir = os.getcwd()
+    os.chdir(tf_dir)
+    try:
+        _terraform_init_or_exit(env, component, tf_dir, dry_run)
+        _terraform_plan_or_exit(component, dry_run)
+        if dry_run:
+            return {}
+        return _terraform_apply_or_exit(component)
+    finally:
+        os.chdir(original_dir)
+
+
 def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
     """Deploy all Terraform components in order."""
     header(f"Deploying {env.upper()} Infrastructure")
@@ -3778,87 +3999,13 @@ def terraform_deploy(env: str, profile: str, dry_run: bool = False) -> dict:
         ("portal", "Portal infrastructure (VPC, RDS, EC2, ALB, Cognito)"),
     ]
 
-    outputs = {}
-
+    outputs: dict = {}
     for i, (component, description) in enumerate(components, 1):
         header(f"Step {i}/{len(components)}: {description}")
         info(f"Component: {component}")
-
-        if not dry_run and not confirm(f"Deploy {component}?"):
-            error(f"{component.title()} deployment is required")
-            if component == "core":
-                error("Core creates ECR repositories needed for container images")
-            elif component == "range":
-                error("Range VPC is required for isolated attack/defense environments")
-            elif component == "portal":
-                error("Portal is the main application infrastructure")
-            sys.exit(1)
-
-        base_path = get_repo_root() / "platform" / "terraform" / "environments" / env
-        tf_dir = base_path if component == "core" else base_path / component
-
-        if not tf_dir.exists():
-            error(f"Directory not found: {tf_dir}")
-            continue
-
-        # Change to terraform directory
-        original_dir = os.getcwd()
-        os.chdir(tf_dir)
-
-        try:
-            # Init with -reconfigure + -backend-config to fill in the partial
-            # backend (bucket/key are placeholders in backend.tf; real values
-            # come from <env>.s3.tfbackend).
-            backend_config = f"{env}.s3.tfbackend"
-            info(f"Running terraform init -backend-config={backend_config}...")
-            init_result = run_cmd(
-                ["terraform", "init", "-reconfigure", f"-backend-config={backend_config}"],
-                dry_run=dry_run,
-            )
-            if not dry_run and init_result and init_result.returncode != 0:
-                error(f"Terraform init failed for {component}")
-                error(f"Check that {backend_config} exists in {tf_dir} and has the real bucket name")
-                sys.exit(1)
-
-            # Plan
-            info("Running terraform plan...")
-            plan_result = run_cmd(["terraform", "plan", "-out=tfplan"], dry_run=dry_run)
-            if not dry_run and plan_result and plan_result.returncode != 0:
-                error(f"Terraform plan failed for {component}")
-                error("Review errors above and fix before continuing")
-                sys.exit(1)
-
-            if not dry_run:
-                # Show plan summary
-                print(f"\n{Colors.BOLD}Plan Summary:{Colors.END}")
-                subprocess.run(["terraform", "show", "-no-color", "tfplan"], check=False)  # nosec B603 B607
-
-                if not confirm("\nApply this plan?"):
-                    error(f"Terraform apply for {component} is required")
-                    error("All infrastructure components are mandatory for Shifter to function")
-                    sys.exit(1)
-
-                # Apply
-                info("Running terraform apply...")
-                apply_result = run_cmd(["terraform", "apply", "tfplan"])
-
-                if apply_result and apply_result.returncode != 0:
-                    error(f"Terraform apply failed for {component}")
-                    error("Infrastructure deployment incomplete")
-                    sys.exit(1)
-
-                success(f"{component} deployed successfully")
-
-                # Capture outputs for portal
-                if component == "portal":
-                    result = subprocess.run(  # nosec B603 B607
-                        ["terraform", "output", "-json"], capture_output=True, text=True, check=False
-                    )
-                    if result.returncode == 0:
-                        outputs = json.loads(result.stdout)
-        finally:
-            os.chdir(original_dir)
-
+        captured = _deploy_terraform_component(env, component, dry_run)
+        if captured:
+            outputs = captured
     return outputs
 
 

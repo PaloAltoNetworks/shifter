@@ -60,8 +60,10 @@ chmod +x /etc/xrdp/startwm.sh
 # Add kali user to ssl-cert group (required for xrdp)
 usermod -aG ssl-cert kali
 
-# Set kali user password for RDP login and SSH
-echo "kali:kali" | chpasswd
+# Issue #762: do not bake a shared static password into the AMI. The
+# kali account stays unlocked (see cloud.cfg.d/90_shifter.cfg below) so
+# the per-range user_data (rendered by Terraform random_password.guest)
+# can chpasswd a per-instance value on first boot.
 
 # Override cloud-init's lock_passwd setting (20_kali.cfg sets lock_passwd: True)
 # This prevents cloud-init from re-locking the account on boot

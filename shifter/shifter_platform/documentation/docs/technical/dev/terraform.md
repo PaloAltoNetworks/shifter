@@ -1,6 +1,6 @@
-# Terraform Patterns
+# Terraform
 
-How we manage infrastructure.
+Infrastructure layout and local Terraform commands.
 
 ## Directory Structure
 
@@ -34,8 +34,8 @@ platform/terraform/
 │   │   └── vpc/              # Portal VPC, subnets
 │   ├── range/
 │   │   └── vpc/              # Range VPC, Network Firewall
-│   ├── pulumi-provisioner/   # ECS task for Shifter Engine
-│   ├── pulumi-state/         # S3 + DynamoDB for Pulumi
+│   ├── engine-provisioner/   # ECS task for Shifter Engine
+│   ├── engine-state/         # Engine state bucket and DynamoDB runtime locks
 │   ├── guacamole/            # Browser-based RDP
 │   ├── log-aggregation/      # Centralized logging
 │   └── ecr/                  # Container registries
@@ -76,9 +76,13 @@ Each component has its own state file:
 | Range | `shifter/{env}/range/terraform.tfstate` |
 | Global | `global/{component}/terraform.tfstate` |
 
-State is stored in S3 with DynamoDB locking:
+AWS Terraform state is stored in S3 with S3 native locking
+(`use_lockfile = true`):
 - **Dev**: `shifter-dev-infra-*` bucket
 - **Prod**: `shifter-infra-*` bucket
+
+The `engine-state` module creates a DynamoDB table for provisioner runtime
+locks. It is not the Terraform backend lock.
 
 ## Working Locally
 
@@ -100,10 +104,10 @@ terraform validate
 CI bootstraps a GCS backend bucket named `${project_id}-terraform-state` for
 `gcp-dev` pushes before running `terraform init`.
 
-The `gcp-dev` tfvars file now carries the security-critical public edge and operator-access settings:
+The `gcp-dev` tfvars file carries the public edge and operator-access settings:
 
 ```hcl
-public_hostname             = "shifter.keplerops.com"
+public_hostname             = "shifter.example.com"
 enable_managed_tls          = true
 gke_master_authorized_cidrs = ["173.181.31.170/32"]
 create_dns_managed_zone = false
@@ -112,7 +116,8 @@ dns_zone_dns_name       = ""
 dns_record_ttl          = 300
 ```
 
-`gdc-bootstrap` now fails before Terraform apply if those secure inputs are missing. The GCP path no longer treats a public IP/debug runtime as an acceptable bootstrap fallback, and normal applies happen through CI/CD on `gcp-dev` rather than ad hoc local deploys.
+`gdc-bootstrap` fails before Terraform apply if these inputs are missing.
+Routine GCP applies happen through CI/CD on `gcp-dev`.
 
 ### Plan
 
@@ -128,20 +133,62 @@ AWS_PROFILE=$PANW_SHIFTER_DEV_PROFILE terraform apply
 
 **Never apply to prod locally** - use the CI/CD pipeline.
 
+### RDS Change Application
+
+RDS changes that AWS can apply during a deploy — instance class, storage
+size, engine version, and dynamic parameter-group fields — must not be
+treated as complete until AWS reports no pending modifications for the
+affected instance. For dev-only RDS resources, prefer explicit
+`apply_immediately` module inputs that default to applying intended changes
+during the current deploy. Production must keep change timing deliberate:
+either pass an explicit maintenance-window choice through the same module
+surface or use a separate reviewed change flow.
+
+`apply_immediately` does NOT remediate every RDS change. Static
+parameter-group fields and major version upgrades still require an instance
+reboot to take effect, and modify-class operations can still leave
+`PendingModifiedValues` populated until the underlying maintenance action
+completes. The post-apply check will surface that residual state, but it does
+not by itself drive a reboot. When you change one of those fields, plan a
+follow-up reboot (or a maintenance-window-gated path) explicitly.
+
+Post-apply checks belong at the Terraform workflow boundary, after
+`terraform apply`, where the existing AWS credentials and environment context
+are already present. Reuse Terraform outputs or module outputs to identify
+the managed DB instances; do not hardcode names such as `dev-portal-db`
+inside a generic checker. For dev portal deploys, a successful apply that
+leaves non-empty `PendingModifiedValues` is treated as an incomplete deploy
+and fails the job loudly. Prod intentionally skips the check because prod
+relies on the maintenance-window path.
+
 ## Configuration vs Secrets
 
-### In terraform.tfvars (Committed)
+### In terraform.tfvars (committed baseline)
 
 ```hcl
-# Environment config - not secrets
+# Non-deployment-specific environment config — committed.
 aws_region         = "us-east-2"
 environment        = "dev"
 instance_type      = "t3.large"
-domain_name        = "dev.shifter.example.com"
+domain_name        = "dev.shifter.example.com"  # example.com baseline
 enable_autoscaling = false
 ```
 
-Terraform variables are committed to the repo. CI/CD reads them directly after checkout.
+### In local.auto.tfvars (gitignored, per-deployment override)
+
+```hcl
+# Deployment-specific identifiers — never committed.
+domain_name           = "dev.shifter.your-domain.example"
+ses_domain            = "your-domain.example"
+alarm_email           = "your-team@your-domain.example"
+allowed_email_domains = ["your-domain.example"]
+user_storage_bucket   = "shifter-dev-user-storage-<account-id>"
+```
+
+Terraform auto-loads `*.auto.tfvars` files alongside `terraform.tfvars`
+and the `.local`/`.auto.tfvars` values win. CI deploy workflows render
+`local.auto.tfvars` from GitHub secrets and repository variables; see
+[`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md).
 
 ### In Cloud Secret Managers (Runtime)
 

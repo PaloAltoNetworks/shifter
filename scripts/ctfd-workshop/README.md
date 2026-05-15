@@ -1,6 +1,6 @@
 # Standalone Workshop CTFd
 
-This directory is the one-off ops path for tonight's standalone CTFd at `ctf.shifter.keplerops.com`. It does not depend on Shifter's native CTF feature set.
+This directory is the one-off ops path for tonight's standalone CTFd at `ctf.shifter.example.com`. It does not depend on Shifter's native CTF feature set.
 
 ## Terraform
 
@@ -14,7 +14,7 @@ AWS_PROFILE=panw-shifter-dev-workstation terraform apply -var-file=dev.tfvars
 
 After apply:
 
-1. Create the external DNS `A` record for `ctf.shifter.keplerops.com` to the new Elastic IP.
+1. Create the external DNS `A` record for `ctf.shifter.example.com` to the new Elastic IP.
 2. Use the Terraform `certbot_command` output over SSM after DNS resolves.
 3. Complete the CTFd setup wizard in the browser.
 4. Generate an admin API token in CTFd and export it as `CTFD_TOKEN`.
@@ -25,7 +25,7 @@ This seeds the 10 `agentic_workshop` challenges, static flags, challenge hints, 
 
 ```bash
 export CTFD_TOKEN=<admin-token>
-python3 scripts/ctfd-workshop/seed_ctfd.py --base-url https://ctf.shifter.keplerops.com
+python3 scripts/ctfd-workshop/seed_ctfd.py --base-url https://ctf.shifter.example.com
 ```
 
 The canonical workshop box/challenge metadata lives in [agentic_workshop.json](/home/atomik/src/shifter/scripts/ctfd-workshop/agentic_workshop.json).
@@ -42,7 +42,7 @@ It does **not** modify the range bake or any scenario box content.
 ```bash
 export CTFD_TOKEN=<admin-token>
 python3 scripts/ctfd-workshop/sync_polaris_ctfd_onboarding.py \
-  --base-url https://polaris.keplerops.com
+  --base-url https://polaris.example.com
 ```
 
 If the core Polaris board has not been imported yet, rerun the sync after the main challenges exist so the warm-up challenge can wire its `next` link to `Company Info`.
@@ -60,7 +60,7 @@ It does **not** modify the range bake or any scenario box content.
 ```bash
 export CTFD_TOKEN=<admin-token>
 python3 scripts/ctfd-workshop/sync_polaris_ctfd.py \
-  --base-url https://polaris.keplerops.com
+  --base-url https://polaris.example.com
 ```
 
 ## Sync Range Flags
@@ -82,7 +82,7 @@ When the participant CSV is ready, create users with:
 
 ```bash
 python3 scripts/ctfd-workshop/create_users.py \
-  --base-url https://ctf.shifter.keplerops.com \
+  --base-url https://ctf.shifter.example.com \
   --csv participants.csv \
   --output participant-credentials.csv
 ```

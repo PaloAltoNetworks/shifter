@@ -12,21 +12,24 @@
 </div>
 
 <div class="filters">
-    <form method="get" class="flex-row gap-md" style="flex-wrap: wrap; align-items: center;">
-        <select name="severity" class="filter-select" onchange="this.form.submit()" aria-label="Filter by severity">
+    <form method="get" class="flex-row gap-md flex-wrap">
+        <label for="filter-severity" class="label-compact">Severity</label>
+        <select name="severity" id="filter-severity" class="filter-select" onchange="this.form.submit()">
             <option value="">All Severities</option>
             {% for value, label in severity_choices %}
             <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
-        <select name="status" class="filter-select" onchange="this.form.submit()" aria-label="Filter by status">
+        <label for="filter-status" class="label-compact">Status</label>
+        <select name="status" id="filter-status" class="filter-select" onchange="this.form.submit()">
             <option value="">All Statuses</option>
             {% for value, label in status_choices %}
             <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
         <label class="checkbox-label">
-            <input type="checkbox" name="include_deleted" value="true" {% if include_deleted %}checked{% endif %} onchange="this.form.submit()">
+            <input type="checkbox" name="include_deleted" value="true"
+                   {% if include_deleted %}checked{% endif %} onchange="this.form.submit()">
             <span>Show Deleted</span>
         </label>
     </form>
@@ -48,7 +51,7 @@
             {% for risk in risks %}
             <tr {% if risk.is_deleted %}class="deleted"{% endif %}>
                 <td>
-                    <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}" class="link" style="color: var(--theme-on-background);">
+                    <a href="{% url 'risk_register:risk_detail' pk=risk.pk %}" class="link text-accent">
                         {{ risk.title }}
                     </a>
                 </td>

@@ -14,7 +14,7 @@
 <div class="card message-success">
     <h3 class="card-title text-success">⚠️ Save This Key Now</h3>
     <p class="mb-md">This is your new API key. Copy it now - you won't be able to see it again!</p>
-    <pre class="font-mono" style="word-break: break-all;">{{ raw_key }}</pre>
+    <pre class="font-mono break-all">{{ raw_key }}</pre>
     <p class="mt-md text-small">
         <strong>Key Name:</strong> {{ api_key.name }}<br>
         <strong>Prefix:</strong> {{ api_key.prefix }}...
@@ -25,11 +25,12 @@
 
 <div class="card">
     <h3 class="card-title">Create New API Key</h3>
-    <form method="post" action="{% url 'risk_register:apikey_create' %}" class="flex-row gap-md" style="align-items: flex-end;">
+    <form method="post" action="{% url 'risk_register:apikey_create' %}" class="flex-row gap-md items-end">
         {% csrf_token %}
-        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+        <div class="form-group flex-1 mb-0">
             <label class="form-label" for="apikey-name">Key Name</label>
-            <input type="text" id="apikey-name" name="name" class="form-input" required placeholder="e.g., AI Agent Production">
+            <input type="text" id="apikey-name" name="name" class="form-input" required
+                   placeholder="e.g., AI Agent Production">
         </div>
         <button type="submit" class="btn btn-primary">Create Key</button>
     </form>
@@ -66,7 +67,9 @@
                 </td>
                 <td>
                     {% if key.is_active %}
-                    <form method="post" action="{% url 'risk_register:apikey_revoke' pk=key.pk %}" style="display: inline;" onsubmit="return confirm('Revoke this API key?');">
+                    <form method="post"
+                          action="{% url 'risk_register:apikey_revoke' pk=key.pk %}"
+                          class="d-inline" onsubmit="return confirm('Revoke this API key?');">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
                     </form>
@@ -85,7 +88,8 @@
         <div class="empty-state-graphic-arc"></div>
         <div class="empty-state-graphic-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1
+                         7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
             </svg>
         </div>
     </div>

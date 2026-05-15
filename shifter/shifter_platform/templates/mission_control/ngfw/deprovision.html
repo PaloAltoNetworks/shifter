@@ -179,6 +179,18 @@
         gap: 12px;
         margin-top: 16px;
     }
+
+    .deprovision-intro {
+        color: var(--theme-text-secondary);
+        font-size: 13px;
+        margin: 0 0 24px;
+    }
+
+    .linked-ranges-note {
+        font-size: 12px;
+        color: var(--theme-text-secondary);
+        margin: 12px 0 0;
+    }
 </style>
 {% endblock %}
 
@@ -203,7 +215,7 @@
             </div>
         </div>
 
-        <p style="color: var(--theme-text-secondary); font-size: 13px; margin: 0 0 24px;">
+        <p class="deprovision-intro">
             You are about to permanently deprovision this NGFW. Please review the impact before proceeding.
         </p>
 
@@ -229,7 +241,8 @@
         {% if linked_ranges %}
         <div class="linked-ranges-warning">
             <h3 class="linked-ranges-title">
-                Warning: {{ linked_ranges|length }} range{% if linked_ranges|length != 1 %}s{% endif %} currently using this NGFW
+                Warning: {{ linked_ranges|length }}
+                range{% if linked_ranges|length != 1 %}s{% endif %} currently using this NGFW
             </h3>
             <ul class="linked-ranges-list">
                 {% for range in linked_ranges %}
@@ -239,7 +252,7 @@
                 </li>
                 {% endfor %}
             </ul>
-            <p style="font-size: 12px; color: var(--theme-text-secondary); margin: 12px 0 0;">
+            <p class="linked-ranges-note">
                 These ranges will lose their NGFW routing. You should destroy them first or assign a different NGFW.
             </p>
         </div>

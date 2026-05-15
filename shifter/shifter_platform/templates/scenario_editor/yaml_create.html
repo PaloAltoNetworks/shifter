@@ -29,9 +29,10 @@
 <form method="post">
     {% csrf_token %}
 
-    <div class="card" style="margin-bottom: 16px; padding: 0;">
+    <label for="yamlEditor" class="form-label">Scenario YAML</label>
+    <div class="card mb-lg p-0">
         <textarea name="yaml_content" id="yamlEditor" class="yaml-editor"
-                  aria-label="Scenario YAML" spellcheck="false">{{ yaml_content }}</textarea>
+                  spellcheck="false">{{ yaml_content }}</textarea>
     </div>
 
     <div class="flex-row gap-sm">

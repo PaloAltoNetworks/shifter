@@ -58,7 +58,7 @@ jobs:
       fast_gcp_deploy: ${{ steps.env.outputs.fast_gcp_deploy }}
       skip_tests: ${{ steps.skip.outputs.skip_tests }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Need full history to access PR head commit
 

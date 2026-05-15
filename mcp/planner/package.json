@@ -14,7 +14,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1"
   },
   "devDependencies": {
-    "eslint": "^9.39.2",
+    "eslint": "^10.3.0",
     "eslint-plugin-security": "^3.0.1"
   }
 }

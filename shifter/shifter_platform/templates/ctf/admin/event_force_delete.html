@@ -88,6 +88,21 @@
     align-items: center;
     padding: 4px 0;
 }
+
+.page-title-danger {
+    color: #dc3545;
+}
+
+.confirm-hint {
+    font-size: 13px;
+    color: var(--theme-text-secondary);
+}
+
+.confirm-target {
+    font-weight: 600;
+    margin: 8px 0;
+    font-size: 15px;
+}
 </style>
 {% endblock %}
 
@@ -101,7 +116,7 @@
         <span class="separator">/</span>
         <span>Force Delete</span>
     </div>
-    <h1 class="page-title" style="color: #dc3545;">Force Delete Event</h1>
+    <h1 class="page-title page-title-danger">Force Delete Event</h1>
 </div>
 
 <!-- Warning -->
@@ -110,7 +125,7 @@
     This cannot be undone. All range instances will be destroyed immediately.
 </div>
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+<div class="grid-2">
     <!-- Impact Summary -->
     <div class="card">
         <div class="card-title">Data To Be Deleted</div>
@@ -141,10 +156,10 @@
     <!-- Confirmation Form -->
     <div class="card">
         <div class="card-title">Confirm Deletion</div>
-        <p style="font-size: 13px; color: var(--theme-text-secondary);">
+        <p class="confirm-hint">
             To confirm, type the event name exactly as shown:
         </p>
-        <p style="font-weight: 600; margin: 8px 0; font-size: 15px;">{{ event.name }}</p>
+        <p class="confirm-target">{{ event.name }}</p>
 
         {% if error %}
         <div class="error-msg">{{ error }}</div>
@@ -156,6 +171,7 @@
                    name="confirmation_name"
                    class="confirm-input"
                    id="confirmation-name"
+                   aria-label="Event name confirmation"
                    placeholder="Type the event name here"
                    autocomplete="off"
                    required>
@@ -164,8 +180,8 @@
             </button>
         </form>
 
-        <div style="margin-top: 12px;">
-            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary" style="width: 100%;">
+        <div class="mt-md">
+            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}" class="btn btn-secondary w-full">
                 Cancel
             </a>
         </div>

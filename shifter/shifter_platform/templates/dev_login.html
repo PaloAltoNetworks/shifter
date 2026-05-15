@@ -107,7 +107,8 @@
         <p>This bypasses OIDC for local testing.</p>
         <form method="post">
             {% csrf_token %}
-            <input type="email" name="email" value="dev@example.com" placeholder="Email">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" value="dev@example.com" placeholder="Email">
             <label for="user_type">User Type</label>
             <select name="user_type" id="user_type">
                 <option value="standard">Standard (Mission Control)</option>

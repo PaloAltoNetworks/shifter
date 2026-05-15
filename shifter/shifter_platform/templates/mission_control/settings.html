@@ -12,8 +12,8 @@
 <div class="card">
     <div class="card-title">Account</div>
     <div class="form-group">
-        <label class="form-label">Email</label>
-        <input type="email" class="form-input opacity-60" value="{{ request.user.email }}" disabled>
+        <label class="form-label" for="account-email">Email</label>
+        <input type="email" id="account-email" class="form-input opacity-60" value="{{ request.user.email }}" disabled>
         <p class="text-small text-muted mt-sm">
             Managed by your identity provider
         </p>
@@ -43,7 +43,7 @@
 </div>
 
 <!-- Delete Confirmation Modal (hidden by default) -->
-<div id="delete-modal" class="modal" style="display: none;">
+<div id="delete-modal" class="modal d-none">
     <div class="card modal-content">
         <div class="card-title text-error">Delete Account?</div>
         <p class="text-muted mb-md">
@@ -58,7 +58,8 @@
             Type <strong class="text-error">DELETE</strong> to confirm:
         </p>
         <div class="form-group">
-            <input type="text" class="form-input" id="delete-confirm-input" placeholder="Type DELETE">
+            <input type="text" class="form-input" id="delete-confirm-input"
+                   aria-label="Type DELETE to confirm account deletion" placeholder="Type DELETE">
         </div>
         <div class="flex-row gap-md">
             <button class="btn btn-danger" id="confirm-delete-btn" disabled>

@@ -131,6 +131,11 @@
     font-size: 13px;
 }
 
+.hint-empty-note {
+    font-size: 13px;
+    margin: 0;
+}
+
 @media (max-width: 960px) {
     .detail-layout {
         grid-template-columns: 1fr;
@@ -186,31 +191,33 @@
 
         <!-- Hints -->
         <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-title flex-between-center">
                 Hints ({{ challenge.hints.count }})
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-outline-primary" onclick="document.getElementById('add-hint-form').style.display='block'">Add Hint</button>
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        onclick="document.getElementById('add-hint-form').classList.add('is-open')">Add Hint</button>
                 {% endif %}
             </div>
             {% if challenge.hints.count > 0 %}
-            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+            <table class="table-compact">
                 <thead>
-                    <tr style="border-bottom: 1px solid var(--theme-border);">
-                        <th style="padding: 6px; text-align: left;">#</th>
-                        <th style="padding: 6px; text-align: left;">Text</th>
-                        <th style="padding: 6px; text-align: left;">Penalty</th>
-                        {% if event.is_content_modifiable %}<th style="padding: 6px;"></th>{% endif %}
+                    <tr class="border-bottom">
+                        <th class="p-xs text-left">#</th>
+                        <th class="p-xs text-left">Text</th>
+                        <th class="p-xs text-left">Penalty</th>
+                        {% if event.is_content_modifiable %}<th class="p-xs"></th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
                     {% for hint in challenge.hints.all %}
-                    <tr style="border-bottom: 1px solid var(--theme-border);">
-                        <td style="padding: 6px;">{{ hint.order }}</td>
-                        <td style="padding: 6px;">{{ hint.text|truncatechars:80 }}</td>
-                        <td style="padding: 6px;">{{ hint.penalty }}%</td>
+                    <tr class="border-bottom">
+                        <td class="p-xs">{{ hint.order }}</td>
+                        <td class="p-xs">{{ hint.text|truncatechars:80 }}</td>
+                        <td class="p-xs">{{ hint.penalty }}%</td>
                         {% if event.is_content_modifiable %}
-                        <td style="padding: 6px; text-align: right;">
-                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeHint('{{ hint.id }}')">Remove</button>
+                        <td class="p-xs text-right">
+                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                    onclick="removeHint('{{ hint.id }}')">Remove</button>
                         </td>
                         {% endif %}
                     </tr>
@@ -218,26 +225,29 @@
                 </tbody>
             </table>
             {% else %}
-            <p class="text-muted" style="font-size: 13px; margin: 0;">No hints added yet.</p>
+            <p class="text-muted hint-empty-note">No hints added yet.</p>
             {% endif %}
             {% if event.is_content_modifiable %}
-            <div id="add-hint-form" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--theme-border);">
-                <div style="margin-bottom: 8px;">
-                    <label style="font-size: 12px; font-weight: 600;">Hint Text</label>
-                    <textarea id="new-hint-text" class="form-input" rows="2" style="width: 100%;"></textarea>
+            <div id="add-hint-form" class="collapse-panel-mt">
+                <div class="mb-sm">
+                    <label for="new-hint-text" class="label-compact">Hint Text</label>
+                    <textarea id="new-hint-text" class="form-input w-full" rows="2"></textarea>
                 </div>
-                <div style="display: flex; gap: 12px; margin-bottom: 8px;">
+                <div class="flex-fields-md">
                     <div>
-                        <label style="font-size: 12px; font-weight: 600;">Penalty (%)</label>
-                        <input type="number" id="new-hint-penalty" class="form-input" min="0" max="100" value="0" style="width: 100px;">
+                        <label for="new-hint-penalty" class="label-compact">Penalty (%)</label>
+                        <input type="number" id="new-hint-penalty" class="form-input w-100px"
+                               min="0" max="100" value="0">
                     </div>
                     <div>
-                        <label style="font-size: 12px; font-weight: 600;">Order</label>
-                        <input type="number" id="new-hint-order" class="form-input" min="0" value="{{ challenge.hints.count }}" style="width: 100px;">
+                        <label for="new-hint-order" class="label-compact">Order</label>
+                        <input type="number" id="new-hint-order" class="form-input w-100px"
+                               min="0" value="{{ challenge.hints.count }}">
                     </div>
                 </div>
                 <button type="button" class="btn btn-sm btn-primary" onclick="addHint()">Add</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('add-hint-form').style.display='none'">Cancel</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary"
+                        onclick="document.getElementById('add-hint-form').classList.remove('is-open')">Cancel</button>
             </div>
             {% endif %}
         </div>
@@ -252,10 +262,11 @@
 
         <!-- Flags -->
         <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-title flex-between-center">
                 Flags
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('add-flag-form').style.display = document.getElementById('add-flag-form').style.display === 'none' ? 'block' : 'none'">
+                <button type="button" class="btn btn-sm btn-primary"
+                        onclick="document.getElementById('add-flag-form').classList.toggle('is-open')">
                     Add Flag
                 </button>
                 {% endif %}
@@ -280,7 +291,8 @@
                         <td>{% if flag.case_sensitive %}Yes{% else %}No{% endif %}</td>
                         {% if event.is_content_modifiable %}
                         <td>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="removeFlag('{{ flag.pk }}')">Remove</button>
+                            <button type="button" class="btn btn-sm btn-danger"
+                                    onclick="removeFlag('{{ flag.pk }}')">Remove</button>
                         </td>
                         {% endif %}
                     </tr>
@@ -294,21 +306,22 @@
             {% endif %}
 
             {% if event.is_content_modifiable %}
-            <div id="add-flag-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
-                <div style="margin-bottom: 8px;">
-                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Flag Value</label>
-                    <input type="text" id="new-flag-value" class="form-control" placeholder="Enter flag value or regex pattern">
+            <div id="add-flag-form" class="collapse-panel">
+                <div class="mb-sm">
+                    <label for="new-flag-value" class="field-label">Flag Value</label>
+                    <input type="text" id="new-flag-value" class="form-control"
+                           placeholder="Enter flag value or regex pattern">
                 </div>
-                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                    <div style="flex: 1;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Type</label>
+                <div class="flex-fields-sm">
+                    <div class="flex-1">
+                        <label for="new-flag-type" class="field-label">Type</label>
                         <select id="new-flag-type" class="form-control">
                             <option value="static">Static</option>
                             <option value="regex">Regex</option>
                         </select>
                     </div>
-                    <div style="flex: 1;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Case Sensitive</label>
+                    <div class="flex-1">
+                        <label for="new-flag-case-sensitive" class="field-label">Case Sensitive</label>
                         <select id="new-flag-case-sensitive" class="form-control">
                             <option value="true">Yes</option>
                             <option value="false">No</option>
@@ -322,10 +335,11 @@
 
         <!-- Files -->
         <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-title flex-between-center">
                 Files
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('upload-file-form').style.display = document.getElementById('upload-file-form').style.display === 'none' ? 'block' : 'none'">
+                <button type="button" class="btn btn-sm btn-primary"
+                        onclick="document.getElementById('upload-file-form').classList.toggle('is-open')">
                     Upload File
                 </button>
                 {% endif %}
@@ -346,13 +360,15 @@
                     {% for file in challenge_files %}
                     <tr>
                         <td>
-                            <a href="#" onclick="downloadFile('{% url 'ctf:api_file_download' file_id=file.pk %}'); return false;">{{ file.display }}</a>
+                            <a href="#"
+                            data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">{{ file.display }}</a>
                         </td>
                         <td>{{ file.file_size_display }}</td>
                         <td>{{ file.content_type }}</td>
                         {% if event.is_content_modifiable %}
                         <td>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="removeFile('{{ file.pk }}')">Remove</button>
+                            <button type="button" class="btn btn-sm btn-danger"
+                                    onclick="removeFile('{{ file.pk }}')">Remove</button>
                         </td>
                         {% endif %}
                     </tr>
@@ -366,19 +382,21 @@
             {% endif %}
 
             {% if event.is_content_modifiable %}
-            <div id="upload-file-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
-                <form method="post" enctype="multipart/form-data" action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
+            <div id="upload-file-form" class="collapse-panel">
+                <form method="post" enctype="multipart/form-data"
+                      action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
                     {% csrf_token %}
-                    <div style="margin-bottom: 8px;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">File</label>
-                        <input type="file" name="file" class="form-control" required>
+                    <div class="mb-sm">
+                        <label for="upload-file-input" class="field-label">File</label>
+                        <input type="file" id="upload-file-input" name="file" class="form-control" required>
                     </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Display Name (optional)</label>
-                        <input type="text" name="display_name" class="form-control" placeholder="Friendly name for download">
+                    <div class="mb-sm">
+                        <label for="upload-display-name" class="field-label">Display Name (optional)</label>
+                        <input type="text" id="upload-display-name" name="display_name"
+                               class="form-control" placeholder="Friendly name for download">
                     </div>
                     <button type="submit" class="btn btn-primary">Upload</button>
-                    <span class="text-muted text-small" style="margin-left: 8px;">Max 50 MB</span>
+                    <span class="text-muted text-small ml-sm">Max 50 MB</span>
                 </form>
             </div>
             {% endif %}
@@ -386,10 +404,11 @@
 
         <!-- Prerequisites -->
         <div class="card">
-            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-title flex-between-center">
                 Prerequisites
                 {% if event.is_content_modifiable %}
-                <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('add-prereq-form').style.display = document.getElementById('add-prereq-form').style.display === 'none' ? 'block' : 'none'">
+                <button type="button" class="btn btn-sm btn-primary"
+                        onclick="document.getElementById('add-prereq-form').classList.toggle('is-open')">
                     Add Prerequisite
                 </button>
                 {% endif %}
@@ -410,11 +429,14 @@
                     {% for prereq in prerequisites %}
                     <tr>
                         <td>{{ prereq.required_challenge.name }}</td>
-                        <td><span class="badge badge-category">{{ prereq.required_challenge.category|title }}</span></td>
+                        <td>
+                            <span class="badge badge-category">{{ prereq.required_challenge.category|title }}</span>
+                        </td>
                         <td>{{ prereq.required_challenge.points }}</td>
                         {% if event.is_content_modifiable %}
                         <td>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="removePrerequisite('{{ prereq.pk }}')">Remove</button>
+                            <button type="button" class="btn btn-sm btn-danger"
+                                    onclick="removePrerequisite('{{ prereq.pk }}')">Remove</button>
                         </td>
                         {% endif %}
                     </tr>
@@ -428,13 +450,15 @@
             {% endif %}
 
             {% if event.is_content_modifiable %}
-            <div id="add-prereq-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
-                <div style="margin-bottom: 8px;">
-                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Required Challenge</label>
+            <div id="add-prereq-form" class="collapse-panel">
+                <div class="mb-sm">
+                    <label for="prereq-challenge-select" class="field-label">Required Challenge</label>
                     <select id="prereq-challenge-select" class="form-control">
                         <option value="">Select a challenge...</option>
                         {% for ch in other_challenges %}
-                        <option value="{{ ch.pk }}">{{ ch.name }} ({{ ch.category|title }}, {{ ch.points }} pts)</option>
+                        <option value="{{ ch.pk }}">
+                            {{ ch.name }} ({{ ch.category|title }}, {{ ch.points }} pts)
+                        </option>
                         {% endfor %}
                     </select>
                 </div>
@@ -533,23 +557,38 @@
             </div>
             <div class="detail-row">
                 <span class="detail-label">Flag Format</span>
-                <span class="detail-value">{% if challenge.flag_format %}{{ challenge.flag_format }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
+                <span class="detail-value">
+                    {% if challenge.flag_format %}{{ challenge.flag_format }}
+                    {% else %}<span class="text-muted">Not set</span>{% endif %}
+                </span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Max Attempts</span>
-                <span class="detail-value">{% if challenge.max_attempts %}{{ challenge.max_attempts }}{% else %}Unlimited{% endif %}</span>
+                <span class="detail-value">
+                    {% if challenge.max_attempts %}{{ challenge.max_attempts }}
+                    {% else %}Unlimited{% endif %}
+                </span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Release Time</span>
-                <span class="detail-value">{% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}{% else %}Immediate{% endif %}</span>
+                <span class="detail-value">
+                    {% if challenge.release_time %}{{ challenge.release_time|date:"M d, H:i" }}
+                    {% else %}Immediate{% endif %}
+                </span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Target Instance</span>
-                <span class="detail-value">{% if challenge.target_instance_name %}{{ challenge.target_instance_name }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
+                <span class="detail-value">
+                    {% if challenge.target_instance_name %}{{ challenge.target_instance_name }}
+                    {% else %}<span class="text-muted">Not set</span>{% endif %}
+                </span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Target Port</span>
-                <span class="detail-value">{% if challenge.target_port %}{{ challenge.target_port }}{% else %}<span class="text-muted">Not set</span>{% endif %}</span>
+                <span class="detail-value">
+                    {% if challenge.target_port %}{{ challenge.target_port }}
+                    {% else %}<span class="text-muted">Not set</span>{% endif %}
+                </span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Tags</span>
@@ -574,7 +613,8 @@
             <div class="detail-row">
                 <span class="detail-label">Rating</span>
                 <span class="detail-value">
-                    {% if rating.average %}{{ rating.average }}/5 ({{ rating.count }} rating{{ rating.count|pluralize }}){% else %}No ratings yet{% endif %}
+                    {% if rating.average %}{{ rating.average }}/5 ({{ rating.count }}
+                    rating{{ rating.count|pluralize }}){% else %}No ratings yet{% endif %}
                 </span>
             </div>
             <div class="detail-row">
@@ -594,6 +634,13 @@ function downloadFile(apiUrl) {
         })
         .catch(function() { alert('Download failed.'); });
 }
+
+document.querySelectorAll('[data-download-url]').forEach(function(link) {
+    link.addEventListener('click', function(event) {
+        event.preventDefault();
+        downloadFile(link.dataset.downloadUrl);
+    });
+});
 </script>
 {% if event.is_content_modifiable %}
 <script>
@@ -647,7 +694,8 @@ function addPrerequisite() {
     });
 }
 
-const REMOVE_PREREQ_URL = "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
+const REMOVE_PREREQ_URL =
+    "{% url 'ctf:api_prerequisite_delete' prerequisite_id='00000000-0000-0000-0000-000000000000' %}";
 function removePrerequisite(prereqId) {
     if (!confirm('Remove this prerequisite?')) return;
     const url = REMOVE_PREREQ_URL.replace('00000000-0000-0000-0000-000000000000', prereqId);

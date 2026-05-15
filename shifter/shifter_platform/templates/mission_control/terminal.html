@@ -47,11 +47,13 @@
     <div class="terminal-container mode-tabs" id="terminal-container">
         <!-- Dynamic terminal panes for each instance (tab mode) -->
         {% for instance in active_range.instances %}
-        <div class="terminal-pane{% if forloop.first %} active{% endif %}" id="pane-{{ instance.uuid }}" data-uuid="{{ instance.uuid }}">
+        <div class="terminal-pane{% if forloop.first %} active{% endif %}"
+             id="pane-{{ instance.uuid }}" data-uuid="{{ instance.uuid }}">
             <div class="pane-header">
                 <span class="pane-icon">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2"
+                              stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                 </span>
@@ -59,7 +61,8 @@
                 <span class="pane-subtitle">{{ instance.os_type }}</span>
                 <button class="pane-action-btn ssh-btn" title="Open SSH Session" data-uuid="{{ instance.uuid }}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2"
+                              stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M13 16H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                     <span>SSH</span>
@@ -86,12 +89,13 @@
         <!-- Split mode panes (hidden by default, shown in split mode) -->
         <div class="split-pane" id="left-pane">
             <div class="split-pane-header">
-                <select class="pane-select" id="left-pane-select">
+                <select class="pane-select" id="left-pane-select" aria-label="Left split-pane terminal target">
                     <!-- Options populated by JavaScript -->
                 </select>
                 <button class="pane-action-btn ssh-btn split-ssh-btn" title="Open SSH Session" id="left-pane-ssh-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2"
+                              stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M13 16H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                     <span>SSH</span>
@@ -115,12 +119,13 @@
         </div>
         <div class="split-pane" id="right-pane">
             <div class="split-pane-header">
-                <select class="pane-select" id="right-pane-select">
+                <select class="pane-select" id="right-pane-select" aria-label="Right split-pane terminal target">
                     <!-- Options populated by JavaScript -->
                 </select>
                 <button class="pane-action-btn ssh-btn split-ssh-btn" title="Open SSH Session" id="right-pane-ssh-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M7 8L11 12L7 16" stroke="currentColor" stroke-width="2"
+                              stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M13 16H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                     <span>SSH</span>
@@ -149,7 +154,8 @@
         <div class="disconnected-content">
             <div class="disconnected-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M6 8L10 12L6 16" stroke="currentColor" stroke-width="2"
+                          stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M12 16H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
             </div>
@@ -169,10 +175,18 @@
 {% block extra_js %}
 {% if has_active_range %}
 <!-- xterm.js from CDN with SRI -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js" integrity="sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js" integrity="sha384-iAAiqSZrWZz/YKZSTKOPNaRhVOg9JY14avg2EWEpYNnUsrnATA+Sg8pV7mak84/G" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+      integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh"
+      crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"
+        integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"
+        integrity="sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"
+        integrity="sha384-iAAiqSZrWZz/YKZSTKOPNaRhVOg9JY14avg2EWEpYNnUsrnATA+Sg8pV7mak84/G"
+        crossorigin="anonymous"></script>
 
 <!-- Split.js for resizable split panes -->
 <script src="https://unpkg.com/split.js@1.6.5/dist/split.min.js"></script>

@@ -116,9 +116,9 @@
 
 <!-- Active Events Quick Controls -->
 {% if active_events_data %}
-<div class="card mb-lg" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">Active Events</div>
+<div class="card mb-lg p-0">
+    <div class="p-lg">
+        <div class="card-title mb-0">Active Events</div>
     </div>
     {% for item in active_events_data %}
     <div class="quick-controls-row">
@@ -135,15 +135,18 @@
                 &middot;
                 Ranges:
                 {% if item.range_ready %}<span class="status-badge ready">{{ item.range_ready }} ready</span>{% endif %}
-                {% if item.range_provisioning %}<span class="status-badge provisioning">{{ item.range_provisioning }} provisioning</span>{% endif %}
+                {% if item.range_provisioning %}<span
+                class="status-badge provisioning">{{ item.range_provisioning }} provisioning</span>{% endif %}
                 {% if item.range_error %}<span class="status-badge error">{{ item.range_error }} error</span>{% endif %}
                 {% endif %}
             </div>
         </div>
         {% if item.status_form.fields.action.choices %}
-        <form method="post" action="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}" class="quick-controls-actions">
+        <form method="post" action="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}"
+              class="quick-controls-actions">
             {% csrf_token %}
-            <select name="action">
+            <label for="event-action-{{ item.event.pk }}" class="label-compact">Status action</label>
+            <select name="action" id="event-action-{{ item.event.pk }}">
                 {% for value, label in item.status_form.fields.action.choices %}
                 <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}
@@ -158,7 +161,7 @@
 
 <!-- Range Provisioning Overview -->
 {% if range_ready or range_provisioning or range_error %}
-<div class="stats-grid mb-lg" style="grid-template-columns: repeat(3, 1fr);">
+<div class="stats-grid mb-lg grid-cols-3">
     <div class="card stat-card">
         <div class="stat-label">Ranges Ready</div>
         <div class="stat-value">{{ range_ready }}</div>
@@ -176,9 +179,9 @@
 
 <!-- Recent Activity Feed -->
 {% if recent_activity %}
-<div class="card mb-lg" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="card-title" style="margin-bottom: 0;">Recent Activity</div>
+<div class="card mb-lg p-0">
+    <div class="p-lg">
+        <div class="card-title mb-0">Recent Activity</div>
     </div>
     <table class="table">
         <thead>
@@ -210,10 +213,10 @@
 {% endif %}
 
 <!-- Recent Events -->
-<div class="card" style="padding: 0;">
-    <div style="padding: 16px;">
+<div class="card p-0">
+    <div class="p-lg">
         <div class="recent-header">
-            <div class="card-title" style="margin-bottom: 0;">Recent Events</div>
+            <div class="card-title mb-0">Recent Events</div>
             <a href="{% url 'ctf:admin_event_list' %}" class="btn btn-secondary">View All</a>
         </div>
     </div>

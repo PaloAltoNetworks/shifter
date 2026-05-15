@@ -434,3 +434,110 @@ a:hover {
 .gap-sm { gap: 8px; }
 .gap-md { gap: 12px; }
 .gap-lg { gap: 16px; }
+
+/*
+ * Extracted utilities — replacements for inline style="" attributes.
+ * Each class reproduces the exact declarations it replaces so rendering
+ * is unchanged.
+ */
+
+/* Display */
+.d-none { display: none; }
+.d-inline { display: inline; }
+
+/* Width */
+.w-full { width: 100%; }
+.w-100px { width: 100px; }
+
+/* Flex / grid */
+.flex-1 { flex: 1; }
+.flex-wrap { flex-wrap: wrap; }
+.items-end { align-items: flex-end; }
+
+.flex-between-center {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.flex-fields-sm {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.flex-fields-md {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+
+/* Margin */
+.m-0 { margin: 0; }
+.mb-0 { margin-bottom: 0; }
+.ml-sm { margin-left: 8px; }
+
+/* Padding */
+.p-0 { padding: 0; }
+.p-xs { padding: 6px; }
+.p-lg { padding: 16px; }
+
+/* Text */
+.text-left { text-align: left; }
+.text-mono { font-family: monospace; }
+.break-all { word-break: break-all; }
+.text-accent { color: var(--theme-on-background); }
+
+/* Borders */
+.border-bottom { border-bottom: 1px solid var(--theme-border); }
+.border-top { border-top: 1px solid var(--theme-border); }
+
+/* Form labels */
+.field-label {
+    font-size: 13px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.label-compact {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* JS-toggled collapsible panels (hidden until .is-open is added) */
+.collapse-panel {
+    display: none;
+    padding: 12px;
+    border-top: 1px solid var(--theme-border);
+}
+
+.collapse-panel-mt {
+    display: none;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--theme-border);
+}
+
+.collapse-panel.is-open,
+.collapse-panel-mt.is-open { display: block; }
+
+/* Compact data table (smaller font, no cell chrome) */
+.table-compact {
+    width: 100%;
+    font-size: 13px;
+    border-collapse: collapse;
+}
+
+/* Compact button (used in dense table rows) */
+.btn-tight {
+    height: auto;
+    padding: 0.125rem 0.5rem;
+}

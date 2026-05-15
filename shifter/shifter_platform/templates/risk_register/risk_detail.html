@@ -15,23 +15,24 @@
     <div class="flex-row gap-sm">
         <a href="{% url 'risk_register:risk_edit' pk=risk.pk %}" class="btn btn-secondary btn-sm">Edit</a>
         {% if risk.status != 'closed' %}
-        <form method="post" action="{% url 'risk_register:risk_close' pk=risk.pk %}" style="display: inline;">
+        <form method="post" action="{% url 'risk_register:risk_close' pk=risk.pk %}" class="d-inline">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary btn-sm">Close</button>
         </form>
         {% else %}
-        <form method="post" action="{% url 'risk_register:risk_reopen' pk=risk.pk %}" style="display: inline;">
+        <form method="post" action="{% url 'risk_register:risk_reopen' pk=risk.pk %}" class="d-inline">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary btn-sm">Reopen</button>
         </form>
         {% endif %}
         {% if risk.is_deleted %}
-        <form method="post" action="{% url 'risk_register:risk_restore' pk=risk.pk %}" style="display: inline;">
+        <form method="post" action="{% url 'risk_register:risk_restore' pk=risk.pk %}" class="d-inline">
             {% csrf_token %}
             <button type="submit" class="btn btn-primary btn-sm">Restore</button>
         </form>
         {% else %}
-        <form method="post" action="{% url 'risk_register:risk_delete' pk=risk.pk %}" style="display: inline;" onsubmit="return confirm('Delete this risk?');">
+        <form method="post" action="{% url 'risk_register:risk_delete' pk=risk.pk %}"
+              class="d-inline" onsubmit="return confirm('Delete this risk?');">
             {% csrf_token %}
             <button type="submit" class="btn btn-danger btn-sm">Delete</button>
         </form>
@@ -63,15 +64,24 @@
         </div>
         <div class="detail-item">
             <div class="detail-label">Likelihood Score</div>
-            <div class="detail-value">{% if risk.likelihood_score %}{{ risk.likelihood_score }} / 5{% else %}<span class="text-muted">—</span>{% endif %}</div>
+            <div class="detail-value">
+                {% if risk.likelihood_score %}{{ risk.likelihood_score }} / 5
+                {% else %}<span class="text-muted">—</span>{% endif %}
+            </div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Impact Score</div>
-            <div class="detail-value">{% if risk.impact_score %}{{ risk.impact_score }} / 5{% else %}<span class="text-muted">—</span>{% endif %}</div>
+            <div class="detail-value">
+                {% if risk.impact_score %}{{ risk.impact_score }} / 5
+                {% else %}<span class="text-muted">—</span>{% endif %}
+            </div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Risk Score</div>
-            <div class="detail-value">{% if risk.risk_score %}<strong>{{ risk.risk_score }}</strong> / 25{% else %}<span class="text-muted">—</span>{% endif %}</div>
+            <div class="detail-value">
+                {% if risk.risk_score %}<strong>{{ risk.risk_score }}</strong> / 25
+                {% else %}<span class="text-muted">—</span>{% endif %}
+            </div>
         </div>
     </div>
 
@@ -79,15 +89,24 @@
         <h3 class="card-title">Details</h3>
         <div class="detail-item">
             <div class="detail-label">Attack Vector</div>
-            <div class="detail-value">{% if risk.attack_vector %}{{ risk.attack_vector }}{% else %}<span class="text-muted">Not specified</span>{% endif %}</div>
+            <div class="detail-value">
+                {% if risk.attack_vector %}{{ risk.attack_vector }}
+                {% else %}<span class="text-muted">Not specified</span>{% endif %}
+            </div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Affected Assets</div>
-            <div class="detail-value">{% if risk.affected_assets %}{{ risk.affected_assets }}{% else %}<span class="text-muted">Not specified</span>{% endif %}</div>
+            <div class="detail-value">
+                {% if risk.affected_assets %}{{ risk.affected_assets }}
+                {% else %}<span class="text-muted">Not specified</span>{% endif %}
+            </div>
         </div>
         <div class="detail-item">
             <div class="detail-label">Mitigation Status</div>
-            <div class="detail-value">{% if risk.mitigation_status %}{{ risk.mitigation_status }}{% else %}<span class="text-muted">Not specified</span>{% endif %}</div>
+            <div class="detail-value">
+                {% if risk.mitigation_status %}{{ risk.mitigation_status }}
+                {% else %}<span class="text-muted">Not specified</span>{% endif %}
+            </div>
         </div>
         {% if risk.resolution_reason %}
         <div class="detail-item">
@@ -127,9 +146,11 @@
                 <span class="comment-author">{{ comment.author_display }}</span>
                 <div>
                     <span class="comment-date">{{ comment.created_at|date:"M d, Y H:i" }}</span>
-                    <form method="post" action="{% url 'risk_register:comment_delete' risk_pk=risk.pk pk=comment.pk %}" style="display: inline; margin-left: 0.5rem;">
+                    <form method="post"
+                          action="{% url 'risk_register:comment_delete' risk_pk=risk.pk pk=comment.pk %}"
+                          class="d-inline ml-sm">
                         {% csrf_token %}
-                        <button type="submit" class="btn btn-danger btn-sm" style="height: auto; padding: 0.125rem 0.5rem;">Delete</button>
+                        <button type="submit" class="btn btn-danger btn-sm btn-tight">Delete</button>
                     </form>
                 </div>
             </div>
@@ -144,7 +165,8 @@
     <form method="post" action="{% url 'risk_register:comment_add' risk_pk=risk.pk %}">
         {% csrf_token %}
         <div class="form-group">
-            <textarea name="content" class="form-textarea" placeholder="Add a comment..." rows="3"></textarea>
+            <textarea id="risk-comment-content" name="content" class="form-textarea"
+                      aria-label="Add a comment" placeholder="Add a comment..." rows="3"></textarea>
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Add Comment</button>
     </form>

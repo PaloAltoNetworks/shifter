@@ -38,10 +38,12 @@ Current mechanisms:
   `security-events: write`, `actions: read`); no `pull_request_target`.
 - `.github/workflows/pr-title-lint.yml`: pull-request title validation
   against the conventional-commit shape used by towncrier and the
-  release-drafter conventions. Allowed types: `security`, `added`,
-  `changed`, `deprecated`, `removed`, `fixed`, `feat`, `fix`, `chore`,
-  `docs`, `refactor`, `test`, `ci`, `build`, `perf`, `revert`. Subject
-  must start with a lowercase letter.
+  release-drafter conventions. PRs targeting the `dev` integration
+  branch are exempt; PRs targeting release/environment branches are
+  validated. Allowed types: `security`, `added`, `changed`,
+  `deprecated`, `removed`, `fixed`, `feat`, `fix`, `chore`, `docs`,
+  `refactor`, `test`, `ci`, `build`, `perf`, `revert`. Subject must
+  start with a lowercase letter.
 - `.github/dependabot.yml`: weekly dependency PRs across every uv,
   npm, github-actions, and pre-commit package root in the repo; every
   block targets the `dev` integration branch.

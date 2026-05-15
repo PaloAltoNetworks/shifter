@@ -21,7 +21,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.14.10",
     "bandit>=1.9.2",
-    "types-pyyaml>=6.0",
+    "types-pyyaml>=6.0.12.20260510",
 ]
 
 [tool.setuptools]

@@ -14,11 +14,13 @@ function Log-Message {
 
 Log-Message "Victim Windows instance booting..."
 
-# Set Administrator password for RDP access
-# TODO: Move to CMS-managed instance credentials (#542)
-$AdminPassword = "{{ admin_password }}"
-net user Administrator $AdminPassword
-Log-Message "Administrator password configured"
+# Issue #762: the per-instance local Administrator password is set
+# by the engine provisioner via SSH (using the per-instance SSH key
+# already baked into administrators_authorized_keys below) after this
+# VM reaches a reachable state — not in user_data. The password value
+# never appears in the rendered cloud-init payload. See
+# shifter/engine/provisioner/plans/set_local_password_plan.py.
+Log-Message "Local Administrator password will be set by the engine provisioner post-boot via SSH/Run Command"
 
 # Ensure OpenSSH Server is installed
 $sshCapability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'

@@ -22,8 +22,10 @@ output "instances" {
       subnet_name        = local.instance_map[key].subnet_name
       instance_id        = inst.id
       private_ip         = inst.private_ip
-      ssh_key_secret_arn = aws_secretsmanager_secret.ssh_key[key].arn
-      hostname           = local.instance_map[key].name != "" ? local.instance_map[key].name : "shifter-${local.instance_map[key].role}-${var.range_id}"
+      ssh_key_secret_arn          = aws_secretsmanager_secret.ssh_key[key].arn
+      rdp_password_secret_arn     = aws_secretsmanager_secret.guest_password[key].arn
+      rdp_password_ssm_param_name = aws_ssm_parameter.guest_password[key].name
+      hostname                    = local.instance_map[key].name != "" ? local.instance_map[key].name : "shifter-${local.instance_map[key].role}-${var.range_id}"
       public_key         = tls_private_key.instance[key].public_key_openssh
       xdr_agent_url      = local.instance_map[key].agent_url
       join_domain        = local.instance_map[key].join_domain

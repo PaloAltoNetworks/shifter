@@ -16,9 +16,10 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 
+from cms.credential_encryption import EncryptedInstanceDataField
 from cms.models.catalogs import AppType, InstanceType
 from cms.models.lifecycle import apply_terminal_soft_delete
-from cms.models.mixins import SoftDeleteMixin
+from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
 from shared.enums import RequestType, ResourceStatus
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,12 @@ class EntityBase(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
+
     class Meta:
         abstract = True
+        base_manager_name = "all_objects"
 
     def save(self, *args, **kwargs):
         """Save with terminal-status soft-delete invariant enforcement."""
@@ -74,7 +79,7 @@ class Request(SoftDeleteMixin, models.Model):
     """Provisioning request container.
 
     Groups items requested together while allowing independent lifecycles.
-    Maps 1:1 with RequestSpec schema. The :class:`~cms.models.mixins.SoftDeleteMixin`
+    Maps 1:1 with RequestSpec schema. The :class:`~shared.db.SoftDeleteMixin`
     supplies ``is_deleted``.
 
     Attributes:
@@ -98,10 +103,14 @@ class Request(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = SoftDeleteManager()
+    all_objects = SoftDeleteQuerySet.as_manager()
+
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "Request"
         verbose_name_plural = "Requests"
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"Request {self.request_id}"
@@ -137,7 +146,7 @@ class Instance(EntityBase):
         on_delete=models.PROTECT,
         related_name="instance_configs",
     )
-    data = models.JSONField(
+    data = EncryptedInstanceDataField(
         default=dict,
         help_text="Type-specific instance data (validated by spec_class)",
     )
@@ -146,6 +155,10 @@ class Instance(EntityBase):
         ordering = ["-created_at"]
         verbose_name = "Instance"
         verbose_name_plural = "Instances"
+        # Concrete Meta does not inherit Meta from the abstract EntityBase
+        # in Django; restate base_manager_name so reverse-FK descriptors and
+        # admin introspection stay on the unfiltered manager.
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.name} ({self.id})"
@@ -193,6 +206,8 @@ class App(EntityBase):
         ordering = ["-created_at"]
         verbose_name = "App"
         verbose_name_plural = "Apps"
+        # See Instance.Meta.base_manager_name for rationale.
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"{self.name} ({self.id})"
@@ -231,6 +246,8 @@ class Subnet(EntityBase):
         ordering = ["-created_at"]
         verbose_name = "Subnet"
         verbose_name_plural = "Subnets"
+        # See Instance.Meta.base_manager_name for rationale.
+        base_manager_name = "all_objects"
 
     def __str__(self) -> str:
         return f"{self.name} ({self.id})"

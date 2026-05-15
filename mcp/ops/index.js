@@ -3,9 +3,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { execSync, spawn } from "child_process";
+import { spawn } from "child_process";
 import pg from "pg";
 import net from "net";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   REGION,
   LOCAL_PORTS,
@@ -20,7 +22,30 @@ import {
   MAX_S3_READ_SIZE,
   isBinaryContentType,
   validateManageCommand,
+  awsJson,
+  awsText as awsTextLib,
+  buildAwsArgv,
+  buildFilterLogEventsArgs,
+  buildSsmSendCommandArgs,
+  buildRunManageArgs,
+  buildPoolConfig,
 } from "./lib.js";
+import {
+  loadPolicy,
+  profileFromEnv,
+  registerTool,
+  consumeApexToken,
+  validateApexCoverage,
+} from "./policy.js";
+
+// Spawn a long-running aws-cli process (e.g. an SSM port-forward that
+// must stay open). Uses the same argv-array discipline as the
+// shared aws()/awsText() helpers so tunnel call sites cannot
+// accidentally re-introduce shell-string interpolation.
+function spawnAws(profile, args, options = {}) {
+  const argv = buildAwsArgv(args, profile, REGION);
+  return spawn("aws", argv, options);
+}
 
 const { Pool } = pg;
 
@@ -35,23 +60,36 @@ function getProfile(env) {
 
 // ==========================================================================
 // AWS helpers
+//
+// All aws-cli invocations go through these wrappers, which delegate to
+// the argv-array helpers in lib.js. Callers MUST pass `args` as an
+// array of argv elements — never as a shell string. The lib helpers
+// throw TypeError if a string slips through.
 // ==========================================================================
 
 function aws(profile, args) {
-  const cmd = `aws ${args} --profile "${profile}" --region "${REGION}" --output json`;
-  return JSON.parse(execSync(cmd, { encoding: "utf-8", timeout: 60000 }));
+  return awsJson(profile, args);
 }
 
 function awsText(profile, args) {
-  const cmd = `aws ${args} --profile "${profile}" --region "${REGION}"`;
-  return execSync(cmd, { encoding: "utf-8", timeout: 60000 }).trim();
+  return awsTextLib(profile, args);
 }
 
 function getInstancePlatform(profile, instanceId) {
-  return awsText(
-    profile,
-    `ec2 describe-instances --instance-ids "${instanceId}" --query "Reservations[0].Instances[0].PlatformDetails"`,
-  );
+  // `--output text` so the scalar query result is returned as the raw
+  // string (`Linux/UNIX`, `Windows`) rather than JSON-quoted
+  // (`"Linux/UNIX"`). Without this getSsmDocument() never matches
+  // "windows" because the value starts with a `"` instead of `w`.
+  return awsText(profile, [
+    "ec2",
+    "describe-instances",
+    "--instance-ids",
+    instanceId,
+    "--query",
+    "Reservations[0].Instances[0].PlatformDetails",
+    "--output",
+    "text",
+  ]);
 }
 
 function ok(text) {
@@ -97,12 +135,22 @@ async function fetchCredentials(env) {
   const profile = getProfile(env);
   const secretId = `shifter-${env}-portal-db-credentials`;
 
-  const result = execSync(
-    `aws secretsmanager get-secret-value --secret-id "${secretId}" --region "${REGION}" --profile "${profile}" --query SecretString --output text`,
-    { encoding: "utf-8", timeout: 30000 }
+  const result = awsTextLib(
+    profile,
+    [
+      "secretsmanager",
+      "get-secret-value",
+      "--secret-id",
+      secretId,
+      "--query",
+      "SecretString",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
   );
 
-  credentials[env] = JSON.parse(result.trim());
+  credentials[env] = JSON.parse(result);
   return credentials[env];
 }
 
@@ -113,39 +161,89 @@ function killTunnel(env) {
   }
 }
 
+function discoverRdsEndpoint(env) {
+  // The RDS endpoint is the verification target for TLS (#1190) and
+  // the destination address for the SSM port-forward. Both code
+  // paths in ensureTunnel() rely on this — the "tunnel already open"
+  // shortcut needs the endpoint too, not just the start-from-scratch
+  // path. Factored out so the lookup runs every invocation and we
+  // never reach getPool() with `tunnels[env].rdsHost === undefined`
+  // (codex review #1180 cycle 1 finding 2).
+  const profile = getProfile(env);
+  const jmesQuery = `DBInstances[?DBInstanceIdentifier==\`${env}-portal-db\`].Endpoint.Address`;
+  const rdsHost = awsTextLib(
+    profile,
+    [
+      "rds",
+      "describe-db-instances",
+      "--query",
+      jmesQuery,
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
+  );
+  if (!rdsHost || rdsHost === "None") {
+    throw new Error(`Could not find RDS endpoint for ${env}`);
+  }
+  return rdsHost;
+}
+
 async function ensureTunnel(env) {
   const port = LOCAL_PORTS[env];
 
+  // Tunnel-already-up paths: still resolve and cache the RDS
+  // endpoint so getPool()'s buildPoolConfig() has the verification
+  // target. Without this, a pre-existing port-forward (started by a
+  // previous server instance, an operator's manual session, etc.)
+  // would short-circuit ensureTunnel() and leave rdsHost undefined,
+  // which buildPoolConfig() refuses by design.
   if (tunnels[env]?.process && !tunnels[env].process.killed) {
-    if (await isPortOpen(port)) return;
+    if (await isPortOpen(port)) {
+      if (!tunnels[env].rdsHost) {
+        tunnels[env].rdsHost = discoverRdsEndpoint(env);
+      }
+      return;
+    }
     killTunnel(env);
   }
 
-  if (await isPortOpen(port)) return;
+  if (await isPortOpen(port)) {
+    // Port is open but we don't own the tunnel record. Cache the
+    // RDS endpoint so getPool can target the right cert; record the
+    // tunnel as managed-elsewhere (no `.process`) so killTunnel
+    // doesn't try to kill someone else's process.
+    const rdsHost = discoverRdsEndpoint(env);
+    tunnels[env] = { process: null, rdsHost };
+    return;
+  }
 
   const profile = getProfile(env);
 
-  const instanceId = execSync(
-    `aws ec2 describe-instances --filters "Name=tag:Name,Values=${env}-portal-ec2" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region "${REGION}" --profile "${profile}"`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const instanceId = awsTextLib(
+    profile,
+    [
+      "ec2",
+      "describe-instances",
+      "--filters",
+      `Name=tag:Name,Values=${env}-portal-ec2`,
+      "Name=instance-state-name,Values=running",
+      "--query",
+      "Reservations[0].Instances[0].InstanceId",
+      "--output",
+      "text",
+    ],
+    { timeoutMs: 30000 }
+  );
 
   if (!instanceId || instanceId === "None") {
     throw new Error(`Could not find running ${env} portal EC2 instance`);
   }
 
-  const jmesQuery = `DBInstances[?DBInstanceIdentifier==\`${env}-portal-db\`].Endpoint.Address`;
-  const rdsHost = execSync(
-    `aws rds describe-db-instances --region "${REGION}" --profile "${profile}" --query '${jmesQuery}' --output text`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  const rdsHost = discoverRdsEndpoint(env);
 
-  if (!rdsHost || rdsHost === "None") {
-    throw new Error(`Could not find RDS endpoint for ${env}`);
-  }
-
-  const proc = spawn(
-    "aws",
+  const proc = spawnAws(
+    profile,
     [
       "ssm",
       "start-session",
@@ -159,15 +257,15 @@ async function ensureTunnel(env) {
         portNumber: ["5432"],
         localPortNumber: [String(port)],
       }),
-      "--region",
-      REGION,
-      "--profile",
-      profile,
     ],
     { stdio: ["ignore", "pipe", "pipe"] }
   );
 
-  tunnels[env] = { process: proc };
+  // Capture the discovered rdsHost so getPool() can set ssl.servername
+  // for cert verification. The tunnel terminates at localhost but the
+  // RDS-issued cert names the RDS endpoint; without this the previous
+  // `rejectUnauthorized: false` workaround silently broke TLS trust.
+  tunnels[env] = { process: proc, rdsHost };
 
   proc.on("exit", () => {
     delete tunnels[env];
@@ -188,17 +286,10 @@ async function getPool(env) {
   const creds = await fetchCredentials(env);
 
   if (!pools[env]) {
-    pools[env] = new Pool({
-      host: "localhost",
-      port: LOCAL_PORTS[env],
-      user: creds.username,
-      password: creds.password,
-      database: creds.dbname,
-      ssl: { rejectUnauthorized: false },
-      max: 3,
-      connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 30000,
-    });
+    const rdsHost = tunnels[env]?.rdsHost;
+    pools[env] = new Pool(
+      buildPoolConfig({ rdsHost, creds, port: LOCAL_PORTS[env] }),
+    );
     pools[env].on("error", () => {
       pools[env]?.end().catch(() => {});
       delete pools[env];
@@ -242,28 +333,82 @@ function cleanup() {
   }
 }
 
-process.on("SIGTERM", () => {
-  cleanup();
-  process.exit(0);
-});
-process.on("SIGINT", () => {
-  cleanup();
-  process.exit(0);
-});
-process.on("exit", cleanup);
+// Signal handlers are installed inside `main()` (codex review #1202
+// cycle 1 finding 1). Module-level registration would fire on import,
+// adding `process.exit(0)`-ing handlers and ops cleanup to any host
+// process that merely imported `registerAllOpsTools` (e.g. the
+// surface tests, or future tooling) — and that contradicts the
+// side-effect-free import contract the seam exists to provide.
+function installLiveProcessHandlers() {
+  process.on("SIGTERM", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("exit", cleanup);
+}
 
 // ==========================================================================
 // MCP Server
+//
+// Phase 6 (#1202): the descriptor-registration block lives inside the
+// exported `registerAllOpsTools(ctx)` so `mcp/ops/tool-surface.test.js`
+// can drive registration against a fake server + real `.shifter.yaml`
+// without opening stdio. The live `main()` below builds the real
+// server, loads policy, calls `registerAllOpsTools`, and connects the
+// transport; the entrypoint guard at the bottom ensures importing this
+// module from a test is side-effect-free.
 // ==========================================================================
 
-const server = new McpServer({ name: "shifter-ops", version: "1.0.0" });
+export function registerAllOpsTools(ctx) {
+  // `approve` is the operator-confirmation MCP tool. The agent reads
+// the token off the operator's terminal (which the server printed to
+// stderr just before an apex operation parked) and calls this tool
+// with it. Registered as `observability` so every profile sees it —
+// without `approve`, no apex op can ever succeed and the server
+// degrades to fail-closed-on-every-apex.
+registerTool(ctx, {
+  name: "approve",
+  klass: "observability",
+  // Codex review #1201 cycle 2: the apex token must NEVER appear in
+  // audit records. `sensitive_args` instructs `_safeOutputArgs` to
+  // redact it on the audit/plan-summary surfaces while the handler
+  // still receives the raw value to consume the matching pending
+  // apex.
+  sensitive_args: ["token"],
+  description:
+    "Release a pending apex operator-confirmation token (printed to server stderr).",
+  schema: {
+    token: z
+      .string()
+      .regex(/^[a-f0-9]{32}$/i, "Must be a 32-char hex token from stderr")
+      .describe("Apex confirmation token from stderr"),
+  },
+  handler: async ({ token }) => {
+    const ok = consumeApexToken(token);
+    return {
+      content: [
+        {
+          type: "text",
+          text: ok
+            ? "Approved."
+            : "Error: token unknown, already consumed, or expired.",
+        },
+      ],
+      ...(ok ? {} : { isError: true }),
+    };
+  },
+});
 
 const EnvSchema = z
   .enum(["dev", "prod"])
   .default("dev")
   .describe("Environment (dev or prod). Defaults to dev.");
 
-// Input validation patterns — prevent shell injection in execSync calls
+// Input validation patterns — defense in depth on top of argv-array AWS execution
 const Ec2Id = z
   .string()
   .regex(/^i-[0-9a-f]{8,17}$/, "Must be a valid EC2 instance ID");
@@ -288,10 +433,11 @@ const ArnSchema = z
 // CloudWatch Logs
 // ==========================================================================
 
-server.tool(
-  "describe_log_streams",
-  "List recent log streams for a component or log group. Use component shorthand (portal, provisioner, guacamole-client, guacd, network-firewall, rds) or a full log group path.",
-  {
+registerTool(ctx, {
+  name: "describe_log_streams",
+  klass: "observability",
+  description: "List recent log streams for a component or log group. Use component shorthand (portal, provisioner, guacamole-client, guacd, network-firewall, rds) or a full log group path.",
+  schema: {
     env: EnvSchema,
     component: SafePath.describe(
       "Component shorthand (portal, provisioner, guacamole-client, guacd, network-firewall, rds) or full log group path"
@@ -304,14 +450,21 @@ server.tool(
       .default(5)
       .describe("Number of streams to return (default 5)"),
   },
-  async ({ env, component, limit }) => {
+  handler: async ({ env, component, limit }) => {
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const result = aws(
-        profile,
-        `logs describe-log-streams --log-group-name "${logGroup}" --order-by LastEventTime --descending --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "describe-log-streams",
+        "--log-group-name",
+        logGroup,
+        "--order-by",
+        "LastEventTime",
+        "--descending",
+        "--limit",
+        String(limit),
+      ]);
       const streams = result.logStreams.map((s) => ({
         name: s.logStreamName,
         lastEvent: s.lastEventTimestamp
@@ -322,13 +475,15 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "get_log_events",
-  "Get log events from a specific log stream",
-  {
+registerTool(ctx, {
+  name: "get_log_events",
+  klass: "observability",
+  untrusted_source: "logs",
+  description: "Get log events from a specific log stream",
+  schema: {
     env: EnvSchema,
     component: SafePath.describe("Component shorthand or full log group path"),
     stream_name: SafePath.describe("Log stream name"),
@@ -340,14 +495,20 @@ server.tool(
       .default(50)
       .describe("Number of events (default 50)"),
   },
-  async ({ env, component, stream_name, limit }) => {
+  handler: async ({ env, component, stream_name, limit }) => {
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const result = aws(
-        profile,
-        `logs get-log-events --log-group-name "${logGroup}" --log-stream-name "${stream_name}" --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "get-log-events",
+        "--log-group-name",
+        logGroup,
+        "--log-stream-name",
+        stream_name,
+        "--limit",
+        String(limit),
+      ]);
       const lines = result.events.map(
         (e) => `[${new Date(e.timestamp).toISOString()}] ${e.message}`
       );
@@ -355,13 +516,15 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "filter_log_events",
-  "Search log events across streams using a CloudWatch filter pattern",
-  {
+registerTool(ctx, {
+  name: "filter_log_events",
+  klass: "observability",
+  untrusted_source: "logs",
+  description: "Search log events across streams using a CloudWatch filter pattern",
+  schema: {
     env: EnvSchema,
     component: SafePath.describe("Component shorthand or full log group path"),
     filter_pattern: z
@@ -377,13 +540,17 @@ server.tool(
       .default(50)
       .describe("Max events to return (default 50)"),
   },
-  async ({ env, component, filter_pattern, limit }) => {
+  handler: async ({ env, component, filter_pattern, limit }) => {
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
       const result = aws(
         profile,
-        `logs filter-log-events --log-group-name "${logGroup}" --filter-pattern ${JSON.stringify(filter_pattern)} --limit ${limit}`
+        buildFilterLogEventsArgs({
+          logGroup,
+          filterPattern: filter_pattern,
+          limit,
+        })
       );
       const lines = result.events.map(
         (e) =>
@@ -395,13 +562,15 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "tail_logs",
-  "Tail recent logs for a component (shortcut for describe_streams + get_log_events on the latest stream)",
-  {
+registerTool(ctx, {
+  name: "tail_logs",
+  klass: "observability",
+  untrusted_source: "logs",
+  description: "Tail recent logs for a component (shortcut for describe_streams + get_log_events on the latest stream)",
+  schema: {
     env: EnvSchema,
     component: SafePath.describe("Component shorthand or full log group path"),
     limit: z
@@ -412,22 +581,35 @@ server.tool(
       .default(50)
       .describe("Number of events (default 50)"),
   },
-  async ({ env, component, limit }) => {
+  handler: async ({ env, component, limit }) => {
     try {
       const profile = getProfile(env);
       const logGroup = resolveLogGroup(component, env);
-      const streams = aws(
-        profile,
-        `logs describe-log-streams --log-group-name "${logGroup}" --order-by LastEventTime --descending --limit 1`
-      );
+      const streams = aws(profile, [
+        "logs",
+        "describe-log-streams",
+        "--log-group-name",
+        logGroup,
+        "--order-by",
+        "LastEventTime",
+        "--descending",
+        "--limit",
+        "1",
+      ]);
       if (!streams.logStreams || streams.logStreams.length === 0) {
         return ok("No log streams found.");
       }
       const streamName = streams.logStreams[0].logStreamName;
-      const result = aws(
-        profile,
-        `logs get-log-events --log-group-name "${logGroup}" --log-stream-name "${streamName}" --limit ${limit}`
-      );
+      const result = aws(profile, [
+        "logs",
+        "get-log-events",
+        "--log-group-name",
+        logGroup,
+        "--log-stream-name",
+        streamName,
+        "--limit",
+        String(limit),
+      ]);
       const lines = result.events.map(
         (e) => `[${new Date(e.timestamp).toISOString()}] ${e.message}`
       );
@@ -437,17 +619,18 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // EC2
 // ==========================================================================
 
-server.tool(
-  "list_ec2_instances",
-  "List EC2 instances, optionally filtered by Name tag pattern",
-  {
+registerTool(ctx, {
+  name: "list_ec2_instances",
+  klass: "observability",
+  description: "List EC2 instances, optionally filtered by Name tag pattern",
+  schema: {
     env: EnvSchema,
     name_filter: SafeName.optional().describe(
       "Name tag glob filter (e.g. '*portal*', '*ngfw*')"
@@ -457,118 +640,136 @@ server.tool(
       .default(false)
       .describe("Include terminated instances (default false)"),
   },
-  async ({ env, name_filter, include_terminated }) => {
+  handler: async ({ env, name_filter, include_terminated }) => {
     try {
       const profile = getProfile(env);
       const filters = buildInstanceFilters({ name_filter, include_terminated });
-      const filtersJson = JSON.stringify(JSON.stringify(filters));
-      const result = aws(
-        profile,
-        `ec2 describe-instances --filters ${filtersJson} --query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==\`Name\`].Value|[0],PrivateIp:PrivateIpAddress,Type:InstanceType}'`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "describe-instances",
+        "--filters",
+        JSON.stringify(filters),
+        "--query",
+        "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==`Name`].Value|[0],PrivateIp:PrivateIpAddress,Type:InstanceType}",
+      ]);
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "start_ec2_instance",
-  "Start a stopped EC2 instance",
-  {
+registerTool(ctx, {
+  name: "start_ec2_instance",
+  klass: "infra_mutation",
+  description: "Start a stopped EC2 instance",
+  schema: {
     env: EnvSchema,
     instance_id: Ec2Id.describe("EC2 instance ID"),
   },
-  async ({ env, instance_id }) => {
+  handler: async ({ env, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ec2 start-instances --instance-ids "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "start-instances",
+        "--instance-ids",
+        instance_id,
+      ]);
       const state = result.StartingInstances?.[0]?.CurrentState?.Name;
       return ok(`Instance ${instance_id}: ${state}`);
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "stop_ec2_instance",
-  "Stop a running EC2 instance",
-  {
+registerTool(ctx, {
+  name: "stop_ec2_instance",
+  klass: "infra_mutation",
+  description: "Stop a running EC2 instance",
+  schema: {
     env: EnvSchema,
     instance_id: Ec2Id.describe("EC2 instance ID"),
   },
-  async ({ env, instance_id }) => {
+  handler: async ({ env, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ec2 stop-instances --instance-ids "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "stop-instances",
+        "--instance-ids",
+        instance_id,
+      ]);
       const state = result.StoppingInstances?.[0]?.CurrentState?.Name;
       return ok(`Instance ${instance_id}: ${state}`);
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "terminate_ec2_instance",
-  "Terminate an EC2 instance (irreversible)",
-  {
+registerTool(ctx, {
+  name: "terminate_ec2_instance",
+  klass: "infra_mutation",
+  description: "Terminate an EC2 instance (irreversible)",
+  schema: {
     env: EnvSchema,
     instance_id: Ec2Id.describe("EC2 instance ID"),
   },
-  async ({ env, instance_id }) => {
+  handler: async ({ env, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ec2 terminate-instances --instance-ids "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ec2",
+        "terminate-instances",
+        "--instance-ids",
+        instance_id,
+      ]);
       const state =
         result.TerminatingInstances?.[0]?.CurrentState?.Name;
       return ok(`Instance ${instance_id}: ${state}`);
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // ECS
 // ==========================================================================
 
-server.tool(
-  "list_ecs_tasks",
-  "List running ECS tasks in a cluster",
-  {
+registerTool(ctx, {
+  name: "list_ecs_tasks",
+  klass: "observability",
+  description: "List running ECS tasks in a cluster",
+  schema: {
     env: EnvSchema,
     cluster: SafeName.optional().describe(
       "ECS cluster name (defaults to {env}-portal)"
     ),
   },
-  async ({ env, cluster }) => {
+  handler: async ({ env, cluster }) => {
     try {
       const profile = getProfile(env);
       const clusterName = cluster || `${env}-portal`;
-      const tasks = aws(
-        profile,
-        `ecs list-tasks --cluster "${clusterName}"`
-      );
+      const tasks = aws(profile, [
+        "ecs",
+        "list-tasks",
+        "--cluster",
+        clusterName,
+      ]);
       if (!tasks.taskArns || tasks.taskArns.length === 0) {
         return ok(`No running tasks in cluster ${clusterName}.`);
       }
-      const arns = tasks.taskArns.map((a) => `"${a}"`).join(" ");
-      const details = aws(
-        profile,
-        `ecs describe-tasks --cluster "${clusterName}" --tasks ${arns}`
-      );
+      const details = aws(profile, [
+        "ecs",
+        "describe-tasks",
+        "--cluster",
+        clusterName,
+        "--tasks",
+        ...tasks.taskArns,
+      ]);
       const summary = details.tasks.map((t) => ({
         taskId: t.taskArn.split("/").pop(),
         status: t.lastStatus,
@@ -579,27 +780,32 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "describe_ecs_service",
-  "Describe an ECS service: task counts, deployment status, load balancers, and recent events.",
-  {
+registerTool(ctx, {
+  name: "describe_ecs_service",
+  klass: "observability",
+  description: "Describe an ECS service: task counts, deployment status, load balancers, and recent events.",
+  schema: {
     env: EnvSchema,
     service: SafeName.describe("ECS service name"),
     cluster: SafeName.optional().describe(
       "ECS cluster name (defaults to {env}-portal)",
     ),
   },
-  async ({ env, service, cluster }) => {
+  handler: async ({ env, service, cluster }) => {
     try {
       const profile = getProfile(env);
       const clusterName = cluster || `${env}-portal`;
-      const result = aws(
-        profile,
-        `ecs describe-services --cluster "${clusterName}" --services "${service}"`,
-      );
+      const result = aws(profile, [
+        "ecs",
+        "describe-services",
+        "--cluster",
+        clusterName,
+        "--services",
+        service,
+      ]);
       const svc = result.services?.[0];
       if (!svc) return ok(`Service "${service}" not found in cluster ${clusterName}.`);
       const summary = {
@@ -630,26 +836,32 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
-server.tool(
-  "restart_ecs_service",
-  "Force a new deployment of an ECS service (rolls all tasks).",
-  {
+registerTool(ctx, {
+  name: "restart_ecs_service",
+  klass: "infra_mutation",
+  description: "Force a new deployment of an ECS service (rolls all tasks).",
+  schema: {
     env: EnvSchema,
     service: SafeName.describe("ECS service name"),
     cluster: SafeName.optional().describe(
       "ECS cluster name (defaults to {env}-portal)",
     ),
   },
-  async ({ env, service, cluster }) => {
+  handler: async ({ env, service, cluster }) => {
     try {
       const profile = getProfile(env);
       const clusterName = cluster || `${env}-portal`;
-      const result = aws(
-        profile,
-        `ecs update-service --cluster "${clusterName}" --service "${service}" --force-new-deployment`,
-      );
+      const result = aws(profile, [
+        "ecs",
+        "update-service",
+        "--cluster",
+        clusterName,
+        "--service",
+        service,
+        "--force-new-deployment",
+      ]);
       const svc = result.service;
       const deployment = svc.deployments?.find((d) => d.status === "PRIMARY");
       return ok(
@@ -669,20 +881,28 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
 // ==========================================================================
 // Secrets Manager
 // ==========================================================================
 
-server.tool(
-  "list_secrets",
-  "List secrets in Secrets Manager",
-  { env: EnvSchema },
-  async ({ env }) => {
+registerTool(ctx, {
+  name: "list_secrets",
+  // Codex review #1201 cycle 3 finding 1: list_secrets returns only
+  // metadata (name + lastChanged), no secret material. Classifying
+  // it as secret_handle would wrap the metadata JSON into an opaque
+  // `shf-secret:<uuid>` handle that the agent has no way to resolve
+  // back to a discoverable list of secret IDs — breaking the
+  // purpose of the list operation. The data is non-sensitive
+  // discovery output, so observability is the correct class.
+  klass: "observability",
+  description: "List secrets in Secrets Manager",
+  schema: { env: EnvSchema },
+  handler: async ({ env }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(profile, `secretsmanager list-secrets`);
+      const result = aws(profile, ["secretsmanager", "list-secrets"]);
       const secrets = result.SecretList.map((s) => ({
         name: s.Name,
         lastChanged: s.LastChangedDate,
@@ -691,51 +911,59 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "get_secret",
-  "Get a secret value from Secrets Manager",
-  {
+registerTool(ctx, {
+  name: "get_secret",
+  klass: "secret_handle",
+  description: "Get a secret value from Secrets Manager",
+  schema: {
     env: EnvSchema,
     secret_id: SecretIdSchema.describe("Secret name or ARN"),
   },
-  async ({ env, secret_id }) => {
+  handler: async ({ env, secret_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `secretsmanager get-secret-value --secret-id "${secret_id}"`
-      );
+      const result = aws(profile, [
+        "secretsmanager",
+        "get-secret-value",
+        "--secret-id",
+        secret_id,
+      ]);
       return ok(result.SecretString || "(binary secret)");
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // SSM
 // ==========================================================================
 
-server.tool(
-  "ssm_send_command",
-  "Run a command on an EC2 instance via SSM. Auto-detects OS to use the correct shell (bash for Linux, PowerShell for Windows).",
-  {
+registerTool(ctx, {
+  name: "ssm_send_command",
+  klass: "ssm_arbitrary",
+  untrusted_inputs: ["command"],
+  description: "Run a command on an EC2 instance via SSM. Auto-detects OS to use the correct shell (bash for Linux, PowerShell for Windows).",
+  schema: {
     env: EnvSchema,
     instance_id: Ec2Id.describe("EC2 instance ID"),
     command: z.string().describe("Command to execute (shell for Linux, PowerShell for Windows)"),
   },
-  async ({ env, instance_id, command }) => {
+  handler: async ({ env, instance_id, command }) => {
     try {
       const profile = getProfile(env);
       const platform = getInstancePlatform(profile, instance_id);
       const docName = getSsmDocument(platform);
-      const params = JSON.stringify({ commands: [command] });
       const result = aws(
         profile,
-        `ssm send-command --instance-ids "${instance_id}" --document-name ${docName} --parameters '${params}'`
+        buildSsmSendCommandArgs({
+          instanceId: instance_id,
+          docName,
+          commands: [command],
+        })
       );
       const cmdId = result.Command.CommandId;
       return ok(
@@ -744,41 +972,48 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "ssm_get_command_output",
-  "Get the output of a previously sent SSM command",
-  {
+registerTool(ctx, {
+  name: "ssm_get_command_output",
+  klass: "ssm_arbitrary",
+  untrusted_source: "ssm_stdout",
+  description: "Get the output of a previously sent SSM command",
+  schema: {
     env: EnvSchema,
     command_id: SsmCommandId.describe("SSM command ID"),
     instance_id: Ec2Id.describe("EC2 instance ID the command was sent to"),
   },
-  async ({ env, command_id, instance_id }) => {
+  handler: async ({ env, command_id, instance_id }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `ssm get-command-invocation --command-id "${command_id}" --instance-id "${instance_id}"`
-      );
+      const result = aws(profile, [
+        "ssm",
+        "get-command-invocation",
+        "--command-id",
+        command_id,
+        "--instance-id",
+        instance_id,
+      ]);
       return ok(
         `Status: ${result.Status}\n\n--- stdout ---\n${result.StandardOutputContent}\n--- stderr ---\n${result.StandardErrorContent}`
       );
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "start_portal_test_tunnel",
-  "Start SSM tunnel to dev portal for testing. Enables dev_login access bypassing Cognito/MFA. Returns local URL.",
-  {
+registerTool(ctx, {
+  name: "start_portal_test_tunnel",
+  klass: "dev_bypass_tunnel",
+  description: "Start SSM tunnel to dev portal for testing. Enables dev_login access bypassing Cognito/MFA. Returns local URL.",
+  schema: {
     env: z.literal("dev").describe("Environment (only 'dev' allowed)"),
     local_port: z.number().int().min(1024).max(65535).optional().describe("Local port (default: 8000)"),
   },
-  async ({ env, local_port = 8000 }) => {
+  handler: async ({ env, local_port = 8000 }) => {
     try {
       if (portalTunnels[env]) {
         return ok(`Tunnel already running on port ${portalTunnels[env].port}. Access at http://localhost:${portalTunnels[env].port}/dev-login/`);
@@ -790,23 +1025,44 @@ server.tool(
       }
 
       const profile = getProfile(env);
-      const instanceId = execSync(
-        `aws ec2 describe-instances --filters "Name=tag:Name,Values=${env}-portal-ec2" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region "${REGION}" --profile "${profile}"`,
-        { encoding: "utf-8", timeout: 30000 }
-      ).trim();
+      const instanceId = awsTextLib(
+        profile,
+        [
+          "ec2",
+          "describe-instances",
+          "--filters",
+          `Name=tag:Name,Values=${env}-portal-ec2`,
+          "Name=instance-state-name,Values=running",
+          "--query",
+          "Reservations[0].Instances[0].InstanceId",
+          "--output",
+          "text",
+        ],
+        { timeoutMs: 30000 }
+      );
 
       if (!instanceId || instanceId === "None") {
         return err(new Error(`Could not find running ${env} portal EC2 instance`));
       }
 
-      const tunnelProc = spawn("aws", [
-        "ssm", "start-session",
-        "--target", instanceId,
-        "--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
-        "--parameters", JSON.stringify({ host: ["localhost"], portNumber: ["8000"], localPortNumber: [local_port.toString()] }),
-        "--profile", profile,
-        "--region", REGION,
-      ], { stdio: ["ignore", "pipe", "pipe"] });
+      const tunnelProc = spawnAws(
+        profile,
+        [
+          "ssm",
+          "start-session",
+          "--target",
+          instanceId,
+          "--document-name",
+          "AWS-StartPortForwardingSessionToRemoteHost",
+          "--parameters",
+          JSON.stringify({
+            host: ["localhost"],
+            portNumber: ["8000"],
+            localPortNumber: [local_port.toString()],
+          }),
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] }
+      );
 
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -862,16 +1118,17 @@ server.tool(
       }
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "stop_portal_test_tunnel",
-  "Stop SSM tunnel to dev portal",
-  {
+registerTool(ctx, {
+  name: "stop_portal_test_tunnel",
+  klass: "dev_bypass_tunnel",
+  description: "Stop SSM tunnel to dev portal",
+  schema: {
     env: z.literal("dev").describe("Environment (only 'dev' allowed)"),
   },
-  async ({ env }) => {
+  handler: async ({ env }) => {
     try {
       if (!portalTunnels[env]) {
         return ok("No tunnel running");
@@ -883,30 +1140,33 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // ASG / ELB
 // ==========================================================================
 
-server.tool(
-  "describe_asg",
-  "Show Auto Scaling Group status and instance refreshes",
-  {
+registerTool(ctx, {
+  name: "describe_asg",
+  klass: "observability",
+  description: "Show Auto Scaling Group status and instance refreshes",
+  schema: {
     env: EnvSchema,
     asg_name: SafeName.optional().describe(
       "ASG name (defaults to {env}-portal-asg)"
     ),
   },
-  async ({ env, asg_name }) => {
+  handler: async ({ env, asg_name }) => {
     try {
       const profile = getProfile(env);
       const name = asg_name || `${env}-portal-asg`;
-      const result = aws(
-        profile,
-        `autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${name}"`
-      );
+      const result = aws(profile, [
+        "autoscaling",
+        "describe-auto-scaling-groups",
+        "--auto-scaling-group-names",
+        name,
+      ]);
       const asg = result.AutoScalingGroups[0];
       if (!asg) return ok(`ASG ${name} not found.`);
       const summary = {
@@ -924,23 +1184,26 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "describe_target_health",
-  "Show health status of targets in a target group",
-  {
+registerTool(ctx, {
+  name: "describe_target_health",
+  klass: "observability",
+  description: "Show health status of targets in a target group",
+  schema: {
     env: EnvSchema,
     target_group_arn: ArnSchema.describe("Target group ARN"),
   },
-  async ({ env, target_group_arn }) => {
+  handler: async ({ env, target_group_arn }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(
-        profile,
-        `elbv2 describe-target-health --target-group-arn "${target_group_arn}"`
-      );
+      const result = aws(profile, [
+        "elbv2",
+        "describe-target-health",
+        "--target-group-arn",
+        target_group_arn,
+      ]);
       const targets = result.TargetHealthDescriptions.map((t) => ({
         id: t.Target.Id,
         port: t.Target.Port,
@@ -951,18 +1214,19 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // Database tools
 // ==========================================================================
 
-server.tool(
-  "list_tables",
-  "List all database tables with their service layer and row counts",
-  { env: EnvSchema },
-  async ({ env }) => {
+registerTool(ctx, {
+  name: "list_tables",
+  klass: "db_arbitrary",
+  description: "List all database tables with their service layer and row counts",
+  schema: { env: EnvSchema },
+  handler: async ({ env }) => {
     return withClient(env, { readOnly: true }, async (client) => {
       const result = await client.query(`
         SELECT t.tablename,
@@ -988,20 +1252,21 @@ server.tool(
         ],
       };
     });
-  }
-);
+  },
+});
 
-server.tool(
-  "describe_table",
-  "Show columns, types, nullability, and constraints for a table",
-  {
+registerTool(ctx, {
+  name: "describe_table",
+  klass: "db_arbitrary",
+  description: "Show columns, types, nullability, and constraints for a table",
+  schema: {
     table_name: z
       .string()
       .regex(/^[a-z_][a-z0-9_]*$/, "Must be a valid table name")
       .describe("Name of the table to describe"),
     env: EnvSchema,
   },
-  async ({ table_name, env }) => {
+  handler: async ({ table_name, env }) => {
     return withClient(env, { readOnly: true }, async (client) => {
       const cols = await client.query(
         `SELECT column_name, data_type, is_nullable, column_default
@@ -1057,17 +1322,19 @@ server.tool(
         content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
       };
     });
-  }
-);
+  },
+});
 
-server.tool(
-  "query",
-  "Execute a read-only SQL query against the Shifter database",
-  {
+registerTool(ctx, {
+  name: "query",
+  klass: "db_arbitrary",
+  untrusted_inputs: ["sql"],
+  description: "Execute a read-only SQL query against the Shifter database",
+  schema: {
     sql: z.string().describe("SQL query to execute (read-only)"),
     env: EnvSchema,
   },
-  async ({ sql, env }) => {
+  handler: async ({ sql, env }) => {
     if (FORBIDDEN_PATTERN.test(sql)) {
       return {
         content: [
@@ -1099,17 +1366,20 @@ server.tool(
         isError: true,
       };
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "execute",
-  "Execute a write SQL statement (UPDATE, INSERT, DELETE) against the Shifter database",
-  {
+registerTool(ctx, {
+  name: "execute",
+  klass: "db_arbitrary",
+  untrusted_inputs: ["sql"],
+  is_write: true,
+  description: "Execute a write SQL statement (UPDATE, INSERT, DELETE) against the Shifter database",
+  schema: {
     sql: z.string().describe("SQL statement to execute"),
     env: EnvSchema,
   },
-  async ({ sql, env }) => {
+  handler: async ({ sql, env }) => {
     try {
       return await withClient(env, { readOnly: false }, async (client) => {
         const result = await client.query(sql);
@@ -1132,17 +1402,18 @@ server.tool(
         isError: true,
       };
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // Range reconciliation
 // ==========================================================================
 
-server.tool(
-  "reconcile_ranges",
-  "Find orphaned EC2 range instances (running in AWS but belonging to failed/destroyed ranges). Dry-run by default; set execute=true to terminate and update DB.",
-  {
+registerTool(ctx, {
+  name: "reconcile_ranges",
+  klass: "infra_mutation",
+  description: "Find orphaned EC2 range instances (running in AWS but belonging to failed/destroyed ranges). Dry-run by default; set execute=true to terminate and update DB.",
+  schema: {
     env: EnvSchema,
     execute: z
       .boolean()
@@ -1151,7 +1422,7 @@ server.tool(
         "Set to true to actually terminate instances and update DB. Default is dry-run."
       ),
   },
-  async ({ env, execute: shouldExecute }) => {
+  handler: async ({ env, execute: shouldExecute }) => {
     try {
       const profile = getProfile(env);
 
@@ -1162,11 +1433,14 @@ server.tool(
         { Name: "tag:shifter:range_id", Values: ["*"] },
         { Name: "instance-state-name", Values: ["running"] },
       ];
-      const filtersJson = JSON.stringify(JSON.stringify(filters));
-      const ec2Result = aws(
-        profile,
-        `ec2 describe-instances --filters ${filtersJson} --query 'Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==\`Name\`].Value|[0],RangeId:Tags[?Key==\`shifter:range_id\`].Value|[0]}'`
-      );
+      const ec2Result = aws(profile, [
+        "ec2",
+        "describe-instances",
+        "--filters",
+        JSON.stringify(filters),
+        "--query",
+        "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Name:Tags[?Key==`Name`].Value|[0],RangeId:Tags[?Key==`shifter:range_id`].Value|[0]}",
+      ]);
 
       const runningEc2s = ec2Result.filter(
         (i) => i.State === "running" && i.RangeId
@@ -1317,10 +1591,12 @@ server.tool(
       // 3. Execute: terminate EC2s and update DB
       const terminated = [];
       for (const orphan of orphans) {
-        const termResult = aws(
-          profile,
-          `ec2 terminate-instances --instance-ids "${orphan.ec2_id}"`
-        );
+        const termResult = aws(profile, [
+          "ec2",
+          "terminate-instances",
+          "--instance-ids",
+          orphan.ec2_id,
+        ]);
         const state =
           termResult.TerminatingInstances?.[0]?.CurrentState?.Name;
         terminated.push({ ec2_id: orphan.ec2_id, state });
@@ -1421,8 +1697,8 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // Risk Register
@@ -1451,10 +1727,11 @@ const ScoreSchema = z
   .max(5)
   .describe("Score from 1 (lowest) to 5 (highest)");
 
-server.tool(
-  "list_risks",
-  "List risk register entries. Returns active (non-deleted) risks by default, with computed risk_score and comment_count. Use filters to narrow results.",
-  {
+registerTool(ctx, {
+  name: "list_risks",
+  klass: "named_db_read",
+  description: "List risk register entries. Returns active (non-deleted) risks by default, with computed risk_score and comment_count. Use filters to narrow results.",
+  schema: {
     status: StatusSchema.optional().describe("Filter by lifecycle status"),
     severity: SeveritySchema.optional().describe("Filter by severity level"),
     include_deleted: z
@@ -1463,7 +1740,7 @@ server.tool(
       .describe("Include soft-deleted risks (default: false)"),
     env: EnvSchema,
   },
-  async ({ status, severity, include_deleted, env }) => {
+  handler: async ({ status, severity, include_deleted, env }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const conditions = [];
@@ -1511,17 +1788,18 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "get_risk",
-  "Get a single risk by ID with full details, including all comments and recent audit history.",
-  {
+registerTool(ctx, {
+  name: "get_risk",
+  klass: "named_db_read",
+  description: "Get a single risk by ID with full details, including all comments and recent audit history.",
+  schema: {
     risk_id: z.number().int().positive().describe("Risk ID"),
     env: EnvSchema,
   },
-  async ({ risk_id, env }) => {
+  handler: async ({ risk_id, env }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const riskResult = await client.query(
@@ -1574,13 +1852,14 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "create_risk",
-  "Create a new risk register entry. Only title and description are required; all other fields have sensible defaults.",
-  {
+registerTool(ctx, {
+  name: "create_risk",
+  klass: "named_db_write",
+  description: "Create a new risk register entry. Only title and description are required; all other fields have sensible defaults.",
+  schema: {
     title: z.string().min(1).max(200).describe("Short title for the risk"),
     description: z.string().min(1).describe("Detailed risk description"),
     severity: SeveritySchema.default("medium").describe(
@@ -1612,7 +1891,7 @@ server.tool(
       .describe("Current mitigation efforts (optional)"),
     env: EnvSchema,
   },
-  async ({
+  handler: async ({
     title,
     description,
     severity,
@@ -1656,13 +1935,14 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "update_risk",
-  "Update one or more fields on an existing risk. Only provide the fields you want to change. Returns the full updated risk.",
-  {
+registerTool(ctx, {
+  name: "update_risk",
+  klass: "named_db_write",
+  description: "Update one or more fields on an existing risk. Only provide the fields you want to change. Returns the full updated risk.",
+  schema: {
     risk_id: z.number().int().positive().describe("Risk ID to update"),
     title: z
       .string()
@@ -1704,7 +1984,7 @@ server.tool(
       .describe("Reason for resolution/closure (optional)"),
     env: EnvSchema,
   },
-  async ({
+  handler: async ({
     risk_id,
     title,
     description,
@@ -1788,17 +2068,18 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "delete_risk",
-  "Soft-delete a risk (sets deleted_at timestamp). The risk can be restored later with restore_risk.",
-  {
+registerTool(ctx, {
+  name: "delete_risk",
+  klass: "named_db_write",
+  description: "Soft-delete a risk (sets deleted_at timestamp). The risk can be restored later with restore_risk.",
+  schema: {
     risk_id: z.number().int().positive().describe("Risk ID to soft-delete"),
     env: EnvSchema,
   },
-  async ({ risk_id, env }) => {
+  handler: async ({ risk_id, env }) => {
     try {
       return await withClient(env, { readOnly: false }, async (client) => {
         const result = await client.query(
@@ -1828,13 +2109,14 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "restore_risk",
-  "Restore a soft-deleted risk (clears deleted_at timestamp).",
-  {
+registerTool(ctx, {
+  name: "restore_risk",
+  klass: "named_db_write",
+  description: "Restore a soft-deleted risk (clears deleted_at timestamp).",
+  schema: {
     risk_id: z
       .number()
       .int()
@@ -1842,7 +2124,7 @@ server.tool(
       .describe("Risk ID to restore from soft-delete"),
     env: EnvSchema,
   },
-  async ({ risk_id, env }) => {
+  handler: async ({ risk_id, env }) => {
     try {
       return await withClient(env, { readOnly: false }, async (client) => {
         const result = await client.query(
@@ -1872,13 +2154,14 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "add_risk_comment",
-  "Add a comment to a risk. Comments are immutable once created.",
-  {
+registerTool(ctx, {
+  name: "add_risk_comment",
+  klass: "named_db_write",
+  description: "Add a comment to a risk. Comments are immutable once created.",
+  schema: {
     risk_id: z
       .number()
       .int()
@@ -1887,7 +2170,7 @@ server.tool(
     content: z.string().min(1).describe("Comment text"),
     env: EnvSchema,
   },
-  async ({ risk_id, content, env }) => {
+  handler: async ({ risk_id, content, env }) => {
     try {
       return await withClient(env, { readOnly: false }, async (client) => {
         const riskCheck = await client.query(
@@ -1921,17 +2204,18 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "delete_risk_comment",
-  "Soft-delete a comment on a risk (sets deleted_at timestamp).",
-  {
+registerTool(ctx, {
+  name: "delete_risk_comment",
+  klass: "named_db_write",
+  description: "Soft-delete a comment on a risk (sets deleted_at timestamp).",
+  schema: {
     comment_id: z.number().int().positive().describe("Comment ID to delete"),
     env: EnvSchema,
   },
-  async ({ comment_id, env }) => {
+  handler: async ({ comment_id, env }) => {
     try {
       return await withClient(env, { readOnly: false }, async (client) => {
         const result = await client.query(
@@ -1961,16 +2245,17 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "risk_dashboard",
-  "Get a summary dashboard of the risk register: total counts, breakdown by severity and status, top risks by score, and recent activity.",
-  {
+registerTool(ctx, {
+  name: "risk_dashboard",
+  klass: "observability",
+  description: "Get a summary dashboard of the risk register: total counts, breakdown by severity and status, top risks by score, and recent activity.",
+  schema: {
     env: EnvSchema,
   },
-  async ({ env }) => {
+  handler: async ({ env }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const totals = await client.query(
@@ -2038,16 +2323,17 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "risk_matrix",
-  "Get a 5x5 risk matrix (likelihood vs impact). Each cell shows the count of risks and their titles. Useful for visualizing risk distribution.",
-  {
+registerTool(ctx, {
+  name: "risk_matrix",
+  klass: "observability",
+  description: "Get a 5x5 risk matrix (likelihood vs impact). Each cell shows the count of risks and their titles. Useful for visualizing risk distribution.",
+  schema: {
     env: EnvSchema,
   },
-  async ({ env }) => {
+  handler: async ({ env }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const result = await client.query(
@@ -2094,13 +2380,14 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "risk_audit_log",
-  "Get the audit history for a specific risk, showing all state changes with timestamps, actions, and before/after state snapshots.",
-  {
+registerTool(ctx, {
+  name: "risk_audit_log",
+  klass: "named_db_read",
+  description: "Get the audit history for a specific risk, showing all state changes with timestamps, actions, and before/after state snapshots.",
+  schema: {
     risk_id: z
       .number()
       .int()
@@ -2115,7 +2402,7 @@ server.tool(
       .describe("Max entries to return (default: 50, max: 100)"),
     env: EnvSchema,
   },
-  async ({ risk_id, limit, env }) => {
+  handler: async ({ risk_id, limit, env }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const result = await client.query(
@@ -2143,27 +2430,28 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
 // ==========================================================================
 // S3
 // ==========================================================================
 
-server.tool(
-  "list_s3_buckets",
-  "List S3 buckets in the account, optionally filtered by name pattern.",
-  {
+registerTool(ctx, {
+  name: "list_s3_buckets",
+  klass: "observability",
+  description: "List S3 buckets in the account, optionally filtered by name pattern.",
+  schema: {
     env: EnvSchema,
     name_filter: z
       .string()
       .optional()
       .describe("Substring filter for bucket names"),
   },
-  async ({ env, name_filter }) => {
+  handler: async ({ env, name_filter }) => {
     try {
       const profile = getProfile(env);
-      const result = aws(profile, "s3api list-buckets");
+      const result = aws(profile, ["s3api", "list-buckets"]);
       let buckets = (result.Buckets || []).map((b) => ({
         name: b.Name,
         created: b.CreationDate,
@@ -2178,12 +2466,18 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
-server.tool(
-  "list_s3_objects",
-  "List objects in an S3 bucket with optional prefix filter. Returns key, size, and last modified.",
-  {
+registerTool(ctx, {
+  name: "list_s3_objects",
+  klass: "observability",
+  // Codex review #1201 cycle 2: an authenticated principal with
+  // write access to a bucket the operator inspects can name objects
+  // with prompt-injection payloads, so the returned keys are
+  // attacker-controlled. Fence the response.
+  untrusted_source: "s3",
+  description: "List objects in an S3 bucket with optional prefix filter. Returns key, size, and last modified.",
+  schema: {
     env: EnvSchema,
     bucket: z.string().describe("S3 bucket name"),
     prefix: z.string().optional().describe("Key prefix filter"),
@@ -2195,11 +2489,18 @@ server.tool(
       .default(100)
       .describe("Maximum number of objects to return (default 100, max 1000)"),
   },
-  async ({ env, bucket, prefix, max_keys }) => {
+  handler: async ({ env, bucket, prefix, max_keys }) => {
     try {
       const profile = getProfile(env);
-      let args = `s3api list-objects-v2 --bucket "${bucket}" --max-items ${max_keys}`;
-      if (prefix) args += ` --prefix "${prefix}"`;
+      const args = [
+        "s3api",
+        "list-objects-v2",
+        "--bucket",
+        bucket,
+        "--max-items",
+        String(max_keys),
+      ];
+      if (prefix) args.push("--prefix", prefix);
       const result = aws(profile, args);
       const objects = (result.Contents || []).map((o) => ({
         key: o.Key,
@@ -2212,24 +2513,30 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
-server.tool(
-  "get_s3_object",
-  "Read the contents of an S3 object. Returns text content for text files, metadata only for binary files. 1MB size limit.",
-  {
+registerTool(ctx, {
+  name: "get_s3_object",
+  klass: "observability",
+  untrusted_source: "s3",
+  description: "Read the contents of an S3 object. Returns text content for text files, metadata only for binary files. 1MB size limit.",
+  schema: {
     env: EnvSchema,
     bucket: z.string().describe("S3 bucket name"),
     key: z.string().describe("S3 object key"),
   },
-  async ({ env, bucket, key }) => {
+  handler: async ({ env, bucket, key }) => {
     try {
       const profile = getProfile(env);
       // Check size first
-      const head = aws(
-        profile,
-        `s3api head-object --bucket "${bucket}" --key "${key}"`,
-      );
+      const head = aws(profile, [
+        "s3api",
+        "head-object",
+        "--bucket",
+        bucket,
+        "--key",
+        key,
+      ]);
       const size = head.ContentLength;
       const contentType = head.ContentType || "";
 
@@ -2264,25 +2571,33 @@ server.tool(
         );
       }
 
-      const content = awsText(
-        profile,
-        `s3 cp "s3://${bucket}/${key}" -`,
-      );
+      const content = awsText(profile, [
+        "s3",
+        "cp",
+        `s3://${bucket}/${key}`,
+        "-",
+      ]);
       return ok(content);
     } catch (e) {
       return err(e);
     }
   },
-);
+});
 
 // ==========================================================================
 // Infrastructure State
 // ==========================================================================
 
-server.tool(
-  "terraform_state",
-  "List resources from a Terraform state file stored in S3. Shows resource types, names, and modules.",
-  {
+registerTool(ctx, {
+  name: "terraform_state",
+  klass: "observability",
+  // Codex review #1201 cycle 2: tfstate is read from caller-selected
+  // S3 objects, so resource/module/name strings can be attacker-
+  // controlled (e.g. a Range ID that originated as user input flows
+  // through to a tag value). Fence the response.
+  untrusted_source: "s3",
+  description: "List resources from a Terraform state file stored in S3. Shows resource types, names, and modules.",
+  schema: {
     env: EnvSchema,
     bucket: z.string().optional().describe(
       "S3 bucket containing TF state (auto-detected from env if omitted)",
@@ -2291,7 +2606,7 @@ server.tool(
       "S3 key for the state file (auto-detected from env if omitted)",
     ),
   },
-  async ({ env, bucket, key }) => {
+  handler: async ({ env, bucket, key }) => {
     try {
       const profile = getProfile(env);
       const stateBuckets = {
@@ -2310,7 +2625,12 @@ server.tool(
       if (!b || !k) {
         return err(new Error("Could not determine state bucket/key. Provide bucket and key explicitly."));
       }
-      const content = awsText(profile, `s3 cp "s3://${b}/${k}" -`);
+      const content = awsText(profile, [
+        "s3",
+        "cp",
+        `s3://${b}/${k}`,
+        "-",
+      ]);
       const state = JSON.parse(content);
       const resources = (state.resources || []).map((r) => ({
         module: r.module || "(root)",
@@ -2335,16 +2655,17 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
 // ==========================================================================
 // Cost & Billing
 // ==========================================================================
 
-server.tool(
-  "cost_summary",
-  "Get AWS cost summary for a date range, broken down by service. Defaults to last 30 days.",
-  {
+registerTool(ctx, {
+  name: "cost_summary",
+  klass: "observability",
+  description: "Get AWS cost summary for a date range, broken down by service. Defaults to last 30 days.",
+  schema: {
     env: EnvSchema,
     start_date: z
       .string()
@@ -2355,17 +2676,25 @@ server.tool(
       .optional()
       .describe("End date YYYY-MM-DD (defaults to today)"),
   },
-  async ({ env, start_date, end_date }) => {
+  handler: async ({ env, start_date, end_date }) => {
     try {
       const profile = getProfile(env);
       const end = end_date || new Date().toISOString().slice(0, 10);
       const start =
         start_date ||
         new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-      const result = aws(
-        profile,
-        `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity MONTHLY --metrics BlendedCost --group-by Type=DIMENSION,Key=SERVICE`,
-      );
+      const result = aws(profile, [
+        "ce",
+        "get-cost-and-usage",
+        "--time-period",
+        `Start=${start},End=${end}`,
+        "--granularity",
+        "MONTHLY",
+        "--metrics",
+        "BlendedCost",
+        "--group-by",
+        "Type=DIMENSION,Key=SERVICE",
+      ]);
       const periods = result.ResultsByTime || [];
       let total = 0;
       const services = {};
@@ -2391,12 +2720,13 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
-server.tool(
-  "daily_spend",
-  "Show daily AWS spend for the last N days. Useful for spotting spikes.",
-  {
+registerTool(ctx, {
+  name: "daily_spend",
+  klass: "observability",
+  description: "Show daily AWS spend for the last N days. Useful for spotting spikes.",
+  schema: {
     env: EnvSchema,
     days: z
       .number()
@@ -2406,17 +2736,23 @@ server.tool(
       .default(7)
       .describe("Number of days to show (default 7, max 90)"),
   },
-  async ({ env, days }) => {
+  handler: async ({ env, days }) => {
     try {
       const profile = getProfile(env);
       const end = new Date().toISOString().slice(0, 10);
       const start = new Date(Date.now() - days * 86400000)
         .toISOString()
         .slice(0, 10);
-      const result = aws(
-        profile,
-        `ce get-cost-and-usage --time-period Start=${start},End=${end} --granularity DAILY --metrics BlendedCost`,
-      );
+      const result = aws(profile, [
+        "ce",
+        "get-cost-and-usage",
+        "--time-period",
+        `Start=${start},End=${end}`,
+        "--granularity",
+        "DAILY",
+        "--metrics",
+        "BlendedCost",
+      ]);
       const dataPoints = (result.ResultsByTime || []).map((p) => {
         const amount = Number.parseFloat(p.Total.BlendedCost.Amount);
         return {
@@ -2443,16 +2779,18 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
 // ==========================================================================
 // Django Management Commands
 // ==========================================================================
 
-server.tool(
-  "run_manage_command",
-  "Run a Django manage.py command on the portal container via SSM. Only whitelisted read-only commands are allowed: check, showmigrations, diffsettings, inspectdb, dbshell, clearsessions, collectstatic, show_urls.",
-  {
+registerTool(ctx, {
+  name: "run_manage_command",
+  klass: "ssm_named",
+  untrusted_inputs: ["command"],
+  description: "Run a Django manage.py command on the portal container via SSM. Only whitelisted read-only commands are allowed: check, showmigrations, diffsettings, inspectdb, dbshell, clearsessions, collectstatic, show_urls.",
+  schema: {
     env: EnvSchema,
     command: z
       .string()
@@ -2461,7 +2799,7 @@ server.tool(
       "Portal EC2 instance ID (auto-detected if omitted)",
     ),
   },
-  async ({ env, command, instance_id }) => {
+  handler: async ({ env, command, instance_id }) => {
     try {
       validateManageCommand(command);
       const profile = getProfile(env);
@@ -2469,24 +2807,25 @@ server.tool(
       // Auto-detect portal instance if not provided
       let targetId = instance_id;
       if (!targetId) {
-        const instances = aws(
-          profile,
-          `ec2 describe-instances --filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text`,
-        );
-        targetId = typeof instances === "string" ? instances : awsText(
-          profile,
-          `ec2 describe-instances --filters "Name=tag:Name,Values=*portal*" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId"`,
-        );
+        targetId = awsText(profile, [
+          "ec2",
+          "describe-instances",
+          "--filters",
+          "Name=tag:Name,Values=*portal*",
+          "Name=instance-state-name,Values=running",
+          "--query",
+          "Reservations[0].Instances[0].InstanceId",
+          "--output",
+          "text",
+        ]);
         if (!targetId || targetId === "None") {
           return err(new Error(`No running portal instance found in ${env}`));
         }
       }
 
-      const dockerCmd = `docker exec portal python manage.py ${command}`;
-      const params = JSON.stringify({ commands: [dockerCmd] });
       const result = aws(
         profile,
-        `ssm send-command --instance-ids "${targetId}" --document-name AWS-RunShellScript --parameters '${params}'`,
+        buildRunManageArgs({ targetId, command })
       );
       const cmdId = result.Command.CommandId;
       return ok(
@@ -2496,16 +2835,17 @@ server.tool(
       return err(e);
     }
   },
-);
+});
 
 // ==========================================================================
 // Range query tools
 // ==========================================================================
 
-server.tool(
-  "list_ranges",
-  "List ranges with status, user, scenario, instance count, and timestamps. Useful for checking active/failed/destroyed ranges.",
-  {
+registerTool(ctx, {
+  name: "list_ranges",
+  klass: "named_db_read",
+  description: "List ranges with status, user, scenario, instance count, and timestamps. Useful for checking active/failed/destroyed ranges.",
+  schema: {
     env: EnvSchema,
     status: z
       .string()
@@ -2525,7 +2865,7 @@ server.tool(
       .default(20)
       .describe("Max results to return (default 20)"),
   },
-  async ({ env, status, user, limit }) => {
+  handler: async ({ env, status, user, limit }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const conditions = [];
@@ -2570,17 +2910,18 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "get_range",
-  "Get detailed info for a single range including instances and subnet allocations.",
-  {
+registerTool(ctx, {
+  name: "get_range",
+  klass: "named_db_read",
+  description: "Get detailed info for a single range including instances and subnet allocations.",
+  schema: {
     env: EnvSchema,
     range_id: z.number().int().describe("The range ID"),
   },
-  async ({ env, range_id }) => {
+  handler: async ({ env, range_id }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const rangeResult = await client.query(
@@ -2641,13 +2982,14 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
 
-server.tool(
-  "list_subnet_allocations",
-  "List subnet CIDR allocations. Useful for debugging race conditions and stale reservations.",
-  {
+registerTool(ctx, {
+  name: "list_subnet_allocations",
+  klass: "named_db_read",
+  description: "List subnet CIDR allocations. Useful for debugging race conditions and stale reservations.",
+  schema: {
     env: EnvSchema,
     status: z
       .string()
@@ -2655,7 +2997,7 @@ server.tool(
       .describe("Filter by status (reserved, active, released)"),
     vpc_id: z.string().optional().describe("Filter by VPC ID"),
   },
-  async ({ env, status, vpc_id }) => {
+  handler: async ({ env, status, vpc_id }) => {
     try {
       return await withClient(env, { readOnly: true }, async (client) => {
         const conditions = [];
@@ -2690,12 +3032,46 @@ server.tool(
     } catch (e) {
       return err(e);
     }
-  }
-);
+  },
+});
+
+  // Codex review #1201 cycle 1 finding 4: every `apex_operations[*].tool`
+  // rule in .shifter.yaml must point at a descriptor that actually
+  // reached registerTool. Run this AFTER every registerTool call so a
+  // typo in .shifter.yaml fails startup rather than silently disabling
+  // the intended apex gate.
+  validateApexCoverage(ctx.policy);
+}
 
 // ==========================================================================
 // Start server
 // ==========================================================================
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// Phase 5 (#1201): load .shifter.yaml at startup. The active profile
+// is `SHIFTER_OPS_PROFILE` (read once here; runtime profile flips
+// would be a confused-deputy surface). A missing or malformed
+// `.shifter.yaml` throws and the server exits before any tool is
+// registered — fail closed is the only correct path.
+async function main() {
+  installLiveProcessHandlers();
+  const _HERE = path.dirname(fileURLToPath(import.meta.url));
+  const _REPO_ROOT = path.resolve(_HERE, "..", "..");
+  const server = new McpServer({ name: "shifter-ops", version: "1.0.0" });
+  const policy = loadPolicy({
+    path: path.join(_REPO_ROOT, ".shifter.yaml"),
+    profile: profileFromEnv(process.env),
+  });
+  registerAllOpsTools({ server, policy });
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// Codex review #1202 cycle 1 finding 2: `process.argv[1]` is undefined
+// in valid Node import contexts (e.g. `node --input-type=module -e
+// "import('./mcp/ops/index.js')"`, embedded runners, repl programmatic
+// loads). Guard the conversion so merely importing this module never
+// throws before the caller can use the exported registration seam.
+const _entrypointArg = process.argv[1];
+if (_entrypointArg && import.meta.url === pathToFileURL(_entrypointArg).href) {
+  await main();
+}

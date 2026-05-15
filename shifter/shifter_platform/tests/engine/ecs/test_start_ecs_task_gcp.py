@@ -46,9 +46,10 @@ class TestStartEcsTaskGCP:
             "GDC_STATIC_IP_RESERVATION_COUNT": "4",
             "GDC_VM_STORAGE_CLASS": "local-shared",
             "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-vm-image-gcs",
-            "GDC_WINDOWS_ADMIN_PASSWORD": "CortexSavesTheDay!",
-            "GDC_KALI_PASSWORD": "kali",
-            "GDC_UBUNTU_PASSWORD": "ubuntu",
+            # GDC_WINDOWS_ADMIN_PASSWORD / GDC_KALI_PASSWORD /
+            # GDC_UBUNTU_PASSWORD are intentionally NOT in the
+            # provisioner env after #762 — guest passwords are now
+            # per-instance secrets resolved through GCP Secret Manager.
             "DC_DOMAIN_PASSWORD": "DomainAdminPass!",
             "GDC_KALI_IMAGE_URL": "gs://images/kali.qcow2",
             "GDC_UBUNTU_IMAGE_URL": "https://example.com/ubuntu.img",
@@ -82,12 +83,12 @@ class TestStartEcsTaskGCP:
                 call_kwargs["env_overrides"]["GDC_VM_IMAGE_GCS_SECRET_ID"]
                 == env_overrides["GDC_VM_IMAGE_GCS_SECRET_ID"]
             )
-            assert (
-                call_kwargs["env_overrides"]["GDC_WINDOWS_ADMIN_PASSWORD"]
-                == env_overrides["GDC_WINDOWS_ADMIN_PASSWORD"]
-            )
-            assert call_kwargs["env_overrides"]["GDC_KALI_PASSWORD"] == env_overrides["GDC_KALI_PASSWORD"]
-            assert call_kwargs["env_overrides"]["GDC_UBUNTU_PASSWORD"] == env_overrides["GDC_UBUNTU_PASSWORD"]
+            # Shared guest password env vars MUST NOT flow into the
+            # provisioner ECS task after #762.
+            assert "GDC_WINDOWS_ADMIN_PASSWORD" not in call_kwargs["env_overrides"]
+            assert "GDC_KALI_PASSWORD" not in call_kwargs["env_overrides"]
+            assert "GDC_UBUNTU_PASSWORD" not in call_kwargs["env_overrides"]
+            # DC_DOMAIN_PASSWORD remains deployment-scoped.
             assert call_kwargs["env_overrides"]["DC_DOMAIN_PASSWORD"] == env_overrides["DC_DOMAIN_PASSWORD"]
             assert call_kwargs["env_overrides"]["GDC_KALI_IMAGE_URL"] == env_overrides["GDC_KALI_IMAGE_URL"]
             assert call_kwargs["env_overrides"]["DB_HOST"] == env_overrides["DB_HOST"]

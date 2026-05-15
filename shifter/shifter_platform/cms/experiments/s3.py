@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -21,6 +22,66 @@ from shared.cloud.exceptions import CloudStorageError
 from shared.log_sanitize import safe_log
 
 logger = logging.getLogger(__name__)
+
+# Character set kept end-to-end aligned with
+# cyberscript.script_context.S3KeySegment so a script upload that succeeds is
+# guaranteed to satisfy the execution-time validator. Anything outside the
+# whitelist collapses to '_'.
+_SCRIPT_FILENAME_NORMALIZE = re.compile(r"[^A-Za-z0-9._=+-]+")
+
+
+def _normalize_script_filename_segment(filename: str) -> str:
+    """Normalize an uploaded script filename to a shell-safe S3 key segment.
+
+    Wraps `sanitize_s3_filename` (which already strips path components,
+    control characters, and leading dots) and then collapses any character
+    outside the execution-time whitelist to `_`. Defuses any `..` sequence
+    that survives the whitelist so the generated key always satisfies
+    `cyberscript.script_context.S3KeySegment`. Empty results fall back to
+    `unnamed.py` so the resulting key remains parseable.
+    """
+    base = sanitize_s3_filename(filename)
+    normalized = _SCRIPT_FILENAME_NORMALIZE.sub("_", base)
+    # Repeatedly collapse `..` until none remain, so cascades like `....` do
+    # not survive a single .replace() pass.
+    while ".." in normalized:
+        normalized = normalized.replace("..", "_")
+    normalized = normalized.strip("_")
+    return normalized or "unnamed.py"
+
+
+# Matches `cyberscript.script_context._MAX_S3_KEY` and the persisted
+# `FileAsset.s3_key` column width. Truncation here keeps the normalized
+# key short enough that both the validator and `asset.save()` will accept it.
+_LEGACY_KEY_MAX_LEN = 500
+
+
+def normalize_legacy_script_s3_key(key: str) -> str:
+    """Normalize a legacy ScriptAsset.s3_key so it satisfies the execution validator.
+
+    Normalizes each path segment individually so the key's `/` separators are
+    preserved. Used by the 0002_normalize_legacy_script_s3_keys data migration
+    to rewrite keys produced by the pre-#700 `sanitize_s3_filename` path.
+    Truncates the final segment if the result exceeds the persisted column /
+    validator cap (500 chars).
+    """
+    if not key:
+        return "unnamed"
+    segments: list[str] = []
+    for segment in key.lstrip("/").split("/"):
+        cleaned = _SCRIPT_FILENAME_NORMALIZE.sub("_", segment)
+        while ".." in cleaned:
+            cleaned = cleaned.replace("..", "_")
+        cleaned = cleaned.strip("_")
+        if cleaned:
+            segments.append(cleaned)
+    result = "/".join(segments) or "unnamed"
+    if len(result) > _LEGACY_KEY_MAX_LEN:
+        # Truncate the final segment so the overall key fits the cap.
+        head, _, tail = result.rpartition("/")
+        budget = _LEGACY_KEY_MAX_LEN - len(head) - (1 if head else 0)
+        result = (head + "/" if head else "") + tail[:budget]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +106,7 @@ def generate_script_upload_url(user_id: int, filename: str) -> tuple[str, str]:
         logger.error("generate_script_upload_url: AWS_S3_BUCKET_NAME not configured")
         raise S3Error("AWS_S3_BUCKET_NAME is not configured")
 
-    safe_filename = sanitize_s3_filename(filename)
+    safe_filename = _normalize_script_filename_segment(filename)
     unique_id = uuid.uuid4().hex[:12]
     s3_key = f"scripts/{user_id}/{unique_id}_{safe_filename}"
 
@@ -118,6 +179,34 @@ def delete_s3_object(s3_key: str) -> None:
         raise S3Error(str(e)) from e
 
     logger.info("delete_s3_object: success s3_key=%s", safe_log(s3_key))
+
+
+def read_script_header(s3_key: str, max_bytes: int) -> bytes:
+    """Read up to `max_bytes` from the start of a script upload object.
+
+    Bridges `CloudStorageError` to the `S3Error` family used by experiment
+    services. Used by `complete_script_upload` to inspect server-side that
+    the uploaded bytes are text rather than a binary file masquerading as a
+    Python script (issue #696).
+    """
+    if not settings.AWS_S3_BUCKET_NAME:
+        logger.error("read_script_header: AWS_S3_BUCKET_NAME not configured")
+        raise S3Error("AWS_S3_BUCKET_NAME is not configured")
+
+    try:
+        storage = get_object_storage()
+        return storage.read_object_header(
+            bucket=settings.AWS_S3_BUCKET_NAME,
+            key=s3_key,
+            max_bytes=max_bytes,
+        )
+    except CloudStorageError as e:
+        logger.exception(
+            "read_script_header: failed s3_key=%s error=%s",
+            safe_log(s3_key),
+            safe_log(str(e)),
+        )
+        raise S3Error(str(e)) from e
 
 
 def verify_s3_object(s3_key: str) -> tuple[int, str]:

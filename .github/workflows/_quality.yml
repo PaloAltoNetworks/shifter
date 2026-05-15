@@ -8,6 +8,66 @@ on:
         required: false
         type: boolean
         default: false
+      core:
+        required: false
+        type: boolean
+        default: false
+      range:
+        required: false
+        type: boolean
+        default: false
+      shifter_engine:
+        required: false
+        type: boolean
+        default: false
+      shifter_platform:
+        required: false
+        type: boolean
+        default: false
+      shifter_app:
+        required: false
+        type: boolean
+        default: false
+      shifter_platform_app:
+        required: false
+        type: boolean
+        default: false
+      mcp:
+        required: false
+        type: boolean
+        default: false
+      packer:
+        required: false
+        type: boolean
+        default: false
+      bootstrap:
+        required: false
+        type: boolean
+        default: false
+      check_layer_imports:
+        required: false
+        type: boolean
+        default: false
+      check_rds_pending_modifications:
+        required: false
+        type: boolean
+        default: false
+      installation:
+        required: false
+        type: boolean
+        default: false
+      gcp:
+        required: false
+        type: boolean
+        default: false
+      guardrails:
+        required: false
+        type: boolean
+        default: false
+      quality_workflow:
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   # ===========================================================================
@@ -18,17 +78,59 @@ jobs:
     permissions:
       contents: read
     name: Architecture (adr conformance)
+    if: |
+      inputs.guardrails ||
+      inputs.quality_workflow ||
+      inputs.core ||
+      inputs.range ||
+      inputs.shifter_engine ||
+      inputs.shifter_platform ||
+      inputs.shifter_app ||
+      inputs.shifter_platform_app ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
+      # The self-hosted runner ships with Python 3.9, but `adr_guard.py`
+      # imports the stdlib `tomllib` module added in 3.11. `uv` brings its
+      # own Python and is already the Python toolchain every other job in
+      # this workflow uses, so it's the portable fix: no OS-package upgrade
+      # on the runner VMs, no dependency on `actions/setup-python`'s
+      # version manifest (which doesn't cover the runner distro).
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install Helm for ADR guard chart rendering (hermetic, version-pinned, checksum-verified)
+        env:
+          HELM_VERSION: v3.15.4
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/helm-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          # Verify the downloaded tarball against the published SHA256 checksum
+          # before extraction or execution. Trust boundary is get.helm.sh; if
+          # it is compromised both files compare equal, but this prevents
+          # CDN/transport tampering and silent corruption.
+          expected=$(curl -fsSL \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum" \
+            | awk '{print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
+          echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/helm-bin/helm" version --short
+
       - name: Run ADR guard
-        run: python3 scripts/adr_guard/adr_guard.py --all --level ci
+        run: |
+          uv run --python 3.11 --with 'pyyaml==6.0.2' \
+            python scripts/adr_guard/adr_guard.py --all --level ci
 
   workflow-lint:
     permissions:
       contents: read
     name: Lint (GitHub Actions)
+    if: inputs.guardrails || inputs.quality_workflow
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +140,14 @@ jobs:
     permissions:
       contents: read
     name: Lint (terraform)
+    if: |
+      inputs.guardrails ||
+      inputs.quality_workflow ||
+      inputs.core ||
+      inputs.range ||
+      inputs.shifter_engine ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +166,11 @@ jobs:
     permissions:
       contents: read
     name: Lint (shifter_platform)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +192,11 @@ jobs:
     permissions:
       contents: read
     name: Lint JavaScript/CSS (shifter_platform)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +224,10 @@ jobs:
     permissions:
       contents: read
     name: Lint (provisioner)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_engine ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -122,6 +246,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (packer)
+    if: inputs.quality_workflow || inputs.packer
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -140,6 +265,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (bootstrap)
+    if: inputs.quality_workflow || inputs.bootstrap
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -154,10 +280,30 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  gcp-scripts-lint:
+    permissions:
+      contents: read
+    name: Lint (gcp scripts)
+    if: inputs.quality_workflow || inputs.gcp
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: scripts/gcp
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   check-layer-imports-lint:
     permissions:
       contents: read
     name: Lint (check_layer_imports)
+    if: inputs.quality_workflow || inputs.check_layer_imports
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -172,13 +318,71 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  check-rds-pending-modifications-lint:
+    permissions:
+      contents: read
+    name: Lint (check_rds_pending_modifications)
+    if: inputs.quality_workflow || inputs.check_rds_pending_modifications
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: scripts/check_rds_pending_modifications
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
+  installation-lint:
+    permissions:
+      contents: read
+    name: Lint (installation)
+    if: inputs.quality_workflow || inputs.installation
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Lint Python
+        working-directory: shifter/installation
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   k8s-lint:
     permissions:
       contents: read
     name: Lint (k8s manifests)
+    if: inputs.guardrails || inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install kustomize (hermetic, version-pinned, checksum-verified)
+        env:
+          KUSTOMIZE_VERSION: v5.4.3
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/kustomize-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/kustomize.tar.gz" \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          # Verify the downloaded tarball against the published SHA256 checksum
+          # before extraction or execution. checksums.txt lists every release
+          # artifact; pull the row for our tarball.
+          expected=$(curl -fsSL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/checksums.txt" \
+            | awk -v fname="kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" '$2 == fname {print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/kustomize.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kustomize.tar.gz" -C "${RUNNER_TEMP}/kustomize-bin" kustomize
+          echo "${RUNNER_TEMP}/kustomize-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/kustomize-bin/kustomize" version
 
       - name: Install kube-linter
         run: |
@@ -186,16 +390,48 @@ jobs:
             "https://github.com/stackrox/kube-linter/releases/download/v0.7.2/kube-linter-linux.tar.gz"
           tar -xzf /tmp/kube-linter.tar.gz -C /tmp kube-linter
 
-      - name: Run kube-linter
-        run: /tmp/kube-linter lint --config .kube-linter.yaml platform/k8s/
+      # Render every kustomize root before linting. The previous "lint the
+      # raw tree" pattern broke as soon as an overlay added a strategic-merge
+      # patch for a Deployment: the patch file is a partial Deployment by
+      # design (no selector, no resources, no securityContext — those come
+      # from the base), but kube-linter saw it as a full Deployment and
+      # tripped on every required field. Rendering kustomize first validates
+      # what actually gets deployed.
+      - name: Render kustomize roots + run kube-linter
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rendered-k8s"
+          while IFS= read -r kfile; do
+            root=$(dirname "$kfile")
+            slug=$(echo "$root" | tr '/' '_')
+            kustomize build "$root" > "${RUNNER_TEMP}/rendered-k8s/${slug}.yaml"
+          done < <(find platform/k8s -name kustomization.yaml)
+          /tmp/kube-linter lint --config .kube-linter.yaml "${RUNNER_TEMP}/rendered-k8s/"
 
   k8s-schema:
     permissions:
       contents: read
     name: Lint (k8s schemas)
+    if: inputs.guardrails || inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install kustomize (hermetic, version-pinned, checksum-verified)
+        env:
+          KUSTOMIZE_VERSION: v5.4.3
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/kustomize-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/kustomize.tar.gz" \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          expected=$(curl -fsSL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/checksums.txt" \
+            | awk -v fname="kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" '$2 == fname {print $1}')
+          echo "${expected}  ${RUNNER_TEMP}/kustomize.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kustomize.tar.gz" -C "${RUNNER_TEMP}/kustomize-bin" kustomize
+          echo "${RUNNER_TEMP}/kustomize-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/kustomize-bin/kustomize" version
 
       - name: Install kubeconform
         run: |
@@ -203,10 +439,21 @@ jobs:
             "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
 
-      - name: Validate k8s manifests
+      # Same rationale as k8s-lint: validate the rendered (kustomized) shape
+      # so overlay patches don't fail schema validation as standalone partial
+      # Deployments.
+      - name: Render kustomize roots + validate schemas
         run: |
-          find platform/k8s -name '*.yaml' ! -name 'kustomization.yaml' -print0 | \
-            xargs -0 /tmp/kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rendered-k8s"
+          while IFS= read -r kfile; do
+            root=$(dirname "$kfile")
+            slug=$(echo "$root" | tr '/' '_')
+            kustomize build "$root" > "${RUNNER_TEMP}/rendered-k8s/${slug}.yaml"
+          done < <(find platform/k8s -name kustomization.yaml)
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas \
+            -kubernetes-version 1.31.0 \
+            "${RUNNER_TEMP}/rendered-k8s/"*.yaml
 
   # ===========================================================================
   # Type Checking (non-blocking quality gate)
@@ -216,7 +463,12 @@ jobs:
     permissions:
       contents: read
     name: Type Check (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_platform_app ||
+       inputs.shifter_platform ||
+       inputs.gcp)
     runs-on: self-hosted
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
@@ -239,7 +491,11 @@ jobs:
     permissions:
       contents: read
     name: Type Check (provisioner)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_engine ||
+       inputs.gcp)
     runs-on: self-hosted
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
@@ -266,6 +522,10 @@ jobs:
     permissions:
       contents: read
     name: Architecture (layer imports)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.check_layer_imports
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -285,6 +545,11 @@ jobs:
     permissions:
       contents: read
     name: Architecture (import linter)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -301,13 +566,28 @@ jobs:
         run: uv run lint-imports --config ../../.importlinter
 
   # ===========================================================================
-  # SAST
+  # SAST (Bandit)
+  #
+  # Policy (#1193): every Bandit job in this workflow is BLOCKING. There
+  # are no advisory Bandit jobs by default. Owner: @Brad-Edwards. Scope
+  # covers every Python package that ships from this repo — runtime
+  # (shifter_platform, provisioner), build (packer), bootstrap and
+  # install scripts (scripts/bootstrap, shifter/installation), operator
+  # scripts (scripts/gcp), and dev-tool linters
+  # (scripts/check_layer_imports). Adding a new Bandit job MUST NOT
+  # introduce `continue-on-error: true` — fix the finding, narrow the
+  # scan, or use a documented `# nosec` with an inline justification.
   # ===========================================================================
 
   shifter-platform-sast:
     permissions:
       contents: read
     name: SAST (shifter_platform)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -324,6 +604,10 @@ jobs:
     permissions:
       contents: read
     name: SAST (provisioner)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_engine ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -342,8 +626,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (packer)
+    if: inputs.quality_workflow || inputs.packer
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -359,8 +643,8 @@ jobs:
     permissions:
       contents: read
     name: SAST (bootstrap)
+    if: inputs.quality_workflow || inputs.bootstrap
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -372,12 +656,29 @@ jobs:
           uv tool install bandit
           bandit -r scripts/bootstrap/ --skip B101 --exclude scripts/bootstrap/tests,scripts/bootstrap/.venv
 
+  gcp-scripts-sast:
+    permissions:
+      contents: read
+    name: SAST (gcp scripts)
+    if: inputs.quality_workflow || inputs.gcp
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Run Bandit
+        run: |
+          uv tool install bandit
+          bandit -r scripts/gcp/ --skip B101,B108 --exclude scripts/gcp/tests,scripts/gcp/.venv
+
   check-layer-imports-sast:
     permissions:
       contents: read
     name: SAST (check_layer_imports)
+    if: inputs.quality_workflow || inputs.check_layer_imports
     runs-on: self-hosted
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -390,6 +691,23 @@ jobs:
           uv tool install 'bandit[toml]'
           bandit -r . -c pyproject.toml
 
+  installation-sast:
+    permissions:
+      contents: read
+    name: SAST (installation)
+    if: inputs.quality_workflow || inputs.installation
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Run Bandit
+        run: |
+          uv tool install bandit
+          bandit -r shifter/installation/ --skip B101 --exclude shifter/installation/tests,shifter/installation/.venv
+
   # ===========================================================================
   # Python Tests
   # ===========================================================================
@@ -398,7 +716,12 @@ jobs:
     permissions:
       contents: read
     name: Tests (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_platform_app ||
+       inputs.shifter_platform ||
+       inputs.gcp)
     needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
     runs-on: self-hosted
     services:
@@ -444,7 +767,11 @@ jobs:
     permissions:
       contents: read
     name: Tests (provisioner)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_engine ||
+       inputs.gcp)
     needs: [provisioner-lint, provisioner-sast]
     runs-on: self-hosted
     steps:
@@ -467,7 +794,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (packer)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.packer) }}
     needs: [packer-lint]
     runs-on: self-hosted
     steps:
@@ -488,7 +815,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (bootstrap)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.bootstrap) }}
     needs: [bootstrap-lint]
     runs-on: self-hosted
     steps:
@@ -505,11 +832,32 @@ jobs:
         working-directory: scripts/bootstrap
         run: uv run pytest tests/
 
+  gcp-scripts-tests:
+    permissions:
+      contents: read
+    name: Tests (gcp scripts)
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.gcp) }}
+    needs: [gcp-scripts-lint]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/gcp
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: scripts/gcp
+        run: uv run pytest tests/
+
   check-layer-imports-tests:
     permissions:
       contents: read
     name: Tests (check_layer_imports)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.check_layer_imports) }}
     needs: [check-layer-imports-lint]
     runs-on: self-hosted
     steps:
@@ -526,18 +874,67 @@ jobs:
         working-directory: scripts/check_layer_imports
         run: uv run pytest tests/
 
+  check-rds-pending-modifications-tests:
+    permissions:
+      contents: read
+    name: Tests (check_rds_pending_modifications)
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.check_rds_pending_modifications) }}
+    needs: [check-rds-pending-modifications-lint]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: scripts/check_rds_pending_modifications
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: scripts/check_rds_pending_modifications
+        run: uv run pytest tests/
+
+  installation-tests:
+    permissions:
+      contents: read
+    name: Tests (installation)
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.installation) }}
+    needs: [installation-lint]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install dependencies
+        working-directory: shifter/installation
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: shifter/installation
+        run: uv run pytest tests/
+
   adr-guard-tests:
     permissions:
       contents: read
     name: Tests (adr_guard)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.guardrails || inputs.quality_workflow) }}
     needs: [adr-conformance]
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
+      # Same rationale as adr-conformance: `adr_guard` imports `tomllib`
+      # (stdlib 3.11+); the self-hosted runner ships 3.9. Use `uv` to
+      # source Python so the workflow doesn't depend on a system upgrade.
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
       - name: Run tests
-        run: python3 -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
+        run: |
+          uv run --python 3.11 --with 'pyyaml==6.0.2' \
+            python -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
 
   # ===========================================================================
   # JavaScript Tests
@@ -547,7 +944,12 @@ jobs:
     permissions:
       contents: read
     name: Tests JavaScript (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_platform_app ||
+       inputs.shifter_platform ||
+       inputs.gcp)
     needs: [shifter-platform-lint-js]
     runs-on: self-hosted
     steps:
@@ -568,6 +970,67 @@ jobs:
         working-directory: shifter/shifter_platform
         run: npm test
 
+  mcp-lint:
+    # Lint always runs, even when [skip tests] is set on the workflow
+    # input, because lint is a static check independent of the test
+    # gate. Matches the shifter-platform pattern (lint-js / js-tests
+    # are separate jobs).
+    permissions:
+      contents: read
+    name: Lint JavaScript (mcp/${{ matrix.package }})
+    if: inputs.quality_workflow || inputs.mcp
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ngfw, ops, shared]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mcp/${{ matrix.package }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mcp/${{ matrix.package }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: mcp/${{ matrix.package }}
+        run: npm run lint
+
+  mcp-tests:
+    permissions:
+      contents: read
+    name: Tests JavaScript (mcp/${{ matrix.package }})
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.mcp) }}
+    needs: [mcp-lint]
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ngfw, ops]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mcp/${{ matrix.package }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mcp/${{ matrix.package }}
+        run: npm ci
+
+      - name: Test
+        working-directory: mcp/${{ matrix.package }}
+        run: npm test
+
   # ===========================================================================
   # Security
   # ===========================================================================
@@ -576,6 +1039,14 @@ jobs:
     permissions:
       contents: read
     name: Security (IaC)
+    if: |
+      inputs.guardrails ||
+      inputs.quality_workflow ||
+      inputs.core ||
+      inputs.range ||
+      inputs.shifter_engine ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -602,6 +1073,7 @@ jobs:
     permissions:
       contents: read
     name: Security (k8s)
+    if: inputs.guardrails || inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     continue-on-error: true  # Soft-fail until manifest remediation complete
     steps:
@@ -658,6 +1130,11 @@ jobs:
     permissions:
       contents: read
     name: Architecture (model FKs)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     services:
       postgres:

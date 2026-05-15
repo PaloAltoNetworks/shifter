@@ -1,16 +1,17 @@
-∏# CI/CD Pipeline
+# CI/CD Pipeline
 
-How code gets from your branch to production.
+How GitHub Actions validates and deploys Shifter.
 
 ## Overview
 
-All CI/CD runs through GitHub Actions. The main orchestrator is `deploy.yml`, which coordinates:
+All CI/CD runs through GitHub Actions. The main orchestrator is `deploy.yml`,
+which coordinates:
 
 1. **Quality** - Linting, tests, security scanning
 2. **Core** - ECR repositories (foundation)
 3. **Range** - Range VPC infrastructure
 4. **Shifter Engine** - Container build
-5. **Portal** - Infrastructure, container, deployment
+5. **Shifter Platform** - Application infrastructure, containers, deployment
 
 ## Trigger Rules
 
@@ -22,9 +23,14 @@ All CI/CD runs through GitHub Actions. The main orchestrator is `deploy.yml`, wh
 | Push to `gcp-dev` | Fast GCP validation + GCP deploy |
 | Push to `main` | Quality + Plan + Apply to prod |
 
-PRs get Terraform plan comments. `dev` is now the integration branch for cross-provider validation only. Actual dev deployments happen only from `aws-dev` and `gcp-dev`.
+PRs get Terraform plan comments. `dev` is the integration branch for
+cross-provider validation only. Dev deployments happen only from `aws-dev` and
+`gcp-dev`.
 
-`gcp-dev` pushes intentionally skip the global quality fan-out so GCP break/fix work can move faster. The fast path still runs the provider-local guardrails in `_gcp-dev.yml`: Terraform fmt/init/validate plus rendered-manifest schema validation before deploy. Broad lint/test/security coverage remains required on `dev`, on PRs, and on production.
+`gcp-dev` pushes skip the global quality fan-out. The fast path still runs the
+provider-local guardrails in `_gcp-dev.yml`: Terraform fmt/init/validate plus
+rendered-manifest schema validation before deploy. Broad lint/test/security
+coverage runs on PRs, `dev`, and `main`.
 
 ## Workflow Files
 
@@ -36,7 +42,7 @@ PRs get Terraform plan comments. `dev` is now the integration branch for cross-p
 ├── _range.yml              # Range VPC
 ├── _gcp-dev.yml            # GCP validate/deploy workflow
 ├── _shifter-engine.yml     # Shifter Engine container
-└── _portal.yml             # Portal infra + deploy
+└── _shifter-platform.yml   # Shifter Platform infra + deploy
 ```
 
 Underscore prefix (`_*.yml`) indicates reusable workflows called by `deploy.yml`.
@@ -65,9 +71,10 @@ The orchestrator uses path filters to run only relevant jobs:
 | Filter | Triggers When |
 |--------|--------------|
 | `core` | ECR module, environment root, deploy workflow |
-| `range` | Range Terraform, pulumi-state module |
+| `range` | Range Terraform, engine state module |
 | `shifter_engine` | Shifter Engine code, ECR module |
-| `portal` | Portal Django code, portal Terraform |
+| `shifter_platform` | Shifter Django code, portal/Guacamole Terraform |
+| `gcp` | GCP Terraform, GCP Kubernetes assets, GCP scripts, GCP cloud adapters |
 
 ## Quality Gate
 
@@ -91,10 +98,10 @@ Runs on every PR and push:
   via `.kube-linter.yaml`.
 - **K8s security scanning**: Checkov with the `kubernetes` framework (soft fail
   while manifests are being hardened).
-- **Tests**: `pytest` with PostgreSQL service container
+- **Tests**: `pytest` with PostgreSQL service container for `shifter_platform`
 - **IaC scanning**: Checkov for Terraform (soft fail - warnings only)
 - **Secret scanning**: gitleaks on newly introduced commits
-- **Coverage**: Shifter Engine requires 80% minimum
+- **Coverage**: `shifter_platform` emits terminal and XML coverage reports
 
 Architecture checks are not skipped by the normal test-skip path. `[skip tests]` may skip slow test jobs on `dev`, but it does not bypass ADR or architecture enforcement.
 
@@ -113,11 +120,17 @@ Each component follows the same pattern:
    - Skip on PRs to prod
    - `terraform apply -auto-approve`
 
-**Note**: Terraform variables are committed to the repo in `terraform.tfvars` files. CI/CD reads them directly after checkout - no secrets or environment variables needed for tfvars.
+**Note**: The committed `terraform.tfvars` files ship an `example.com`
+baseline. Deployment-specific values (domains, alarm emails, allow-list
+domains, account-suffixed bucket names, GCP project id, etc.) come from
+GitHub repository variables and secrets at deploy time; CI/CD renders
+them into a gitignored `local.auto.tfvars` before `terraform apply`.
+See [`docs/dev/deploy-secrets.md`](../../../../../../docs/dev/deploy-secrets.md)
+for the required surface.
 
-## Portal Deployment
+## AWS Platform Deployment
 
-After Terraform apply, portal deployment:
+After Terraform apply, AWS platform deployment:
 
 1. Build Docker image
 2. Push to ECR with tags: `latest`, `{git-sha}`
@@ -144,7 +157,7 @@ Push to main      → AWS prod deploy
 
 ## Provider Routing
 
-`deploy.yml` now resolves branch intent explicitly:
+`deploy.yml` resolves branch intent explicitly:
 
 - `dev` is the shared integration branch. It must validate both provider paths when shared code changes, but it must not apply infrastructure or deploy workloads.
 - `aws-dev` is the only branch that deploys the AWS dev environment.
@@ -153,7 +166,7 @@ Push to main      → AWS prod deploy
 - Shared Shifter application changes trigger both the AWS validation chain and the GCP validation chain on `dev`, so provider overlaps are caught before promotion to either deploy branch.
 - The GCP control plane is deployed through the Helm chart in `platform/charts/shifter`, with generated values layered on top of environment defaults.
 - The GCP portal auth contract is FirebaseUI/browser-side Identity Platform auth plus server-side verified-token exchange. Do not add Django credential handling to recreate Cognito semantics.
-- New multi-cloud work should enter through the shared cloud adapter layers rather than adding provider-specific calls directly in domain services.
+- Multi-cloud work enters through the shared cloud adapter layers rather than provider-specific calls in domain services.
 
 ## Self-Hosted Runner
 
@@ -173,7 +186,7 @@ All workflows run on `self-hosted` runners (not GitHub-hosted). The runner has:
 3. Expand the job you want to inspect
 4. Each step shows its logs
 
-Terraform plans are also posted as PR comments for easy review.
+Terraform plans are also posted as PR comments.
 
 ## Common Issues
 

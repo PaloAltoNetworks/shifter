@@ -6,10 +6,24 @@ on:
   push:
     branches: [main, dev, aws-dev, gcp-dev]
   workflow_dispatch:
+    inputs:
+      gcp_require_active_certificate:
+        description: >-
+          Fail the GCP deploy if the GKE ManagedCertificate is not Active for the
+          public hostname. Set false only for first-time bootstrap, before DNS for
+          the hostname has been pointed at the ingress IP. Automatic (push) deploys
+          always require an active certificate.
+        type: boolean
+        default: true
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: false
+  # Cancel an in-flight run when a newer push to the same ref arrives. Old
+  # behaviour (cancel-in-progress: false) queued every new push behind the
+  # previous run's full duration — fine if the older run was apply-bound to
+  # a different SHA, but for env-branch pushes the newer SHA always
+  # supersedes the old one (env branches never go backwards).
+  cancel-in-progress: true
 
 jobs:
   # ============================================================================
@@ -23,7 +37,17 @@ jobs:
       range: ${{ steps.filter.outputs.range }}
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
+      shifter_app: ${{ steps.filter.outputs.shifter_app }}
+      shifter_platform_app: ${{ steps.filter.outputs.shifter_platform_app }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      packer: ${{ steps.filter.outputs.packer }}
+      bootstrap: ${{ steps.filter.outputs.bootstrap }}
+      check_layer_imports: ${{ steps.filter.outputs.check_layer_imports }}
+      check_rds_pending_modifications: ${{ steps.filter.outputs.check_rds_pending_modifications }}
+      installation: ${{ steps.filter.outputs.installation }}
       gcp: ${{ steps.filter.outputs.gcp }}
+      guardrails: ${{ steps.filter.outputs.guardrails }}
+      quality_workflow: ${{ steps.filter.outputs.quality_workflow }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
       aws_is_dev: ${{ steps.env.outputs.aws_is_dev }}
       gcp_environment: ${{ steps.env.outputs.gcp_environment }}
@@ -63,8 +87,40 @@ jobs:
               - 'platform/terraform/modules/portal/**'
               - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
-              - 'shifter/**'
               - '.github/workflows/_shifter-platform.yml'
+            shifter_app:
+              - 'shifter/**'
+            shifter_platform_app:
+              - 'shifter/shifter_platform/**'
+            mcp:
+              - 'mcp/**'
+            packer:
+              - 'shifter/packer/**'
+            bootstrap:
+              - 'scripts/bootstrap/**'
+            check_layer_imports:
+              - 'scripts/check_layer_imports/**'
+            check_rds_pending_modifications:
+              - 'scripts/check_rds_pending_modifications/**'
+            installation:
+              - 'shifter/installation/**'
+            guardrails:
+              - '.github/workflows/**'
+              - '.github/CODEOWNERS'
+              - '.github/pull_request_template.md'
+              - '.github/copilot-instructions.md'
+              - '.pre-commit-config.yaml'
+              - '.importlinter'
+              - '.tflint.hcl'
+              - '.gitleaks.toml'
+              - '.kube-linter.yaml'
+              - '.claude/settings.json'
+              - '.claude/hooks/**'
+              - 'scripts/adr_guard/**'
+              - 'docs/adr/**'
+            quality_workflow:
+              - '.github/workflows/_quality.yml'
+              - '.github/workflows/deploy.yml'
             gcp:
               - 'platform/terraform/gcp/**'
               - 'platform/k8s/gcp/**'
@@ -183,17 +239,51 @@ jobs:
   quality:
     name: Quality
     needs: changes
+    # Run Quality on PRs and direct pushes to `dev` only.
+    # Pushes to env branches (aws-dev, gcp-dev, main) only happen via merge
+    # from `dev` (per repo rule: env branches must never be ahead of dev),
+    # so the same SHA already passed Quality on its dev push and re-running
+    # here is pure duplicate work. Deploy jobs already tolerate skipped
+    # Quality via `(needs.quality.result == 'success' || ... == 'skipped')`.
     if: |
+      (github.event_name == 'pull_request' ||
+       github.event_name == 'workflow_dispatch' ||
+       github.ref == 'refs/heads/dev') &&
       needs.changes.outputs.fast_gcp_deploy != 'true' &&
       (needs.changes.outputs.core == 'true' ||
        needs.changes.outputs.range == 'true' ||
        needs.changes.outputs.shifter_engine == 'true' ||
        needs.changes.outputs.shifter_platform == 'true' ||
+       needs.changes.outputs.shifter_app == 'true' ||
+       needs.changes.outputs.shifter_platform_app == 'true' ||
+       needs.changes.outputs.mcp == 'true' ||
+       needs.changes.outputs.packer == 'true' ||
+       needs.changes.outputs.bootstrap == 'true' ||
+       needs.changes.outputs.check_layer_imports == 'true' ||
+       needs.changes.outputs.check_rds_pending_modifications == 'true' ||
+       needs.changes.outputs.installation == 'true' ||
        needs.changes.outputs.gcp == 'true' ||
+       needs.changes.outputs.guardrails == 'true' ||
+       needs.changes.outputs.quality_workflow == 'true' ||
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
     with:
       skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
+      core: ${{ needs.changes.outputs.core == 'true' }}
+      range: ${{ needs.changes.outputs.range == 'true' }}
+      shifter_engine: ${{ needs.changes.outputs.shifter_engine == 'true' }}
+      shifter_platform: ${{ needs.changes.outputs.shifter_platform == 'true' }}
+      shifter_app: ${{ needs.changes.outputs.shifter_app == 'true' }}
+      shifter_platform_app: ${{ needs.changes.outputs.shifter_platform_app == 'true' }}
+      mcp: ${{ needs.changes.outputs.mcp == 'true' }}
+      packer: ${{ needs.changes.outputs.packer == 'true' }}
+      bootstrap: ${{ needs.changes.outputs.bootstrap == 'true' }}
+      check_layer_imports: ${{ needs.changes.outputs.check_layer_imports == 'true' }}
+      check_rds_pending_modifications: ${{ needs.changes.outputs.check_rds_pending_modifications == 'true' }}
+      installation: ${{ needs.changes.outputs.installation == 'true' }}
+      gcp: ${{ needs.changes.outputs.gcp == 'true' }}
+      guardrails: ${{ needs.changes.outputs.guardrails == 'true' }}
+      quality_workflow: ${{ needs.changes.outputs.quality_workflow == 'true' || github.event_name == 'workflow_dispatch' }}
 
   gcp-dev:
     name: GCP Dev
@@ -212,6 +302,9 @@ jobs:
     with:
       environment: ${{ needs.changes.outputs.gcp_environment }}
       deploy_changes: ${{ needs.changes.outputs.deploy_gcp == 'true' }}
+      # Automatic deploys always require an active certificate; only a manual
+      # workflow_dispatch may opt into the first-time-bootstrap bypass.
+      require_active_certificate: ${{ github.event_name != 'workflow_dispatch' || inputs.gcp_require_active_certificate }}
     secrets:
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -292,3 +385,7 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
+      TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+      TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}

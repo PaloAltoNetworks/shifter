@@ -46,6 +46,15 @@ output "ecs_task_role_arn" {
 }
 
 # ------------------------------------------------------------------------------
+# Secrets Manager Outputs
+# ------------------------------------------------------------------------------
+
+output "dc_domain_password_secret_arn" {
+  description = "ARN of the Terraform-managed Secrets Manager secret holding the DC domain Administrator password (DC_DOMAIN_PASSWORD)"
+  value       = aws_secretsmanager_secret.dc_domain_password.arn
+}
+
+# ------------------------------------------------------------------------------
 # CloudWatch Outputs
 # ------------------------------------------------------------------------------
 

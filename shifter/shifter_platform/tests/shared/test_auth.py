@@ -2,14 +2,18 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import PermissionDenied
 from django.test import RequestFactory
 
 from shared.auth import (
     THREAT_RESEARCH_GROUP,
-    _is_staff_or_threat_researcher,
+    can_edit_cms_authoring,
     threat_research_required,
+    validate_cms_authoring_user,
 )
+from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 
 
 def _make_user(is_staff=False, is_active=True, groups=None):
@@ -27,27 +31,75 @@ def _make_user(is_staff=False, is_active=True, groups=None):
     return user
 
 
-class TestIsStaffOrThreatResearcher:
-    """Unit tests for _is_staff_or_threat_researcher helper."""
+class TestValidateCmsAuthoringUser:
+    """Unit tests for validate_cms_authoring_user — the shared service-layer
+    gate that combines structural user checks with the CMS authoring policy.
+    """
+
+    def test_none_user_raises_type_error(self):
+        with pytest.raises(TypeError, match=USER_CANNOT_BE_NONE):
+            validate_cms_authoring_user(None, "svc")
+
+    def test_non_user_object_raises_type_error(self):
+        with pytest.raises(TypeError, match="must be a User instance"):
+            validate_cms_authoring_user("not-a-user", "svc")
+
+    def test_unsaved_user_raises_value_error(self):
+        import re
+
+        unsaved = MagicMock()
+        unsaved.id = None
+        with pytest.raises(ValueError, match=re.escape(USER_MUST_BE_SAVED)):
+            validate_cms_authoring_user(unsaved, "svc")
+
+    def test_unrelated_authenticated_user_denied(self):
+        user = _make_user(is_staff=False)
+        user.id = 7
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            validate_cms_authoring_user(user, "svc")
+
+    def test_inactive_threat_research_user_denied(self):
+        user = _make_user(is_staff=False, is_active=False, groups=[THREAT_RESEARCH_GROUP])
+        user.id = 7
+        with pytest.raises(PermissionDenied, match="Active staff or Threat Research"):
+            validate_cms_authoring_user(user, "svc")
+
+    def test_active_staff_user_passes(self):
+        user = _make_user(is_staff=True)
+        user.id = 7
+        assert validate_cms_authoring_user(user, "svc") is None
+
+    def test_active_threat_research_user_passes(self):
+        user = _make_user(is_staff=False, groups=[THREAT_RESEARCH_GROUP])
+        user.id = 7
+        assert validate_cms_authoring_user(user, "svc") is None
+
+
+class TestCanEditCmsAuthoring:
+    """Unit tests for can_edit_cms_authoring helper."""
 
     def test_active_staff_returns_true(self):
         user = _make_user(is_staff=True)
-        assert _is_staff_or_threat_researcher(user) is True
+        assert can_edit_cms_authoring(user) is True
 
     def test_active_threat_research_member_returns_true(self):
         user = _make_user(is_staff=False, groups=[THREAT_RESEARCH_GROUP])
-        assert _is_staff_or_threat_researcher(user) is True
+        assert can_edit_cms_authoring(user) is True
 
-    def test_inactive_user_returns_false(self):
+    def test_inactive_staff_returns_false(self):
         user = _make_user(is_staff=True, is_active=False)
-        assert _is_staff_or_threat_researcher(user) is False
+        assert can_edit_cms_authoring(user) is False
+
+    def test_inactive_threat_research_member_returns_false(self):
+        user = _make_user(is_staff=False, is_active=False, groups=[THREAT_RESEARCH_GROUP])
+        assert can_edit_cms_authoring(user) is False
 
     def test_regular_user_returns_false(self):
         user = _make_user(is_staff=False)
-        assert _is_staff_or_threat_researcher(user) is False
+        assert can_edit_cms_authoring(user) is False
 
     def test_anonymous_user_returns_false(self):
-        assert _is_staff_or_threat_researcher(AnonymousUser()) is False
+        assert can_edit_cms_authoring(AnonymousUser()) is False
 
 
 class TestThreatResearchRequiredDecorator:

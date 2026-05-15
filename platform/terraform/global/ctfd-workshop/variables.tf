@@ -47,7 +47,7 @@ variable "root_volume_throughput" {
 variable "domain" {
   description = "Public DNS name for the workshop CTFd"
   type        = string
-  default     = "ctf.shifter.keplerops.com"
+  default     = "ctf.shifter.example.com"
 }
 
 variable "ctfd_repo_url" {

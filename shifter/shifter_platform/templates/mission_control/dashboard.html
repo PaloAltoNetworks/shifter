@@ -1,8 +1,9 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-
+{% load static i18n %}
 {% block extra_css %}
-<style>
+    <style>
 /* Ranges tile grid - 2x2 layout */
 .ranges-grid {
     display: grid;
@@ -12,8 +13,8 @@
 }
 
 .range-tile {
-    background: var(--xdr-surface);
-    border: 1px solid var(--xdr-border);
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
     padding: 16px;
     min-height: 200px;
@@ -34,7 +35,7 @@
 .range-tile .tile-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 0 0 12px;
 }
 
@@ -51,7 +52,7 @@
 
 .launch-tile-info {
     /* Scenario info column */
-    border-left: 1px solid var(--xdr-border);
+    border-left: 1px solid var(--theme-border);
     padding-left: 24px;
 }
 
@@ -66,13 +67,13 @@
 .scenario-info-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 0 0 8px;
 }
 
 .scenario-info-description {
     font-size: 12px;
-    color: var(--xdr-text-muted);
+    color: var(--theme-text-muted);
     line-height: 1.5;
 }
 
@@ -84,235 +85,294 @@
 .range-tile.provisioning-tile .status {
     margin-bottom: 12px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Ranges</h1>
-    <p class="page-subtitle">Launch and manage your cyber ranges</p>
-</div>
-
-<div class="ranges-grid">
-    <!-- Launch Range Tile (hidden for CTF-only participants who have pre-provisioned ranges) -->
-    {% if not is_ctf_participant_only %}
-    <div class="range-tile launch-tile" id="launch-tile">
-        <div class="tile-title">Launch a Range</div>
-        <div class="launch-tile-content">
-            <div class="launch-tile-form">
-                <div class="form-group">
-                    <label class="form-label">Scenario</label>
-                    <div class="xdr-dropdown full-width" id="scenario-dropdown">
-                        <input type="hidden" name="scenario" id="scenario-select-value" value="">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">Loading scenarios...</span>
-                            <span class="xdr-dropdown-chevron"></span>
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Ranges" %}
+        </h1>
+        <p class="page-subtitle">
+            {% trans "Launch and manage your cyber ranges" %}
+        </p>
+    </div>
+    <div class="ranges-grid">
+        <!-- Launch Range Tile (hidden for CTF-only participants who have pre-provisioned ranges) -->
+        {% if not is_ctf_participant_only %}
+            <div class="range-tile launch-tile" id="launch-tile">
+                <div class="tile-title">
+                    {% trans "Launch a Range" %}
+                </div>
+                <div class="launch-tile-content">
+                    <div class="launch-tile-form">
+                        <div class="form-group">
+                            <label class="form-label">
+                                {% trans "Scenario" %}
+                            </label>
+                            <div class="shifter-dropdown full-width" id="scenario-dropdown">
+                                <input type="hidden"
+                                       name="scenario"
+                                       id="scenario-select-value"
+                                       value="">
+                                <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        Loading scenarios...
+    {% endblocktrans %}
+</span>
+                                    <span class="shifter-dropdown-chevron"></span>
+                                </button>
+                                <div class="shifter-dropdown-panel">
+                                    <ul class="shifter-dropdown-items" id="scenario-items">
+                                        <!-- Populated dynamically by dashboard.js -->
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- OS Selection - shown when scenario has from_agent instances -->
+                        <div class="form-group"
+                             id="os-selection-section"
+                             style="display: none">
+                            <label class="form-label">
+                                {% trans "Victim OS" %}
+                            </label>
+                            <div class="shifter-dropdown full-width" id="os-dropdown">
+                                <input type="hidden" name="os_type" id="os-select-value">
+                                <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select OS type --
+    {% endblocktrans %}
+</span>
+                                    <span class="shifter-dropdown-chevron"></span>
+                                </button>
+                                <div class="shifter-dropdown-panel">
+                                    <ul class="shifter-dropdown-items" id="os-items">
+                                        <li class="shifter-dropdown-item"
+                                            data-value='{% trans "windows" %}'>
+                                            <span class="item-label">{% trans "Windows" %}</span>
+                                            <span class="item-description">{% trans "Windows 10/11" %}</span>
+                                        </li>
+                                        <li class="shifter-dropdown-item"
+                                            data-value='{% trans "linux" %}'>
+                                            <span class="item-label">{% trans "Linux" %}</span>
+                                            <span class="item-description">{% trans "Ubuntu" %}</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Agent dropdown - filtered by selected OS for from_agent scenarios -->
+                        <div class="form-group"
+                             id="agent-section"
+                             style="display: none">
+                            <label class="form-label">
+                                {% trans "Agent" %}
+                            </label>
+                            <div class="shifter-dropdown full-width" id="agent-dropdown">
+                                <input type="hidden" name="agent" id="agent-select-value">
+                                <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select an agent --
+    {% endblocktrans %}
+</span>
+                                    <span class="shifter-dropdown-chevron"></span>
+                                </button>
+                                <div class="shifter-dropdown-panel">
+                                    <ul class="shifter-dropdown-items" id="agent-items">
+                                        <!-- Will be populated dynamically -->
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Windows Agent dropdown - shown when scenario requires Windows agents -->
+                        <div class="form-group"
+                             id="windows-agent-section"
+                             style="display: none">
+                            <label class="form-label">
+                                {% trans "Windows Agent" %}
+                            </label>
+                            <div class="shifter-dropdown full-width"
+                                 id="windows-agent-dropdown">
+                                <input type="hidden"
+                                       name="windows_agent"
+                                       id="windows-agent-select-value">
+                                <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select a Windows agent --
+    {% endblocktrans %}
+</span>
+                                    <span class="shifter-dropdown-chevron"></span>
+                                </button>
+                                <div class="shifter-dropdown-panel">
+                                    <ul class="shifter-dropdown-items" id="windows-agent-items">
+                                        <!-- Will be populated dynamically with Windows agents only -->
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Linux Agent dropdown - shown when scenario requires Linux agents -->
+                        <div class="form-group"
+                             id="linux-agent-section"
+                             style="display: none">
+                            <label class="form-label">
+                                {% trans "Linux Agent" %}
+                            </label>
+                            <div class="shifter-dropdown full-width"
+                                 id="linux-agent-dropdown">
+                                <input type="hidden"
+                                       name="linux_agent"
+                                       id="linux-agent-select-value">
+                                <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select a Linux agent --
+    {% endblocktrans %}
+</span>
+                                    <span class="shifter-dropdown-chevron"></span>
+                                </button>
+                                <div class="shifter-dropdown-panel">
+                                    <ul class="shifter-dropdown-items" id="linux-agent-items">
+                                        <!-- Will be populated dynamically with Linux agents only -->
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" id="launch-btn" disabled>
+                            {% trans "Launch Range" %}
                         </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="scenario-items">
-                                <!-- Populated dynamically by dashboard.js -->
-                            </ul>
+                        <p class="text-small text-muted mt-md">
+                            {% trans "No agents yet?&nbsp;" %}
+                            <a href="{% url 'mission_control:agents' %}" class="link">{% trans "Upload one first" %}</a>
+                        </p>
+                    </div>
+                    <div class="launch-tile-info">
+                        <div class="scenario-info-panel" id="scenario-info-panel">
+                            <div class="scenario-info-title" id="scenario-info-title">
+                                {% trans "Scenario Details" %}
+                            </div>
+                            <div class="scenario-info-description"
+                                 id="scenario-info-description">
+                                {% trans "Select a scenario to see details." %}
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- OS Selection - shown when scenario has from_agent instances -->
-                <div class="form-group" id="os-selection-section" style="display: none;">
-                    <label class="form-label">Victim OS</label>
-                    <div class="xdr-dropdown full-width" id="os-dropdown">
-                        <input type="hidden" name="os_type" id="os-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select OS type --</span>
-                            <span class="xdr-dropdown-chevron"></span>
-                        </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="os-items">
-                                <li class="xdr-dropdown-item" data-value="windows">
-                                    <span class="item-label">Windows</span>
-                                    <span class="item-description">Windows 10/11</span>
-                                </li>
-                                <li class="xdr-dropdown-item" data-value="linux">
-                                    <span class="item-label">Linux</span>
-                                    <span class="item-description">Ubuntu</span>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Agent dropdown - filtered by selected OS for from_agent scenarios -->
-                <div class="form-group" id="agent-section" style="display: none;">
-                    <label class="form-label">Agent</label>
-                    <div class="xdr-dropdown full-width" id="agent-dropdown">
-                        <input type="hidden" name="agent" id="agent-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select an agent --</span>
-                            <span class="xdr-dropdown-chevron"></span>
-                        </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="agent-items">
-                                <!-- Will be populated dynamically -->
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Windows Agent dropdown - shown when scenario requires Windows agents -->
-                <div class="form-group" id="windows-agent-section" style="display: none;">
-                    <label class="form-label">Windows Agent</label>
-                    <div class="xdr-dropdown full-width" id="windows-agent-dropdown">
-                        <input type="hidden" name="windows_agent" id="windows-agent-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select a Windows agent --</span>
-                            <span class="xdr-dropdown-chevron"></span>
-                        </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="windows-agent-items">
-                                <!-- Will be populated dynamically with Windows agents only -->
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Linux Agent dropdown - shown when scenario requires Linux agents -->
-                <div class="form-group" id="linux-agent-section" style="display: none;">
-                    <label class="form-label">Linux Agent</label>
-                    <div class="xdr-dropdown full-width" id="linux-agent-dropdown">
-                        <input type="hidden" name="linux_agent" id="linux-agent-select-value">
-                        <button type="button" class="xdr-dropdown-trigger">
-                            <span class="xdr-dropdown-value placeholder">-- Select a Linux agent --</span>
-                            <span class="xdr-dropdown-chevron"></span>
-                        </button>
-                        <div class="xdr-dropdown-panel">
-                            <ul class="xdr-dropdown-items" id="linux-agent-items">
-                                <!-- Will be populated dynamically with Linux agents only -->
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <button class="btn btn-primary" id="launch-btn" disabled>
-                    Launch Range
-                </button>
-
-                <p class="text-small text-muted mt-md">
-                    No agents yet?&nbsp; <a href="{% url 'mission_control:agents' %}" class="link">Upload one first</a>
-                </p>
             </div>
-
-            <div class="launch-tile-info">
-                <div class="scenario-info-panel" id="scenario-info-panel">
-                    <div class="scenario-info-title" id="scenario-info-title">Scenario Details</div>
-                    <div class="scenario-info-description" id="scenario-info-description">
-                        Select a scenario to see details.
-                    </div>
+        {% endif %}
+        <!-- Range Tile 1 (provisioning/active/paused state) -->
+        <div class="range-tile empty-tile" id="range-tile-1">
+            <span class="text-muted">{% trans "No active range" %}</span>
+        </div>
+        <!-- Range Tile 2 (future) -->
+        <div class="range-tile empty-tile" id="range-tile-2">
+            <span class="text-muted">{% trans "No active range" %}</span>
+        </div>
+        <!-- Range Tile 3 (future) -->
+        <div class="range-tile empty-tile" id="range-tile-3">
+            <span class="text-muted">{% trans "No active range" %}</span>
+        </div>
+    </div>
+    <!-- Templates for dynamic range tile content -->
+    <template id="provisioning-template">
+        <div class="tile-title">
+            {% trans "Provisioning Range" %}
+        </div>
+        <div class="status status-provisioning mb-md">
+            <span class="status-dot"></span>
+            <span class="status-text">{% trans "Setting up infrastructure..." %}</span>
+        </div>
+        <p class="text-muted text-small mb-lg">
+            {% trans "This usually takes under 10 minutes. You'll be notified when ready." %}
+        </p>
+        <button class="btn btn-danger cancel-range-btn">
+            {% trans "Cancel" %}
+        </button>
+    </template>
+    <template id="active-template">
+        <div class="flex-between">
+            <div>
+                <div class="tile-title">
+                    {% trans "Active Range" %}
+                </div>
+                <div class="status status-active">
+                    <span class="status-dot"></span>
+                    <span>{% trans "Running" %}</span>
+                </div>
+            </div>
+            <div class="text-right text-small text-muted">
+                <div>
+                    {% trans "Agent:" %} <span class="range-agent">--</span>
                 </div>
             </div>
         </div>
-    </div>
-    {% endif %}
-
-    <!-- Range Tile 1 (provisioning/active/paused state) -->
-    <div class="range-tile empty-tile" id="range-tile-1">
-        <span class="text-muted">No active range</span>
-    </div>
-
-    <!-- Range Tile 2 (future) -->
-    <div class="range-tile empty-tile" id="range-tile-2">
-        <span class="text-muted">No active range</span>
-    </div>
-
-    <!-- Range Tile 3 (future) -->
-    <div class="range-tile empty-tile" id="range-tile-3">
-        <span class="text-muted">No active range</span>
-    </div>
-</div>
-
-<!-- Templates for dynamic range tile content -->
-<template id="provisioning-template">
-    <div class="tile-title">Provisioning Range</div>
-    <div class="status status-provisioning mb-md">
-        <span class="status-dot"></span>
-        <span class="status-text">Setting up infrastructure...</span>
-    </div>
-    <p class="text-muted text-small mb-lg">
-        This usually takes under 10 minutes. You'll be notified when ready.
-    </p>
-    <button class="btn btn-danger cancel-range-btn">
-        Cancel
-    </button>
-</template>
-
-<template id="active-template">
-    <div class="flex-between">
-        <div>
-            <div class="tile-title">Active Range</div>
-            <div class="status status-active">
-                <span class="status-dot"></span>
-                <span>Running</span>
+        <div class="flex-row gap-md mt-md">
+            <a href="{% url 'mission_control:terminal' %}"
+               class="btn btn-primary open-workspace-btn"
+               style="flex:1;
+                      text-align:center">{% trans "Open Range" %}</a>
+            <button class="btn btn-secondary" id="pause-btn" style="flex:1">
+                {% trans "Pause" %}
+            </button>
+            <button class="btn btn-danger destroy-btn" style="flex:1">
+                {% trans "Destroy" %}
+            </button>
+        </div>
+    </template>
+    <template id="paused-template">
+        <div class="flex-between">
+            <div>
+                <div class="tile-title">
+                    {% trans "Paused Range" %}
+                </div>
+                <div class="status status-paused">
+                    <span class="status-dot"></span>
+                    <span>{% trans "Paused" %}</span>
+                </div>
+            </div>
+            <div class="text-right text-small text-muted">
+                <div>
+                    {% trans "Paused:" %} <span class="range-paused-at">--</span>
+                </div>
+                <div>
+                    {% trans "Agent:" %} <span class="range-agent">--</span>
+                </div>
             </div>
         </div>
-        <div class="text-right text-small text-muted">
-            <div>Agent: <span class="range-agent">--</span></div>
+        <div class="flex-row gap-md mt-md">
+            <button class="btn btn-primary" id="resume-btn" style="flex:1">
+                {% trans "Resume" %}
+            </button>
+            <button class="btn btn-danger destroy-btn" style="flex:1">
+                {% trans "Destroy" %}
+            </button>
         </div>
-    </div>
-
-    <div class="flex-row gap-md mt-md">
-        <a href="{% url 'mission_control:terminal' %}" class="btn btn-primary open-workspace-btn" style="flex:1;text-align:center">
-            Open Range
-        </a>
-        <button class="btn btn-secondary" id="pause-btn" style="flex:1">
-            Pause
-        </button>
-        <button class="btn btn-danger destroy-btn" style="flex:1">
-            Destroy
-        </button>
-    </div>
-</template>
-
-<template id="paused-template">
-    <div class="flex-between">
-        <div>
-            <div class="tile-title">Paused Range</div>
-            <div class="status status-paused">
-                <span class="status-dot"></span>
-                <span>Paused</span>
-            </div>
+    </template>
+    <template id="failed-template">
+        <div class="tile-title">
+            {% trans "Range Failed" %}
         </div>
-        <div class="text-right text-small text-muted">
-            <div>Paused: <span class="range-paused-at">--</span></div>
-            <div>Agent: <span class="range-agent">--</span></div>
+        <div class="status status-error mb-md">
+            <span class="status-dot"></span>
+            <span>{% trans "Provisioning Failed" %}</span>
         </div>
-    </div>
-
-    <div class="flex-row gap-md mt-md">
-        <button class="btn btn-primary" id="resume-btn" style="flex:1">
-            Resume
+        <p class="text-muted text-small mb-lg">
+            <strong>
+            {% trans "Error:" %}
+            </strong> <span class="error-message">
+            {% trans "Unknown error occurred" %}
+            </span>
+        </p>
+        <button class="btn btn-secondary dismiss-error-btn">
+            {% trans "Dismiss" %}
         </button>
-        <button class="btn btn-danger destroy-btn" style="flex:1">
-            Destroy
-        </button>
-    </div>
-</template>
-
-<template id="failed-template">
-    <div class="tile-title">Range Failed</div>
-    <div class="status status-error mb-md">
-        <span class="status-dot"></span>
-        <span>Provisioning Failed</span>
-    </div>
-    <p class="text-muted text-small mb-lg">
-        <strong>Error:</strong> <span class="error-message">Unknown error occurred</span>
-    </p>
-    <button class="btn btn-secondary dismiss-error-btn">
-        Dismiss
-    </button>
-</template>
+    </template>
 {% endblock %}
-
 {% block extra_js %}
-<script src="{% static 'js/dashboard.js' %}"></script>
-<script>
+    <script src="{% static 'js/dashboard.js' %}"></script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     const dashboard = new DashboardManager({
         csrfToken: '{{ csrf_token }}',
@@ -330,5 +390,5 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     dashboard.init();
 });
-</script>
+    </script>
 {% endblock %}

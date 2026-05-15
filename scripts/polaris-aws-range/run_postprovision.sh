@@ -80,8 +80,10 @@ rewrite_status
 # -----------------------------------------------------------------------------
 SPLICE_STATE="running (started $(now_edt))"
 rewrite_status
-echo "" >> "$LOG"
-echo "=== [$(now)] splice watcher: start ===" >> "$LOG"
+{
+    echo ""
+    echo "=== [$(now)] splice watcher: start ==="
+} >> "$LOG"
 python3 "$SCRIPT_DIR/apply_splice_watcher.py" \
     --region "$REGION" --yes >> "$LOG" 2>&1
 SW_RC=$?
@@ -100,8 +102,10 @@ rewrite_status
 # -----------------------------------------------------------------------------
 BEDROCK_STATE="running (started $(now_edt))"
 rewrite_status
-echo "" >> "$LOG"
-echo "=== [$(now)] bedrock shard: start ===" >> "$LOG"
+{
+    echo ""
+    echo "=== [$(now)] bedrock shard: start ==="
+} >> "$LOG"
 python3 "$SCRIPT_DIR/apply_kali_bedrock_shard.py" \
     --profile "$PROFILE" --region "$REGION" --yes >> "$LOG" 2>&1
 BS_RC=$?

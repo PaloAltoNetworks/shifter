@@ -71,15 +71,15 @@ def sign_and_encrypt_payload(payload: dict[str, Any], secret_key: str) -> str:
 
     Args:
         payload: The JSON auth payload dictionary
-        secret_key: 32-character hex string (128-bit key)
+        secret_key: Hex string key (64 characters / 256-bit preferred)
 
     Returns:
         Base64-encoded encrypted payload for use as 'data' parameter
     """
     # Convert secret key from hex string to bytes
     key_bytes = bytes.fromhex(secret_key)
-    if len(key_bytes) != 16:
-        raise ValueError("Secret key must be 32 hex characters (128 bits)")
+    if len(key_bytes) not in {16, 24, 32}:
+        raise ValueError("Secret key must be 32, 48, or 64 hex characters (128, 192, or 256 bits)")
 
     # Convert payload to JSON bytes
     json_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -201,13 +201,13 @@ def get_guacamole_auth_token(base_url: str, encrypted_data: str) -> str:
             result = json.loads(response.read().decode("utf-8"))
             return result["authToken"]
     except urllib.error.HTTPError as e:
-        logger.error(f"Guacamole token request failed: {e.code} {e.reason}")
+        logger.error("Guacamole token request failed: %s %s", e.code, e.reason)
         raise ValueError(f"Failed to get Guacamole auth token: {e.reason}") from e
     except urllib.error.URLError as e:
-        logger.error(f"Guacamole token request failed: {e.reason}")
+        logger.error("Guacamole token request failed: %s", e.reason)
         raise ValueError(f"Failed to connect to Guacamole: {e.reason}") from e
     except (KeyError, json.JSONDecodeError) as e:
-        logger.error(f"Invalid Guacamole token response: {e}")
+        logger.error("Invalid Guacamole token response: %s", e)
         raise ValueError("Invalid response from Guacamole") from e
 
 
@@ -234,7 +234,7 @@ def create_guacamole_rdp_url(
 
     Args:
         base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
-        secret_key: 32-character hex string (128-bit key)
+        secret_key: Hex string key (64 characters / 256-bit preferred)
         username: User's email/username for Guacamole session
         connection_name: Identifier for this connection
         hostname: Target host IP for RDP
@@ -340,7 +340,7 @@ def create_guacamole_ssh_url(
 
     Args:
         base_url: Public Guacamole URL for browser (e.g., 'https://portal.example.com/guacamole')
-        secret_key: 32-character hex string (128-bit key)
+        secret_key: Hex string key (64 characters / 256-bit preferred)
         username: User's email/username for Guacamole session
         connection_name: Identifier for this connection
         hostname: Target host IP for SSH

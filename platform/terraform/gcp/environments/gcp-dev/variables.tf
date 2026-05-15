@@ -104,6 +104,17 @@ variable "cloud_sql_tier" {
   default     = "db-custom-1-3840"
 }
 
+variable "cloud_sql_availability_type" {
+  description = "Cloud SQL availability type. Keep ZONAL in dev to reduce cost."
+  type        = string
+  default     = "ZONAL"
+
+  validation {
+    condition     = contains(["REGIONAL", "ZONAL"], var.cloud_sql_availability_type)
+    error_message = "cloud_sql_availability_type must be either REGIONAL or ZONAL."
+  }
+}
+
 variable "cloud_sql_disk_size_gb" {
   description = "Cloud SQL disk size in GiB."
   type        = number
@@ -123,9 +134,9 @@ variable "cloud_sql_user_name" {
 }
 
 variable "redis_tier" {
-  description = "Memorystore tier for the control-plane Redis instance."
+  description = "Memorystore tier for the control-plane Redis instance. STANDARD_HA is the default production high-availability posture; AUTH and TLS are enforced unconditionally by the platform-core module regardless of tier (ADR-008-R6)."
   type        = string
-  default     = "BASIC"
+  default     = "STANDARD_HA"
 }
 
 variable "redis_memory_size_gb" {
@@ -135,15 +146,23 @@ variable "redis_memory_size_gb" {
 }
 
 variable "public_hostname" {
-  description = "Optional public hostname for the GKE ingress."
+  description = "Public hostname for the GKE ingress. Required: the portal runtime renders SITE_URL=https://<public_hostname> and fails closed without one."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = length(trimspace(var.public_hostname)) > 0
+    error_message = "public_hostname must be non-empty for the gcp-dev environment."
+  }
 }
 
 variable "enable_managed_tls" {
-  description = "Whether the GKE ingress should use a Google-managed certificate when a hostname is configured."
+  description = "Whether the GKE ingress uses a Google-managed certificate for the hostname. Required true: the portal serves over HTTPS only."
   type        = bool
-  default     = false
+
+  validation {
+    condition     = var.enable_managed_tls
+    error_message = "enable_managed_tls must be true for the gcp-dev environment; the portal serves over HTTPS only and the runtime renderer fails closed without managed TLS."
+  }
 }
 
 variable "create_dns_managed_zone" {
@@ -165,7 +184,7 @@ variable "dns_zone_dns_name" {
 }
 
 variable "dns_record_ttl" {
-  description = "TTL in seconds for the optional ingress A record."
+  description = "TTL in seconds for the optional ingress A record. 300s is acceptable for dev; use 60s for production to enable fast failover."
   type        = number
   default     = 300
 }

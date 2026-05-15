@@ -881,3 +881,167 @@ def _json(response):
     import json
 
     return json.loads(response.content)
+
+
+# ---------------------------------------------------------------------------
+# TestRangeLifecycleAudit
+# ---------------------------------------------------------------------------
+
+
+class TestRangeLifecycleAudit:
+    """HTTP-layer audit entries for range lifecycle actions (#694).
+
+    Verifies that each range lifecycle endpoint in mission_control records an
+    AuditLog entry via risk_register.services.audit_log_from_request, carrying
+    source IP / user agent / HTTP request_id alongside the action. The CMS
+    service-layer audit calls are tested separately; these tests pin the
+    HTTP boundary so the request context is not silently lost.
+    """
+
+    def test_launch_range_records_provision_audit(self, rf, mock_user, mock_agent):
+        request = rf.post(
+            "/api/range/launch/",
+            data=f'{{"agent_id": {mock_agent.id}, "scenario": "basic"}}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+        range_ctx = _make_range_context(
+            user_id=mock_user.id,
+            status=ResourceStatus.PROVISIONING,
+            agent_name=mock_agent.name,
+        )
+
+        with (
+            patch.object(views, "cms_list_scenarios", return_value=[{"id": "basic"}]),
+            patch.object(views, "cms_get_agent", return_value=mock_agent),
+            patch.object(views, "cms_create_range", return_value=range_ctx),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.launch_range(request)
+
+        assert response.status_code == 200
+        mock_audit.assert_called_once()
+        kwargs = mock_audit.call_args.kwargs
+        assert kwargs["entity_type"] == views.AuditLog.EntityType.RANGE
+        assert kwargs["action"] == views.AuditLog.Action.PROVISION
+        assert kwargs["new_state"]["scenario"] == "basic"
+        assert kwargs["new_state"]["request_id"] == str(range_ctx.request_id)
+
+    def test_cancel_range_records_cancel_audit(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/cancel/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch("cms.services.cancel_range"),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.cancel_range(request)
+
+        assert response.status_code == 200
+        mock_audit.assert_called_once()
+        kwargs = mock_audit.call_args.kwargs
+        assert kwargs["entity_type"] == views.AuditLog.EntityType.RANGE
+        assert kwargs["entity_id"] == 42
+        assert kwargs["action"] == views.AuditLog.Action.CANCEL
+
+    def test_destroy_range_records_deprovision_audit(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/destroy/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch("cms.services.destroy_range"),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.destroy_range(request)
+
+        assert response.status_code == 200
+        mock_audit.assert_called_once()
+        kwargs = mock_audit.call_args.kwargs
+        assert kwargs["entity_type"] == views.AuditLog.EntityType.RANGE
+        assert kwargs["entity_id"] == 42
+        assert kwargs["action"] == views.AuditLog.Action.DEPROVISION
+
+    def test_pause_range_records_pause_audit(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/pause/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch("cms.services.pause_range"),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.pause_range(request)
+
+        assert response.status_code == 200
+        mock_audit.assert_called_once()
+        kwargs = mock_audit.call_args.kwargs
+        assert kwargs["action"] == views.AuditLog.Action.PAUSE
+
+    def test_resume_range_records_resume_audit(self, rf, mock_user):
+        request = rf.post(
+            "/api/range/resume/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch("cms.services.resume_range"),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.resume_range(request)
+
+        assert response.status_code == 200
+        mock_audit.assert_called_once()
+        kwargs = mock_audit.call_args.kwargs
+        assert kwargs["action"] == views.AuditLog.Action.RESUME
+
+    def test_failed_destroy_does_not_audit(self, rf, mock_user):
+        """If the CMS layer rejects the destroy, no audit entry is recorded."""
+        request = rf.post(
+            "/api/range/destroy/",
+            data='{"range_id": 42}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch("cms.services.destroy_range", side_effect=CMSError("nope")),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.destroy_range(request)
+
+        assert response.status_code == 400
+        mock_audit.assert_not_called()
+
+    def test_request_id_format_audits_against_uuid(self, rf, mock_user):
+        """request_id (UUID) format threads the UUID into new_state."""
+        request = rf.post(
+            "/api/range/destroy/",
+            data='{"request_id": "abc-123"}',
+            content_type="application/json",
+        )
+        request.user = mock_user
+
+        with (
+            patch("cms.services.destroy_range_by_request_id"),
+            patch.object(views, "audit_log_from_request") as mock_audit,
+        ):
+            response = views.destroy_range(request)
+
+        assert response.status_code == 200
+        kwargs = mock_audit.call_args.kwargs
+        # entity_id falls back to 0 when only request_id is provided
+        assert kwargs["entity_id"] == 0
+        assert kwargs["new_state"]["request_id"] == "abc-123"

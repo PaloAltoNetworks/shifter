@@ -1,77 +1,100 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-
+{% load i18n %}
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Settings</h1>
-    <p class="page-subtitle">Manage your account</p>
-</div>
-
-<!-- Account Info -->
-<div class="card">
-    <div class="card-title">Account</div>
-    <div class="form-group">
-        <label class="form-label">Email</label>
-        <input type="email" class="form-input opacity-60" value="{{ request.user.email }}" disabled>
-        <p class="text-small text-muted mt-sm">
-            Managed by your identity provider
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Settings" %}
+        </h1>
+        <p class="page-subtitle">
+            {% trans "Manage your account" %}
         </p>
     </div>
-</div>
-
-<!-- Security -->
-<div class="card">
-    <div class="card-title">Security</div>
-    <p class="text-muted mb-md">
-        Change your password through your identity provider.
-    </p>
-    <a href="#" class="btn btn-secondary" id="change-password-btn">
-        Change Password
-    </a>
-</div>
-
-<!-- Danger Zone -->
-<div class="card card-danger">
-    <div class="card-title text-error">Danger Zone</div>
-    <p class="text-muted mb-md">
-        Permanently delete your account and all associated data. This action cannot be undone.
-    </p>
-    <button class="btn btn-danger" id="delete-account-btn">
-        Delete Account
-    </button>
-</div>
-
-<!-- Delete Confirmation Modal (hidden by default) -->
-<div id="delete-modal" class="modal" style="display: none;">
-    <div class="card modal-content">
-        <div class="card-title text-error">Delete Account?</div>
-        <p class="text-muted mb-md">
-            This will:
-        </p>
-        <ul class="text-muted mb-lg pl-lg">
-            <li>Destroy any active ranges</li>
-            <li>Delete all uploaded agents</li>
-            <li>Remove your account permanently</li>
-        </ul>
-        <p class="text-muted mb-lg">
-            Type <strong class="text-error">DELETE</strong> to confirm:
-        </p>
+    <!-- Account Info -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Account" %}
+        </div>
         <div class="form-group">
-            <input type="text" class="form-input" id="delete-confirm-input" placeholder="Type DELETE">
-        </div>
-        <div class="flex-row gap-md">
-            <button class="btn btn-danger" id="confirm-delete-btn" disabled>
-                Delete My Account
-            </button>
-            <button class="btn btn-secondary" id="cancel-delete-btn">
-                Cancel
-            </button>
+            <label class="form-label" for="account-email">
+                {% trans "Email" %}
+            </label>
+            <input type="email"
+                   id="account-email"
+                   class="form-input opacity-60"
+                   value="{{ request.user.email }}"
+                   disabled>
+            <p class="text-small text-muted mt-sm">
+                {% trans "Managed by your identity provider" %}
+            </p>
         </div>
     </div>
-</div>
+    <!-- Security -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Security" %}
+        </div>
+        <p class="text-muted mb-md">
+            {% trans "Change your password through your identity provider." %}
+        </p>
+        <a href="#" class="btn btn-secondary" id="change-password-btn">{% trans "Change Password" %}</a>
+    </div>
+    <!-- Danger Zone -->
+    <div class="card card-danger">
+        <div class="card-title text-error">
+            {% trans "Danger Zone" %}
+        </div>
+        <p class="text-muted mb-md">
+            {% trans "Permanently delete your account and all associated data. This action cannot be undone." %}
+        </p>
+        <button class="btn btn-danger" id="delete-account-btn">
+            {% trans "Delete Account" %}
+        </button>
+    </div>
+    <!-- Delete Confirmation Modal (hidden by default) -->
+    <div id="delete-modal" class="modal d-none">
+        <div class="card modal-content">
+            <div class="card-title text-error">
+                {% trans "Delete Account?" %}
+            </div>
+            <p class="text-muted mb-md">
+                {% trans "This will:" %}
+            </p>
+            <ul class="text-muted mb-lg pl-lg">
+                <li>
+                    {% trans "Destroy any active ranges" %}
+                </li>
+                <li>
+                    {% trans "Delete all uploaded agents" %}
+                </li>
+                <li>
+                    {% trans "Remove your account permanently" %}
+                </li>
+            </ul>
+            <p class="text-muted mb-lg">
+                {% trans "Type" %} <strong class="text-error">{% trans "DELETE" %}</strong> {% trans "to confirm:" %}
+            </p>
+            <div class="form-group">
+                <input type="text"
+                       class="form-input"
+                       id="delete-confirm-input"
+                       aria-label='{% trans "Type DELETE to confirm account deletion" %}'
+                       placeholder='{% trans "Type DELETE" %}'>
+            </div>
+            <div class="flex-row gap-md">
+                <button class="btn btn-danger" id="confirm-delete-btn" disabled>
+                    {% trans "Delete My Account" %}
+                </button>
+                <button class="btn btn-secondary" id="cancel-delete-btn">
+                    {% trans "Cancel" %}
+                </button>
+            </div>
+        </div>
+    </div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
     // Delete account modal logic
     const deleteBtn = document.getElementById('delete-account-btn');
     const deleteModal = document.getElementById('delete-modal');
@@ -92,5 +115,5 @@
     confirmInput.addEventListener('input', () => {
         confirmBtn.disabled = confirmInput.value !== 'DELETE';
     });
-</script>
+    </script>
 {% endblock %}

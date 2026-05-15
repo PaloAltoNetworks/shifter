@@ -1,84 +1,118 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "ctf/base.html" %}
-{% block ctf_title %}Range{% endblock %}
-
-{% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="mb-4">
-        <h1 class="h3 mb-0">Range Access</h1>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h5 class="mb-0">Range Status</h5>
-        </div>
-        <div class="card-body">
-            {% if range_status == 'ready' %}
-            <div class="alert alert-success mb-4">
-                <strong>Range is ready.</strong> Your environment is provisioned and available.
-            </div>
-            {% if target_instances %}
-            <h6 class="mt-3 mb-2">Target Boxes</h6>
-            <div class="table-responsive">
-                <table class="table table-sm table-hover mb-4">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>IP Address</th>
-                            <th>OS</th>
-                            <th>Access</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for inst in target_instances %}
-                        <tr>
-                            <td><code>{{ inst.name }}</code></td>
-                            <td><code>{{ inst.private_ip }}</code></td>
-                            <td>{{ inst.os_type }}</td>
-                            <td>
-                                {% if inst.os_type == 'kali' or inst.os_type == 'ubuntu' or inst.os_type == 'windows' %}
-                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="openRdpSession(this, '{{ inst.uuid }}')">
-                                    Open
-                                </button>
-                                {% else %}
-                                <span class="text-muted">N/A</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-
-            {% elif range_status == 'provisioning' %}
-            <div class="alert alert-info mb-3">
-                <strong>Provisioning...</strong> Your range environment is being set up. This may take several minutes.
-            </div>
-            <div class="d-flex align-items-center">
-                <output class="spinner-border spinner-border-sm text-info me-2" style="display:inline-block">
-                    <span class="visually-hidden">Loading...</span>
-                </output>
-                <span class="text-muted">Please wait while your range is being provisioned.</span>
-            </div>
-
-            {% elif range_status == 'error' %}
-            <div class="alert alert-danger mb-3">
-                <strong>Error.</strong> There was a problem provisioning your range. Please contact an organizer for assistance.
-            </div>
-
-            {% else %}
-            {# not_assigned or empty #}
-            <div class="alert alert-secondary mb-0">
-                <strong>Not assigned.</strong> Range will be provisioned when the event starts.
-            </div>
-            {% endif %}
-        </div>
-    </div>
-</div>
+{% load i18n %}
+{% block ctf_title %}
+    Range
 {% endblock %}
-
+{% block ctf_content %}
+    <div class="container-fluid py-4">
+        <div class="mb-4">
+            <h1 class="h3 mb-0">
+                {% trans "Range Access" %}
+            </h1>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    {% trans "Range Status" %}
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if range_status == 'ready' %}
+                    <div class="alert alert-success mb-4">
+                        <strong>{% trans "Range is ready." %}</strong>
+                        {% trans "Your environment is provisioned and available." %}
+                    </div>
+                    {% if target_instances %}
+                        <h6 class="mt-3 mb-2">
+                            {% trans "Target Boxes" %}
+                        </h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-4">
+                                <thead>
+                                    <tr>
+                                        <th>
+                                            {% trans "Name" %}
+                                        </th>
+                                        <th>
+                                            {% trans "IP Address" %}
+                                        </th>
+                                        <th>
+                                            {% trans "OS" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Access" %}
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for inst in target_instances %}
+                                        <tr>
+                                            <td>
+                                                <code>{{ inst.name }}</code>
+                                            </td>
+                                            <td>
+                                                <code>{{ inst.private_ip }}</code>
+                                            </td>
+                                            <td>
+                                                {{ inst.os_type }}
+                                            </td>
+                                            <td>
+                                                {% if inst.os_type == 'kali' or inst.os_type == 'ubuntu' %}
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-primary"
+                                                            onclick="openRdpSession(this, '{{ inst.uuid }}')">
+                                                        {% trans "Open" %}
+                                                    </button>
+                                                {% elif inst.os_type == 'windows' %}
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-primary"
+                                                            onclick="openRdpSession(this, '{{ inst.uuid }}')">
+                                                        {% trans "Open" %}
+                                                    </button>
+                                                {% else %}
+                                                    <span class="text-muted">{% trans "N/A" %}</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                {% elif range_status == 'provisioning' %}
+                    <div class="alert alert-info mb-3">
+                        <strong>{% trans "Provisioning..." %}</strong>
+                        {% trans "Your range environment is being set up. This may take several minutes." %}
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <output class="spinner-border spinner-border-sm text-info me-2"
+                                style="display:inline-block">
+                            <span class="visually-hidden">{% trans "Loading..." %}</span>
+                        </output>
+                        <span class="text-muted">{% trans "Please wait while your range is being provisioned." %}</span>
+                    </div>
+                {% elif range_status == 'error' %}
+                    <div class="alert alert-danger mb-3">
+                        <strong>{% trans "Error." %}</strong>
+                        {% blocktrans trimmed %}
+                            There was a problem provisioning your range. Please contact an organizer for assistance.
+                        {% endblocktrans %}
+                    </div>
+                {% else %}
+                    {# not_assigned or empty #}
+                    <div class="alert alert-secondary mb-0">
+                        <strong>{% trans "Not assigned." %}</strong>
+                        {% trans "Range will be provisioned when the event starts." %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}
 {% block extra_js %}
-<script>
+    <script>
 function getCookie(name) {
     let value = null;
     if (document.cookie && document.cookie !== '') {
@@ -131,5 +165,5 @@ function openRdpSession(button, instanceUuid) {
         button.textContent = originalText;
     });
 }
-</script>
+    </script>
 {% endblock %}

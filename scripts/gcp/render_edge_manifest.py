@@ -13,7 +13,7 @@ _MANAGED_CERTIFICATE_OUTPUT_KEY = "managed_tls_enabled"
 _PUBLIC_HOSTNAME_OUTPUT_KEY = "public_hostname"
 _PUBLIC_INGRESS_IP_NAME_OUTPUT_KEY = "public_ingress_ip_name"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TERRAFORM_OUTPUT_PATH = Path("/tmp/gcp-terraform-outputs.json")
+_TERRAFORM_OUTPUT_PATH = Path("/tmp/gcp-terraform-outputs.json")  # noqa: S108 - fixed path the deploy workflow writes
 _EDGE_MANIFEST_RELATIVE_PATHS = {
     "gcp-dev": Path("platform/k8s/gcp/overlays/gcp-dev/platform-edge.generated.yaml"),
     "gcp-prod": Path("platform/k8s/gcp/overlays/gcp-prod/platform-edge.generated.yaml"),

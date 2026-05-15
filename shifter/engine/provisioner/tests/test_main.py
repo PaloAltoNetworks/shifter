@@ -240,6 +240,58 @@ class TestRangeStatePayloads:
             }
         }
 
+    def test_build_instance_state_propagates_rdp_password_secret_arn_aws(self):
+        # Per #762: the AWS Terraform range module emits a per-instance
+        # rdp_password_secret_arn alongside ssh_key_secret_arn. The
+        # state writer must propagate it so engine.services can resolve
+        # it through shared.cloud at access time.
+        from main import _build_instance_state
+
+        rdp_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-rdp-password"
+        ssh_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-ssh-key"
+        instance_state = _build_instance_state(
+            {
+                "instance_id": "i-abc123",
+                "private_ip": "10.1.1.10",
+                "ssh_key_secret_arn": ssh_arn,
+                "rdp_password_secret_arn": rdp_arn,
+                "subnet_name": "attack",
+            },
+            provider="aws",
+        )
+
+        assert instance_state["rdp_password_secret_arn"] == rdp_arn
+
+    def test_build_instance_state_propagates_rdp_password_secret_ref_gcp(self):
+        # Per #762: GDC VM Runtime creates a per-instance Secret Manager
+        # secret for the RDP password and stores the resource path in
+        # the asset payload as rdp_password_secret_arn. The state writer
+        # surfaces it both at the top level (for engine.services'
+        # symmetric resolver) and inside provider_metadata.gcp (for
+        # state-shape consistency with ssh_key_secret_arn).
+        from main import _build_instance_state
+
+        rdp_ref = "projects/test/secrets/shifter-gcp-dev-range-42-victim-abc-rdp-password"
+        instance_state = _build_instance_state(
+            {
+                "asset_type": "vm_runtime_vm",
+                "instance_id": "vmrt-vm-1",
+                "private_ip": "10.200.0.110",
+                "ssh_key_secret_arn": "projects/test/secrets/vmrt-ssh-key",
+                "rdp_password_secret_arn": rdp_ref,
+                "ssh_username": "ubuntu",
+                "subnet_name": "attack",
+                "gdc_vm_name": "vmrt-vm-1",
+                "gdc_namespace": "range-42",
+                "gdc_ip": "10.200.0.110",
+                "gdc_rdp_password_secret_ref": rdp_ref,
+            },
+            provider="gcp",
+        )
+
+        assert instance_state["rdp_password_secret_arn"] == rdp_ref
+        assert instance_state["provider_metadata"]["gcp"].get("rdp_password_secret_ref") == rdp_ref
+
     def test_build_provisioned_instance_payload_keeps_legacy_fields_and_adds_provider_metadata(self):
         from main import _build_provisioned_instance_payload
 
@@ -269,6 +321,33 @@ class TestRangeStatePayloads:
         assert payload["ssh_username"] == "Administrator"
         assert payload["cloud_provider"] == "gcp"
         assert payload["provider_metadata"] == {"gcp": {"vm_name": "vmrt-vm-1", "namespace": "range-42"}}
+
+    def test_build_provisioned_instance_payload_propagates_rdp_password_secret_arn(self):
+        # Per #762: Range.provisioned_instances entries carry the
+        # rdp_password_secret_arn so engine.services can resolve a
+        # guest password through shared.cloud at access time.
+        from main import _build_provisioned_instance_payload
+
+        rdp_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-rdp-password"
+        ssh_arn = "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-abc-ssh-key"
+        payload = _build_provisioned_instance_payload(
+            {
+                "uuid": "inst-456",
+                "name": "victim-1",
+                "asset_type": "ec2_instance",
+                "role": "victim",
+                "os": "kali",
+                "subnet_name": "attack",
+                "instance_id": "i-abc",
+                "private_ip": "10.1.1.10",
+                "ssh_key_secret_arn": ssh_arn,
+                "rdp_password_secret_arn": rdp_arn,
+                "ssh_username": "kali",
+            },
+            provider="aws",
+        )
+
+        assert payload["rdp_password_secret_arn"] == rdp_arn
 
     def test_get_cloud_provider_defaults_to_aws(self):
         from main import _get_cloud_provider
@@ -472,6 +551,8 @@ class TestGdcProvisioning:
     def test_build_range_terraform_variables_includes_gcp_ngfw_attachment(self, mocker):
         from main import _build_range_terraform_variables
 
+        # GCP path uses GDC VM Runtime + GCP Secret Manager and does not
+        # consume SECRETS_KMS_KEY_ARN — verify by omitting it from the env.
         mocker.patch.dict(
             "os.environ",
             {
@@ -529,6 +610,82 @@ class TestGdcProvisioning:
         assert variables["ngfw_data_eni_id"] == ""
         assert variables["ngfw_attachment"]["cloud_provider"] == "gcp"
         assert variables["ngfw_attachment"]["route_next_hop_ip"] == "10.200.0.2"
+        # GCP path must NOT include the AWS-only Secrets Manager CMK ARN (#213).
+        assert "secrets_kms_key_arn" not in variables
+
+    def test_build_range_terraform_variables_aws_includes_secrets_kms_key_arn(self, mocker):
+        """AWS range tfvars include the Secrets Manager CMK ARN (#213).
+
+        Mirrors the NGFW positive coverage in test_terraform_runner.py: the
+        runtime range Terraform module's `aws_secretsmanager_secret.ssh_key`
+        resource depends on this variable.
+        """
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "aws",
+                "ENVIRONMENT": "dev",
+                "SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234",
+                "RANGE_INSTANCE_PROFILE_NAME": "shifter-dev-range-profile",
+            },
+            clear=True,
+        )
+        mocker.patch(
+            "main.load_range_network_config",
+            return_value=mocker.Mock(
+                network_id="vpc-test",
+                network_cidr="10.1.0.0/16",
+                primary_portal_cidr="10.0.0.0/16",
+            ),
+        )
+        mocker.patch("main.get_range_availability_zone", return_value="us-east-2a")
+        mocker.patch("main.get_ami_id", return_value="ami-deadbeef")
+        mocker.patch("main.generate_presigned_url", return_value="")
+
+        variables = _build_range_terraform_variables(
+            request_id="req-aws-1",
+            range_id=1,
+            user_id=2,
+            range_spec={"ngfw": False, "subnets": []},
+        )
+
+        assert variables["secrets_kms_key_arn"] == "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"
+        assert variables["kali_ami_id"] == "ami-deadbeef"
+
+    def test_build_range_terraform_variables_aws_raises_when_secrets_kms_key_arn_missing(self, mocker):
+        """Fail-fast on missing SECRETS_KMS_KEY_ARN for AWS range path (#213)."""
+        from main import _build_range_terraform_variables
+
+        mocker.patch.dict(
+            "os.environ",
+            {
+                "CLOUD_PROVIDER": "aws",
+                "ENVIRONMENT": "dev",
+                "RANGE_INSTANCE_PROFILE_NAME": "shifter-dev-range-profile",
+            },
+            clear=True,
+        )
+        mocker.patch(
+            "main.load_range_network_config",
+            return_value=mocker.Mock(
+                network_id="vpc-test",
+                network_cidr="10.1.0.0/16",
+                primary_portal_cidr="10.0.0.0/16",
+            ),
+        )
+        mocker.patch("main.get_range_availability_zone", return_value="us-east-2a")
+        mocker.patch("main.get_ami_id", return_value="ami-deadbeef")
+        mocker.patch("main.generate_presigned_url", return_value="")
+
+        with pytest.raises(KeyError, match="SECRETS_KMS_KEY_ARN"):
+            _build_range_terraform_variables(
+                request_id="req-aws-2",
+                range_id=1,
+                user_id=2,
+                range_spec={"ngfw": False, "subnets": []},
+            )
 
     def test_run_range_terraform_rejects_non_ready_gcp_ngfw(self, mocker):
         from main import run_range_terraform

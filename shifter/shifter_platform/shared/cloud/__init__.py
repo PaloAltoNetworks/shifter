@@ -17,6 +17,15 @@ from django.conf import settings
 
 from shared.cloud.exceptions import CloudProviderNotImplementedError
 
+# Cross-provider container-name contract for the engine provisioner Job.
+# Lives at the cloud-neutral layer so AWS/ECS dispatch sites and the GCP
+# task-runner gate import the same string. The GCP runner uses this to
+# select issue #1103 hardening (readOnlyRootFilesystem, writable mounts,
+# fsGroup); the ECS task definition's container_name must also match it
+# so behavior is consistent across providers — a structural test in
+# `tests/shared/cloud/test_gcp_task_runner.py` enforces alignment.
+PROVISIONER_CONTAINER_NAME = "pulumi-provisioner"
+
 if TYPE_CHECKING:
     from shared.cloud.types import (
         ObjectStorage,

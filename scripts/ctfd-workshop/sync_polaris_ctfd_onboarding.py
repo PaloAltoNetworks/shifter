@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Sync Polaris CTFd onboarding pages and the Start Here warm-up challenge."
     )
-    parser.add_argument("--base-url", required=True, help="CTFd base URL, e.g. https://polaris.keplerops.com")
+    parser.add_argument("--base-url", required=True, help="CTFd base URL, e.g. https://polaris.example.com")
     parser.add_argument(
         "--token",
         default=os.environ.get("CTFD_TOKEN"),

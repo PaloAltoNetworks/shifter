@@ -43,6 +43,7 @@ Review controls:
 - `.github/CODEOWNERS` requires review on guardrail files and shared/public architecture seams.
 - `.github/pull_request_template.md` requires an ADR impact section on PRs.
 - `.github/copilot-instructions.md` now points GitHub Copilot toward the same ADR enforcement model.
+- `.github/workflows/_gcp-dev.yml` now pins `platform/k8s/gcp/overlays/gcp-dev/kustomization.yaml` image `newTag` values to `${SHORT_SHA}` before `kubectl apply -k`, preventing mutable `:latest` restarts from drifting to a different image than the commit being deployed.
 
 ## Current Checks
 
@@ -62,11 +63,48 @@ The first slice intentionally stays small:
 - `cross-layer-model-imports`
   Fails on direct cross-layer model imports inside service layers. The current tree already satisfies this rule, so it is part of the default guard.
 
+- `python-complexity-gate`
+  Enforces ADR-012-R1: every canonical Python package `pyproject.toml`
+  must enable Ruff's `C901` rule in `[tool.ruff.lint].select`, set
+  `[tool.ruff.lint.mccabe].max-complexity` to the repo-wide threshold
+  (`PYTHON_COMPLEXITY_THRESHOLD` in `scripts/adr_guard/adr_guard.py`,
+  currently `15`, matching SonarCloud's default cognitive-complexity
+  threshold), AND must not silently disable the rule by listing it in
+  `ignore`, `extend-ignore`, or `per-file-ignores`. The check also
+  cross-verifies that `PYTHON_COMPLEXITY_GATE_PYPROJECTS` matches the
+  `id: ruff` hook working directories in `.pre-commit-config.yaml`, so
+  a new lint surface cannot be added in one place without the other.
+  The complexity computation itself is Ruff's job; this check is the
+  config-shape backstop against silent gate removal. Existing
+  high-complexity functions carry per-function `# noqa: C901`
+  exemptions; the function-level backlog (one row per exemption with
+  current complexity) lives at `docs/adr/complexity-backlog.md`. The
+  threshold ratchets down as that backlog shrinks; a ratchet edit
+  updates `PYTHON_COMPLEXITY_THRESHOLD`, every canonical
+  `pyproject.toml`, and the backlog rows in a single PR. Runs in both
+  `fast` and `ci` levels.
+  Test coverage in `scripts/adr_guard/tests/test_adr_guard.py` drives
+  the silent-bypass and prefix-selector cases through `subTest()` loops
+  so adding a new bypass shape (e.g., `extend-select`-side variants) is
+  one row in the cases tuple, not a new test method.
+
 - `import-linter`
   Adds package-level forbidden-import contracts across the main Django app layers.
 
 - `actionlint`
   Lints GitHub Actions workflows beyond plain YAML validation.
+  This includes the GCP deploy workflow's Terraform state-backend hardening
+  (`_gcp-dev.yml`) so retention and IAM policy bootstrap logic remains valid.
+
+- `deploy-workflow-plan-scope`
+  Enforces ADR-003-R2 for the AWS platform workflow. The `shifter_platform`
+  change filter in `.github/workflows/deploy.yml` must stay scoped to
+  Terraform-consumed platform files, with application source changes routed
+  through the separate `shifter_app` filter so Quality still runs without
+  launching a platform Terraform plan. The check also requires every
+  `terraform plan` command in `_shifter-platform.yml` to include
+  `-lock-timeout=5m`, so legitimate concurrent platform plans wait on the
+  backend state lock instead of failing immediately.
 
 - `TFLint`
   Adds Terraform linting on top of `terraform fmt` and `terraform validate`.
@@ -111,6 +149,203 @@ The first slice intentionally stays small:
 - `k8s-pss-labels`
   Architecture check ensuring namespace manifests carry Pod Security Standards
   `pod-security.kubernetes.io/enforce` labels. Enforces ADR-006-R1.
+
+- `k8s-deployment-security-context`
+  Enforces ADR-006-R2 against two enforcement sources: (1) every YAML
+  document under `platform/k8s/gcp/base/` (recursive) whose `kind` is
+  `Deployment`, and (2) the rendered output of
+  `helm template platform/charts/shifter -f <values>` for each entry
+  in `HELM_VALUES_FILES` (`values-gcp-dev.yaml`, `values-gcp-prod.yaml`).
+  Per ADR-007 the chart is the authoritative deployment contract;
+  base manifests are supporting snapshots. Validating both sources
+  catches regressions where a chart template or values file removes
+  a required securityContext field even when the base snapshots
+  remain compliant. Kind-based filtering, not filename-based — a
+  Deployment shipped under any filename or extension is scanned.
+  Multi-document files (`---` separator) and indentless YAML
+  sequences are supported.
+  Per pod template: `securityContext.seccompProfile.type` must be
+  `RuntimeDefault`. Per container AND init container: the *effective*
+  context (after pod-level inheritance for `runAsNonRoot`,
+  `runAsUser`, `runAsGroup`) must satisfy
+  `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` with
+  no `capabilities.add`, `readOnlyRootFilesystem: true`,
+  `runAsNonRoot: true`, `securityContext.privileged` not `true`, an
+  optional container-level `seccompProfile.type` (when set) equal to
+  `RuntimeDefault`, and `runAsUser`/`runAsGroup` set to positive
+  integers (booleans are rejected since Python treats `bool` as a
+  subclass of `int`). Runs in the `ci` level (`--all --level ci`,
+  including CI) and in a dedicated pre-commit hook `adr-guard-k8s`
+  (separate from `adr-guard-fast`) that triggers on
+  `platform/k8s/gcp/base/*.{yaml,yml}` and
+  `platform/charts/shifter/` changes. Not in the `fast` level, so
+  unrelated `--level fast` invocations and the system-Python
+  `adr-guard-fast` hook do not pull in the YAML or helm dependencies.
+  **Runtime dependencies:** PyYAML (`pyyaml>=6.0`) and Helm
+  (`v3.15.4`). The `adr-conformance` job in
+  `.github/workflows/_quality.yml` bootstraps pip via the stdlib
+  `ensurepip` module (the self-hosted Amazon Linux runner's system
+  Python ships without pip; `actions/setup-python` cannot fetch
+  Python 3.12 for the runner's architecture), then installs PyYAML
+  via `python3 -m pip install --no-deps --target
+  ${RUNNER_TEMP}/py-deps` with `PYTHONPATH=${RUNNER_TEMP}/py-deps`
+  on the run step, and Helm via the official `get.helm.sh` release
+  tarball extracted to `${RUNNER_TEMP}/helm-bin/` and added to
+  `$GITHUB_PATH`. The `--user` site PyPI install of pip itself is
+  job-scoped on the self-hosted runner; PyYAML lands under
+  `${RUNNER_TEMP}/py-deps` which is ephemeral. The `adr-guard-tests`
+  job uses the same ensurepip + PyYAML pattern; the chart-rendering
+  test uses a fake helm shim, so CI tests don't need real helm. The `adr-guard-k8s` pre-commit hook
+  uses `language: python` with `additional_dependencies:
+  pyyaml>=6.0` so PyYAML is provisioned in an isolated pre-commit
+  virtualenv; helm is a developer prerequisite shared with the
+  existing `helm-lint-shifter-chart` hook. Complements existing
+  kube-linter checks (`run-as-non-root`, `no-read-only-root-fs`,
+  `privilege-escalation-container`) which cover the subset
+  PSS-restricted enforces directly; this check fills the gaps for
+  `seccompProfile`, `capabilities.drop`/`add`, container-level
+  seccomp overrides, `privileged: true`, pod-level inheritance, and
+  initContainer coverage. Implementation note: the validator is
+  decomposed into focused helpers (`_check_container_basic_fields`,
+  `_check_container_capabilities`, `_check_container_seccomp`,
+  `_check_container_identity`, `_resolve_pod_spec`,
+  `_resolve_pod_sc`, `_validate_containers_list`, `_scan_targets`,
+  `_validate_base_files`, `_validate_chart_renders`) so each piece
+  stays under SonarCloud's cognitive-complexity threshold and tests
+  can target each clause independently.
+
+- `k8s-network-policy-coverage`
+  Enforces ADR-006-R3 against the base manifest snapshots under
+  `platform/k8s/gcp/base/` and the rendered Helm chart output for
+  each supported values file. Every Shifter namespace discovered in
+  those manifests must have a default-deny `NetworkPolicy` with an
+  empty pod selector and both `Ingress` and `Egress` policy types.
+  The check also rejects broad egress `ipBlock` CIDRs (`0.0.0.0/0`
+  and `::/0`) in Shifter NetworkPolicies, forcing policies to use
+  explicit GCLB, Google API, private service, and in-cluster service
+  ranges. Runs in the `ci` level and shares the Helm-rendered
+  validation boundary with `k8s-deployment-security-context`.
+
+- `no-plaintext-secrets-in-tfvars`
+  Architecture check that scans `*.tfvars` files committed under
+  `platform/terraform/environments/` and flags any line that assigns a
+  quoted string literal to a variable whose name ends in `_password`,
+  `_passwords`, `_secret`, `_secrets`, `_token`, `_tokens`, `_key`,
+  `_keys`, `_credential`, or `_credentials`. Heredoc string literals
+  (`name = <<EOF` / `<<-EOF`) are flagged equivalently. Object/array
+  assignments to a secret-bearing variable are walked forward to the
+  matching brace/bracket and flagged when any string literal appears
+  inside (so `db_credentials = { password = "..." }` is caught while
+  `db_credentials = { password = var.x }` is allowed). Function-wrapped
+  string literals (`db_password = trimspace("...")`,
+  `api_token = sensitive("...")`,
+  `db_credentials = jsonencode({ password = "..." })`) are caught via
+  a same-line RHS scan; multi-line wrapper expressions (jsonencode
+  spanning lines, nested function calls across lines) are walked via
+  balanced-delimiter matching of `()`/`[]`/`{}` until the expression
+  closes, and any inner string literal flags the assignment.
+  Var/local/data references and empty strings
+  are allowed. Variables whose name ENDS WITH a public-material suffix
+  (`public_key`, `public_keys`, `public_cert`, `pub_key`, `pubkey`,
+  `authorized_keys`, etc.) are exempted because that material is
+  share-only by design; the match is suffix-based so a name like
+  `public_key_password` (which has the public-key fragment AND a
+  secret suffix) stays flagged. `*.tfvars.example` files are skipped. Both `#` and `//` line comments and `/* ... */`
+  block comments are stripped before matching, matching Terraform's
+  HCL grammar. Enforces ADR-004-R7. Complements gitleaks, which
+  matches high-entropy random strings; this catches low-entropy
+  committed credentials gitleaks ignores. Implementation note: the
+  check is decomposed into focused helpers (`_collect_tfvars_candidates`,
+  `_scan_tfvars_file`, `_flagged_secret_var`, `_block_assignment_has_literal`,
+  `_wrapped_rhs_has_literal`, `_lines_have_string_literal`,
+  `_find_balanced_close_index`, `_find_block_close_index`, `_balance_scan`,
+  `_block_depth_scan`, `_scrub_line`) so each piece stays under SonarCloud's
+  cognitive-complexity threshold and tests can target each clause
+  independently.
+
+- `mcp-ops-tls-strict`
+  Architecture check that fails the build when any file under
+  `mcp/ops/` (`.js`, `.mjs`, `.cjs`, excluding `node_modules/`)
+  re-introduces `rejectUnauthorized: false` (or `0` / `null`) on a
+  TLS configuration. `mcp/ops` connects to RDS Postgres through an
+  SSM port forward; `mcp/ops/lib.js::buildPoolConfig` is the single
+  call site that builds the pool's TLS config and now preserves
+  verification by setting `ssl.servername` to the captured RDS
+  endpoint. Comments and string literals are flattened to whitespace
+  before matching (mirroring `mcp-no-shell-exec`'s approach) so a
+  descriptive doc-string about the prior `rejectUnauthorized: false`
+  workaround does not trip the check. Backstops the `buildPoolConfig`
+  unit-test invariant on every other JS file in the package. Enforces
+  ADR-014-R7.
+
+- `no-tracked-generated-artifacts`
+  Architecture check that fails the build when generated or pre-staging
+  sensitive artifacts are tracked in source under narrow roots. Two
+  artifact families are blocked, each scoped to its own root:
+  Terraform plan outputs (`tfplan`, `tfplan.binary`, `plan.out`,
+  `*.tfplan`, `*.tfplan.binary`) under
+  `platform/terraform/environments/` and
+  `platform/terraform/gcp/environments/`; and license / authcode
+  bootstrap material (`authcodes`, `*.authcodes`) under
+  `temp/bootstrap/`. Enumeration uses `git ls-files` (tracked +
+  staged + untracked-but-not-ignored) so ignored ephemeral
+  workspace artifacts are intentionally allowed; a synthetic-tree
+  test-mode fallback walks the filesystem. The blocked path/name
+  set is centralized in `scripts/adr_guard/adr_guard.py` so adding
+  another generated filename or environment root is one edit. The
+  guardrail fails closed: violations name only the repo-relative
+  path and a remediation hint, never echoing plan content, license
+  material, or binary payloads. Backstops `.gitignore`, which does
+  not retroactively un-track files that were already added (e.g.
+  through `git add -f`), and complements
+  `no-plaintext-secrets-in-tfvars`. Enforces ADR-004-R8.
+
+- `no-populated-secret-env-files`
+  Architecture check that fails the build when a tracked
+  `*-secrets.env` file under `platform/k8s/` carries a real value on
+  any assignment. Comments (lines whose first non-whitespace
+  character is `#`), blank lines, empty assignments (`KEY=`), and a
+  small **fixed** synthetic-placeholder allowlist
+  (`REPLACE_AT_DEPLOY`, `CHANGE_ME`, `PLACEHOLDER`, `EXAMPLE`, plus
+  the matching bracketed forms `<replace-at-deploy>`, `<change-me>`,
+  `<placeholder>`, `<example>`) are allowed; anything else is
+  flagged. The bracket allowlist is an explicit fixed set rather
+  than a `<...>` pattern so a committer cannot hide a real credential
+  inside angle brackets (e.g. `DB_PASSWORD=<attacker-known-password>`).
+  The parser splits on the first `=` so non-identifier key shapes
+  (`db.password=...`, `api-token=...`, `export DB_PASSWORD=...`) are
+  still subject to the value check; inline `# ...` is **not**
+  honored as a comment (Kustomize / Docker env_file treats `#` as a
+  comment only when it is the first non-whitespace character on a
+  line); non-comment, non-blank lines without `=` are flagged as
+  malformed. Containment uses `git ls-files` so gitignored local-dev
+  files (e.g. `platform-runtime-secrets.local.env`) are intentionally
+  not scanned; a synthetic-tree test-mode fallback walks the
+  filesystem for unit tests. The roots and the synthetic-placeholder
+  allowlist are centralized in `scripts/adr_guard/adr_guard.py` so
+  adding a future overlay (e.g. `gcp-prod`) is automatic and adding
+  a new cluster tree is one entry. Failure reporting names the
+  repo-relative path and the variable name only; the rejected value
+  is never echoed. Real runtime secrets must flow in at deploy time
+  from GCP Secret Manager, a gitignored local env file, or a
+  deploy-time Kubernetes Secret. Backstops gitleaks for low-entropy
+  committed credentials it ignores and prevents reintroduction of
+  the failure mode resolved by PR #1207 (issue #1195). Enforces
+  ADR-004-R9.
+
+- `rds-pending-modifications`
+  Post-`terraform apply` gate in `_shifter-platform.yml`. Reads the portal
+  Terraform outputs, then calls `aws rds describe-db-instances` for each
+  `*_db_instance_id` output and fails the deploy job if any RDS instance
+  still has non-empty `PendingModifiedValues` or non-`in-sync`/`applying`
+  `DBParameterGroups[].ParameterApplyStatus`. Catches the failure mode
+  documented in `dev/terraform.md` ("RDS Change Application") where a
+  successful apply silently queues class/parameter changes for the
+  maintenance window. Implementation: `scripts/check_rds_pending_modifications/`,
+  with its own uv-managed dev environment, dedicated CI lint+test jobs
+  (`check-rds-pending-modifications-lint` / `-tests` in `_quality.yml`),
+  and matching pre-commit hooks (ruff + pytest). Same pattern as
+  `scripts/check_layer_imports/`.
 
 ## Local Usage
 

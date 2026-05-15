@@ -19,7 +19,15 @@ COMPOSE_FILE="${COMPOSE_FILE:-$RANGE_DIR/build/docker-compose.yml}"
 if [[ ! -f "$COMPOSE_FILE" ]] && [[ -f "$RANGE_DIR/docker-compose.yml" ]]; then
     COMPOSE_FILE="$RANGE_DIR/docker-compose.yml"
 fi
-COMPOSE="docker compose -p range -f $COMPOSE_FILE"
+# Compose project name. Defaults to "build" to match the production
+# user_data path (`scripts/polaris-aws-range/user_data.sh.tpl` runs
+# `docker compose up -d` from `/opt/polaris/scenario-dev/polaris/build`,
+# yielding project=build). The `polaris-splice-watcher` systemd unit's
+# default `SPLICE_NETWORK=build_splice-link` also assumes this. Override
+# with `COMPOSE_PROJECT_NAME=...` if you bring up compose with a
+# different `-p` value.
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-build}"
+COMPOSE="docker compose -p $COMPOSE_PROJECT_NAME -f $COMPOSE_FILE"
 
 STICKY=(a5-scada a10-tail a11-leg a12-arms a13-brain)
 # (container, port) pairs to poll for readiness. "running" status alone is

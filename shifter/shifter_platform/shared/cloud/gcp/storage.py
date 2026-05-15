@@ -49,6 +49,41 @@ class GCPObjectStorage:
             raise CloudStorageError(f"Failed to delete GCS object: {e}") from e
         logger.info("delete_object: success bucket=%s key=%s", bucket, key)
 
+    def copy_object(self, bucket: str, src_key: str, dst_key: str) -> None:
+        """Copy a blob within the same bucket using GCS rewrite."""
+        logger.debug("copy_object: bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+        try:
+            client = self._get_client()
+            source_bucket = client.bucket(bucket)
+            source_blob = source_bucket.blob(src_key)
+            source_bucket.copy_blob(source_blob, source_bucket, dst_key)
+        except Exception as e:
+            logger.exception(
+                "copy_object: failed bucket=%s src=%s dst=%s",
+                bucket,
+                src_key,
+                dst_key,
+            )
+            raise CloudStorageError(f"Failed to copy GCS object: {e}") from e
+        logger.info("copy_object: success bucket=%s src=%s dst=%s", bucket, src_key, dst_key)
+
+    def object_exists(self, bucket: str, key: str) -> bool:
+        """Return True iff the blob exists.
+
+        Distinguishes a confirmed miss from any other error so callers can
+        safely use this for "is the destination already occupied?" preflights.
+        Other errors (auth, network) raise `CloudStorageError` so the caller
+        fails closed.
+        """
+        logger.debug("object_exists: bucket=%s key=%s", bucket, key)
+        try:
+            client = self._get_client()
+            blob = client.bucket(bucket).get_blob(key)
+            return blob is not None
+        except Exception as e:
+            logger.exception("object_exists: failed bucket=%s key=%s", bucket, key)
+            raise CloudStorageError(f"Failed to test GCS object existence: {e}") from e
+
     def head_object(self, bucket: str, key: str) -> dict[str, Any]:
         logger.debug("head_object: bucket=%s key=%s", bucket, key)
         try:
@@ -65,6 +100,29 @@ class GCPObjectStorage:
         except Exception as e:
             logger.error("head_object: failed bucket=%s key=%s error=%s", bucket, key, e)
             raise CloudStorageError(f"Failed to head GCS object: {e}") from e
+
+    def read_object_header(self, bucket: str, key: str, max_bytes: int) -> bytes:
+        """Read up to `max_bytes` from the start of the blob.
+
+        GCS `download_as_bytes(start=, end=)` uses an inclusive `end`, so
+        `max_bytes=512` corresponds to `end=511`.
+        """
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        logger.debug("read_object_header: bucket=%s key=%s max_bytes=%d", bucket, key, max_bytes)
+        try:
+            client = self._get_client()
+            blob = client.bucket(bucket).blob(key)
+            body = blob.download_as_bytes(start=0, end=max_bytes - 1)
+        except Exception as e:
+            logger.exception(
+                "read_object_header: failed bucket=%s key=%s error=%s",
+                bucket,
+                key,
+                e,
+            )
+            raise CloudStorageError(f"Failed to read GCS object header: {e}") from e
+        return body[:max_bytes]
 
     def generate_presigned_upload_url(
         self,

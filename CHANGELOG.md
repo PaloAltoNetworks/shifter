@@ -5,10 +5,748 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.95.11] - 2026-05-03
+PRs do **not** edit this file directly — they drop a tiny fragment under
+[`changelog.d/`](changelog.d/) (named `<issue>.<type>.md`, where `<type>` is one of
+`security`, `added`, `changed`, `deprecated`, `removed`, `fixed`). At release
+time, `towncrier build` collates the fragments into a new release block just
+under the marker below and removes the consumed fragments. See
+[`changelog.d/README.md`](changelog.d/README.md). This file's history above
+the marker is the historical hand-written record and stays as-is.
+
+<!-- towncrier release notes start -->
+
+## [3.101.5] - 2026-05-10
+
+### Security
+
+- **Cloud SQL SSL enforcement enabled (MEDIUM-03).** Added
+  `ssl_mode = "ENCRYPTED_ONLY"` to the `ip_configuration` block of
+  `google_sql_database_instance.platform` in
+  `platform/terraform/gcp/modules/platform-core/main.tf`. Database connections
+  over the private network that do not negotiate TLS are now rejected by Cloud
+  SQL, preventing cleartext capture via compromised pods or VPC flow logs. The
+  google provider (>= 6.0) removed the legacy `require_ssl` argument in favor
+  of `ssl_mode`; `ENCRYPTED_ONLY` is the server-TLS-required mode that pairs
+  with client `sslmode=verify-ca` against the Cloud SQL server CA (no mTLS).
+
+## [3.101.4] - 2026-05-10
+
+### Security
+
+- **GCP portal runtime no longer derives its Django security posture from
+  managed-TLS readiness, and now fails closed (#966).**
+  `scripts/gcp/render_runtime_env.py` previously used a single
+  `secure_portal_mode` flag — set by the `gcp-dev` deploy workflow only
+  once the GKE `ManagedCertificate` was `Active` — to switch
+  `DJANGO_DEBUG`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, and
+  `AUTH_PROVIDER` together, so until the certificate activated the portal
+  ran with `DJANGO_DEBUG=true` (full Django debug pages) and session/CSRF
+  cookies sent over plaintext HTTP. The renderer now:
+  - emits the production runtime security profile unconditionally —
+    `DJANGO_DEBUG=false`, `SESSION_COOKIE_SECURE=true`,
+    `CSRF_COOKIE_SECURE=true`, `AUTH_PROVIDER=identity_platform`;
+  - **fails closed**: a configured public hostname and managed TLS are
+    mandatory; the renderer raises rather than emitting an
+    `http://<ingress-ip>` runtime, so `SITE_URL` is always
+    `https://<public_hostname>` (`ADR-008-R1`, `ADR-008-R3`). The
+    `secure_portal_mode` / `--secure-portal-mode` switch and the
+    re-render-on-promote step in `_gcp-dev.yml` are removed; the deploy
+    renders once, rolls out the production-secure workload (new runtime
+    ConfigMap + restart) first so the public Ingress never routes to pods
+    on an older runtime, then (re-)applies the edge manifest and hard-gates
+    on a load-balancer IP and on the `ManagedCertificate` becoming `Active`
+    for the hostname (verifying `.spec.domains` so a stale `Active`
+    certificate for a previous hostname is not trusted). The certificate
+    gate can be relaxed to a warning only via a manual `workflow_dispatch`
+    input (`gcp_require_active_certificate=false`) for first-time bootstrap
+    before DNS is pointed at the ingress IP, and in that mode the deploy
+    does a short readiness check instead of the full 60-minute Active wait;
+  - drops the ingress IP from `DJANGO_ALLOWED_HOSTS` — the public hostname
+    is the only externally addressable host and health-check probes hit
+    `/health/`, which bypasses host validation;
+  - renders the Identity Platform allow-list (`IDENTITY_ALLOWED_EMAIL_DOMAIN`,
+    `IDENTITY_ALLOWED_EMAILS`) from new Terraform outputs
+    (`identity_allowed_email_domain` / `identity_allowed_emails` on the
+    `platform-core` module and the `gcp-dev` environment) — the same
+    source the provider-side blocking function uses — instead of a literal
+    and the runner environment, so both enforce one policy.
+
+  The `gcp-dev` Terraform environment now `validation`-checks `public_hostname`
+  (non-empty) and `enable_managed_tls` (`true`), so bad security inputs fail at
+  `terraform apply` variable evaluation, before any infrastructure side effects.
+  `scripts/gcp/` gained its own `pyproject.toml` plus `Lint (gcp scripts)`,
+  `Tests (gcp scripts)`, and `SAST (gcp scripts)` CI jobs and matching
+  pre-commit hooks, so `scripts/gcp/tests/` (previously run in no CI job)
+  is now a real gate. The committed
+  `platform/k8s/gcp/overlays/gcp-dev/platform-runtime.generated.env`
+  snapshot was regenerated to match.
+
+## [3.101.3] - 2026-05-10
+
+### Security
+
+- **Added default-deny Kubernetes NetworkPolicies for the GCP control plane
+  (#958).** The Helm chart and static GCP base manifests now isolate
+  `shifter-platform` and `shifter-jobs` by default, with explicit allow rules
+  for GCLB ingress, DNS, Guacamole-to-guacd traffic, Google APIs, and generated
+  private service CIDRs.
+
+## [3.101.2] - 2026-05-10
+
+### Security
+
+- **Expanded Terraform-generated credential character sets in GCP platform-core
+  module (MEDIUM-08).** `platform/terraform/gcp/modules/platform-core/main.tf`
+  now sets `special = true` for `random_password.db_password`,
+  `random_password.django_secret_key`, and `random_password.guacamole_db_password`
+  to avoid alphanumeric-only generated secrets.
+
+## [3.101.1] - 2026-05-10
+
+### Security
+
+- **Enabled Binary Authorization enforcement on the GKE control-plane cluster
+  (MEDIUM-07).** `platform/terraform/gcp/modules/platform-core/main.tf` now
+  enables the Binary Authorization API and sets
+  `google_container_cluster.platform.binary_authorization.evaluation_mode =
+  "PROJECT_SINGLETON_POLICY_ENFORCE"`, preventing unrestricted image admission
+  and requiring cluster image verification to follow the project's Binary
+  Authorization policy.
+
+## [3.101.0] - 2026-05-10
+
+### Added
+
+- **Backend bundle contract and registry (#1113, PLAT-2002 / PLAT-2003).**
+  New `installation.contract` and `installation.registry` modules in the
+  Django-free `installation` package (`shifter/installation/`):
+  - `installation.contract` defines the typed, machine-readable contract every
+    backend bundle exposes (PLAT-2003) — `BackendBundle` with its
+    `contract_version` (versioned independently of `shifter.yaml`'s `version`,
+    fails closed on an unknown version), identity/metadata (`name`, `title`,
+    `maturity`, `description`), `supported_profiles`, a per-backend
+    `settings_model`, `required_tools`, `required_secrets` (logical name, the
+    human-readable reference grammar, and an optional `reference_pattern` regex
+    for machine validation — the root config holds references, never values),
+    `generated_outputs` (the runtime/infra/CI values the backend renders, each
+    tagged with owner, source, a typed `OutputDestination` — `runtime-env`,
+    `kubernetes-secret`, `provider-secret-store`, `terraform-variables`,
+    `helm-values`, `generated-file` — a sensitivity — `public` /
+    `secret-reference` / `secret-value` — and the process roles that consume it;
+    a `secret-value` output may only be placed in a secret store, never a
+    ConfigMap), `validation_checks` (argv command specs — PATH-resolved
+    executable name, repo-relative path arguments, no internal whitespace, shell
+    metacharacters, or absolute host paths), `health_checks` (read-only probes),
+    `capabilities` (which cloud-neutral `shared.cloud` / `engine/provisioner/cloud`
+    protocols the backend satisfies), and `owned_files` / `docs` (repository-relative
+    path roots, so validation and docs generation find a backend's files without a
+    branch router). All contract models are frozen and reject unknown fields; a
+    `BackendBundle` additionally rejects a `settings_model` that does not set
+    `extra="forbid"`, an `argv[0]` / `RequiredTool.name` that is not a bare
+    executable name, a `validation_checks` executable that is not in the same
+    bundle's `required_tools`, and duplicate `name` / `logical_name` across any of
+    its `RequiredTool` / `RequiredSecret` / `GeneratedOutput` / `ValidationCheck` /
+    `HealthCheck` records. The contract also exposes
+    `BackendBundle.validate_settings` (returns the normalized settings or raises a
+    sanitized `InstallationConfigError`) / `settings_issues` /
+    `secret_reference_issues` (and `RequiredSecret.matches_reference`) so consumers
+    can check a `RootConfig` against the selected bundle without the rejected input
+    ever appearing in an error.
+  - `installation.registry` is the single registry of known backend bundles
+    (`BACKEND_BUNDLES`, `get_backend_bundle`) — the OSS unit of backend
+    selection (PLAT-2002). It supersedes the provisional `installation.backends`
+    list; `KNOWN_BACKENDS`, `KNOWN_PROFILES`, and `ALLOWED_PROFILES` are now
+    derived from it, so adding a backend or a profile is a registry entry, not a
+    schema change or a branch router. The shipped `aws` and `gcp` entries are
+    intentionally provisional: each pins `contract_version` and an explicit
+    capability set, and carries its identity, supported profiles, owned repo
+    roots, required Terraform/CLI tools (including `uv`, the executable the
+    root-config check runs), the root-config validation check, a portal health
+    probe, and the `CLOUD_PROVIDER` plus app/database secret-reference runtime
+    bindings the platform actually consumes today (GCP's canonical `*_SECRET_ID`
+    names; AWS's `*_SECRET_ARN` aliases) — but `settings_model` and each
+    `reference_pattern` are left unset (any `settings` mapping and any reference
+    are accepted), and the per-backend renderer / validation-check /
+    infrastructure-entrypoint detail is filled in by the AWS and GCP backend
+    bundle migration issues (#1116/#1117). The `local` backend is #1119.
+  - `installation.schema.RootConfig` now derives backend and profile validation
+    from the registry; the loader (`installation.loader.load_root_config` /
+    `validate_root_config_file`) then runs the selected backend bundle's
+    `settings` and secret checks and returns the bundle's normalized settings. The
+    secret checks flag a `RequiredSecret` the backend declares with no `secrets:`
+    entry (the value may be `PROMPT_REFERENCE` — the literal `prompt` — to collect
+    it at deploy time, or a provider secret name / GitHub Actions secret name / env
+    var), a `secrets:` entry for a logical name the backend does not use (catches
+    typos before deploy), and a reference that does not match the backend's
+    `reference_pattern` when one is declared. Root-shape and backend-specific
+    problems are aggregated into one `InstallationConfigError`, each as a
+    path-anchored `ConfigIssue` (e.g. `settings.region`, `secrets.django_secret_key`)
+    that never echoes the rejected input — a backend setting or secret reference
+    could be sensitive. Behavior is unchanged for the shipped `aws`/`gcp` backends'
+    *settings* (still any mapping), but each of those backends now requires its
+    declared secrets (`aws`: `django_secret_key`, `db_password`; `gcp`:
+    `django_secret_key`) to have a `secrets:` entry.
+  - The provisional `installation.backends` module is removed; import the
+    registry constants from `installation` (or `installation.registry`) instead.
+
+## [3.100.4] - 2026-05-10
 
 ### Changed
 
+- **GCP Cloud SQL availability is now configurable with regional HA as
+  the module default.** The GCP platform-core Terraform module exposes
+  `cloud_sql_availability_type`, defaults it to `REGIONAL`, validates
+  accepted Cloud SQL values, and keeps the `gcp-dev` environment on
+  `ZONAL` for lower-cost development deployments.
+
+## [3.100.3] - 2026-05-10
+
+### Security
+
+- **Hardened GCP Terraform state bucket bootstrap in CI.** The
+  `.github/workflows/_gcp-dev.yml` deploy path now sets a 30-day GCS retention
+  policy for the Terraform backend bucket, enforces public access prevention on
+  creation, and configures bucket IAM so the configured CI service account gets
+  the required backend roles while broad/public bucket bindings are removed.
+
+## [3.99.3] - 2026-05-10
+
+### Changed
+
+- **Quality workflows now use GitHub-hosted runner capacity instead of
+  queueing entirely on the custom EC2 runner pool.** Portable lint,
+  architecture, SAST, security, and test jobs in
+  `.github/workflows/_quality.yml` now run on `ubuntu-latest`; deploy,
+  image-build, Packer, and environment-mutating workflows remain on
+  `self-hosted`. Runner docs now record the GitHub Actions limitation
+  that `ubuntu-latest` and self-hosted runners cannot be combined into a
+  native priority/fallback pool, so Shifter balances capacity by routing
+  job classes to different runner pools.
+
+## [3.99.2] - 2026-05-10
+
+### Changed
+
+- **DC domain password secret is now Terraform-managed end to end (#760
+  follow-up).** `platform/terraform/modules/engine-provisioner/secrets.tf`
+  replaces the `data "aws_secretsmanager_secret"` reference (which required a
+  manual, per-environment `aws secretsmanager create-secret` +
+  `put-secret-value`) with the same pattern the portal RDS credentials and
+  Django-app secret use: a `random_password` generated at apply time, stored
+  in `aws_secretsmanager_secret.dc_domain_password` via an
+  `aws_secretsmanager_secret_version`. `terraform apply` for the portal stack
+  now creates the secret with a live `AWSCURRENT` value — no out-of-band
+  bootstrap step — and the `iam.tf` / `outputs.tf` / `task_definition.tf`
+  references switch from the data source to the resource. The DC-secret
+  "is it populated yet?" preflight is removed from
+  `platform/terraform/modules/portal/ec2/user_data.sh` and the
+  `_shifter-platform.yml` deploy job (the secret always carries a value now).
+  Docs updated: `dev/secrets.md` (Provisioning / rotation runbook),
+  `platform_infrastructure/ami-management.md` (the DC AMI build reads the
+  Terraform-seeded value rather than choosing one). Rotation is now one
+  `terraform apply -replace='module.engine_provisioner.random_password.dc_domain_password'`.
+
+## [3.99.1] - 2026-05-10
+
+### Security
+
+- **Removed hardcoded prebaked Domain Controller Administrator password
+  from committed sources (#760).** The literal `dc_domain_password`
+  value previously committed in
+  `platform/terraform/environments/{prod,dev}/portal/terraform.tfvars`,
+  the matching Python fallback in
+  `shifter/shifter_platform/engine/services._get_windows_rdp_fallback`,
+  and the GDC VM Runtime DC fallback in
+  `shifter/engine/provisioner/gdc_vmruntime_assets._get_windows_admin_password`
+  have been removed. The engine-provisioner Terraform module now
+  references an out-of-band-managed `aws_secretsmanager_secret` named
+  `shifter-{env}-portal-dc-domain` via a `data` source; operators
+  create AND populate the secret with `aws secretsmanager create-secret`
+  before the first `terraform apply` (see `secrets.md` "Bootstrap (fresh
+  environment)"). The engine ECS task injects the value via the task
+  definition's `secrets = [...]` block; the portal Django container
+  reads the same secret at startup through `entrypoint.sh` and the
+  `DC_DOMAIN_PASSWORD_SECRET_ARN` env var plumbed through the
+  `portal/ssm` and `portal/ec2` modules. The Windows-DC RDP credential
+  lookup in `engine.services` is provider-scoped via the portal's
+  `CLOUD_PROVIDER` env, fail-loud (raises `ValueError` mapped to HTTP
+  400 by mission_control) when the secret is unconfigured or when an
+  instance's provider does not match the portal's deployment provider
+  (closes the cross-provider leak). The GDC VM Runtime DC provisioner
+  requires the same `DC_DOMAIN_PASSWORD` env (no literal fallback for
+  the DC role; non-DC Windows victim fallback remains pending separate
+  follow-up). Adds an `adr_guard` check `no-plaintext-secrets-in-tfvars`
+  (ADR-004-R7) that scans
+  `platform/terraform/environments/**/*.tfvars` for string-literal
+  assignments to `*_password` / `*_secret` / `*_token` / `*_key` /
+  `*_credentials` variables (with multi-line wrapper, HCL `#`/`//`/`/* */`
+  comment, and object/array detection) and fails the architecture gate
+  if any re-appear; complements gitleaks (which catches high-entropy
+  random strings) by catching low-entropy committed credentials
+  gitleaks ignores. Variables whose name ENDS WITH a public-material
+  suffix (`public_key`, `public_cert`, `pubkey`, `authorized_keys`,
+  etc.) are exempt; `public_key_password` and similar names that mix
+  a public-material fragment with a secret suffix stay flagged.
+  `*.tfvars.example` files are skipped. The previously exposed value
+  must be rotated operationally; the prebaked DC AMI Administrator
+  password and the Secrets Manager value must match.
+
+## [3.99.0] - 2026-05-10
+
+### Added
+
+- **Root installation config schema (#1112, PLAT-2001 / GEN-2001 /
+  GEN-2002).** New `installation` package (`shifter/installation/`)
+  defining `shifter.yaml` — the single authoritative root file an OSS
+  deployment edits to choose and configure a backend bundle. It ships:
+  - Typed Pydantic v2 models (`installation.schema.RootConfig`,
+    `DeploymentConfig`) for the root keys `version`, `backend`,
+    `deployment` (`name`, `domain`, `profile`), `secrets`, and
+    `settings`. The schema validates the *shape* of the root config:
+    unknown top-level keys, unknown `deployment` keys, missing required
+    keys, an unknown backend, an unsupported profile/backend
+    combination, a malformed deployment name or domain, duplicate YAML
+    mapping keys at any level (which PyYAML would otherwise silently
+    collapse), and `secrets` values that are clearly raw key material
+    (multi-line, PEM-headered, or implausibly long — capped at 1024
+    characters, well above the longest realistic provider reference) are
+    all rejected — and every problem is reported together — *before*
+    Terraform, Helm, Django startup, workers, or deployment scripts run.
+    `secrets` holds *references* (a provider secret name, a GitHub
+    Actions secret name, an env var, or `prompt`), never values; the
+    schema cannot tell a short secret value from a secret *name*, so the
+    precise per-provider reference grammar — and the contents of
+    `settings`, and which settings each backend requires — are validated
+    by the selected backend bundle's contract (#1113), not by the root
+    schema. The schema models exactly one standalone deployment (no
+    fleet / install registry / cross-install orchestration keys). The
+    known backends and the profiles each allows live in
+    `installation.backends` as a provisional registry that #1113
+    supersedes; the `local` backend is #1119.
+  - `installation.loader.load_root_config` /
+    `validate_root_config_file` — load and fail-fast validate a config
+    file, aggregating all problems on `InstallationConfigError.issues`.
+    The error model (`installation.errors.ConfigIssue` /
+    `InstallationConfigError`) never carries the rejected input, so a
+    mistyped secret cannot leak through an error message; YAML parse
+    errors are reported from the parser's own position/description only,
+    not from the file content.
+  - The `shifter-config validate [PATH]` CLI (also `python -m
+    installation validate`), run from the repo root via `uv run
+    --project shifter/installation`: exits `0` with `OK — root config
+    shape is valid (backend=…, profile=…)` for a valid config, or `1`
+    with each problem on stderr; defaults to `./shifter.yaml`.
+  - Worked, machine-validated example configs for the AWS and GCP
+    backends under `shifter/installation/examples/` (the test suite
+    loads every file there through the same parser, so an example cannot
+    drift from the schema).
+
+  Wired into the standard per-package CI jobs (`installation-lint`,
+  `installation-sast`, `installation-tests` in
+  `.github/workflows/_quality.yml` — on GitHub-hosted ephemeral runners,
+  since they execute PR-controlled Python), pre-commit (ruff /
+  ruff-format / bandit / pytest hooks scoped to `shifter/installation/`),
+  SonarCloud (`sonar.sources` / `sonar.tests` / coverage report path),
+  and recorded as ADR-011 evidence in `docs/adr/index.yaml`. The package
+  is built into the Shifter Platform Docker image alongside `cyberscript`
+  (so the Django app, workers, and provisioner can `import installation`
+  when #1114 derives runtime config from the root config). The
+  architecture note `docs/architecture/root-configured-backend-bundles.md`
+  records the resolved root-config filename. Django-free (pydantic v2 +
+  PyYAML only) so scripts, CI, and the Django app can all use it.
+
+## [3.98.1] - 2026-05-10
+
+### Fixed
+
+- **Git worktrees now symlink the repo-root `.env`.**
+  `scripts/setup-worktree.sh` only linked the platform `.env` and the
+  venvs, so a worktree had no repo-root `.env`. The `ground-control` MCP
+  server forwards `GROUND_CONTROL_API_TOKEN` from that file as a bearer
+  token, so every Ground Control backend call returned `401` in any
+  worktree. The setup script now also links `$MAIN_REPO/.env` to the
+  worktree root.
+
+## [3.98.0] - 2026-05-10
+
+### Security
+
+- **Locked Pod Security Standards on K8s Deployments via a new ADR
+  guard check (#951).** Added the
+  `k8s-deployment-security-context` check to
+  `scripts/adr_guard/adr_guard.py`, wired into ADR-006-R2 in
+  `docs/adr/index.yaml`, the ADR guard's `ci` level (kept out of
+  `fast` so the system-Python `adr-guard-fast` hook stays
+  dependency-free), and a dedicated `adr-guard-k8s` pre-commit hook
+  scoped to `platform/k8s/gcp/base/*.{yaml,yml}` and
+  `platform/charts/shifter/`. The check validates two enforcement
+  sources:
+  - **Base manifest snapshots**: PyYAML's `safe_load_all` parses every
+    `.yaml`/`.yml` document under `platform/k8s/gcp/base/` (recursive)
+    and applies the rule to every document whose `kind` is
+    `Deployment` (kind-based filtering rather than filename-based, so
+    a Deployment shipped under any filename or extension is scanned).
+  - **Helm chart rendered output** (per ADR-007, the chart is the
+    authoritative deployment contract; base manifests are supporting
+    snapshots): the check shells out to `helm template
+    platform/charts/shifter -f <values-file>` for each entry in
+    `HELM_VALUES_FILES` (`values-gcp-dev.yaml`, `values-gcp-prod.yaml`)
+    and applies the same rule to every Deployment in the rendered
+    output. Catches regressions where a chart template or values file
+    removes a required securityContext field even when the base
+    snapshots remain compliant. Multi-document files and
+  indentless YAML sequences are supported; non-mapping
+  `spec`/`spec.template`/`spec.template.spec` shapes produce
+  actionable violations rather than crashing the guard. The check
+  fails CI if any pod template is missing
+  `seccompProfile.type: RuntimeDefault`, or if any container OR
+  initContainer's *effective* context (after pod-level inheritance
+  for `runAsNonRoot`/`runAsUser`/`runAsGroup`) is missing
+  `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`
+  (with no `capabilities.add` key at all — empty list is also
+  rejected), `readOnlyRootFilesystem: true`, `runAsNonRoot: true`,
+  a positive integer `runAsUser`/`runAsGroup` (booleans rejected;
+  Python's `bool` is a subclass of `int`), or sets `privileged:
+  true` or a container-level `seccompProfile.type` other than
+  `RuntimeDefault`. PyYAML (`pyyaml>=6.0`) and Helm (`v3.15.4`) are
+  the new ADR-guard runtime dependencies: the `adr-conformance` job
+  in `.github/workflows/_quality.yml` installs both **hermetically
+  per job** — pip is bootstrapped via the stdlib `ensurepip` module
+  (the self-hosted Amazon Linux runner's system Python ships without
+  pip and does not have Python 3.12 available for
+  `actions/setup-python`), then PyYAML via
+  `pip install --no-deps --target ${RUNNER_TEMP}/py-deps` with
+  `PYTHONPATH=${RUNNER_TEMP}/py-deps` on the run step, and Helm via
+  the official `get.helm.sh` release tarball extracted to
+  `${RUNNER_TEMP}/helm-bin/` and added to `$GITHUB_PATH` (no
+  `pip install --user`, no `sudo mv` to system paths, no mutable
+  host state that can leak between jobs on the self-hosted runner).
+  The `adr-guard-tests` job installs PyYAML the same way; the
+  chart-rendering test uses a fake helm shim, not real helm.
+  Locally the dedicated `adr-guard-k8s` pre-commit hook
+  (`language: python`, `additional_dependencies: pyyaml>=6.0`)
+  provisions PyYAML in an isolated venv so the system-Python
+  `adr-guard-fast` hook stays dep-free; helm is a developer
+  prerequisite shared with the existing `helm-lint-shifter-chart`
+  hook. Robustness extras: empty or missing `containers` lists are
+  explicit violations (preventing chart regressions that drop the
+  container list from silently passing as long as pod-level seccomp
+  is set), and a configured Helm values file that is deleted or
+  renamed produces a violation rather than being silently skipped.
+  The k8s check is wired into the ADR guard's `ci` level only;
+  `fast` stays PyYAML- and helm-free. Documented in
+  `shifter/shifter_platform/documentation/docs/technical/dev/adr-enforcement.md`.
+  Tests in `scripts/adr_guard/tests/test_adr_guard.py` cover the
+  negative paths (missing/wrong seccomp, allowPrivilegeEscalation
+  true, partial capability drop, capability re-grant, container-level
+  seccomp override, privileged true, missing fields, UID 0, boolean
+  UID/GID, unsafe initContainer), the robustness paths (`---`
+  separator, indentless sequences, empty flow `securityContext: {}`,
+  non-mapping `securityContext`, multi-document files, kind-based
+  filtering of unsuffixed Deployment files, non-Deployment kinds
+  ignored, pod-level inheritance honored, container override beats
+  pod default), and the real-repo regression. Removed the
+  now-redundant `ADR-006-R2` exception from
+  `docs/adr/exceptions.yaml` (filed when the manifests lacked
+  security contexts; the manifests have since been hardened to
+  1000/1000 for app/guacd and 1001/1001 for guacamole-client via
+  `platform/charts/shifter/templates/_helpers.tpl`, and the new
+  check now enforces the structural fields). Existing kube-linter
+  checks (`run-as-non-root`, `no-read-only-root-fs`,
+  `privilege-escalation-container`) continue to run as
+  defense-in-depth. The unrelated ADR-006-R3 NetworkPolicy exception
+  remains.
+- **Provisioner container now runs with read-only root filesystem and a dedicated
+  writable workspace volume (#1103, follow-up to #950).** `shifter/engine/provisioner/Dockerfile`
+  no longer chowns `/app` or copies source with `--chown=appuser`; application code
+  stays root-owned and immutable. Terraform writes are redirected to
+  `${TERRAFORM_WORKSPACE_DIR}` (default `/var/run/provisioner/workspace`):
+  `shifter/engine/provisioner/terraform_base.py` adds `_stage_workspace()` /
+  `_cleanup_workspace()` so each Terraform apply/destroy call copies the read-only
+  module source from `/app/terraform/modules/<name>` into a per-request workspace,
+  runs `terraform init`/`apply`/`destroy` from the staged path, and removes the
+  staged tree (with any `terraform.tfvars.json` that may carry secrets) on both
+  success and failure paths. The dynamic GCP Job factory at
+  `shifter/shifter_platform/shared/cloud/gcp/task_runner.py` now sets
+  `securityContext.readOnlyRootFilesystem=true`, `runAsNonRoot=true`,
+  `runAsUser=runAsGroup=1000`, `allowPrivilegeEscalation=false`,
+  `capabilities.drop=["ALL"]`, and `seccompProfile=RuntimeDefault`, plus four
+  explicit `emptyDir` volumes (the workspace memory-backed) for
+  `/var/run/provisioner/workspace`, `/tmp`,
+  `/home/appuser/.terraform.d/plugin-cache`, and `/home/appuser/.pulumi`. The ECS
+  task definition under `platform/terraform/modules/engine-provisioner/`
+  enables `readonlyRootFilesystem` and adds matching ephemeral `volume`/`mountPoints`
+  entries. Tests under `shifter/engine/provisioner/tests/test_dockerfile.py` and
+  `shifter/engine/provisioner/tests/test_terraform_base.py` lock in the structural
+  contract; the opt-in (`RUN_DOCKER_TESTS=1`) Docker smoke test now launches the
+  container with `--read-only` and tmpfs mounts and asserts `/app` is not writable
+  while the workspace path is. Dead `_get_working_dir()` helper in
+  `shifter/engine/provisioner/main.py` (never called, misleading) removed.
+  Source: codex review of #950 (cycle 2).
+- **Provisioner container now runs as non-root (#950).** `shifter/engine/provisioner/Dockerfile`
+  creates `appuser:1000 / appgroup:1000` (matching the existing pattern in
+  `shifter/shifter_platform/Dockerfile`) and drops privileges via
+  `USER 1000:1000` before `ENTRYPOINT` (numeric form so Kubernetes
+  `runAsNonRoot` admission can verify it). Terraform/Pulumi binary installs
+  and `pip install` still run as root during build. This reduces the blast
+  radius of a container compromise — an attacker who exploits the running
+  process no longer has root inside the container — but does not eliminate
+  the risk of host root via a kernel-level container escape. `/app` is
+  chowned to the runtime user, `HOME` / `TF_PLUGIN_CACHE_DIR` /
+  `PULUMI_HOME` are set explicitly, and the corresponding cache
+  directories under `/home/appuser` are pre-created so Terraform/Pulumi
+  can write under the non-root identity. Added
+  `shifter/engine/provisioner/tests/test_dockerfile.py` as a structural
+  regression gate plus an opt-in (`RUN_DOCKER_TESTS=1`) Docker smoke
+  test that verifies the running container's UID, HOME, and writable
+  cache paths. Source: GCP Red Team Report (CRITICAL-01).
+
+### Changed
+
+- **Stripped Cortex/Palo branding from UI surfaces (#1101).** Renamed
+  `static/css/xdr-theme.css` / `xdr-sidebar.css` / `xdr-dropdown.css` to
+  neutral `theme.css` / `sidebar.css` / `dropdown.css`; renamed
+  `static/js/xdr-dropdown.js` to `dropdown.js`, the `XdrDropdown` class
+  to `ShifterDropdown` (with `globalThis.ShifterDropdown` and
+  `_shifterDropdown` element marker), and the `.xdr-dropdown*` selectors
+  to `.shifter-dropdown*`; renamed `--xdr-*` CSS custom properties and
+  `.xdr-dark-theme` to `--theme-*` and `.theme-dark`; replaced Cortex
+  green (`#00d26a` / `#0c6`) and Palo blue (`#128df3`) accents with
+  desaturated slate (`#94a3b8`) on a dark neutral palette (WCAG AA on
+  dark) — system-state indicators (active/online dot, success metrics)
+  use neutral system green `#22c55e` rather than Cortex green; replaced
+  the Cortex-derived logo SVGs and the "CORTEX SHIFTER / by palo alto
+  networks" wordmark in `partials/icon_sidebar.html` and
+  `partials/ctf_participant_sidebar.html` with a plain text "SHIFTER"
+  wordmark + interim slate "S" mark; replaced the Cortex-style green
+  favicon PNG with a neutral SVG favicon; rebuilt `coming_soon.html`
+  with CSS-styled text instead of the cyberpunk-green Shifter PNG
+  marks. Functional product references (XDR/XSIAM in instructional
+  copy, the `xdr_agent` scenario schema field, VM-Series authcode flow,
+  "Cortex BYOT" scenario name, NGFW-to-XDR/XSIAM data source setup) are
+  preserved per #1101 scope. Final visual identity remains tracked under
+  #1097 / UX-002 (still DRAFT).
+
+### Fixed
+
+- **Dev RDS class/storage/engine changes now apply during the deploy.** Both
+  the portal RDS module (`platform/terraform/modules/portal/rds/`) and the
+  Guacamole RDS module (`platform/terraform/modules/guacamole/`) now expose
+  an `apply_immediately` input. Dev environments set it to `true`; prod
+  keeps it `false` so prod RDS changes continue to land through the
+  configured maintenance window. The May 2026 `db.t3.small → db.m5.xlarge`
+  bump for `dev-portal-guacamole-db` was accepted by `terraform apply` but
+  queued in `PendingModifiedValues` for the maintenance window — the live
+  class never changed during the event (#1085). Note: `apply_immediately`
+  covers changes AWS can perform during the apply (class, storage, engine
+  version, dynamic parameter-group fields). Static parameter changes and
+  major version upgrades still require an explicit reboot.
+- **Post-apply RDS gate in CI (dev only).** A new check
+  (`scripts/check_rds_pending_modifications/`) runs after `terraform apply`
+  in the dev branch of `_shifter-platform.yml`. It reads the portal env's
+  Terraform outputs (every `*_db_instance_id` output), calls
+  `aws rds describe-db-instances`, and fails the deploy job if any managed
+  RDS instance still has non-empty `PendingModifiedValues`. A successful
+  apply that leaves pending mods is treated as an incomplete deploy. Prod
+  is exempt by design.
+
+## [3.97.0] - 2026-05-07
+
+### Changed
+
+- **Polaris bedrock model** switched from `us.anthropic.claude-sonnet-4-5-20250929-v1:0`
+  (deprecated, unsubscribable) to `us.anthropic.claude-sonnet-4-6` across the engine,
+  packer scripts, and local-dev `config-claude.sh`. Sonnet 4.5 was returning
+  `AccessDeniedException` on every invoke for the dev account.
+- **Removed claude smoke-test gate from `polaris_kali_bedrock_shard`**. The step
+  still writes `/etc/profile.d/claude-bedrock.sh`, the `/etc/hosts` VPCE override,
+  and resolves the bedrock-runtime private IP — but no longer runs
+  `claude -p "ok"` as a 60s provisioning gate. Aligns with how every other
+  scenario handles claude (no per-range smoke test).
+- **In-browser terminal copy/paste**. xterm.js shows selection highlighting but
+  never wired the system clipboard. Added a custom key handler:
+  Ctrl+Shift+C copies the current selection via `navigator.clipboard.writeText`,
+  Ctrl+Shift+V pastes via the existing `sendInput`. Both fall through silently
+  on permission denial.
+- **Polaris CTFd content trimmed to 5-mission event scope.** Index, mission-log,
+  surfaces, and getting-unstuck pages no longer reference Missions 6–9 (Exposure,
+  Counterintel, Delivery Denied, Safety Case) — those are CTFd-board-only and
+  have no compose backing. Also removed Palo + Ottawa BSides Discord references
+  (`discord.gg/N7S2ChA9`); event uses in-room support instead. The "Start Here"
+  bullet on the orientation page is now a real link to `/challenges`.
+- **Polaris briefing deck (`scenario-dev/polaris/briefing-deck/`)** trimmed
+  to 5 missions; Board Access slide updated to reflect the per-cohort
+  credential pattern (username = email, single shared password) instead of
+  the BSides `meetup+N` convention; range-access slide replaced with a
+  Mission-Control-flow instruction set instead of a stale 110-token grid.
+- **Dev guacamole DB instance class** bumped from `db.t3.small` to
+  `db.m5.xlarge` (`platform/terraform/environments/dev/portal/terraform.tfvars`).
+  The t3.small was undersized at BSides Ottawa — sessions took 4–5 retries
+  under sustained load. m5.xlarge gives 4 vCPU / 16 GiB and no burst-credit
+  cliff. Note: rds module's `apply_immediately` defaults to false, so the
+  class change is queued behind RDS's next maintenance window.
+
+## [3.96.0] - 2026-05-07
+
+### Added
+
+- **`polaris_kali_bedrock_shard` step in `PolarisRangeBootstrapPlan`**
+  (`shifter/engine/provisioner/plans/polaris_range_bootstrap.py`).
+  Per-range step that resolves the bedrock-runtime VPC endpoint's
+  private IP, writes `/etc/profile.d/claude-bedrock.sh` inside the
+  a14-kali container with `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`,
+  `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, drops a
+  `/etc/hosts` override pointing the bedrock-runtime FQDN at the VPCE
+  IP, and runs a `claude -p "reply ok"` smoke test. Without this step
+  the kali container had no AWS credentials and `claude` failed with
+  "Not logged in" because the container ships with no creds and on a
+  default docker bridge network can't reach IMDS at `169.254.169.254`
+  through the host. At BSides Ottawa this was a manual post-provision
+  step (`scripts/polaris-aws-range/apply_kali_bedrock_shard.py`)
+  operators ran by hand for every participant; integrating it into
+  the bootstrap plan makes provisioning self-sufficient.
+- **IMDS hop-limit bump in `_run_polaris_range_bootstrap`**
+  (`shifter/engine/provisioner/main.py`). Calls
+  `ec2.modify_instance_metadata_options(HttpPutResponseHopLimit=2)`
+  on the polaris-vm before running the bootstrap plan. Default IMDS
+  hop limit is 1, which blocks docker-bridge containers from reaching
+  the link-local IMDS endpoint and makes the kali container unable to
+  pick up the EC2 instance role's credentials. Hop limit 2 lets the
+  container hop through the host network namespace to IMDS. Idempotent.
+- **`Set-DnsServerForwarder 169.254.169.253` in
+  `scripts/polaris-aws-range/a2_setup.ps1`.** Future polaris-dc bakes
+  pick up the DNS forwarder at bake time so a fresh DC AMI launched
+  into a non-default VPC can resolve external names (specifically
+  `ssm.us-east-2.amazonaws.com`) without needing a post-launch fixup.
+  Without this the DC's local DNS server has no upstream and the SSM
+  agent never registers, so the engine provisioner times out waiting
+  for SSM and tears the range down.
+
+### Fixed
+
+- **Engine DC SSM-wait timeout 600s → 1800s** (`_run_dc_setup` in
+  `shifter/engine/provisioner/main.py`). The Packer-built shifter-dc
+  AMI runs through 2-3 sysprep reboot cycles on first boot before
+  SSM agent is reliably online — empirically 13-15 minutes between
+  launch and stable SSM. The 600s ceiling caused the provisioner to
+  give up early and tear ranges down. 1800s gives sysprep room; on
+  a warm DC AMI the wait still returns in seconds.
+- **Bucket name mismatch in `polaris_range_bootstrap.py`'s
+  `polaris_fetch_tests` step.** `BUCKET="shifter-dev-user-storage-e3462f0c"`
+  is the dev bucket from a previous AWS account. This account uses
+  `shifter-dev-user-storage-788327019743`, so range provisioning got
+  403 on `s3://shifter-dev-user-storage-e3462f0c/polaris/tests/...`
+  and the engine marked the range failed even though everything else
+  had succeeded. Updated to the correct bucket; matches the
+  `agent_s3_bucket` value already corrected in
+  `platform/terraform/environments/dev/range/terraform.tfvars`.
+- **`ec2:ModifyInstanceMetadataOptions` added to the engine
+  provisioner ECS task role** (`platform/terraform/modules/engine-provisioner/iam.tf`).
+  Required for the new IMDS hop-limit bump above. Granted alongside
+  the existing `ec2:RunInstances`, `ec2:ModifyInstanceAttribute` etc.
+  in the `EC2InstanceOperations` statement.
+
+## [3.95.17] - 2026-05-04
+
+### Security
+
+- **Closed shell-injection paths in `mcp/ngfw` (#759).** `run_command`,
+  `show_system_info`, and `show_routes` previously interpolated
+  user-controlled command strings into shell pipelines on two
+  boundaries — every aws-cli invocation in `mcp/ngfw/index.js` ran
+  through `execSync()` shell strings on the local host, and the SSM
+  `AWS-RunShellScript` payload that ferried PAN-OS commands to the
+  NGFW used `echo ${JSON.stringify(command)} | ssh ...` on the portal
+  jump host. `JSON.stringify` only produces a double-quoted shell
+  string, so payloads containing `$(...)` or backticks were evaluated
+  by the portal shell before reaching SSH. Both boundaries are now
+  closed: AWS-CLI argv-array helpers (`buildAwsArgv`, `awsExec`,
+  `awsJson`, `awsText`, `buildSsmSendCommandArgs`) now live in a
+  shared `mcp/shared/aws-helpers.js` module re-exported by both
+  `mcp/ngfw/lib.js` and `mcp/ops/lib.js`, so a single change-site
+  governs the argv-array contract across MCP servers. Errors carry an
+  `aws <service> <op>: <stderr>` operation label so MCP handlers
+  surface localized failures. `buildNgfwSshCommands` base64-encodes
+  the PAN-OS command (with a trailing newline so the line-oriented
+  appliance gets Enter) into the SSM payload; the portal decodes it
+  (`base64 -d`) and pipes the bytes into `ssh`'s stdin instead of
+  evaluating them. Per-invocation `/tmp/ngfw-<uuid>.pem` paths prevent
+  concurrent calls from clobbering each other's key material. `set
+  -e` plus `trap 'rc=$?; rm -f <path>; exit $rc' EXIT` preserves the
+  SSH/PAN-OS exit code through cleanup so SSM reports failed PAN-OS
+  calls as failed. `child_process.execSync` is no longer imported
+  from `mcp/ngfw/index.js`. `validateNgfwIp` adds a strict IPv4 check
+  on the SSH target as defense in depth. `runNgfwCommand` throws an
+  explicit timeout error after 60s and only retries the genuine
+  `InvocationDoesNotExist` transient during polling — other AWS
+  errors propagate immediately. Regression coverage:
+  `mcp/ngfw/lib.test.js` covers argv builders, `awsExec` runner
+  injection with operation-labeled errors, SSM JSON payload shape,
+  base64 round-trip across `$()`, backticks, quotes, semicolons,
+  ampersands, pipes, newlines, and the heredoc terminator;
+  `mcp/ops/spawn-roundtrip.test.js` (now covering both packages
+  through the shared `spawnSync` boundary) proves Node forwards argv
+  elements byte-for-byte; and `mcp/ngfw/script-execution.test.js`
+  runs the generated SSM command list under `/bin/sh` with a stub
+  `ssh` and asserts the EXIT trap preserves the failing exit code
+  (42 round-trips end-to-end) and removes the temporary key file in
+  both success and failure paths.
+  Component-local guardrails recorded in `mcp/ngfw/SECURITY.md`. The
+  `ADR-010-R1` and `ADR-010-R2` exceptions for `mcp/ngfw/*` are
+  removed from `docs/adr/exceptions.yaml`; ADR-010 evidence now lists
+  the shared module and ngfw artifacts.
+
+## [3.95.16] - 2026-05-04
+
+### Security
+
+- **Closed shell-injection paths in `mcp/ops` (#763).** The shared
+  `aws()` and `awsText()` helpers, `getInstancePlatform`,
+  `fetchCredentials`, `ensureTunnel`, and `start_portal_test_tunnel`
+  previously interpolated user-controlled strings into shell command
+  strings and ran them via `execSync()`. Three documented payload
+  paths reached the host shell — `filter_log_events` (CloudWatch
+  filter pattern), `ssm_send_command` (SSM `--parameters` JSON), and
+  `run_manage_command` (Django management commands wrapped in JSON) —
+  with several other tools sharing the same unsafe abstraction.
+  Every aws-cli invocation in `mcp/ops/index.js` now goes through
+  argv-array helpers in `mcp/ops/lib.js` (`buildAwsArgv`, `awsExec`,
+  `awsJson`, `awsText`) backed by `spawnSync`, so payloads containing
+  `$()`, backticks, single and double quotes, semicolons, ampersands,
+  pipes, spaces, and newlines are forwarded as literal argv elements
+  rather than evaluated by the local shell. `child_process.execSync`
+  is no longer imported from `mcp/ops/index.js`. Regression coverage
+  in `mcp/ops/lib.test.js` (argv-builder and runner-injected
+  `awsExec`) and `mcp/ops/spawn-roundtrip.test.js` (proves Node's
+  `spawnSync` preserves literal argv across all metacharacters)
+  guards the new boundary. Component-local guardrails recorded in
+  `mcp/ops/SECURITY.md`.
+
+## [3.95.15] - 2026-05-03
+
+### Changed
+
+- **Split `cms.handlers` into per-domain handler modules.** The 389-LOC
+  `shifter/shifter_platform/cms/handlers.py` god module is replaced by a
+  `cms/handlers/` package: `range_events`, `experiment_bridge`, `ctf_bridge`
+  (signal fire), `ngfw_events`, with the package `__init__` owning the
+  prefix dispatcher. Public surface preserved via re-exports —
+  `cms.handlers.process_event` (referenced as a string in
+  `config/settings.py` for the SQS worker), `parse_sns_message`,
+  `process_range_event`, `process_ngfw_event`, and
+  `notify_experiment_on_range_ready` all keep their existing import paths.
+  Runtime routing, signal wiring (`cms.signals.range_status_changed`), and
+  experiment-failure semantics are unchanged. New `TestProcessEvent` cases
+  cover the previously-untested experiment route. Tracked under #1055 (#1068).
+- **Consolidated SNS envelope unwrapping at `shared.messages.envelope.parse_sns_message`.**
+  Four near-identical copies — in `cms/handlers/envelope.py`,
+  `engine/handlers.py`, `mission_control/handlers.py`, and
+  `cms/experiments/handlers.py` (as `_parse_message`) — are replaced by a
+  single shared helper. The CMS, Engine, and Mission Control handlers
+  re-export `parse_sns_message` so existing
+  `from <module>.handlers import parse_sns_message` imports keep working;
+  `cms.experiments.handlers._parse_message` was renamed to
+  `parse_sns_message` (private name had only the one local consumer).
 - **Refactored `cms.models` into a bounded-context package.** The 978-LOC
   `shifter/shifter_platform/cms/models.py` god module is replaced by a
   `cms/models/` package split by domain: `catalogs`, `assets`,
@@ -37,98 +775,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function and the iteration moved into a new
   `OperatingSystemQuerySet.for_extension()` queryset method;
   `get_for_extension()` is preserved as a thin compatibility wrapper.
+- **Promoted `spec_class` field to `CatalogBase`** — `CredentialType`,
+  `InstanceType`, and `AppType` no longer redeclare it. Cosmetic
+  `help_text` migration for `cms.CredentialType` (no schema change).
+- **`Credential` now extends `CredentialBase`** per the original design
+  intent. Adds `last_verified_at` and `last_used_at` columns to the
+  credentials table (cms migration `0025`), creating schema slots for
+  credential-rotation, staleness, and compromise-detection signals.
+- **Closed the soft-delete bypass bug class.** Added
+  `shared/db/soft_delete.py` exposing the canonical primitives for any
+  model with a nullable `deleted_at` field:
+  - `SoftDeleteMixin` — `is_deleted` property.
+  - `ExpiringStateMixin` — `is_expired` / `expires_soon`.
+  - `SoftDeleteQuerySet` — chainable `.active()` / `.deleted()` /
+    `.with_deleted()`.
+  - `SoftDeleteManager` — **default manager that pre-filters every
+    queryset to non-deleted rows.** A plain `Model.objects.filter(...)`
+    cannot return deleted rows. Code that needs deleted rows must
+    explicitly use `Model.all_objects` — making the intent obvious to
+    reviewers and grep.
 
-## [3.95.0] - 2026-05-03
+  `Asset`, `EntityBase`, `Request`, `Scenario`, `RangeInstance`, `Risk`,
+  and `Comment` all declare the canonical pair (`objects =
+  SoftDeleteManager()`, `all_objects = SoftDeleteQuerySet.as_manager()`)
+  with `Meta.base_manager_name = "all_objects"` so reverse relations
+  and admin introspection still see the full table. Removed the legacy
+  `cms.models.ActiveRangeInstanceManager` (now redundant: the default
+  `RangeInstance.objects` already pre-filters active).
+- **Replaced every inline `deleted_at__isnull=True` filter** across
+  `cms/services.py` (9 sites), `cms/experiments/services.py` (4),
+  `cms/scenarios/registry.py` (3), `cms/scenario_editor/services.py`
+  (3), `risk_register/views.py` (2), `risk_register/api/views.py` (2),
+  `risk_register/models.py` (2), `ctf/forms.py` (1), and
+  `ctf/services/event.py` (1) with default-manager calls — and dropped
+  the now-redundant `.active()` chains. Helpers live in `shared/db/`
+  (not `shared/models/`) to satisfy ADR-001-R2's
+  cross-layer-model-imports check.
+- **Fixed risk_register reachability bugs surfaced by the manager
+  flip.** `risk_detail` and `risk_delete` now use `Risk.all_objects`
+  (preserves view-deleted-risks behavior; makes re-delete idempotent).
+  `RiskViewSet.restore` now bypasses the active-only `get_object()` and
+  looks up via `Risk.all_objects` directly so deleted risks are
+  reachable for restore.
+- **Reverse-FK traversal is intentionally active-only.** The split
+  between `_default_manager` (active) and `_base_manager` (unfiltered) is
+  load-bearing: every implicit Django integration (`get_object_or_404`,
+  ModelForm, admin, DRF serializers, generic CBVs) reaches for
+  `_default_manager` and must default to active to keep the soft-delete
+  bypass closed. Reverse-FK access (`parent.children.all()`) goes
+  through the same `_default_manager`, so it is also active-only by
+  design. Cascade delete and migration introspection use
+  `_base_manager`, which `Meta.base_manager_name = "all_objects"` points
+  at the unfiltered manager — so cascades still walk soft-deleted
+  descendants and integrity stays correct. Audit / restore / admin code
+  that needs to walk reverse relations *including* deleted rows must
+  use the explicit `Child.all_objects.filter(parent=parent)` pattern.
+  The verbosity is the contract: it makes the intent grep-able.
+- **DB-backed integration tests** in
+  `tests/integration/cms/test_soft_delete_manager.py` pin the canonical
+  semantics: `Model.objects` excludes deleted rows even via explicit
+  filter, `Model.all_objects` includes them, the chainable helpers
+  compose, `_meta.base_manager_name` points at `all_objects`, and
+  `parent.children.all()` returns deleted descendants too. These pin
+  behaviour where the unit-test mocks pin call shape.
+- **Range lookup helpers** (`get_range_status_by_id`,
+  `get_range_spec_by_id`, `find_range_instance_id_by_request` in
+  `cms/services.py`) now use `RangeInstance.all_objects` so terminal /
+  destroyed ranges remain reachable for status lookups, audit reads,
+  and callback correlation.
+- **`risk_delete` is idempotent** — a re-delete attempt on an
+  already-soft-deleted risk short-circuits before re-mutating
+  `deleted_at` or writing a duplicate DELETE audit entry.
+- **`RiskViewSet.restore` enforces object-level permissions** explicitly
+  via `self.check_object_permissions()` after looking up via
+  `Risk.all_objects` (the lookup bypass would otherwise skip DRF's
+  permission check that `self.get_object()` would have run).
+- **`CommentViewSet.list` honours `?include_deleted=true` for the parent
+  risk too** — previously the parent lookup used active-only
+  `Risk.objects`, so comment history on a soft-deleted risk was
+  unreachable even with the include-deleted flag set.
+- **`SoftDeleteQuerySet.with_deleted()` removed.** Its semantics were
+  unsafe — it dropped any prior chained filters on the way back to the
+  full table. Callers wanting every row use `Model.all_objects`
+  directly: single canonical entry point keeps intent unambiguous.
 
-### Fixed
-
-- **80+ Dependabot security alerts cleared** across every package manager
-  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
-  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
-  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
-  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
-  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
-  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
-  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
-  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
-  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
-  in `shifter/engine/provisioner/requirements.txt`.
+## [3.95.14] - 2026-05-03
 
 ### Changed
 
-- **Full dependency refresh on every uv- and npm-managed manifest**
-  beyond the security bumps above. `uv lock --upgrade` ran on
-  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
-  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
-  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
-  patch/minor versions of ~40 transitive packages including pydantic
-  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
-  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
-  `npm update --package-lock-only` ran on the four MCP servers
-  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
-  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
-- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
-  17 root configurations and provisioner modules. The 16 `modules/*`
-  subdirectories had already moved to aws 6.x via looser constraints;
-  this aligns the consumers (`environments/{dev,prod}`,
-  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
-  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
-  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
-- **Terraform `required_version` standardized to `>= 1.5.0`** across all
-  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
-- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
-  `_range.yml`, and `_shifter-platform.yml` — required by the
-  `use_lockfile` migration below (S3 native locking landed in 1.10).
-- **Terraform S3 backend state locking migrated from DynamoDB to S3
-  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
-  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
-  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
-  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
-  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
-  is unrelated to terraform state locking and was left intact (it
-  serves the Shifter engine application).
-- **Environment backend.tf files converted to partial-backend pattern.**
-  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
-  used to hard-code the bucket UUID inline; they now ship with
-  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
-  from `<env>.s3.tfbackend` at init time, matching the existing
-  `global/iam/` convention. Single source of truth for the bucket
-  name; backend.tf is never modified by automation.
-- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
-  `terraform init` (was bare `terraform init`). Required by the
-  partial-backend conversion above.
-- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
-  walkthrough now writes `.s3.tfbackend` files for env, portal, and
-  range (instead of overwriting `backend.tf`), emits
-  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
-  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
-  creation is gone. The unused `dynamodb_table_exists` and
-  `create_dynamodb_table` helpers are kept for now in case someone
-  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
-  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
-  templated `.tfbackend` files get filled in at bootstrap time.
-- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
-  the root `.gitignore` plus two nested `.gitignore` files in
-  `platform/terraform/global/dev-box/` and
-  `scripts/polaris-aws-range/`). All 30 lock files committed at
-  aws 6.43.0; the `temp/` tree remains intentionally excluded.
-- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
-  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
-  configs without leaving stale UUIDs in the repo. Three new
-  `dev.s3.tfbackend` files added under `environments/dev/`,
-  `environments/dev/portal/`, and `environments/dev/range/` (those
-  three previously had no `.tfbackend` and relied entirely on inline
-  config).
+- **`deploy.yml` cancels in-flight runs on new push to the same ref**
+  (`concurrency.cancel-in-progress: true`). Previous setting (`false`)
+  queued each new push behind the prior run's full duration, so a
+  rapid sequence of pushes to `dev` or `aws-dev` stacked up indefinitely
+  (saw 5 active runs after two back-to-back pushes today). Env
+  branches never go backwards, so a newer SHA always supersedes the
+  older queued one — cancelling is correct.
 
-### Removed
+## [3.95.13] - 2026-05-03
 
-- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
-  and `platform/terraform/modules/pulumi-state/` — they contained only
-  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
-  from a deleted module.
-- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
-  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
-  corresponding live infrastructure).
+### Changed
+
+- **`deploy.yml` skips Quality on env-branch pushes** to dedupe runs.
+  Pushing to `aws-dev`/`gcp-dev`/`main` previously re-ran the entire
+  Quality phase even though the same SHA had just passed Quality on
+  its `dev` push (per the repo rule: env branches never get commits
+  except via merge from `dev`). That doubled CI runner-minutes per
+  change. Quality now runs on PRs, `workflow_dispatch`, or direct
+  `dev` pushes only. Deploy jobs already tolerate
+  `needs.quality.result == 'skipped'`, so no downstream changes
+  needed.
+
+  Trust assumption: any SHA reaching an env branch must have green
+  Quality on its dev run. If you ever push directly to an env branch
+  bypassing dev, Quality won't gate it — keep the rule.
+
+## [3.95.12] - 2026-05-03
+
+### Fixed
+
+- **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
+  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  `shifter/engine/provisioner/terraform_base.py` derives the lock
+  table name from the state bucket: it stripped `-pulumi-state` and
+  replaced with `-pulumi-locks`, otherwise fell through to
+  `<bucket>-locks`. The 3.95.6 bucket-name fix added a
+  `-<account_id>` suffix, breaking the `endswith("-pulumi-state")`
+  check, so the fallback computed
+  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  (the actual table from the engine-state module is still
+  `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
+  regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
+  account-id-suffixed forms; lock table name resolves to
+  `<prefix>-pulumi-locks` either way. Added a test case for the new
+  pattern. (Commit message tagged this 3.95.11 but 3.95.11 was taken
+  by the cms refactor PR landing concurrently; bumped here for
+  correctness.)
+
+## [3.95.11] - 2026-05-03
+
+### Fixed
+
+- **Range provisioning failed with `dynamodb:PutItem` AccessDenied on a
+  non-existent table** (`dev-range-pulumi-state-788327019743-locks`).
+  `shifter/engine/provisioner/terraform_base.py` derives the lock table
+  name from the state bucket: it stripped `-pulumi-state` and replaced
+  with `-pulumi-locks`, otherwise fell through to `<bucket>-locks`. The
+  3.95.6 bucket-name fix added a `-<account_id>` suffix, breaking the
+  `endswith("-pulumi-state")` check, so the fallback computed
+  `dev-range-pulumi-state-788327019743-locks` — which doesn't exist
+  (the actual table from the engine-state module is still
+  `dev-range-pulumi-locks`) and isn't in the IAM policy. Switched to a
+  regex (`-pulumi-state(?:-\d+)?$`) that matches both the legacy and
+  account-id-suffixed forms; lock table name resolves to
+  `<prefix>-pulumi-locks` either way. Added a test case for the new
+  pattern.
 
 ## [3.95.10] - 2026-05-03
 
@@ -316,6 +1116,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REPLACE_AT_BOOTSTRAP` placeholder. Also dropped the `*.tf` walker
   since every `*.tf` backend block is now partial (placeholder bucket,
   real value supplied via `-backend-config` at init).
+
+## [3.95.0] - 2026-05-03
+
+### Fixed
+
+- **80+ Dependabot security alerts cleared** across every package manager
+  in the repo. Python (uv): bumped Django to 6.0.4, cryptography to
+  47.0.0, cbor2 to 6.0.1, pyOpenSSL to 26.1.0, pyasn1 to 0.6.3, pytest
+  to 9.0.3, python-dotenv to 1.2.2, Pygments to 2.20.0, requests to
+  2.33.1, ujson to 5.12.0, urllib3 to 2.6.3, filelock to 3.25.2,
+  virtualenv to 21.2.0. Node (npm): bumped hono to 4.12.16,
+  @hono/node-server to 1.19.14, path-to-regexp to 8.4.2, flatted to
+  3.4.2, picomatch (v2) to 2.3.2 and (v4) to 4.0.4, brace-expansion to
+  2.1.0, minimatch (v3) to 3.1.5 and (v9) to 9.0.9, ajv (v6) to 6.15.0
+  and (v8) to 8.20.0. Pinned `cryptography==46.0.7` and `protobuf==5.29.6`
+  in `shifter/engine/provisioner/requirements.txt`.
+
+### Changed
+
+- **Full dependency refresh on every uv- and npm-managed manifest**
+  beyond the security bumps above. `uv lock --upgrade` ran on
+  `shifter/shifter_platform/`, `shifter/engine/provisioner/`,
+  `scripts/check_layer_imports/`, `scripts/bootstrap/`,
+  `shifter/cyberscript/`, and `shifter/packer/` — pulling in the latest
+  patch/minor versions of ~40 transitive packages including pydantic
+  2.13.3, mypy 1.20.2, ruff 0.15.12, gunicorn 25.3.0, mozilla-django-oidc
+  5.0.2, redis 7.4.0, boto3 1.43.2, grpcio 1.80.0, and protobuf 7.34.1.
+  `npm update --package-lock-only` ran on the four MCP servers
+  (`mcp/{ops,planner,ngfw}/`), `shifter/shifter_platform/`, and
+  `platform/terraform/gcp/modules/platform-core/functions/identity-platform/`.
+- **Terraform AWS provider major bump** `~> 5.0` → `~> 6.0` across all
+  17 root configurations and provisioner modules. The 16 `modules/*`
+  subdirectories had already moved to aws 6.x via looser constraints;
+  this aligns the consumers (`environments/{dev,prod}`,
+  `global/{iam,github-runner,se-admins,tssummit,tssummit-ranges,
+  ctfd-workshop,dev-box}`, `scripts/polaris-aws-range/`,
+  `temp/ngfw-bootstrap-test/`) so everything resolves to **aws 6.43.0**.
+- **Terraform `required_version` standardized to `>= 1.5.0`** across all
+  17 root configs (was an inconsistent mix of `>= 1.0` and `>= 1.5.0`).
+- **CI Terraform action bumped 1.7.1 → 1.13.3** in `_core.yml`,
+  `_range.yml`, and `_shifter-platform.yml` — required by the
+  `use_lockfile` migration below (S3 native locking landed in 1.10).
+- **Terraform S3 backend state locking migrated from DynamoDB to S3
+  native** (`use_lockfile = true`). All inline `backend "s3"` blocks
+  (`environments/{dev,prod}/{,portal,range}/backend.tf`,
+  `global/iam/backend.tf`) and all `.s3.tfbackend` files dropped
+  `dynamodb_table = "..."` in favour of `use_lockfile = true`. The
+  `engine-state` module's `aws_dynamodb_table.engine_locks` resource
+  is unrelated to terraform state locking and was left intact (it
+  serves the Shifter engine application).
+- **Environment backend.tf files converted to partial-backend pattern.**
+  The six `environments/{dev,prod}/{,portal,range}/backend.tf` files
+  used to hard-code the bucket UUID inline; they now ship with
+  `OVERRIDDEN_VIA_BACKEND_CONFIG` placeholders and the real values come
+  from `<env>.s3.tfbackend` at init time, matching the existing
+  `global/iam/` convention. Single source of truth for the bucket
+  name; backend.tf is never modified by automation.
+- **CI workflows now pass `-backend-config=${env}.s3.tfbackend`** to
+  `terraform init` (was bare `terraform init`). Required by the
+  partial-backend conversion above.
+- **`scripts/bootstrap/deploy.py` rewritten for the new pattern.** The
+  walkthrough now writes `.s3.tfbackend` files for env, portal, and
+  range (instead of overwriting `backend.tf`), emits
+  `use_lockfile = true`, and never touches `backend.tf`. Bootstrap
+  steps renumbered 1/3, 2/3, 3/3 (was 1/4..4/4) since DynamoDB table
+  creation is gone. The unused `dynamodb_table_exists` and
+  `create_dynamodb_table` helpers are kept for now in case someone
+  needs to reintroduce DynamoDB locking. `_update_global_backend_configs`
+  now also matches the `REPLACE_AT_BOOTSTRAP` literal so freshly
+  templated `.tfbackend` files get filled in at bootstrap time.
+- **`.terraform.lock.hcl` files now tracked in git** (was ignored by
+  the root `.gitignore` plus two nested `.gitignore` files in
+  `platform/terraform/global/dev-box/` and
+  `scripts/polaris-aws-range/`). All 30 lock files committed at
+  aws 6.43.0; the `temp/` tree remains intentionally excluded.
+- **All `.s3.tfbackend` files templated.** Bucket UUIDs replaced with
+  `REPLACE_AT_BOOTSTRAP` so a fresh bootstrap produces matching
+  configs without leaving stale UUIDs in the repo. Three new
+  `dev.s3.tfbackend` files added under `environments/dev/`,
+  `environments/dev/portal/`, and `environments/dev/range/` (those
+  three previously had no `.tfbackend` and relied entirely on inline
+  config).
+
+### Removed
+
+- **Empty stub directories** `platform/terraform/modules/pulumi-provisioner/`
+  and `platform/terraform/modules/pulumi-state/` — they contained only
+  stale `.terraform.lock.hcl` files with no `.tf` content, leftover
+  from a deleted module.
+- **Stale terraform state in `temp/ngfw-bootstrap-test/`** —
+  `terraform.tfstate` and `terraform.tfstate.backup` deleted (no
+  corresponding live infrastructure).
 
 ## [3.94.0] - 2026-04-14
 
@@ -2684,7 +3576,6 @@ of-truth rule)
 ### Fixed
 - Some range boxes have unexpected Internet access
 
-
 ## [1.0.2] - 2026-01-25
 
 ### Added
@@ -2822,7 +3713,6 @@ of-truth rule)
   - GitHub App authentication for secure runner registration
 - Added runner-deploy.sh script for runner infrastructure management
 - Added manual-deployment.md documentation for global terraform stacks
-
 
 ## [0.10.1] - 2025-01-02
 
@@ -3143,7 +4033,6 @@ of-truth rule)
 - Kali boots slow due to redundant kali headless install
 - Failed range auto-cleanup not running in dev
 
-
 ## [0.7.10] - 2025-12-21
 
 ### Fixed
@@ -3217,7 +4106,6 @@ of-truth rule)
 - Dev environment: autoscaling enabled with 2 instances
 - GitHub Actions portal workflow supports ASG deployment via SSM targeting by tag
 - IAM: Added `elasticache_asg` policy for ElastiCache, Auto Scaling, and Launch Template permissions
-
 
 ## [0.7.3] - 2025-12-17
 

@@ -282,7 +282,10 @@ class CTFChallengeForm(forms.ModelForm):
 
         # Filter next_challenge to same-event challenges, excluding self
         if event:
-            qs = CTFChallenge.objects.filter(event=event, deleted_at__isnull=True)
+            # CTFChallenge.objects is a SoftDeleteManager, so deleted rows
+            # are already excluded by default — no inline deleted_at filter
+            # needed.
+            qs = CTFChallenge.objects.filter(event=event)
             if self.instance.pk:
                 qs = qs.exclude(pk=self.instance.pk)
             self.fields["next_challenge"].queryset = qs
@@ -322,69 +325,49 @@ class CTFChallengeForm(forms.ModelForm):
 
         return cleaned_data
 
+    # Persistence DELIBERATELY NOT in the form (codex review #765 cycle 5):
+    # all challenge writes — JSON API and HTML admin — go through
+    # `ctf.services.challenge.create_challenge` / `update_challenge` so the
+    # actor-checked, allowlisted, multi-flag- and release-task-aware
+    # service contract is the single source of truth. Admin views call
+    # `to_service_data()` on a validated form, then pass the result to
+    # the service with `actor_id=request.user.pk`.
+    #
+    # Override the inherited ModelForm.save() to fail loudly (codex cycle
+    # 7): without this, a future caller (or test) calling `form.save()`
+    # would silently fall back to `ModelForm.save()` and bypass the actor
+    # check, the field allowlist, flag hashing, multi-flag handling,
+    # tag/topic resolution, and release-task syncing the service contract
+    # owns.
     def save(self, commit: bool = True) -> CTFChallenge:
-        """Save challenge with flag hashing.
+        raise NotImplementedError(
+            "CTFChallengeForm.save() is intentionally not implemented. Use "
+            "`ctf.services.challenge.create_challenge` or `update_challenge` "
+            "with the form's `to_service_data()` and an `actor_id`."
+        )
 
-        Creates a CTFFlag record for the flag. Also sets the legacy flag_hash
-        field on the challenge for backward compatibility.
+    def to_service_data(self) -> dict:
+        """Return a dict suitable for `create_challenge`/`update_challenge`.
 
-        Args:
-            commit: Whether to save to database.
-
-        Returns:
-            The saved challenge instance.
+        Must be called only after `is_valid()`.
         """
-        from ctf.services.challenge import hash_flag
-
-        challenge = super().save(commit=False)
-        is_new = challenge._state.adding
-
-        # Hash the flag if provided
-        flag = self.cleaned_data.get("flag")
+        cleaned = self.cleaned_data
+        # Start from the ModelForm field set, drop the form-only helpers,
+        # and add service-shape fields (flag, tags, topics).
+        data: dict = {}
+        for field in self.Meta.fields:
+            if field in cleaned:
+                data[field] = cleaned[field]
+        flag = cleaned.get("flag")
         if flag:
-            challenge.flag_hash = hash_flag(flag)
-
-        # Set event if provided
-        if self.event:
-            challenge.event = self.event
-
-        if commit:
-            challenge.save()
-
-            # Create a CTFFlag record for the flag
-            if flag:
-                from ctf.models import CTFFlag
-
-                if is_new:
-                    # New challenge: create the first flag record
-                    CTFFlag.objects.create(
-                        challenge=challenge,
-                        flag_hash=challenge.flag_hash,
-                        flag_type="static",
-                        case_sensitive=True,
-                        order=0,
-                    )
-
-            # Handle tags (M2M)
-            tag_list_str = self.cleaned_data.get("tag_list", "")
-            if tag_list_str is not None:
-                from ctf.services.challenge import _resolve_tags
-
-                tag_names = [t.strip() for t in tag_list_str.split(",") if t.strip()]
-                event = self.event or challenge.event
-                tag_objects = _resolve_tags(event, tag_names)
-                challenge.tags.set(tag_objects)
-
-            # Handle topics (M2M)
-            topic_list_str = self.cleaned_data.get("topic_list", "")
-            if topic_list_str is not None:
-                from ctf.services.challenge import _resolve_topics
-
-                topic_names = [t.strip() for t in topic_list_str.split(",") if t.strip()]
-                topic_objects = _resolve_topics(topic_names)
-                challenge.topics.set(topic_objects)
-
-        return challenge
+            data["flag"] = flag
+        tag_list_str = cleaned.get("tag_list")
+        if tag_list_str is not None:
+            data["tags"] = [t.strip() for t in tag_list_str.split(",") if t.strip()]
+        topic_list_str = cleaned.get("topic_list")
+        if topic_list_str is not None:
+            data["topics"] = [t.strip() for t in topic_list_str.split(",") if t.strip()]
+        return data
 
 
 class CTFParticipantForm(forms.ModelForm):

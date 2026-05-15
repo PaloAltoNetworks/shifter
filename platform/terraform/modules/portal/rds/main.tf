@@ -65,11 +65,11 @@ resource "random_password" "db_password" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-# checkov:skip=CKV_AWS_149:Deferred for MVP. AWS-managed keys sufficient for low-usage internal MVP. See #213
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "shifter-${var.name_prefix}-db-credentials"
   description             = "RDS PostgreSQL credentials"
   recovery_window_in_days = 0 # Immediate deletion, avoids naming conflicts on recreate
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(var.tags, {
     Name   = "shifter-${var.name_prefix}-db-credentials"
@@ -143,6 +143,10 @@ resource "aws_db_instance" "this" {
 
   # CloudWatch Log Exports
   enabled_cloudwatch_logs_exports = var.enable_log_exports ? ["postgresql", "upgrade"] : []
+
+  # Whether class/storage/parameter changes apply during the deploy or wait
+  # for the maintenance window. Set true in dev, false in prod.
+  apply_immediately = var.apply_immediately
 
   tags = merge(var.tags, {
     Name   = "${var.name_prefix}-db"

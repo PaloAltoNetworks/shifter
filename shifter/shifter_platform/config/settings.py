@@ -45,10 +45,14 @@ INTERNAL_IPS = ["127.0.0.1"]  # Required for debug context processor
 # For testing, use a deterministic key; in production, use FIELD_ENCRYPTION_KEY env var
 FIELD_ENCRYPTION_KEY = os.environ.get(
     "FIELD_ENCRYPTION_KEY",
-    # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required)
+    # Test-only default - not used in production (FIELD_ENCRYPTION_KEY env var is required).
+    # Empty-string (not None) when neither env nor test mode applies so the
+    # type stays `str` for consumers like `cms.credential_encryption`. The
+    # production fail-closed check on the second FIELD_ENCRYPTION_KEY block
+    # below treats an empty string as "unset" and raises.
     "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # NOSONAR - test-only key, not a production credential
     if IS_TEST_RUN
-    else None,
+    else "",
 )
 _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
@@ -93,6 +97,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -134,26 +139,96 @@ ASGI_APPLICATION = "config.asgi.application"
 # Django Channels Configuration
 # ------------------------------------------------------------------------------
 
-# Redis for channel layer (multi-instance ASG deployment)
-# Falls back to in-memory for local dev when REDIS_HOST not set
-REDIS_HOST = os.environ.get("REDIS_HOST", "")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
-if REDIS_HOST:
-    CHANNEL_LAYERS = {
+# Redis for the channel layer (multi-instance pod deployment).
+#
+# Three runtime postures, in order of preference, derived from the env:
+#   1. REDIS_HOST empty       -> InMemoryChannelLayer (local dev,
+#                                pytest runs without a Redis dependency).
+#   2. REDIS_HOST set, no TLS -> channels_redis tuple host form (plaintext
+#                                Redis on a private network — the AWS and
+#                                pre-#963 GCP shape).
+#   3. REDIS_HOST + REDIS_TLS -> rediss://<password>@host:port/0 URL host.
+#                                REDIS_PASSWORD is hydrated by entrypoint.sh
+#                                from Secret Manager (ADR-008-R6).
+#
+# Fail closed when the TLS flag is on but no password was hydrated — silent
+# fallback to plaintext is the failure mode #963 was opened to close.
+def _build_channel_layers(env):
+    """Build CHANNEL_LAYERS from the given mapping (typically os.environ).
+
+    Pure function so it is unit-testable without touching real settings.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    host = env.get("REDIS_HOST", "").strip()
+    if not host:
+        return {
+            "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+        }
+
+    port = int(env.get("REDIS_PORT", "6379"))
+    tls = env.get("REDIS_TLS", "").strip().lower() == "true"
+    if tls:
+        password = env.get("REDIS_PASSWORD", "").strip()
+        if not password:
+            raise ImproperlyConfigured(
+                "REDIS_TLS=true requires REDIS_PASSWORD (hydrated by entrypoint.sh "
+                "from Secret Manager); refusing to fall back to a plaintext connection"
+            )
+        # channels_redis (>= 4) accepts dict-form host entries; the dict is
+        # unpacked into `aioredis.ConnectionPool.from_url(address, **rest)`
+        # (see channels_redis/utils.py::create_pool), so redis-py's SSL
+        # kwargs flow through. SERVER_AUTHENTICATION on GCP Memorystore
+        # needs the instance CA to verify the server cert — when present,
+        # the CA PEM is passed via `ssl_ca_data` so we never have to write
+        # the cert to disk or mutate the system trust store. When absent
+        # (tests, or environments that haven't shipped the CA bundle yet),
+        # redis-py falls back to the system trust store with cert_reqs
+        # still required.
+        ca_pem = env.get("REDIS_CA_PEM", "")
+        if not ca_pem.strip():
+            # ADR-008-R6 fail-closed: the GCP runtime delivers the
+            # Memorystore server CA alongside the AUTH token in Secret
+            # Manager, and entrypoint.sh exports both as a unit. If the
+            # CA didn't make it into the env, either Terraform hasn't
+            # been re-applied with the new payload yet or the entrypoint
+            # block was bypassed — both are misconfigurations, not
+            # "fall back to system trust" cases. Memorystore uses a
+            # private CA, so the system trust store could not validate
+            # the cert anyway; this guard surfaces the misconfiguration
+            # at startup rather than as an opaque TLS handshake failure
+            # later.
+            raise ImproperlyConfigured(
+                "REDIS_TLS=true requires REDIS_CA_PEM (hydrated by entrypoint.sh "
+                "from the Memorystore server_ca_cert in Secret Manager); refusing "
+                "to fall back to the system trust store, which cannot validate the "
+                "Memorystore private CA"
+            )
+        address = f"rediss://:{password}@{host}:{port}/0"
+        # Use the raw CA value (do not strip) — the PEM block's
+        # trailing newline matters for some TLS implementations and the
+        # canonical form ends with one.
+        host_entry = {
+            "address": address,
+            "ssl_cert_reqs": "required",
+            "ssl_ca_data": ca_pem,
+        }
+        hosts = [host_entry]
+    else:
+        hosts = [(host, port)]
+
+    return {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {
-                "hosts": [(REDIS_HOST, REDIS_PORT)],
-            },
+            "CONFIG": {"hosts": hosts},
         },
     }
-else:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        },
-    }
+
+
+REDIS_HOST = os.environ.get("REDIS_HOST", "")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+CHANNEL_LAYERS = _build_channel_layers(os.environ)
 
 # Database
 # Use SQLite for local dev/tests, PostgreSQL for deployed environments
@@ -193,6 +268,7 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
+LOCALE_PATHS = [BASE_DIR / "locale"]
 USE_TZ = True
 
 # Static files
@@ -223,6 +299,23 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", True)
     CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", True)
+
+    # HTTPS enforcement (issue #776). `SECURE_PROXY_SSL_HEADER` above tells
+    # Django to read the LB's forwarded-proto, so `SECURE_SSL_REDIRECT`
+    # won't loop behind a TLS-terminating proxy. Health-check probes that
+    # arrive over plain HTTP without `X-Forwarded-Proto: https` will 301;
+    # add their paths to `SECURE_REDIRECT_EXEMPT` via env if the LB
+    # doesn't follow redirects.
+    SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
+
+    # HSTS — defense in depth so an active downgrade can't strip the first
+    # redirect. Defaults: 1 year, include subdomains, NO preload. Preload
+    # is opt-in because submission to the browser-baked preload list is
+    # near-irreversible (chromium docs: weeks-to-months to remove); only
+    # enable once you actually intend to submit chrome://net-internals.
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+    SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", False)
 
 # ------------------------------------------------------------------------------
 # Authentication
@@ -436,6 +529,21 @@ AGENT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1MB max per script
 SCRIPT_UPLOAD_URL_EXPIRES = 600  # 10 minutes for presigned URL
 
+# Server-side upload inspection (issue #696). Provider-neutral byte budget for
+# the magic-byte header read performed at finalization across CTF, agent, and
+# experiment-script uploads. The floor is dictated by the largest registered
+# offset signature (POSIX tar's ``ustar`` marker at offset 257 needs 262 bytes);
+# 512 comfortably covers it with slack. Sub-floor or non-positive overrides
+# (env mis-set to 0/-1) clamp to the floor so the adapter never raises
+# ``ValueError`` from an invalid runtime config, and so offset-based formats
+# remain inspectable.
+_UPLOAD_INSPECTION_FLOOR = 512
+try:
+    _UPLOAD_INSPECTION_RAW = int(os.environ.get("UPLOAD_INSPECTION_MAX_HEADER_BYTES", str(_UPLOAD_INSPECTION_FLOOR)))
+except ValueError:
+    _UPLOAD_INSPECTION_RAW = _UPLOAD_INSPECTION_FLOOR
+UPLOAD_INSPECTION_MAX_HEADER_BYTES = max(_UPLOAD_INSPECTION_RAW, _UPLOAD_INSPECTION_FLOOR)
+
 # Experiment execution limits
 EXPERIMENT_MAX_TOTAL_RUNS = 10
 EXPERIMENT_MAX_PARALLEL_RUNS = 5
@@ -444,7 +552,7 @@ EXPERIMENT_MAX_PARALLEL_RUNS = 5
 # ------------------------------------------------------------------------------
 # JSON auth secret key for signing RDP session URLs
 # Must match the JSON_SECRET_KEY configured in Guacamole's ECS task definition
-# This is a 32-character hex string (128-bit key) stored in Secrets Manager
+# This is a hex string key (64-character/256-bit preferred) stored in Secrets Manager
 GUACAMOLE_JSON_AUTH_SECRET = os.environ.get("GUACAMOLE_JSON_AUTH_SECRET", "")
 # Public URL for browser (returned to client)
 GUACAMOLE_BASE_URL = os.environ.get("GUACAMOLE_BASE_URL", "/guacamole")
@@ -493,10 +601,10 @@ SQS_QUEUE_CONFIG = QUEUE_CONFIG  # Backward compat alias
 # CTF Configuration
 # ------------------------------------------------------------------------------
 
-CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", "ctf@keplerops.com")
+CTF_FROM_EMAIL = os.environ.get("CTF_FROM_EMAIL", "ctf@example.com")
 CTF_DEFAULT_RANGE_SPINUP_MINUTES = int(os.environ.get("CTF_DEFAULT_RANGE_SPINUP_MINUTES", "30"))
 CTF_DEFAULT_CLEANUP_DELAY_HOURS = int(os.environ.get("CTF_DEFAULT_CLEANUP_DELAY_HOURS", "24"))
-CTFD_PLATFORM_URL = os.environ.get("CTFD_PLATFORM_URL", "https://ctf.shifter.keplerops.com/login")
+CTFD_PLATFORM_URL = os.environ.get("CTFD_PLATFORM_URL", "https://ctf.shifter.example.com/login")
 
 # Email - SES
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
@@ -523,7 +631,7 @@ REST_FRAMEWORK = {
 # Environment
 # ------------------------------------------------------------------------------
 
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 DEV_LOGIN_ALLOWED_HOSTS = _env_list("DEV_LOGIN_ALLOWED_HOSTS") or ["localhost", "127.0.0.1", "[::1]"]
 DEV_LOGIN_ALLOWED_CIDRS = _env_list("DEV_LOGIN_ALLOWED_CIDRS")
 

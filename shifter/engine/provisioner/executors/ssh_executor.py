@@ -65,6 +65,13 @@ class SSHExecutor:
         # Parse the private key (supports RSA and Ed25519)
         self._pkey = self._load_private_key(private_key)
 
+    def _create_client(self) -> paramiko.SSHClient:
+        """Create an SSH client which verifies target host keys."""
+        client = paramiko.SSHClient()
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        return client
+
     def _load_private_key(self, private_key: str) -> paramiko.PKey:
         """Load a private key, detecting type automatically.
 
@@ -124,12 +131,7 @@ class SSHExecutor:
         """
         del document_name
         host = instance_id
-        client = paramiko.SSHClient()
-        # Security context: AutoAddPolicy is acceptable because we connect to freshly
-        # provisioned PAN-OS VMs in isolated VPC subnets. Host keys change on reprovision.
-        client.set_missing_host_key_policy(
-            paramiko.AutoAddPolicy()  # noqa: S507  # NOSONAR — freshly provisioned VMs in isolated VPC
-        )  # nosec B507
+        client = self._create_client()
 
         # Build the full command to send via stdin
         commands = script
@@ -137,7 +139,7 @@ class SSHExecutor:
             commands = f"{commands}\n{stdin_input}"
 
         try:
-            logger.info(f"Connecting to {host}:{self._port} as {self._username}")
+            logger.info("Connecting to %s:%s as %s", host, self._port, self._username)
             client.connect(
                 hostname=host,
                 port=self._port,
@@ -148,93 +150,33 @@ class SSHExecutor:
                 look_for_keys=False,
             )
 
-            logger.info(f"Executing command: {commands[:100]}...")
+            logger.info("Executing command: %s...", commands[:100])
             logger.info("Opening interactive shell with invoke_shell()")
             channel = client.invoke_shell()
             channel.settimeout(timeout_seconds)
 
             # Send commands
-            logger.info(f"Sending command: {commands[:100]}")
+            logger.info("Sending command: %s", commands[:100])
             channel.send("set cli pager off\n")  # nosec B601  # NOSONAR — hardcoded operational command
             channel.send(commands + "\n")  # nosec B601  # NOSONAR — operational data, not user input
             channel.send("exit\n")
             channel.shutdown_write()
 
-            # Read output until channel closes naturally
-            # We send 'exit' and shutdown_write(), so PAN-OS will close the channel
-            # when all commands complete. This is more reliable than prompt detection
-            # since commits can take 30+ seconds.
-            #
-            # IMPORTANT: We must wait for eof_received, NOT exit_status_ready.
-            # exit_status_ready() can return True before all data arrives, causing
-            # truncated output. eof_received is the authoritative signal that the
-            # server has finished sending all data.
-            output = ""
-            start_time = time.time()
-            chunk_count = 0
-
-            logger.info("Reading output until channel EOF")
-
-            while True:
-                # Read any available data
-                if channel.recv_ready():
-                    chunk = channel.recv(4096).decode("utf-8", errors="replace")
-                    chunk_count += 1
-                    logger.info(f"Chunk {chunk_count}: {len(chunk)} bytes")
-                    logger.debug(f"Chunk {chunk_count} content: {chunk!r}")
-                    output += chunk
-
-                # Check if channel EOF (server finished sending all data)
-                # This is the ONLY reliable way to know all output has been received
-                if channel.eof_received:
-                    logger.info("Channel EOF received - draining remaining data")
-                    # Use blocking recv() to drain ALL remaining data
-                    # recv_ready() only checks Paramiko's buffer, not kernel TCP buffer
-                    # Set short timeout for drain phase
-                    channel.settimeout(2)
-                    while True:
-                        try:
-                            chunk = channel.recv(4096)
-                            if not chunk:  # Empty bytes = channel closed, no more data
-                                break
-                            chunk_count += 1
-                            logger.info(f"Drain chunk {chunk_count}: {len(chunk)} bytes")
-                            output += chunk.decode("utf-8", errors="replace")
-                        except builtins.TimeoutError:
-                            logger.info("Drain timeout - no more data")
-                            break
-                    break
-
-                # Overall timeout check
-                elapsed = time.time() - start_time
-                if elapsed > timeout_seconds:
-                    logger.error(
-                        f"Command timed out after {elapsed:.1f}s (received {chunk_count} chunks, {len(output)} bytes)"
-                    )
-                    raise TimeoutError(f"Command timed out after {timeout_seconds}s")
-
-                time.sleep(0.1)
-
-            # Get exit code - wait briefly if not ready yet
-            # After EOF, exit status should arrive shortly
-            exit_code = -1
-            for _ in range(10):  # Wait up to 1 second
-                if channel.exit_status_ready():
-                    exit_code = channel.recv_exit_status()
-                    logger.info(f"Exit code: {exit_code}")
-                    break
-                time.sleep(0.1)
-            else:
-                logger.info("Exit status not ready after 1s - using -1")
-
+            output, chunk_count, start_time = self._read_until_eof(channel, timeout_seconds)
+            exit_code = self._wait_for_exit_status(channel)
             elapsed = time.time() - start_time
-            logger.info(f"Command completed in {elapsed:.1f}s, received {len(output)} bytes in {chunk_count} chunks")
-            logger.info(f"Raw output (first 1000 chars): {output[:1000]!r}")
+            logger.info(
+                "Command completed in %.1fs, received %d bytes in %d chunks",
+                elapsed,
+                len(output),
+                chunk_count,
+            )
+            logger.info("Raw output (first 1000 chars): %r", output[:1000])
 
             # Clean output
             cleaned = self._clean_output(output, commands)
-            logger.info(f"Cleaned output: {len(cleaned)} bytes")
-            logger.info(f"Cleaned output (first 500 chars): {cleaned[:500]}")
+            logger.info("Cleaned output: %d bytes", len(cleaned))
+            logger.info("Cleaned output (first 500 chars): %s", cleaned[:500])
 
             return CommandResult(
                 success=True,
@@ -251,6 +193,86 @@ class SSHExecutor:
             raise TimeoutError(f"SSH command timed out on {host}: {e}") from e
         finally:
             client.close()
+
+    def _read_until_eof(self, channel, timeout_seconds: int) -> tuple[str, int, float]:
+        """Read from `channel` until EOF or timeout.
+
+        PAN-OS closes the channel when our `exit` finishes; `eof_received` is
+        the authoritative signal that all data has arrived (exit-status can
+        flip ready before output finishes draining, leading to truncation).
+        Returns `(output, chunk_count, start_time)`; raises TimeoutError on
+        overall timeout.
+        """
+        output = ""
+        start_time = time.time()
+        chunk_count = 0
+        logger.info("Reading output until channel EOF")
+        while True:
+            if channel.recv_ready():
+                chunk = channel.recv(4096).decode("utf-8", errors="replace")
+                chunk_count += 1
+                logger.info("Chunk %d: %d bytes", chunk_count, len(chunk))
+                logger.debug("Chunk %d content: %r", chunk_count, chunk)
+                output += chunk
+            if channel.eof_received:
+                logger.info("Channel EOF received - draining remaining data")
+                drained, drain_chunks = self._drain_channel(channel, chunk_count)
+                output += drained
+                chunk_count += drain_chunks
+                return output, chunk_count, start_time
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                logger.error(
+                    "Command timed out after %.1fs (received %d chunks, %d bytes)",
+                    elapsed,
+                    chunk_count,
+                    len(output),
+                )
+                raise TimeoutError(f"Command timed out after {timeout_seconds}s")
+            time.sleep(0.1)
+
+    @staticmethod
+    def _wait_for_exit_status(channel) -> int:
+        """Poll briefly for the SSH channel's exit status; return -1 if not delivered."""
+        for _ in range(10):  # Wait up to 1 second
+            if channel.exit_status_ready():
+                exit_code = channel.recv_exit_status()
+                logger.info("Exit code: %s", exit_code)
+                return exit_code
+            time.sleep(0.1)
+        logger.info("Exit status not ready after 1s - using -1")
+        return -1
+
+    def _drain_channel(self, channel, prior_chunk_count: int) -> tuple[str, int]:
+        """Drain remaining data from an EOF'd channel until close or timeout.
+
+        Use blocking recv() rather than recv_ready(): recv_ready() only
+        inspects Paramiko's buffer, not the kernel TCP buffer, so it can
+        underreport. A short timeout bounds the drain phase.
+
+        Returns:
+            (decoded_output, chunks_drained)
+        """
+        channel.settimeout(2)
+        drained = ""
+        chunks_drained = 0
+        while True:
+            try:
+                chunk = channel.recv(4096)
+            except builtins.TimeoutError:
+                logger.info("Drain timeout - no more data")
+                break
+            if not chunk:
+                # Empty bytes = channel closed, no more data
+                break
+            chunks_drained += 1
+            logger.info(
+                "Drain chunk %d: %d bytes",
+                prior_chunk_count + chunks_drained,
+                len(chunk),
+            )
+            drained += chunk.decode("utf-8", errors="replace")
+        return drained, chunks_drained
 
     def _clean_output(self, output: str, commands: str) -> str:
         """Clean output by removing prompts and command echo."""
@@ -297,10 +319,15 @@ class SSHExecutor:
                 raise TimeoutError(f"SSH on {host} did not become available within {timeout_seconds}s")
 
             if self._check_ssh_available(host):
-                logger.info(f"SSH available on {host} after {elapsed:.1f}s")
+                logger.info("SSH available on %s after %.1fs", host, elapsed)
                 return True
 
-            logger.info(f"Waiting for SSH on {host}... ({elapsed:.1f}s / {timeout_seconds}s)")
+            logger.info(
+                "Waiting for SSH on %s... (%.1fs / %ss)",
+                host,
+                elapsed,
+                timeout_seconds,
+            )
             time.sleep(self._poll_interval)
 
     def wait_for_ready(
@@ -324,11 +351,7 @@ class SSHExecutor:
         does not support the SSH exec channel.
         """
         try:
-            client = paramiko.SSHClient()
-            # Security context: Same as run_command - freshly provisioned VMs in isolated VPC.
-            client.set_missing_host_key_policy(
-                paramiko.AutoAddPolicy()  # noqa: S507  # NOSONAR — freshly provisioned VMs in isolated VPC
-            )  # nosec B507
+            client = self._create_client()
             client.connect(
                 hostname=host,
                 port=self._port,
@@ -338,7 +361,7 @@ class SSHExecutor:
                 allow_agent=False,
                 look_for_keys=False,
             )
-            logger.info(f"SSH readiness check: connected to {host}")
+            logger.info("SSH readiness check: connected to %s", host)
 
             # Use interactive shell - PAN-OS does not support SSH exec channel
             channel = client.invoke_shell()
@@ -362,17 +385,23 @@ class SSHExecutor:
             is_ready = has_hostname and has_ip and has_netmask
 
             if is_ready:
-                logger.info(f"SSH readiness check passed for {host}")
+                logger.info("SSH readiness check passed for %s", host)
             else:
                 logger.info(
-                    f"SSH readiness check failed for {host}: "
-                    f"hostname={has_hostname} ip-address={has_ip} netmask={has_netmask} "
-                    f"output_length={len(output)} output={output!r:.500}"
+                    "SSH readiness check failed for %s: "
+                    "hostname=%s ip-address=%s netmask=%s "
+                    "output_length=%d output=%s",
+                    host,
+                    has_hostname,
+                    has_ip,
+                    has_netmask,
+                    len(output),
+                    repr(output)[:500],
                 )
 
             return is_ready
         except Exception as exc:
-            logger.info(f"SSH readiness check exception for {host}: {exc}")
+            logger.info("SSH readiness check exception for %s: %s", host, exc)
             return False
 
     def reboot_and_wait(
@@ -395,7 +424,7 @@ class SSHExecutor:
             TimeoutError: If device doesn't come back in time
         """
         host = instance_id
-        logger.info(f"Rebooting {host}...")
+        logger.info("Rebooting %s...", host)
 
         # Issue reboot command
         try:

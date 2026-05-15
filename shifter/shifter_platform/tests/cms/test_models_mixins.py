@@ -12,7 +12,7 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from cms.models.mixins import ExpiringStateMixin, SoftDeleteMixin
+from shared.db import ExpiringStateMixin, SoftDeleteMixin
 
 
 class _SoftDeleteSubject(SoftDeleteMixin):

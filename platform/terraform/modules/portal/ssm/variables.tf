@@ -68,6 +68,12 @@ variable "guacamole_secret_arn" {
   default     = ""
 }
 
+variable "dc_domain_password_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the prebaked DC Administrator password. The portal Django container resolves this at startup (entrypoint.sh) to populate the DC_DOMAIN_PASSWORD env var used by Windows-DC RDP credential display."
+  type        = string
+  default     = ""
+}
+
 variable "guacamole_base_url" {
   description = "Public base URL for Guacamole (browser URL, e.g., https://domain.com/guacamole)"
   type        = string
@@ -182,7 +188,7 @@ variable "email_backend" {
 variable "ctf_from_email" {
   description = "From address for CTF emails"
   type        = string
-  default     = "ctf@keplerops.com"
+  default     = "ctf@example.com"
 }
 
 # ------------------------------------------------------------------------------

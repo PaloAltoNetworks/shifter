@@ -70,10 +70,11 @@ Keep responses focused and concise.
 
 Write for technical audience (no marketing language).
 
-**Git operations are user-only unless you are EXPLICITLY directed:**
-1. NEVER make commits - the user will do it and sign them
-2. NEVER create PRs - the user handles all PR creation
-3. NEVER merge branches - the user controls all merges
+**Git operations.** The Ground Control `/implement` skill drives the full
+commit / push / PR / CI / SonarCloud / review-fix lifecycle and is the
+authoritative workflow for issue-driven changes. Outside of `/implement`,
+do not commit, push, or open PRs without explicit user direction. Do not
+merge branches under any workflow — merges are always user-driven.
 
 Understand your tasks in the overall context of the project and sound architecture. If something seems wrong or odd, bring it to the user's attention.
 

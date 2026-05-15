@@ -44,6 +44,27 @@ resource "aws_iam_role_policy" "ecs_execution_ecr" {
   })
 }
 
+# Allow the ECS execution role to fetch the DC domain password secret so
+# ECS can hydrate the DC_DOMAIN_PASSWORD container env var via the
+# `secrets = [...]` block in task_definition.tf.
+resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  name = "secrets-read"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "secretsmanager:GetSecretValue"
+      ]
+      Resource = [
+        aws_secretsmanager_secret.dc_domain_password.arn
+      ]
+    }]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role
 # ------------------------------------------------------------------------------
@@ -115,28 +136,115 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
     Version = "2012-10-17"
     Statement = [
       {
-        # Full EC2 instance lifecycle management
-        # - RunInstances, TerminateInstances for create/destroy
-        # - StopInstances, StartInstances for power management
-        # - ModifyInstanceAttribute for runtime changes
-        # - CreateTags, DeleteTags for tagging
-        # - Describe* for state queries
-        # - ImportKeyPair/DeleteKeyPair for SSH key management
-        Sid    = "EC2InstanceOperations"
+        # EC2 read and key-pair operations. Describe APIs require
+        # Resource=*; key-pair names are generated per range/NGFW run.
+        Sid    = "EC2DescribeAndKeyPairOperations"
         Effect = "Allow"
         Action = [
-          "ec2:RunInstances",
-          "ec2:TerminateInstances",
-          "ec2:StopInstances",
-          "ec2:StartInstances",
-          "ec2:ModifyInstanceAttribute",
-          "ec2:CreateTags",
-          "ec2:DeleteTags",
           "ec2:Describe*",
           "ec2:ImportKeyPair",
           "ec2:DeleteKeyPair"
         ]
+        Resource = [
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*",
+          "arn:aws:ec2:${local.region}::image/*"
+        ]
+      },
+      {
+        # Instance creation is restricted by the runtime Terraform tags that
+        # the provisioner applies to every managed range/NGFW instance.
+        Sid    = "EC2TaggedInstanceCreate"
+        Effect = "Allow"
+        Action = [
+          "ec2:RunInstances"
+        ]
+        Resource = [
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:volume/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:network-interface/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:subnet/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:security-group/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:route-table/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:internet-gateway/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:elastic-ip/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:natgateway/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:vpc-endpoint-service/*",
+          "arn:aws:ec2:${local.region}:${local.account_id}:key-pair/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # Tagging at create time is needed for the EC2 resources provisioner
+        # Terraform creates and is bound to create APIs so it cannot retag
+        # arbitrary EC2 resources.
+        Sid    = "EC2TagOnCreate"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateTags"
+        ]
         Resource = "*"
+        Condition = {
+          StringEquals = {
+            "ec2:CreateAction" = [
+              "AllocateAddress",
+              "CreateInternetGateway",
+              "CreateNatGateway",
+              "CreateNetworkInterface",
+              "CreateRouteTable",
+              "CreateSecurityGroup",
+              "CreateSubnet",
+              "CreateVpcEndpoint",
+              "CreateVpcEndpointServiceConfiguration",
+              "ImportKeyPair",
+              "RunInstances"
+            ]
+            "aws:RequestTag/shifter:system"      = "shifter"
+            "aws:RequestTag/shifter:environment" = var.environment
+            "aws:RequestTag/ManagedBy"           = "terraform"
+          }
+        }
+      },
+      {
+        # EC2 instance lifecycle management for provisioner-owned instances.
+        # - TerminateInstances for destroy
+        # - StopInstances, StartInstances for power management
+        # - ModifyInstanceAttribute for runtime changes
+        # - DeleteTags for cleanup
+        Sid    = "EC2TaggedInstanceLifecycle"
+        Effect = "Allow"
+        Action = [
+          "ec2:TerminateInstances",
+          "ec2:StopInstances",
+          "ec2:StartInstances",
+          "ec2:ModifyInstanceAttribute",
+          # ModifyInstanceMetadataOptions is required so the polaris
+          # range bootstrap can set HttpPutResponseHopLimit=2 on the
+          # polaris-vm — without that the a14-kali docker container
+          # can't reach IMDS for instance-profile credentials and the
+          # claude/Bedrock smoke test fails.
+          "ec2:ModifyInstanceMetadataOptions",
+          "ec2:DeleteTags"
+        ]
+        Resource = "arn:aws:ec2:${local.region}:${local.account_id}:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/shifter:system"      = "shifter"
+            "ec2:ResourceTag/shifter:environment" = var.environment
+            "ec2:ResourceTag/ManagedBy"           = "terraform"
+          }
+        }
       },
       {
         # Network interface operations for NGFW ENI creation
@@ -158,7 +266,7 @@ resource "aws_iam_role_policy" "ec2_provisioning" {
         # - CreateSubnet, DeleteSubnet for create/destroy
         # - ModifySubnetAttribute for map_public_ip_on_launch, etc.
         # - DescribeSubnets for state queries
-        # Note: CreateTags is in EC2InstanceOperations and applies to all EC2 resources
+        # Note: tag-on-create support is in EC2TagOnCreate.
         Sid    = "EC2SubnetOperations"
         Effect = "Allow"
         Action = [

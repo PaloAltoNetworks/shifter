@@ -27,6 +27,14 @@ architectural defaults, and Kubernetes-specific validators previously in
   owner and expiry.
 - Plans MUST keep cross-layer access going through service boundaries;
   shared contracts live under `shared/`.
+- Plans with a user-visible change MUST add a fragment under
+  `changelog.d/<issue>.<type>.md` (where `<type>` is one of `security`,
+  `added`, `changed`, `deprecated`, `removed`, `fixed`) instead of editing
+  `CHANGELOG.md` directly; `CHANGELOG.md` is collated from fragments at
+  release time by `uvx towncrier build`. Fragments cannot conflict between
+  PRs, eliminating the rebase / re-run-CI churn that hand-edits caused. See
+  `changelog.d/README.md`. Pure refactors / CI-only / docs-only changes may
+  legitimately ship without a fragment.
 - Changes to guardrail files (`.github/workflows/**`, `.github/CODEOWNERS`,
   `.github/pull_request_template.md`, `.github/copilot-instructions.md`,
   `.pre-commit-config.yaml`, `.importlinter`, `.tflint.hcl`,

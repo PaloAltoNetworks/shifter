@@ -409,25 +409,8 @@ def wait_for_ec2_launch(
     return counts
 
 
-def run_one_batch(
-    ssm, ec2, instance_id: str, state: State, batch_num: int, args: argparse.Namespace
-) -> tuple[int, int]:
-    """Trigger the next batch, wait for terminal state, record outcomes.
-
-    Returns (successes, failures) for this batch.
-    """
-    current: list[str] = []
-    log_line(current, f"=== batch {batch_num}: fetch up to {args.batch_size} unprovisioned ===")
-
-    fetched = fetch_unprovisioned(ssm, instance_id, args.event_id, args.batch_size, args.email_regex)
-    batch = fetched["batch"]
-    remaining = fetched["total_unprovisioned"]
-    log_line(current, f"unprovisioned remaining: {remaining}; batch size: {len(batch)}")
-
-    if not batch:
-        return (0, 0)
-
-    # Register outcomes
+def _register_initial_outcomes(state: State, batch: list[dict], batch_num: int) -> None:
+    """Record per-participant `triggered` outcomes before the trigger call."""
     started = now_iso()
     for p in batch:
         pid = p["participant_id"]
@@ -439,14 +422,10 @@ def run_one_batch(
             batch_num=batch_num,
             started_at=started,
         )
-    save_state(state)
-    write_status_doc(state, current)
 
-    # Trigger
-    pids = [p["participant_id"] for p in batch]
-    log_line(current, f"triggering provision for pids: {pids}")
-    trig = trigger_batch(ssm, instance_id, pids)
 
+def _record_trigger_results(state: State, batch: list[dict], trig: dict, current: list[str]) -> list[str]:
+    """Stamp trigger outcomes onto state; return the list of successful range ids."""
     range_ids: list[str] = []
     for p in batch:
         pid = p["participant_id"]
@@ -456,99 +435,24 @@ def run_one_batch(
             state.outcomes[pid].error = tres["error"]
             state.outcomes[pid].finished_at = now_iso()
             log_line(current, f"  [TRIGGER FAIL] {p['email']}: {tres['error']}")
-        else:
-            rid = tres.get("range_instance_id")
-            if rid is None:
-                state.outcomes[pid].status = "trigger_error"
-                state.outcomes[pid].error = "no range_instance_id returned"
-                state.outcomes[pid].finished_at = now_iso()
-                log_line(current, f"  [TRIGGER FAIL] {p['email']}: no range_id")
-            else:
-                state.outcomes[pid].range_instance_id = str(rid)
-                range_ids.append(str(rid))
-                log_line(current, f"  [TRIGGERED] {p['email']}: range={rid}")
-    save_state(state)
-    write_status_doc(state, current)
+            continue
+        rid = tres.get("range_instance_id")
+        if rid is None:
+            state.outcomes[pid].status = "trigger_error"
+            state.outcomes[pid].error = "no range_instance_id returned"
+            state.outcomes[pid].finished_at = now_iso()
+            log_line(current, f"  [TRIGGER FAIL] {p['email']}: no range_id")
+            continue
+        state.outcomes[pid].range_instance_id = str(rid)
+        range_ids.append(str(rid))
+        log_line(current, f"  [TRIGGERED] {p['email']}: range={rid}")
+    return range_ids
 
-    if not range_ids:
-        log_line(current, "no ranges triggered successfully; skipping wait")
-        return (0, sum(1 for p in batch if state.outcomes[p["participant_id"]].status == "trigger_error"))
 
-    # Wave mode: trigger, wait until EC2 launched for this wave, then return so
-    # the next wave can be triggered. The actual provisioning completion is
-    # validated at end-of-run by a separate tool, not per-batch.
-    if args.wave_ec2_gate:
-        log_line(current, f"wave mode: waiting up to {args.wave_gate_timeout}s for {len(range_ids)} ranges to launch EC2")
-        counts = wait_for_ec2_launch(
-            ec2,
-            range_ids,
-            current,
-            timeout_s=args.wave_gate_timeout,
-            poll_interval_s=args.wave_gate_poll,
-        )
-        successes = 0
-        failures = 0
-        for p in batch:
-            pid = p["participant_id"]
-            o = state.outcomes[pid]
-            if o.status == "trigger_error":
-                failures += 1
-                continue
-            # Consider triggered; final verification happens at end of run
-            o.status = "triggered"
-            o.finished_at = now_iso()
-            successes += 1
-        save_state(state)
-        write_status_doc(state, current)
-        log_line(current, f"wave {batch_num} EC2-gated: triggered={successes} trigger_errors={failures}")
-        return (successes, failures)
-
-    # Sleep-only mode: trust the observed provisioning time, skip DB polling
-    if args.sleep_only > 0:
-        wait_s = args.sleep_only * 60
-        log_line(current, f"sleep-only mode: waiting {args.sleep_only} min before next batch")
-        time.sleep(wait_s)
-        successes = 0
-        failures = 0
-        for p in batch:
-            pid = p["participant_id"]
-            o = state.outcomes[pid]
-            if o.status == "trigger_error":
-                failures += 1
-                continue
-            # Treat as ready (will be verified end-to-end at summary)
-            o.status = "ready"
-            o.finished_at = now_iso()
-            successes += 1
-        save_state(state)
-        write_status_doc(state, current)
-        log_line(current, f"batch {batch_num} assumed-ready: successes={successes} failures={failures}")
-        return (successes, failures)
-
-    # Wait for terminal
-    log_line(current, f"waiting for {len(range_ids)} range(s) to reach terminal state...")
-    deadline = time.monotonic() + args.batch_timeout * 60
-    terminal: dict[str, str] = {}
-    while range_ids and time.monotonic() < deadline:
-        time.sleep(args.poll_interval)
-        statuses = check_range_status(ssm, instance_id, range_ids)
-        still_pending: list[str] = []
-        for rid in range_ids:
-            s = statuses.get(rid, {}).get("status", "?")
-            if s in ("ready", "failed", "destroyed", "missing"):
-                terminal[rid] = s
-                log_line(current, f"  [{s.upper():8}] range={rid}")
-            else:
-                still_pending.append(rid)
-        range_ids = still_pending
-        if range_ids:
-            log_line(current, f"  still pending: {len(range_ids)}")
-
-    # Any remaining are timeouts
-    for rid in range_ids:
-        terminal[rid] = "timeout"
-
-    # Update outcomes based on range status
+def _finalize_batch_outcomes(
+    state: State, batch: list[dict], terminal: dict[str, str]
+) -> tuple[int, int]:
+    """Translate per-range terminal statuses into outcome counts (successes, failures)."""
     successes = failures = 0
     for p in batch:
         pid = p["participant_id"]
@@ -568,10 +472,192 @@ def run_one_batch(
             o.status = "failed"
             o.error = f"terminal range status={s}"
             failures += 1
+    return successes, failures
+
+
+def _run_wave_ec2_mode(
+    state: State,
+    batch: list[dict],
+    range_ids: list[str],
+    args: argparse.Namespace,
+    ec2,
+    current: list[str],
+    batch_num: int,
+) -> tuple[int, int]:
+    """Wave mode: trigger, wait for EC2 launch, return so the next wave can trigger."""
+    log_line(
+        current,
+        f"wave mode: waiting up to {args.wave_gate_timeout}s for {len(range_ids)} ranges to launch EC2",
+    )
+    wait_for_ec2_launch(
+        ec2,
+        range_ids,
+        current,
+        timeout_s=args.wave_gate_timeout,
+        poll_interval_s=args.wave_gate_poll,
+    )
+    successes = failures = 0
+    for p in batch:
+        o = state.outcomes[p["participant_id"]]
+        if o.status == "trigger_error":
+            failures += 1
+            continue
+        o.status = "triggered"
+        o.finished_at = now_iso()
+        successes += 1
+    save_state(state)
+    write_status_doc(state, current)
+    log_line(
+        current, f"wave {batch_num} EC2-gated: triggered={successes} trigger_errors={failures}"
+    )
+    return successes, failures
+
+
+def _run_sleep_only_mode(
+    state: State,
+    batch: list[dict],
+    args: argparse.Namespace,
+    current: list[str],
+    batch_num: int,
+) -> tuple[int, int]:
+    """Sleep-only mode: trust observed provisioning time, skip DB polling."""
+    wait_s = args.sleep_only * 60
+    log_line(current, f"sleep-only mode: waiting {args.sleep_only} min before next batch")
+    time.sleep(wait_s)
+    successes = failures = 0
+    for p in batch:
+        o = state.outcomes[p["participant_id"]]
+        if o.status == "trigger_error":
+            failures += 1
+            continue
+        o.status = "ready"
+        o.finished_at = now_iso()
+        successes += 1
+    save_state(state)
+    write_status_doc(state, current)
+    log_line(
+        current, f"batch {batch_num} assumed-ready: successes={successes} failures={failures}"
+    )
+    return successes, failures
+
+
+def _wait_for_terminal(
+    ssm, instance_id: str, range_ids: list[str], args: argparse.Namespace, current: list[str]
+) -> dict[str, str]:
+    """Poll until every range reaches a terminal state or batch_timeout elapses."""
+    log_line(current, f"waiting for {len(range_ids)} range(s) to reach terminal state...")
+    deadline = time.monotonic() + args.batch_timeout * 60
+    terminal: dict[str, str] = {}
+    pending = list(range_ids)
+    while pending and time.monotonic() < deadline:
+        time.sleep(args.poll_interval)
+        statuses = check_range_status(ssm, instance_id, pending)
+        still_pending: list[str] = []
+        for rid in pending:
+            s = statuses.get(rid, {}).get("status", "?")
+            if s in ("ready", "failed", "destroyed", "missing"):
+                terminal[rid] = s
+                log_line(current, f"  [{s.upper():8}] range={rid}")
+            else:
+                still_pending.append(rid)
+        pending = still_pending
+        if pending:
+            log_line(current, f"  still pending: {len(pending)}")
+    for rid in pending:
+        terminal[rid] = "timeout"
+    return terminal
+
+
+def run_one_batch(
+    ssm, ec2, instance_id: str, state: State, batch_num: int, args: argparse.Namespace
+) -> tuple[int, int]:
+    """Trigger the next batch, wait for terminal state, record outcomes.
+
+    Returns (successes, failures) for this batch.
+    """
+    current: list[str] = []
+    log_line(current, f"=== batch {batch_num}: fetch up to {args.batch_size} unprovisioned ===")
+
+    fetched = fetch_unprovisioned(
+        ssm, instance_id, args.event_id, args.batch_size, args.email_regex
+    )
+    batch = fetched["batch"]
+    log_line(
+        current,
+        f"unprovisioned remaining: {fetched['total_unprovisioned']}; batch size: {len(batch)}",
+    )
+    if not batch:
+        return (0, 0)
+
+    _register_initial_outcomes(state, batch, batch_num)
+    save_state(state)
+    write_status_doc(state, current)
+
+    pids = [p["participant_id"] for p in batch]
+    log_line(current, f"triggering provision for pids: {pids}")
+    trig = trigger_batch(ssm, instance_id, pids)
+
+    range_ids = _record_trigger_results(state, batch, trig, current)
+    save_state(state)
+    write_status_doc(state, current)
+
+    if not range_ids:
+        log_line(current, "no ranges triggered successfully; skipping wait")
+        return (
+            0,
+            sum(1 for p in batch if state.outcomes[p["participant_id"]].status == "trigger_error"),
+        )
+
+    if args.wave_ec2_gate:
+        return _run_wave_ec2_mode(state, batch, range_ids, args, ec2, current, batch_num)
+
+    if args.sleep_only > 0:
+        return _run_sleep_only_mode(state, batch, args, current, batch_num)
+
+    terminal = _wait_for_terminal(ssm, instance_id, range_ids, args, current)
+    successes, failures = _finalize_batch_outcomes(state, batch, terminal)
     save_state(state)
     write_status_doc(state, current)
     log_line(current, f"batch {batch_num} done: successes={successes} failures={failures}")
-    return (successes, failures)
+    return successes, failures
+
+
+def _trigger_retry_and_collect_range_ids(
+    state: State, retry_pids: list[str], ssm, instance_id: str
+) -> list[str]:
+    """Re-trigger provision for `retry_pids`; mutate state and return ranges to wait on."""
+    trig = trigger_batch(ssm, instance_id, retry_pids)
+    range_ids: list[str] = []
+    for pid in retry_pids:
+        t = trig.get(pid, {})
+        if "error" in t:
+            state.outcomes[pid].status = "trigger_error"
+            state.outcomes[pid].error = t["error"]
+            state.outcomes[pid].finished_at = now_iso()
+            continue
+        rid = t.get("range_instance_id")
+        if rid:
+            state.outcomes[pid].range_instance_id = str(rid)
+            range_ids.append(str(rid))
+    return range_ids
+
+
+def _finalize_retry_outcomes(
+    state: State, retry_pids: list[str], terminal: dict[str, str]
+) -> None:
+    """Map terminal range statuses back onto the retry participants."""
+    for pid in retry_pids:
+        o = state.outcomes[pid]
+        if o.status == "trigger_error":
+            continue
+        rid = o.range_instance_id
+        s = terminal.get(rid, "unknown")
+        o.finished_at = now_iso()
+        if s == "ready":
+            o.status = "ready"
+        else:
+            o.status = "failed"
+            o.error = f"retry terminal status={s}"
 
 
 def retry_failures(
@@ -587,9 +673,13 @@ def retry_failures(
 
     # Before retry, the DB may already have range_instance_id set on some
     # participants (partial provision). Skip those by re-querying.
-    fetched = fetch_unprovisioned(ssm, instance_id, args.event_id, limit=len(failed) + 5, email_regex=args.email_regex)
+    fetched = fetch_unprovisioned(
+        ssm, instance_id, args.event_id, limit=len(failed) + 5, email_regex=args.email_regex
+    )
     still_unprovisioned = {p["participant_id"] for p in fetched["batch"]}
-    retry_pids = [o.participant_id for o in failed if o.participant_id in still_unprovisioned]
+    retry_pids = [
+        o.participant_id for o in failed if o.participant_id in still_unprovisioned
+    ]
     log_line(current, f"retry pids (after DB re-check): {retry_pids}")
 
     if not retry_pids:
@@ -597,61 +687,20 @@ def retry_failures(
         write_status_doc(state, current)
         return
 
-    # Mark retrying
     for pid in retry_pids:
         state.outcomes[pid].status = "retrying"
         state.outcomes[pid].error = None
     save_state(state)
     write_status_doc(state, current)
 
-    # Trigger + wait
-    trig = trigger_batch(ssm, instance_id, retry_pids)
-    range_ids: list[str] = []
-    for pid in retry_pids:
-        t = trig.get(pid, {})
-        if "error" in t:
-            state.outcomes[pid].status = "trigger_error"
-            state.outcomes[pid].error = t["error"]
-            state.outcomes[pid].finished_at = now_iso()
-        else:
-            rid = t.get("range_instance_id")
-            if rid:
-                state.outcomes[pid].range_instance_id = str(rid)
-                range_ids.append(str(rid))
+    range_ids = _trigger_retry_and_collect_range_ids(state, retry_pids, ssm, instance_id)
     save_state(state)
     write_status_doc(state, current)
 
     if range_ids:
         log_line(current, f"waiting on {len(range_ids)} retry range(s)...")
-        deadline = time.monotonic() + args.batch_timeout * 60
-        terminal: dict[str, str] = {}
-        while range_ids and time.monotonic() < deadline:
-            time.sleep(args.poll_interval)
-            statuses = check_range_status(ssm, instance_id, range_ids)
-            still = []
-            for rid in range_ids:
-                s = statuses.get(rid, {}).get("status", "?")
-                if s in ("ready", "failed", "destroyed", "missing"):
-                    terminal[rid] = s
-                    log_line(current, f"  [{s.upper():8}] range={rid}")
-                else:
-                    still.append(rid)
-            range_ids = still
-        for rid in range_ids:
-            terminal[rid] = "timeout"
-
-        for pid in retry_pids:
-            o = state.outcomes[pid]
-            if o.status == "trigger_error":
-                continue
-            rid = o.range_instance_id
-            s = terminal.get(rid, "unknown")
-            o.finished_at = now_iso()
-            if s == "ready":
-                o.status = "ready"
-            else:
-                o.status = "failed"
-                o.error = f"retry terminal status={s}"
+        terminal = _wait_for_terminal(ssm, instance_id, range_ids, args, current)
+        _finalize_retry_outcomes(state, retry_pids, terminal)
 
     save_state(state)
     write_status_doc(state, current)
@@ -692,6 +741,37 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _run_batch_loop(
+    ssm, ec2, instance_id: str, state: State, args: argparse.Namespace
+) -> int:
+    """Run batches until the queue empties, a threshold trips, or max_batches hits."""
+    total_failures = sum(
+        1 for o in state.outcomes.values() if o.status in ("failed", "trigger_error")
+    )
+    for batch_num in range(state.batches_completed + 1, args.max_batches + 1):
+        succ, fail = run_one_batch(ssm, ec2, instance_id, state, batch_num, args)
+        state.batches_completed = batch_num
+        total_failures += fail
+        save_state(state)
+
+        if succ == 0 and fail == 0:
+            break
+        if fail >= args.batch_fail_threshold:
+            state.halted = True
+            state.halt_reason = (
+                f"batch {batch_num} had {fail} failures (threshold {args.batch_fail_threshold})"
+            )
+            break
+        if total_failures >= args.total_fail_threshold:
+            state.halted = True
+            state.halt_reason = (
+                f"cumulative failures {total_failures} reached threshold "
+                f"{args.total_fail_threshold}"
+            )
+            break
+    return total_failures
+
+
 def main() -> int:
     args = parse_args()
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
@@ -701,9 +781,12 @@ def main() -> int:
     instance_id = find_portal_instance(ec2)
     print(f"portal instance: {instance_id}")
 
-    # Dry run: fetch + show
-    first = fetch_unprovisioned(ssm, instance_id, args.event_id, args.batch_size, args.email_regex)
-    print(f"unprovisioned: {first['total_unprovisioned']} total; next batch of {len(first['batch'])}:")
+    first = fetch_unprovisioned(
+        ssm, instance_id, args.event_id, args.batch_size, args.email_regex
+    )
+    print(
+        f"unprovisioned: {first['total_unprovisioned']} total; next batch of {len(first['batch'])}:"
+    )
     for p in first["batch"]:
         print(f"  {p['email']}  (participant_id={p['participant_id']}, user_id={p['user_id']})")
 
@@ -714,7 +797,10 @@ def main() -> int:
         return 0
 
     if not args.yes:
-        ans = input(f"\nproceed with batches of {args.batch_size} (abort at {args.batch_fail_threshold}/batch or {args.total_fail_threshold} total)? [yes/NO] ").strip()
+        ans = input(
+            f"\nproceed with batches of {args.batch_size} (abort at "
+            f"{args.batch_fail_threshold}/batch or {args.total_fail_threshold} total)? [yes/NO] "
+        ).strip()
         if ans.lower() not in ("yes", "y"):
             print("aborted.")
             return 1
@@ -727,33 +813,12 @@ def main() -> int:
     )
     save_state(state)
 
-    total_failures = sum(1 for o in state.outcomes.values() if o.status in ("failed", "trigger_error"))
-    for batch_num in range(state.batches_completed + 1, args.max_batches + 1):
-        succ, fail = run_one_batch(ssm, ec2, instance_id, state, batch_num, args)
-        state.batches_completed = batch_num
-        total_failures += fail
-        save_state(state)
+    _run_batch_loop(ssm, ec2, instance_id, state, args)
 
-        if succ == 0 and fail == 0:
-            # nothing to do
-            break
-
-        if fail >= args.batch_fail_threshold:
-            state.halted = True
-            state.halt_reason = f"batch {batch_num} had {fail} failures (threshold {args.batch_fail_threshold})"
-            break
-        if total_failures >= args.total_fail_threshold:
-            state.halted = True
-            state.halt_reason = f"cumulative failures {total_failures} reached threshold {args.total_fail_threshold}"
-            break
-
-    # In wave/EC2-gate mode, the last wave just finished EC2 launch. Give
-    # everything time to complete docker-compose bootstrap before wrap up.
     if args.wave_ec2_gate and args.final_wait > 0 and not state.halted:
         print(f"final wait: {args.final_wait} min to let last wave finish provisioning...")
         time.sleep(args.final_wait * 60)
 
-    # Retry pass (even if halted, give them one more chance)
     retry_failures(ssm, ec2, instance_id, state, args)
 
     state.finished_at = now_iso()

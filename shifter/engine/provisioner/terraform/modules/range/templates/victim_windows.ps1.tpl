@@ -19,11 +19,11 @@ Log-Message "Setting hostname to ${hostname}..."
 Rename-Computer -NewName "${hostname}" -Force
 Log-Message "Hostname set"
 
-# Set Administrator password for RDP access
-# TODO: Move to CMS-managed instance credentials (#542)
-$AdminPassword = "CortexSavesTheDay!"
-net user Administrator $AdminPassword
-Log-Message "Administrator password configured"
+# Issue #762: the per-instance local Administrator password is set
+# by the engine provisioner via SSM Run Command after this instance
+# reports SSMAvailable — not in user_data. The password value never
+# appears in EC2 user_data, IMDS, or process argv on this host. See
+# shifter/engine/provisioner/plans/set_local_password_plan.py.
 
 # All setup (SSH keys, XDR) is handled by Ansible via SSH.
 # SSH server is pre-baked in AMI with password auth enabled.

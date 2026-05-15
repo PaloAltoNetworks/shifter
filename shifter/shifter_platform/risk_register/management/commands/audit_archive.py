@@ -51,6 +51,118 @@ class Command(BaseCommand):
             help="Number of records to process per batch (default: 10000)",
         )
 
+    def _resolve_archive_bucket(self) -> str | None:
+        """Resolve the destination S3 bucket name. Emit an error to stdout on miss."""
+        bucket_name = (
+            getattr(settings, "LOGS_BUCKET_NAME", None)
+            or os.environ.get("LOGS_BUCKET_NAME")
+            or getattr(settings, "AUDIT_ARCHIVE_BUCKET", None)
+            or os.environ.get("AUDIT_ARCHIVE_BUCKET")
+        )
+        if not bucket_name:
+            self.stdout.write(
+                self.style.ERROR("LOGS_BUCKET_NAME not configured. Set via Terraform log-aggregation module output.")
+            )
+        return bucket_name
+
+    def _resolve_expected_bucket_owner(self) -> str:
+        """Return the AWS account ID to pass as `ExpectedBucketOwner`, or ''.
+
+        Defence-in-depth against a bucket-name collision where an attacker
+        pre-creates a bucket with the same name in a different account.
+        Explicit env var wins; STS fallback discovers the caller's account
+        at runtime; on failure we log a warning and skip the check — never
+        hard-fail the archive on this defence-in-depth knob.
+        """
+        expected_bucket_owner = os.environ.get("AWS_ACCOUNT_ID", "")
+        if expected_bucket_owner:
+            return expected_bucket_owner
+        try:
+            import boto3
+
+            sts_client = boto3.client("sts")
+            return sts_client.get_caller_identity()["Account"]
+        except Exception as e:
+            self.stdout.write(
+                self.style.WARNING(f"  ExpectedBucketOwner check disabled (STS GetCallerIdentity failed: {e})")
+            )
+            return ""
+
+    @staticmethod
+    def _serialize_batch(batch) -> tuple[bytes, list[int]]:
+        """Render a batch into compressed JSONL bytes; also return the record ids."""
+        lines = []
+        record_ids = []
+        for record in batch:
+            record_ids.append(record.id)
+            lines.append(
+                json.dumps(
+                    {
+                        "id": record.id,
+                        "entity_type": record.entity_type,
+                        "entity_id": record.entity_id,
+                        "action": record.action,
+                        "actor_type": record.actor_type,
+                        "actor_id": record.actor_id,
+                        "timestamp": record.timestamp.isoformat(),
+                        "previous_state": record.previous_state,
+                        "new_state": record.new_state,
+                        "context": record.context,
+                        "source_ip": record.source_ip,
+                        "user_agent": record.user_agent,
+                        "request_id": record.request_id,
+                    },
+                    default=str,
+                )
+            )
+        return gzip.compress("\n".join(lines).encode("utf-8")), record_ids
+
+    def _archive_one_batch(
+        self,
+        s3_client,
+        batch,
+        bucket_name: str,
+        expected_bucket_owner: str,
+        batch_num: int,
+        no_delete: bool,
+    ) -> tuple[int, int, bool]:
+        """Compress + upload one batch; optionally delete the source rows.
+
+        Returns (archived, deleted, ok). `ok=False` signals the caller should
+        break out of the loop because S3 upload failed.
+        """
+        from botocore.exceptions import ClientError
+
+        first_ts = batch[0].timestamp
+        last_ts = batch[-1].timestamp
+        s3_key = (
+            f"audit-archive/{first_ts.year}/{first_ts.month:02d}/"
+            f"audit_{first_ts.strftime('%Y%m%d_%H%M%S')}_"
+            f"{last_ts.strftime('%Y%m%d_%H%M%S')}.jsonl.gz"
+        )
+        compressed, record_ids = self._serialize_batch(batch)
+        put_kwargs = {
+            "Bucket": bucket_name,
+            "Key": s3_key,
+            "Body": compressed,
+            "ContentType": "application/x-ndjson",
+            "ContentEncoding": "gzip",
+        }
+        if expected_bucket_owner:
+            put_kwargs["ExpectedBucketOwner"] = expected_bucket_owner
+        try:
+            s3_client.put_object(**put_kwargs)
+        except ClientError as e:
+            self.stdout.write(self.style.ERROR(f"  Batch {batch_num}: S3 upload failed: {e}"))
+            return 0, 0, False
+        self.stdout.write(f"  Batch {batch_num}: Uploaded {len(batch)} records to s3://{bucket_name}/{s3_key}")
+        deleted = 0
+        if not no_delete:
+            AuditLog.objects.filter(id__in=record_ids).delete()
+            deleted = len(record_ids)
+            self.stdout.write(f"  Batch {batch_num}: Deleted {deleted} records from database")
+        return len(batch), deleted, True
+
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
         retention_days = options["retention_days"]
@@ -58,17 +170,14 @@ class Command(BaseCommand):
         batch_size = options["batch_size"]
 
         cutoff_date = timezone.now() - timedelta(days=retention_days)
-
         self.stdout.write("Audit log archive started")
         self.stdout.write(f"  Retention: {retention_days} days")
         self.stdout.write(f"  Cutoff date: {cutoff_date.isoformat()}")
         self.stdout.write(f"  Dry run: {dry_run}")
         self.stdout.write(f"  Delete after archive: {not no_delete}")
 
-        # Count records to archive
         queryset = AuditLog.objects.filter(timestamp__lt=cutoff_date)
         total_count = queryset.count()
-
         if total_count == 0:
             self.stdout.write(self.style.SUCCESS("No audit logs to archive"))
             return
@@ -76,7 +185,6 @@ class Command(BaseCommand):
         self.stdout.write(f"  Records to archive: {total_count}")
 
         if dry_run:
-            # Show sample of what would be archived
             sample = queryset.order_by("timestamp")[:5]
             self.stdout.write("\nSample records that would be archived:")
             for record in sample:
@@ -86,126 +194,39 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("\nDry run - no changes made"))
             return
 
-        # Get S3 bucket from settings or environment
-        # Uses the existing logs bucket from log-aggregation infrastructure
-        # Falls back to AUDIT_ARCHIVE_BUCKET for backward compatibility
-        bucket_name = (
-            getattr(settings, "LOGS_BUCKET_NAME", None)
-            or os.environ.get("LOGS_BUCKET_NAME")
-            or getattr(settings, "AUDIT_ARCHIVE_BUCKET", None)
-            or os.environ.get("AUDIT_ARCHIVE_BUCKET")
-        )
-
+        bucket_name = self._resolve_archive_bucket()
         if not bucket_name:
-            self.stdout.write(
-                self.style.ERROR("LOGS_BUCKET_NAME not configured. Set via Terraform log-aggregation module output.")
-            )
             return
 
         try:
             import boto3
-            from botocore.exceptions import ClientError
-
-            s3_client = boto3.client("s3")
         except ImportError:
             self.stdout.write(self.style.ERROR("boto3 not installed. Install with: pip install boto3"))
             return
+        s3_client = boto3.client("s3")
+        expected_bucket_owner = self._resolve_expected_bucket_owner()
 
-        # Resolve the AWS account ID so every put_object call can pass
-        # ExpectedBucketOwner. Defence-in-depth against a bucket-name
-        # collision where an attacker pre-creates a bucket with the same
-        # name in a different account: without this, audit logs could be
-        # silently written to the attacker's bucket.
-        # Strategy: explicit env var wins (simple to pin for tests), STS
-        # fallback discovers the caller's account at runtime. If both
-        # fail we log a warning and skip the ExpectedBucketOwner check —
-        # we never hard-fail the archive on this defence-in-depth knob.
-        expected_bucket_owner = os.environ.get("AWS_ACCOUNT_ID", "")
-        if not expected_bucket_owner:
-            try:
-                sts_client = boto3.client("sts")
-                expected_bucket_owner = sts_client.get_caller_identity()["Account"]
-            except Exception as e:
-                self.stdout.write(
-                    self.style.WARNING(f"  ExpectedBucketOwner check disabled (STS GetCallerIdentity failed: {e})")
-                )
-                expected_bucket_owner = ""
-
-        # Process in batches
         archived_count = 0
         deleted_count = 0
         batch_num = 0
-
         while True:
             batch = list(queryset.order_by("timestamp")[:batch_size])
             if not batch:
                 break
-
             batch_num += 1
-            first_ts = batch[0].timestamp
-            last_ts = batch[-1].timestamp
-
-            # Generate S3 key based on date range
-            s3_key = (
-                f"audit-archive/{first_ts.year}/{first_ts.month:02d}/"
-                f"audit_{first_ts.strftime('%Y%m%d_%H%M%S')}_"
-                f"{last_ts.strftime('%Y%m%d_%H%M%S')}.jsonl.gz"
+            archived, deleted, ok = self._archive_one_batch(
+                s3_client,
+                batch,
+                bucket_name,
+                expected_bucket_owner,
+                batch_num,
+                no_delete,
             )
-
-            # Convert to JSON Lines format
-            lines = []
-            record_ids = []
-            for record in batch:
-                record_ids.append(record.id)
-                lines.append(
-                    json.dumps(
-                        {
-                            "id": record.id,
-                            "entity_type": record.entity_type,
-                            "entity_id": record.entity_id,
-                            "action": record.action,
-                            "actor_type": record.actor_type,
-                            "actor_id": record.actor_id,
-                            "timestamp": record.timestamp.isoformat(),
-                            "previous_state": record.previous_state,
-                            "new_state": record.new_state,
-                            "context": record.context,
-                            "source_ip": record.source_ip,
-                            "user_agent": record.user_agent,
-                            "request_id": record.request_id,
-                        },
-                        default=str,
-                    )
-                )
-
-            # Compress and upload
-            content = "\n".join(lines).encode("utf-8")
-            compressed = gzip.compress(content)
-
-            try:
-                put_kwargs = {
-                    "Bucket": bucket_name,
-                    "Key": s3_key,
-                    "Body": compressed,
-                    "ContentType": "application/x-ndjson",
-                    "ContentEncoding": "gzip",
-                }
-                if expected_bucket_owner:
-                    put_kwargs["ExpectedBucketOwner"] = expected_bucket_owner
-                s3_client.put_object(**put_kwargs)
-                archived_count += len(batch)
-                self.stdout.write(f"  Batch {batch_num}: Uploaded {len(batch)} records to s3://{bucket_name}/{s3_key}")
-            except ClientError as e:
-                self.stdout.write(self.style.ERROR(f"  Batch {batch_num}: S3 upload failed: {e}"))
+            archived_count += archived
+            deleted_count += deleted
+            if not ok:
                 break
 
-            # Delete from database if not --no-delete
-            if not no_delete:
-                AuditLog.objects.filter(id__in=record_ids).delete()
-                deleted_count += len(record_ids)
-                self.stdout.write(f"  Batch {batch_num}: Deleted {len(record_ids)} records from database")
-
-        # Summary
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("Archive complete:"))
         self.stdout.write(f"  Records archived: {archived_count}")

@@ -1,8 +1,12 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Import Participants - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Import Participants - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .import-layout {
     display: grid;
     grid-template-columns: 1fr 320px;
@@ -15,7 +19,7 @@
     display: flex;
     gap: 4px;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-bottom: 8px;
     list-style: none;
     padding: 0;
@@ -23,18 +27,18 @@
 }
 
 .breadcrumb a {
-    color: #128df3;
+    color: #94a3b8;
 }
 
 .breadcrumb li + li::before {
     content: "/";
     margin-right: 4px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .form-help {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     margin-top: 4px;
 }
 
@@ -67,14 +71,14 @@
     display: flex;
     gap: 8px;
     padding-top: 16px;
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
     margin-top: 8px;
 }
 
 .btn-cancel {
     background: transparent;
-    color: var(--xdr-text-secondary);
-    border: 1px solid var(--xdr-border);
+    color: var(--theme-text-secondary);
+    border: 1px solid var(--theme-border);
 }
 
 /* File input styled for dark theme */
@@ -84,12 +88,12 @@ input[type="file"] {
 
 .csv-example {
     background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
     padding: 8px 12px;
     font-family: monospace;
     font-size: 12px;
-    color: var(--xdr-text);
+    color: var(--theme-text);
     margin: 8px 0;
     white-space: pre;
     overflow-x: auto;
@@ -97,11 +101,11 @@ input[type="file"] {
 
 .info-note {
     font-size: 12px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
     padding: 8px 12px;
-    border: 1px solid var(--xdr-border);
+    border: 1px solid var(--theme-border);
     border-radius: 4px;
-    background: rgba(18, 141, 243, 0.05);
+    background: rgba(148, 163, 184, 0.05);
 }
 
 .detail-row {
@@ -113,16 +117,16 @@ input[type="file"] {
 }
 
 .detail-row + .detail-row {
-    border-top: 1px solid var(--xdr-border);
+    border-top: 1px solid var(--theme-border);
 }
 
 .detail-label {
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 
 .detail-value {
     font-weight: 600;
-    color: var(--xdr-text);
+    color: var(--theme-text);
 }
 
 @media (max-width: 800px) {
@@ -130,106 +134,142 @@ input[type="file"] {
         grid-template-columns: 1fr;
     }
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <nav>
-        <ol class="breadcrumb">
-            <li><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
-            <li><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
-            <li><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
-            <li>Import</li>
-        </ol>
-    </nav>
-    <h1 class="page-title">Import Participants</h1>
-</div>
-
-<div class="import-layout">
-    <!-- Form Column -->
-    <div>
-        <div class="card">
-            <div class="card-title">Upload CSV File</div>
-
-            {% if errors %}
-            <div class="form-alert-error">
-                <strong>Import Errors</strong>
-                <ul>
-                    {% for error in errors %}
-                    <li>{{ error }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-
-            <form method="post" enctype="multipart/form-data">
-                {% csrf_token %}
-                <div class="form-group">
-                    <label class="form-label" for="csv_file">CSV File</label>
-                    <input type="file" id="csv_file" name="{{ form.csv_file.html_name }}" class="form-input" accept=".csv">
-                    {% if form.csv_file.help_text %}
-                    <div class="form-help">{{ form.csv_file.help_text }}</div>
-                    {% endif %}
-                    {% if form.csv_file.errors %}
-                    <div class="field-error">
-                        {% for error in form.csv_file.errors %}{{ error }}{% endfor %}
-                    </div>
-                    {% endif %}
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">
-                        Import
-                    </button>
-                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-cancel">
-                        Cancel
-                    </a>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Sidebar Column -->
-    <div>
-        <!-- CSV Format Instructions -->
-        <div class="card">
-            <div class="card-title">CSV Format</div>
-            <p style="margin: 0 0 8px; font-size: 13px; color: var(--xdr-text);">Upload a CSV file with participant data. The file should have two columns:</p>
-            <ol style="margin: 0 0 12px; padding-left: 20px; font-size: 13px; color: var(--xdr-text);">
-                <li><strong>Name</strong> - Participant display name</li>
-                <li><strong>Email</strong> - Participant email address</li>
+    <!-- Header -->
+    <div class="page-header">
+        <nav>
+            <ol class="breadcrumb">
+                <li>
+                    <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">{% trans "Participants" %}</a>
+                </li>
+                <li>
+                    {% trans "Import" %}
+                </li>
             </ol>
-
-            <div style="font-size: 13px; font-weight: 600; color: var(--xdr-text); margin-bottom: 4px;">Example:</div>
-            <div class="csv-example">Alice Smith,alice@example.com
-Bob Jones,bob@example.com
-Carol Wilson,carol@example.com</div>
-
-            <div class="info-note">
-                The first row should contain data, not headers. Emails must be unique within the event.
+        </nav>
+        <h1 class="page-title">
+            {% trans "Import Participants" %}
+        </h1>
+    </div>
+    <div class="import-layout">
+        <!-- Form Column -->
+        <div>
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Upload CSV File" %}
+                </div>
+                {% if errors %}
+                    <div class="form-alert-error">
+                        <strong>{% trans "Import Errors" %}</strong>
+                        <ul>
+                            {% for error in errors %}
+                                <li>
+                                    {{ error }}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <label class="form-label" for="csv_file">
+                            {% trans "CSV File" %}
+                        </label>
+                        <input type="file"
+                               id="csv_file"
+                               name="{{ form.csv_file.html_name }}"
+                               class="form-input"
+                               accept=".csv">
+                        {% if form.csv_file.help_text %}
+                            <div class="form-help">
+                                {{ form.csv_file.help_text }}
+                            </div>
+                        {% endif %}
+                        {% if form.csv_file.errors %}
+                            <div class="field-error">
+                                {% for error in form.csv_file.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            {% trans "Import" %}
+                        </button>
+                        <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}"
+                           class="btn btn-cancel">{% trans "Cancel" %}</a>
+                    </div>
+                </form>
             </div>
         </div>
-
-        <!-- Current Status -->
-        <div class="card">
-            <div class="card-title">Current Status</div>
-            <div class="detail-row">
-                <span class="detail-label">Event</span>
-                <span class="detail-value">{{ event.name }}</span>
+        <!-- Sidebar Column -->
+        <div>
+            <!-- CSV Format Instructions -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "CSV Format" %}
+                </div>
+                <p style="margin: 0 0 8px;
+                          font-size: 13px;
+                          color: var(--theme-text)">
+                    {% trans "Upload a CSV file with participant data. The file should have two columns:" %}
+                </p>
+                <ol style="margin: 0 0 12px;
+                           padding-left: 20px;
+                           font-size: 13px;
+                           color: var(--theme-text)">
+                    <li>
+                        <strong>{% trans "Name" %}</strong> {% trans "- Participant display name" %}
+                    </li>
+                    <li>
+                        <strong>{% trans "Email" %}</strong> {% trans "- Participant email address" %}
+                    </li>
+                </ol>
+                <div style="font-size: 13px;
+                            font-weight: 600;
+                            color: var(--theme-text);
+                            margin-bottom: 4px">
+                    {% trans "Example:" %}
+                </div>
+                <div class="csv-example">
+                    {% trans "Alice Smith,alice@example.com Bob Jones,bob@example.com Carol Wilson,carol@example.com" %}
+                </div>
+                <div class="info-note">
+                    {% blocktrans trimmed %}
+                        The first row should contain data, not headers. Emails must be unique within the event.
+                    {% endblocktrans %}
+                </div>
             </div>
-            <div class="detail-row">
-                <span class="detail-label">Current Participants</span>
-                <span class="detail-value">{{ event.participant_count }}</span>
+            <!-- Current Status -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Current Status" %}
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Event" %}</span>
+                    <span class="detail-value">{{ event.name }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">{% trans "Current Participants" %}</span>
+                    <span class="detail-value">{{ event.participant_count }}</span>
+                </div>
+                {% if event.max_participants %}
+                    <div class="detail-row">
+                        <span class="detail-label">{% trans "Maximum" %}</span>
+                        <span class="detail-value">{{ event.max_participants }}</span>
+                    </div>
+                {% endif %}
             </div>
-            {% if event.max_participants %}
-            <div class="detail-row">
-                <span class="detail-label">Maximum</span>
-                <span class="detail-value">{{ event.max_participants }}</span>
-            </div>
-            {% endif %}
         </div>
     </div>
-</div>
 {% endblock %}

@@ -32,6 +32,7 @@ locals {
     "db"                  = "Database connection secret bundle for the platform control plane."
     "guacamole-db"        = "Database connection secret bundle for the Guacamole client."
     "guacamole-json-auth" = "Guacamole JSON auth signing key."
+    "redis"               = "Redis AUTH token for the platform control-plane cache (ADR-008-R6)."
   }
 
   workload_service_accounts = toset([
@@ -68,13 +69,21 @@ locals {
     ])
     provisioner = toset([
       "roles/pubsub.publisher",
-      "roles/secretmanager.secretAccessor",
+      # Per-instance RDP password secrets (#762) require the provisioner
+      # to create, write versions to, and delete per-range secrets at
+      # provisioning / teardown time. The full secret lifecycle role
+      # is bounded to the provisioner workload identity and is never
+      # granted to range guests, so this stays within the trust
+      # boundary the SSH-key precedent established for per-range
+      # secret management.
+      "roles/secretmanager.admin",
       "roles/storage.objectAdmin",
     ])
   }
 
   required_services = toset([
     "artifactregistry.googleapis.com",
+    "binaryauthorization.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "identitytoolkit.googleapis.com",
@@ -138,6 +147,16 @@ resource "google_compute_subnetwork" "gke" {
     ip_cidr_range = var.gke_services_cidr
   }
 
+  # Dedicated pod range for the provisioner node pool (ADR-008-R4, #959).
+  # Provisioner pods get IPs from this range; the
+  # range-allow-platform-provisioner firewall rule sources from this
+  # narrow CIDR only, so other platform pods (portal, workers,
+  # guacamole-client) cannot reach range VMs on the admin ports.
+  secondary_ip_range {
+    range_name    = var.gke_provisioner_pods_secondary_range_name
+    ip_cidr_range = var.gke_provisioner_pods_cidr
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -148,12 +167,20 @@ resource "google_compute_router" "nat" {
   network = google_compute_network.platform.id
 }
 
+resource "google_compute_address" "nat" {
+  name         = "${local.name_prefix}-nat-egress"
+  project      = var.project_id
+  region       = var.region
+  address_type = "EXTERNAL"
+}
+
 resource "google_compute_router_nat" "nat" {
   name                               = "${local.name_prefix}-nat"
   project                            = var.project_id
   region                             = var.region
   router                             = google_compute_router.nat.name
-  nat_ip_allocate_option             = "AUTO_ONLY"
+  nat_ip_allocate_option             = "MANUAL_ONLY"
+  nat_ips                            = [google_compute_address.nat.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
@@ -164,12 +191,20 @@ resource "google_compute_router" "range_nat" {
   network = google_compute_network.range.id
 }
 
+resource "google_compute_address" "range_nat" {
+  name         = "${local.name_prefix}-range-nat-egress"
+  project      = var.project_id
+  region       = var.region
+  address_type = "EXTERNAL"
+}
+
 resource "google_compute_router_nat" "range_nat" {
   name                               = "${local.name_prefix}-range-nat"
   project                            = var.project_id
   region                             = var.region
   router                             = google_compute_router.range_nat.name
-  nat_ip_allocate_option             = "AUTO_ONLY"
+  nat_ip_allocate_option             = "MANUAL_ONLY"
+  nat_ips                            = [google_compute_address.range_nat.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
@@ -186,6 +221,172 @@ resource "google_compute_network_peering" "range_to_platform" {
 
   # GCP rejects concurrent peering operations touching the same networks.
   depends_on = [google_compute_network_peering.platform_to_range]
+}
+
+# ------------------------------------------------------------------------------
+# VPC firewall policy (ADR-008-R4, #959)
+# ------------------------------------------------------------------------------
+#
+# Both the platform and range VPCs use custom networks (auto_create_subnetworks
+# = false), so they inherit GCP's implicit-allow-internal-on-custom-VPC and
+# implicit-deny-ingress baseline rather than the permissive
+# default-network rules. These resources make the documented policy explicit:
+#
+# - Range VPC: deny-by-default on ingress; only an explicit
+#   platform-provisioner allow rule (sourced from local.portal_network_cidrs)
+#   reaches range VMs. Optional direct break-glass admin SSH is gated
+#   on operator_admin_cidrs (direct-access source CIDRs at the VPC
+#   firewall layer — these are NOT IAP TCP forwarding rules, which would
+#   source from Google's 35.235.240.0/20 proxy range and are handled
+#   via IAM / OS Login instead).
+# - Platform VPC: explicit deny on world-open SSH/RDP, explicit allow for
+#   Google LB health-check ranges to the GKE nodes (tag-scoped). No
+#   broad "platform internal" catch-all — node-tag scoping keeps the
+#   existing implicit-allow-internal behavior intact.
+#
+# Priorities: numerically lower priority = higher precedence (GCP convention).
+
+# Range VPC — deny all external ingress as a low-precedence catch-all.
+resource "google_compute_firewall" "range_deny_ingress_all" {
+  name        = "${local.name_prefix}-range-deny-ingress-all"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "ADR-008-R4: range VPC ingress is denied by default; explicit allow rules ride higher precedence."
+  direction   = "INGRESS"
+  priority    = 65000
+
+  source_ranges = ["0.0.0.0/0"]
+
+  deny {
+    protocol = "all"
+  }
+}
+
+# Range VPC — allow the platform provisioner to reach range VMs on documented
+# protocols only. Sourced from the dedicated provisioner pod CIDR
+# (`var.gke_provisioner_pods_cidr`), not the shared platform pod range, so a
+# compromised non-provisioner pod (portal, workers, guacamole-client) cannot
+# satisfy this rule (ADR-008-R4, #959).
+resource "google_compute_firewall" "range_allow_platform_provisioner" {
+  name        = "${local.name_prefix}-range-allow-platform-provisioner"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "ADR-008-R4: provisioner-pod traffic (dedicated GKE pod range) into range VMs on documented ports only."
+  direction   = "INGRESS"
+  priority    = 1000
+
+  source_ranges = [var.gke_provisioner_pods_cidr]
+
+  allow {
+    protocol = "tcp"
+    ports    = [for p in var.range_provisioner_ports : tostring(p)]
+  }
+}
+
+# Range VPC — optional direct break-glass admin SSH, gated on
+# operator_admin_cidrs. Empty in dev, so the resource compiles to zero
+# instances and no SSH rule lands. When set, the named CIDRs reach
+# range VMs on port 22 directly; world-open CIDRs are rejected by
+# variable validation. This rule is intentionally NOT named "iap" —
+# IAP TCP forwarding presents traffic from Google's fixed proxy range
+# (35.235.240.0/20), not from the operator workstation's public IP, so
+# the source CIDRs here are operator-source CIDRs for direct admin
+# access, not IAP traffic. IAP-based SSH onto these VPCs is handled
+# via IAM / OS Login / bootstrap; if a future change adds a Terraform
+# IAP firewall rule, it must source from the IAP TCP forwarding range
+# and is a separate resource from this one.
+resource "google_compute_firewall" "range_allow_operator_admin_ssh" {
+  count = length(var.operator_admin_cidrs) > 0 ? 1 : 0
+
+  name        = "${local.name_prefix}-range-allow-operator-admin-ssh"
+  project     = var.project_id
+  network     = google_compute_network.range.name
+  description = "ADR-008-R4: break-glass direct SSH into range VMs from the operator-admin CIDR allowlist (not IAP)."
+  direction   = "INGRESS"
+  # Priority strictly higher (numerically lower) than the broad SSH/RDP
+  # deny on the platform VPC and the deny-ingress-all (65000) on the
+  # range VPC, so the allowlist actually opens SSH for the named CIDRs.
+  priority = 800
+
+  source_ranges = var.operator_admin_cidrs
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+# Platform VPC — explicit deny on world-open SSH/RDP. The platform VPC is
+# private-cluster-only today, but this rule is an audit anchor: if a future
+# resource accidentally exposes an external IP, the rule still blocks SSH/RDP.
+resource "google_compute_firewall" "platform_deny_external_ssh_rdp" {
+  name        = "${local.name_prefix}-platform-deny-external-ssh-rdp"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "ADR-008-R4: SSH/RDP from 0.0.0.0/0 is never allowed into the platform VPC."
+  direction   = "INGRESS"
+  priority    = 900
+
+  source_ranges = ["0.0.0.0/0"]
+
+  deny {
+    protocol = "tcp"
+    ports    = ["22", "3389"]
+  }
+}
+
+# Platform VPC — allow Google LB health-check sources to reach GKE nodes.
+# These are the same CIDRs the bootstrap helm bridge sets in
+# `gclbSourceRanges`; expressing them at the Terraform layer keeps the
+# firewall policy auditable independent of the chart values.
+resource "google_compute_firewall" "platform_allow_gke_health_checks" {
+  name        = "${local.name_prefix}-platform-allow-gke-health-checks"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "ADR-008-R4: Google LB health-check ranges reach GKE nodes; required for backend probes."
+  direction   = "INGRESS"
+  priority    = 1000
+
+  source_ranges = [
+    # Google Cloud Load Balancer health-check / proxy ranges.
+    "35.191.0.0/16",
+    "130.211.0.0/22",
+  ]
+
+  target_tags = ["gke"]
+
+  allow {
+    protocol = "tcp"
+    # NodePort range probes plus common backend ports the platform exposes
+    # behind the ingress (matches the existing portal/guacamole services).
+    ports = ["80", "443", "8000", "8080", "30000-32767"]
+  }
+}
+
+# Platform VPC — optional direct break-glass admin SSH onto GKE nodes,
+# gated on operator_admin_cidrs. Empty in dev. Same direct-access (NOT
+# IAP) semantics as range_allow_operator_admin_ssh; see that resource's
+# header comment for why the rule is not named "iap".
+resource "google_compute_firewall" "platform_allow_operator_admin_ssh" {
+  count = length(var.operator_admin_cidrs) > 0 ? 1 : 0
+
+  name        = "${local.name_prefix}-platform-allow-operator-admin-ssh"
+  project     = var.project_id
+  network     = google_compute_network.platform.name
+  description = "ADR-008-R4: break-glass direct SSH onto GKE platform nodes from the operator-admin CIDR allowlist (not IAP)."
+  direction   = "INGRESS"
+  # Strictly higher precedence (lower number) than the broad
+  # platform_deny_external_ssh_rdp (priority 900). At equal priority,
+  # GCP gives deny rules precedence — the allow would be shadowed.
+  priority = 800
+
+  source_ranges = var.operator_admin_cidrs
+  target_tags   = ["gke"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
 }
 
 resource "google_compute_global_address" "services" {
@@ -488,12 +689,12 @@ resource "google_secret_manager_secret" "runtime" {
 
 resource "random_password" "db_password" {
   length  = 32
-  special = false
+  special = true
 }
 
 resource "random_password" "django_secret_key" {
   length  = 64
-  special = false
+  special = true
 }
 
 resource "random_id" "field_encryption_key" {
@@ -502,25 +703,38 @@ resource "random_id" "field_encryption_key" {
 
 resource "random_password" "guacamole_db_password" {
   length  = 32
-  special = false
+  special = true
 }
 
 resource "random_id" "guacamole_json_auth_secret" {
-  byte_length = 16
+  byte_length = 32
 }
 
 resource "google_sql_database_instance" "platform" {
-  name                = "${local.name_prefix}-pg"
-  project             = var.project_id
-  region              = var.region
-  database_version    = var.cloud_sql_database_version
-  deletion_protection = false
+  name             = "${local.name_prefix}-pg"
+  project          = var.project_id
+  region           = var.region
+  database_version = var.cloud_sql_database_version
+  # ADR-008 (#960): the platform Cloud SQL instance is durable control-plane
+  # state. Deletion protection defaults to true on the module; environments
+  # that genuinely need to tear the instance down can override via
+  # var.cloud_sql_deletion_protection, but the secure default is preserved.
+  deletion_protection = var.cloud_sql_deletion_protection
 
   settings {
     tier              = var.cloud_sql_tier
-    availability_type = "ZONAL"
+    availability_type = var.cloud_sql_availability_type
     disk_size         = var.cloud_sql_disk_size_gb
     disk_type         = "PD_SSD"
+
+    # GCP exposes two deletion-protection surfaces (#960):
+    # - `google_sql_database_instance.deletion_protection` (top-level) is
+    #   Terraform's plan-time guard: `terraform destroy` is refused.
+    # - `settings.deletion_protection_enabled` is the Cloud SQL API-level
+    #   guard: Console / gcloud / direct API delete calls are refused.
+    # Both need to be set or the protection is incomplete; we drive both
+    # from the same input so the secure default applies on every surface.
+    deletion_protection_enabled = var.cloud_sql_deletion_protection
 
     backup_configuration {
       enabled = true
@@ -530,6 +744,11 @@ resource "google_sql_database_instance" "platform" {
       ipv4_enabled                                  = false
       private_network                               = google_compute_network.platform.id
       enable_private_path_for_google_cloud_services = true
+      # Require TLS for every Cloud SQL connection. The google provider (>= 6.0) removed
+      # the legacy ``require_ssl`` argument in favor of ``ssl_mode``; ``ENCRYPTED_ONLY``
+      # is the server-TLS-required mode (client uses ``sslmode=verify-ca`` against the
+      # Cloud SQL server CA — no mTLS).
+      ssl_mode = "ENCRYPTED_ONLY"
     }
 
     database_flags {
@@ -583,6 +802,13 @@ resource "google_redis_instance" "platform" {
   display_name       = "Shifter ${var.environment} Redis"
   labels             = local.common_labels
 
+  # ADR-008-R6 (#963): Memorystore runs with AUTH and server-side TLS.
+  # The provider-generated auth_string is wired into Secret Manager
+  # (`runtime_seeded["redis"]`) and hydrated by `entrypoint.sh`; it never
+  # touches the runtime ConfigMap, generated env files, or process argv.
+  auth_enabled            = true
+  transit_encryption_mode = "SERVER_AUTHENTICATION"
+
   depends_on = [
     google_project_service.required,
     google_service_networking_connection.services,
@@ -610,6 +836,20 @@ resource "google_secret_manager_secret_version" "runtime_seeded" {
       password = random_password.guacamole_db_password.result
     })
     "guacamole-json-auth" = random_id.guacamole_json_auth_secret.hex
+    # Redis AUTH bundle (ADR-008-R6, #963). The provider-generated auth_string
+    # is the secret field; the Memorystore server CA PEM is non-secret on its
+    # own (it identifies the GCP-managed server cert, not a client credential)
+    # but is delivered together with the password because Django Channels
+    # needs it on the same hydration timeline to verify the server certificate
+    # when negotiating SERVER_AUTHENTICATION TLS. Memorystore exposes the
+    # TLS endpoint on a different port than plaintext (typically 6378) —
+    # `google_redis_instance.platform.port` already returns the TLS port
+    # when transit_encryption_mode is set, so render_runtime_env.py picks
+    # it up via the existing `cache["port"]` field.
+    redis = jsonencode({
+      password       = google_redis_instance.platform.auth_string
+      server_ca_cert = google_redis_instance.platform.server_ca_certs[0].cert
+    })
   }
 
   secret      = google_secret_manager_secret.runtime[each.key].id
@@ -633,6 +873,15 @@ resource "google_container_cluster" "platform" {
   ip_allocation_policy {
     cluster_secondary_range_name  = var.gke_pods_secondary_range_name
     services_secondary_range_name = var.gke_services_secondary_range_name
+
+    # Declare the provisioner-only pod range as an additional pod range
+    # available to node pools on this cluster. The provisioner node pool
+    # opts into it via `network_config.pod_range` so its pods get IPs
+    # from the dedicated range; web/worker pools continue to draw from
+    # the default cluster_secondary_range_name (ADR-008-R4, #959).
+    additional_pod_ranges_config {
+      pod_range_names = [var.gke_provisioner_pods_secondary_range_name]
+    }
   }
 
   private_cluster_config {
@@ -662,6 +911,10 @@ resource "google_container_cluster" "platform" {
 
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  binary_authorization {
+    evaluation_mode = "PROJECT_SINGLETON_POLICY_ENFORCE"
   }
 
   logging_config {
@@ -767,6 +1020,18 @@ resource "google_container_node_pool" "provisioner" {
   location   = var.region
   cluster    = google_container_cluster.platform.name
   node_count = var.provisioner_node_count
+
+  # ADR-008-R4 (#959): the provisioner pool draws pod IPs from a
+  # dedicated secondary range (declared on the GKE subnet and on the
+  # cluster's ip_allocation_policy.additional_pod_ranges_config). The
+  # range-VPC firewall sources only this CIDR for the
+  # range-allow-platform-provisioner rule, so a compromised non-
+  # provisioner pod elsewhere on the cluster cannot reach range VMs on
+  # the admin ports.
+  network_config {
+    create_pod_range = false
+    pod_range        = var.gke_provisioner_pods_secondary_range_name
+  }
 
   node_config {
     machine_type    = var.provisioner_machine_type

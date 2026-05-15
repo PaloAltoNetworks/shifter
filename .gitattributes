@@ -1,0 +1,9 @@
+# Belt-and-suspenders against the merge-conflict pathology that the
+# changelog fragments setup (`towncrier`, `changelog.d/`) is the real fix
+# for: even with fragments in place, the periodic release-collation
+# commit and any straggler hand-edits still touch CHANGELOG.md, and the
+# `union` driver concatenates both sides of any append-only conflict
+# instead of producing markers (you'll still want to eyeball the version
+# numbers/ordering, but the rebase no longer stops). See
+# `changelog.d/README.md`.
+CHANGELOG.md merge=union

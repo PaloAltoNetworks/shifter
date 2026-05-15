@@ -169,7 +169,7 @@ The authoritative manual bring-up path is:
 That bootstrap path now expects:
 
 - private GDC hosts with IAP-based operator access
-- a managed-TLS public hostname (`shifter.keplerops.com` in the current `gcp-dev` tfvars)
+- a managed-TLS public hostname (`shifter.example.com` in the current `gcp-dev` tfvars)
 - authorized CIDRs restricting the public GKE control-plane endpoint
 - Cloud Armor on the public ingress backends
 - Terraform-managed Identity Platform for corporate login, with browser-side Google auth and server-side verified-token exchange

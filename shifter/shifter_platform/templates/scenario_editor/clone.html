@@ -1,75 +1,128 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-
-{% block title %}Clone: {{ source.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Clone: {{ source.name }}
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Clone Scenario</h1>
-        <p class="page-subtitle">
-            Create an editable copy of <strong>{{ source.name }}</strong>
-            <span style="font-family: monospace; color: var(--xdr-text-secondary);">({{ source.id }})</span>
-        </p>
-    </div>
-</div>
-
-{% if errors %}
-<ul class="error-list">
-    {% for error in errors %}
-    <li>{{ error }}</li>
-    {% endfor %}
-</ul>
-{% endif %}
-
-<form method="post">
-    {% csrf_token %}
-
-    <div class="card" style="margin-bottom: 16px;">
-        <div class="card-title">Clone Settings</div>
-
-        <div class="form-group">
-            <label for="new_scenario_id">New Scenario ID</label>
-            <input type="text" id="new_scenario_id" name="new_scenario_id" class="form-input"
-                   required pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, hyphens, and underscores only"
-                   placeholder="{{ source.id }}-copy" value="{{ source.id }}-copy">
-            <div class="help-text">URL-safe identifier for the clone. Must be unique.</div>
-        </div>
-
-        <div class="form-group">
-            <label for="new_name">Name (optional)</label>
-            <input type="text" id="new_name" name="new_name" class="form-input"
-                   maxlength="200" placeholder="Copy of {{ source.name }}"
-                   value="Copy of {{ source.name }}">
-            <div class="help-text">Leave empty to use "Copy of {{ source.name }}".</div>
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {% trans "Clone Scenario" %}
+            </h1>
+            <p class="page-subtitle">
+                {% trans "Create an editable copy of" %} <strong>{{ source.name }}</strong>
+                <span style="font-family: monospace;
+                             color: var(--theme-text-secondary)">
+                             {% blocktrans with v1=source.id %}({{ v1 }}){% endblocktrans %}
+                             </span>
+            </p>
         </div>
     </div>
-
-    <!-- Source summary -->
-    <div class="card" style="margin-bottom: 16px;">
-        <div class="card-title">Source Scenario</div>
-        <table style="width: 100%;">
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0; width: 120px;">Name</th>
-                <td style="padding: 4px 0;">{{ source.name }}</td>
-            </tr>
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">Instances</th>
-                <td style="padding: 4px 0;">{{ source.instances|length }}</td>
-            </tr>
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">Subnets</th>
-                <td style="padding: 4px 0;">{{ source.subnets|length }}</td>
-            </tr>
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">NGFW</th>
-                <td style="padding: 4px 0;">{% if source.ngfw %}Yes{% else %}No{% endif %}</td>
-            </tr>
-        </table>
-    </div>
-
-    <div class="flex-row gap-sm">
-        <button type="submit" class="btn btn-primary">Clone Scenario</button>
-        <a href="{% url 'scenario_editor:detail' scenario_id=source.id %}" class="btn btn-secondary">Cancel</a>
-    </div>
-</form>
+    {% if errors %}
+        <ul class="error-list">
+            {% for error in errors %}
+                <li>
+                    {{ error }}
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">
+                {% trans "Clone Settings" %}
+            </div>
+            <div class="form-group">
+                <label for="new_scenario_id">
+                    {% trans "New Scenario ID" %}
+                </label>
+                <input type="text"
+                       id="new_scenario_id"
+                       name="new_scenario_id"
+                       class="form-input"
+                       required
+                       pattern="[a-z0-9_-]+"
+                       title='{% trans "Lowercase letters, numbers, hyphens, and underscores only" %}'
+                       placeholder="{{ source.id }}-copy"
+                       value="{{ source.id }}-copy">
+                <div class="help-text">
+                    {% trans "URL-safe identifier for the clone. Must be unique." %}
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="new_name">
+                    {% trans "Name (optional)" %}
+                </label>
+                <input type="text"
+                       id="new_name"
+                       name="new_name"
+                       class="form-input"
+                       maxlength="200"
+                       placeholder="Copy of {{ source.name }}"
+                       value="Copy of {{ source.name }}">
+                <div class="help-text">
+                    {% blocktrans with v1=source.name %}
+                        Leave empty to use "Copy of {{ v1 }}".
+                    {% endblocktrans %}
+                </div>
+            </div>
+        </div>
+        <!-- Source summary -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">
+                {% trans "Source Scenario" %}
+            </div>
+            <table style="width: 100%;">
+                <tr>
+                    <th scope="row"
+                        class="text-muted"
+                        style="padding: 4px 0;
+                               width: 120px">
+                        {% trans "Name" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {{ source.name }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                        {% trans "Instances" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {{ source.instances|length }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                        {% trans "Subnets" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {{ source.subnets|length }}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                        {% trans "NGFW" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {% if source.ngfw %}
+                            {% trans "Yes" %}
+                        {% else %}
+                            {% trans "No" %}
+                        {% endif %}
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div class="flex-row gap-sm">
+            <button type="submit" class="btn btn-primary">
+                {% trans "Clone Scenario" %}
+            </button>
+            <a href="{% url 'scenario_editor:detail' scenario_id=source.id %}"
+               class="btn btn-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
 {% endblock %}

@@ -92,14 +92,14 @@ class TestAddPrerequisite:
 
     def test_add_prerequisite_success(self, challenge_a, challenge_b):
         """Adding a valid prerequisite creates the link."""
-        prereq = add_prerequisite(challenge_b.id, challenge_a.id)
+        prereq = add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
         assert prereq.challenge_id == challenge_b.id
         assert prereq.required_challenge_id == challenge_a.id
 
     def test_self_reference_rejected(self, challenge_a):
         """A challenge cannot require itself."""
         with pytest.raises(CTFValidationError, match="itself"):
-            add_prerequisite(challenge_a.id, challenge_a.id)
+            add_prerequisite(challenge_a.id, challenge_a.id, actor_id=challenge_a.event.created_by_id)
 
     def test_different_event_rejected(self, challenge_a, organizer_user):
         """Prerequisites must be in the same event."""
@@ -122,26 +122,28 @@ class TestAddPrerequisite:
             flag_hash="$2b$12$hash_other",
         )
         with pytest.raises(CTFValidationError, match="same event"):
-            add_prerequisite(challenge_a.id, other_challenge.id)
+            add_prerequisite(challenge_a.id, other_challenge.id, actor_id=challenge_a.event.created_by_id)
 
     def test_duplicate_rejected(self, challenge_a, challenge_b):
         """Cannot add the same prerequisite twice."""
-        add_prerequisite(challenge_b.id, challenge_a.id)
+        add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
         with pytest.raises(CTFValidationError, match="already exists"):
-            add_prerequisite(challenge_b.id, challenge_a.id)
+            add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
 
     def test_direct_cycle_rejected(self, challenge_a, challenge_b):
         """A -> B and B -> A creates a cycle."""
-        add_prerequisite(challenge_b.id, challenge_a.id)  # B requires A
+        add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)  # B requires A
         with pytest.raises(CTFValidationError, match="circular"):
-            add_prerequisite(challenge_a.id, challenge_b.id)  # A requires B
+            add_prerequisite(challenge_a.id, challenge_b.id, actor_id=challenge_a.event.created_by_id)  # A requires B
 
     def test_indirect_cycle_rejected(self, challenge_a, challenge_b, challenge_c):
         """A -> B -> C and C -> A creates a cycle."""
-        add_prerequisite(challenge_b.id, challenge_a.id)  # B requires A
-        add_prerequisite(challenge_c.id, challenge_b.id)  # C requires B
+        add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)  # B requires A
+        add_prerequisite(challenge_c.id, challenge_b.id, actor_id=challenge_c.event.created_by_id)  # C requires B
         with pytest.raises(CTFValidationError, match="circular"):
-            add_prerequisite(challenge_a.id, challenge_c.id)  # A requires C = cycle
+            add_prerequisite(
+                challenge_a.id, challenge_c.id, actor_id=challenge_a.event.created_by_id
+            )  # A requires C = cycle
 
     def test_non_content_modifiable_rejected(self, organizer_user):
         """Cannot add prerequisites in non-modifiable events."""
@@ -173,7 +175,7 @@ class TestAddPrerequisite:
             flag_hash="$2b$12$hash_active_b",
         )
         with pytest.raises(CTFStateError):
-            add_prerequisite(ch_b.id, ch_a.id)
+            add_prerequisite(ch_b.id, ch_a.id, actor_id=ch_b.event.created_by_id)
 
 
 class TestRemovePrerequisite:
@@ -181,8 +183,8 @@ class TestRemovePrerequisite:
 
     def test_remove_prerequisite_success(self, challenge_a, challenge_b):
         """Removing a prerequisite soft-deletes it."""
-        prereq = add_prerequisite(challenge_b.id, challenge_a.id)
-        remove_prerequisite(prereq.id)
+        prereq = add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
+        remove_prerequisite(prereq.id, actor_id=challenge_b.event.created_by_id)
 
         # Soft-deleted — not in default queryset
         assert not CTFChallengePrerequisite.objects.filter(pk=prereq.id).exists()
@@ -195,8 +197,8 @@ class TestGetPrerequisites:
 
     def test_get_prerequisites(self, challenge_a, challenge_b, challenge_c):
         """get_prerequisites returns the required challenges."""
-        add_prerequisite(challenge_c.id, challenge_a.id)
-        add_prerequisite(challenge_c.id, challenge_b.id)
+        add_prerequisite(challenge_c.id, challenge_a.id, actor_id=challenge_c.event.created_by_id)
+        add_prerequisite(challenge_c.id, challenge_b.id, actor_id=challenge_c.event.created_by_id)
 
         prereqs = get_prerequisites(challenge_c.id)
         required_ids = {p.required_challenge_id for p in prereqs}
@@ -204,8 +206,8 @@ class TestGetPrerequisites:
 
     def test_get_dependents(self, challenge_a, challenge_b, challenge_c):
         """get_dependents returns challenges that depend on this one."""
-        add_prerequisite(challenge_b.id, challenge_a.id)
-        add_prerequisite(challenge_c.id, challenge_a.id)
+        add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
+        add_prerequisite(challenge_c.id, challenge_a.id, actor_id=challenge_c.event.created_by_id)
 
         deps = get_dependents(challenge_a.id)
         dep_ids = {d.challenge_id for d in deps}
@@ -236,7 +238,7 @@ class TestCheckPrerequisitesMet:
             status=ParticipantStatus.ACTIVE.value,
             registered_at=timezone.now(),
         )
-        add_prerequisite(challenge_b.id, challenge_a.id)
+        add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
 
         met, unmet = check_prerequisites_met(challenge_b.id, participant.id)
         assert met is False
@@ -256,7 +258,7 @@ class TestCheckPrerequisitesMet:
             status=ParticipantStatus.ACTIVE.value,
             registered_at=timezone.now(),
         )
-        add_prerequisite(challenge_b.id, challenge_a.id)
+        add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
 
         # Solve challenge A
         CTFSubmission.objects.create(
@@ -292,7 +294,7 @@ class TestGetAvailableChallengesWithPrereqs:
             registered_at=timezone.now(),
         )
         # C requires A
-        add_prerequisite(challenge_c.id, challenge_a.id)
+        add_prerequisite(challenge_c.id, challenge_a.id, actor_id=challenge_c.event.created_by_id)
 
         available = get_available_challenges(
             draft_event.id,
@@ -321,7 +323,7 @@ class TestGetAvailableChallengesWithPrereqs:
             status=ParticipantStatus.ACTIVE.value,
             registered_at=timezone.now(),
         )
-        add_prerequisite(challenge_c.id, challenge_a.id)
+        add_prerequisite(challenge_c.id, challenge_a.id, actor_id=challenge_c.event.created_by_id)
 
         # Solve A
         CTFSubmission.objects.create(
@@ -347,7 +349,7 @@ class TestGetAvailableChallengesWithPrereqs:
 
     def test_no_participant_id_returns_all(self, draft_event, challenge_a, challenge_b, challenge_c):
         """Without participant_id, all released challenges are returned."""
-        add_prerequisite(challenge_c.id, challenge_a.id)
+        add_prerequisite(challenge_c.id, challenge_a.id, actor_id=challenge_c.event.created_by_id)
 
         available = get_available_challenges(draft_event.id, include_unreleased=True)
         available_ids = set(available.values_list("id", flat=True))
@@ -418,10 +420,10 @@ class TestDeleteChallengeCascadePrereqs:
 
     def test_soft_delete_cascades_to_prerequisite_links(self, challenge_a, challenge_b, challenge_c):
         """Deleting a required challenge soft-deletes prerequisite links."""
-        prereq_b = add_prerequisite(challenge_b.id, challenge_a.id)
-        prereq_c = add_prerequisite(challenge_c.id, challenge_a.id)
+        prereq_b = add_prerequisite(challenge_b.id, challenge_a.id, actor_id=challenge_b.event.created_by_id)
+        prereq_c = add_prerequisite(challenge_c.id, challenge_a.id, actor_id=challenge_c.event.created_by_id)
 
-        delete_challenge(challenge_a.id)
+        delete_challenge(challenge_a.id, actor_id=challenge_a.event.created_by_id)
 
         # Prerequisite links should be soft-deleted
         assert not CTFChallengePrerequisite.objects.filter(pk=prereq_b.id).exists()

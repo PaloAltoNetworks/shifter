@@ -105,6 +105,15 @@ resource "aws_ssm_parameter" "guacamole_secret_arn" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "dc_domain_password_secret_arn" {
+  name        = "${local.ps_prefix}/dc-domain-password-secret-arn"
+  description = "ARN of the Secrets Manager secret holding the prebaked DC Administrator password (resolved at portal startup)"
+  type        = "String"
+  value       = var.dc_domain_password_secret_arn
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "guacamole_base_url" {
   name        = "${local.ps_prefix}/guacamole-base-url"
   description = "Guacamole public URL for browser (e.g., https://domain.com/guacamole)"

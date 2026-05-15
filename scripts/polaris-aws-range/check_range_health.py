@@ -163,40 +163,40 @@ class RangeReport:
 
     @property
     def ok(self) -> bool:
-        if self.fields.get("container_count") != str(EXPECTED_CONTAINER_COUNT):
-            return False
-        if self.fields.get("exited_containers", "none") not in ("none", ""):
-            return False
-        if self.fields.get("a14_state") != "running":
-            return False
-        if self.fields.get("a14_on_splice") != "0":
-            return False
-        if self.fields.get("bedrock_profile") != "1":
-            return False
-        for k in KALI_ENV_KEYS:
-            if self.fields.get(f"env_{k}") != "1":
-                return False
-        if self.fields.get("hosts_override") != "1":
-            return False
-        if self.fields.get("splice_watcher") != "active":
-            return False
-        for name in ("a5_scada_state", "a9_splice_state", "a0_website_state"):
-            if self.fields.get(name) != "running":
-                return False
-        return True
+        return not self.issues()
 
     def issues(self) -> list[str]:
         probs: list[str] = []
+        probs.extend(self._container_count_issue())
+        probs.extend(self._exited_containers_issue())
+        probs.extend(self._a14_kali_issues())
+        probs.extend(self._bedrock_env_issues())
+        probs.extend(self._splice_watcher_issue())
+        probs.extend(self._other_container_state_issues())
+        return probs
+
+    def _container_count_issue(self) -> list[str]:
         cc = self.fields.get("container_count", "?")
         if cc != str(EXPECTED_CONTAINER_COUNT):
-            probs.append(f"container_count={cc}/{EXPECTED_CONTAINER_COUNT}")
+            return [f"container_count={cc}/{EXPECTED_CONTAINER_COUNT}"]
+        return []
+
+    def _exited_containers_issue(self) -> list[str]:
         ex = self.fields.get("exited_containers", "")
         if ex and ex != "none":
-            probs.append(f"exited=[{ex}]")
+            return [f"exited=[{ex}]"]
+        return []
+
+    def _a14_kali_issues(self) -> list[str]:
+        probs: list[str] = []
         if self.fields.get("a14_state") != "running":
             probs.append(f"a14-kali={self.fields.get('a14_state')}")
         if self.fields.get("a14_on_splice") == "1":
             probs.append("a14 still on splice-link (watcher didn't disconnect)")
+        return probs
+
+    def _bedrock_env_issues(self) -> list[str]:
+        probs: list[str] = []
         if self.fields.get("bedrock_profile") != "1":
             probs.append("missing /etc/profile.d/claude-bedrock.sh")
         for k in KALI_ENV_KEYS:
@@ -204,12 +204,19 @@ class RangeReport:
                 probs.append(f"missing env {k}")
         if self.fields.get("hosts_override") != "1":
             probs.append("missing /etc/hosts bedrock-runtime entry")
+        return probs
+
+    def _splice_watcher_issue(self) -> list[str]:
         sw = self.fields.get("splice_watcher")
         if sw != "active":
-            probs.append(f"splice-watcher={sw}")
+            return [f"splice-watcher={sw}"]
+        return []
+
+    def _other_container_state_issues(self) -> list[str]:
+        probs: list[str] = []
         for name in ("a5_scada_state", "a9_splice_state", "a0_website_state"):
             if self.fields.get(name) != "running":
-                probs.append(f"{name.replace('_state','')}={self.fields.get(name)}")
+                probs.append(f"{name.replace('_state', '')}={self.fields.get(name)}")
         return probs
 
 

@@ -29,11 +29,11 @@ resource "random_password" "db_password" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal platform
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "shifter-${var.name_prefix}-guacamole-db"
   description             = "Guacamole PostgreSQL database credentials"
   recovery_window_in_days = var.secrets_recovery_window_days
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(local.common_tags, {
     Name = "shifter-${var.name_prefix}-guacamole-db"
@@ -66,11 +66,11 @@ resource "random_id" "json_auth_secret" {
   byte_length = 16 # 16 bytes = 128 bits = 32 hex characters
 }
 
-# checkov:skip=CKV_AWS_149:AWS-managed keys sufficient for internal platform
 resource "aws_secretsmanager_secret" "json_auth" {
   name                    = "shifter-${var.name_prefix}-guacamole-json-auth"
   description             = "Guacamole JSON auth 128-bit secret key for Portal RDP integration"
   recovery_window_in_days = var.secrets_recovery_window_days
+  kms_key_id              = var.secrets_kms_key_arn
 
   tags = merge(local.common_tags, {
     Name = "shifter-${var.name_prefix}-guacamole-json-auth"
@@ -133,6 +133,10 @@ resource "aws_db_instance" "guacamole" {
 
   # CloudWatch Log Exports
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+
+  # Whether class/storage/parameter changes apply during the deploy or wait
+  # for the maintenance window. Set true in dev, false in prod.
+  apply_immediately = var.db_apply_immediately
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-guacamole-db"

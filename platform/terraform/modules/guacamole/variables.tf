@@ -179,6 +179,11 @@ variable "db_skip_final_snapshot" {
   type        = bool
 }
 
+variable "db_apply_immediately" {
+  description = "Apply RDS modifications during the deploy instead of queueing them for the maintenance window. Required input — environments must choose explicitly."
+  type        = bool
+}
+
 # ------------------------------------------------------------------------------
 # Auto Scaling
 # ------------------------------------------------------------------------------
@@ -210,6 +215,11 @@ variable "autoscaling_cpu_target" {
 variable "secrets_recovery_window_days" {
   description = "Recovery window in days for Secrets Manager (0 for immediate deletion)"
   type        = number
+}
+
+variable "secrets_kms_key_arn" {
+  description = "ARN of the KMS CMK used to encrypt Secrets Manager secrets owned by this module (CKV_AWS_149). Required input — no default."
+  type        = string
 }
 
 # ------------------------------------------------------------------------------

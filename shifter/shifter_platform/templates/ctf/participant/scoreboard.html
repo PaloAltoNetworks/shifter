@@ -1,126 +1,189 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "ctf/base.html" %}
-{% load static %}
-{% block ctf_title %}Scoreboard{% endblock %}
-
-{% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Scoreboard</h1>
-        {% if not scoreboard_hidden %}
-        <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-btn" onclick="refreshScoreboard()">
-            Auto-Refresh: Off
-        </button>
-        {% endif %}
-    </div>
-
-    {% if scoreboard_hidden %}
-    <div class="card">
-        <div class="card-body text-center py-5">
-            <h5 class="text-muted mb-2">Scoreboard Hidden</h5>
-            <p class="text-muted mb-0">The scoreboard is not yet available. The organizer will make it visible when ready.</p>
-        </div>
-    </div>
-    {% else %}
-
-    {% if frozen %}
-    <div class="alert alert-info mb-4" id="freeze-banner">
-        Scoreboard frozen since {{ event.scoreboard_freeze_at|date:"N j, Y g:i A" }}. Your own score continues to update.
-    </div>
-    {% endif %}
-
-    {% if brackets %}
-    <ul class="nav nav-tabs mb-4" id="bracket-tabs">
-        <li class="nav-item">
-            <a class="nav-link {% if not selected_bracket %}active{% endif %}" href="?">Overall</a>
-        </li>
-        {% for bracket in brackets %}
-        <li class="nav-item">
-            <a class="nav-link {% if selected_bracket and selected_bracket.id == bracket.id %}active{% endif %}"
-               href="?bracket={{ bracket.id }}">{{ bracket.name }}</a>
-        </li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-
-    {% if selected_bracket and bracket_rankings is not None %}
-    <h5 class="mb-3">{{ selected_bracket.name }} Bracket</h5>
-    <div class="card mb-4">
-        <div class="card-body p-0">
-            {% if bracket_rankings %}
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Rank</th>
-                            <th>Name</th>
-                            {% if team_mode %}<th>Members</th>{% elif event.team_mode %}<th>Team</th>{% endif %}
-                            <th>Score</th>
-                            <th>Solves</th>
-                            <th>Last Solve</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% include "ctf/includes/scoreboard_table.html" with entries=bracket_rankings %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="p-4 text-center text-muted">
-                <p class="mb-0">No scores yet in this bracket.</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <h5 class="mb-3">Overall Scoreboard</h5>
-    {% endif %}
-
-    {% if participant and not team_mode and not selected_bracket %}
-    <!-- Score Timeline Chart (individual mode only, overall view) -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <h5 class="card-title mb-3">Your Score Timeline</h5>
-            <div style="position: relative; height: 250px;">
-                <canvas id="score-timeline-chart"></canvas>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="card">
-        <div class="card-body p-0">
-            {% if rankings %}
-            <div class="table-responsive">
-                <table class="table table-hover mb-0" id="scoreboard-table">
-                    <thead>
-                        <tr>
-                            <th>Rank</th>
-                            <th>Name</th>
-                            {% if team_mode %}<th>Members</th>{% elif event.team_mode %}<th>Team</th>{% endif %}
-                            <th>Score</th>
-                            <th>Solves</th>
-                            <th>Last Solve</th>
-                        </tr>
-                    </thead>
-                    <tbody id="scoreboard-body">
-                        {% include "ctf/includes/scoreboard_table.html" with entries=rankings %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="p-4 text-center text-muted">
-                <p class="mb-0">No scores yet. Be the first to solve a challenge!</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    {% endif %}{# end scoreboard_hidden #}
-</div>
+{% load static i18n %}
+{% block ctf_title %}
+    Scoreboard
 {% endblock %}
-
+{% block ctf_content %}
+    <div class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3 mb-0">
+                {% trans "Scoreboard" %}
+            </h1>
+            {% if not scoreboard_hidden %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-primary"
+                        id="refresh-btn"
+                        onclick="refreshScoreboard()">
+                    {% trans "Auto-Refresh: Off" %}
+                </button>
+            {% endif %}
+        </div>
+        {% if scoreboard_hidden %}
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <h5 class="text-muted mb-2">
+                        {% trans "Scoreboard Hidden" %}
+                    </h5>
+                    <p class="text-muted mb-0">
+                        {% blocktrans trimmed %}
+                            The scoreboard is not yet available. The organizer will make it visible when ready.
+                        {% endblocktrans %}
+                    </p>
+                </div>
+            </div>
+        {% else %}
+            {% if frozen %}
+                <div class="alert alert-info mb-4" id="freeze-banner">
+                    {% blocktrans with v1=event.scoreboard_freeze_at|date:"N j, Y g:i A" %}
+                        Scoreboard frozen since {{ v1 }}. Your own score continues to update.
+                    {% endblocktrans %}
+                </div>
+            {% endif %}
+            {% if brackets %}
+                <ul class="nav nav-tabs mb-4" id="bracket-tabs">
+                    <li class="nav-item">
+                        <a class="nav-link
+                                  {% if not selected_bracket %}
+                                      active
+                                  {% endif %}"
+                           href="?">{% trans "Overall" %}</a>
+                    </li>
+                    {% for bracket in brackets %}
+                        <li class="nav-item">
+                            <a class="nav-link
+                                      {% if selected_bracket and selected_bracket.id == bracket.id %}
+                                          active
+                                      {% endif %}"
+                               href="?bracket={{ bracket.id }}">{{ bracket.name }}</a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            {% if selected_bracket and bracket_rankings is not None %}
+                <h5 class="mb-3">
+                    {% blocktrans with v1=selected_bracket.name %}
+                        {{ v1 }} Bracket
+                    {% endblocktrans %}
+                </h5>
+                <div class="card mb-4">
+                    <div class="card-body p-0">
+                        {% if bracket_rankings %}
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>
+                                                {% trans "Rank" %}
+                                            </th>
+                                            <th>
+                                                {% trans "Name" %}
+                                            </th>
+                                            {% if team_mode %}
+                                                <th>
+                                                    {% trans "Members" %}
+                                                </th>
+                                            {% elif event.team_mode %}
+                                                <th>
+                                                    {% trans "Team" %}
+                                                </th>
+                                            {% endif %}
+                                            <th>
+                                                {% trans "Score" %}
+                                            </th>
+                                            <th>
+                                                {% trans "Solves" %}
+                                            </th>
+                                            <th>
+                                                {% trans "Last Solve" %}
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% include "ctf/includes/scoreboard_table.html" with entries=bracket_rankings %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="p-4 text-center text-muted">
+                                <p class="mb-0">
+                                    {% trans "No scores yet in this bracket." %}
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <h5 class="mb-3">
+                    {% trans "Overall Scoreboard" %}
+                </h5>
+            {% endif %}
+            {% if participant and not team_mode and not selected_bracket %}
+                <!-- Score Timeline Chart (individual mode only, overall view) -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">
+                            {% trans "Your Score Timeline" %}
+                        </h5>
+                        <div style="position: relative; height: 250px;">
+                            <canvas id="score-timeline-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+            <div class="card">
+                <div class="card-body p-0">
+                    {% if rankings %}
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0" id="scoreboard-table">
+                                <thead>
+                                    <tr>
+                                        <th>
+                                            {% trans "Rank" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Name" %}
+                                        </th>
+                                        {% if team_mode %}
+                                            <th>
+                                                {% trans "Members" %}
+                                            </th>
+                                        {% elif event.team_mode %}
+                                            <th>
+                                                {% trans "Team" %}
+                                            </th>
+                                        {% endif %}
+                                        <th>
+                                            {% trans "Score" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Solves" %}
+                                        </th>
+                                        <th>
+                                            {% trans "Last Solve" %}
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scoreboard-body">
+                                    {% include "ctf/includes/scoreboard_table.html" with entries=rankings %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="p-4 text-center text-muted">
+                            <p class="mb-0">
+                                {% trans "No scores yet. Be the first to solve a challenge!" %}
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+        {# end scoreboard_hidden #}
+    </div>
+{% endblock %}
 {% block extra_js %}
-<script>
+    <script>
 var autoRefreshInterval = null;
 
 function refreshScoreboard() {
@@ -148,9 +211,7 @@ function refreshScoreboard() {
 
 function fetchScoreboard() {
     var url = "{% url 'ctf:api_scoreboard' event_id=event.pk %}";
-    {% if selected_bracket %}
-    url += "?bracket={{ selected_bracket.id }}";
-    {% endif %}
+    {% if selected_bracket %}url += "?bracket={{ selected_bracket.id }}";{% endif %}
     fetch(url)
     .then(function(response) { return response.json(); })
     .then(function(data) {
@@ -267,13 +328,18 @@ function rebuildScoreboardTable(rankings, teamMode) {
         tbody.appendChild(tr);
     }
 }
-</script>
-{% if participant and not team_mode and not selected_bracket %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
-<script src="{% static 'js/score-timeline.js' %}"></script>
-<script>
+    </script>
+    {% if participant and not team_mode and not selected_bracket %}
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
+                integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
+                crossorigin="anonymous"></script>
+<script
+src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
+integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
+crossorigin="anonymous"></script>
+        <script src="{% static 'js/score-timeline.js' %}"></script>
+        <script>
 initScoreTimeline('score-timeline-chart', "{% url 'ctf:api_score_timeline' participant_id=participant.pk %}");
-</script>
-{% endif %}
+        </script>
+    {% endif %}
 {% endblock %}

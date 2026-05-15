@@ -497,27 +497,39 @@ class TestRangeNetworkEnv:
 
 
 class TestDecryptField:
-    """Tests for decrypt_field function for encrypted database fields."""
+    """Tests for decrypt_field function for encrypted database fields.
+
+    Fail-closed contract (#1189): the function raises FieldDecryptError on
+    every path that previously silently returned the input — missing
+    encryption key, malformed base64, and Fernet token failures. Only the
+    empty-input case (the explicit "no field present" sentinel) and the
+    happy decrypt path return values.
+    """
 
     # Test key for testing only
     # pragma: allowlist secret
     TEST_ENCRYPTION_KEY = "VbMOEgh9VmS5lr0EsIS2sD9X1iy-Qd12i4kVZHdgPVE="  # nosec B105
 
     def test_empty_value_returns_empty(self):
-        """Empty string should return empty string."""
+        """Empty string still returns empty (sentinel for absent field)."""
         assert decrypt_field("") == ""
 
-    def test_no_key_returns_value_unchanged(self, mocker):
-        """Without FIELD_ENCRYPTION_KEY, value is returned as-is."""
-        mocker.patch.dict(os.environ, {}, clear=True)
-        if "FIELD_ENCRYPTION_KEY" in os.environ:
-            del os.environ["FIELD_ENCRYPTION_KEY"]
+    def test_no_key_with_non_empty_value_raises(self, mocker):
+        """Missing FIELD_ENCRYPTION_KEY MUST fail closed, not pass through."""
+        from config import FieldDecryptError
 
-        result = decrypt_field("some-value")
-        assert result == "some-value"
+        mocker.patch.dict(os.environ, {}, clear=True)
+
+        with pytest.raises(FieldDecryptError) as excinfo:
+            decrypt_field("some-value")
+
+        msg = str(excinfo.value)
+        assert "FIELD_ENCRYPTION_KEY" in msg
+        # Never leak the raw input value into the exception message.
+        assert "some-value" not in msg
 
     def test_decrypts_valid_encrypted_value(self, mocker):
-        """Valid Fernet-encrypted value should be decrypted."""
+        """Valid Fernet-encrypted value round-trips."""
         import base64
 
         from cryptography.fernet import Fernet
@@ -532,9 +544,52 @@ class TestDecryptField:
         result = decrypt_field(encrypted_value)
         assert result == plaintext
 
-    def test_invalid_value_returns_unchanged(self, mocker):
-        """Invalid encrypted value should return as-is (backward compatibility)."""
+    def test_malformed_base64_raises(self, mocker):
+        """Input that isn't valid base64-url MUST fail closed."""
+        from config import FieldDecryptError
+
         mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": self.TEST_ENCRYPTION_KEY})
 
-        result = decrypt_field("not-encrypted-just-plaintext")
-        assert result == "not-encrypted-just-plaintext"
+        with pytest.raises(FieldDecryptError) as excinfo:
+            # Contains '!' which is not in the base64-url alphabet.
+            decrypt_field("not-valid-base64!@#")
+
+        msg = str(excinfo.value)
+        assert "decrypt" in msg.lower()
+        assert "not-valid-base64" not in msg
+
+    def test_plaintext_looking_input_raises(self, mocker):
+        """A valid-base64 string that is NOT a Fernet token MUST fail closed
+        when the encryption key is present (drift signal)."""
+        from config import FieldDecryptError
+
+        mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": self.TEST_ENCRYPTION_KEY})
+
+        with pytest.raises(FieldDecryptError) as excinfo:
+            decrypt_field("not-encrypted-just-plaintext")
+
+        msg = str(excinfo.value)
+        assert "not-encrypted-just-plaintext" not in msg
+
+    def test_wrong_key_raises(self, mocker):
+        """Valid Fernet token encrypted with a different key MUST fail closed."""
+        import base64
+
+        from cryptography.fernet import Fernet
+
+        from config import FieldDecryptError
+
+        # Encrypt with one key, attempt to decrypt with another. Both are
+        # test-only Fernet keys (32 url-safe base64-encoded bytes).
+        encryption_key_a = self.TEST_ENCRYPTION_KEY
+        encryption_key_b = Fernet.generate_key().decode("ascii")
+        assert encryption_key_a != encryption_key_b
+
+        fernet = Fernet(encryption_key_a.encode())
+        encrypted_bytes = fernet.encrypt(b"some-plaintext")
+        encrypted_value = base64.urlsafe_b64encode(encrypted_bytes).decode("ascii")
+
+        mocker.patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": encryption_key_b})
+
+        with pytest.raises(FieldDecryptError):
+            decrypt_field(encrypted_value)

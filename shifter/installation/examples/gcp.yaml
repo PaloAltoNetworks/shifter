@@ -1,0 +1,32 @@
+# Example root installation config for the GCP backend.
+#
+# Copy this file to ./shifter.yaml at the repository root and edit it for your
+# deployment, then validate it from the repo root with:
+#   uv run --project shifter/installation shifter-config validate shifter.yaml
+# See shifter/installation/README.md for the full field reference.
+#
+# This file is user-authored installation intent only. It holds *references* to
+# secrets, never secret values — store the values in Google Secret Manager / GitHub
+# Actions secrets and reference them by name here.
+version: 1
+backend: gcp
+
+deployment:
+  # DNS-label-safe identifier for this installation (lowercase, digits, internal hyphens).
+  name: shifter
+  # Public hostname users reach this deployment at. Must be a real DNS name.
+  domain: shifter.example.com
+  # Deployment tier. One of: prod, dev.
+  profile: prod
+
+# References to the secrets this deployment needs. The names on the right are
+# resolved by the GCP backend bundle at deploy/runtime (a Secret Manager resource
+# name, a GitHub Actions secret name, an environment variable, or the literal "prompt").
+secrets:
+  django_secret_key: projects/your-gcp-project/secrets/shifter-django-secret-key/versions/latest
+
+# Backend-specific settings. The root schema checks that this is a mapping.
+# Deployment tooling validates the values it consumes.
+settings:
+  region: us-central1
+  project_id: your-gcp-project

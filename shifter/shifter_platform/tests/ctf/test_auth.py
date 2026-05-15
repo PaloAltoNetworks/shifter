@@ -435,18 +435,23 @@ class TestAccessControlDecorators:
         response = admin_dashboard(request)
         assert response.status_code == 403
 
-    @patch("ctf.models.CTFParticipant.objects")
-    def test_participant_required_allows_participant(self, mock_objects, request_factory, mock_participant_user):
-        """ctf_participant_required should allow participant with CTFParticipant record."""
-        from ctf.views import participant_dashboard
+    def test_participant_required_allows_participant(self, request_factory, mock_participant_user):
+        """ctf_participant_required should allow participant with CTFParticipant record.
 
-        mock_objects.filter.return_value.exists.return_value = True
+        After the cycle-4 cleanup, the decorator delegates to
+        `ctf.services.participant.is_active_participant`; the view delegates
+        participant resolution to `_get_active_participant(request)` which
+        in turn reads the user's active CTF event via bridges. Patch at
+        these boundaries instead of the underlying ORM.
+        """
+        from ctf.views import participant_dashboard
 
         request = self._make_view_request(request_factory, mock_participant_user)
 
         with (
+            patch("ctf.services.participant.is_active_participant", return_value=True),
+            patch("ctf.views._get_active_participant", return_value=None),
             patch("ctf.views.render", return_value=HttpResponse("ok", status=200)),
-            patch("ctf.services.participant.get_participant_by_user", return_value=None),
         ):
             response = participant_dashboard(request)
 
@@ -912,19 +917,25 @@ class TestInviteRateLimit:
 class TestCTFSidebar:
     """Test that CTF users get CTF-specific sidebar."""
 
-    @patch("ctf.models.CTFParticipant.objects")
     @patch("ctf.views.render")
-    def test_participant_sees_ctf_sidebar(self, mock_render, mock_objects, request_factory, mock_participant_user):
-        """CTF participants should see CTF sidebar items."""
+    def test_participant_sees_ctf_sidebar(self, mock_render, request_factory, mock_participant_user):
+        """CTF participants should see CTF sidebar items.
+
+        Patches the participant-membership predicate (`is_active_participant`)
+        and the active-event participant resolver (`_get_active_participant`)
+        directly, since the cycle-4 cleanup centralised both.
+        """
         from ctf.views import participant_dashboard
 
-        mock_objects.filter.return_value.exists.return_value = True
         mock_render.return_value = HttpResponse("ok", status=200)
 
         request = request_factory.get("/ctf/participant/dashboard/")
         request.user = mock_participant_user
 
-        with patch("ctf.services.participant.get_participant_by_user", return_value=None):
+        with (
+            patch("ctf.services.participant.is_active_participant", return_value=True),
+            patch("ctf.views._get_active_participant", return_value=None),
+        ):
             response = participant_dashboard(request)
 
         assert response.status_code != 403

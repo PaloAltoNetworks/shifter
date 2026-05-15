@@ -31,6 +31,10 @@ class TestGuestSSHExecutorRunCommand:
         ssh_args = mock_run.call_args.args[0]
         assert ssh_args[-2:] == ["bash", "-se"]
         assert "ubuntu@10.10.1.5" in ssh_args
+        assert "StrictHostKeyChecking=yes" in ssh_args
+        assert "BatchMode=yes" in ssh_args
+        assert "StrictHostKeyChecking=no" not in ssh_args
+        assert "UserKnownHostsFile=/dev/null" not in ssh_args
         assert mock_run.call_args.kwargs["input"].decode("utf-8").startswith("set -euo pipefail\necho ok")
 
     def test_windows_run_command_uses_powershell_transport(self, mocker):

@@ -1,16 +1,23 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-
-{% block title %}Error{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Error
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Error</h1>
-</div>
-
-<div class="card">
-    <p class="text-muted">{{ message }}</p>
-    <div style="margin-top: 16px;">
-        <a href="{% url 'scenario_editor:list' %}" class="btn btn-secondary">Back to Scenarios</a>
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Error" %}
+        </h1>
     </div>
-</div>
+    <div class="card">
+        <p class="text-muted">
+            {{ message }}
+        </p>
+        <div style="margin-top: 16px;">
+            <a href="{% url 'scenario_editor:list' %}"
+               class="btn btn-secondary">{% trans "Back to Scenarios" %}</a>
+        </div>
+    </div>
 {% endblock %}

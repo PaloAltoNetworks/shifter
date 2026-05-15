@@ -1,3 +1,6 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
 {% comment %}
 Reusable scoreboard ranking table rows.
 
@@ -8,25 +11,41 @@ Required context:
   - participant_id: (optional) current participant's ID for highlighting
 {% endcomment %}
 {% for entry in entries %}
-<tr {% if not team_mode and entry.participant_id == participant_id %}class="table-active"{% endif %}>
-    <td>
-        {% if entry.rank <= 3 %}<strong>{{ entry.rank }}</strong>{% else %}{{ entry.rank }}{% endif %}
-    </td>
-    <td>
-        <strong>{{ entry.name }}</strong>
-        {% if not team_mode and entry.participant_id == participant_id %}
-        <span class="badge bg-primary ms-1">You</span>
+    <tr {% if not team_mode and entry.participant_id == participant_id %}
+            class="table-active"
+        {% endif %}>
+        <td>
+            {% if entry.rank <= 3 %}
+                <strong>{{ entry.rank }}</strong>
+            {% else %}
+                {{ entry.rank }}
+            {% endif %}
+        </td>
+        <td>
+            <strong>{{ entry.name }}</strong>
+            {% if not team_mode and entry.participant_id == participant_id %}
+                <span class="badge bg-primary ms-1">{% trans "You" %}</span>
+            {% endif %}
+        </td>
+        {% if team_mode %}
+            <td>
+                {{ entry.member_count }}
+            </td>
+        {% else %}
+            {% if event.team_mode %}
+                <td>
+                    {{ entry.team_name|default:"-" }}
+                </td>
+            {% endif %}
         {% endif %}
-    </td>
-    {% if team_mode %}
-    <td>{{ entry.member_count }}</td>
-    {% else %}
-    {% if event.team_mode %}
-    <td>{{ entry.team_name|default:"-" }}</td>
-    {% endif %}
-    {% endif %}
-    <td><strong>{{ entry.score }}</strong></td>
-    <td>{{ entry.solve_count }}</td>
-    <td>{{ entry.last_solve|default:"-" }}</td>
-</tr>
+        <td>
+            <strong>{{ entry.score }}</strong>
+        </td>
+        <td>
+            {{ entry.solve_count }}
+        </td>
+        <td>
+            {{ entry.last_solve|default:"-" }}
+        </td>
+    </tr>
 {% endfor %}

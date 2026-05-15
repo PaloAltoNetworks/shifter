@@ -147,53 +147,62 @@ class SSMExecutor:
             logger.info(f"Command {command_id} status: {status} (elapsed={elapsed:.1f}s)")
 
             if status in self.TERMINAL_STATUSES:
-                exit_code = result.get("ResponseCode", -1)
-                stdout = result.get("StandardOutputContent", "")
-                stderr = result.get("StandardErrorContent", "")
-
-                # Truncate very long outputs
-                max_output = 50000
-                if len(stdout) > max_output:
-                    stdout = stdout[:max_output] + "\n... (truncated)"
-                if len(stderr) > max_output:
-                    stderr = stderr[:max_output] + "\n... (truncated)"
-
-                if status == "Success":
-                    elapsed = time.time() - start_time
-                    logger.info(f"SSM command completed in {elapsed:.1f}s on {instance_id}")
-                    return CommandResult(
-                        success=True,
-                        exit_code=exit_code,
-                        stdout=stdout,
-                        stderr=stderr,
-                    )
-                elif status == "Cancelled":
-                    raise CommandError(
-                        f"Command was cancelled on {instance_id}",
-                        exit_code=exit_code,
-                        stderr=stderr,
-                    )
-                elif status == "TimedOut":
-                    raise TimeoutError(f"Command timed out on {instance_id} (SSM timeout)")
-                else:  # Failed
-                    # Check if it's an instance termination
-                    if "not in a valid state" in stderr.lower():
-                        raise InstanceTerminatedError(f"Instance {instance_id} is not in a valid state")
-                    # Include both stdout and stderr - PowerShell Write-Host goes to stdout
-                    # SSM often returns generic errors in stderr, so always include stdout
-                    error_parts = []
-                    if stdout:
-                        error_parts.append(f"stdout={stdout[:2000]}")
-                    if stderr:
-                        error_parts.append(f"stderr={stderr[:500]}")
-                    error_details = " | ".join(error_parts) if error_parts else "no output"
-                    raise CommandError(
-                        f"Command failed on {instance_id}",
-                        exit_code=exit_code,
-                        stderr=error_details,
-                    )
+                return self._build_terminal_result(instance_id, result, start_time)
 
             time.sleep(self._poll_interval)
+
+    @staticmethod
+    def _truncate_output(text: str, max_output: int = 50000) -> str:
+        """Cap a single SSM stream to `max_output` chars with a marker."""
+        if len(text) <= max_output:
+            return text
+        return text[:max_output] + "\n... (truncated)"
+
+    def _build_terminal_result(self, instance_id: str, result: dict, start_time: float) -> CommandResult:
+        """Translate a terminal SSM invocation result into `CommandResult` or raise.
+
+        Owns the status-branch dispatch (`Success` / `Cancelled` / `TimedOut` /
+        `Failed`) so `run_command` stays under the per-function complexity ceiling.
+        """
+        status = result.get("Status", "")
+        exit_code = result.get("ResponseCode", -1)
+        stdout = self._truncate_output(result.get("StandardOutputContent", ""))
+        stderr = self._truncate_output(result.get("StandardErrorContent", ""))
+
+        if status == "Success":
+            elapsed = time.time() - start_time
+            logger.info(f"SSM command completed in {elapsed:.1f}s on {instance_id}")
+            return CommandResult(
+                success=True,
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        if status == "Cancelled":
+            raise CommandError(
+                f"Command was cancelled on {instance_id}",
+                exit_code=exit_code,
+                stderr=stderr,
+            )
+        if status == "TimedOut":
+            raise TimeoutError(f"Command timed out on {instance_id} (SSM timeout)")
+
+        # status == "Failed". Detect instance-termination, then combine streams
+        # into a single error envelope. PowerShell Write-Host goes to stdout;
+        # SSM often returns a generic error in stderr, so include both.
+        if "not in a valid state" in stderr.lower():
+            raise InstanceTerminatedError(f"Instance {instance_id} is not in a valid state")
+        error_parts = []
+        if stdout:
+            error_parts.append(f"stdout={stdout[:2000]}")
+        if stderr:
+            error_parts.append(f"stderr={stderr[:500]}")
+        error_details = " | ".join(error_parts) if error_parts else "no output"
+        raise CommandError(
+            f"Command failed on {instance_id}",
+            exit_code=exit_code,
+            stderr=error_details,
+        )
 
     def wait_for_agent(
         self,
@@ -336,7 +345,6 @@ class SSMExecutor:
             InstanceTerminatedError: If instance is terminated
             SSMExecutorError: If readiness probe fails
         """
-        # Initiate reboot
         try:
             self._ec2_client.reboot_instances(InstanceIds=[instance_id])
         except ClientError as e:
@@ -345,12 +353,9 @@ class SSMExecutor:
                 raise InstanceNotFoundError(f"Instance {instance_id} not found") from e
             raise SSMExecutorError(f"Failed to reboot instance: {e}") from e
 
-        # Wait a moment for reboot to initiate
-        time.sleep(10)
-
+        time.sleep(10)  # let reboot initiate before we start polling
         start_time = time.time()
 
-        # Wait for instance to be running with status checks passing
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
@@ -358,45 +363,65 @@ class SSMExecutor:
                     f"Instance {instance_id} did not come back online after reboot within {timeout_seconds}s"
                 )
 
-            try:
-                response = self._ec2_client.describe_instance_status(
-                    InstanceIds=[instance_id],
-                    IncludeAllInstances=True,
-                )
-                statuses = response.get("InstanceStatuses", [])
-
-                if statuses:
-                    instance_status = statuses[0]
-                    state = instance_status.get("InstanceState", {}).get("Name", "")
-
-                    if state == "terminated":
-                        raise InstanceTerminatedError(f"Instance {instance_id} was terminated during reboot")
-
-                    if state == "running":
-                        # Check status checks
-                        instance_check = instance_status.get("InstanceStatus", {}).get("Status", "")
-                        system_check = instance_status.get("SystemStatus", {}).get("Status", "")
-
-                        if instance_check == "ok" and system_check == "ok":
-                            # Now wait for SSM agent ping status
-                            remaining_time = timeout_seconds - elapsed
-                            if remaining_time > 0:
-                                self.wait_for_agent(
-                                    instance_id,
-                                    timeout_seconds=int(remaining_time),
-                                )
-                                # Verify agent can actually execute commands
-                                # (PingStatus=Online doesn't mean document worker is ready)
-                                remaining_time = timeout_seconds - (time.time() - start_time)
-                                if remaining_time > 0:
-                                    return self.verify_agent_ready(
-                                        instance_id,
-                                        timeout_seconds=min(60, int(remaining_time)),
-                                        max_attempts=6,
-                                        document_name=document_name,
-                                    )
-                                return True  # No time left for probe, hope for the best
-            except ClientError:
-                pass  # Instance might be transitioning
+            finalized = self._maybe_finalize_reboot(instance_id, start_time, timeout_seconds, document_name)
+            if finalized is not None:
+                return finalized
 
             time.sleep(self._poll_interval)
+
+    def _maybe_finalize_reboot(
+        self,
+        instance_id: str,
+        start_time: float,
+        timeout_seconds: int,
+        document_name: str,
+    ) -> bool | None:
+        """One poll-iteration of `reboot_and_wait`.
+
+        Returns:
+            True/False if the reboot has reached a terminal outcome this
+            iteration (instance is up and SSM-ready, or proven ready in the
+            remaining time budget). None if the caller should continue polling.
+
+        Raises:
+            InstanceTerminatedError: if the instance was terminated mid-reboot.
+        """
+        try:
+            response = self._ec2_client.describe_instance_status(
+                InstanceIds=[instance_id],
+                IncludeAllInstances=True,
+            )
+        except ClientError:
+            return None  # Instance might be transitioning; retry.
+
+        statuses = response.get("InstanceStatuses", [])
+        if not statuses:
+            return None
+
+        instance_status = statuses[0]
+        state = instance_status.get("InstanceState", {}).get("Name", "")
+        if state == "terminated":
+            raise InstanceTerminatedError(f"Instance {instance_id} was terminated during reboot")
+        if state != "running":
+            return None
+
+        instance_check = instance_status.get("InstanceStatus", {}).get("Status", "")
+        system_check = instance_status.get("SystemStatus", {}).get("Status", "")
+        if instance_check != "ok" or system_check != "ok":
+            return None
+
+        remaining_time = timeout_seconds - (time.time() - start_time)
+        if remaining_time <= 0:
+            return True  # No time left for probe; declare ready optimistically.
+
+        # PingStatus=Online doesn't mean document worker is ready; do both.
+        self.wait_for_agent(instance_id, timeout_seconds=int(remaining_time))
+        remaining_time = timeout_seconds - (time.time() - start_time)
+        if remaining_time <= 0:
+            return True
+        return self.verify_agent_ready(
+            instance_id,
+            timeout_seconds=min(60, int(remaining_time)),
+            max_attempts=6,
+            document_name=document_name,
+        )

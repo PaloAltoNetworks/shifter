@@ -5,6 +5,7 @@ the plan step by step, handling reboots and verification.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -50,6 +51,39 @@ class SetupResult:
     error: str | None = None
 
 
+# Internal discriminated outcome of a single attempt inside `_execute_step`.
+# The retry loop dispatches on these; this keeps per-attempt control flow
+# out of the loop body so the loop itself stays trivially readable.
+class _AttemptOutcomeBase:
+    """Sealed base for the three `_execute_step` per-attempt outcomes."""
+
+
+@dataclass(frozen=True)
+class _AttemptSuccess(_AttemptOutcomeBase):
+    """Attempt succeeded; the carried `CommandResult` flows back to the caller."""
+
+    result: CommandResult
+
+
+@dataclass(frozen=True)
+class _AttemptRetry(_AttemptOutcomeBase):
+    """Attempt should be retried (or, if retries exhausted, fall through to
+    a failed StepResult). `last_result` carries the most recent CommandResult
+    if one was produced (None for pre-execution transport errors)."""
+
+    last_result: CommandResult | None
+
+
+@dataclass(frozen=True)
+class _AttemptFailHard(_AttemptOutcomeBase):
+    """Attempt failure that must propagate as `SetupError` (no fallthrough)."""
+
+    error: "SetupError"
+
+
+_AttemptOutcome = _AttemptSuccess | _AttemptRetry | _AttemptFailHard
+
+
 class SetupOrchestrator:
     """Orchestrates setup plan execution.
 
@@ -63,6 +97,16 @@ class SetupOrchestrator:
 
     # Default reboot timeout (5 minutes)
     DEFAULT_REBOOT_TIMEOUT = 300
+    SENSITIVE_ENV_VARS = (
+        "DC_DOMAIN_PASSWORD",
+        # Defense in depth (#762): if a per-instance RDP password is ever
+        # forwarded into setup orchestration as an env var (e.g., a future
+        # plan that needs to chpasswd through SSM), keep the value out of
+        # captured stdout/stderr.
+        "RDP_PASSWORD",
+        "GUEST_PASSWORD",
+    )
+    SENSITIVE_CONTEXT_KEY_PARTS = ("password", "secret", "token")
 
     def __init__(self, executor: Executor):
         """Initialize orchestrator with an executor.
@@ -184,170 +228,301 @@ class SetupOrchestrator:
     ) -> StepResult:
         """Execute a single step with retry support.
 
-        Args:
-            instance_id: Target instance
-            step: Step to execute
-            context: Template variables
-            document_name: SSM document to use
-            max_retries: Number of retry attempts on failure (default 1)
-
-        Returns:
-            StepResult with step output
+        Per-attempt logic lives in `_run_one_attempt`, which returns an
+        `_AttemptOutcome` so this loop only has to dispatch on three cases:
+        success (return), hard failure (raise), retry (loop or fall through).
 
         Raises:
-            CommandError, TimeoutError, SetupError: On failure after retries
+            SetupError: transport-error / PAN-OS poll-fail / silent-commit-fail
+                after retries are exhausted.
         """
         import time
 
         logger.info("_execute_step: starting step=%s", step.name)
-        # Render the script and stdin_input with context variables
         rendered_script = self._render_script(step.script, context, step.name)
-        rendered_stdin = self._render_script(getattr(step, "stdin_input", "") or "", context, step.name)
+        rendered_stdin = self._render_script(step.stdin_input or "", context, step.name)
 
-        last_result = None
+        last_result: CommandResult | None = None
         for attempt in range(max_retries + 1):
             if attempt > 0:
                 logger.info("_execute_step: retry %d/%d for step=%s", attempt, max_retries, step.name)
-                time.sleep(15)  # Pause before retry
+                time.sleep(15)
 
-            # Execute via executor (SSM or SSH)
-            try:
-                result = self.executor.run_command(
-                    instance_id=instance_id,
-                    script=rendered_script,
-                    timeout_seconds=step.timeout_seconds,
-                    document_name=document_name,
-                    stdin_input=rendered_stdin if rendered_stdin else None,
-                )
-            except (ExecutorConnectionError, ExecutorTimeoutError) as e:
-                logger.warning(
-                    "_execute_step: transport error step=%s attempt=%d: %s",
-                    step.name,
-                    attempt + 1,
-                    e,
-                )
-                if attempt < max_retries:
-                    continue  # Retry
-                raise SetupError(
-                    f"Step '{step.name}' failed: transport error after {max_retries + 1} attempts: {e}",
-                    step_name=step.name,
-                    cause=e,
-                ) from e
-            last_result = result
-
-            if result.success:
-                if result.stdout and "commit" in result.stdout.lower():
-                    output_lower = result.stdout.lower()
-                    if "configuration committed successfully" in output_lower:
-                        logger.info("_execute_step: step=%s commit=immediate_success", step.name)
-                    elif "there are no changes to commit" in output_lower:
-                        logger.info("_execute_step: step=%s commit=no_changes", step.name)
-                    elif "jobid" in output_lower:
-                        logger.info("_execute_step: step=%s commit=job_enqueued", step.name)
-                    else:
-                        logger.info("_execute_step: step=%s commit=unknown_output", step.name)
-
-                # If poll_for_job is enabled, parse job ID and poll until complete
-                if getattr(step, "poll_for_job", False):
-                    job_id = self._parse_panos_job_id(result.stdout)
-                    if job_id:
-                        logger.info("_execute_step: polling for job %s completion", job_id)
-                        poll_success, poll_output = self._poll_panos_job(
-                            instance_id, job_id, step.timeout_seconds, document_name
-                        )
-                        if not poll_success:
-                            if attempt < max_retries:
-                                continue  # Retry
-                            raise SetupError(
-                                f"Step '{step.name}' failed: PAN-OS job {job_id} did not complete successfully",
-                                step_name=step.name,
-                            )
-                        # Append poll output to result
-                        result = CommandResult(
-                            success=True,
-                            exit_code=0,
-                            stdout=result.stdout + "\n" + poll_output,
-                            stderr=result.stderr,
-                        )
-                    else:
-                        logger.warning("_execute_step: poll_for_job enabled but no job ID found in output")
-
-                # Check for PAN-OS commit failures (SSH sessions return success even when commit fails)
-                if not self._check_commit_success(result.stdout):
-                    logger.warning(
-                        "_execute_step: PAN-OS commit failed step=%s attempt=%d/%d",
-                        step.name,
-                        attempt + 1,
-                        max_retries + 1,
-                    )
-                    if result.stdout:
-                        logger.warning(
-                            "_execute_step: step=%s COMMIT FAILED STDOUT:\n%s",
-                            step.name,
-                            result.stdout,
-                        )
-                    if attempt < max_retries:
-                        continue  # Retry
-                    raise SetupError(
-                        f"Step '{step.name}' failed: PAN-OS commit failed after {max_retries + 1} attempts",
-                        step_name=step.name,
-                    )
-
-                # Log success with full output for visibility
-                logger.info(
-                    "_execute_step: completed step=%s exit_code=%d",
-                    step.name,
-                    result.exit_code,
-                )
-                if result.stdout:
-                    # Log full output - critical for debugging setup issues
-                    logger.info(
-                        "_execute_step: step=%s STDOUT:\n%s",
-                        step.name,
-                        result.stdout,
-                    )
-                if result.stderr:
-                    logger.info(
-                        "_execute_step: step=%s STDERR:\n%s",
-                        step.name,
-                        result.stderr,
-                    )
+            outcome = self._run_one_attempt(
+                instance_id,
+                step,
+                rendered_script,
+                rendered_stdin,
+                context,
+                document_name,
+                attempt,
+                max_retries,
+            )
+            if isinstance(outcome, _AttemptSuccess):
+                self._log_step_success(step, outcome.result, context)
                 return StepResult(
                     step_name=step.name,
                     success=True,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
+                    stdout=outcome.result.stdout,
+                    stderr=outcome.result.stderr,
                 )
-            else:
-                logger.warning(
-                    "_execute_step: FAILED step=%s attempt=%d/%d exit_code=%d",
-                    step.name,
-                    attempt + 1,
-                    max_retries + 1,
-                    result.exit_code,
-                )
-                if result.stdout:
-                    logger.warning(
-                        "_execute_step: step=%s FAILED STDOUT:\n%s",
-                        step.name,
-                        result.stdout,
-                    )
-                if result.stderr:
-                    logger.warning(
-                        "_execute_step: step=%s FAILED STDERR:\n%s",
-                        step.name,
-                        result.stderr,
-                    )
-                if attempt < max_retries:
-                    continue  # Retry
+            if isinstance(outcome, _AttemptFailHard):
+                raise outcome.error
+            # _AttemptRetry: remember last result, loop again
+            last_result = outcome.last_result
 
-        # All retries exhausted
+        # All retries exhausted on the soft-failure path (exit-nonzero).
+        # Asymmetry preserved: this path RETURNS a failed StepResult; the
+        # hard-failure paths above RAISE via _AttemptFailHard.
         return StepResult(
             step_name=step.name,
             success=False,
             stdout=last_result.stdout if last_result else "",
             stderr=last_result.stderr if last_result else "",
         )
+
+    def _run_one_attempt(
+        self,
+        instance_id: str,
+        step: SetupStep,
+        rendered_script: str,
+        rendered_stdin: str,
+        context: dict[str, Any],
+        document_name: str,
+        attempt: int,
+        max_retries: int,
+    ) -> _AttemptOutcome:
+        """Execute one attempt and classify the outcome."""
+        try:
+            result = self.executor.run_command(
+                instance_id=instance_id,
+                script=rendered_script,
+                timeout_seconds=step.timeout_seconds,
+                document_name=document_name,
+                stdin_input=rendered_stdin if rendered_stdin else None,
+            )
+        except (ExecutorConnectionError, ExecutorTimeoutError) as e:
+            logger.warning(
+                "_execute_step: transport error step=%s attempt=%d: %s",
+                step.name,
+                attempt + 1,
+                e,
+            )
+            return (
+                _AttemptRetry(last_result=None)
+                if attempt < max_retries
+                else _AttemptFailHard(
+                    SetupError(
+                        f"Step '{step.name}' failed: transport error after {max_retries + 1} attempts: {e}",
+                        step_name=step.name,
+                        cause=e,
+                    )
+                )
+            )
+
+        if not result.success:
+            self._log_step_failure(step, result, attempt, max_retries, context)
+            return _AttemptRetry(last_result=result)
+
+        return self._classify_successful_attempt(
+            instance_id,
+            step,
+            result,
+            context,
+            document_name,
+            attempt,
+            max_retries,
+        )
+
+    def _classify_successful_attempt(
+        self,
+        instance_id: str,
+        step: SetupStep,
+        result: CommandResult,
+        context: dict[str, Any],
+        document_name: str,
+        attempt: int,
+        max_retries: int,
+    ) -> _AttemptOutcome:
+        """Post-process an exit-0 CommandResult with PAN-OS-specific checks."""
+        self._log_panos_commit_outcome(step.name, result.stdout)
+
+        if step.poll_for_job:
+            poll_outcome = self._handle_panos_poll(
+                instance_id,
+                step,
+                result,
+                document_name,
+                attempt,
+                max_retries,
+            )
+            if not isinstance(poll_outcome, _AttemptSuccess):
+                return poll_outcome
+            result = poll_outcome.result
+
+        if not self._check_commit_success(result.stdout):
+            logger.warning(
+                "_execute_step: PAN-OS commit failed step=%s attempt=%d/%d",
+                step.name,
+                attempt + 1,
+                max_retries + 1,
+            )
+            if result.stdout:
+                logger.warning(
+                    "_execute_step: step=%s COMMIT FAILED STDOUT:\n%s",
+                    step.name,
+                    self._mask_sensitive_output(result.stdout, context),
+                )
+            return (
+                _AttemptRetry(last_result=result)
+                if attempt < max_retries
+                else _AttemptFailHard(
+                    SetupError(
+                        f"Step '{step.name}' failed: PAN-OS commit failed after {max_retries + 1} attempts",
+                        step_name=step.name,
+                    )
+                )
+            )
+
+        return _AttemptSuccess(result=result)
+
+    def _handle_panos_poll(
+        self,
+        instance_id: str,
+        step: SetupStep,
+        result: CommandResult,
+        document_name: str,
+        attempt: int,
+        max_retries: int,
+    ) -> _AttemptOutcome:
+        """Resolve a `poll_for_job` step: parse job id, poll, augment result."""
+        job_id = self._parse_panos_job_id(result.stdout)
+        if not job_id:
+            logger.warning("_execute_step: poll_for_job enabled but no job ID found in output")
+            return _AttemptSuccess(result=result)
+
+        logger.info("_execute_step: polling for job %s completion", job_id)
+        poll_success, poll_output = self._poll_panos_job(
+            instance_id,
+            job_id,
+            step.timeout_seconds,
+            document_name,
+        )
+        if not poll_success:
+            return (
+                _AttemptRetry(last_result=result)
+                if attempt < max_retries
+                else _AttemptFailHard(
+                    SetupError(
+                        f"Step '{step.name}' failed: PAN-OS job {job_id} did not complete successfully",
+                        step_name=step.name,
+                    )
+                )
+            )
+
+        return _AttemptSuccess(
+            result=CommandResult(
+                success=True,
+                exit_code=0,
+                stdout=result.stdout + "\n" + poll_output,
+                stderr=result.stderr,
+            )
+        )
+
+    @staticmethod
+    def _log_panos_commit_outcome(step_name: str, stdout: str) -> None:
+        """Classify and log a PAN-OS commit line if present in stdout."""
+        if not stdout or "commit" not in stdout.lower():
+            return
+        output_lower = stdout.lower()
+        if "configuration committed successfully" in output_lower:
+            outcome = "immediate_success"
+        elif "there are no changes to commit" in output_lower:
+            outcome = "no_changes"
+        elif "jobid" in output_lower:
+            outcome = "job_enqueued"
+        else:
+            outcome = "unknown_output"
+        logger.info("_execute_step: step=%s commit=%s", step_name, outcome)
+
+    def _log_step_success(
+        self,
+        step: SetupStep,
+        result: CommandResult,
+        context: dict[str, Any],
+    ) -> None:
+        logger.info(
+            "_execute_step: completed step=%s exit_code=%d",
+            step.name,
+            result.exit_code,
+        )
+        if result.stdout:
+            logger.info(
+                "_execute_step: step=%s STDOUT:\n%s",
+                step.name,
+                self._mask_sensitive_output(result.stdout, context),
+            )
+        if result.stderr:
+            logger.info(
+                "_execute_step: step=%s STDERR:\n%s",
+                step.name,
+                self._mask_sensitive_output(result.stderr, context),
+            )
+
+    def _log_step_failure(
+        self,
+        step: SetupStep,
+        result: CommandResult,
+        attempt: int,
+        max_retries: int,
+        context: dict[str, Any],
+    ) -> None:
+        logger.warning(
+            "_execute_step: FAILED step=%s attempt=%d/%d exit_code=%d",
+            step.name,
+            attempt + 1,
+            max_retries + 1,
+            result.exit_code,
+        )
+        if result.stdout:
+            logger.warning(
+                "_execute_step: step=%s FAILED STDOUT:\n%s",
+                step.name,
+                self._mask_sensitive_output(result.stdout, context),
+            )
+        if result.stderr:
+            logger.warning(
+                "_execute_step: step=%s FAILED STDERR:\n%s",
+                step.name,
+                self._mask_sensitive_output(result.stderr, context),
+            )
+
+    @classmethod
+    def _mask_sensitive_output(cls, output: str, context: dict[str, Any] | None = None) -> str:
+        """Mask known secret values before writing command output to logs."""
+        if not output:
+            return output
+
+        masked_output = output
+        for sensitive_value in cls._sensitive_values(context):
+            masked_output = masked_output.replace(sensitive_value, "[REDACTED]")
+        return masked_output
+
+    @classmethod
+    def _sensitive_values(cls, context: dict[str, Any] | None = None) -> list[str]:
+        values = {value for env_var in cls.SENSITIVE_ENV_VARS if (value := os.environ.get(env_var))}
+
+        if context:
+            for key, value in context.items():
+                if value is not None and cls._is_sensitive_context_key(key):
+                    values.add(str(value))
+
+        return sorted((value for value in values if value), key=len, reverse=True)
+
+    @classmethod
+    def _is_sensitive_context_key(cls, key: str) -> bool:
+        normalized_key = key.lower()
+        return any(part in normalized_key for part in cls.SENSITIVE_CONTEXT_KEY_PARTS)
 
     def _check_commit_success(self, output: str) -> bool:
         """Check if PAN-OS commit succeeded.
@@ -409,14 +584,14 @@ class SetupOrchestrator:
         for var_name in matches:
             if var_name not in context:
                 logger.error(
-                    "_render_script: missing variable=%s step=%s available=%s",
+                    "_render_script: missing variable=%s step=%s context_keys=%d",
                     var_name,
                     step_name,
-                    list(context.keys()),
+                    len(context),
                 )
                 raise SetupError(
                     f"Missing template variable '{var_name}' in step '{step_name}'. "
-                    f"Available variables: {list(context.keys())}",
+                    "Required variables are missing from the supplied context.",
                     step_name=step_name,
                 )
             # Replace {{ var }} with the value

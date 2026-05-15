@@ -214,36 +214,26 @@ def main() -> int:
     stdout, stderr = run_in_portal(ssm, portal, inner)
     events = parse_events(stdout)
 
-    # Summarize
-    start = next((e for e in events if e["kind"] == "start"), None)
-    plan = next((e for e in events if e["kind"] == "plan"), None)
-    done = next((e for e in events if e["kind"] == "done"), None)
-    abort = next((e for e in events if e["kind"] == "abort"), None)
-    fatal = next((e for e in events if e["kind"] == "fatal"), None)
+    return _summarize_events(events, execute=args.execute)
 
-    if fatal:
+
+def _summarize_events(events: list[dict], *, execute: bool) -> int:
+    """Print a per-event-kind summary and return the appropriate exit code."""
+    by_kind = {kind: next((e for e in events if e["kind"] == kind), None)
+               for kind in ("start", "plan", "done", "abort", "fatal")}
+
+    if by_kind["fatal"]:
         print("FATAL:")
-        print(fatal.get("error", ""))
+        print(by_kind["fatal"].get("error", ""))
         return 2
-    if abort:
-        print(f"ABORTED: {abort.get('reason')}")
-        print(json.dumps(abort, indent=2))
+    if by_kind["abort"]:
+        print(f"ABORTED: {by_kind['abort'].get('reason')}")
+        print(json.dumps(by_kind["abort"], indent=2))
         return 3
 
-    if start:
-        print(f"event: {start['event_name']}")
-        print(f"participants in DB: {start['participant_count']}")
-        n = start["participant_count"]
-        if not (EXPECTED_TOTAL_MIN <= n <= EXPECTED_TOTAL_MAX):
-            print(f"SANITY ABORT: participant count {n} outside "
-                  f"[{EXPECTED_TOTAL_MIN}, {EXPECTED_TOTAL_MAX}]")
-            return 4
-    if plan:
-        print(f"  keepers found: {plan['keepers']}")
-        print(f"  destroyers:    {plan['destroyers']}")
-        if plan["keepers"] != len(KEEP_EMAILS):
-            print(f"SANITY ABORT: found {plan['keepers']} keepers, expected {len(KEEP_EMAILS)}")
-            return 5
+    sanity_code = _check_event_sanity(by_kind["start"], by_kind["plan"])
+    if sanity_code:
+        return sanity_code
 
     to_destroy = [e for e in events if e["kind"] == "would_destroy"]
     print(f"\nranges marked for destroy: {len(to_destroy)}")
@@ -254,18 +244,41 @@ def main() -> int:
         print(f"  {e['email']:<45s} participant={e['participant_id']} "
               f"range_instance={e['range_instance_id']} status={e['range_status']}")
 
-    if args.execute:
-        destroyed = [e for e in events if e["kind"] == "destroyed"]
-        failed = [e for e in events if e["kind"] == "destroy_failed"]
-        print(f"\ndestroyed: {len(destroyed)}")
-        print(f"failed:    {len(failed)}")
-        for f in failed:
-            print(f"  FAIL {f['email']}  {f['error']}")
-        print(f"\n{done}")
-        return 0 if len(failed) == 0 else 7
-    else:
-        print(f"\nDRY-RUN complete. No changes made. Re-run with --execute to destroy.")
+    if not execute:
+        print("\nDRY-RUN complete. No changes made. Re-run with --execute to destroy.")
         return 0
+
+    destroyed = [e for e in events if e["kind"] == "destroyed"]
+    failed = [e for e in events if e["kind"] == "destroy_failed"]
+    print(f"\ndestroyed: {len(destroyed)}")
+    print(f"failed:    {len(failed)}")
+    for f in failed:
+        print(f"  FAIL {f['email']}  {f['error']}")
+    print(f"\n{by_kind['done']}")
+    return 0 if not failed else 7
+
+
+def _check_event_sanity(start: dict | None, plan: dict | None) -> int:
+    """Verify participant_count + keepers fall within configured bounds; return exit code or 0."""
+    if start:
+        print(f"event: {start['event_name']}")
+        print(f"participants in DB: {start['participant_count']}")
+        n = start["participant_count"]
+        if not (EXPECTED_TOTAL_MIN <= n <= EXPECTED_TOTAL_MAX):
+            print(
+                f"SANITY ABORT: participant count {n} outside "
+                f"[{EXPECTED_TOTAL_MIN}, {EXPECTED_TOTAL_MAX}]"
+            )
+            return 4
+    if plan:
+        print(f"  keepers found: {plan['keepers']}")
+        print(f"  destroyers:    {plan['destroyers']}")
+        if plan["keepers"] != len(KEEP_EMAILS):
+            print(
+                f"SANITY ABORT: found {plan['keepers']} keepers, expected {len(KEEP_EMAILS)}"
+            )
+            return 5
+    return 0
 
 
 if __name__ == "__main__":

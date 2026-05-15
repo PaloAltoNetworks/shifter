@@ -11,13 +11,62 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
+  # Issue #1103: dedicated writable volumes so the container can run with
+  # readonlyRootFilesystem = true. Fargate creates these from the task's
+  # ephemeral storage (no host_path), which is fine for Terraform staging
+  # and tool caches that should not persist across task restarts.
+  #
+  # Ownership contract — these volumes have NO `host` block and NO
+  # `host_path`, so AWS/Fargate creates a Docker named-volume on the
+  # task's ephemeral storage. Docker named-volume semantics (which AWS
+  # Fargate inherits) initialize the volume from the image's directory at
+  # the mount point: contents AND ownership/permissions are copied from
+  # the image dir at mount time. The Dockerfile pre-creates each of these
+  # paths (`/var/run/provisioner/workspace`, `/tmp`,
+  # `/home/appuser/.terraform.d/plugin-cache`, `/home/appuser/.pulumi`)
+  # with `mkdir` + `chown -R appuser:appgroup`, so the named volume comes
+  # up owned by uid/gid 1000 and the non-root container can write
+  # immediately. This is the AWS-native equivalent of the GKE
+  # `fsGroup: 1000` we set on the Pod spec — different mechanism, same
+  # outcome. End-to-end dev verification (per the issue's acceptance
+  # criterion) is the conclusive cross-check.
+  # See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specify-bind-mount-config.html
+  volume {
+    name = "provisioner-workspace"
+  }
+  volume {
+    name = "tmp"
+  }
+  volume {
+    name = "tf-plugin-cache"
+  }
+  volume {
+    name = "pulumi-home"
+  }
+
   container_definitions = jsonencode([{
-    name      = "pulumi-provisioner"
-    image     = "${var.ecr_repository_url}:${var.container_image_tag}"
-    essential = true
+    name                   = "pulumi-provisioner"
+    image                  = "${var.ecr_repository_url}:${var.container_image_tag}"
+    essential              = true
+    readonlyRootFilesystem = true
+    # Defense-in-depth: the image's USER directive already drops to UID/GID
+    # 1000, but declaring it on the task definition makes the contract
+    # explicit and guards against an image where USER was omitted. The
+    # mountPoints below resolve to ephemeral Fargate volumes that inherit
+    # the image directory's ownership (appuser:appgroup, pre-chowned in
+    # the Dockerfile), so writes by UID 1000 succeed without an init-chown.
+    user = "1000:1000"
+
+    mountPoints = [
+      { sourceVolume = "provisioner-workspace", containerPath = "/var/run/provisioner/workspace", readOnly = false },
+      { sourceVolume = "tmp", containerPath = "/tmp", readOnly = false },
+      { sourceVolume = "tf-plugin-cache", containerPath = "/home/appuser/.terraform.d/plugin-cache", readOnly = false },
+      { sourceVolume = "pulumi-home", containerPath = "/home/appuser/.pulumi", readOnly = false },
+    ]
 
     environment = [
       { name = "ENVIRONMENT", value = var.environment },
+      { name = "SECRETS_KMS_KEY_ARN", value = var.secrets_manager_kms_key_arn },
       { name = "AWS_REGION", value = local.region },
       { name = "DB_HOST", value = var.db_host },
       { name = "DB_PORT", value = tostring(var.db_port) },
@@ -34,7 +83,6 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "WINDOWS_AMI_ID", value = var.windows_ami_id },
       { name = "DC_AMI_ID", value = var.dc_ami_id },
       { name = "DC_DOMAIN_NAME", value = var.dc_domain_name },
-      { name = "DC_DOMAIN_PASSWORD", value = var.dc_domain_password },
       { name = "AGENT_S3_BUCKET", value = var.agent_s3_bucket },
       { name = "S3_ENDPOINT_ID", value = var.s3_endpoint_id },
       { name = "FIREWALL_ENDPOINT_ID", value = var.firewall_endpoint_id },
@@ -55,6 +103,13 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
       # Messaging (SNS for range events)
       { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
+    ]
+
+    secrets = [
+      {
+        name      = "DC_DOMAIN_PASSWORD"
+        valueFrom = aws_secretsmanager_secret.dc_domain_password.arn
+      }
     ]
 
     logConfiguration = {

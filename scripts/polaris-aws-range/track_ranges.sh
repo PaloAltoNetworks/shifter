@@ -39,6 +39,7 @@ while true; do
     echo
 
     # Range instances
+    # shellcheck disable=SC2016  # Backticks are JMESPath literals, not shell substitutions.
     aws ec2 describe-instances \
         --profile "$PROFILE" --region "$REGION" \
         --filters "Name=image-id,Values=$AMI" "Name=instance-state-name,Values=running,pending,stopping" \
@@ -54,6 +55,7 @@ while true; do
     # Stopped DC1 windows instances (per-range)
     echo
     echo "dc01 windows instances (per-range):"
+    # shellcheck disable=SC2016  # Backticks are JMESPath literals, not shell substitutions.
     aws ec2 describe-instances \
         --profile "$PROFILE" --region "$REGION" \
         --filters "Name=tag:Name,Values=dc01" "Name=tag-key,Values=shifter:range_id" "Name=instance-state-name,Values=running,pending,stopping" \

@@ -115,67 +115,79 @@ def _check_cidr(value: str) -> str | None:
     return None
 
 
+def _collect_cidr_violations_on_line(path: Path, idx: int, raw: str) -> list[Violation]:
+    """Return any CIDR-block violations found on a single ingress line."""
+    out: list[Violation] = []
+    m = _CIDR_BLOCKS_RE.match(raw)
+    if not m:
+        return out
+    for item in _parse_cidr_block_items(m.group("items")):
+        reason = _check_cidr(item)
+        if reason is not None:
+            out.append(Violation(path, idx, item, reason))
+    return out
+
+
+class _ParserState:
+    """Mutable per-file scan state for `check_file`'s line walker."""
+
+    def __init__(self) -> None:
+        self.in_resource: str | None = None
+        self.resource_brace_depth = 0
+        self.in_inline_ingress_block = False
+        self.ingress_brace_depth = 0
+        self.is_security_group_rule_ingress = False
+
+    def reset_resource(self) -> None:
+        self.in_resource = None
+        self.in_inline_ingress_block = False
+        self.is_security_group_rule_ingress = False
+
+
+def _enter_resource_if_match(state: _ParserState, raw: str) -> bool:
+    """If `raw` opens a new resource block, record it. Return True iff so."""
+    m = _RESOURCE_RE.match(raw)
+    if not m:
+        return False
+    state.in_resource = m.group(1)
+    state.resource_brace_depth = raw.count("{") - raw.count("}")
+    state.is_security_group_rule_ingress = False
+    return True
+
+
 def check_file(path: Path) -> list[Violation]:
     violations: list[Violation] = []
     text = path.read_text()
-    lines = text.splitlines()
+    state = _ParserState()
 
-    in_resource: str | None = None
-    resource_brace_depth = 0
-
-    in_ingress = False
-    ingress_brace_depth = 0
-    in_inline_ingress_block = False
-    is_security_group_rule_ingress = False
-
-    for idx, raw in enumerate(lines, start=1):
-        if in_resource is None:
-            m = _RESOURCE_RE.match(raw)
-            if m:
-                in_resource = m.group(1)
-                resource_brace_depth = raw.count("{") - raw.count("}")
-                in_ingress = False
-                is_security_group_rule_ingress = False
+    for idx, raw in enumerate(text.splitlines(), start=1):
+        if state.in_resource is None:
+            _enter_resource_if_match(state, raw)
             continue
 
-        resource_brace_depth += raw.count("{") - raw.count("}")
-        if resource_brace_depth <= 0:
-            in_resource = None
-            in_ingress = False
-            in_inline_ingress_block = False
-            is_security_group_rule_ingress = False
+        state.resource_brace_depth += raw.count("{") - raw.count("}")
+        if state.resource_brace_depth <= 0:
+            state.reset_resource()
             continue
 
-        if in_resource == "aws_security_group_rule":
+        if state.in_resource == "aws_security_group_rule":
             if _TYPE_INGRESS_RE.match(raw):
-                is_security_group_rule_ingress = True
-            if is_security_group_rule_ingress:
-                m = _CIDR_BLOCKS_RE.match(raw)
-                if m:
-                    for item in _parse_cidr_block_items(m.group("items")):
-                        reason = _check_cidr(item)
-                        if reason is not None:
-                            violations.append(
-                                Violation(path, idx, item, reason)
-                            )
+                state.is_security_group_rule_ingress = True
+            if state.is_security_group_rule_ingress:
+                violations.extend(_collect_cidr_violations_on_line(path, idx, raw))
             continue
 
         # aws_security_group: only check inside `ingress { ... }` inline blocks.
-        if not in_inline_ingress_block and _INGRESS_BLOCK_RE.match(raw):
-            in_inline_ingress_block = True
-            ingress_brace_depth = raw.count("{") - raw.count("}")
+        if not state.in_inline_ingress_block and _INGRESS_BLOCK_RE.match(raw):
+            state.in_inline_ingress_block = True
+            state.ingress_brace_depth = raw.count("{") - raw.count("}")
             continue
 
-        if in_inline_ingress_block:
-            ingress_brace_depth += raw.count("{") - raw.count("}")
-            m = _CIDR_BLOCKS_RE.match(raw)
-            if m:
-                for item in _parse_cidr_block_items(m.group("items")):
-                    reason = _check_cidr(item)
-                    if reason is not None:
-                        violations.append(Violation(path, idx, item, reason))
-            if ingress_brace_depth <= 0:
-                in_inline_ingress_block = False
+        if state.in_inline_ingress_block:
+            state.ingress_brace_depth += raw.count("{") - raw.count("}")
+            violations.extend(_collect_cidr_violations_on_line(path, idx, raw))
+            if state.ingress_brace_depth <= 0:
+                state.in_inline_ingress_block = False
 
     return violations
 

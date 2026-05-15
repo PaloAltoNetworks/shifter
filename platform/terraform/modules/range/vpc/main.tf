@@ -17,7 +17,6 @@ locals {
 # VPC
 # ------------------------------------------------------------------------------
 
-# checkov:skip=CKV2_AWS_12:Default SG restriction deferred - see #221
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -25,6 +24,22 @@ resource "aws_vpc" "this" {
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-vpc"
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Default Security Group — deny all
+# ------------------------------------------------------------------------------
+# Adopts the AWS-created default security group and removes the permissive
+# default rules (open intra-SG ingress, open egress). All range traffic flows
+# through named security groups and the Network Firewall; the default SG must
+# never be attached to any workload. Satisfies Checkov CKV2_AWS_12.
+
+resource "aws_default_security_group" "this" {
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-default-sg-deny-all"
   })
 }
 

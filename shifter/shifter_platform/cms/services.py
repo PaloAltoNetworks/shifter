@@ -37,6 +37,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _validate_caller_user(user: Any, fn_name: str) -> None:
+    """Reject None/wrong-type/unsaved User; raise the canonical TypeError/ValueError.
+
+    Used by every service entrypoint that takes `user: User` so the
+    boilerplate user-input gate lives in one place. Keeps callers below the
+    per-function complexity ceiling.
+    """
+    if user is None:
+        logger.error("%s called with None user", fn_name)
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error("%s called with invalid user type: %s", fn_name, type(user).__name__)
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("%s called with unsaved user (id=None)", fn_name)
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _validate_nonneg_int_id(value: Any, name: str, fn_name: str, user_id: Any) -> None:
+    """Reject None/wrong-type/negative int IDs; raise canonical TypeError/ValueError."""
+    if value is None:
+        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        raise TypeError(f"{name} cannot be None")
+    if not isinstance(value, int):
+        logger.error(
+            "%s called with invalid %s type: %s",
+            fn_name,
+            name,
+            type(value).__name__,
+        )
+        msg = f"{name} must be an int, got {type(value).__name__}"
+        raise TypeError(msg)
+    if value < 0:
+        logger.error(
+            "%s called with negative %s=%s for user_id=%s",
+            fn_name,
+            name,
+            value,
+            user_id,
+        )
+        raise ValueError(f"{name} must be non-negative")
+
+
 # =============================================================================
 # Agents
 # =============================================================================
@@ -67,21 +111,7 @@ def create_agent(user: User, **kwargs: Any) -> AgentConfig:
         AssetError: If the operating system is not found
     """
     # Input validation - user
-    if user is None:
-        logger.error("create_agent called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "create_agent called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("create_agent called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "create_agent")
 
     logger.debug("create_agent called for user_id=%s", user.id)
 
@@ -141,21 +171,7 @@ def delete_agent(user: User, agent_id: int) -> None:
         AssetError: If S3 delete fails
     """
     # Input validation - user
-    if user is None:
-        logger.error("delete_agent called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "delete_agent called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("delete_agent called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "delete_agent")
 
     # Input validation - agent_id
     if agent_id is None:
@@ -209,6 +225,62 @@ def delete_agent(user: User, agent_id: int) -> None:
         raise
 
 
+def _validate_listing_user(user: User, fn_name: str) -> None:
+    """Validate `user` is suitable for a list-style query; raise on failure."""
+    if user is None:
+        logger.error("%s called with None user", fn_name)
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error("%s called with invalid user type: %s", fn_name, type(user).__name__)
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("%s called with unsaved user (id=None)", fn_name)
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _agent_projection_dict(agent: Any) -> dict[str, Any]:
+    """Build the agent projection dict; verify the model shape on the way out.
+
+    Centralizes the per-agent type-shape contract that `list_agents` enforces
+    on its return rows, keeping the caller below the per-function complexity
+    ceiling.
+    """
+    if not (hasattr(agent, "id") and hasattr(agent, "name") and hasattr(agent, "os")):
+        raise TypeError("Model returned invalid agent object")
+    projection = {
+        "id": agent.id,
+        "name": agent.name,
+        "os_name": agent.os.name,
+        "os_slug": agent.os.slug,
+        "file_size_mb": agent.file_size_mb,
+        "original_filename": agent.original_filename,
+        "created_at": agent.created_at,
+        "agent_type": agent.agent_type,
+        "agent_type_display": agent.get_agent_type_display(),
+    }
+    _assert_agent_projection_shape(projection)
+    return projection
+
+
+def _assert_agent_projection_shape(projection: dict[str, Any]) -> None:
+    """Assert the projection dict satisfies the documented downstream contract."""
+    if not isinstance(projection["id"], int):
+        raise TypeError("agent.id must be int")
+    if not isinstance(projection["name"], str) or not projection["name"]:
+        raise TypeError("agent.name must be non-empty str")
+    if not isinstance(projection["os_name"], str) or not projection["os_name"]:
+        raise TypeError("agent.os.name must be non-empty str")
+    if not isinstance(projection["os_slug"], str) or not projection["os_slug"]:
+        raise TypeError("agent.os.slug must be non-empty str")
+    if not isinstance(projection["file_size_mb"], (int, float)):
+        raise TypeError("agent.file_size_mb must be number")
+    if not isinstance(projection["original_filename"], str) or not projection["original_filename"]:
+        raise TypeError("agent.original_filename must be non-empty str")
+    if projection["created_at"] is None:
+        raise TypeError("agent.created_at must not be None")
+
+
 def list_agents(user: User) -> list[dict[str, Any]]:
     """Get user's agents as projection dicts.
 
@@ -223,108 +295,17 @@ def list_agents(user: User) -> list[dict[str, Any]]:
         TypeError: If user is None or invalid type
         ValueError: If user has no ID (unsaved)
     """
-    # Input validation
-    if user is None:
-        logger.error("list_agents called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_agents called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_agents called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_listing_user(user, "list_agents")
 
     logger.debug("list_agents called for user_id=%s", user.id)
 
     try:
         result = AgentConfig.active_for_user(user).select_related("os")
-
-        # Validate response from model
         if result is None:
-            logger.error(
-                "list_agents: model returned None for user_id=%s",
-                user.id,
-            )
+            logger.error("list_agents: model returned None for user_id=%s", user.id)
             raise TypeError("Model returned None instead of iterable")
 
-        # Convert to projection dicts with validation
-        agents = []
-        for agent in result:
-            # Validate agent has required attributes
-            has_id = hasattr(agent, "id")
-            has_name = hasattr(agent, "name")
-            has_os = hasattr(agent, "os")
-            if not (has_id and has_name and has_os):
-                logger.error(
-                    "list_agents: invalid agent object in result for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("Model returned invalid agent object")
-
-            agent_dict = {
-                "id": agent.id,
-                "name": agent.name,
-                "os_name": agent.os.name,
-                "os_slug": agent.os.slug,
-                "file_size_mb": agent.file_size_mb,
-                "original_filename": agent.original_filename,
-                "created_at": agent.created_at,
-                "agent_type": agent.agent_type,
-                "agent_type_display": agent.get_agent_type_display(),
-            }
-
-            # Validate dict values are non-empty and correct types
-            if not isinstance(agent_dict["id"], int):
-                logger.error(
-                    "list_agents: agent.id is not int for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.id must be int")
-            if not isinstance(agent_dict["name"], str) or not agent_dict["name"]:
-                logger.error(
-                    "list_agents: agent.name is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.name must be non-empty str")
-            if not isinstance(agent_dict["os_name"], str) or not agent_dict["os_name"]:
-                logger.error(
-                    "list_agents: agent.os.name is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.os.name must be non-empty str")
-            if not isinstance(agent_dict["os_slug"], str) or not agent_dict["os_slug"]:
-                logger.error(
-                    "list_agents: agent.os.slug is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.os.slug must be non-empty str")
-            if not isinstance(agent_dict["file_size_mb"], (int, float)):
-                logger.error(
-                    "list_agents: agent.file_size_mb is not number for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.file_size_mb must be number")
-            if not isinstance(agent_dict["original_filename"], str) or not agent_dict["original_filename"]:
-                logger.error(
-                    "list_agents: agent.original_filename is not non-empty str for user_id=%s",
-                    user.id,
-                )
-                msg = "agent.original_filename must be non-empty str"
-                raise TypeError(msg)
-            if agent_dict["created_at"] is None:
-                logger.error(
-                    "list_agents: agent.created_at is None for user_id=%s",
-                    user.id,
-                )
-                raise TypeError("agent.created_at must not be None")
-
-            agents.append(agent_dict)
+        agents = [_agent_projection_dict(agent) for agent in result]
 
         logger.debug(
             "list_agents returning %d agents for user_id=%s",
@@ -334,13 +315,9 @@ def list_agents(user: User) -> list[dict[str, Any]]:
         return agents
 
     except TypeError:
-        # Re-raise TypeErrors (our validation errors)
         raise
     except Exception:
-        logger.exception(
-            "Error in list_agents for user_id=%s",
-            user.id,
-        )
+        logger.exception("Error in list_agents for user_id=%s", user.id)
         raise
 
 
@@ -361,46 +338,8 @@ def get_agent(user: User, agent_id: int) -> AgentConfig:
     """
     from cms.exceptions import CMSError
 
-    # Input validation - user
-    if user is None:
-        logger.error("get_agent called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_agent called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_agent called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - agent_id
-    if agent_id is None:
-        logger.error(
-            "get_agent called with None agent_id for user_id=%s",
-            user.id,
-        )
-        raise TypeError("agent_id cannot be None")
-
-    if not isinstance(agent_id, int):
-        logger.error(
-            "get_agent called with invalid agent_id type: %s",
-            type(agent_id).__name__,
-        )
-        msg = f"agent_id must be an int, got {type(agent_id).__name__}"
-        raise TypeError(msg)
-
-    if agent_id < 0:
-        logger.error(
-            "get_agent called with negative agent_id=%s for user_id=%s",
-            agent_id,
-            user.id,
-        )
-        raise ValueError("agent_id must be non-negative")
+    _validate_caller_user(user, "get_agent")
+    _validate_nonneg_int_id(agent_id, "agent_id", "get_agent", user.id)
 
     logger.debug(
         "get_agent called for user_id=%s, agent_id=%s",
@@ -512,21 +451,7 @@ def create_credential(user: User, credential_type_slug: str, **kwargs: Any) -> C
     from shared.schemas import CredentialRef
 
     # Input validation - user
-    if user is None:
-        logger.error("create_credential called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "create_credential called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("create_credential called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "create_credential")
 
     # Input validation - credential_type_slug
     if credential_type_slug is None:
@@ -640,21 +565,7 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
     from shared.schemas import CredentialRef
 
     # Input validation - user
-    if user is None:
-        logger.error("delete_credential called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "delete_credential called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("delete_credential called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "delete_credential")
 
     # Input validation - credential_id
     if credential_id is None:
@@ -692,7 +603,6 @@ def delete_credential(user: User, credential_id: int) -> CredentialRef:
             credential = Credential.objects.get(
                 id=credential_id,
                 user=user,
-                deleted_at__isnull=True,
             )
         except Credential.DoesNotExist:
             logger.error(
@@ -768,21 +678,7 @@ def list_credentials(user: User) -> list[CredentialContext]:
     )
 
     # Input validation
-    if user is None:
-        logger.error("list_credentials called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_credentials called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_credentials called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "list_credentials")
 
     logger.debug("list_credentials called for user_id=%s", user.id)
 
@@ -790,7 +686,6 @@ def list_credentials(user: User) -> list[CredentialContext]:
         credentials = (
             Credential.objects.filter(
                 user=user,
-                deleted_at__isnull=True,
             )
             .select_related("credential_type")
             .order_by("-created_at")
@@ -877,21 +772,7 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
     from shared.schemas import DeploymentProfileContext, SCMCredentialContext
 
     # Input validation - user
-    if user is None:
-        logger.error("get_credential called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_credential called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_credential called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "get_credential")
 
     # Input validation - credential_id
     if credential_id is None:
@@ -927,7 +808,6 @@ def get_credential(user: User, credential_id: int) -> CredentialContext:
         cred = Credential.objects.select_related("credential_type").get(
             id=credential_id,
             user=user,
-            deleted_at__isnull=True,
         )
     except Credential.DoesNotExist:
         logger.error(
@@ -1011,21 +891,7 @@ def list_ranges(user: User) -> list[RangeInstance]:
         ValueError: If user has no ID (unsaved)
     """
     # Input validation
-    if user is None:
-        logger.error("list_ranges called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_ranges called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_ranges called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "list_ranges")
 
     logger.debug("list_ranges called for user_id=%s", user.id)
 
@@ -1087,21 +953,7 @@ def get_range(user: User, range_id: int) -> RangeInstance:
     from cms.exceptions import CMSError
 
     # Input validation - user
-    if user is None:
-        logger.error("get_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "get_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -1186,6 +1038,40 @@ def get_range(user: User, range_id: int) -> RangeInstance:
         raise
 
 
+def _instance_contexts_from_range_spec(
+    range_spec: dict[str, Any] | None,
+    instance_context_cls: type,
+) -> list[Any]:
+    """Flatten a stored range_spec into a list of `InstanceContext` rows.
+
+    Accepts two on-disk shapes:
+    - Current: instances nested under subnets (`range_spec["subnets"][*]["instances"]`)
+    - Legacy: a flat `range_spec["instances"]` list (preserved for backward
+      compatibility with existing prod rows)
+
+    The `instance_context_cls` is passed in so this helper has no
+    cross-layer model import; the caller already imports it from
+    `shared.schemas`.
+    """
+    if not range_spec:
+        return []
+
+    def to_context(spec: dict[str, Any]) -> Any:
+        return instance_context_cls(
+            uuid=spec.get("uuid"),
+            name=spec.get("name", ""),
+            role=spec["role"],
+            os_type=spec["os_type"],
+            join_domain=spec.get("join_domain", False),
+        )
+
+    if "subnets" in range_spec:
+        return [to_context(spec) for subnet in range_spec["subnets"] for spec in subnet.get("instances", [])]
+    if "instances" in range_spec:
+        return [to_context(spec) for spec in range_spec["instances"]]
+    return []
+
+
 def get_active_range(user: User) -> RangeContext | None:
     """Get user's active (non-deleted) range as a RangeContext projection.
 
@@ -1236,7 +1122,7 @@ def get_active_range(user: User) -> RangeContext | None:
         from shared.enums import ResourceStatus
 
         instance = (
-            RangeInstance.active.filter(user_id=user.id)
+            RangeInstance.objects.filter(user_id=user.id)
             .exclude(status=ResourceStatus.DESTROYING.value)
             .order_by("-created_at")
             .first()
@@ -1261,32 +1147,7 @@ def get_active_range(user: User) -> RangeContext | None:
         # Get instance data from stored range_spec
         # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
         # Legacy format: instances directly at range_spec["instances"]
-        instance_contexts = []
-        if instance.range_spec:
-            if "subnets" in instance.range_spec:
-                for subnet in instance.range_spec["subnets"]:
-                    for spec in subnet.get("instances", []):
-                        instance_contexts.append(
-                            InstanceContext(
-                                uuid=spec.get("uuid"),
-                                name=spec.get("name", ""),
-                                role=spec["role"],
-                                os_type=spec["os_type"],
-                                join_domain=spec.get("join_domain", False),
-                            )
-                        )
-            elif "instances" in instance.range_spec:
-                # Legacy flat format for backward compatibility with existing prod data
-                for spec in instance.range_spec["instances"]:
-                    instance_contexts.append(
-                        InstanceContext(
-                            uuid=spec.get("uuid"),
-                            name=spec.get("name", ""),
-                            role=spec["role"],
-                            os_type=spec["os_type"],
-                            join_domain=spec.get("join_domain", False),
-                        )
-                    )
+        instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext)
 
         # Get agent_name from FK if exists
         agent_name = instance.agent.name if instance.agent else None
@@ -1337,19 +1198,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     from shared.enums import ResourceStatus
     from shared.schemas import InstanceContext, RangeContext
 
-    # Input validation
-    if user is None:
-        logger.error("get_range_by_request_id called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_range_by_request_id called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
+    _validate_caller_user(user, "get_range_by_request_id")
     if not request_id:
         logger.error("get_range_by_request_id called with empty request_id")
         raise CMSError("request_id is required")
@@ -1378,35 +1227,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     if instance.request is None:
         raise CMSError("Range has no associated request")
 
-    # Build instance contexts from range_spec
-    # New format: instances nested under subnets: range_spec["subnets"][*]["instances"]
-    # Legacy format: instances directly at range_spec["instances"]
-    instance_contexts = []
-    if instance.range_spec:
-        if "subnets" in instance.range_spec:
-            for subnet in instance.range_spec["subnets"]:
-                for spec in subnet.get("instances", []):
-                    instance_contexts.append(
-                        InstanceContext(
-                            uuid=spec.get("uuid"),
-                            name=spec.get("name", ""),
-                            role=spec["role"],
-                            os_type=spec["os_type"],
-                            join_domain=spec.get("join_domain", False),
-                        )
-                    )
-        elif "instances" in instance.range_spec:
-            # Legacy flat format for backward compatibility with existing prod data
-            for spec in instance.range_spec["instances"]:
-                instance_contexts.append(
-                    InstanceContext(
-                        uuid=spec.get("uuid"),
-                        name=spec.get("name", ""),
-                        role=spec["role"],
-                        os_type=spec["os_type"],
-                        join_domain=spec.get("join_domain", False),
-                    )
-                )
+    instance_contexts = _instance_contexts_from_range_spec(instance.range_spec, InstanceContext)
 
     # Get agent_name from FK if exists
     agent_name = instance.agent.name if instance.agent else None
@@ -1419,6 +1240,206 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         status=ResourceStatus(instance.status),
         instances=instance_contexts,
         agent_name=agent_name,
+    )
+
+
+def _validate_create_range_user(user: User) -> None:
+    """Validate the ``user`` argument shape for create_range."""
+    if user is None:
+        logger.error("create_range called with None user")
+        raise TypeError(USER_CANNOT_BE_NONE)
+    if not hasattr(user, "id"):
+        logger.error(
+            "create_range called with invalid user type: %s",
+            type(user).__name__,
+        )
+        msg = f"user must be a User instance, got {type(user).__name__}"
+        raise TypeError(msg)
+    if user.id is None:
+        logger.error("create_range called with unsaved user (id=None)")
+        raise ValueError(USER_MUST_BE_SAVED)
+
+
+def _validate_create_range_scenario(user: User, scenario: str) -> None:
+    """Validate the ``scenario`` argument shape for create_range."""
+    if scenario is None:
+        logger.error(
+            "create_range called with None scenario for user_id=%s",
+            user.id,
+        )
+        raise ValueError("scenario cannot be None")
+    if not isinstance(scenario, str) or not scenario:
+        logger.error(
+            "create_range called with invalid scenario '%s' for user_id=%s",
+            scenario,
+            user.id,
+        )
+        raise ValueError("scenario must be a non-empty string")
+
+
+def _validate_create_range_agents_by_os(user: User, agents_by_os: dict[str, int]) -> None:
+    """Validate the ``agents_by_os`` argument shape for create_range."""
+    if agents_by_os is None:
+        logger.error(
+            "create_range called with None agents_by_os for user_id=%s",
+            user.id,
+        )
+        raise TypeError("agents_by_os cannot be None")
+    if not isinstance(agents_by_os, dict):
+        logger.error(
+            "create_range called with invalid agents_by_os type: %s",
+            type(agents_by_os).__name__,
+        )
+        msg = f"agents_by_os must be a dict, got {type(agents_by_os).__name__}"
+        raise TypeError(msg)
+
+
+def _assert_no_active_range(user: User) -> None:
+    """Raise CMSError if the user already has an active range."""
+    from cms.exceptions import CMSError
+
+    existing = get_active_range(user)
+    if existing:
+        logger.warning(
+            "create_range: user_id=%s already has active range request_id=%s",
+            user.id,
+            existing.range_id,
+        )
+        msg = "You already have an active range. Please destroy it before creating a new one."
+        raise CMSError(msg)
+
+
+def _load_scenario_template_or_raise(scenario: str) -> Any:
+    """Return the scenario template or raise CMSError if not found."""
+    from cms.exceptions import CMSError
+    from cms.scenarios.registry import load_scenario_template as load_scenario
+
+    try:
+        return load_scenario(scenario)
+    except ValueError as e:
+        logger.error("create_range: scenario '%s' not found", scenario)
+        raise CMSError(str(e)) from e
+
+
+def _check_scenario_agent_requirements(scenario: str, requirements: dict, agents_by_os: dict[str, int]) -> None:
+    """Raise CMSError when scenario requirements are not met by agents_by_os."""
+    from cms.exceptions import CMSError
+
+    if requirements["requires_windows"] and "windows" not in agents_by_os:
+        raise CMSError(f"Scenario '{scenario}' requires a Windows agent")
+    if requirements["requires_linux"] and "linux" not in agents_by_os:
+        raise CMSError(f"Scenario '{scenario}' requires a Linux agent")
+    if requirements["has_from_agent"] and not agents_by_os:
+        raise CMSError(f"Scenario '{scenario}' requires at least one agent")
+
+
+def _lookup_agents_by_os(user: User, agents_by_os: dict[str, int]) -> dict[str, AgentConfig]:
+    """Resolve each agent ID to an AgentConfig owned by the user."""
+    return {os_type: get_agent(user, aid) for os_type, aid in agents_by_os.items()}
+
+
+def _create_cms_request_and_dispatch_engine(user: User, range_spec: Any) -> tuple[UUID, Any]:
+    """Create the CMS Request row, dispatch the engine, return (request_id, cms_request)."""
+    from uuid import uuid4
+
+    from cms.models import Request
+    from shared.enums import RequestType
+    from shared.schemas import RequestSpec
+
+    request_id = uuid4()
+    cms_request = Request.objects.create(
+        request_id=request_id,
+        request_type=RequestType.RANGE.value,
+        user=user,
+    )
+    logger.info(
+        "create_range: created CMS Request id=%s for user_id=%s",
+        request_id,
+        user.id,
+    )
+    request_spec = RequestSpec(
+        request_id=request_id,
+        user_id=user.id,
+        items=[range_spec],
+    )
+    engine_create_range(request_spec)
+    return request_id, cms_request
+
+
+def _persist_range_instance_record(
+    cms_request: Any,
+    scenario: str,
+    user: User,
+    agents: dict[str, AgentConfig],
+    range_spec: Any,
+) -> None:
+    """Persist the RangeInstance row tying the CMS Request to the hydrated spec."""
+    from cms.models import RangeInstance
+
+    # Store first agent for backward compatibility (field is nullable).
+    first_agent = next(iter(agents.values()), None)
+    RangeInstance.objects.create(
+        request=cms_request,
+        scenario_id=scenario,
+        user_id=user.id,
+        agent=first_agent,
+        range_spec=range_spec.model_dump(mode="json"),
+    )
+
+
+def _audit_range_provision(
+    request_id: UUID,
+    scenario: str,
+    user: User,
+    agents: dict[str, AgentConfig],
+    ngfw_enabled: bool,
+) -> None:
+    """Write the audit-log entry for a successful create_range request."""
+    audit_log(
+        entity_type=AuditLog.EntityType.RANGE,
+        entity_id=0,  # Range ID not yet assigned at this point.
+        action=AuditLog.Action.PROVISION,
+        actor_type=AuditLog.ActorType.USER,
+        actor_id=user.id,
+        new_state={
+            "request_id": str(request_id),
+            "scenario": scenario,
+            "agents": {os_type: a.name for os_type, a in agents.items()},
+            "ngfw_enabled": ngfw_enabled,
+        },
+        request_id=str(request_id),
+    )
+
+
+def _build_range_context_for_create(
+    request_id: UUID,
+    scenario: str,
+    user: User,
+    range_spec: Any,
+    agents: dict[str, AgentConfig],
+) -> RangeContext:
+    """Build the RangeContext projection returned by create_range."""
+    from shared.schemas import InstanceContext, RangeContext
+
+    instance_contexts = [
+        InstanceContext(
+            uuid=spec.uuid,
+            name=spec.name or "",
+            role=spec.role,
+            os_type=spec.os_type,
+            join_domain=spec.join_domain,
+        )
+        for spec in range_spec.all_instances
+    ]
+    agent_names = ", ".join(a.name for a in agents.values())
+    return RangeContext(
+        request_id=request_id,
+        range_id=None,  # Legacy field, use request_id for new ranges.
+        scenario_id=scenario,
+        user_id=user.id,
+        status=ResourceStatus.PROVISIONING,
+        instances=instance_contexts,
+        agent_name=agent_names,
     )
 
 
@@ -1451,58 +1472,11 @@ def create_range(
             requirements not met
     """
     from cms.exceptions import CMSError
-    from cms.models import RangeInstance
     from cms.scenarios.hydrator import hydrate_scenario
-    from cms.scenarios.registry import load_scenario_template as load_scenario
 
-    # Input validation - user
-    if user is None:
-        logger.error("create_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "create_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("create_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - scenario
-    if scenario is None:
-        logger.error(
-            "create_range called with None scenario for user_id=%s",
-            user.id,
-        )
-        raise ValueError("scenario cannot be None")
-
-    if not isinstance(scenario, str) or not scenario:
-        logger.error(
-            "create_range called with invalid scenario '%s' for user_id=%s",
-            scenario,
-            user.id,
-        )
-        raise ValueError("scenario must be a non-empty string")
-
-    # Input validation - agents_by_os
-    if agents_by_os is None:
-        logger.error(
-            "create_range called with None agents_by_os for user_id=%s",
-            user.id,
-        )
-        raise TypeError("agents_by_os cannot be None")
-
-    if not isinstance(agents_by_os, dict):
-        logger.error(
-            "create_range called with invalid agents_by_os type: %s",
-            type(agents_by_os).__name__,
-        )
-        msg = f"agents_by_os must be a dict, got {type(agents_by_os).__name__}"
-        raise TypeError(msg)
+    _validate_create_range_user(user)
+    _validate_create_range_scenario(user, scenario)
+    _validate_create_range_agents_by_os(user, agents_by_os)
 
     logger.debug(
         "create_range called for user_id=%s, scenario=%s, agents_by_os=%s, ngfw_enabled=%s",
@@ -1513,96 +1487,18 @@ def create_range(
     )
 
     try:
-        # 0. Check user doesn't already have an active range
-        existing = get_active_range(user)
-        if existing:
-            logger.warning(
-                "create_range: user_id=%s already has active range request_id=%s",
-                user.id,
-                existing.range_id,
-            )
-            msg = "You already have an active range. Please destroy it before creating a new one."
-            raise CMSError(msg)
+        _assert_no_active_range(user)
 
-        # 1. Load scenario and get requirements
-        try:
-            scenario_template = load_scenario(scenario)
-        except ValueError as e:
-            logger.error("create_range: scenario '%s' not found", scenario)
-            raise CMSError(str(e)) from e
+        scenario_template = _load_scenario_template_or_raise(scenario)
         requirements = scenario_template.get_agent_requirements()
+        _check_scenario_agent_requirements(scenario, requirements, agents_by_os)
 
-        # 2. Validate we have all required agents
-        if requirements["requires_windows"] and "windows" not in agents_by_os:
-            raise CMSError(f"Scenario '{scenario}' requires a Windows agent")
-        if requirements["requires_linux"] and "linux" not in agents_by_os:
-            raise CMSError(f"Scenario '{scenario}' requires a Linux agent")
-        if requirements["has_from_agent"] and not agents_by_os:
-            raise CMSError(f"Scenario '{scenario}' requires at least one agent")
-
-        # 3. Look up each agent (validates ownership and not deleted)
-        agents: dict[str, AgentConfig] = {}
-        for os_type, aid in agents_by_os.items():
-            agents[os_type] = get_agent(user, aid)
-
-        # 4. Hydrate scenario with agent details
+        agents = _lookup_agents_by_os(user, agents_by_os)
         range_spec = hydrate_scenario(scenario, user.id, agents)
 
-        # 5. Create CMS Request record
-        from uuid import uuid4
-
-        from cms.models import Request
-        from shared.enums import RequestType
-        from shared.schemas import RequestSpec
-
-        request_id = uuid4()
-        cms_request = Request.objects.create(
-            request_id=request_id,
-            request_type=RequestType.RANGE.value,
-            user=user,
-        )
-
-        logger.info(
-            "create_range: created CMS Request id=%s for user_id=%s",
-            request_id,
-            user.id,
-        )
-
-        # 6. Wrap RangeSpec in RequestSpec and call engine
-        request_spec = RequestSpec(
-            request_id=request_id,
-            user_id=user.id,
-            items=[range_spec],
-        )
-
-        engine_create_range(request_spec)
-
-        # 7. Store RangeInstance record with request FK
-        # Store first agent for backward compatibility (field is nullable)
-        first_agent = next(iter(agents.values()), None)
-        RangeInstance.objects.create(
-            request=cms_request,
-            scenario_id=scenario,
-            user_id=user.id,
-            agent=first_agent,
-            range_spec=range_spec.model_dump(mode="json"),
-        )
-
-        # Audit log range provisioning request
-        audit_log(
-            entity_type=AuditLog.EntityType.RANGE,
-            entity_id=0,  # Range ID not yet assigned
-            action=AuditLog.Action.PROVISION,
-            actor_type=AuditLog.ActorType.USER,
-            actor_id=user.id,
-            new_state={
-                "request_id": str(request_id),
-                "scenario": scenario,
-                "agents": {os_type: a.name for os_type, a in agents.items()},
-                "ngfw_enabled": ngfw_enabled,
-            },
-            request_id=str(request_id),
-        )
+        request_id, cms_request = _create_cms_request_and_dispatch_engine(user, range_spec)
+        _persist_range_instance_record(cms_request, scenario, user, agents, range_spec)
+        _audit_range_provision(request_id, scenario, user, agents, ngfw_enabled)
 
         logger.debug(
             "create_range completed: request_id=%s, scenario=%s, user_id=%s",
@@ -1610,39 +1506,10 @@ def create_range(
             scenario,
             user.id,
         )
-
-        # 8. Return RangeContext projection with instances
-        # Engine always sets PROVISIONING status on creation
-        # Note: range_id is 0 for new Request-based ranges (use request_id for correlation)
-        from shared.schemas import InstanceContext, RangeContext
-
-        # Flatten instances from all subnets for RangeContext
-        instance_contexts = [
-            InstanceContext(
-                uuid=spec.uuid,
-                name=spec.name or "",
-                role=spec.role,
-                os_type=spec.os_type,
-                join_domain=spec.join_domain,
-            )
-            for spec in range_spec.all_instances
-        ]
-
-        # Format agent names for display
-        agent_names = ", ".join(a.name for a in agents.values())
-
-        return RangeContext(
-            request_id=request_id,
-            range_id=None,  # Legacy field, use request_id for new ranges
-            scenario_id=scenario,
-            user_id=user.id,
-            status=ResourceStatus.PROVISIONING,
-            instances=instance_contexts,
-            agent_name=agent_names,
-        )
+        return _build_range_context_for_create(request_id, scenario, user, range_spec, agents)
 
     except (TypeError, ValueError, CMSError):
-        # Re-raise known errors
+        # Re-raise known errors so callers see the original exception type.
         raise
     except Exception:
         logger.exception("Error in create_range for user_id=%s", user.id)
@@ -1670,21 +1537,7 @@ def destroy_range(user: User, range_id: int) -> None:
     """
 
     # Input validation - user
-    if user is None:
-        logger.error("destroy_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "destroy_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("destroy_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "destroy_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -1809,21 +1662,7 @@ def cancel_range(user: User, range_id: int) -> None:
     """
 
     # Input validation - user
-    if user is None:
-        logger.error("cancel_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "cancel_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("cancel_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "cancel_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -1894,6 +1733,19 @@ def cancel_range(user: User, range_id: int) -> None:
             raise CMSError(f"Range {range_id} has no associated request")
 
         engine_cancel_range_by_request(request_id)
+
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=range_id,
+            action=AuditLog.Action.CANCEL,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": ResourceStatus.DESTROYED.value,
+                "scenario": instance.scenario_id,
+            },
+            request_id=str(request_id),
+        )
     except (TypeError, ValueError, CMSError):
         # Re-raise known errors
         raise
@@ -2071,6 +1923,19 @@ def cancel_range_by_request_id(user: User, request_id: str) -> None:
         # Call Engine with request_id directly
         engine_cancel_range_by_request(instance.request.request_id)
 
+        audit_log(
+            entity_type=AuditLog.EntityType.RANGE,
+            entity_id=instance.id,
+            action=AuditLog.Action.CANCEL,
+            actor_type=AuditLog.ActorType.USER,
+            actor_id=user.id,
+            previous_state={
+                "status": ResourceStatus.DESTROYED.value,
+                "scenario": instance.scenario_id,
+            },
+            request_id=str(instance.request.request_id),
+        )
+
         logger.debug(
             "cancel_range_by_request_id completed: request_id=%s user_id=%s",
             request_id,
@@ -2106,21 +1971,7 @@ def pause_range(user: User, range_id: int) -> None:
         CMSError: If range not found, not owned by user, or not in pausable state
     """
     # Input validation - user
-    if user is None:
-        logger.error("pause_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "pause_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("pause_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "pause_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -2343,21 +2194,7 @@ def resume_range(user: User, range_id: int) -> None:
         CMSError: If range not found, not owned by user, or not in resumable state
     """
     # Input validation - user
-    if user is None:
-        logger.error("resume_range called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "resume_range called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("resume_range called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "resume_range")
 
     # Input validation - range_id
     if range_id is None:
@@ -2566,6 +2403,149 @@ def resume_range_by_request_id(user: User, request_id: str) -> None:
 # =============================================================================
 
 
+def _validate_nonempty_str(value: Any, name: str, fn_name: str, user_id: Any) -> str:
+    """Strip and validate a required non-empty string parameter."""
+    if value is None:
+        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        raise ValueError(f"{name} cannot be None")
+    stripped: str = value.strip()
+    if not stripped:
+        logger.error("%s called with empty %s for user_id=%s", fn_name, name, user_id)
+        raise ValueError(f"{name} cannot be empty")
+    return stripped
+
+
+def _validate_positive_int(value: Any, name: str, fn_name: str, user_id: Any) -> None:
+    """Validate a required positive int (> 0); raise canonical TypeError/ValueError."""
+    if value is None:
+        logger.error("%s called with None %s for user_id=%s", fn_name, name, user_id)
+        raise TypeError(f"{name} cannot be None")
+    if not isinstance(value, int):
+        logger.error(
+            "%s called with invalid %s type: %s",
+            fn_name,
+            name,
+            type(value).__name__,
+        )
+        msg = f"{name} must be an int, got {type(value).__name__}"
+        raise TypeError(msg)
+    if value <= 0:
+        logger.error("%s called with invalid %s=%s for user_id=%s", fn_name, name, value, user_id)
+        raise ValueError(f"{name} must be positive")
+
+
+def _validate_initiate_upload_inputs(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+) -> tuple[str, str]:
+    """Validate inputs for `initiate_upload` and return normalized (name, filename)."""
+    _validate_caller_user(user, "initiate_upload")
+    name = _validate_nonempty_str(name, "name", "initiate_upload", user.id)
+    filename = _validate_nonempty_str(filename, "filename", "initiate_upload", user.id)
+    _validate_positive_int(file_size, "file_size", "initiate_upload", user.id)
+    return name, filename
+
+
+def _initiate_upload_inner(
+    user: User,
+    name: str,
+    filename: str,
+    file_size: int,
+    agent_type: str,
+) -> dict[str, Any]:
+    """Quota check, extension validation, presigned-URL + upload-token issuance.
+
+    Split out of `initiate_upload` so that function carries only input
+    validation and exception-translation, keeping each below the per-function
+    complexity ceiling.
+    """
+    from django.conf import settings
+
+    from cms.assets.s3 import S3Error, generate_presigned_upload_url
+    from cms.assets.services import get_storage_used
+    from cms.assets.upload_token import generate_upload_token
+    from cms.assets.validation import ValidationError, validate_file_extension
+    from cms.exceptions import CMSError
+
+    current_usage = get_storage_used(user)
+    quota_bytes = settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
+    if current_usage + file_size > quota_bytes:
+        available_mb = (quota_bytes - current_usage) / 1024 / 1024
+        logger.error(
+            "initiate_upload: quota exceeded for user_id=%s - current=%s, requested=%s, quota=%s",
+            user.id,
+            current_usage,
+            file_size,
+            quota_bytes,
+        )
+        msg = (
+            f"Storage quota exceeded. You have {available_mb:.1f} MB "
+            f"available of {settings.AGENT_USER_STORAGE_QUOTA_MB} "
+            f"MB total."
+        )
+        raise CMSError(msg)
+
+    try:
+        file_format = validate_file_extension(filename)
+    except ValidationError as e:
+        logger.error(
+            "initiate_upload: validation error for user_id=%s - %s",
+            user.id,
+            str(e),
+        )
+        raise CMSError(str(e)) from e
+
+    try:
+        presigned_url, s3_key = generate_presigned_upload_url(
+            user_id=user.id,
+            filename=filename,
+        )
+    except S3Error as e:
+        logger.error(
+            "initiate_upload: S3 error for user_id=%s - %s",
+            user.id,
+            str(e),
+        )
+        raise CMSError("Failed to initiate upload") from e
+
+    # Agent installer formats always carry an os_slug — the shared FileFormat
+    # dataclass makes the field Optional for non-installer consumers (CTF),
+    # so narrow here.
+    os_slug = file_format.os_slug
+    if os_slug is None:
+        logger.error(
+            "initiate_upload: installer format missing os_slug for filename=%s",
+            filename,
+        )
+        raise CMSError("Internal error: installer format misconfigured")
+
+    upload_token = generate_upload_token(
+        user_id=user.id,
+        s3_key=s3_key,
+        name=name,
+        filename=filename,
+        os_slug=os_slug,
+        file_size=file_size,
+        agent_type=agent_type,
+    )
+
+    logger.debug(
+        "initiate_upload completed for user_id=%s, filename=%s, s3_key=%s",
+        user.id,
+        filename,
+        s3_key,
+    )
+
+    return {
+        "presigned_url": presigned_url,
+        "s3_key": s3_key,
+        "upload_token": upload_token,
+        "expected_os": file_format.os_slug,
+    }
+
+
 def initiate_upload(
     user: User,
     name: str,
@@ -2599,86 +2579,9 @@ def initiate_upload(
             file_size is invalid
         CMSError: If quota exceeded, invalid extension, or S3 error
     """
-    from django.conf import settings
-
-    from cms.assets.s3 import S3Error, generate_presigned_upload_url
-    from cms.assets.services import get_storage_used
-    from cms.assets.upload_token import generate_upload_token
-    from cms.assets.validation import ValidationError, validate_file_extension
     from cms.exceptions import CMSError
 
-    # Input validation - user
-    if user is None:
-        logger.error("initiate_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "initiate_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("initiate_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - name
-    if name is None:
-        logger.error(
-            "initiate_upload called with None name for user_id=%s",
-            user.id,
-        )
-        raise ValueError("name cannot be None")
-
-    name = name.strip()
-    if not name:
-        logger.error(
-            "initiate_upload called with empty name for user_id=%s",
-            user.id,
-        )
-        raise ValueError("name cannot be empty")
-
-    # Input validation - filename
-    if filename is None:
-        logger.error(
-            "initiate_upload called with None filename for user_id=%s",
-            user.id,
-        )
-        raise ValueError("filename cannot be None")
-
-    filename = filename.strip()
-    if not filename:
-        logger.error(
-            "initiate_upload called with empty filename for user_id=%s",
-            user.id,
-        )
-        raise ValueError("filename cannot be empty")
-
-    # Input validation - file_size
-    if file_size is None:
-        logger.error(
-            "initiate_upload called with None file_size for user_id=%s",
-            user.id,
-        )
-        raise TypeError("file_size cannot be None")
-
-    if not isinstance(file_size, int):
-        logger.error(
-            "initiate_upload called with invalid file_size type: %s",
-            type(file_size).__name__,
-        )
-        msg = f"file_size must be an int, got {type(file_size).__name__}"
-        raise TypeError(msg)
-
-    if file_size <= 0:
-        logger.error(
-            "initiate_upload called with invalid file_size=%s for user_id=%s",
-            file_size,
-            user.id,
-        )
-        raise ValueError("file_size must be positive")
+    name, filename = _validate_initiate_upload_inputs(user, name, filename, file_size)
 
     logger.debug(
         "initiate_upload called for user_id=%s, filename=%s, file_size=%s",
@@ -2688,77 +2591,8 @@ def initiate_upload(
     )
 
     try:
-        # Check storage quota
-        current_usage = get_storage_used(user)
-        quota_bytes = settings.AGENT_USER_STORAGE_QUOTA_MB * 1024 * 1024
-        if current_usage + file_size > quota_bytes:
-            available_mb = (quota_bytes - current_usage) / 1024 / 1024
-            logger.error(
-                "initiate_upload: quota exceeded for user_id=%s - current=%s, requested=%s, quota=%s",
-                user.id,
-                current_usage,
-                file_size,
-                quota_bytes,
-            )
-            msg = (
-                f"Storage quota exceeded. You have {available_mb:.1f} MB "
-                f"available of {settings.AGENT_USER_STORAGE_QUOTA_MB} "
-                f"MB total."
-            )
-            raise CMSError(msg)
-
-        # Validate file extension
-        try:
-            file_format = validate_file_extension(filename)
-        except ValidationError as e:
-            logger.error(
-                "initiate_upload: validation error for user_id=%s - %s",
-                user.id,
-                str(e),
-            )
-            raise CMSError(str(e)) from e
-
-        # Generate presigned URL
-        try:
-            presigned_url, s3_key = generate_presigned_upload_url(
-                user_id=user.id,
-                filename=filename,
-            )
-        except S3Error as e:
-            logger.error(
-                "initiate_upload: S3 error for user_id=%s - %s",
-                user.id,
-                str(e),
-            )
-            raise CMSError("Failed to initiate upload") from e
-
-        # Generate upload token
-        upload_token = generate_upload_token(
-            user_id=user.id,
-            s3_key=s3_key,
-            name=name,
-            filename=filename,
-            os_slug=file_format.os_slug,
-            file_size=file_size,
-            agent_type=agent_type,
-        )
-
-        logger.debug(
-            "initiate_upload completed for user_id=%s, filename=%s, s3_key=%s",
-            user.id,
-            filename,
-            s3_key,
-        )
-
-        return {
-            "presigned_url": presigned_url,
-            "s3_key": s3_key,
-            "upload_token": upload_token,
-            "expected_os": file_format.os_slug,
-        }
-
+        return _initiate_upload_inner(user, name, filename, file_size, agent_type)
     except (TypeError, ValueError, CMSError):
-        # Re-raise known errors
         raise
     except Exception:
         logger.exception("Error in initiate_upload for user_id=%s", user.id)
@@ -2784,48 +2618,34 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
         CMSError: If token is invalid/expired, S3 verification fails,
             or size mismatch
     """
-    from cms.assets.s3 import S3Error, tag_s3_object, verify_s3_object_exists
+    from django.conf import settings as _settings
+
+    from cms.assets import s3 as _s3
+    from cms.assets.s3 import (
+        S3Error,
+        tag_s3_object,
+        verify_s3_object_exists,
+    )
     from cms.assets.services import create_agent
     from cms.assets.upload_token import verify_upload_token
+    from cms.assets.validation import (
+        ValidationError as _AssetValidationError,
+    )
+    from cms.assets.validation import (
+        validate_file_extension,
+    )
     from cms.exceptions import CMSError
+    from shared.uploads.inspection import InspectionError as _InspectionError
+    from shared.uploads.inspection import (
+        validate_magic_bytes as _validate_magic_bytes,
+    )
 
-    # Input validation - user
-    if user is None:
-        logger.error("complete_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "complete_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("complete_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
-
-    # Input validation - upload_token
-    if upload_token is None:
-        logger.error(
-            "complete_upload called with None upload_token for user_id=%s",
-            user.id,
-        )
-        raise ValueError("upload_token cannot be None")
-
-    upload_token = upload_token.strip()
-    if not upload_token:
-        logger.error(
-            "complete_upload called with empty upload_token for user_id=%s",
-            user.id,
-        )
-        raise ValueError("upload_token cannot be empty")
+    _validate_caller_user(user, "complete_upload")
+    upload_token = _validate_nonempty_str(upload_token, "upload_token", "complete_upload", user.id)
 
     logger.debug("complete_upload called for user_id=%s", user.id)
 
     try:
-        # Verify upload token
         try:
             payload = verify_upload_token(upload_token, user.id)
         except ValueError as e:
@@ -2860,6 +2680,55 @@ def complete_upload(user: User, upload_token: str) -> AgentConfig:
             )
             msg = f"File size mismatch: expected {expected_size}, got {actual_size}"
             raise CMSError(msg)
+
+        # Server-side header inspection (issue #696). Resolve the expected
+        # installer format from the signed filename, read a bounded byte range,
+        # and reject the upload if the magic bytes don't match. Token shape
+        # already guarantees `filename` came from initiate_upload, so the
+        # extension lookup cannot be steered by request input.
+        try:
+            expected_format = validate_file_extension(payload["filename"])
+        except _AssetValidationError as exc:
+            logger.error(
+                "complete_upload: filename failed extension check user_id=%s",
+                user.id,
+            )
+            _s3.delete_agent(s3_key)
+            raise CMSError(f"Invalid upload filename: {exc}") from exc
+
+        max_header = _settings.UPLOAD_INSPECTION_MAX_HEADER_BYTES
+        try:
+            header = _s3.read_agent_header(s3_key, max_header)
+        except S3Error as exc:
+            logger.error(
+                "complete_upload: header read failed user_id=%s s3_key=%s",
+                user.id,
+                s3_key,
+            )
+            raise CMSError("Upload content inspection failed") from exc
+
+        try:
+            _validate_magic_bytes(header, expected_format)
+        except _InspectionError as exc:
+            logger.warning(
+                "complete_upload: header inspection rejected upload user_id=%s s3_key=%s expected=%s reason=%s",
+                user.id,
+                s3_key,
+                expected_format.description,
+                exc,
+            )
+            # Remove the rejected object so the bucket does not accumulate
+            # mismatched uploads. delete_agent failures are best-effort logged.
+            try:
+                _s3.delete_agent(s3_key)
+            except S3Error as delete_exc:
+                logger.error(
+                    "complete_upload: delete after inspection failure also failed user_id=%s s3_key=%s error=%s",
+                    user.id,
+                    s3_key,
+                    delete_exc,
+                )
+            raise CMSError("Uploaded content does not match the declared installer format") from exc
 
         # Tag S3 object as completed
         tag_s3_object(s3_key, {"status": "completed"})
@@ -2916,21 +2785,7 @@ def cancel_upload(user: User, upload_token: str) -> None:
     from cms.exceptions import CMSError
 
     # Input validation - user
-    if user is None:
-        logger.error("cancel_upload called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "cancel_upload called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("cancel_upload called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "cancel_upload")
 
     # Input validation - upload_token
     if upload_token is None:
@@ -2955,7 +2810,7 @@ def cancel_upload(user: User, upload_token: str) -> None:
         try:
             payload = verify_upload_token(upload_token, user.id)
         except ValueError as e:
-            logger.error(
+            logger.exception(
                 "cancel_upload: token verification failed for user_id=%s - %s",
                 user.id,
                 str(e),
@@ -3011,21 +2866,7 @@ def get_storage_used(user: User) -> int:
     from cms.assets.services import get_storage_used as assets_get_storage_used
 
     # Input validation - user
-    if user is None:
-        logger.error("get_storage_used called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "get_storage_used called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("get_storage_used called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "get_storage_used")
 
     logger.debug("get_storage_used called for user_id=%s", user.id)
 
@@ -3072,21 +2913,7 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
     from cms.scenarios.registry import list_all_scenarios
 
     # Input validation - user
-    if user is None:
-        logger.error("list_scenarios called with None user")
-        raise TypeError(USER_CANNOT_BE_NONE)
-
-    if not hasattr(user, "id"):
-        logger.error(
-            "list_scenarios called with invalid user type: %s",
-            type(user).__name__,
-        )
-        msg = f"user must be a User instance, got {type(user).__name__}"
-        raise TypeError(msg)
-
-    if user.id is None:
-        logger.error("list_scenarios called with unsaved user (id=None)")
-        raise ValueError(USER_MUST_BE_SAVED)
+    _validate_caller_user(user, "list_scenarios")
 
     logger.debug("list_scenarios called for user_id=%s", user.id)
 
@@ -3226,6 +3053,59 @@ def _validate_ngfw_user(user: User) -> None:
         raise ValueError(USER_MUST_BE_SAVED)
 
 
+def _validate_ngfw_name(name: str) -> str:
+    """Strip and require a non-empty NGFW display name."""
+    if not name or not name.strip():
+        raise ValueError("name is required")
+    return name.strip()
+
+
+def _resolve_ngfw_deployment_profile(user: User, deployment_profile_id: int, Credential: Any) -> Any:
+    """Load and type-check the deployment-profile credential for `create_ngfw`."""
+    if not deployment_profile_id:
+        raise ValueError("deployment_profile_id is required")
+    try:
+        deployment_profile = Credential.objects.select_related("credential_type").get(
+            id=deployment_profile_id,
+            user=user,
+        )
+    except Credential.DoesNotExist:
+        raise CMSError("Deployment profile not found") from None
+    if deployment_profile.credential_type.slug != "deployment_profile":
+        raise CMSError("deployment_profile_id must reference a deployment profile credential")
+    return deployment_profile
+
+
+def _resolve_ngfw_registration(
+    user: User,
+    registration_method: str,
+    scm_credential_id: int | None,
+    otp_value: str | None,
+    otp_folder: str | None,
+    Credential: Any,
+) -> Any:
+    """Validate registration-method-specific inputs; return the SCM credential or None."""
+    if registration_method not in ("pin", "otp"):
+        raise ValueError("registration_method must be 'pin' or 'otp'")
+    if registration_method == "otp":
+        if not otp_value or not otp_folder:
+            raise ValueError("otp_value and otp_folder are required for OTP registration")
+        return None
+    # pin
+    if not scm_credential_id:
+        raise ValueError("scm_credential_id is required for PIN registration")
+    try:
+        scm_credential = Credential.objects.select_related("credential_type").get(
+            id=scm_credential_id,
+            user=user,
+        )
+    except Credential.DoesNotExist:
+        raise CMSError("SCM credential not found") from None
+    if scm_credential.credential_type.slug != "scm":
+        raise CMSError("scm_credential_id must reference an SCM credential")
+    return scm_credential
+
+
 def _validate_app_id(app_id: UUID | str) -> UUID:
     """Validate app_id for NGFW operations.
 
@@ -3271,7 +3151,6 @@ def list_ngfws(user: User) -> list[NGFWAppContext]:
         App.objects.filter(
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
         .select_related("instance")
         .order_by("-created_at")
@@ -3306,7 +3185,6 @@ def get_ngfw(user: User, app_id: UUID | str) -> NGFWAppContext:
             id=validated_app_id,
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
     except App.DoesNotExist:
         logger.error("get_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
@@ -3355,7 +3233,6 @@ def create_ngfw(
         App.objects.filter(
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
         .exclude(status=ResourceStatus.DESTROYING.value)
         .first()
@@ -3368,48 +3245,16 @@ def create_ngfw(
         )
         raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
 
-    # Validate name
-    if not name or not name.strip():
-        raise ValueError("name is required")
-    name = name.strip()
-
-    # Validate deployment_profile_id
-    if not deployment_profile_id:
-        raise ValueError("deployment_profile_id is required")
-    try:
-        deployment_profile = Credential.objects.select_related("credential_type").get(
-            id=deployment_profile_id,
-            user=user,
-            deleted_at__isnull=True,
-        )
-        if deployment_profile.credential_type.slug != "deployment_profile":
-            raise CMSError("deployment_profile_id must reference a deployment profile credential")
-    except Credential.DoesNotExist:
-        raise CMSError("Deployment profile not found") from None
-
-    # Validate registration_method
-    if registration_method not in ("pin", "otp"):
-        raise ValueError("registration_method must be 'pin' or 'otp'")
-
-    # Validate registration-specific fields
-    scm_credential = None  # Initialize outside if-block
-    if registration_method == "pin":
-        if not scm_credential_id:
-            raise ValueError("scm_credential_id is required for PIN registration")
-        # Validate SCM credential exists and is owned by user
-        try:
-            scm_credential = Credential.objects.select_related("credential_type").get(
-                id=scm_credential_id,
-                user=user,
-                deleted_at__isnull=True,
-            )
-            if scm_credential.credential_type.slug != "scm":
-                raise CMSError("scm_credential_id must reference an SCM credential")
-        except Credential.DoesNotExist:
-            raise CMSError("SCM credential not found") from None
-    else:  # otp
-        if not otp_value or not otp_folder:
-            raise ValueError("otp_value and otp_folder are required for OTP registration")
+    name = _validate_ngfw_name(name)
+    deployment_profile = _resolve_ngfw_deployment_profile(user, deployment_profile_id, Credential)
+    scm_credential = _resolve_ngfw_registration(
+        user,
+        registration_method,
+        scm_credential_id,
+        otp_value,
+        otp_folder,
+        Credential,
+    )
 
     logger.debug(
         "create_ngfw called for user_id=%s, name=%s, method=%s",
@@ -3549,7 +3394,6 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
             id=validated_app_id,
             instance__request__user=user,
             app_type__slug="panw-ngfw",
-            deleted_at__isnull=True,
         )
     except App.DoesNotExist:
         logger.error("destroy_ngfw: App id=%s not found for user_id=%s", app_id, user.id)
@@ -3627,7 +3471,9 @@ def get_range_status_by_id(range_instance_id: int) -> str:
         Status string, or ``"unknown"`` if not found.
     """
     try:
-        return RangeInstance.objects.values_list("status", flat=True).get(pk=range_instance_id)
+        # all_objects: status lookups must see soft-deleted (terminal/destroyed)
+        # ranges so callers can report the final lifecycle state of a torn-down range.
+        return str(RangeInstance.all_objects.values_list("status", flat=True).get(pk=range_instance_id))
     except RangeInstance.DoesNotExist:
         return "unknown"
 
@@ -3639,7 +3485,10 @@ def get_range_spec_by_id(range_instance_id: int) -> dict | None:
         The range_spec dict, or ``None`` if not found.
     """
     try:
-        return RangeInstance.objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
+        # all_objects: range_spec lookups must see soft-deleted (terminal)
+        # ranges so callers can correlate audit events to a torn-down range.
+        spec = RangeInstance.all_objects.values_list("range_spec", flat=True).get(pk=range_instance_id)
+        return spec if spec is None or isinstance(spec, dict) else None
     except RangeInstance.DoesNotExist:
         return None
 
@@ -3650,13 +3499,16 @@ def find_range_instance_id_by_request(request_id: Any) -> int | None:
     Returns:
         The RangeInstance PK, or ``None`` if not found.
     """
-    return (
-        RangeInstance.objects.filter(
+    # all_objects: callback correlation needs to find ranges by request even
+    # after the range has reached a terminal soft-deleted state.
+    pk = (
+        RangeInstance.all_objects.filter(
             request__request_id=request_id,
         )
         .values_list("pk", flat=True)
         .first()
     )
+    return int(pk) if pk is not None else None
 
 
 def get_range_target_instances(user_id: int) -> list[dict[str, str]]:

@@ -67,6 +67,12 @@ ensure_symlink() {
     echo "Created $desc symlink"
 }
 
+# Repo-root .env (shared secrets, e.g. GROUND_CONTROL_API_TOKEN for MCP servers)
+ensure_symlink \
+    "$MAIN_REPO/.env" \
+    "$WORKTREE_ROOT/.env" \
+    ".env"
+
 # Shifter platform venv
 ensure_symlink \
     "$MAIN_REPO/shifter/shifter_platform/.venv" \

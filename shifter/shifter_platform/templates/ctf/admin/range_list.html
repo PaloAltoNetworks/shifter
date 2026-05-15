@@ -1,13 +1,16 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-{% block title %}Ranges - {{ event.name }}{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    Ranges - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .range-id {
     font-family: monospace;
     font-size: 13px;
-    color: var(--xdr-text-secondary);
+    color: var(--theme-text-secondary);
 }
 .btn-group-actions {
     display: flex;
@@ -17,93 +20,138 @@
     padding: 4px 10px;
     font-size: 13px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="page-header flex-between">
-    <h1 class="page-title">Range Management</h1>
-    <button class="btn btn-primary" id="btn-provision-all">Provision All Ranges</button>
-</div>
-
-<div class="card" style="padding: 0;">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Participant</th>
-                <th>Email</th>
-                <th>Range Status</th>
-                <th>Range ID</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in participants %}
-            <tr>
-                <td>{{ p.name }}</td>
-                <td>{{ p.email }}</td>
-                <td>
-                    {% if p.range_status == "ready" %}
-                    <span class="status status-active"><span class="status-dot"></span> Ready</span>
-                    {% elif p.range_status == "provisioning" %}
-                    <span class="status status-provisioning"><span class="status-dot"></span> Provisioning</span>
-                    {% elif p.range_status == "stopping" or p.range_status == "paused" %}
-                    <span class="status status-paused"><span class="status-dot"></span> Stopped</span>
-                    {% elif p.range_status == "resuming" %}
-                    <span class="status status-provisioning"><span class="status-dot"></span> Starting</span>
-                    {% elif p.range_status == "error" %}
-                    <span class="status status-offline"><span class="status-dot"></span> Error</span>
-                    {% elif p.range_status %}
-                    <span class="status status-offline"><span class="status-dot"></span> {{ p.range_status }}</span>
-                    {% else %}
-                    <span class="status status-paused"><span class="status-dot"></span> Not Assigned</span>
-                    {% endif %}
-                </td>
-                <td><span class="range-id">{{ p.range_instance_id|default:"-" }}</span></td>
-                <td>
-                    <div class="btn-group-actions">
-                    {% if not p.range_instance_id %}
-                        <button class="btn btn-secondary btn-provision"
-                                data-participant-id="{{ p.id }}">Provision</button>
-                    {% elif p.range_status == "ready" %}
-                        <button class="btn btn-secondary btn-stop"
-                                data-participant-id="{{ p.id }}">Stop</button>
-                        <button class="btn btn-secondary btn-restart"
-                                data-participant-id="{{ p.id }}">Restart</button>
-                        <button class="btn btn-danger btn-destroy"
-                                data-participant-id="{{ p.id }}">Destroy</button>
-                    {% elif p.range_status == "stopping" or p.range_status == "paused" %}
-                        <button class="btn btn-secondary btn-start"
-                                data-participant-id="{{ p.id }}">Start</button>
-                        <button class="btn btn-danger btn-destroy"
-                                data-participant-id="{{ p.id }}">Destroy</button>
-                    {% elif p.range_status == "error" %}
-                        <button class="btn btn-secondary btn-provision"
-                                data-participant-id="{{ p.id }}">Retry</button>
-                        <button class="btn btn-danger btn-destroy"
-                                data-participant-id="{{ p.id }}">Destroy</button>
-                    {% elif p.range_status == "provisioning" or p.range_status == "resuming" %}
-                        {# In-progress — no actions #}
-                    {% else %}
-                        <button class="btn btn-danger btn-destroy"
-                                data-participant-id="{{ p.id }}">Destroy</button>
-                    {% endif %}
-                    </div>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="5" class="text-muted" style="text-align: center;">No participants yet.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+    <div class="page-header flex-between">
+        <h1 class="page-title">
+            {% trans "Range Management" %}
+        </h1>
+        <button class="btn btn-primary" id="btn-provision-all">
+            {% trans "Provision All Ranges" %}
+        </button>
+    </div>
+    <div class="card" style="padding: 0;">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>
+                        {% trans "Participant" %}
+                    </th>
+                    <th>
+                        {% trans "Email" %}
+                    </th>
+                    <th>
+                        {% trans "Range Status" %}
+                    </th>
+                    <th>
+                        {% trans "Range ID" %}
+                    </th>
+                    <th>
+                        {% trans "Actions" %}
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in participants %}
+                    <tr>
+                        <td>
+                            {{ p.name }}
+                        </td>
+                        <td>
+                            {{ p.email }}
+                        </td>
+                        <td>
+                            {% if p.range_status == "ready" %}
+                                <span class="status status-active"><span class="status-dot"></span>
+                                {% trans "Ready" %}</span>
+                            {% elif p.range_status == "provisioning" %}
+                                <span class="status status-provisioning"><span class="status-dot"></span>
+                                {% trans "Provisioning" %}</span>
+                            {% elif p.range_status == "stopping" or p.range_status == "paused" %}
+                                <span class="status status-paused"><span class="status-dot"></span>
+                                {% trans "Stopped" %}</span>
+                            {% elif p.range_status == "resuming" %}
+                                <span class="status status-provisioning"><span class="status-dot"></span>
+                                {% trans "Starting" %}</span>
+                            {% elif p.range_status == "error" %}
+                                <span class="status status-offline"><span class="status-dot"></span>
+                                {% trans "Error" %}</span>
+                            {% elif p.range_status %}
+                                <span class="status status-offline">
+                                <span class="status-dot"></span> {{ p.range_status }}
+                                </span>
+                            {% else %}
+                                <span class="status status-paused"><span class="status-dot"></span>
+                                {% trans "Not Assigned" %}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="range-id">{{ p.range_instance_id|default:"-" }}</span>
+                        </td>
+                        <td>
+                            <div class="btn-group-actions">
+                                {% if not p.range_instance_id %}
+                                    <button class="btn btn-secondary btn-provision"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Provision" %}
+                                    </button>
+                                {% elif p.range_status == "ready" %}
+                                    <button class="btn btn-secondary btn-stop"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Stop" %}
+                                    </button>
+                                    <button class="btn btn-secondary btn-restart"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Restart" %}
+                                    </button>
+                                    <button class="btn btn-danger btn-destroy"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Destroy" %}
+                                    </button>
+                                {% elif p.range_status == "stopping" or p.range_status == "paused" %}
+                                    <button class="btn btn-secondary btn-start"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Start" %}
+                                    </button>
+                                    <button class="btn btn-danger btn-destroy"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Destroy" %}
+                                    </button>
+                                {% elif p.range_status == "error" %}
+                                    <button class="btn btn-secondary btn-provision"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Retry" %}
+                                    </button>
+                                    <button class="btn btn-danger btn-destroy"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Destroy" %}
+                                    </button>
+                                {% elif p.range_status == "provisioning" or p.range_status == "resuming" %}
+                                    {# In-progress \u2014 no actions #}
+                                {% else %}
+                                    <button class="btn btn-danger btn-destroy"
+                                            data-participant-id="{{ p.id }}">
+                                        {% trans "Destroy" %}
+                                    </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-muted" style="text-align: center;">
+                            {% trans "No participants yet." %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 {% endblock %}
-
 {% block extra_js %}
-<script src="{% static 'js/ctf-ranges.js' %}"></script>
-<script>
+    <script src="{% static 'js/ctf-ranges.js' %}"></script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     var manager = new CTFRangeManager({
         csrfToken: '{{ csrf_token }}',
@@ -112,5 +160,5 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     manager.init();
 });
-</script>
+    </script>
 {% endblock %}

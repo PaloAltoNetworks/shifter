@@ -165,35 +165,14 @@ pull request titles. Release notes are collated from towncrier fragments
 under [`changelog.d/`](changelog.d/) — see
 [`changelog.d/README.md`](changelog.d/README.md).
 
-## Ethics
-
-AI-driven attack capabilities exist in the wild. Defenders need realistic
-exposure to defend effectively. Shifter's ranges are network-isolated, all
-attack tooling is contained, and all AI actions are logged.
-
 ## Safety
 
-- Ranges are network-isolated.
 - Human oversight required for all scenarios.
-- All AI actions logged.
-- MFA-enforced authentication.
-- Access restricted to authorized personnel.
 
 ## Maintainers
 
 - Brad Edwards — [Brad-Edwards-SecOps](https://github.com/Brad-Edwards-SecOps),
   [Brad-Edwards](https://github.com/Brad-Edwards)
-
-Thank you to all the
-[contributors](https://github.com/Brad-Edwards/shifter/graphs/contributors)
-who participated in this project.
-
-## Acknowledgments
-
-- README structure adapted from the
-  [Palo Alto Networks open-source README template](https://github.com/PaloAltoNetworks/.github/blob/master/docs/README.example.md).
-- CyberScript range topology drew on the practical experience of operators
-  running attack/defend exercises in the wild.
 
 ## Citation
 

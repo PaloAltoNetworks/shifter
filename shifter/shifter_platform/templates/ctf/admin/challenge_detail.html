@@ -223,16 +223,16 @@
             {% if event.is_content_modifiable %}
             <div id="add-hint-form" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--theme-border);">
                 <div style="margin-bottom: 8px;">
-                    <label style="font-size: 12px; font-weight: 600;">Hint Text</label>
+                    <label for="new-hint-text" style="font-size: 12px; font-weight: 600;">Hint Text</label>
                     <textarea id="new-hint-text" class="form-input" rows="2" style="width: 100%;"></textarea>
                 </div>
                 <div style="display: flex; gap: 12px; margin-bottom: 8px;">
                     <div>
-                        <label style="font-size: 12px; font-weight: 600;">Penalty (%)</label>
+                        <label for="new-hint-penalty" style="font-size: 12px; font-weight: 600;">Penalty (%)</label>
                         <input type="number" id="new-hint-penalty" class="form-input" min="0" max="100" value="0" style="width: 100px;">
                     </div>
                     <div>
-                        <label style="font-size: 12px; font-weight: 600;">Order</label>
+                        <label for="new-hint-order" style="font-size: 12px; font-weight: 600;">Order</label>
                         <input type="number" id="new-hint-order" class="form-input" min="0" value="{{ challenge.hints.count }}" style="width: 100px;">
                     </div>
                 </div>
@@ -296,19 +296,19 @@
             {% if event.is_content_modifiable %}
             <div id="add-flag-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
                 <div style="margin-bottom: 8px;">
-                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Flag Value</label>
+                    <label for="new-flag-value" style="font-size: 13px; display: block; margin-bottom: 4px;">Flag Value</label>
                     <input type="text" id="new-flag-value" class="form-control" placeholder="Enter flag value or regex pattern">
                 </div>
                 <div style="display: flex; gap: 8px; margin-bottom: 8px;">
                     <div style="flex: 1;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Type</label>
+                        <label for="new-flag-type" style="font-size: 13px; display: block; margin-bottom: 4px;">Type</label>
                         <select id="new-flag-type" class="form-control">
                             <option value="static">Static</option>
                             <option value="regex">Regex</option>
                         </select>
                     </div>
                     <div style="flex: 1;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Case Sensitive</label>
+                        <label for="new-flag-case-sensitive" style="font-size: 13px; display: block; margin-bottom: 4px;">Case Sensitive</label>
                         <select id="new-flag-case-sensitive" class="form-control">
                             <option value="true">Yes</option>
                             <option value="false">No</option>
@@ -370,12 +370,12 @@
                 <form method="post" enctype="multipart/form-data" action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
                     {% csrf_token %}
                     <div style="margin-bottom: 8px;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">File</label>
-                        <input type="file" name="file" class="form-control" required>
+                        <label for="upload-file-input" style="font-size: 13px; display: block; margin-bottom: 4px;">File</label>
+                        <input type="file" id="upload-file-input" name="file" class="form-control" required>
                     </div>
                     <div style="margin-bottom: 8px;">
-                        <label style="font-size: 13px; display: block; margin-bottom: 4px;">Display Name (optional)</label>
-                        <input type="text" name="display_name" class="form-control" placeholder="Friendly name for download">
+                        <label for="upload-display-name" style="font-size: 13px; display: block; margin-bottom: 4px;">Display Name (optional)</label>
+                        <input type="text" id="upload-display-name" name="display_name" class="form-control" placeholder="Friendly name for download">
                     </div>
                     <button type="submit" class="btn btn-primary">Upload</button>
                     <span class="text-muted text-small" style="margin-left: 8px;">Max 50 MB</span>
@@ -430,7 +430,7 @@
             {% if event.is_content_modifiable %}
             <div id="add-prereq-form" style="display: none; padding: 12px; border-top: 1px solid var(--theme-border);">
                 <div style="margin-bottom: 8px;">
-                    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Required Challenge</label>
+                    <label for="prereq-challenge-select" style="font-size: 13px; display: block; margin-bottom: 4px;">Required Challenge</label>
                     <select id="prereq-challenge-select" class="form-control">
                         <option value="">Select a challenge...</option>
                         {% for ch in other_challenges %}

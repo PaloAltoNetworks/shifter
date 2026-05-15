@@ -146,7 +146,7 @@
                     <form id="flag-form" onsubmit="return submitFlag(event)">
                         <div class="input-group">
                             <input type="text" class="form-control" id="flag-input" name="flag"
-                                   placeholder="Enter flag..." required autocomplete="off">
+                                   aria-label="Flag" placeholder="Enter flag..." required autocomplete="off">
                             <button type="submit" class="btn btn-primary" id="submit-btn">Submit</button>
                         </div>
                         {% if max_attempts > 0 %}

@@ -143,7 +143,7 @@
         {% if item.status_form.fields.action.choices %}
         <form method="post" action="{% url 'ctf:admin_event_detail' event_id=item.event.pk %}" class="quick-controls-actions">
             {% csrf_token %}
-            <select name="action">
+            <select name="action" aria-label="Status action for {{ item.event.name }}">
                 {% for value, label in item.status_form.fields.action.choices %}
                 <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}

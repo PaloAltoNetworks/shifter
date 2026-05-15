@@ -28,8 +28,8 @@
     <form method="post" action="{% url 'risk_register:apikey_create' %}" class="flex-row gap-md" style="align-items: flex-end;">
         {% csrf_token %}
         <div class="form-group" style="flex: 1; margin-bottom: 0;">
-            <label class="form-label">Key Name</label>
-            <input type="text" name="name" class="form-input" required placeholder="e.g., AI Agent Production">
+            <label class="form-label" for="apikey-name">Key Name</label>
+            <input type="text" id="apikey-name" name="name" class="form-input" required placeholder="e.g., AI Agent Production">
         </div>
         <button type="submit" class="btn btn-primary">Create Key</button>
     </form>

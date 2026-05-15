@@ -144,7 +144,8 @@
     <form method="post" action="{% url 'risk_register:comment_add' risk_pk=risk.pk %}">
         {% csrf_token %}
         <div class="form-group">
-            <textarea name="content" class="form-textarea" placeholder="Add a comment..." rows="3"></textarea>
+            <textarea id="risk-comment-content" name="content" class="form-textarea"
+                      aria-label="Add a comment" placeholder="Add a comment..." rows="3"></textarea>
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Add Comment</button>
     </form>

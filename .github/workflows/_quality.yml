@@ -8,6 +8,66 @@ on:
         required: false
         type: boolean
         default: false
+      core:
+        required: false
+        type: boolean
+        default: false
+      range:
+        required: false
+        type: boolean
+        default: false
+      shifter_engine:
+        required: false
+        type: boolean
+        default: false
+      shifter_platform:
+        required: false
+        type: boolean
+        default: false
+      shifter_app:
+        required: false
+        type: boolean
+        default: false
+      shifter_platform_app:
+        required: false
+        type: boolean
+        default: false
+      mcp:
+        required: false
+        type: boolean
+        default: false
+      packer:
+        required: false
+        type: boolean
+        default: false
+      bootstrap:
+        required: false
+        type: boolean
+        default: false
+      check_layer_imports:
+        required: false
+        type: boolean
+        default: false
+      check_rds_pending_modifications:
+        required: false
+        type: boolean
+        default: false
+      installation:
+        required: false
+        type: boolean
+        default: false
+      gcp:
+        required: false
+        type: boolean
+        default: false
+      guardrails:
+        required: false
+        type: boolean
+        default: false
+      quality_workflow:
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   # ===========================================================================
@@ -18,6 +78,16 @@ jobs:
     permissions:
       contents: read
     name: Architecture (adr conformance)
+    if: |
+      inputs.guardrails ||
+      inputs.quality_workflow ||
+      inputs.core ||
+      inputs.range ||
+      inputs.shifter_engine ||
+      inputs.shifter_platform ||
+      inputs.shifter_app ||
+      inputs.shifter_platform_app ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +130,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (GitHub Actions)
+    if: inputs.guardrails || inputs.quality_workflow
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +140,14 @@ jobs:
     permissions:
       contents: read
     name: Lint (terraform)
+    if: |
+      inputs.guardrails ||
+      inputs.quality_workflow ||
+      inputs.core ||
+      inputs.range ||
+      inputs.shifter_engine ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -87,6 +166,11 @@ jobs:
     permissions:
       contents: read
     name: Lint (shifter_platform)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -108,6 +192,11 @@ jobs:
     permissions:
       contents: read
     name: Lint JavaScript/CSS (shifter_platform)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +224,10 @@ jobs:
     permissions:
       contents: read
     name: Lint (provisioner)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_engine ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -153,6 +246,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (packer)
+    if: inputs.quality_workflow || inputs.packer
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +265,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (bootstrap)
+    if: inputs.quality_workflow || inputs.bootstrap
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -189,6 +284,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (gcp scripts)
+    if: inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -207,6 +303,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (check_layer_imports)
+    if: inputs.quality_workflow || inputs.check_layer_imports
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -225,6 +322,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (check_rds_pending_modifications)
+    if: inputs.quality_workflow || inputs.check_rds_pending_modifications
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -243,6 +341,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (installation)
+    if: inputs.quality_workflow || inputs.installation
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -261,6 +360,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (k8s manifests)
+    if: inputs.guardrails || inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -312,6 +412,7 @@ jobs:
     permissions:
       contents: read
     name: Lint (k8s schemas)
+    if: inputs.guardrails || inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -362,7 +463,12 @@ jobs:
     permissions:
       contents: read
     name: Type Check (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_platform_app ||
+       inputs.shifter_platform ||
+       inputs.gcp)
     runs-on: self-hosted
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
@@ -385,7 +491,11 @@ jobs:
     permissions:
       contents: read
     name: Type Check (provisioner)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_engine ||
+       inputs.gcp)
     runs-on: self-hosted
     continue-on-error: true  # Non-blocking - quality signal only
     steps:
@@ -412,6 +522,10 @@ jobs:
     permissions:
       contents: read
     name: Architecture (layer imports)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.check_layer_imports
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -431,6 +545,11 @@ jobs:
     permissions:
       contents: read
     name: Architecture (import linter)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -464,6 +583,11 @@ jobs:
     permissions:
       contents: read
     name: SAST (shifter_platform)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -480,6 +604,10 @@ jobs:
     permissions:
       contents: read
     name: SAST (provisioner)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_engine ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -498,6 +626,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (packer)
+    if: inputs.quality_workflow || inputs.packer
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -514,6 +643,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (bootstrap)
+    if: inputs.quality_workflow || inputs.bootstrap
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -530,6 +660,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (gcp scripts)
+    if: inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -546,6 +677,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (check_layer_imports)
+    if: inputs.quality_workflow || inputs.check_layer_imports
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -563,6 +695,7 @@ jobs:
     permissions:
       contents: read
     name: SAST (installation)
+    if: inputs.quality_workflow || inputs.installation
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -583,7 +716,12 @@ jobs:
     permissions:
       contents: read
     name: Tests (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_platform_app ||
+       inputs.shifter_platform ||
+       inputs.gcp)
     needs: [shifter-platform-lint, shifter-platform-lint-js, shifter-platform-sast]
     runs-on: self-hosted
     services:
@@ -629,7 +767,11 @@ jobs:
     permissions:
       contents: read
     name: Tests (provisioner)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_engine ||
+       inputs.gcp)
     needs: [provisioner-lint, provisioner-sast]
     runs-on: self-hosted
     steps:
@@ -652,7 +794,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (packer)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.packer) }}
     needs: [packer-lint]
     runs-on: self-hosted
     steps:
@@ -673,7 +815,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (bootstrap)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.bootstrap) }}
     needs: [bootstrap-lint]
     runs-on: self-hosted
     steps:
@@ -694,7 +836,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (gcp scripts)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.gcp) }}
     needs: [gcp-scripts-lint]
     runs-on: self-hosted
     steps:
@@ -715,7 +857,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (check_layer_imports)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.check_layer_imports) }}
     needs: [check-layer-imports-lint]
     runs-on: self-hosted
     steps:
@@ -736,7 +878,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (check_rds_pending_modifications)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.check_rds_pending_modifications) }}
     needs: [check-rds-pending-modifications-lint]
     runs-on: self-hosted
     steps:
@@ -757,7 +899,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (installation)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.installation) }}
     needs: [installation-lint]
     runs-on: self-hosted
     steps:
@@ -778,7 +920,7 @@ jobs:
     permissions:
       contents: read
     name: Tests (adr_guard)
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.guardrails || inputs.quality_workflow) }}
     needs: [adr-conformance]
     runs-on: self-hosted
     steps:
@@ -802,7 +944,12 @@ jobs:
     permissions:
       contents: read
     name: Tests JavaScript (shifter_platform)
-    if: ${{ !inputs.skip_tests }}
+    if: |
+      !inputs.skip_tests &&
+      (inputs.quality_workflow ||
+       inputs.shifter_platform_app ||
+       inputs.shifter_platform ||
+       inputs.gcp)
     needs: [shifter-platform-lint-js]
     runs-on: self-hosted
     steps:
@@ -831,6 +978,7 @@ jobs:
     permissions:
       contents: read
     name: Lint JavaScript (mcp/${{ matrix.package }})
+    if: inputs.quality_workflow || inputs.mcp
     runs-on: self-hosted
     strategy:
       fail-fast: false
@@ -858,7 +1006,7 @@ jobs:
     permissions:
       contents: read
     name: Tests JavaScript (mcp/${{ matrix.package }})
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_tests && (inputs.quality_workflow || inputs.mcp) }}
     needs: [mcp-lint]
     runs-on: self-hosted
     strategy:
@@ -891,6 +1039,14 @@ jobs:
     permissions:
       contents: read
     name: Security (IaC)
+    if: |
+      inputs.guardrails ||
+      inputs.quality_workflow ||
+      inputs.core ||
+      inputs.range ||
+      inputs.shifter_engine ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -917,6 +1073,7 @@ jobs:
     permissions:
       contents: read
     name: Security (k8s)
+    if: inputs.guardrails || inputs.quality_workflow || inputs.gcp
     runs-on: self-hosted
     continue-on-error: true  # Soft-fail until manifest remediation complete
     steps:
@@ -973,6 +1130,11 @@ jobs:
     permissions:
       contents: read
     name: Architecture (model FKs)
+    if: |
+      inputs.quality_workflow ||
+      inputs.shifter_platform_app ||
+      inputs.shifter_platform ||
+      inputs.gcp
     runs-on: self-hosted
     services:
       postgres:

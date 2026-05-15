@@ -38,8 +38,16 @@ jobs:
       shifter_engine: ${{ steps.filter.outputs.shifter_engine }}
       shifter_platform: ${{ steps.filter.outputs.shifter_platform }}
       shifter_app: ${{ steps.filter.outputs.shifter_app }}
+      shifter_platform_app: ${{ steps.filter.outputs.shifter_platform_app }}
       mcp: ${{ steps.filter.outputs.mcp }}
+      packer: ${{ steps.filter.outputs.packer }}
+      bootstrap: ${{ steps.filter.outputs.bootstrap }}
+      check_layer_imports: ${{ steps.filter.outputs.check_layer_imports }}
+      check_rds_pending_modifications: ${{ steps.filter.outputs.check_rds_pending_modifications }}
+      installation: ${{ steps.filter.outputs.installation }}
       gcp: ${{ steps.filter.outputs.gcp }}
+      guardrails: ${{ steps.filter.outputs.guardrails }}
+      quality_workflow: ${{ steps.filter.outputs.quality_workflow }}
       aws_environment: ${{ steps.env.outputs.aws_environment }}
       aws_is_dev: ${{ steps.env.outputs.aws_is_dev }}
       gcp_environment: ${{ steps.env.outputs.gcp_environment }}
@@ -82,9 +90,37 @@ jobs:
               - '.github/workflows/_shifter-platform.yml'
             shifter_app:
               - 'shifter/**'
+            shifter_platform_app:
+              - 'shifter/shifter_platform/**'
             mcp:
               - 'mcp/**'
+            packer:
+              - 'shifter/packer/**'
+            bootstrap:
+              - 'scripts/bootstrap/**'
+            check_layer_imports:
+              - 'scripts/check_layer_imports/**'
+            check_rds_pending_modifications:
+              - 'scripts/check_rds_pending_modifications/**'
+            installation:
+              - 'shifter/installation/**'
+            guardrails:
+              - '.github/workflows/**'
+              - '.github/CODEOWNERS'
+              - '.github/pull_request_template.md'
+              - '.github/copilot-instructions.md'
+              - '.pre-commit-config.yaml'
+              - '.importlinter'
+              - '.tflint.hcl'
+              - '.gitleaks.toml'
+              - '.kube-linter.yaml'
+              - '.claude/settings.json'
+              - '.claude/hooks/**'
+              - 'scripts/adr_guard/**'
+              - 'docs/adr/**'
+            quality_workflow:
               - '.github/workflows/_quality.yml'
+              - '.github/workflows/deploy.yml'
             gcp:
               - 'platform/terraform/gcp/**'
               - 'platform/k8s/gcp/**'
@@ -219,12 +255,35 @@ jobs:
        needs.changes.outputs.shifter_engine == 'true' ||
        needs.changes.outputs.shifter_platform == 'true' ||
        needs.changes.outputs.shifter_app == 'true' ||
+       needs.changes.outputs.shifter_platform_app == 'true' ||
        needs.changes.outputs.mcp == 'true' ||
+       needs.changes.outputs.packer == 'true' ||
+       needs.changes.outputs.bootstrap == 'true' ||
+       needs.changes.outputs.check_layer_imports == 'true' ||
+       needs.changes.outputs.check_rds_pending_modifications == 'true' ||
+       needs.changes.outputs.installation == 'true' ||
        needs.changes.outputs.gcp == 'true' ||
+       needs.changes.outputs.guardrails == 'true' ||
+       needs.changes.outputs.quality_workflow == 'true' ||
        github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/_quality.yml
     with:
       skip_tests: ${{ needs.changes.outputs.skip_tests == 'true' }}
+      core: ${{ needs.changes.outputs.core == 'true' }}
+      range: ${{ needs.changes.outputs.range == 'true' }}
+      shifter_engine: ${{ needs.changes.outputs.shifter_engine == 'true' }}
+      shifter_platform: ${{ needs.changes.outputs.shifter_platform == 'true' }}
+      shifter_app: ${{ needs.changes.outputs.shifter_app == 'true' }}
+      shifter_platform_app: ${{ needs.changes.outputs.shifter_platform_app == 'true' }}
+      mcp: ${{ needs.changes.outputs.mcp == 'true' }}
+      packer: ${{ needs.changes.outputs.packer == 'true' }}
+      bootstrap: ${{ needs.changes.outputs.bootstrap == 'true' }}
+      check_layer_imports: ${{ needs.changes.outputs.check_layer_imports == 'true' }}
+      check_rds_pending_modifications: ${{ needs.changes.outputs.check_rds_pending_modifications == 'true' }}
+      installation: ${{ needs.changes.outputs.installation == 'true' }}
+      gcp: ${{ needs.changes.outputs.gcp == 'true' }}
+      guardrails: ${{ needs.changes.outputs.guardrails == 'true' }}
+      quality_workflow: ${{ needs.changes.outputs.quality_workflow == 'true' || github.event_name == 'workflow_dispatch' }}
 
   gcp-dev:
     name: GCP Dev

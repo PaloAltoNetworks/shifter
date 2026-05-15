@@ -1,10 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Email Templates - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Email Templates - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
     color: var(--theme-text-secondary);
@@ -61,44 +63,55 @@
     color: #28a745;
     font-size: 12px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="flex-between mb-lg">
-    <div>
-        <div class="breadcrumb">
-            <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-            <span class="separator">/</span>
-            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-            <span class="separator">/</span>
-            <span>Email Templates</span>
-        </div>
-        <h1 class="page-title">Email Templates</h1>
-        <p style="color: var(--theme-text-secondary); font-size: 13px; margin-top: 4px;">
-            Customise email templates for this event. Types using the default template can be overridden via the API.
-        </p>
-    </div>
-</div>
-
-<div class="template-grid">
-    {% for item in template_list %}
-    <div class="template-card">
-        <div class="type-label">{{ item.label }}</div>
-        <div class="status">
-            {% if item.custom %}
-            <span class="badge-custom">Custom</span>
-            {% if item.custom.subject %}
-            <div style="margin-top: 6px; font-size: 13px; color: var(--theme-text-secondary);">
-                Subject: {{ item.custom.subject }}
+    <!-- Header -->
+    <div class="flex-between mb-lg">
+        <div>
+            <div class="breadcrumb">
+                <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                <span class="separator">/</span>
+                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                <span class="separator">/</span>
+                <span>{% trans "Email Templates" %}</span>
             </div>
-            {% endif %}
-            {% else %}
-            <span class="badge-default">Default</span>
-            {% endif %}
+            <h1 class="page-title">
+                {% trans "Email Templates" %}
+            </h1>
+            <p style="color: var(--theme-text-secondary);
+                      font-size: 13px;
+                      margin-top: 4px">
+                {% blocktrans trimmed %}
+                    Customise email templates for this event. Types using the default template can be
+                    overridden via the API.
+                {% endblocktrans %}
+            </p>
         </div>
     </div>
-    {% endfor %}
-</div>
+    <div class="template-grid">
+        {% for item in template_list %}
+            <div class="template-card">
+                <div class="type-label">
+                    {{ item.label }}
+                </div>
+                <div class="status">
+                    {% if item.custom %}
+                        <span class="badge-custom">{% trans "Custom" %}</span>
+                        {% if item.custom.subject %}
+                            <div style="margin-top: 6px;
+                                        font-size: 13px;
+                                        color: var(--theme-text-secondary)">
+                                {% blocktrans with v1=item.custom.subject %}
+                                    Subject: {{ v1 }}
+                                {% endblocktrans %}
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <span class="badge-default">{% trans "Default" %}</span>
+                    {% endif %}
+                </div>
+            </div>
+        {% endfor %}
+    </div>
 {% endblock %}

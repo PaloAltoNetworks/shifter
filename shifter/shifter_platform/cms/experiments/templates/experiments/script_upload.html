@@ -1,10 +1,10 @@
 {% extends "experiments/base.html" %}
-{% load static %}
-
-{% block title %}Upload Script{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    Upload Script
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
     .form-container { max-width: 560px; }
     .form-group { margin-bottom: 16px; }
     .form-group label {
@@ -67,52 +67,72 @@
         color: var(--xdr-text-secondary);
         margin-top: 8px;
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<a href="{% url 'experiments:script_list' %}" class="back-link">&larr; Back to Scripts</a>
-
-<div class="form-container">
-    <h1 class="page-title">Upload Script</h1>
-    <p class="page-subtitle mb-lg">Upload a Python script file to use in experiments</p>
-
-    {% if messages %}
-    <div class="mb-lg">
-        {% for message in messages %}
-        <div class="message message-{{ message.tags }}">{{ message }}</div>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    <div class="card">
-        <div class="form-group">
-            <label for="name">Script Name <span class="required">*</span></label>
-            <input type="text" id="name" name="name" required maxlength="255" placeholder="e.g., Ransomware Simulation">
-        </div>
-        <div class="form-group">
-            <label for="file">Python File <span class="required">*</span></label>
-            <input type="file" id="file" accept=".py">
-            <div class="form-hint">Only .py files up to 1MB</div>
-        </div>
-
-        <div class="upload-progress" id="upload-progress">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill"></div>
+    <a href="{% url 'experiments:script_list' %}"
+       class="back-link">{% trans "&larr; Back to Scripts" %}</a>
+    <div class="form-container">
+        <h1 class="page-title">
+            {% trans "Upload Script" %}
+        </h1>
+        <p class="page-subtitle mb-lg">
+            {% trans "Upload a Python script file to use in experiments" %}
+        </p>
+        {% if messages %}
+            <div class="mb-lg">
+                {% for message in messages %}
+                    <div class="message message-{{ message.tags }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
             </div>
-            <div class="upload-status" id="upload-status">Uploading...</div>
-        </div>
-
-        <div class="form-actions">
-            <button type="button" id="upload-btn" class="btn btn-primary" disabled>Upload</button>
-            <a href="{% url 'experiments:script_list' %}" class="btn btn-secondary">Cancel</a>
+        {% endif %}
+        <div class="card">
+            <div class="form-group">
+                <label for="name">
+                    {% trans "Script Name" %} <span class="required">*</span>
+                </label>
+                <input type="text"
+                       id="name"
+                       name="name"
+                       required
+                       maxlength="255"
+                       placeholder='{% trans "e.g., Ransomware Simulation" %}'>
+            </div>
+            <div class="form-group">
+                <label for="file">
+                    {% trans "Python File" %} <span class="required">*</span>
+                </label>
+                <input type="file" id="file" accept=".py">
+                <div class="form-hint">
+                    {% trans "Only .py files up to 1MB" %}
+                </div>
+            </div>
+            <div class="upload-progress" id="upload-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill">
+                    </div>
+                </div>
+                <div class="upload-status" id="upload-status">
+                    {% trans "Uploading..." %}
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button"
+                        id="upload-btn"
+                        class="btn btn-primary"
+                        disabled>
+                    {% trans "Upload" %}
+                </button>
+                <a href="{% url 'experiments:script_list' %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
+            </div>
         </div>
     </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 (function() {
     const nameInput = document.getElementById('name');
     const fileInput = document.getElementById('file');
@@ -209,5 +229,5 @@
         }
     });
 })();
-</script>
+    </script>
 {% endblock %}

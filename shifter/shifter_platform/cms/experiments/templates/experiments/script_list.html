@@ -1,10 +1,10 @@
 {% extends "experiments/base.html" %}
-{% load static %}
-
-{% block title %}Scripts{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    Scripts
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
     .script-table {
         width: 100%;
         border-collapse: collapse;
@@ -24,65 +24,99 @@
     .script-table tbody tr:hover {
         background: var(--xdr-hover);
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="page-header-row">
-    <div class="page-header-content">
-        <h1 class="page-title">Script Assets</h1>
-        <p class="page-subtitle">Manage reusable Python scripts for experiments</p>
-    </div>
-    <a href="{% url 'experiments:script_upload' %}" class="btn btn-primary">Upload Script</a>
-</div>
-
-{% if messages %}
-<div class="mb-lg">
-    {% for message in messages %}
-    <div class="message message-{{ message.tags }}">{{ message }}</div>
-    {% endfor %}
-</div>
-{% endif %}
-
-{% if scripts %}
-<div class="card">
-    <table class="script-table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Filename</th>
-                <th>Size</th>
-                <th>Uploaded</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for script in scripts %}
-            <tr>
-                <td>{{ script.name }}</td>
-                <td class="text-muted">{{ script.original_filename }}</td>
-                <td class="text-muted text-small">{{ script.file_size_mb }} MB</td>
-                <td class="text-muted text-small">{{ script.created_at|date:"M d, Y H:i" }}</td>
-                <td class="text-right">
-                    <form method="post" action="{% url 'experiments:script_delete' script.pk %}" style="display:inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-danger btn-small" onclick="return confirm('Delete this script?')">Delete</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% else %}
-<div class="card">
-    <div class="empty-state">
-        <h3>No scripts uploaded</h3>
-        <p>Upload Python scripts to use in your experiments</p>
-        <div style="margin-top: 16px;">
-            <a href="{% url 'experiments:script_upload' %}" class="btn btn-primary">Upload Script</a>
+    <div class="page-header-row">
+        <div class="page-header-content">
+            <h1 class="page-title">
+                {% trans "Script Assets" %}
+            </h1>
+            <p class="page-subtitle">
+                {% trans "Manage reusable Python scripts for experiments" %}
+            </p>
         </div>
+        <a href="{% url 'experiments:script_upload' %}"
+           class="btn btn-primary">{% trans "Upload Script" %}</a>
     </div>
-</div>
-{% endif %}
+    {% if messages %}
+        <div class="mb-lg">
+            {% for message in messages %}
+                <div class="message message-{{ message.tags }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if scripts %}
+        <div class="card">
+            <table class="script-table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "Name" %}
+                        </th>
+                        <th>
+                            {% trans "Filename" %}
+                        </th>
+                        <th>
+                            {% trans "Size" %}
+                        </th>
+                        <th>
+                            {% trans "Uploaded" %}
+                        </th>
+                        <th>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for script in scripts %}
+                        <tr>
+                            <td>
+                                {{ script.name }}
+                            </td>
+                            <td class="text-muted">
+                                {{ script.original_filename }}
+                            </td>
+                            <td class="text-muted text-small">
+                                {% blocktrans with v1=script.file_size_mb %}
+                                    {{ v1 }} MB
+                                {% endblocktrans %}
+                            </td>
+                            <td class="text-muted text-small">
+                                {{ script.created_at|date:"M d, Y H:i" }}
+                            </td>
+                            <td class="text-right">
+                                <form method="post"
+                                      action="{% url 'experiments:script_delete' script.pk %}"
+                                      style="display:inline">
+                                    {% csrf_token %}
+                                    <button type="submit"
+                                            class="btn btn-danger btn-small"
+                                            onclick="return confirm('Delete this script?')">
+                                        {% trans "Delete" %}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="card">
+            <div class="empty-state">
+                <h3>
+                    {% trans "No scripts uploaded" %}
+                </h3>
+                <p>
+                    {% trans "Upload Python scripts to use in your experiments" %}
+                </p>
+                <div style="margin-top: 16px;">
+                    <a href="{% url 'experiments:script_upload' %}"
+                       class="btn btn-primary">{% trans "Upload Script" %}</a>
+                </div>
+            </div>
+        </div>
+    {% endif %}
 {% endblock %}

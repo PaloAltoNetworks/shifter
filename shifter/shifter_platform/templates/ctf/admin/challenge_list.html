@@ -1,10 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}Challenges - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Challenges - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .breadcrumb {
     font-size: 13px;
     color: var(--theme-text-secondary);
@@ -44,110 +46,140 @@
     padding: 1px 6px;
     margin-left: 8px;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="flex-between mb-lg">
-    <div>
-        <div class="breadcrumb">
-            <a href="{% url 'ctf:admin_event_list' %}">Events</a>
-            <span class="separator">/</span>
-            <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
-            <span class="separator">/</span>
-            <span>Challenges</span>
+    <!-- Header -->
+    <div class="flex-between mb-lg">
+        <div>
+            <div class="breadcrumb">
+                <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                <span class="separator">/</span>
+                <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                <span class="separator">/</span>
+                <span>{% trans "Challenges" %}</span>
+            </div>
+            <h1 class="page-title">
+                {% trans "Challenges" %}
+            </h1>
+            <p class="text-muted mt-sm">
+                {% blocktrans with v1=challenges|length %}
+                    {{ v1 }} challenges, {{ total_points }} total points
+                {% endblocktrans %}
+            </p>
         </div>
-        <h1 class="page-title">Challenges</h1>
-        <p class="text-muted mt-sm">{{ challenges|length }} challenges, {{ total_points }} total points</p>
-    </div>
-    {% if event.is_modifiable %}
-    <a href="{% url 'ctf:admin_challenge_create' event_id=event.pk %}" class="btn btn-primary">
-        Add Challenge
-    </a>
-    {% endif %}
-</div>
-
-<!-- Challenges by Category -->
-{% if challenges %}
-{% for category, category_challenges in challenges_by_category.items %}
-<div class="card" style="padding: 0;">
-    <div style="padding: 16px;">
-        <div class="category-header">
-            <div class="card-title" style="margin-bottom: 0;">{{ category|title }}</div>
-            <span class="category-count">{{ category_challenges|length }} challenges</span>
-        </div>
-    </div>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Points</th>
-                <th>Difficulty</th>
-                <th>Solves</th>
-                <th>Release</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for challenge in category_challenges %}
-            <tr>
-                <td>
-                    <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}">
-                        {{ challenge.name }}
-                    </a>
-                    {% if challenge.hint %}
-                    <span class="hint-indicator" title="Has hint">Hint</span>
-                    {% endif %}
-                </td>
-                <td><strong>{{ challenge.points }}</strong></td>
-                <td>
-                    {% if challenge.difficulty == 'easy' %}
-                    <span class="difficulty-easy">Easy</span>
-                    {% elif challenge.difficulty == 'medium' %}
-                    <span class="difficulty-medium">Medium</span>
-                    {% elif challenge.difficulty == 'hard' %}
-                    <span class="difficulty-hard">Hard</span>
-                    {% elif challenge.difficulty == 'expert' %}
-                    <span class="difficulty-expert">Expert</span>
-                    {% endif %}
-                </td>
-                <td>{{ challenge.solve_count }}</td>
-                <td>
-                    {% if challenge.release_time %}
-                    {{ challenge.release_time|date:"M d, H:i" }}
-                    {% else %}
-                    <span class="text-muted">Immediate</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <div class="flex-row gap-sm">
-                        <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}" class="btn btn-secondary" title="View">
-                            View
-                        </a>
-                        {% if event.is_modifiable %}
-                        <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}" class="btn btn-secondary" title="Edit">
-                            Edit
-                        </a>
-                        {% endif %}
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endfor %}
-{% else %}
-<div class="card">
-    <div class="empty-state">
-        <p>No challenges yet.</p>
         {% if event.is_modifiable %}
-        <a href="{% url 'ctf:admin_challenge_create' event_id=event.pk %}" class="btn btn-primary mt-md">
-            Add Your First Challenge
-        </a>
+            <a href="{% url 'ctf:admin_challenge_create' event_id=event.pk %}"
+               class="btn btn-primary">{% trans "Add Challenge" %}</a>
         {% endif %}
     </div>
-</div>
-{% endif %}
+    <!-- Challenges by Category -->
+    {% if challenges %}
+        {% for category, category_challenges in challenges_by_category.items %}
+            <div class="card" style="padding: 0;">
+                <div style="padding: 16px;">
+                    <div class="category-header">
+                        <div class="card-title" style="margin-bottom: 0;">
+                            {{ category|title }}
+                        </div>
+                        <span class="category-count">
+                            {% blocktrans with v1=category_challenges|length %}
+                                {{ v1 }} challenges
+                            {% endblocktrans %}
+                        </span>
+                    </div>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>
+                                {% trans "Name" %}
+                            </th>
+                            <th>
+                                {% trans "Points" %}
+                            </th>
+                            <th>
+                                {% trans "Difficulty" %}
+                            </th>
+                            <th>
+                                {% trans "Solves" %}
+                            </th>
+                            <th>
+                                {% trans "Release" %}
+                            </th>
+                            <th>
+                                {% trans "Actions" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for challenge in category_challenges %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}">
+                                    {{ challenge.name }}
+                                    </a>
+                                    {% if challenge.hint %}
+<span class="hint-indicator" title='{% trans "Has hint" %}'>
+    {% blocktrans trimmed %}
+        Hint
+    {% endblocktrans %}
+</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <strong>{{ challenge.points }}</strong>
+                                </td>
+                                <td>
+                                    {% if challenge.difficulty == 'easy' %}
+                                        <span class="difficulty-easy">{% trans "Easy" %}</span>
+                                    {% elif challenge.difficulty == 'medium' %}
+                                        <span class="difficulty-medium">{% trans "Medium" %}</span>
+                                    {% elif challenge.difficulty == 'hard' %}
+                                        <span class="difficulty-hard">{% trans "Hard" %}</span>
+                                    {% elif challenge.difficulty == 'expert' %}
+                                        <span class="difficulty-expert">{% trans "Expert" %}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {{ challenge.solve_count }}
+                                </td>
+                                <td>
+                                    {% if challenge.release_time %}
+                                        {{ challenge.release_time|date:"M d, H:i" }}
+                                    {% else %}
+                                        <span class="text-muted">{% trans "Immediate" %}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="flex-row gap-sm">
+                                        <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}"
+                                           class="btn btn-secondary"
+                                           title='{% trans "View" %}'>{% trans "View" %}</a>
+                                        {% if event.is_modifiable %}
+                                            <a href="{% url 'ctf:admin_challenge_edit' challenge_id=challenge.pk %}"
+                                               class="btn btn-secondary"
+                                               title='{% trans "Edit" %}'>{% trans "Edit" %}</a>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="card">
+            <div class="empty-state">
+                <p>
+                    {% trans "No challenges yet." %}
+                </p>
+                {% if event.is_modifiable %}
+                    <a href="{% url 'ctf:admin_challenge_create' event_id=event.pk %}"
+                       class="btn btn-primary mt-md">{% trans "Add Your First Challenge" %}</a>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
 {% endblock %}

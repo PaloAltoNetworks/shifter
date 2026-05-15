@@ -1,10 +1,16 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}{% if is_edit %}Edit Challenge{% else %}Create Challenge{% endif %}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    {% if is_edit %}
+        Edit Challenge
+    {% else %}
+        Create Challenge
+    {% endif %}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .challenge-form {
     max-width: 720px;
 }
@@ -65,230 +71,424 @@ select.form-input {
 input[type="datetime-local"] {
     color-scheme: dark;
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="challenge-form">
-    <div class="page-header">
-        <h1 class="page-title">{% if is_edit %}Edit Challenge: {{ challenge.name }}{% else %}Create New Challenge{% endif %}</h1>
-        <p class="text-muted mt-sm">{% if is_edit %}Update challenge configuration.{% else %}Configure a new challenge for this event.{% endif %}</p>
-    </div>
-
-    <form method="post" novalidate>
-        {% csrf_token %}
-
-        {% if form.non_field_errors %}
-        <div class="form-alert">
-            {% for error in form.non_field_errors %}
-            <p style="margin: 0;">{{ error }}</p>
-            {% endfor %}
+    <div class="challenge-form">
+        <div class="page-header">
+            <h1 class="page-title">
+                {% if is_edit %}
+                    {% trans "Edit Challenge:" %} {{ challenge.name }}
+                {% else %}
+                    {% trans "Create New Challenge" %}
+                {% endif %}
+            </h1>
+            <p class="text-muted mt-sm">
+                {% if is_edit %}
+                    {% trans "Update challenge configuration." %}
+                {% else %}
+                    {% trans "Configure a new challenge for this event." %}
+                {% endif %}
+            </p>
         </div>
-        {% endif %}
-
-        <!-- Basic Information -->
-        <div class="card">
-            <div class="card-title">Basic Information</div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.name.id_for_label }}">Challenge Name *</label>
-                <input type="text" id="{{ form.name.id_for_label }}" name="{{ form.name.html_name }}" class="form-input" maxlength="200" required value="{{ form.name.value|default_if_none:'' }}">
-                {% if form.name.errors %}
-                <div class="field-error">{{ form.name.errors.0 }}</div>
-                {% endif %}
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.description.id_for_label }}">Description *</label>
-                <textarea id="{{ form.description.id_for_label }}" name="{{ form.description.html_name }}" class="form-input" rows="4">{{ form.description.value|default_if_none:'' }}</textarea>
-                <div class="form-help">Supports Markdown formatting</div>
-                {% if form.description.errors %}
-                <div class="field-error">{{ form.description.errors.0 }}</div>
-                {% endif %}
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label" for="{{ form.category.id_for_label }}">Category *</label>
-                    <select id="{{ form.category.id_for_label }}" name="{{ form.category.html_name }}" class="form-input">
-                        {% for value, label in form.category.field.choices %}
-                        <option value="{{ value }}" {% if form.category.value|stringformat:"s" == value|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                    {% if form.category.errors %}
-                    <div class="field-error">{{ form.category.errors.0 }}</div>
-                    {% endif %}
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="{{ form.difficulty.id_for_label }}">Difficulty *</label>
-                    <select id="{{ form.difficulty.id_for_label }}" name="{{ form.difficulty.html_name }}" class="form-input">
-                        {% for value, label in form.difficulty.field.choices %}
-                        <option value="{{ value }}" {% if form.difficulty.value|stringformat:"s" == value|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                    {% if form.difficulty.errors %}
-                    <div class="field-error">{{ form.difficulty.errors.0 }}</div>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label" for="{{ form.points.id_for_label }}">Points *</label>
-                    <input type="number" id="{{ form.points.id_for_label }}" name="{{ form.points.html_name }}" class="form-input" required value="{{ form.points.value|default_if_none:'' }}">
-                    {% if form.points.errors %}
-                    <div class="field-error">{{ form.points.errors.0 }}</div>
-                    {% endif %}
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="{{ form.order.id_for_label }}">Display Order</label>
-                    <input type="number" id="{{ form.order.id_for_label }}" name="{{ form.order.html_name }}" class="form-input" value="{{ form.order.value|default_if_none:'' }}">
-                    <div class="form-help">Order within category (lower = first)</div>
-                    {% if form.order.errors %}
-                    <div class="field-error">{{ form.order.errors.0 }}</div>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.tag_list.id_for_label }}">Tags</label>
-                <input type="text" id="{{ form.tag_list.id_for_label }}" name="{{ form.tag_list.html_name }}" class="form-input" value="{{ form.tag_list.value|default_if_none:'' }}" maxlength="500">
-                <div class="form-help">Comma-separated tags (e.g. XDR, Linux, Windows)</div>
-                {% if form.tag_list.errors %}
-                <div class="field-error">{{ form.tag_list.errors.0 }}</div>
-                {% endif %}
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.topic_list.id_for_label }}">Topics</label>
-                <input type="text" id="{{ form.topic_list.id_for_label }}" name="{{ form.topic_list.html_name }}" class="form-input" value="{{ form.topic_list.value|default_if_none:'' }}" maxlength="500">
-                <div class="form-help">Comma-separated topics (e.g. SQL Injection, Privilege Escalation, Network Analysis)</div>
-                {% if form.topic_list.errors %}
-                <div class="field-error">{{ form.topic_list.errors.0 }}</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Flag Settings -->
-        <div class="card">
-            <div class="card-title">Flag Settings</div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.flag.id_for_label }}">
-                    Flag {% if not is_edit %}*{% endif %}
-                </label>
-                <input type="text" id="{{ form.flag.id_for_label }}" name="{{ form.flag.html_name }}" class="form-input" value="{{ form.flag.value|default_if_none:'' }}">
-                <div class="form-help">
-                    {% if is_edit %}
-                    Leave blank to keep existing flag
-                    {% else %}
-                    Enter the flag value (will be hashed for secure storage)
-                    {% endif %}
-                </div>
-                {% if form.flag.errors %}
-                <div class="field-error">{{ form.flag.errors.0 }}</div>
-                {% endif %}
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.flag_format.id_for_label }}">Flag Format Hint</label>
-                <input type="text" id="{{ form.flag_format.id_for_label }}" name="{{ form.flag_format.html_name }}" class="form-input" value="{{ form.flag_format.value|default_if_none:'' }}">
-                <div class="form-help">Optional format hint shown to participants (e.g., "FLAG{...}")</div>
-                {% if form.flag_format.errors %}
-                <div class="field-error">{{ form.flag_format.errors.0 }}</div>
-                {% endif %}
-            </div>
-
-            <div class="form-group" style="max-width: 340px;">
-                <label class="form-label" for="{{ form.max_attempts.id_for_label }}">Max Attempts</label>
-                <input type="number" id="{{ form.max_attempts.id_for_label }}" name="{{ form.max_attempts.html_name }}" class="form-input" min="0" value="{{ form.max_attempts.value|default_if_none:'' }}">
-                <div class="form-help">0 = unlimited attempts</div>
-                {% if form.max_attempts.errors %}
-                <div class="field-error">{{ form.max_attempts.errors.0 }}</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Connection Info -->
-        <div class="card">
-            <div class="card-title">Connection Info</div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label" for="{{ form.target_instance_name.id_for_label }}">Target Instance Name</label>
-                    <input type="text" id="{{ form.target_instance_name.id_for_label }}" name="{{ form.target_instance_name.html_name }}" class="form-input" maxlength="100" value="{{ form.target_instance_name.value|default_if_none:'' }}">
-                    <div class="form-help">Match a provisioned victim instance name so participants see the resolved host IP.</div>
-                    {% if form.target_instance_name.errors %}
-                    <div class="field-error">{{ form.target_instance_name.errors.0 }}</div>
-                    {% endif %}
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="{{ form.target_port.id_for_label }}">Target Port</label>
-                    <input type="number" id="{{ form.target_port.id_for_label }}" name="{{ form.target_port.html_name }}" class="form-input" min="1" max="65535" value="{{ form.target_port.value|default_if_none:'' }}">
-                    <div class="form-help">Optional service port to display with the resolved host.</div>
-                    {% if form.target_port.errors %}
-                    <div class="field-error">{{ form.target_port.errors.0 }}</div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <!-- Solution Writeup -->
-        <div class="card">
-            <div class="card-title">Solution Writeup</div>
-
-            <div class="form-group">
-                <label class="form-label" for="{{ form.solution.id_for_label }}">Solution</label>
-                <textarea id="{{ form.solution.id_for_label }}" name="{{ form.solution.html_name }}" class="form-input" rows="6">{{ form.solution.value|default_if_none:'' }}</textarea>
-                <div class="form-help">Official solution writeup (supports Markdown). Visible to participants only after event ends.</div>
-                {% if form.solution.errors %}
-                <div class="field-error">{{ form.solution.errors.0 }}</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Release Settings -->
-        <div class="card">
-            <div class="card-title">Release Settings</div>
-
-            <div class="form-group" style="max-width: 340px;">
-                <label class="form-label" for="{{ form.release_time.id_for_label }}">Release Time</label>
-                <input type="datetime-local" id="{{ form.release_time.id_for_label }}" name="{{ form.release_time.html_name }}" class="form-input" value="{{ form.release_time.value|default_if_none:'' }}">
-                <div class="form-help">Leave empty to release immediately when event starts</div>
-                {% if form.release_time.errors %}
-                <div class="field-error">{{ form.release_time.errors.0 }}</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Challenge Navigation -->
-        <div class="card">
-            <div class="card-title">Challenge Navigation</div>
-
-            <div class="form-group" style="max-width: 340px;">
-                <label class="form-label" for="{{ form.next_challenge.id_for_label }}">Next Challenge</label>
-                <select id="{{ form.next_challenge.id_for_label }}" name="{{ form.next_challenge.html_name }}" class="form-input">
-                    <option value="">--- None ---</option>
-                    {% for choice in form.next_challenge.field.queryset %}
-                    <option value="{{ choice.pk }}" {% if form.next_challenge.value|stringformat:"s" == choice.pk|stringformat:"s" %}selected{% endif %}>{{ choice.name }}</option>
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-alert">
+                    {% for error in form.non_field_errors %}
+                        <p style="margin: 0;">
+                            {{ error }}
+                        </p>
                     {% endfor %}
-                </select>
-                <div class="form-help">Suggested follow-up challenge shown after solving (optional, non-blocking)</div>
-                {% if form.next_challenge.errors %}
-                <div class="field-error">{{ form.next_challenge.errors.0 }}</div>
-                {% endif %}
+                </div>
+            {% endif %}
+            <!-- Basic Information -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Basic Information" %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.name.id_for_label }}">
+                        {% trans "Challenge Name *" %}
+                    </label>
+                    <input type="text"
+                           id="{{ form.name.id_for_label }}"
+                           name="{{ form.name.html_name }}"
+                           class="form-input"
+                           maxlength="200"
+                           required
+                           value="{{ form.name.value|default_if_none:'' }}">
+                    {% if form.name.errors %}
+                        <div class="field-error">
+                            {{ form.name.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label"
+                           for="{{ form.description.id_for_label }}">
+                        {% trans "Description *" %}
+                    </label>
+                    <textarea id="{{ form.description.id_for_label }}"
+                              name="{{ form.description.html_name }}"
+                              class="form-input"
+                              rows="4">{{ form.description.value|default_if_none:'' }}</textarea>
+                    <div class="form-help">
+                        {% trans "Supports Markdown formatting" %}
+                    </div>
+                    {% if form.description.errors %}
+                        <div class="field-error">
+                            {{ form.description.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="{{ form.category.id_for_label }}">
+                            {% trans "Category *" %}
+                        </label>
+                        <select id="{{ form.category.id_for_label }}"
+                                name="{{ form.category.html_name }}"
+                                class="form-input">
+                            {% for value, label in form.category.field.choices %}
+                                <option value="{{ value }}"
+                                        {% if form.category.value|stringformat:"s" == value|stringformat:"s" %}
+                                            selected
+                                        {% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        {% if form.category.errors %}
+                            <div class="field-error">
+                                {{ form.category.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="{{ form.difficulty.id_for_label }}">
+                            {% trans "Difficulty *" %}
+                        </label>
+                        <select id="{{ form.difficulty.id_for_label }}"
+                                name="{{ form.difficulty.html_name }}"
+                                class="form-input">
+                            {% for value, label in form.difficulty.field.choices %}
+                                <option value="{{ value }}"
+                                        {% if form.difficulty.value|stringformat:"s" == value|stringformat:"s" %}
+                                            selected
+                                        {% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        {% if form.difficulty.errors %}
+                            <div class="field-error">
+                                {{ form.difficulty.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="{{ form.points.id_for_label }}">
+                            {% trans "Points *" %}
+                        </label>
+                        <input type="number"
+                               id="{{ form.points.id_for_label }}"
+                               name="{{ form.points.html_name }}"
+                               class="form-input"
+                               required
+                               value="{{ form.points.value|default_if_none:'' }}">
+                        {% if form.points.errors %}
+                            <div class="field-error">
+                                {{ form.points.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="{{ form.order.id_for_label }}">
+                            {% trans "Display Order" %}
+                        </label>
+                        <input type="number"
+                               id="{{ form.order.id_for_label }}"
+                               name="{{ form.order.html_name }}"
+                               class="form-input"
+                               value="{{ form.order.value|default_if_none:'' }}">
+                        <div class="form-help">
+                            {% trans "Order within category (lower = first)" %}
+                        </div>
+                        {% if form.order.errors %}
+                            <div class="field-error">
+                                {{ form.order.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.tag_list.id_for_label }}">
+                        {% trans "Tags" %}
+                    </label>
+                    <input type="text"
+                           id="{{ form.tag_list.id_for_label }}"
+                           name="{{ form.tag_list.html_name }}"
+                           class="form-input"
+                           value="{{ form.tag_list.value|default_if_none:'' }}"
+                           maxlength="500">
+                    <div class="form-help">
+                        {% trans "Comma-separated tags (e.g. XDR, Linux, Windows)" %}
+                    </div>
+                    {% if form.tag_list.errors %}
+                        <div class="field-error">
+                            {{ form.tag_list.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.topic_list.id_for_label }}">
+                        {% trans "Topics" %}
+                    </label>
+                    <input type="text"
+                           id="{{ form.topic_list.id_for_label }}"
+                           name="{{ form.topic_list.html_name }}"
+                           class="form-input"
+                           value="{{ form.topic_list.value|default_if_none:'' }}"
+                           maxlength="500">
+                    <div class="form-help">
+                        {% blocktrans trimmed %}
+                            Comma-separated topics (e.g. SQL Injection, Privilege Escalation, Network Analysis)
+                        {% endblocktrans %}
+                    </div>
+                    {% if form.topic_list.errors %}
+                        <div class="field-error">
+                            {{ form.topic_list.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
             </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="form-actions">
-            <a href="{% if is_edit %}{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}{% else %}{% url 'ctf:admin_challenge_list' event_id=event.pk %}{% endif %}" class="btn btn-cancel">
-                Cancel
-            </a>
-            <button type="submit" class="btn btn-primary">
-                {% if is_edit %}Save Changes{% else %}Create Challenge{% endif %}
-            </button>
-        </div>
-    </form>
-</div>
+            <!-- Flag Settings -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Flag Settings" %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.flag.id_for_label }}">
+                        {% trans "Flag" %}
+                        {% if not is_edit %}
+                            *
+                        {% endif %}
+                    </label>
+                    <input type="text"
+                           id="{{ form.flag.id_for_label }}"
+                           name="{{ form.flag.html_name }}"
+                           class="form-input"
+                           value="{{ form.flag.value|default_if_none:'' }}">
+                    <div class="form-help">
+                        {% if is_edit %}
+                            {% trans "Leave blank to keep existing flag" %}
+                        {% else %}
+                            {% trans "Enter the flag value (will be hashed for secure storage)" %}
+                        {% endif %}
+                    </div>
+                    {% if form.flag.errors %}
+                        <div class="field-error">
+                            {{ form.flag.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label"
+                           for="{{ form.flag_format.id_for_label }}">
+                        {% trans "Flag Format Hint" %}
+                    </label>
+                    <input type="text"
+                           id="{{ form.flag_format.id_for_label }}"
+                           name="{{ form.flag_format.html_name }}"
+                           class="form-input"
+                           value="{{ form.flag_format.value|default_if_none:'' }}">
+                    <div class="form-help">
+                        {% trans "Optional format hint shown to participants (e.g., \"FLAG{...}\")" %}
+                    </div>
+                    {% if form.flag_format.errors %}
+                        <div class="field-error">
+                            {{ form.flag_format.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-group" style="max-width: 340px;">
+                    <label class="form-label"
+                           for="{{ form.max_attempts.id_for_label }}">
+                        {% trans "Max Attempts" %}
+                    </label>
+                    <input type="number"
+                           id="{{ form.max_attempts.id_for_label }}"
+                           name="{{ form.max_attempts.html_name }}"
+                           class="form-input"
+                           min="0"
+                           value="{{ form.max_attempts.value|default_if_none:'' }}">
+                    <div class="form-help">
+                        {% trans "0 = unlimited attempts" %}
+                    </div>
+                    {% if form.max_attempts.errors %}
+                        <div class="field-error">
+                            {{ form.max_attempts.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Connection Info -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Connection Info" %}
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label"
+                               for="{{ form.target_instance_name.id_for_label }}">
+                            {% trans "Target Instance Name" %}
+                        </label>
+                        <input type="text"
+                               id="{{ form.target_instance_name.id_for_label }}"
+                               name="{{ form.target_instance_name.html_name }}"
+                               class="form-input"
+                               maxlength="100"
+                               value="{{ form.target_instance_name.value|default_if_none:'' }}">
+                        <div class="form-help">
+                            {% blocktrans trimmed %}
+                                Match a provisioned victim instance name so participants see the resolved host IP.
+                            {% endblocktrans %}
+                        </div>
+                        {% if form.target_instance_name.errors %}
+                            <div class="field-error">
+                                {{ form.target_instance_name.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label"
+                               for="{{ form.target_port.id_for_label }}">
+                            {% trans "Target Port" %}
+                        </label>
+                        <input type="number"
+                               id="{{ form.target_port.id_for_label }}"
+                               name="{{ form.target_port.html_name }}"
+                               class="form-input"
+                               min="1"
+                               max="65535"
+                               value="{{ form.target_port.value|default_if_none:'' }}">
+                        <div class="form-help">
+                            {% trans "Optional service port to display with the resolved host." %}
+                        </div>
+                        {% if form.target_port.errors %}
+                            <div class="field-error">
+                                {{ form.target_port.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <!-- Solution Writeup -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Solution Writeup" %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.solution.id_for_label }}">
+                        {% trans "Solution" %}
+                    </label>
+                    <textarea id="{{ form.solution.id_for_label }}"
+                              name="{{ form.solution.html_name }}"
+                              class="form-input"
+                              rows="6">{{ form.solution.value|default_if_none:'' }}</textarea>
+                    <div class="form-help">
+                        {% blocktrans trimmed %}
+                            Official solution writeup (supports Markdown). Visible to participants only after event
+                            ends.
+                        {% endblocktrans %}
+                    </div>
+                    {% if form.solution.errors %}
+                        <div class="field-error">
+                            {{ form.solution.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Release Settings -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Release Settings" %}
+                </div>
+                <div class="form-group" style="max-width: 340px;">
+                    <label class="form-label"
+                           for="{{ form.release_time.id_for_label }}">
+                        {% trans "Release Time" %}
+                    </label>
+                    <input type="datetime-local"
+                           id="{{ form.release_time.id_for_label }}"
+                           name="{{ form.release_time.html_name }}"
+                           class="form-input"
+                           value="{{ form.release_time.value|default_if_none:'' }}">
+                    <div class="form-help">
+                        {% trans "Leave empty to release immediately when event starts" %}
+                    </div>
+                    {% if form.release_time.errors %}
+                        <div class="field-error">
+                            {{ form.release_time.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Challenge Navigation -->
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Challenge Navigation" %}
+                </div>
+                <div class="form-group" style="max-width: 340px;">
+                    <label class="form-label"
+                           for="{{ form.next_challenge.id_for_label }}">
+                        {% trans "Next Challenge" %}
+                    </label>
+                    <select id="{{ form.next_challenge.id_for_label }}"
+                            name="{{ form.next_challenge.html_name }}"
+                            class="form-input">
+                        <option value="">
+                            {% trans "--- None ---" %}
+                        </option>
+                        {% for choice in form.next_challenge.field.queryset %}
+                            <option value="{{ choice.pk }}"
+                                    {% if form.next_challenge.value|stringformat:"s" == choice.pk|stringformat:"s" %}
+                                        selected
+                                    {% endif %}>
+                                {{ choice.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-help">
+                        {% trans "Suggested follow-up challenge shown after solving (optional, non-blocking)" %}
+                    </div>
+                    {% if form.next_challenge.errors %}
+                        <div class="field-error">
+                            {{ form.next_challenge.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Actions -->
+            <div class="form-actions">
+                {% if is_edit %}
+                    <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}"
+                       class="btn btn-cancel">{% trans "Cancel" %}</a>
+                {% else %}
+                    <a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}"
+                       class="btn btn-cancel">{% trans "Cancel" %}</a>
+                {% endif %}
+                <button type="submit" class="btn btn-primary">
+                    {% if is_edit %}
+                        {% trans "Save Changes" %}
+                    {% else %}
+                        {% trans "Create Challenge" %}
+                    {% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
 {% endblock %}

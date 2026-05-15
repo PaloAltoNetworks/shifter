@@ -1,111 +1,185 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-{% load static %}
-
-{% block title %}{% if mode == 'create' %}Create Scenario{% else %}Edit {{ scenario.name }}{% endif %}{% endblock %}
-
+{% load static i18n %}
+{% block title %}
+    {% if mode == 'create' %}
+        Create Scenario
+    {% else %}
+        Edit {{ scenario.name }}
+    {% endif %}
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">{% if mode == 'create' %}Create Scenario{% else %}Edit: {{ scenario.name }}{% endif %}</h1>
-        <p class="page-subtitle">{% if mode == 'create' %}Define a new scenario template{% else %}Modify scenario definition{% endif %}</p>
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {% if mode == 'create' %}
+                    {% trans "Create Scenario" %}
+                {% else %}
+                    {% trans "Edit:" %} {{ scenario.name }}
+                {% endif %}
+            </h1>
+            <p class="page-subtitle">
+                {% if mode == 'create' %}
+                    {% trans "Define a new scenario template" %}
+                {% else %}
+                    {% trans "Modify scenario definition" %}
+                {% endif %}
+            </p>
+        </div>
     </div>
-</div>
-
-{% if errors %}
-<ul class="error-list">
-    {% for error in errors %}
-    <li>{{ error }}</li>
-    {% endfor %}
-</ul>
-{% endif %}
-
-<form method="post" id="scenarioForm">
-    {% csrf_token %}
-
-    <!-- Basic Information -->
-    <div class="card" style="margin-bottom: 16px;">
-        <div class="card-title">Basic Information</div>
-
-        {% if mode == 'create' %}
-        <div class="form-group">
-            <label for="scenario_id">Scenario ID</label>
-            <input type="text" id="scenario_id" name="scenario_id" class="form-input"
-                   value="{{ scenario.id|default:'' }}" required
-                   pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, hyphens, and underscores only"
-                   placeholder="my-custom-scenario">
-            <div class="help-text">URL-safe identifier. Lowercase letters, numbers, hyphens, underscores.</div>
-        </div>
-        {% endif %}
-
-        <div class="form-group">
-            <label for="name">Name</label>
-            <input type="text" id="name" name="name" class="form-input"
-                   value="{{ scenario.name|default:'' }}" required maxlength="200"
-                   placeholder="My Custom Scenario">
-        </div>
-
-        <div class="form-group">
-            <label for="description">Description</label>
-            <textarea id="description" name="description" class="form-textarea"
-                      required placeholder="Describe what this scenario does...">{{ scenario.description|default:'' }}</textarea>
-        </div>
-
-        <div class="form-group">
-            <div class="form-checkbox">
-                <input type="checkbox" id="ngfw" name="ngfw" {% if scenario.ngfw %}checked{% endif %}>
-                <label for="ngfw" style="margin-bottom: 0;">Requires NGFW (Next-Gen Firewall)</label>
+    {% if errors %}
+        <ul class="error-list">
+            {% for error in errors %}
+                <li>
+                    {{ error }}
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    <form method="post" id="scenarioForm">
+        {% csrf_token %}
+        <!-- Basic Information -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">
+                {% trans "Basic Information" %}
+            </div>
+            {% if mode == 'create' %}
+                <div class="form-group">
+                    <label for="scenario_id">
+                        {% trans "Scenario ID" %}
+                    </label>
+                    <input type="text"
+                           id="scenario_id"
+                           name="scenario_id"
+                           class="form-input"
+                           value="{{ scenario.id|default:'' }}"
+                           required
+                           pattern="[a-z0-9_-]+"
+                           title='{% trans "Lowercase letters, numbers, hyphens, and underscores only" %}'
+                           placeholder='{% trans "my-custom-scenario" %}'>
+                    <div class="help-text">
+                        {% trans "URL-safe identifier. Lowercase letters, numbers, hyphens, underscores." %}
+                    </div>
+                </div>
+            {% endif %}
+            <div class="form-group">
+                <label for="name">
+                    {% trans "Name" %}
+                </label>
+                <input type="text"
+                       id="name"
+                       name="name"
+                       class="form-input"
+                       value="{{ scenario.name|default:'' }}"
+                       required
+                       maxlength="200"
+                       placeholder='{% trans "My Custom Scenario" %}'>
+            </div>
+            <div class="form-group">
+                <label for="description">
+                    {% trans "Description" %}
+                </label>
+                <textarea id="description"
+                          name="description"
+                          class="form-textarea"
+                          required
+                          placeholder='{% trans "Describe what this scenario does..." %}'>
+                          {{ scenario.description|default:'' }}
+                          </textarea>
+            </div>
+            <div class="form-group">
+                <div class="form-checkbox">
+                    <input type="checkbox"
+                           id="ngfw"
+                           name="ngfw"
+                           {% if scenario.ngfw %}
+                               checked
+                           {% endif %}>
+                    <label for="ngfw" style="margin-bottom: 0;">
+                        {% trans "Requires NGFW (Next-Gen Firewall)" %}
+                    </label>
+                </div>
             </div>
         </div>
-    </div>
-
-    <!-- Instances -->
-    <div class="card" style="margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div class="card-title" style="margin-bottom: 0;">Instances</div>
-            <button type="button" class="btn btn-add" onclick="addInstance()" style="font-size: 12px; height: 28px;">+ Add Instance</button>
+        <!-- Instances -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div style="display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 12px">
+                <div class="card-title" style="margin-bottom: 0;">
+                    {% trans "Instances" %}
+                </div>
+                <button type="button"
+                        class="btn btn-add"
+                        onclick="addInstance()"
+                        style="font-size: 12px;
+                               height: 28px">
+                    {% trans "+ Add Instance" %}
+                </button>
+            </div>
+            <div id="instances-container">
+                <!-- Instances rendered by JS -->
+            </div>
         </div>
-        <div id="instances-container">
-            <!-- Instances rendered by JS -->
+        <!-- Subnets -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div style="display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 12px">
+                <div class="card-title" style="margin-bottom: 0;">
+                    {% trans "Subnets" %}
+                </div>
+                <button type="button"
+                        class="btn btn-add"
+                        onclick="addSubnet()"
+                        style="font-size: 12px;
+                               height: 28px">
+                    {% trans "+ Add Subnet" %}
+                </button>
+            </div>
+            <div class="help-text" style="margin-bottom: 12px;">
+                {% blocktrans trimmed %}
+                    Define network segments. If no subnets are defined, all instances are placed in a single
+                    default subnet.
+                {% endblocktrans %}
+            </div>
+            <div id="subnets-container">
+                <!-- Subnets rendered by JS -->
+            </div>
         </div>
-    </div>
-
-    <!-- Subnets -->
-    <div class="card" style="margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div class="card-title" style="margin-bottom: 0;">Subnets</div>
-            <button type="button" class="btn btn-add" onclick="addSubnet()" style="font-size: 12px; height: 28px;">+ Add Subnet</button>
+        <!-- Hidden fields for JSON data -->
+        <input type="hidden" name="instances_json" id="instances_json">
+        <input type="hidden" name="subnets_json" id="subnets_json">
+        <!-- Actions -->
+        <div class="flex-row gap-sm">
+            <button type="submit" class="btn btn-primary">
+                {% if mode == 'create' %}
+                    {% trans "Create Scenario" %}
+                {% else %}
+                    {% trans "Save Changes" %}
+                {% endif %}
+            </button>
+            {% if mode == 'edit' %}
+                <a href="{% url 'scenario_editor:detail' scenario_id=scenario.id %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
+            {% else %}
+                <a href="{% url 'scenario_editor:list' %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
+            {% endif %}
         </div>
-        <div class="help-text" style="margin-bottom: 12px;">
-            Define network segments. If no subnets are defined, all instances are placed in a single default subnet.
-        </div>
-        <div id="subnets-container">
-            <!-- Subnets rendered by JS -->
-        </div>
-    </div>
-
-    <!-- Hidden fields for JSON data -->
-    <input type="hidden" name="instances_json" id="instances_json">
-    <input type="hidden" name="subnets_json" id="subnets_json">
-
-    <!-- Actions -->
-    <div class="flex-row gap-sm">
-        <button type="submit" class="btn btn-primary">{% if mode == 'create' %}Create Scenario{% else %}Save Changes{% endif %}</button>
-        <a href="{% if mode == 'edit' %}{% url 'scenario_editor:detail' scenario_id=scenario.id %}{% else %}{% url 'scenario_editor:list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
-    </div>
-</form>
-
-{% if scenario and scenario.instances %}
-  {{ scenario.instances|json_script:"instances-data" }}
-{% endif %}
-{% if scenario and scenario.subnets %}
-  {{ scenario.subnets|json_script:"subnets-data" }}
-{% endif %}
+    </form>
+    {% if scenario and scenario.instances %}
+        {{ scenario.instances|json_script:"instances-data" }}
+    {% endif %}
+    {% if scenario and scenario.subnets %}
+        {{ scenario.subnets|json_script:"subnets-data" }}
+    {% endif %}
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 // Safe data loading via json_script tags
 var instances = [];
 var subnets = [];
@@ -123,6 +197,12 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+function parseNameList(value) {
+    return value.split(',').map(function(s) {
+        return s.trim();
+    }).filter(Boolean);
+}
+
 function renderInstances() {
     var container = document.getElementById('instances-container');
     container.innerHTML = '';
@@ -131,39 +211,65 @@ function renderInstances() {
         var card = document.createElement('div');
         card.className = 'instance-card';
         card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom:
+                8px;">
                 <strong style="font-size: 14px;">Instance ${idx + 1}</strong>
-                <button type="button" class="btn btn-danger" onclick="removeInstance(${idx})" style="font-size: 11px; height: 22px; padding: 0 8px; border-radius: 11px; min-width: auto;">Remove</button>
+                <button type="button"
+                        class="btn btn-danger"
+                        onclick="removeInstance(${idx})"
+                        style="font-size: 11px; height: 22px; padding: 0 8px;
+                               border-radius: 11px; min-width: auto;">
+                    Remove
+                </button>
             </div>
             <div class="inline-fields">
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label>Name</label>
-                    <input type="text" class="form-input" value="${escapeHtml(inst.name || '')}" onchange="instances[${idx}].name = this.value" placeholder="Instance name" required>
+                    <input type="text"
+                           class="form-input"
+                           value="${escapeHtml(inst.name || '')}"
+                           onchange="instances[${idx}].name = this.value"
+                           placeholder="Instance name"
+                           required>
                 </div>
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label>Role</label>
                     <select class="form-select" onchange="instances[${idx}].role = this.value">
-                        ${ROLES.map(function(r) { return '<option value="' + escapeHtml(r) + '" ' + (inst.role === r ? 'selected' : '') + '>' + escapeHtml(r) + '</option>'; }).join('')}
+                        ${ROLES.map(function(r) {
+                            return '<option value="' + escapeHtml(r) + '" '
+                                + (inst.role === r ? 'selected' : '') + '>'
+                                + escapeHtml(r) + '</option>';
+                        }).join('')}
                     </select>
                 </div>
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label>OS Type</label>
                     <select class="form-select" onchange="instances[${idx}].os_type = this.value">
-                        ${OS_TYPES.map(function(o) { return '<option value="' + escapeHtml(o) + '" ' + (inst.os_type === o ? 'selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('')}
+                        ${OS_TYPES.map(function(o) {
+                            return '<option value="' + escapeHtml(o) + '" '
+                                + (inst.os_type === o ? 'selected' : '') + '>'
+                                + escapeHtml(o) + '</option>';
+                        }).join('')}
                     </select>
                 </div>
             </div>
             <div class="inline-fields" style="margin-top: 4px;">
                 <div class="form-checkbox">
-                    <input type="checkbox" ${inst.xdr_agent ? 'checked' : ''} onchange="instances[${idx}].xdr_agent = this.checked">
+                    <input type="checkbox"
+                           ${inst.xdr_agent ? 'checked' : ''}
+                           onchange="instances[${idx}].xdr_agent = this.checked">
                     <label style="margin-bottom: 0; font-size: 13px;">XDR Agent</label>
                 </div>
                 <div class="form-checkbox">
-                    <input type="checkbox" ${inst.domain_controller ? 'checked' : ''} onchange="handleDCChange(${idx}, this.checked)">
+                    <input type="checkbox"
+                           ${inst.domain_controller ? 'checked' : ''}
+                           onchange="handleDCChange(${idx}, this.checked)">
                     <label style="margin-bottom: 0; font-size: 13px;">Domain Controller</label>
                 </div>
                 <div class="form-checkbox">
-                    <input type="checkbox" ${inst.join_domain ? 'checked' : ''} onchange="instances[${idx}].join_domain = this.checked">
+                    <input type="checkbox"
+                           ${inst.join_domain ? 'checked' : ''}
+                           onchange="instances[${idx}].join_domain = this.checked">
                     <label style="margin-bottom: 0; font-size: 13px;">Join Domain</label>
                 </div>
             </div>
@@ -172,11 +278,19 @@ function renderInstances() {
                 <div class="inline-fields">
                     <div class="form-group" style="margin-bottom: 4px;">
                         <label>Domain Name</label>
-                        <input type="text" class="form-input" value="${escapeHtml(inst.dc_config?.domain_name || 'internal.shifter')}" onchange="updateDCConfig(${idx}, 'domain_name', this.value)" placeholder="internal.shifter">
+                        <input type="text"
+                               class="form-input"
+                               value="${escapeHtml(inst.dc_config?.domain_name || 'internal.shifter')}"
+                               onchange="updateDCConfig(${idx}, 'domain_name', this.value)"
+                               placeholder="internal.shifter">
                     </div>
                     <div class="form-group" style="margin-bottom: 4px;">
                         <label>NetBIOS Name</label>
-                        <input type="text" class="form-input" value="${escapeHtml(inst.dc_config?.netbios_name || 'INTSHIFTER')}" onchange="updateDCConfig(${idx}, 'netbios_name', this.value)" placeholder="INTSHIFTER">
+                        <input type="text"
+                               class="form-input"
+                               value="${escapeHtml(inst.dc_config?.netbios_name || 'INTSHIFTER')}"
+                               onchange="updateDCConfig(${idx}, 'netbios_name', this.value)"
+                               placeholder="INTSHIFTER">
                     </div>
                 </div>
             </div>
@@ -196,22 +310,43 @@ function renderSubnets() {
         var card = document.createElement('div');
         card.className = 'subnet-card';
         card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom:
+                8px;">
                 <strong style="font-size: 14px;">Subnet ${idx + 1}</strong>
-                <button type="button" class="btn btn-danger" onclick="removeSubnet(${idx})" style="font-size: 11px; height: 22px; padding: 0 8px; border-radius: 11px; min-width: auto;">Remove</button>
+                <button type="button"
+                        class="btn btn-danger"
+                        onclick="removeSubnet(${idx})"
+                        style="font-size: 11px; height: 22px; padding: 0 8px;
+                               border-radius: 11px; min-width: auto;">
+                    Remove
+                </button>
             </div>
             <div class="form-group" style="margin-bottom: 8px;">
                 <label>Subnet Name</label>
-                <input type="text" class="form-input" value="${escapeHtml(subnet.name || '')}" onchange="subnets[${idx}].name = this.value" placeholder="core" required>
+                <input type="text"
+                       class="form-input"
+                       value="${escapeHtml(subnet.name || '')}"
+                       onchange="subnets[${idx}].name = this.value"
+                       placeholder="core"
+                       required>
             </div>
             <div class="form-group" style="margin-bottom: 8px;">
                 <label>Instances (comma-separated names)</label>
-                <input type="text" class="form-input" value="${escapeHtml((subnet.instances || []).join(', '))}" onchange="subnets[${idx}].instances = this.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)" placeholder="${escapeHtml(instanceNames.join(', '))}">
-                <div class="help-text">Available: ${escapeHtml(instanceNames.join(', ') || '(define instances first)')}</div>
+                <input type="text"
+                       class="form-input"
+                       value="${escapeHtml((subnet.instances || []).join(', '))}"
+                       onchange="subnets[${idx}].instances = parseNameList(this.value)"
+                       placeholder="${escapeHtml(instanceNames.join(', '))}">
+                <div class="help-text">Available: ${escapeHtml(instanceNames.join(', ') || '(define instances first)')}
+                </div>
             </div>
             <div class="form-group" style="margin-bottom: 4px;">
                 <label>Connected To (comma-separated subnet names)</label>
-                <input type="text" class="form-input" value="${escapeHtml((subnet.connected_to || []).join(', '))}" onchange="subnets[${idx}].connected_to = this.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)" placeholder="other_subnet">
+                <input type="text"
+                       class="form-input"
+                       value="${escapeHtml((subnet.connected_to || []).join(', '))}"
+                       onchange="subnets[${idx}].connected_to = parseNameList(this.value)"
+                       placeholder="other_subnet">
             </div>
         `;
         container.appendChild(card);
@@ -281,5 +416,5 @@ document.getElementById('scenarioForm').addEventListener('submit', function(e) {
 // Initial render
 renderInstances();
 renderSubnets();
-</script>
+    </script>
 {% endblock %}

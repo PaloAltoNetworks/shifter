@@ -1,20 +1,58 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
+{% load i18n %}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{% if subject %}{{ subject }}{% else %}Invitation{% endif %}</title>
-</head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-<h2>You're Invited!</h2>
-<p>Hi {{ participant.name }},</p>
-<p>You have been invited to participate in <strong>{{ event.name }}</strong>.</p>
-<p><strong>Event Date:</strong> {{ event.event_start|date:"F j, Y g:i A" }} - {{ event.event_end|date:"F j, Y g:i A" }}</p>
-{% if event.description %}<p>{{ event.description }}</p>{% endif %}
-<p>Click below to access your event:</p>
-<p><a href="{{ registration_url }}" style="display:inline-block;padding:10px 24px;background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">Access Event</a></p>
-<p style="font-size:12px;color:#666;">Or copy this URL: {{ registration_url }}</p>
-<p>If you have any questions, please contact your event organizer.</p>
-</body>
+    <head>
+        <meta charset="utf-8">
+        <title>
+            {% if subject %}
+                {{ subject }}
+            {% else %}
+                {% trans "Invitation" %}
+            {% endif %}
+        </title>
+    </head>
+    <body style="font-family: Arial, sans-serif;
+                 max-width: 600px;
+                 margin: 0 auto">
+        <h2>
+            {% trans "You're Invited!" %}
+        </h2>
+        <p>
+            {% blocktrans with v1=participant.name %}Hi {{ v1 }},{% endblocktrans %}
+        </p>
+        <p>
+            {% trans "You have been invited to participate in" %} <strong>{{ event.name }}</strong>.
+        </p>
+        <p>
+            <strong>{% trans "Event Date:" %}</strong>
+            {% blocktrans with v1=event.event_start|date:"F j, Y g:i A" v2=event.event_end|date:"F j, Y g:i A" %}
+                {{ v1 }} - {{ v2 }}
+            {% endblocktrans %}
+        </p>
+        {% if event.description %}
+            <p>
+                {{ event.description }}
+            </p>
+        {% endif %}
+        <p>
+            {% trans "Click below to access your event:" %}
+        </p>
+        <p>
+            <a href="{{ registration_url }}"
+               style="display:inline-block;
+                      padding:10px 24px;
+                      background:#0d6efd;
+                      color:#fff;
+                      text-decoration:none;
+                      border-radius:4px">{% trans "Access Event" %}</a>
+        </p>
+        <p style="font-size:12px;color:#666;">
+            {% blocktrans %}Or copy this URL: {{ registration_url }}{% endblocktrans %}
+        </p>
+        <p>
+            {% trans "If you have any questions, please contact your event organizer." %}
+        </p>
+    </body>
 </html>

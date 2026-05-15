@@ -1,9 +1,9 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-
+{% load i18n %}
 {% block extra_css %}
-<style>
+    <style>
     .ctfd-card {
         max-width: 760px;
         background: var(--theme-surface);
@@ -39,26 +39,31 @@
         font-weight: 700;
         text-decoration: none;
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<div class="container-fluid py-4">
-    <div class="mb-4">
-        <h1 class="h3 mb-1">CTFd Platform</h1>
-    </div>
-
-    <div class="ctfd-card">
-        <p class="ctfd-intro">
-            Challenge submission, hints, and walkthrough content now live in the standalone CTFd platform.
-            Open it below to log in and submit flags.
-        </p>
-        <div class="ctfd-link-box">
-            <a href="{{ ctfd_url }}" target="_blank" rel="noopener noreferrer">{{ ctfd_url }}</a>
+    <div class="container-fluid py-4">
+        <div class="mb-4">
+            <h1 class="h3 mb-1">
+                {% trans "CTFd Platform" %}
+            </h1>
         </div>
-        <a class="ctfd-open-btn" href="{{ ctfd_url }}" target="_blank" rel="noopener noreferrer">
-            Open CTFd
-        </a>
+        <div class="ctfd-card">
+            <p class="ctfd-intro">
+                {% blocktrans trimmed %}
+                    Challenge submission, hints, and walkthrough content now live in the standalone CTFd
+                    platform. Open it below to log in and submit flags.
+                {% endblocktrans %}
+            </p>
+            <div class="ctfd-link-box">
+                <a href="{{ ctfd_url }}"
+                   target="_blank"
+                   rel="noopener noreferrer">{{ ctfd_url }}</a>
+            </div>
+            <a class="ctfd-open-btn"
+               href="{{ ctfd_url }}"
+               target="_blank"
+               rel="noopener noreferrer">{% trans "Open CTFd" %}</a>
+        </div>
     </div>
-</div>
 {% endblock %}

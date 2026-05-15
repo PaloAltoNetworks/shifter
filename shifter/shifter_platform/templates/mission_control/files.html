@@ -1,127 +1,169 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-
+{% load static i18n %}
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/upload-ui.css' %}">
+    <link rel="stylesheet" href="{% static 'css/upload-ui.css' %}">
 {% endblock %}
-
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Files</h1>
-    <p class="page-subtitle">Manage script files for experiments</p>
-</div>
-
-{% if messages %}
-<div class="mb-lg">
-    {% for message in messages %}
-    <div class="message message-{{ message.tags }}">
-        {{ message }}
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Files" %}
+        </h1>
+        <p class="page-subtitle">
+            {% trans "Manage script files for experiments" %}
+        </p>
     </div>
-    {% endfor %}
-</div>
-{% endif %}
-
-<!-- Upload Card -->
-<div class="card">
-    <div class="card-title">Upload Script</div>
-    <form id="upload-form" class="upload-form">
-        {% csrf_token %}
-        <div class="form-group">
-            <label class="form-label" for="script-name">Script Name</label>
-            <input type="text" class="form-input" placeholder="e.g., Lateral Movement Script" id="script-name" name="name" required maxlength="100">
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="script-file">Script File</label>
-            <input type="file" class="form-input" id="script-file" name="file" accept=".py" required>
-            <p class="text-small text-muted mt-sm">
-                Python scripts only (.py), max 1MB per file
-            </p>
-        </div>
-
-        <div id="upload-progress" class="upload-progress">
-            <div class="progress-bar-container">
-                <div id="progress-bar" class="progress-bar"></div>
-            </div>
-            <div class="progress-status">
-                <span id="progress-text">Preparing...</span>
-                <button type="button" id="cancel-btn" class="btn-cancel-upload">Cancel</button>
-            </div>
-        </div>
-
-        <div id="upload-error" class="upload-error"></div>
-
-        <button type="submit" class="btn btn-primary" id="upload-btn">Upload Script</button>
-    </form>
-</div>
-
-<!-- Script List -->
-<div class="card">
-    <div class="card-title">Your Scripts</div>
-
-    {% if scripts %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>NAME</th>
-                <th>FILE</th>
-                <th>SIZE</th>
-                <th>UPLOADED</th>
-                <th class="text-right">ACTIONS</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for script in scripts %}
-            <tr>
-                <td>
-                    <span class="text-bold">{{ script.name }}</span>
-                </td>
-                <td>
-                    <span class="text-muted">{{ script.original_filename }}</span>
-                </td>
-                <td>
-                    <span class="text-muted">{{ script.file_size_bytes|filesizeformat }}</span>
-                </td>
-                <td>
-                    <span class="text-muted">{{ script.created_at|date:"M d, Y" }}</span>
-                    <br>
-                    <span class="text-small text-muted">{{ script.created_at|time:"H:i" }}</span>
-                </td>
-                <td class="text-right">
-                    <form method="post" action="{% url 'mission_control:file_delete' script.pk %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this script?');">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-secondary btn-small">Delete</button>
-                    </form>
-                </td>
-            </tr>
+    {% if messages %}
+        <div class="mb-lg">
+            {% for message in messages %}
+                <div class="message message-{{ message.tags }}">
+                    {{ message }}
+                </div>
             {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <div class="empty-state-graphic">
-            <div class="empty-state-graphic-arc"></div>
-            <div class="empty-state-graphic-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/>
-                    <line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10 9 9 9 8 9"/>
-                </svg>
-            </div>
         </div>
-        <h3>No scripts uploaded yet</h3>
-        <p>Upload a Python script to use in experiments</p>
-    </div>
     {% endif %}
-</div>
+    <!-- Upload Card -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Upload Script" %}
+        </div>
+        <form id="upload-form" class="upload-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label class="form-label" for="script-name">
+                    {% trans "Script Name" %}
+                </label>
+                <input type="text"
+                       class="form-input"
+                       placeholder='{% trans "e.g., Lateral Movement Script" %}'
+                       id="script-name"
+                       name="name"
+                       required
+                       maxlength="100">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="script-file">
+                    {% trans "Script File" %}
+                </label>
+                <input type="file"
+                       class="form-input"
+                       id="script-file"
+                       name="file"
+                       accept=".py"
+                       required>
+                <p class="text-small text-muted mt-sm">
+                    {% trans "Python scripts only (.py), max 1MB per file" %}
+                </p>
+            </div>
+            <div id="upload-progress" class="upload-progress">
+                <div class="progress-bar-container">
+                    <div id="progress-bar" class="progress-bar">
+                    </div>
+                </div>
+                <div class="progress-status">
+                    <span id="progress-text">{% trans "Preparing..." %}</span>
+                    <button type="button" id="cancel-btn" class="btn-cancel-upload">
+                        {% trans "Cancel" %}
+                    </button>
+                </div>
+            </div>
+            <div id="upload-error" class="upload-error">
+            </div>
+            <button type="submit" class="btn btn-primary" id="upload-btn">
+                {% trans "Upload Script" %}
+            </button>
+        </form>
+    </div>
+    <!-- Script List -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Your Scripts" %}
+        </div>
+        {% if scripts %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>
+                            {% trans "NAME" %}
+                        </th>
+                        <th>
+                            {% trans "FILE" %}
+                        </th>
+                        <th>
+                            {% trans "SIZE" %}
+                        </th>
+                        <th>
+                            {% trans "UPLOADED" %}
+                        </th>
+                        <th class="text-right">
+                            {% trans "ACTIONS" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for script in scripts %}
+                        <tr>
+                            <td>
+                                <span class="text-bold">{{ script.name }}</span>
+                            </td>
+                            <td>
+                                <span class="text-muted">{{ script.original_filename }}</span>
+                            </td>
+                            <td>
+                                <span class="text-muted">{{ script.file_size_bytes|filesizeformat }}</span>
+                            </td>
+                            <td>
+                                <span class="text-muted">{{ script.created_at|date:"M d, Y" }}</span>
+                                <br>
+                                <span class="text-small text-muted">{{ script.created_at|time:"H:i" }}</span>
+                            </td>
+                            <td class="text-right">
+                                <form method="post"
+                                      action="{% url 'mission_control:file_delete' script.pk %}"
+                                      style="display: inline"
+                                      onsubmit="return confirm('Are you sure you want to delete this script?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-secondary btn-small">
+                                        {% trans "Delete" %}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <div class="empty-state-graphic">
+                    <div class="empty-state-graphic-arc">
+                    </div>
+                    <div class="empty-state-graphic-icon">
+                        <svg viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             stroke-width="1.5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                            <polyline points="10 9 9 9 8 9" />
+                        </svg>
+                    </div>
+                </div>
+                <h3>
+                    {% trans "No scripts uploaded yet" %}
+                </h3>
+                <p>
+                    {% trans "Upload a Python script to use in experiments" %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}
-
 {% block extra_js %}
-<script src="{% static 'js/upload.js' %}"></script>
-<script>
+    <script src="{% static 'js/upload.js' %}"></script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('upload-form');
     const fileInput = document.getElementById('script-file');
@@ -205,5 +247,5 @@ document.addEventListener('DOMContentLoaded', function() {
         uploader = null;
     }
 });
-</script>
+    </script>
 {% endblock %}

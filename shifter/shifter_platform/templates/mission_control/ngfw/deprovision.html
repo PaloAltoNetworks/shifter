@@ -1,10 +1,9 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-
+{% load static i18n %}
 {% block extra_css %}
-<style>
+    <style>
     /* Back link */
     .back-link {
         display: inline-flex;
@@ -191,92 +190,116 @@
         color: var(--theme-text-secondary);
         margin: 12px 0 0;
     }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="back-link">
-    <span>&larr;</span> Back to {{ ngfw.name }}
-</a>
-
-<div class="deprovision-container">
-    <div class="card">
-        <div class="warning-header">
-            <div class="warning-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                    <line x1="12" y1="9" x2="12" y2="13"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
+    <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}"
+       class="back-link">
+        <span>{% trans "&larr;" %}</span>
+        {% blocktrans with v1=ngfw.name %}Back to {{ v1 }}{% endblocktrans %}
+    </a>
+    <div class="deprovision-container">
+        <div class="card">
+            <div class="warning-header">
+                <div class="warning-icon">
+                    <svg viewBox="0 0 24 24"
+                         fill="none"
+                         stroke="currentColor"
+                         stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0
+                            0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="warning-title">
+                        {% blocktrans with v1=ngfw.name %}Deprovision {{ v1 }}{% endblocktrans %}
+                    </h1>
+                    <p class="warning-subtitle">
+                        {% trans "This action cannot be undone" %}
+                    </p>
+                </div>
             </div>
-            <div>
-                <h1 class="warning-title">Deprovision {{ ngfw.name }}</h1>
-                <p class="warning-subtitle">This action cannot be undone</p>
-            </div>
-        </div>
-
-        <p class="deprovision-intro">
-            You are about to permanently deprovision this NGFW. Please review the impact before proceeding.
-        </p>
-
-        <ul class="impact-list">
-            <li>
-                <span class="impact-icon">&#10005;</span>
-                <span>The EC2 instance and all associated AWS resources will be terminated</span>
-            </li>
-            <li>
-                <span class="impact-icon">&#10005;</span>
-                <span>The NGFW license will be deactivated and credits returned to your pool</span>
-            </li>
-            <li>
-                <span class="impact-icon">&#10005;</span>
-                <span>Traffic logging to XDR will stop for any ranges using this NGFW</span>
-            </li>
-            <li>
-                <span class="impact-icon">&#10005;</span>
-                <span>The GWLB and endpoint service will be deleted</span>
-            </li>
-        </ul>
-
-        {% if linked_ranges %}
-        <div class="linked-ranges-warning">
-            <h3 class="linked-ranges-title">
-                Warning: {{ linked_ranges|length }}
-                range{% if linked_ranges|length != 1 %}s{% endif %} currently using this NGFW
-            </h3>
-            <ul class="linked-ranges-list">
-                {% for range in linked_ranges %}
-                <li>
-                    <span>Range #{{ range.id }}</span>
-                    <span>{{ range.get_status_display }}</span>
-                </li>
-                {% endfor %}
-            </ul>
-            <p class="linked-ranges-note">
-                These ranges will lose their NGFW routing. You should destroy them first or assign a different NGFW.
+            <p class="deprovision-intro">
+                {% blocktrans trimmed %}
+                    You are about to permanently deprovision this NGFW. Please review the impact before
+                    proceeding.
+                {% endblocktrans %}
             </p>
-        </div>
-        {% endif %}
-
-        <div class="confirmation-form">
-            <label class="confirmation-label" for="confirm-input">
-                To confirm, type <strong>{{ ngfw.name }}</strong> below:
-            </label>
-            <input type="text" class="form-input" id="confirm-input" placeholder="{{ ngfw.name }}" autocomplete="off">
-        </div>
-
-        <div class="action-buttons">
-            <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}" class="btn btn-secondary">Cancel</a>
-            <button type="button" class="btn btn-danger" id="deprovision-btn" disabled>
-                Deprovision NGFW
-            </button>
+            <ul class="impact-list">
+                <li>
+                    <span class="impact-icon">&#10005;</span>
+                    <span>{% trans "The EC2 instance and all associated AWS resources will be terminated" %}</span>
+                </li>
+                <li>
+                    <span class="impact-icon">&#10005;</span>
+                    <span>{% trans "The NGFW license will be deactivated and credits returned to your pool" %}</span>
+                </li>
+                <li>
+                    <span class="impact-icon">&#10005;</span>
+                    <span>{% trans "Traffic logging to XDR will stop for any ranges using this NGFW" %}</span>
+                </li>
+                <li>
+                    <span class="impact-icon">&#10005;</span>
+                    <span>{% trans "The GWLB and endpoint service will be deleted" %}</span>
+                </li>
+            </ul>
+            {% if linked_ranges %}
+                <div class="linked-ranges-warning">
+                    <h3 class="linked-ranges-title">
+                        {% trans "Warning:" %} {{ linked_ranges|length }}
+                        {% trans "range" %}
+                        {% if linked_ranges|length != 1 %}
+                            {% trans "s" %}
+                        {% endif %}
+                        {% trans "currently using this NGFW" %}
+                    </h3>
+                    <ul class="linked-ranges-list">
+                        {% for range in linked_ranges %}
+                            <li>
+                                <span>
+                                    {% blocktrans with v1=range.id %}
+                                        Range #{{ v1 }}
+                                    {% endblocktrans %}
+                                </span>
+                                <span>{{ range.get_status_display }}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                    <p class="linked-ranges-note">
+                        {% blocktrans trimmed %}
+                            These ranges will lose their NGFW routing. You should destroy them first or assign a
+                            different NGFW.
+                        {% endblocktrans %}
+                    </p>
+                </div>
+            {% endif %}
+            <div class="confirmation-form">
+                <label class="confirmation-label" for="confirm-input">
+                    {% trans "To confirm, type" %} <strong>{{ ngfw.name }}</strong> {% trans "below:" %}
+                </label>
+                <input type="text"
+                       class="form-input"
+                       id="confirm-input"
+                       placeholder="{{ ngfw.name }}"
+                       autocomplete="off">
+            </div>
+            <div class="action-buttons">
+                <a href="{% url 'mission_control:ngfw_detail' ngfw.app_id %}"
+                   class="btn btn-secondary">{% trans "Cancel" %}</a>
+                <button type="button"
+                        class="btn btn-danger"
+                        id="deprovision-btn"
+                        disabled>
+                    {% trans "Deprovision NGFW" %}
+                </button>
+            </div>
         </div>
     </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     const csrfToken = '{{ csrf_token }}';
     const ngfwId = '{{ ngfw.app_id }}';
@@ -328,5 +351,5 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
-</script>
+    </script>
 {% endblock %}

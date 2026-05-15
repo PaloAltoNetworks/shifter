@@ -1,0 +1,5492 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-15 04:12+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: cms/experiments/templates/experiments/base.html:10
+#: cms/experiments/templates/experiments/experiment_list.html:72
+#: templates/partials/icon_sidebar.html:344
+msgid "Experiments"
+msgstr ""
+
+#: cms/experiments/templates/experiments/base.html:12
+msgid "- Cortex Shifter"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:101
+#: cms/experiments/templates/experiments/experiment_detail.html:125
+msgid "&larr; Back to Experiments"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:106
+#: cms/experiments/templates/experiments/experiment_create.html:241
+msgid "Create Experiment"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:109
+msgid "Configure a new experiment with scenario, runs, and scripts"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:127
+#: templates/ctf/admin/challenge_form.html:108
+#: templates/ctf/admin/event_form.html:100
+#: templates/mission_control/credentials/add.html:283
+#: templates/risk_register/risk_form.html:28
+#: templates/scenario_editor/form.html:45
+msgid "Basic Information"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:131
+#: cms/experiments/templates/experiments/experiment_list.html:96
+#: cms/experiments/templates/experiments/script_list.html:57
+#: templates/ctf/admin/analytics.html:148
+#: templates/ctf/admin/bracket_list.html:74
+#: templates/ctf/admin/challenge_detail.html:454
+#: templates/ctf/admin/challenge_list.html:96
+#: templates/ctf/admin/dashboard.html:306
+#: templates/ctf/admin/event_list.html:76
+#: templates/ctf/admin/participant_import.html:232
+#: templates/ctf/admin/participant_list.html:156
+#: templates/ctf/admin/scoreboard.html:179
+#: templates/ctf/admin/scoreboard.html:242
+#: templates/ctf/admin/team_list.html:116
+#: templates/ctf/participant/range.html:36
+#: templates/ctf/participant/scoreboard.html:81
+#: templates/ctf/participant/scoreboard.html:145
+#: templates/mission_control/credentials/detail.html:169
+#: templates/mission_control/credentials/list.html:197
+#: templates/mission_control/ngfw/detail.html:264
+#: templates/mission_control/ngfw/wizard.html:231
+#: templates/risk_register/apikey_list.html:65
+#: templates/scenario_editor/clone.html:84
+#: templates/scenario_editor/detail.html:257
+#: templates/scenario_editor/detail.html:344
+#: templates/scenario_editor/form.html:68
+#: templates/scenario_editor/list.html:38
+msgid "Name"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:138
+msgid "e.g., XDR Detection Test"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:142
+#: cms/experiments/templates/experiments/experiment_detail.html:212
+#: templates/ctf/admin/bracket_list.html:77
+#: templates/ctf/admin/challenge_detail.html:202
+#: templates/ctf/admin/event_detail.html:113
+#: templates/ctf/admin/event_form.html:116
+#: templates/risk_register/risk_detail.html:65
+#: templates/scenario_editor/detail.html:84
+#: templates/scenario_editor/form.html:81
+msgid "Description"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:148
+msgid "Optional description"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:153
+msgid "Scenario & Execution"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:157
+#: cms/experiments/templates/experiments/experiment_detail.html:182
+#: cms/experiments/templates/experiments/experiment_list.html:99
+#: templates/mission_control/dashboard.html:110
+msgid "Scenario"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:161
+msgid "-- Select scenario --"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:170
+msgid "Select the infrastructure scenario template"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:175
+#: templates/mission_control/dashboard.html:194
+msgid "Windows Agent"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:179
+msgid "-- Select agent --"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:183
+msgid "XDR agent for Windows instances"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:189
+#: cms/experiments/templates/experiments/experiment_detail.html:186
+msgid "Total Runs"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:198
+msgid "1-10 runs per experiment"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:203
+#: cms/experiments/templates/experiments/experiment_detail.html:190
+msgid "Max Parallel"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:212
+msgid "1-5 concurrent runs"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:219
+#: cms/experiments/templates/experiments/experiment_detail.html:223
+msgid "Script Assignments"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:222
+msgid ""
+"Assign scripts to scenario instances (loaded when you select a scenario)"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:231
+msgid "+ Add Script"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_create.html:244
+#: cms/experiments/templates/experiments/experiment_detail.html:157
+#: cms/experiments/templates/experiments/script_upload.html:129
+#: templates/ctf/admin/bracket_form.html:114
+#: templates/ctf/admin/challenge_detail.html:310
+#: templates/ctf/admin/challenge_form.html:479
+#: templates/ctf/admin/challenge_form.html:482
+#: templates/ctf/admin/event_force_delete.html:195
+#: templates/ctf/admin/event_form.html:417
+#: templates/ctf/admin/event_form.html:421
+#: templates/ctf/admin/participant_form.html:211
+#: templates/ctf/admin/participant_import.html:210
+#: templates/mission_control/agents.html:92
+#: templates/mission_control/credentials/add.html:461
+#: templates/mission_control/dashboard.html:291
+#: templates/mission_control/files.html:67
+#: templates/mission_control/ngfw/deprovision.html:290
+#: templates/mission_control/ngfw/wizard.html:107
+#: templates/mission_control/settings.html:90
+#: templates/risk_register/risk_form.html:248
+#: templates/risk_register/risk_form.html:251
+#: templates/scenario_editor/clone.html:125
+#: templates/scenario_editor/form.html:167
+#: templates/scenario_editor/form.html:170
+#: templates/scenario_editor/yaml_create.html:55
+#: templates/scenario_editor/yaml_editor.html:57
+msgid "Cancel"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:136
+msgid "connecting..."
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:146
+msgid "Start Experiment"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:163
+msgid "Download Bundle"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:178
+#: templates/documentation/doc_page.html:25
+#: templates/mission_control/credentials/detail.html:165
+#: templates/mission_control/ngfw/detail.html:260
+msgid "Overview"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:194
+#: cms/experiments/templates/experiments/experiment_list.html:108
+#: templates/mission_control/credentials/detail.html:183
+#: templates/mission_control/ngfw/detail.html:280
+#: templates/mission_control/ngfw/detail.html:359
+#: templates/mission_control/ngfw/list.html:157
+#: templates/risk_register/apikey_list.html:71
+#: templates/risk_register/risk_detail.html:190
+msgid "Created"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:199
+msgid "Started"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:205
+#: templates/ctf/admin/participant_detail.html:225
+#: templates/ctf/admin/participant_list.html:206
+msgid "Completed"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:233
+#: cms/experiments/templates/experiments/experiment_detail.html:235
+msgid "&mdash;"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:239
+#, python-format
+msgid ""
+"\n"
+"                                    (order: %(v1)s)\n"
+"                                "
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:253
+#: cms/experiments/templates/experiments/experiment_detail.html:304
+#: cms/experiments/templates/experiments/experiment_list.html:105
+msgid "Runs"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:262
+#: cms/experiments/templates/experiments/experiment_list.html:102
+#: templates/ctf/admin/dashboard.html:309
+#: templates/ctf/admin/event_force_delete.html:143
+#: templates/ctf/admin/event_list.html:79
+#: templates/ctf/admin/participant_detail.html:216
+#: templates/ctf/admin/participant_list.html:162
+#: templates/ctf/participant/team.html:44
+#: templates/mission_control/ngfw/detail.html:268
+#: templates/mission_control/ngfw/detail.html:356
+#: templates/risk_register/apikey_list.html:77
+#: templates/risk_register/risk_form.html:78
+#: templates/risk_register/risk_list.html:40
+#: templates/risk_register/risk_list.html:82
+#: templates/scenario_editor/list.html:78
+msgid "Status"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:265
+#: cms/experiments/templates/experiments/experiment_detail.html:315
+#: templates/ctf/admin/range_list.html:79
+#: templates/ctf/email/provision_failure.html:31
+#: templates/scenario_editor/error.html:11
+msgid "Error"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:268
+#: templates/ctf/admin/bracket_list.html:86
+#: templates/ctf/admin/challenge_detail.html:353
+#: templates/ctf/admin/challenge_detail.html:464
+#: templates/ctf/admin/challenge_detail.html:563
+#: templates/ctf/admin/challenge_list.html:111
+#: templates/ctf/admin/dashboard.html:321
+#: templates/ctf/admin/event_list.html:94
+#: templates/ctf/admin/participant_list.html:179
+#: templates/ctf/admin/range_list.html:51
+#: templates/mission_control/credentials/list.html:209
+#: templates/risk_register/apikey_list.html:80
+#: templates/scenario_editor/list.html:94
+msgid "Actions"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_detail.html:307
+msgid "Runs will be created when the experiment is started."
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:75
+msgid "Manage and monitor your experiment runs"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:79
+#: cms/experiments/templates/experiments/experiment_list.html:167
+msgid "New Experiment"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:130
+#, python-format
+msgid "%(done)s / %(total)s"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:144
+msgid "&larr; Previous"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:147
+#, python-format
+msgid ""
+"\n"
+"                        Page %(v1)s of %(v2)s\n"
+"                    "
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:152
+msgid "Next &rarr;"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:160
+msgid "No experiments yet"
+msgstr ""
+
+#: cms/experiments/templates/experiments/experiment_list.html:163
+msgid "Create your first experiment to get started"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:33
+msgid "Script Assets"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:36
+msgid "Manage reusable Python scripts for experiments"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:40
+#: cms/experiments/templates/experiments/script_list.html:117
+#: cms/experiments/templates/experiments/script_upload.html:77
+#: templates/mission_control/files.html:29
+#: templates/mission_control/files.html:74
+msgid "Upload Script"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:60
+msgid "Filename"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:63
+#: templates/ctf/admin/challenge_detail.html:457
+msgid "Size"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:66
+msgid "Uploaded"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:82
+#, python-format
+msgid ""
+"\n"
+"                                    %(v1)s MB\n"
+"                                "
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:97
+#: templates/ctf/admin/bracket_list.html:116
+#: templates/mission_control/agents.html:166
+#: templates/mission_control/credentials/list.html:276
+#: templates/mission_control/files.html:128
+#: templates/risk_register/risk_detail.html:57
+#: templates/risk_register/risk_detail.html:231
+#: templates/scenario_editor/detail.html:75
+#: templates/scenario_editor/list.html:243
+msgid "Delete"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:110
+msgid "No scripts uploaded"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_list.html:113
+msgid "Upload Python scripts to use in your experiments"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:74
+msgid "&larr; Back to Scripts"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:80
+msgid "Upload a Python script file to use in experiments"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:94
+#: templates/mission_control/files.html:35
+msgid "Script Name"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:101
+msgid "e.g., Ransomware Simulation"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:105
+msgid "Python File"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:109
+msgid "Only .py files up to 1MB"
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:118
+msgid "Uploading..."
+msgstr ""
+
+#: cms/experiments/templates/experiments/script_upload.html:126
+#: templates/ctf/admin/challenge_detail.html:529
+msgid "Upload"
+msgstr ""
+
+#: templates/coming_soon.html:10
+msgid "SHIFTER // Coming Soon"
+msgstr ""
+
+#: templates/coming_soon.html:225
+msgid "Shifter logo"
+msgstr ""
+
+#: templates/coming_soon.html:226
+#: templates/partials/ctf_participant_sidebar.html:36
+#: templates/partials/icon_sidebar.html:42
+msgid "S"
+msgstr ""
+
+#: templates/coming_soon.html:230 templates/partials/icon_sidebar.html:44
+msgid "SHIFTER"
+msgstr ""
+
+#: templates/coming_soon.html:234
+msgid ""
+"Autonomous AI adversaries. Real infrastructure. Controlled environments."
+msgstr ""
+
+#: templates/coming_soon.html:238
+msgid "// December 18, 2025"
+msgstr ""
+
+#: templates/coming_soon.html:242
+msgid "&copy; 2025 Brad Edwards"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:55
+#: templates/ctf/admin/bracket_form.html:69
+#: templates/ctf/admin/bracket_list.html:51
+#: templates/ctf/admin/challenge_detail.html:154
+#: templates/ctf/admin/challenge_list.html:56
+#: templates/ctf/admin/email_templates.html:73
+#: templates/ctf/admin/event_detail.html:86
+#: templates/ctf/admin/event_force_delete.html:114
+#: templates/ctf/admin/participant_detail.html:168
+#: templates/ctf/admin/participant_form.html:122
+#: templates/ctf/admin/participant_import.html:145
+#: templates/ctf/admin/participant_list.html:68
+#: templates/ctf/admin/scoreboard.html:83 templates/ctf/admin/team_list.html:71
+msgid "Events"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:59 templates/ctf/admin/analytics.html:62
+msgid "Analytics"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:72
+#: templates/ctf/admin/bracket_list.html:83
+#: templates/ctf/admin/dashboard.html:318
+#: templates/ctf/admin/event_force_delete.html:147
+#: templates/ctf/admin/event_list.html:88
+#: templates/ctf/admin/participant_detail.html:174
+#: templates/ctf/admin/participant_form.html:128
+#: templates/ctf/admin/participant_import.html:151
+#: templates/ctf/admin/participant_list.html:72
+#: templates/ctf/admin/participant_list.html:75
+#: templates/ctf/admin/scoreboard.html:119
+msgid "Participants"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:80
+msgid "Active Participants"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:88
+#: templates/ctf/admin/challenge_detail.html:160
+#: templates/ctf/admin/challenge_list.html:60
+#: templates/ctf/admin/challenge_list.html:63
+#: templates/ctf/admin/event_force_delete.html:151
+#: templates/ctf/admin/event_list.html:91
+#: templates/ctf/admin/scoreboard.html:143 templates/ctf/help.html:31
+#: templates/ctf/participant/challenges.html:13
+#: templates/partials/ctf_participant_sidebar.html:93
+msgid "Challenges"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:96
+msgid "Zero-Solve Challenges"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:106
+msgid "Average Score"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:114
+msgid "Median Score"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:122
+#: templates/ctf/admin/challenge_detail.html:688
+#: templates/ctf/admin/event_force_delete.html:155
+#: templates/ctf/admin/scoreboard.html:135
+msgid "Total Submissions"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:127
+#, python-format
+msgid ""
+"\n"
+"                    %(v1)sh\n"
+"                "
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:132
+msgid "Event Duration"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:140
+msgid "Challenge Breakdown"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:151
+#: templates/ctf/admin/challenge_detail.html:556
+#: templates/ctf/admin/challenge_detail.html:722
+msgid "Category"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:154
+#: templates/ctf/admin/challenge_detail.html:559
+#: templates/ctf/admin/challenge_detail.html:646
+#: templates/ctf/admin/challenge_detail.html:726
+#: templates/ctf/admin/challenge_list.html:99
+#: templates/ctf/admin/participant_detail.html:335
+#: templates/ctf/participant/challenge_detail.html:238
+#: templates/ctf/participant/dashboard.html:102
+msgid "Points"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:157
+#: templates/ctf/admin/participant_detail.html:301
+msgid "Attempts"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:160
+#: templates/ctf/admin/challenge_list.html:105
+#: templates/ctf/admin/scoreboard.html:194
+#: templates/ctf/admin/scoreboard.html:257
+#: templates/ctf/participant/scoreboard.html:96
+#: templates/ctf/participant/scoreboard.html:160
+msgid "Solves"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:163
+#: templates/ctf/admin/challenge_detail.html:696
+msgid "Solve Rate"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:166
+#: templates/ctf/admin/challenge_detail.html:706
+msgid "First Blood"
+msgstr ""
+
+#: templates/ctf/admin/analytics.html:205
+#: templates/ctf/admin/challenge_list.html:176
+msgid "No challenges yet."
+msgstr ""
+
+#: templates/ctf/admin/bracket_form.html:73
+#: templates/ctf/admin/bracket_list.html:55
+#: templates/ctf/admin/bracket_list.html:61
+msgid "Brackets"
+msgstr ""
+
+#: templates/ctf/admin/bracket_form.html:77
+#: templates/ctf/admin/bracket_list.html:107
+#: templates/ctf/admin/challenge_detail.html:192
+#: templates/ctf/admin/challenge_list.html:162
+#: templates/ctf/admin/event_detail.html:103
+#: templates/ctf/admin/event_list.html:130
+#: templates/ctf/admin/participant_form.html:134
+#: templates/risk_register/risk_detail.html:21
+#: templates/scenario_editor/list.html:218
+msgid "Edit"
+msgstr ""
+
+#: templates/ctf/admin/bracket_form.html:79
+msgid "Create"
+msgstr ""
+
+#: templates/ctf/admin/bracket_form.html:85
+msgid "Edit Bracket"
+msgstr ""
+
+#: templates/ctf/admin/bracket_form.html:87
+#: templates/ctf/admin/bracket_form.html:119
+#: templates/ctf/admin/bracket_list.html:64
+msgid "Create Bracket"
+msgstr ""
+
+#: templates/ctf/admin/bracket_form.html:117
+#: templates/ctf/admin/challenge_form.html:486
+#: templates/ctf/admin/event_form.html:425
+#: templates/ctf/admin/participant_form.html:207
+#: templates/risk_register/risk_form.html:241
+#: templates/scenario_editor/form.html:162
+#: templates/scenario_editor/yaml_editor.html:54
+msgid "Save Changes"
+msgstr ""
+
+#: templates/ctf/admin/bracket_list.html:80
+#: templates/ctf/admin/challenge_detail.html:293
+msgid "Order"
+msgstr ""
+
+#: templates/ctf/admin/bracket_list.html:127
+msgid ""
+"No brackets configured. Create brackets to group participants by skill level."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:175
+#: templates/ctf/admin/challenge_list.html:135
+#: templates/ctf/participant/challenge_detail.html:43
+#: templates/ctf/participant/challenges.html:188
+msgid "Easy"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:177
+#: templates/ctf/admin/challenge_list.html:137
+#: templates/ctf/participant/challenge_detail.html:45
+#: templates/ctf/participant/challenges.html:190
+#: templates/risk_register/risk_form.html:140
+msgid "Medium"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:179
+#: templates/ctf/admin/challenge_list.html:139
+#: templates/ctf/participant/challenge_detail.html:47
+#: templates/ctf/participant/challenges.html:192
+msgid "Hard"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:181
+#: templates/ctf/admin/challenge_list.html:141
+#: templates/ctf/participant/challenge_detail.html:49
+#: templates/ctf/participant/challenges.html:194
+msgid "Expert"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:184
+#, python-format
+msgid ""
+"\n"
+"                            %(v1)s pts\n"
+"                        "
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:211
+msgid "Hints ("
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:216
+msgid "Add Hint"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:228
+msgid "Text"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:231
+msgid "Penalty"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:249
+#, python-format
+msgid ""
+"\n"
+"                                            %(v1)s%%\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:258
+#: templates/ctf/admin/challenge_detail.html:379
+#: templates/ctf/admin/challenge_detail.html:489
+#: templates/ctf/admin/challenge_detail.html:587
+msgid "Remove"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:268
+msgid "No hints added yet."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:275
+msgid "Hint Text"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:282
+#, python-format
+msgid "Penalty (%%)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:305
+#: templates/ctf/admin/challenge_detail.html:622
+#: templates/ctf/admin/participant_form.html:132
+msgid "Add"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:319
+#: templates/ctf/admin/challenge_form.html:392
+msgid "Solution Writeup"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:329
+msgid "Flags"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:334
+msgid "Add Flag"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:346
+#: templates/ctf/admin/challenge_detail.html:406
+#: templates/ctf/admin/challenge_detail.html:460
+#: templates/mission_control/credentials/add.html:243
+#: templates/mission_control/credentials/detail.html:173
+#: templates/mission_control/credentials/list.html:200
+#: templates/mission_control/settings.html:76
+#: templates/scenario_editor/list.html:54
+msgid "Type"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:349
+#: templates/ctf/admin/challenge_detail.html:419
+msgid "Case Sensitive"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:369
+#: templates/ctf/admin/challenge_detail.html:423
+#: templates/ctf/admin/event_detail.html:284
+#: templates/scenario_editor/clone.html:112
+#: templates/scenario_editor/detail.html:109
+#: templates/scenario_editor/detail.html:305
+#: templates/scenario_editor/list.html:137
+msgid "Yes"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:371
+#: templates/ctf/admin/challenge_detail.html:426
+#: templates/ctf/admin/event_detail.html:286
+#: templates/scenario_editor/clone.html:114
+#: templates/scenario_editor/detail.html:111
+#: templates/scenario_editor/detail.html:149
+#: templates/scenario_editor/detail.html:307
+#: templates/scenario_editor/list.html:139
+msgid "No"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:389
+msgid "No flag records. Using legacy flag_hash field."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:396
+msgid "Flag Value"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:401
+msgid "Enter flag value or regex pattern"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:409
+msgid "static"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:410
+msgid "Static"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:412
+msgid "regex"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:413
+msgid "Regex"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:432
+msgid "Save Flag"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:440
+#: templates/mission_control/files.html:11
+#: templates/partials/icon_sidebar.html:533
+msgid "Files"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:445
+msgid "Upload File"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:499
+msgid "No files attached."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:510
+msgid "File"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:520
+msgid "Display Name (optional)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:526
+msgid "Friendly name for download"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:531
+msgid "Max 50 MB"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:539
+msgid "Prerequisites"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:544
+msgid "Add Prerequisite"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:553
+#: templates/ctf/admin/challenge_detail.html:604
+msgid "Required Challenge"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:597
+msgid "No prerequisites. This challenge is available immediately."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:608
+msgid "Select a challenge..."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:612
+#, python-format
+msgid ""
+"\n"
+"                                            %(v1)s (%(v2)s, %(v3)s pts)\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:630
+#: templates/ctf/participant/dashboard.html:86
+msgid "Recent Submissions"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:637
+#: templates/ctf/admin/dashboard.html:251
+#: templates/ctf/admin/range_list.html:39
+#: templates/ctf/email/provision_failure.html:26
+msgid "Participant"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:640
+#: templates/ctf/admin/dashboard.html:248
+#: templates/ctf/admin/participant_detail.html:341
+#: templates/ctf/participant/challenge_detail.html:241
+#: templates/ctf/participant/dashboard.html:105
+msgid "Time"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:643
+#: templates/ctf/admin/dashboard.html:257
+#: templates/ctf/admin/participant_detail.html:332
+#: templates/ctf/participant/challenge_detail.html:235
+#: templates/ctf/participant/dashboard.html:99
+msgid "Result"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:661
+#: templates/ctf/admin/participant_detail.html:359
+#: templates/ctf/participant/challenge_detail.html:256
+#: templates/ctf/participant/dashboard.html:119
+msgid "Correct"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:663
+#: templates/ctf/admin/dashboard.html:281
+#: templates/ctf/admin/participant_detail.html:368
+#: templates/ctf/participant/challenge_detail.html:258
+#: templates/ctf/participant/dashboard.html:121
+msgid "Incorrect"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:675
+#: templates/ctf/admin/participant_detail.html:392
+msgid "No submissions yet."
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:685
+#: templates/ctf/admin/event_detail.html:195
+#: templates/ctf/admin/participant_detail.html:277
+msgid "Statistics"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:692
+#: templates/ctf/admin/scoreboard.html:127
+msgid "Correct Submissions"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:701
+#: templates/ctf/admin/participant_detail.html:249
+#: templates/ctf/participant/range.html:75
+msgid "N/A"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:711
+msgid "None yet"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:719
+#: templates/ctf/admin/event_detail.html:257
+#: templates/mission_control/settings.html:8
+#: templates/partials/icon_sidebar.html:394
+#: templates/partials/icon_sidebar.html:423
+msgid "Settings"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:730
+#: templates/ctf/admin/challenge_list.html:102
+msgid "Difficulty"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:734
+msgid "Flag Format"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:739
+#: templates/ctf/admin/challenge_detail.html:769
+#: templates/ctf/admin/challenge_detail.html:779
+msgid "Not set"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:744
+#: templates/ctf/admin/challenge_form.html:320
+msgid "Max Attempts"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:749
+#: templates/ctf/admin/event_detail.html:269
+msgid "Unlimited"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:754
+#: templates/ctf/admin/challenge_form.html:423
+msgid "Release Time"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:759
+#: templates/ctf/admin/challenge_list.html:151
+msgid "Immediate"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:764
+msgid "Target Instance"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:774
+#: templates/ctf/admin/challenge_form.html:369
+msgid "Target Port"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:784
+#: templates/ctf/admin/challenge_form.html:229
+msgid "Tags"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:789
+#: templates/ctf/admin/challenge_detail.html:799
+#: templates/ctf/admin/team_list.html:151
+msgid "None"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:794
+#: templates/ctf/admin/challenge_form.html:248
+msgid "Topics"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:804
+msgid "Rating"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:808
+#: templates/ctf/participant/challenge_detail.html:398
+msgid "rating"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:810
+#: templates/ctf/participant/challenge_detail.html:400
+msgid "No ratings yet"
+msgstr ""
+
+#: templates/ctf/admin/challenge_detail.html:815
+#: templates/ctf/admin/challenge_form.html:210
+msgid "Display Order"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:81
+msgid "Edit Challenge:"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:83
+msgid "Create New Challenge"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:88
+msgid "Update challenge configuration."
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:90
+msgid "Configure a new challenge for this event."
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:112
+msgid "Challenge Name *"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:130
+#: templates/risk_register/risk_form.html:47
+msgid "Description *"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:137
+#: templates/ctf/admin/event_form.html:120
+msgid "Supports Markdown formatting"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:148
+msgid "Category *"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:170
+msgid "Difficulty *"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:194
+msgid "Points *"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:218
+msgid "Order within category (lower = first)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:238
+msgid "Comma-separated tags (e.g. XDR, Linux, Windows)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:257
+msgid ""
+"Comma-separated topics (e.g. SQL Injection, Privilege Escalation, Network "
+"Analysis)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:271
+msgid "Flag Settings"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:275
+#: templates/ctf/participant/challenge_detail.html:195
+msgid "Flag"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:287
+msgid "Leave blank to keep existing flag"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:289
+msgid "Enter the flag value (will be hashed for secure storage)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:301
+msgid "Flag Format Hint"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:309
+msgid "Optional format hint shown to participants (e.g., \\"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:329
+msgid "0 = unlimited attempts"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:341
+msgid "Connection Info"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:347
+msgid "Target Instance Name"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:356
+msgid ""
+"Match a provisioned victim instance name so participants see the resolved "
+"host IP."
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:379
+msgid "Optional service port to display with the resolved host."
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:396
+msgid "Solution"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:403
+msgid ""
+"Official solution writeup (supports Markdown). Visible to participants only "
+"after event ends."
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:418
+msgid "Release Settings"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:431
+msgid "Leave empty to release immediately when event starts"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:443
+msgid "Challenge Navigation"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:448
+msgid "Next Challenge"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:454
+msgid "--- None ---"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:466
+msgid ""
+"Suggested follow-up challenge shown after solving (optional, non-blocking)"
+msgstr ""
+
+#: templates/ctf/admin/challenge_form.html:488
+msgid "Create Challenge"
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:66
+#, python-format
+msgid ""
+"\n"
+"                    %(v1)s challenges, %(total_points)s total points\n"
+"                "
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:73
+msgid "Add Challenge"
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:86
+#, python-format
+msgid ""
+"\n"
+"                                %(v1)s challenges\n"
+"                            "
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:108
+msgid "Release"
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:123
+msgid "Has hint"
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:124
+msgid "Hint"
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:158
+#: templates/ctf/admin/dashboard.html:345
+#: templates/ctf/admin/event_list.html:126
+#: templates/ctf/admin/participant_list.html:242
+#: templates/mission_control/credentials/list.html:271
+msgid "View"
+msgstr ""
+
+#: templates/ctf/admin/challenge_list.html:180
+msgid "Add Your First Challenge"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:93
+msgid "CTF Admin Dashboard"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:96
+#: templates/ctf/admin/event_form.html:427
+#: templates/ctf/admin/event_list.html:37
+msgid "Create Event"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:102
+#: templates/ctf/admin/dashboard.html:138
+msgid "Active Events"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:110
+msgid "Upcoming Events"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:118
+msgid "Draft Events"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:126
+msgid "Total Events"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:151
+msgid "participants ("
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:152
+msgid "registered,"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:154
+msgid "invited) &middot;"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:155
+msgid "solves"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:157
+msgid "&middot; Ranges:"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:160
+#, python-format
+msgid ""
+"\n"
+"                                            %(v1)s ready\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:167
+#, python-format
+msgid ""
+"\n"
+"                                            %(v1)s provisioning\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:174
+#, python-format
+msgid ""
+"\n"
+"                                            %(v1)s error\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:189
+msgid "Status action"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:199
+#: templates/ctf/admin/event_detail.html:249
+msgid "Apply"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:212
+msgid "Ranges Ready"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:220
+msgid "Ranges Provisioning"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:228
+msgid "Ranges Error"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:241
+msgid "Recent Activity"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:254
+#: templates/ctf/admin/participant_detail.html:329
+#: templates/ctf/participant/dashboard.html:96
+msgid "Challenge"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:276
+#, python-format
+msgid ""
+"\n"
+"                                            Correct (+%(v1)s)\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:295
+msgid "Recent Events"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:298
+msgid "View All"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:312
+#: templates/ctf/admin/event_list.html:82
+#: templates/ctf/admin/range_list.html:115
+#: templates/ctf/participant/event.html:82
+msgid "Start"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:315
+#: templates/ctf/admin/event_list.html:85
+#: templates/ctf/participant/event.html:91
+msgid "End"
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:354
+#: templates/ctf/admin/event_list.html:148
+msgid "No events yet."
+msgstr ""
+
+#: templates/ctf/admin/dashboard.html:357
+#: templates/ctf/admin/event_list.html:151
+msgid "Create Your First Event"
+msgstr ""
+
+#: templates/ctf/admin/email_templates.html:77
+#: templates/ctf/admin/email_templates.html:80
+msgid "Email Templates"
+msgstr ""
+
+#: templates/ctf/admin/email_templates.html:85
+msgid ""
+"Customise email templates for this event. Types using the default template "
+"can be overridden via the API."
+msgstr ""
+
+#: templates/ctf/admin/email_templates.html:100
+#: templates/scenario_editor/detail.html:31
+#: templates/scenario_editor/list.html:129
+msgid "Custom"
+msgstr ""
+
+#: templates/ctf/admin/email_templates.html:105
+#, python-format
+msgid ""
+"\n"
+"                                    Subject: %(v1)s\n"
+"                                "
+msgstr ""
+
+#: templates/ctf/admin/email_templates.html:111
+#: templates/scenario_editor/detail.html:23
+#: templates/scenario_editor/list.html:122
+msgid "Default"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:96
+#: templates/ctf/participant/event.html:106
+msgid "Team Mode"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:121
+#: templates/ctf/participant/event.html:42
+msgid "No description provided."
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:128
+#: templates/ctf/admin/event_form.html:129
+#: templates/ctf/admin/notification_form.html:106
+#: templates/ctf/participant/event.html:70
+msgid "Schedule"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:132
+msgid "Event Start:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:136
+msgid "Event End:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:140
+msgid "Duration:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:141
+#: templates/ctf/admin/event_detail.html:293
+#, python-format
+msgid ""
+"\n"
+"                            %(v1)s hours\n"
+"                        "
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:149
+msgid "Registration Deadline:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:158
+msgid "Event Management"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:163
+#, python-format
+msgid ""
+"\n"
+"                            Challenges (%(v1)s)\n"
+"                        "
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:169
+#, python-format
+msgid ""
+"\n"
+"                            Participants (%(v1)s)\n"
+"                        "
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:176
+#, python-format
+msgid ""
+"\n"
+"                                Teams (%(v1)s)\n"
+"                            "
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:182
+#: templates/ctf/admin/scoreboard.html:87
+#: templates/ctf/admin/scoreboard.html:90 templates/ctf/help.html:39
+#: templates/ctf/participant/dashboard.html:75
+#: templates/ctf/participant/scoreboard.html:12
+#: templates/partials/ctf_participant_sidebar.html:153
+msgid "Scoreboard"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:184
+#: templates/mission_control/dashboard.html:93
+#: templates/partials/icon_sidebar.html:122
+msgid "Ranges"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:186
+#: templates/ctf/admin/notification_list.html:32
+msgid "Notifications"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:198
+msgid "Participants:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:202
+msgid "- Registered:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:206
+msgid "- Invited:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:211
+msgid "Challenges:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:215
+msgid "Total Points:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:220
+msgid "Total Submissions:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:224
+msgid "Correct Submissions:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:232
+msgid "Status Actions"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:238
+msgid "Change Status:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:260
+msgid "Scenario:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:264
+msgid "Max Participants:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:275
+msgid "Team Size Limit:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:281
+msgid "Auto Cleanup:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:291
+msgid "Cleanup Delay:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:299
+msgid "Range Spinup:"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:301
+#, python-format
+msgid ""
+"\n"
+"                            %(v1)s min\n"
+"                        "
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:310
+#: templates/mission_control/credentials/detail.html:244
+#: templates/mission_control/ngfw/detail.html:391
+#: templates/mission_control/settings.html:46
+msgid "Danger Zone"
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:315
+msgid ""
+"Permanently delete this event and all associated data. This action cannot be "
+"undone."
+msgstr ""
+
+#: templates/ctf/admin/event_detail.html:321
+#: templates/ctf/admin/event_force_delete.html:121
+msgid "Force Delete Event"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:118
+msgid "Force Delete"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:126
+msgid ""
+"This action will permanently delete the event and ALL associated data. This "
+"cannot be undone. All range instances will be destroyed immediately."
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:135
+msgid "Data To Be Deleted"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:139
+#: templates/ctf/admin/participant_import.html:259
+msgid "Event"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:163
+msgid "Confirm Deletion"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:166
+msgid "To confirm, type the event name exactly as shown:"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:182
+msgid "Event name confirmation"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:183
+msgid "Type the event name here"
+msgstr ""
+
+#: templates/ctf/admin/event_force_delete.html:190
+msgid "Permanently Delete Event"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:82
+msgid "Edit Event"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:84
+msgid "Create CTF Event"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:89
+msgid "Update event configuration."
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:91
+msgid "Configure a new Capture The Flag event."
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:104
+msgid "Event Name *"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:134
+msgid "Event Start *"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:145
+msgid "Event End *"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:157
+msgid "Registration Deadline"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:163
+msgid "Optional. Must be before event start."
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:173
+msgid "Scoreboard Visible"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:175
+msgid "When unchecked, participants cannot see the scoreboard"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:182
+msgid "Scoreboard Freeze Time"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:188
+msgid ""
+"Optional. Scoreboard freezes at this time. Participants see frozen "
+"standings; organizers see real-time."
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:201
+msgid "Range Settings"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:206
+msgid "Scenario Template"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:215
+msgid "-- Select a scenario --"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:232
+msgid "Range Spinup (minutes)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:241
+msgid "Minutes before event to start range provisioning (0 = at event start)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:252
+msgid "Auto-cleanup ranges after event"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:260
+msgid "Enable NGFW"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:262
+msgid "Provision a Next-Generation Firewall per range"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:270
+msgid "Cleanup Delay (hours)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:278
+msgid "Hours after event end before cleanup"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:287
+msgid "Participant Settings"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:291
+msgid "Maximum Participants"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:298
+msgid "Leave blank for unlimited"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:308
+msgid "Enable Team Mode"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:314
+msgid "Team Size Limit"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:322
+msgid "Required if team mode is enabled (2-10)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:332
+msgid "Submission Limits"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:337
+msgid "Submission Cooldown (seconds)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:346
+msgid ""
+"Minimum seconds between submissions per participant per challenge (0 = no "
+"limit)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:353
+msgid "Attempt Limit Behavior"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:356
+msgid "lockout"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:357
+msgid "Lockout (permanent)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:359
+msgid "timeout"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:360
+msgid "Timeout (temporary)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:364
+msgid "What happens when a participant reaches max attempts on a challenge"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:374
+msgid "Attempt Limit Cooldown (seconds)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:383
+msgid "Seconds before attempts reset in timeout mode (0-3600)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:391
+msgid "Challenge Rating Visibility"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:394
+msgid "public"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:395
+msgid "Public (participants see ratings)"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:397
+msgid "organizer"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:398
+msgid "Organizer only"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:400
+msgid "disabled"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:401
+#: templates/scenario_editor/detail.html:40
+#: templates/scenario_editor/detail.html:195
+#: templates/scenario_editor/list.html:167
+msgid "Disabled"
+msgstr ""
+
+#: templates/ctf/admin/event_form.html:405
+msgid "Whether participants can see and submit challenge ratings"
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:34
+msgid "CTF Events"
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:43
+#: templates/ctf/admin/participant_list.html:123
+msgid "Filter by Status:"
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:52
+#: templates/ctf/admin/participant_list.html:132
+#: templates/risk_register/risk_list.html:47
+msgid "All Statuses"
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:65
+#: templates/ctf/admin/participant_list.html:145
+msgid "Clear Filter"
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:104
+#: templates/ctf/admin/participant_detail.html:233
+#: templates/ctf/admin/participant_list.html:166
+#: templates/ctf/admin/scoreboard.html:187
+#: templates/ctf/admin/scoreboard.html:250
+#: templates/ctf/participant/scoreboard.html:89
+#: templates/ctf/participant/scoreboard.html:153
+#: templates/ctf/participant/team.html:12
+#: templates/partials/ctf_participant_sidebar.html:181
+msgid "Team"
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:142
+#, python-format
+msgid "No events with status \"%(status_filter)s\"."
+msgstr ""
+
+#: templates/ctf/admin/event_list.html:145
+msgid "View All Events"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:44
+msgid "Compose Notification"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:57
+msgid "Subject"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:65
+msgid "Notification subject"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:69
+msgid "Body"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:76
+msgid "Notification body (supports Markdown)"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:82
+msgid "Schedule For"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:93
+msgid "send_now"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:95
+#: templates/ctf/admin/notification_list.html:86
+msgid "Send Now"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:99
+msgid "draft"
+msgstr ""
+
+#: templates/ctf/admin/notification_form.html:101
+msgid "Save Draft"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:35
+msgid "New Notification"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:47
+msgid "&middot; Created"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:50
+msgid "&middot; Sent"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:53
+msgid "&middot;"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:53
+msgid "delivered"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:60
+msgid "Sent"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:63
+msgid "Scheduled"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:66
+msgid "Sending"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:69
+msgid "Failed"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:72
+#: templates/ctf/includes/event_status_badge.html:7
+#: templates/ctf/participant/dashboard.html:22
+#: templates/ctf/participant/event.html:21
+msgid "Draft"
+msgstr ""
+
+#: templates/ctf/admin/notification_list.html:97
+msgid "No notifications yet."
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:190
+msgid "Resend Invite"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:197
+msgid "Disqualify"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:209
+msgid "Profile"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:212
+#: templates/ctf/admin/participant_import.html:235
+#: templates/ctf/admin/participant_list.html:159
+#: templates/ctf/admin/range_list.html:42 templates/dev_login.html:120
+#: templates/dev_login.html:126 templates/mission_control/settings.html:21
+msgid "Email"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:219
+#: templates/ctf/admin/participant_detail.html:244
+#: templates/ctf/admin/participant_list.html:197
+#: templates/ctf/participant/team.html:72
+msgid "Invited"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:221
+#: templates/ctf/admin/participant_detail.html:254
+#: templates/ctf/admin/participant_list.html:115
+#: templates/ctf/admin/participant_list.html:173
+#: templates/ctf/admin/participant_list.html:200
+#: templates/ctf/participant/team.html:70
+msgid "Registered"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:223
+#: templates/ctf/admin/participant_list.html:203
+#: templates/ctf/includes/event_status_badge.html:11
+#: templates/ctf/participant/dashboard.html:16
+#: templates/ctf/participant/event.html:15
+#: templates/ctf/participant/team.html:68
+#: templates/risk_register/apikey_list.html:105
+msgid "Active"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:227
+#: templates/ctf/admin/participant_list.html:209
+msgid "Disqualified"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:238
+#: templates/ctf/admin/participant_list.html:217
+msgid "No team"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:259
+#: templates/ctf/admin/participant_list.html:232
+msgid "Not registered"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:264
+msgid "Last Active"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:269
+#: templates/risk_register/apikey_list.html:100
+msgid "Never"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:285
+#: templates/ctf/admin/participant_list.html:176
+#: templates/ctf/admin/scoreboard.html:191
+#: templates/ctf/admin/scoreboard.html:254
+#: templates/ctf/admin/team_list.html:125
+#: templates/ctf/participant/dashboard.html:34
+#: templates/ctf/participant/scoreboard.html:93
+#: templates/ctf/participant/scoreboard.html:157
+msgid "Score"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:293
+#: templates/ctf/participant/challenges.html:173
+msgid "Solved"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:312
+msgid "Score Timeline"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:322
+msgid "Submission History"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:338
+msgid "Attempt"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:362
+msgid "Hint Used"
+msgstr ""
+
+#: templates/ctf/admin/participant_detail.html:379
+#, python-format
+msgid ""
+"\n"
+"                                            #%(v1)s\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:141
+#: templates/ctf/admin/participant_form.html:205
+#: templates/ctf/admin/participant_list.html:80
+#: templates/ctf/admin/participant_list.html:270
+msgid "Add Participant"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:143
+msgid "Edit Participant"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:162
+msgid "Name *"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:178
+msgid "Display name for the participant"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:183
+msgid "Email *"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:199
+msgid "Email address for sending invitation"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:220
+msgid "Information"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:226
+msgid "Adding a participant will:"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:230
+msgid "Create a participant record"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:233
+msgid "Generate an invitation token"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:236
+msgid "Set status to \\"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:240
+msgid ""
+"To actually send the invitation email, you will need to use the notification "
+"system after adding participants."
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:249
+msgid "Update the participant's profile information."
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:256
+msgid "Bulk Import"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:261
+msgid "Need to add many participants at once?"
+msgstr ""
+
+#: templates/ctf/admin/participant_form.html:268
+#: templates/ctf/admin/participant_list.html:272
+msgid "Import from CSV"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:154
+#: templates/ctf/admin/participant_import.html:207
+msgid "Import"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:159
+msgid "Import Participants"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:167
+msgid "Upload CSV File"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:171
+msgid "Import Errors"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:185
+msgid "CSV File"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:220
+msgid "CSV Format"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:225
+msgid ""
+"Upload a CSV file with participant data. The file should have two columns:"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:232
+msgid "- Participant display name"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:235
+msgid "- Participant email address"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:242
+msgid "Example:"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:245
+msgid ""
+"Alice Smith,alice@example.com Bob Jones,bob@example.com Carol Wilson,"
+"carol@example.com"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:248
+msgid ""
+"The first row should contain data, not headers. Emails must be unique within "
+"the event."
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:256
+msgid "Current Status"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:263
+msgid "Current Participants"
+msgstr ""
+
+#: templates/ctf/admin/participant_import.html:268
+msgid "Maximum"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:82
+msgid "Import CSV"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:87
+#, python-format
+msgid "Send All Links (%(total_count)s)"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:99
+msgid "Total Participants"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:107
+msgid "Invited (Pending)"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:170
+msgid "Bracket"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:245
+#: templates/ctf/admin/participant_list.html:247
+msgid "Send Link"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:259
+#, python-format
+msgid "No participants with status \"%(status_filter)s\"."
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:262
+msgid "View All Participants"
+msgstr ""
+
+#: templates/ctf/admin/participant_list.html:265
+#: templates/ctf/admin/range_list.html:144
+msgid "No participants yet."
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:28
+msgid "Range Management"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:31
+msgid "Provision All Ranges"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:45
+#: templates/ctf/participant/range.html:18
+msgid "Range Status"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:48
+#: templates/mission_control/ngfw/detail.html:353
+msgid "Range ID"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:67
+msgid "Ready"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:70
+msgid "Provisioning"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:73
+msgid "Stopped"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:76
+msgid "Starting"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:86
+msgid "Not Assigned"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:97
+#: templates/mission_control/ngfw/wizard.html:35
+msgid "Provision"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:102
+msgid "Stop"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:106
+msgid "Restart"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:110
+#: templates/ctf/admin/range_list.html:119
+#: templates/ctf/admin/range_list.html:128
+#: templates/ctf/admin/range_list.html:135
+#: templates/mission_control/dashboard.html:320
+#: templates/mission_control/dashboard.html:349
+msgid "Destroy"
+msgstr ""
+
+#: templates/ctf/admin/range_list.html:124
+msgid "Retry"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:98
+msgid ""
+"Scoreboard is hidden from participants. They cannot see rankings until you "
+"enable visibility in event settings."
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:109
+msgid ""
+"Scoreboard is frozen for participants. You are viewing real-time standings."
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:152
+#: templates/ctf/participant/scoreboard.html:51
+msgid "Overall"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:166
+#: templates/ctf/participant/scoreboard.html:66
+#, python-format
+msgid ""
+"\n"
+"                        %(v1)s Bracket\n"
+"                    "
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:176
+#: templates/ctf/admin/scoreboard.html:239
+#: templates/ctf/participant/dashboard.html:46
+#: templates/ctf/participant/scoreboard.html:78
+#: templates/ctf/participant/scoreboard.html:142
+msgid "Rank"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:183
+#: templates/ctf/admin/scoreboard.html:246
+#: templates/ctf/admin/team_list.html:119
+#: templates/ctf/participant/scoreboard.html:85
+#: templates/ctf/participant/scoreboard.html:149
+msgid "Members"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:197
+#: templates/ctf/admin/scoreboard.html:260
+#: templates/ctf/participant/scoreboard.html:99
+#: templates/ctf/participant/scoreboard.html:163
+msgid "Last Solve"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:208
+#: templates/ctf/participant/scoreboard.html:111
+msgid "No scores yet in this bracket."
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:217
+msgid "Overall Rankings"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:227
+msgid "Team Rankings"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:229
+msgid "Individual Rankings"
+msgstr ""
+
+#: templates/ctf/admin/scoreboard.html:271
+msgid "No scores yet."
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:75 templates/ctf/admin/team_list.html:78
+msgid "Teams"
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:85
+msgid "Team mode is not enabled for this event."
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:97
+msgid "Total Teams"
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:105
+msgid "Max Team Size"
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:122
+#: templates/ctf/participant/team.html:61
+msgid "Captain"
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:128
+#: templates/ctf/participant/team_join.html:35
+msgid "Invite Code"
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:144
+msgid "Full"
+msgstr ""
+
+#: templates/ctf/admin/team_list.html:167
+msgid "No teams yet."
+msgstr ""
+
+#: templates/ctf/base.html:14
+msgid "CTF"
+msgstr ""
+
+#: templates/ctf/base.html:16 templates/documentation/base.html:14
+#: templates/mission_control/base.html:14 templates/risk_register/base.html:14
+#: templates/scenario_editor/base.html:14
+msgid "- Shifter"
+msgstr ""
+
+#: templates/ctf/email/announcement.html:12
+msgid "Announcement"
+msgstr ""
+
+#: templates/ctf/email/announcement.html:23
+#: templates/ctf/email/credentials.html:23
+#: templates/ctf/email/invitation.html:23 templates/ctf/email/reminder.html:23
+#, python-format
+msgid "Hi %(v1)s,"
+msgstr ""
+
+#: templates/ctf/email/announcement.html:29
+#, python-format
+msgid "— %(v1)s Organizers"
+msgstr ""
+
+#: templates/ctf/email/credentials.html:12
+#: templates/mission_control/credentials/list.html:157
+#: templates/partials/icon_sidebar.html:526
+msgid "Credentials"
+msgstr ""
+
+#: templates/ctf/email/credentials.html:20
+msgid "Your Range Credentials"
+msgstr ""
+
+#: templates/ctf/email/credentials.html:26
+msgid "Your range for"
+msgstr ""
+
+#: templates/ctf/email/credentials.html:26
+msgid "is ready."
+msgstr ""
+
+#: templates/ctf/email/credentials.html:29
+#: templates/ctf/email/invitation.html:29
+msgid "Event Date:"
+msgstr ""
+
+#: templates/ctf/email/credentials.html:30
+#: templates/ctf/email/invitation.html:30
+#, python-format
+msgid ""
+"\n"
+"                %(v1)s - %(v2)s\n"
+"            "
+msgstr ""
+
+#: templates/ctf/email/credentials.html:36
+msgid "Access URL:"
+msgstr ""
+
+#: templates/ctf/email/credentials.html:40
+msgid "Your range will be available for the duration of the event."
+msgstr ""
+
+#: templates/ctf/email/event_end.html:7 templates/ctf/email/event_end.html:13
+msgid "Event Ended"
+msgstr ""
+
+#: templates/ctf/email/event_end.html:16
+#: templates/ctf/email/event_start.html:16
+msgid "Your event"
+msgstr ""
+
+#: templates/ctf/email/event_end.html:18
+#: templates/ctf/email/event_start.html:18
+msgid "has automatically transitioned to"
+msgstr ""
+
+#: templates/ctf/email/event_end.html:19
+msgid "ended"
+msgstr ""
+
+#: templates/ctf/email/event_end.html:22
+msgid "Flag submissions have been disabled."
+msgstr ""
+
+#: templates/ctf/email/event_end.html:25
+#: templates/ctf/email/event_start.html:25 templates/ctf/email/reminder.html:29
+msgid "Start Time:"
+msgstr ""
+
+#: templates/ctf/email/event_end.html:27
+#: templates/ctf/email/event_start.html:27
+msgid "End Time:"
+msgstr ""
+
+#: templates/ctf/email/event_start.html:7
+#: templates/ctf/email/event_start.html:13
+msgid "Event Started"
+msgstr ""
+
+#: templates/ctf/email/event_start.html:19
+msgid "active"
+msgstr ""
+
+#: templates/ctf/email/event_start.html:22
+msgid "Flag submissions are now enabled for participants."
+msgstr ""
+
+#: templates/ctf/email/invitation.html:12
+msgid "Invitation"
+msgstr ""
+
+#: templates/ctf/email/invitation.html:20
+msgid "You're Invited!"
+msgstr ""
+
+#: templates/ctf/email/invitation.html:26
+msgid "You have been invited to participate in"
+msgstr ""
+
+#: templates/ctf/email/invitation.html:40
+msgid "Click below to access your event:"
+msgstr ""
+
+#: templates/ctf/email/invitation.html:49 templates/ctf/email/reminder.html:41
+msgid "Access Event"
+msgstr ""
+
+#: templates/ctf/email/invitation.html:52
+#, python-format
+msgid "Or copy this URL: %(registration_url)s"
+msgstr ""
+
+#: templates/ctf/email/invitation.html:55
+msgid "If you have any questions, please contact your event organizer."
+msgstr ""
+
+#: templates/ctf/email/provision_failure.html:7
+#: templates/ctf/email/provision_failure.html:13
+msgid "Range Provisioning Failures"
+msgstr ""
+
+#: templates/ctf/email/provision_failure.html:16
+#, python-format
+msgid "%(failure_count)s participant range(s) failed to provision for"
+msgstr ""
+
+#: templates/ctf/email/provision_failure.html:46
+msgid "You can retry provisioning from the Range Management page."
+msgstr ""
+
+#: templates/ctf/email/reminder.html:12
+msgid "Reminder"
+msgstr ""
+
+#: templates/ctf/email/reminder.html:20
+msgid "Event Reminder"
+msgstr ""
+
+#: templates/ctf/email/reminder.html:26
+#, python-format
+msgid "starts in %(hours_before)s hours!"
+msgstr ""
+
+#: templates/ctf/email/reminder.html:30
+#, python-format
+msgid ""
+"\n"
+"                %(v1)s (%(event_timezone)s)\n"
+"            "
+msgstr ""
+
+#: templates/ctf/email/reminder.html:44
+#, python-format
+msgid "Or copy this link: %(access_url)s"
+msgstr ""
+
+#: templates/ctf/email/reminder.html:47
+msgid "Make sure you're ready. Good luck!"
+msgstr ""
+
+#: templates/ctf/help.html:13
+msgid "CTF Help"
+msgstr ""
+
+#: templates/ctf/help.html:18
+msgid "Getting Started"
+msgstr ""
+
+#: templates/ctf/help.html:24
+msgid "Check your email for an invitation link from your event organizer."
+msgstr ""
+
+#: templates/ctf/help.html:27
+msgid "Click the link to register and set up your account."
+msgstr ""
+
+#: templates/ctf/help.html:30
+msgid "Once the event starts, navigate to"
+msgstr ""
+
+#: templates/ctf/help.html:32
+msgid "to see available tasks."
+msgstr ""
+
+#: templates/ctf/help.html:35
+msgid "Solve challenges and submit flags to earn points."
+msgstr ""
+
+#: templates/ctf/help.html:38
+msgid "Check the"
+msgstr ""
+
+#: templates/ctf/help.html:40
+msgid "to see how you rank against other participants."
+msgstr ""
+
+#: templates/ctf/help.html:48
+msgid "How to Submit Flags"
+msgstr ""
+
+#: templates/ctf/help.html:53
+msgid ""
+"Each challenge has a hidden flag that you need to find. Flags are typically "
+"formatted as:"
+msgstr ""
+
+#: templates/ctf/help.html:58
+#, python-brace-format
+msgid "FLAG{example_flag_value}"
+msgstr ""
+
+#: templates/ctf/help.html:60
+msgid "To submit a flag:"
+msgstr ""
+
+#: templates/ctf/help.html:64
+msgid "Navigate to the challenge detail page."
+msgstr ""
+
+#: templates/ctf/help.html:67
+msgid "Enter the flag exactly as you found it (flags are case-sensitive)."
+msgstr ""
+
+#: templates/ctf/help.html:70
+msgid "Click"
+msgstr ""
+
+#: templates/ctf/help.html:70
+#: templates/ctf/participant/challenge_detail.html:200
+msgid "Submit"
+msgstr ""
+
+#: templates/ctf/help.html:74
+msgid ""
+"Some challenges may have a maximum number of attempts. Check the challenge "
+"description for details."
+msgstr ""
+
+#: templates/ctf/help.html:84
+msgid "Scoring"
+msgstr ""
+
+#: templates/ctf/help.html:90
+msgid ""
+"Each challenge is worth a fixed number of points based on its difficulty."
+msgstr ""
+
+#: templates/ctf/help.html:93
+msgid "Points are awarded on the first correct submission only."
+msgstr ""
+
+#: templates/ctf/help.html:96
+msgid ""
+"Using a hint deducts a penalty from the points awarded for that challenge."
+msgstr ""
+
+#: templates/ctf/help.html:99
+msgid ""
+"Rankings are determined by total score. In case of a tie, the participant "
+"who achieved their score first wins."
+msgstr ""
+
+#: templates/ctf/help.html:110 templates/mission_control/help.html:53
+msgid "FAQ"
+msgstr ""
+
+#: templates/ctf/help.html:115
+msgid "Can I use hints?"
+msgstr ""
+
+#: templates/ctf/help.html:118
+msgid ""
+"Yes, but hints have a point penalty. The penalty is shown before you reveal "
+"the hint, so you can decide if it's worth it."
+msgstr ""
+
+#: templates/ctf/help.html:124
+msgid "What if I run out of attempts?"
+msgstr ""
+
+#: templates/ctf/help.html:127
+msgid ""
+"If a challenge has a maximum number of attempts and you've used them all, "
+"you won't be able to submit more flags for that challenge."
+msgstr ""
+
+#: templates/ctf/help.html:133
+msgid "How do teams work?"
+msgstr ""
+
+#: templates/ctf/help.html:136
+msgid ""
+"If the event uses team mode, you can join a team using an invite code from "
+"your team captain. Team scores are the sum of all member scores."
+msgstr ""
+
+#: templates/ctf/help.html:142
+msgid "What is a range?"
+msgstr ""
+
+#: templates/ctf/help.html:145
+msgid ""
+"A range is a dedicated lab environment provisioned for you during the event. "
+"It contains the systems you need to solve challenges. Access your range from "
+"the"
+msgstr ""
+
+#: templates/ctf/help.html:149 templates/ctf/participant/dashboard.html:79
+#: templates/ctf/participant/walkthrough.html:147
+#: templates/partials/ctf_participant_sidebar.html:129
+msgid "Range"
+msgstr ""
+
+#: templates/ctf/help.html:150
+msgid "page in the sidebar."
+msgstr ""
+
+#: templates/ctf/includes/event_status_badge.html:9
+#: templates/mission_control/ngfw/wizard.html:27
+#: templates/mission_control/ngfw/wizard.html:242
+msgid "Registration"
+msgstr ""
+
+#: templates/ctf/includes/event_status_badge.html:13
+#: templates/mission_control/dashboard.html:332
+msgid "Paused"
+msgstr ""
+
+#: templates/ctf/includes/event_status_badge.html:15
+#: templates/ctf/participant/dashboard.html:20
+#: templates/ctf/participant/event.html:19
+msgid "Ended"
+msgstr ""
+
+#: templates/ctf/includes/event_status_badge.html:17
+#: templates/ctf/participant/dashboard.html:24
+#: templates/ctf/participant/event.html:23
+msgid "Cancelled"
+msgstr ""
+
+#: templates/ctf/includes/event_status_badge.html:19
+msgid "Archived"
+msgstr ""
+
+#: templates/ctf/includes/scoreboard_table.html:27
+#: templates/ctf/participant/team.html:56
+msgid "You"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:12
+msgid "&larr; Back to Challenges"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:24
+msgid "Web Exploitation"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:26
+msgid "Forensics"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:28
+msgid "Cryptography"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:30
+msgid "Reverse Engineering"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:32
+msgid "Binary Exploitation"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:34
+msgid "Miscellaneous"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:36
+msgid "OSINT"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:38
+msgid "Hardware"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:40
+msgid "Network"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:52
+#, python-format
+msgid ""
+"\n"
+"                                    %(v1)s pts\n"
+"                                "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:61
+msgid "You have solved this challenge!"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:63
+msgid "First Blood!"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:68
+msgid "Next:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:70
+#, python-format
+msgid ""
+"\n"
+"                                                %(next_name)s &rarr;\n"
+"                                            "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:80
+msgid "First blood:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:89
+msgid "Target:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:92
+#, python-format
+msgid ""
+"\n"
+"                                            %(host)s:%(port)s\n"
+"                                        "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:100
+#, python-format
+msgid ""
+"\n"
+"                                        (%(instance_name)s)\n"
+"                                    "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:108
+msgid "Flag format:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:113
+msgid "Files:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:120
+#, python-format
+msgid ""
+"\n"
+"                                                    &#128196; %(v1)s\n"
+"                                                "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:137
+msgid "&#128274; Prerequisites Required"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:142
+msgid ""
+"You must complete the following challenges before you can submit flags for "
+"this one:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:153
+#, python-format
+msgid ""
+"\n"
+"                                                (%(v1)s pts)\n"
+"                                            "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:168
+msgid "Submit Flag"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:174
+#, python-format
+msgid ""
+"Maximum attempts reached (%(attempt_count)s/%(max_attempts)s). You can no "
+"longer submit flags for this challenge."
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:181
+#, python-format
+msgid ""
+"Maximum attempts reached (%(attempt_count)s/%(max_attempts)s). Try again in "
+"%(timeout_retry_after)s seconds."
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:196
+msgid "Enter flag..."
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:205
+#, python-format
+msgid ""
+"\n"
+"                                                Attempts: %(attempt_count)s/"
+"%(max_attempts)s\n"
+"                                            "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:220
+msgid "Previous Attempts"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:232
+msgid "Submitted Flag"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:283
+#, python-format
+msgid ""
+"\n"
+"                                    Hints (%(v1)s)\n"
+"                                "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:291
+#, python-format
+msgid ""
+"\n"
+"                                        Hint penalty applied: "
+"%(total_hint_penalty)s%%\n"
+"                                    "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:303
+#, python-format
+msgid ""
+"\n"
+"                                                Hint %(v1)s:\n"
+"                                            "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:312
+#, python-format
+msgid ""
+"\n"
+"                                                Hint %(v1)s available\n"
+"                                            "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:318
+#, python-format
+msgid ""
+"\n"
+"                                                    Penalty: %(v1)s%% of "
+"points (-%(next_hint_cost)s pts)\n"
+"                                                "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:323
+#, python-format
+msgid ""
+"\n"
+"                                                    Challenge value after: "
+"%(points_after_next_hint)s / %(v1)s pts\n"
+"                                                "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:330
+msgid "Warning: This hint will reduce the challenge to its minimum value!"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:338
+#, python-format
+msgid ""
+"\n"
+"                                                Reveal Hint %(v1)s\n"
+"                                            "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:345
+#, python-format
+msgid ""
+"\n"
+"                                                    Hint %(v1)s — locked "
+"(unlock previous hints first)\n"
+"                                                "
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:361
+msgid "Official Solution"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:375
+msgid "Stats"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:380
+msgid "Solves:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:383
+msgid "Points:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:387
+msgid "Max attempts:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:391
+msgid "Your attempts:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:395
+msgid "Rating:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:411
+msgid "Rate This Challenge"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:434
+msgid "Your rating:"
+msgstr ""
+
+#: templates/ctf/participant/challenge_detail.html:436
+msgid "Rate from 1 (poor) to 5 (excellent)"
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:26
+#: templates/ctf/participant/challenges.html:53
+#: templates/ctf/participant/challenges.html:91
+#: templates/ctf/participant/challenges.html:98
+#: templates/ctf/participant/challenges.html:105
+#: templates/ctf/participant/challenges.html:112
+msgid "All"
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:44
+msgid "Tags:"
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:85
+msgid "Topics:"
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:176
+msgid "Locked - prerequisites required"
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:183
+#, python-format
+msgid ""
+"\n"
+"                                                    %(v1)s pts\n"
+"                                                "
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:204
+#, python-format
+msgid ""
+"\n"
+"                                                %(solve_count)s solve\n"
+"                                            "
+msgid_plural ""
+"\n"
+"                                                %(solve_count)s solves\n"
+"                                            "
+msgstr[0] ""
+msgstr[1] ""
+
+#: templates/ctf/participant/challenges.html:213
+msgid "Requires:"
+msgstr ""
+
+#: templates/ctf/participant/challenges.html:234
+msgid "No challenges available yet."
+msgstr ""
+
+#: templates/ctf/participant/dashboard.html:18
+#: templates/ctf/participant/event.html:17
+msgid "Upcoming"
+msgstr ""
+
+#: templates/ctf/participant/dashboard.html:58
+msgid "Challenges Solved"
+msgstr ""
+
+#: templates/ctf/participant/dashboard.html:61
+#, python-format
+msgid "%(solved_count)s / %(total_challenges)s"
+msgstr ""
+
+#: templates/ctf/participant/dashboard.html:71
+msgid "View Challenges"
+msgstr ""
+
+#: templates/ctf/participant/dashboard.html:138
+msgid "No submissions yet. Head to the challenges to get started!"
+msgstr ""
+
+#: templates/ctf/participant/event.html:32
+msgid "Event Details"
+msgstr ""
+
+#: templates/ctf/participant/event.html:85
+#: templates/ctf/participant/event.html:94
+#, python-format
+msgid ""
+"\n"
+"                                    %(v1)s UTC\n"
+"                                "
+msgstr ""
+
+#: templates/ctf/participant/event.html:111
+msgid "This is a team-based competition."
+msgstr ""
+
+#: templates/ctf/participant/event.html:115
+msgid "Max team size:"
+msgstr ""
+
+#: templates/ctf/participant/event.html:120
+msgid "Your team:"
+msgstr ""
+
+#: templates/ctf/participant/event.html:123
+msgid "View Team"
+msgstr ""
+
+#: templates/ctf/participant/event.html:126
+msgid "You are not on a team yet."
+msgstr ""
+
+#: templates/ctf/participant/event.html:129
+#: templates/ctf/participant/team.html:122
+#: templates/ctf/participant/team_join.html:19
+msgid "Join a Team"
+msgstr ""
+
+#: templates/ctf/participant/range.html:12
+msgid "Range Access"
+msgstr ""
+
+#: templates/ctf/participant/range.html:24
+msgid "Range is ready."
+msgstr ""
+
+#: templates/ctf/participant/range.html:25
+msgid "Your environment is provisioned and available."
+msgstr ""
+
+#: templates/ctf/participant/range.html:29
+msgid "Target Boxes"
+msgstr ""
+
+#: templates/ctf/participant/range.html:39
+msgid "IP Address"
+msgstr ""
+
+#: templates/ctf/participant/range.html:42
+#: templates/mission_control/agents.html:120
+msgid "OS"
+msgstr ""
+
+#: templates/ctf/participant/range.html:45
+#: templates/scenario_editor/detail.html:203
+#: templates/scenario_editor/list.html:86
+msgid "Access"
+msgstr ""
+
+#: templates/ctf/participant/range.html:66
+#: templates/ctf/participant/range.html:72
+msgid "Open"
+msgstr ""
+
+#: templates/ctf/participant/range.html:86
+msgid "Provisioning..."
+msgstr ""
+
+#: templates/ctf/participant/range.html:87
+msgid "Your range environment is being set up. This may take several minutes."
+msgstr ""
+
+#: templates/ctf/participant/range.html:92
+msgid "Loading..."
+msgstr ""
+
+#: templates/ctf/participant/range.html:94
+msgid "Please wait while your range is being provisioned."
+msgstr ""
+
+#: templates/ctf/participant/range.html:98
+msgid "Error."
+msgstr ""
+
+#: templates/ctf/participant/range.html:99
+msgid ""
+"There was a problem provisioning your range. Please contact an organizer for "
+"assistance."
+msgstr ""
+
+#: templates/ctf/participant/range.html:106
+msgid "Not assigned."
+msgstr ""
+
+#: templates/ctf/participant/range.html:107
+msgid "Range will be provisioned when the event starts."
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:19
+msgid "Auto-Refresh: Off"
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:27
+msgid "Scoreboard Hidden"
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:30
+msgid ""
+"The scoreboard is not yet available. The organizer will make it visible when "
+"ready."
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:39
+#, python-format
+msgid ""
+"\n"
+"                        Scoreboard frozen since %(v1)s. Your own score "
+"continues to update.\n"
+"                    "
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:118
+msgid "Overall Scoreboard"
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:126
+msgid "Your Score Timeline"
+msgstr ""
+
+#: templates/ctf/participant/scoreboard.html:175
+msgid "No scores yet. Be the first to solve a challenge!"
+msgstr ""
+
+#: templates/ctf/participant/team.html:26
+#, python-format
+msgid ""
+"\n"
+"                                        %(team_score)s pts\n"
+"                                    "
+msgstr ""
+
+#: templates/ctf/participant/team.html:38
+#: templates/ctf/participant/team.html:63
+msgid "Member"
+msgstr ""
+
+#: templates/ctf/participant/team.html:41
+#: templates/scenario_editor/detail.html:264
+msgid "Role"
+msgstr ""
+
+#: templates/ctf/participant/team.html:91
+msgid "Team Details"
+msgstr ""
+
+#: templates/ctf/participant/team.html:96
+msgid "Members:"
+msgstr ""
+
+#: templates/ctf/participant/team.html:102
+msgid "Team Score:"
+msgstr ""
+
+#: templates/ctf/participant/team.html:105
+msgid "Invite Code:"
+msgstr ""
+
+#: templates/ctf/participant/team.html:117
+msgid "You're not on a team"
+msgstr ""
+
+#: templates/ctf/participant/team.html:120
+msgid "Join a team using an invite code from your team captain."
+msgstr ""
+
+#: templates/ctf/participant/team_join.html:12
+msgid "&larr; Back to Team"
+msgstr ""
+
+#: templates/ctf/participant/team_join.html:29
+msgid "Enter the invite code provided by your team captain."
+msgstr ""
+
+#: templates/ctf/participant/team_join.html:41
+msgid "Enter invite code..."
+msgstr ""
+
+#: templates/ctf/participant/team_join.html:46
+msgid "Join Team"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:131
+msgid "Box 0 &mdash; WebShell Walkthrough"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:135
+msgid "Follow these steps to hack your first box. Open"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:136
+#: templates/mission_control/terminal.html:13
+#: templates/partials/icon_sidebar.html:185
+msgid "Terminal"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:137
+msgid "in the sidebar, then copy each prompt below into Claude Code."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:140
+msgid "Replace"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:141
+msgid "&lt;TARGET_IP&gt;"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:142
+msgid "in each prompt with your"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:143
+msgid "webdev01"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:144
+msgid "IP address. Find it on the"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:147
+msgid "page under Target Boxes."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:153
+msgid "Reconnaissance"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:157
+msgid ""
+"Every engagement starts with recon. Find out what's running on the target."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:161
+msgid ""
+"Scan &lt;TARGET_IP&gt; for open ports and identify the services running on "
+"them. Use a quick scan of only the most common ports."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:168
+#: templates/ctf/participant/walkthrough.html:196
+#: templates/ctf/participant/walkthrough.html:227
+#: templates/ctf/participant/walkthrough.html:257
+msgid "Copy"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:172
+#: templates/ctf/participant/walkthrough.html:200
+#: templates/ctf/participant/walkthrough.html:231
+#: templates/ctf/participant/walkthrough.html:261
+msgid "What to look for:"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:173
+msgid "You should see port 80 (HTTP) with Apache. That's our way in."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:181
+msgid "Find the Vulnerability"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:185
+msgid ""
+"There's a web server. Ask Claude to poke around and find something "
+"exploitable."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:189
+msgid ""
+"Investigate the web server on &lt;TARGET_IP&gt;. Look at the page source, "
+"identify any vulnerabilities, and recommend next steps."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:201
+msgid ""
+"Claude should find a hidden page that lets you run commands on the server. "
+"It will explain the vulnerability and suggest how to exploit it."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:212
+msgid "Get User Access"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:216
+msgid ""
+"Now exploit the vulnerability, escalate to a real user, and capture the "
+"first flag."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:220
+msgid ""
+"Exploit the vulnerability to get a shell. Escalate to a local user and find "
+"their local.txt flag."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:232
+msgid ""
+"Claude will chain the web shell with a sudo misconfiguration to become "
+"another user. You should get a flag &mdash; submit it on the Challenges page!"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:243
+msgid "Get Root"
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:247
+msgid ""
+"You own a user account. Now find a way to become root and capture the final "
+"flag."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:251
+msgid ""
+"Find a privilege escalation path to root and get the root flag from /root/"
+"root.txt."
+msgstr ""
+
+#: templates/ctf/participant/walkthrough.html:262
+msgid ""
+"Claude should find a custom SUID binary and exploit a command injection in "
+"it to read the root flag. Box owned!"
+msgstr ""
+
+#: templates/dev_login.html:7
+msgid "Dev Login"
+msgstr ""
+
+#: templates/dev_login.html:109
+msgid "\\u26a0 DEV MODE ONLY"
+msgstr ""
+
+#: templates/dev_login.html:112
+msgid "Development Login"
+msgstr ""
+
+#: templates/dev_login.html:115
+msgid "This bypasses OIDC for local testing."
+msgstr ""
+
+#: templates/dev_login.html:125
+msgid "dev@example.com"
+msgstr ""
+
+#: templates/dev_login.html:128
+msgid "User Type"
+msgstr ""
+
+#: templates/dev_login.html:131
+msgid "standard"
+msgstr ""
+
+#: templates/dev_login.html:132
+msgid "Standard (Mission Control)"
+msgstr ""
+
+#: templates/dev_login.html:134
+msgid "ctf_organizer"
+msgstr ""
+
+#: templates/dev_login.html:135
+msgid "CTF Organizer"
+msgstr ""
+
+#: templates/dev_login.html:137
+msgid "ctf_participant"
+msgstr ""
+
+#: templates/dev_login.html:138
+msgid "CTF Participant"
+msgstr ""
+
+#: templates/dev_login.html:142
+msgid "Login as Dev User"
+msgstr ""
+
+#: templates/documentation/doc_page.html:14
+#: templates/mission_control/help.html:17
+msgid "Documentation"
+msgstr ""
+
+#: templates/identity_platform_login.html:10
+msgid "Shifter Access"
+msgstr ""
+
+#: templates/identity_platform_login.html:203
+msgid "Access Shifter"
+msgstr ""
+
+#: templates/identity_platform_login.html:206
+msgid "Corporate access is restricted to"
+msgstr ""
+
+#: templates/identity_platform_login.html:208
+#, python-format
+msgid "@%(allowed_email_domain)s"
+msgstr ""
+
+#: templates/identity_platform_login.html:210
+msgid ""
+". Sign-in and registration use Google Identity Platform's prebuilt web UI. "
+"Shifter only creates an application session after the provider confirms the "
+"identity token, verified email, and enrolled MFA state."
+msgstr ""
+
+#: templates/identity_platform_login.html:217
+msgid "Loading authentication\\u2026"
+msgstr ""
+
+#: templates/identity_platform_login.html:222
+msgid ""
+"CTF participant access still uses range invitation magic links and does not "
+"go through this page."
+msgstr ""
+
+#: templates/identity_platform_login.html:230
+msgid "Verify your email"
+msgstr ""
+
+#: templates/identity_platform_login.html:237
+msgid "Back to sign in"
+msgstr ""
+
+#: templates/identity_platform_login.html:242
+msgid "Set up multi-factor authentication"
+msgstr ""
+
+#: templates/identity_platform_login.html:245
+msgid ""
+"Add the secret below to your authenticator app, then enter the current six-"
+"digit code to finish sign-in."
+msgstr ""
+
+#: templates/identity_platform_login.html:251
+msgid "Authenticator URI"
+msgstr ""
+
+#: templates/identity_platform_login.html:256
+msgid "Secret key"
+msgstr ""
+
+#: templates/identity_platform_login.html:262
+#: templates/identity_platform_login.html:282
+msgid "Verification code"
+msgstr ""
+
+#: templates/identity_platform_login.html:270
+msgid "Complete MFA setup"
+msgstr ""
+
+#: templates/identity_platform_login.html:275
+msgid "Enter your authentication code"
+msgstr ""
+
+#: templates/identity_platform_login.html:278
+msgid "Enter the code from your authenticator app to finish signing in."
+msgstr ""
+
+#: templates/identity_platform_login.html:290
+msgid "Verify and sign in"
+msgstr ""
+
+#: templates/identity_platform_logout.html:10
+msgid "Signing out of Shifter"
+msgstr ""
+
+#: templates/identity_platform_logout.html:17
+msgid "Signing out\\u2026"
+msgstr ""
+
+#: templates/mission_control/agents.html:11
+#: templates/partials/icon_sidebar.html:512
+msgid "Agents"
+msgstr ""
+
+#: templates/mission_control/agents.html:14
+msgid "Manage your XDR, XDR Collector, and Cloud Identity Engine agents"
+msgstr ""
+
+#: templates/mission_control/agents.html:30
+#: templates/mission_control/agents.html:99
+msgid "Upload Agent"
+msgstr ""
+
+#: templates/mission_control/agents.html:36
+msgid "Agent Name"
+msgstr ""
+
+#: templates/mission_control/agents.html:40
+msgid "e.g., Acme Corp XSIAM"
+msgstr ""
+
+#: templates/mission_control/agents.html:48
+msgid "Agent Type"
+msgstr ""
+
+#: templates/mission_control/agents.html:54
+msgid "xdr"
+msgstr ""
+
+#: templates/mission_control/agents.html:55
+msgid "XDR/XSIAM Agent"
+msgstr ""
+
+#: templates/mission_control/agents.html:57
+msgid "xdr_collector"
+msgstr ""
+
+#: templates/mission_control/agents.html:58
+msgid "XDR Collector"
+msgstr ""
+
+#: templates/mission_control/agents.html:60
+msgid "cloud_identity_engine"
+msgstr ""
+
+#: templates/mission_control/agents.html:61
+msgid "Cloud Identity Engine"
+msgstr ""
+
+#: templates/mission_control/agents.html:67
+msgid "Installer File"
+msgstr ""
+
+#: templates/mission_control/agents.html:78
+#, python-format
+msgid ""
+"\n"
+"                        Supported formats: %(allowed_extensions)s (max 2GB "
+"per file, 5GB total)\n"
+"                    "
+msgstr ""
+
+#: templates/mission_control/agents.html:90
+#: templates/mission_control/files.html:65
+msgid "Preparing..."
+msgstr ""
+
+#: templates/mission_control/agents.html:106
+msgid "Your Agents"
+msgstr ""
+
+#: templates/mission_control/agents.html:114
+#: templates/mission_control/files.html:88
+msgid "NAME"
+msgstr ""
+
+#: templates/mission_control/agents.html:117
+msgid "TYPE"
+msgstr ""
+
+#: templates/mission_control/agents.html:123
+#: templates/mission_control/files.html:91
+msgid "FILE"
+msgstr ""
+
+#: templates/mission_control/agents.html:126
+#: templates/mission_control/files.html:97
+msgid "UPLOADED"
+msgstr ""
+
+#: templates/mission_control/agents.html:129
+#: templates/mission_control/files.html:100
+msgid "ACTIONS"
+msgstr ""
+
+#: templates/mission_control/agents.html:149
+#, python-format
+msgid ""
+"\n"
+"                                        %(v1)s MB\n"
+"                                    "
+msgstr ""
+
+#: templates/mission_control/agents.html:193
+msgid "No agents uploaded yet"
+msgstr ""
+
+#: templates/mission_control/agents.html:196
+msgid ""
+"Upload an XDR, XDR Collector, or Cloud Identity Engine agent to get started"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:203
+#: templates/mission_control/credentials/list.html:165
+#: templates/mission_control/credentials/list.html:310
+msgid "Add Credential"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:206
+msgid "Store credentials for provisioning and integrations"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:212
+msgid "About SCM Credentials"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:215
+msgid ""
+"In SCM, go to Settings > Registration > Registration PIN. Create a new PIN "
+"if needed. The folder name, PIN ID, and PIN value are shown after creation."
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:223
+msgid "About Deployment Profiles"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:226
+msgid ""
+"A deployment profile contains your VM-Series authcode from the Palo Alto "
+"Networks Customer Support Portal. This authcode is used to license NGFWs "
+"during provisioning. Each authcode can typically license multiple instances "
+"depending on your agreement."
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:239
+msgid "Credential Type"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:249
+msgid "-- Select credential type --"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:258
+msgid "scm"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:259
+#: templates/mission_control/credentials/detail.html:154
+#: templates/mission_control/credentials/detail.html:176
+msgid "SCM Registration"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:261
+msgid "For PIN-based NGFW registration"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:267
+msgid "deployment_profile"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:268
+#: templates/mission_control/credentials/detail.html:156
+#: templates/mission_control/credentials/detail.html:178
+#: templates/mission_control/credentials/list.html:231
+#: templates/mission_control/ngfw/wizard.html:62
+#: templates/mission_control/ngfw/wizard.html:235
+msgid "Deployment Profile"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:270
+msgid "VM-Series authcode for licensing"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:287
+msgid "Display Name"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:293
+msgid "e.g., Production Credential"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:296
+msgid "A friendly name to identify this credential"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:304
+#: templates/mission_control/credentials/detail.html:211
+msgid "SCM Registration Details"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:308
+#: templates/mission_control/credentials/detail.html:215
+msgid "Folder Name"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:313
+msgid "e.g., Shared/Firewall"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:315
+msgid "Optional. Defaults to \\"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:321
+#: templates/mission_control/credentials/detail.html:219
+msgid "PIN ID"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:326
+msgid "e.g., pin-12345"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:330
+msgid "PIN Value"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:336
+msgid "Enter PIN value"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:352
+msgid "This value will be encrypted at rest"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:358
+#: templates/mission_control/credentials/detail.html:223
+msgid "License Region"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:364
+msgid "Select region..."
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:373
+msgid "americas"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:374
+msgid "Americas"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:377
+msgid "europe"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:378
+msgid "Europe"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:381
+msgid "japan"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:382
+msgid "Japan"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:385
+msgid "asiapacific"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:386
+msgid "Asia Pacific"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:392
+msgid "The Palo Alto Networks licensing region"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:401
+#: templates/mission_control/credentials/detail.html:231
+msgid "Authcode"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:405
+#: templates/mission_control/credentials/detail.html:235
+msgid "VM-Series Authcode"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:411
+msgid "Enter your authcode"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:429
+msgid ""
+"This value will be encrypted at rest and cannot be changed after creation"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:432
+msgid "Format: Alphanumeric string (e.g., D1234567)"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:440
+msgid "Optional Settings"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:444
+msgid "Expiration Date"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:448
+msgid "Set a reminder when this credential expires"
+msgstr ""
+
+#: templates/mission_control/credentials/add.html:458
+msgid "Save Credential"
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:144
+#: templates/mission_control/ngfw/deprovision.html:198
+#: templates/mission_control/ngfw/detail.html:189
+#: templates/mission_control/ngfw/wizard.html:11
+msgid "&larr;"
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:144
+msgid "Back to Credentials"
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:187
+#: templates/mission_control/credentials/list.html:206
+msgid "Expires"
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:191
+#, python-format
+msgid ""
+"\n"
+"                                Expired %(v1)s\n"
+"                            "
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:202
+#: templates/mission_control/credentials/list.html:265
+msgid "No expiration"
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:249
+msgid ""
+"Deleting this credential is permanent. Any NGFWs currently using it will not "
+"be affected, but you will not be able to use it for new provisioning."
+msgstr ""
+
+#: templates/mission_control/credentials/detail.html:258
+msgid "Delete Credential"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:160
+msgid "Manage credentials for provisioning and integrations"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:182
+#, python-format
+msgid "All (%(v1)s)"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:185
+#, python-format
+msgid "SCM (%(scm_count)s)"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:188
+#, python-format
+msgid "Profiles (%(profile_count)s)"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:203
+#: templates/risk_register/risk_detail.html:133
+msgid "Details"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:221
+#, python-format
+msgid ""
+"\n"
+"                                        Added %(v1)s\n"
+"                                    "
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:229
+msgid "SCM"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:238
+#, python-format
+msgid ""
+"\n"
+"                                            %(v1)s / %(v2)s\n"
+"                                        "
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:254
+msgid "Expired"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:303
+msgid "No credentials saved"
+msgstr ""
+
+#: templates/mission_control/credentials/list.html:306
+msgid "Add credentials to enable provisioning and integrations"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:96
+msgid "Launch and manage your cyber ranges"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:104
+msgid "Launch a Range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:119
+msgid "Loading scenarios..."
+msgstr ""
+
+#: templates/mission_control/dashboard.html:137
+msgid "Victim OS"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:143
+msgid "-- Select OS type --"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:152
+msgid "windows"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:153
+#: templates/scenario_editor/detail.html:141
+msgid "Windows"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:154
+msgid "Windows 10/11"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:157
+msgid "linux"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:158
+#: templates/scenario_editor/detail.html:144
+msgid "Linux"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:159
+msgid "Ubuntu"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:170
+msgid "Agent"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:176
+msgid "-- Select an agent --"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:203
+msgid "-- Select a Windows agent --"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:221
+msgid "Linux Agent"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:230
+msgid "-- Select a Linux agent --"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:244
+msgid "Launch Range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:247
+msgid "No agents yet?&nbsp;"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:248
+msgid "Upload one first"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:254
+msgid "Scenario Details"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:258
+msgid "Select a scenario to see details."
+msgstr ""
+
+#: templates/mission_control/dashboard.html:267
+#: templates/mission_control/dashboard.html:271
+#: templates/mission_control/dashboard.html:275
+#: templates/mission_control/terminal.html:18
+msgid "No active range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:281
+msgid "Provisioning Range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:285
+msgid "Setting up infrastructure..."
+msgstr ""
+
+#: templates/mission_control/dashboard.html:288
+msgid "This usually takes under 10 minutes. You'll be notified when ready."
+msgstr ""
+
+#: templates/mission_control/dashboard.html:298
+msgid "Active Range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:302
+msgid "Running"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:307
+#: templates/mission_control/dashboard.html:340
+msgid "Agent:"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:315
+msgid "Open Range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:317
+msgid "Pause"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:328
+msgid "Paused Range"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:337
+msgid "Paused:"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:346
+msgid "Resume"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:355
+msgid "Range Failed"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:359
+msgid "Provisioning Failed"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:363
+msgid "Error:"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:365
+msgid "Unknown error occurred"
+msgstr ""
+
+#: templates/mission_control/dashboard.html:369
+msgid "Dismiss"
+msgstr ""
+
+#: templates/mission_control/files.html:14
+msgid "Manage script files for experiments"
+msgstr ""
+
+#: templates/mission_control/files.html:39
+msgid "e.g., Lateral Movement Script"
+msgstr ""
+
+#: templates/mission_control/files.html:47
+msgid "Script File"
+msgstr ""
+
+#: templates/mission_control/files.html:56
+msgid "Python scripts only (.py), max 1MB per file"
+msgstr ""
+
+#: templates/mission_control/files.html:81
+msgid "Your Scripts"
+msgstr ""
+
+#: templates/mission_control/files.html:94
+msgid "SIZE"
+msgstr ""
+
+#: templates/mission_control/files.html:155
+msgid "No scripts uploaded yet"
+msgstr ""
+
+#: templates/mission_control/files.html:158
+msgid "Upload a Python script to use in experiments"
+msgstr ""
+
+#: templates/mission_control/help.html:8
+#: templates/partials/ctf_participant_sidebar.html:218
+#: templates/partials/icon_sidebar.html:460
+msgid "Help"
+msgstr ""
+
+#: templates/mission_control/help.html:11
+msgid "Get started with Shifter"
+msgstr ""
+
+#: templates/mission_control/help.html:20
+msgid "Full guides for using Shifter."
+msgstr ""
+
+#: templates/mission_control/help.html:24
+msgid "Quickstart Guide"
+msgstr ""
+
+#: templates/mission_control/help.html:26
+msgid "All Documentation"
+msgstr ""
+
+#: templates/mission_control/help.html:32
+msgid "Quick Links"
+msgstr ""
+
+#: templates/mission_control/help.html:37
+msgid "Key Concepts"
+msgstr ""
+
+#: templates/mission_control/help.html:37
+msgid "- Agents, ranges, scenarios"
+msgstr ""
+
+#: templates/mission_control/help.html:41
+msgid "Agents Guide"
+msgstr ""
+
+#: templates/mission_control/help.html:41
+msgid "- Upload and manage installers"
+msgstr ""
+
+#: templates/mission_control/help.html:45
+msgid "Ranges Guide"
+msgstr ""
+
+#: templates/mission_control/help.html:45
+msgid "- Launch and manage environments"
+msgstr ""
+
+#: templates/mission_control/help.html:49
+msgid "Terminal Guide"
+msgstr ""
+
+#: templates/mission_control/help.html:49
+msgid "- SSH and RDP access"
+msgstr ""
+
+#: templates/mission_control/help.html:53
+msgid "- Common questions"
+msgstr ""
+
+#: templates/mission_control/help.html:60
+msgid "Need More Help?"
+msgstr ""
+
+#: templates/mission_control/help.html:63
+msgid "Contact the Shifter team for support or to report issues."
+msgstr ""
+
+#: templates/mission_control/help.html:66
+msgid "Contact Support"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:199
+#, python-format
+msgid "Back to %(v1)s"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:217
+#, python-format
+msgid "Deprovision %(v1)s"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:220
+msgid "This action cannot be undone"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:225
+msgid ""
+"You are about to permanently deprovision this NGFW. Please review the impact "
+"before proceeding."
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:233
+msgid "The EC2 instance and all associated AWS resources will be terminated"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:237
+msgid "The NGFW license will be deactivated and credits returned to your pool"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:241
+msgid "Traffic logging to XDR will stop for any ranges using this NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:245
+msgid "The GWLB and endpoint service will be deleted"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:251
+msgid "Warning:"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:252
+msgid "range"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:254
+msgid "s"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:256
+msgid "currently using this NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:262
+#, python-format
+msgid ""
+"\n"
+"                                        Range #%(v1)s\n"
+"                                    "
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:271
+msgid ""
+"These ranges will lose their NGFW routing. You should destroy them first or "
+"assign a different NGFW."
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:280
+msgid "To confirm, type"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:280
+msgid "below:"
+msgstr ""
+
+#: templates/mission_control/ngfw/deprovision.html:295
+#: templates/mission_control/ngfw/detail.html:409
+msgid "Deprovision NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:189
+#: templates/mission_control/ngfw/wizard.html:11
+#: templates/mission_control/ngfw/wizard.html:333
+msgid "Back to NGFWs"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:206
+#: templates/mission_control/ngfw/list.html:167
+msgid "Refresh NGFW Status"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:272
+msgid "Serial Number"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:276
+msgid "Pending provisioning"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:289
+msgid "Next Step"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:294
+msgid "Add this NGFW as a data source in your XDR/XSIAM tenant."
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:299
+msgid "Go to"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:300
+msgid "XDR/XSIAM &rarr; Settings &rarr; Data Sources &rarr; Add Data Source"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:301
+msgid "and select this firewall."
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:304
+msgid "Serial Number:"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:315
+msgid "CLI Access"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:320
+msgid "Open PAN-OS command line interface via SSH"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:339
+msgid "Open CLI"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:346
+msgid "Linked Ranges"
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:384
+msgid "No ranges are currently using this NGFW."
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:396
+msgid ""
+"Deprovisioning will destroy this NGFW and deactivate its license. Credits "
+"will be returned to your pool."
+msgstr ""
+
+#: templates/mission_control/ngfw/detail.html:402
+#, python-format
+msgid ""
+"\n"
+"                        Warning: %(v1)s range(s) are currently using this "
+"NGFW.\n"
+"                    "
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:124
+#: templates/partials/icon_sidebar.html:519
+msgid "NGFWs"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:127
+msgid ""
+"Manage your persistent Next-Generation Firewalls for XDR traffic logging"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:131
+#: templates/mission_control/ngfw/list.html:250
+#: templates/mission_control/ngfw/wizard.html:15
+msgid "Setup NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:155
+msgid "Serial:"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:155
+msgid "&bull;"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:220
+msgid "View Details"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:243
+msgid "No NGFWs configured"
+msgstr ""
+
+#: templates/mission_control/ngfw/list.html:246
+msgid ""
+"Set up a persistent NGFW to enable traffic logging to XDR for your ranges"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:23
+msgid "Name & Profile"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:31
+msgid "Confirm"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:42
+msgid "Name & Deployment Profile"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:46
+msgid "NGFW Name"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:51
+msgid "e.g., My Lab NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:55
+msgid "A friendly name to identify this NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:70
+msgid "-- Select a deployment profile --"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:86
+msgid "No deployment profiles available"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:93
+msgid "The authcode from your Software NGFW Credits deployment profile."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:95
+msgid "Add a deployment profile"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:96
+#: templates/mission_control/ngfw/wizard.html:195
+msgid "first."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:116
+#: templates/mission_control/ngfw/wizard.html:210
+msgid "Next"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:124
+msgid "Registration Method"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:129
+msgid ""
+"Choose how to register this NGFW with Strata Cloud Manager for device "
+"certificate and XDR integration."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:138
+msgid "pin"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:142
+msgid "Use Stored PIN"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:145
+msgid ""
+"Use an existing SCM credential with auto-registration PIN. Recommended for "
+"recurring use."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:161
+#: templates/mission_control/ngfw/wizard.html:250
+msgid "SCM Credential"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:167
+msgid "-- Select an SCM credential --"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:186
+msgid "No SCM credentials available"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:194
+msgid "Add an SCM credential"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:205
+#: templates/mission_control/ngfw/wizard.html:275
+msgid "Back"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:218
+msgid "Confirm Setup"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:223
+msgid "Review your configuration before provisioning."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:227
+msgid "NGFW Configuration"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:246
+msgid "Method"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:254
+msgid "SCM Folder"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:258
+msgid "SLS Region"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:265
+msgid "Note:"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:266
+msgid ""
+"Provisioning takes approximately 15-30 minutes. The NGFW will consume "
+"credits from your deployment profile during this time."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:280
+msgid "Provision NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:291
+msgid "Provisioning NGFW"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:294
+msgid "This may take 15-30 minutes. Please don't close this page."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:299
+msgid "Creating EC2 instance and ENIs..."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:303
+msgid "Bootstrap and license activation..."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:307
+msgid "Registering with Strata Cloud Manager..."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:311
+msgid "Configuring XDR logging..."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:315
+msgid "Creating Gateway Load Balancer..."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:326
+msgid "NGFW Provisioned Successfully!"
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:329
+msgid "Your NGFW is ready. Add it as a data source in your XDR/XSIAM tenant."
+msgstr ""
+
+#: templates/mission_control/ngfw/wizard.html:334
+msgid "View NGFW Details"
+msgstr ""
+
+#: templates/mission_control/settings.html:11
+msgid "Manage your account"
+msgstr ""
+
+#: templates/mission_control/settings.html:17
+msgid "Account"
+msgstr ""
+
+#: templates/mission_control/settings.html:29
+msgid "Managed by your identity provider"
+msgstr ""
+
+#: templates/mission_control/settings.html:36
+msgid "Security"
+msgstr ""
+
+#: templates/mission_control/settings.html:39
+msgid "Change your password through your identity provider."
+msgstr ""
+
+#: templates/mission_control/settings.html:41
+msgid "Change Password"
+msgstr ""
+
+#: templates/mission_control/settings.html:49
+msgid ""
+"Permanently delete your account and all associated data. This action cannot "
+"be undone."
+msgstr ""
+
+#: templates/mission_control/settings.html:52
+msgid "Delete Account"
+msgstr ""
+
+#: templates/mission_control/settings.html:59
+msgid "Delete Account?"
+msgstr ""
+
+#: templates/mission_control/settings.html:62
+msgid "This will:"
+msgstr ""
+
+#: templates/mission_control/settings.html:66
+msgid "Destroy any active ranges"
+msgstr ""
+
+#: templates/mission_control/settings.html:69
+msgid "Delete all uploaded agents"
+msgstr ""
+
+#: templates/mission_control/settings.html:72
+msgid "Remove your account permanently"
+msgstr ""
+
+#: templates/mission_control/settings.html:76
+msgid "DELETE"
+msgstr ""
+
+#: templates/mission_control/settings.html:76
+msgid "to confirm:"
+msgstr ""
+
+#: templates/mission_control/settings.html:82
+msgid "Type DELETE to confirm account deletion"
+msgstr ""
+
+#: templates/mission_control/settings.html:83
+msgid "Type DELETE"
+msgstr ""
+
+#: templates/mission_control/settings.html:87
+msgid "Delete My Account"
+msgstr ""
+
+#: templates/mission_control/terminal.html:25
+msgid "Tabbed View"
+msgstr ""
+
+#: templates/mission_control/terminal.html:38
+msgid "Split View"
+msgstr ""
+
+#: templates/mission_control/terminal.html:81
+#: templates/mission_control/terminal.html:127
+#: templates/mission_control/terminal.html:170
+msgid "Open SSH Session"
+msgstr ""
+
+#: templates/mission_control/terminal.html:91
+#: templates/mission_control/terminal.html:137
+#: templates/mission_control/terminal.html:180
+msgid "SSH"
+msgstr ""
+
+#: templates/mission_control/terminal.html:94
+#: templates/mission_control/terminal.html:140
+#: templates/mission_control/terminal.html:183
+msgid "Open RDP Session"
+msgstr ""
+
+#: templates/mission_control/terminal.html:105
+#: templates/mission_control/terminal.html:151
+#: templates/mission_control/terminal.html:194
+msgid "RDP"
+msgstr ""
+
+#: templates/mission_control/terminal.html:109
+#: templates/mission_control/terminal.html:155
+#: templates/mission_control/terminal.html:198
+msgid "Not connected"
+msgstr ""
+
+#: templates/mission_control/terminal.html:123
+msgid "Left split-pane terminal target"
+msgstr ""
+
+#: templates/mission_control/terminal.html:166
+msgid "Right split-pane terminal target"
+msgstr ""
+
+#: templates/mission_control/terminal.html:222
+msgid "No Active Range"
+msgstr ""
+
+#: templates/mission_control/terminal.html:225
+msgid "Launch a range from the dashboard to connect to terminals."
+msgstr ""
+
+#: templates/mission_control/terminal.html:228
+msgid "Go to Dashboard"
+msgstr ""
+
+#: templates/mission_control/walkthrough.html:48
+msgid "CTFd Platform"
+msgstr ""
+
+#: templates/mission_control/walkthrough.html:53
+msgid ""
+"Challenge submission, hints, and walkthrough content now live in the "
+"standalone CTFd platform. Open it below to log in and submit flags."
+msgstr ""
+
+#: templates/mission_control/walkthrough.html:66
+msgid "Open CTFd"
+msgstr ""
+
+#: templates/partials/ctf_participant_sidebar.html:18
+#: templates/partials/icon_sidebar.html:24
+#: templates/partials/icon_sidebar.html:60
+msgid "lock filled icon"
+msgstr ""
+
+#: templates/partials/ctf_participant_sidebar.html:35
+msgid "CTF Dashboard"
+msgstr ""
+
+#: templates/partials/ctf_participant_sidebar.html:38
+msgid "SHIFTER CTF"
+msgstr ""
+
+#: templates/partials/ctf_participant_sidebar.html:39
+msgid "capture the flag"
+msgstr ""
+
+#: templates/partials/ctf_participant_sidebar.html:66
+msgid "Dashboard"
+msgstr ""
+
+#: templates/partials/ctf_participant_sidebar.html:198
+#: templates/partials/icon_sidebar.html:439
+msgid "help icon"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:41
+msgid "Shifter home"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:77
+msgid "Back to main"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:82
+#: templates/partials/icon_sidebar.html:144
+#: templates/partials/icon_sidebar.html:157
+msgid "Assets"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:216
+msgid "CTFd"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:256
+#: templates/risk_register/base.html:12
+#: templates/risk_register/risk_list.html:9
+msgid "Risk Register"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:284
+msgid "CTF Admin"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:315
+msgid "Scenarios"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:373
+msgid "Docs"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:395
+msgid "settings icon"
+msgstr ""
+
+#: templates/partials/icon_sidebar.html:498
+msgid "Sign out"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:9
+msgid "API Keys"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:12
+msgid "Manage API keys for programmatic access"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:19
+msgid "\\u26a0\\ufe0f Save This Key Now"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:22
+msgid ""
+"This is your new API key. Copy it now - you won't be able to see it again!"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:26
+msgid "Key Name:"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:28
+msgid "Prefix:"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:29
+#, python-format
+msgid "%(v1)s..."
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:32
+msgid "Done - Show All Keys"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:37
+msgid "Create New API Key"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:45
+msgid "Key Name"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:52
+msgid "e.g., AI Agent Production"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:55
+msgid "Create Key"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:68
+msgid "Prefix"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:74
+msgid "Last Used"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:107
+msgid "Revoked"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:118
+msgid "Revoke"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:146
+msgid "No API keys yet"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:149
+msgid "Create an API key to access the Risk Register API"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:156
+msgid "API Usage"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:159
+msgid "Use your API key in the"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:159
+msgid "X-API-Key"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:159
+msgid "header:"
+msgstr ""
+
+#: templates/risk_register/apikey_list.html:162
+#, python-format
+msgid ""
+"\n"
+"            curl -H \"X-API-Key: rr_live_your_key_here\" \\ %(v1)s://{{ v2\n"
+"            }}/api/v1/risks/\n"
+"        "
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:15
+msgid "[DELETED]"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:28
+msgid "Close"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:37
+msgid "Reopen"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:47
+msgid "Restore"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:74
+#: templates/risk_register/risk_form.html:95
+msgid "Threat Modeling"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:78
+#: templates/risk_register/risk_form.html:99
+msgid "STRIDE Categories"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:90
+#: templates/risk_register/risk_detail.html:143
+#: templates/risk_register/risk_detail.html:155
+#: templates/risk_register/risk_detail.html:167
+#: templates/risk_register/risk_form.html:127
+#: templates/risk_register/risk_form.html:158
+msgid "Not specified"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:96
+#: templates/risk_register/risk_form.html:121
+msgid "Likelihood Score"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:108
+#: templates/risk_register/risk_form.html:152
+msgid "Impact Score"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:120
+#: templates/risk_register/risk_list.html:85
+msgid "Risk Score"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:137
+#: templates/risk_register/risk_form.html:184
+msgid "Attack Vector"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:149
+#: templates/risk_register/risk_form.html:196
+msgid "Affected Assets"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:161
+#: templates/risk_register/risk_form.html:213
+msgid "Mitigation Status"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:174
+#: templates/risk_register/risk_form.html:226
+msgid "Resolution Reason"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:185
+msgid "Metadata"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:198
+msgid "Last Updated"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:206
+#: templates/risk_register/risk_detail.html:216
+msgid "Comments"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:244
+msgid "No comments yet."
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:254
+msgid "Add a comment"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:255
+msgid "Add a comment..."
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:259
+msgid "Add Comment"
+msgstr ""
+
+#: templates/risk_register/risk_detail.html:265
+msgid "&larr; Back to List"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:10
+msgid "Edit Risk"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:12
+msgid "New Risk"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:17
+msgid "Update risk details"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:19
+msgid "Create a new security risk entry"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:32
+msgid "Title *"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:43
+msgid "Brief title for this risk"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:53
+msgid "Detailed description of the risk..."
+msgstr ""
+
+#: templates/risk_register/risk_form.html:60
+msgid "Severity *"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:115
+msgid "Select all that apply"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:136
+msgid "Very Low"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:138
+msgid "Low"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:142
+msgid "High"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:144
+msgid "Very High"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:167
+msgid "Negligible"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:169
+msgid "Minor"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:171
+msgid "Moderate"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:173
+msgid "Major"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:175
+msgid "Severe"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:190
+msgid "How could this risk be exploited?"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:202
+msgid "What systems, data, or components are affected?"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:209
+msgid "Mitigation"
+msgstr ""
+
+#: templates/risk_register/risk_form.html:219
+msgid "Current mitigation efforts or plans..."
+msgstr ""
+
+#: templates/risk_register/risk_form.html:232
+msgid "Reason for closing this risk (if applicable)..."
+msgstr ""
+
+#: templates/risk_register/risk_form.html:243
+msgid "Create Risk"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:12
+msgid "Security risks and threat tracking"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:16
+msgid "+ New Risk"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:21
+#: templates/risk_register/risk_list.html:79
+msgid "Severity"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:28
+msgid "All Severities"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:66
+msgid "Show Deleted"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:76
+msgid "Title"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:88
+msgid "Updated"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:137
+msgid "No risks found"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:140
+msgid "No risks match your current filters"
+msgstr ""
+
+#: templates/risk_register/risk_list.html:143
+msgid "Create First Risk"
+msgstr ""
+
+#: templates/scenario_editor/base.html:12
+#: templates/scenario_editor/list.html:12
+msgid "Scenario Editor"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:12
+#: templates/scenario_editor/clone.html:122
+msgid "Clone Scenario"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:15
+msgid "Create an editable copy of"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:18
+#: templates/scenario_editor/yaml_editor.html:16
+#, python-format
+msgid "(%(v1)s)"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:36
+msgid "Clone Settings"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:40
+msgid "New Scenario ID"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:48
+#: templates/scenario_editor/form.html:59
+msgid "Lowercase letters, numbers, hyphens, and underscores only"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:52
+msgid "URL-safe identifier for the clone. Must be unique."
+msgstr ""
+
+#: templates/scenario_editor/clone.html:57
+msgid "Name (optional)"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:67
+#, python-format
+msgid ""
+"\n"
+"                        Leave empty to use \"Copy of %(v1)s\".\n"
+"                    "
+msgstr ""
+
+#: templates/scenario_editor/clone.html:76
+msgid "Source Scenario"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:92
+#: templates/scenario_editor/detail.html:351
+#: templates/scenario_editor/form.html:112
+#: templates/scenario_editor/list.html:62
+msgid "Instances"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:100
+#: templates/scenario_editor/form.html:133
+msgid "Subnets"
+msgstr ""
+
+#: templates/scenario_editor/clone.html:108
+#: templates/scenario_editor/list.html:70
+msgid "NGFW"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:49
+#: templates/scenario_editor/detail.html:228
+#: templates/scenario_editor/list.html:195
+msgid "Staff Only"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:56
+msgid "Edit Form"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:58
+#: templates/scenario_editor/yaml_editor.html:12
+msgid "YAML Editor"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:61
+#: templates/scenario_editor/list.html:210
+msgid "Clone"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:63
+msgid "Export YAML"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:97
+msgid "Properties"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:105
+msgid "NGFW Required"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:117
+msgid "Total Instances"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:125
+msgid "Total Subnets"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:134
+msgid "Requires Agent"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:138
+msgid "User selects OS"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:160
+msgid "Access Control"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:168
+#: templates/scenario_editor/detail.html:193
+#: templates/scenario_editor/list.html:165
+msgid "Enabled"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:230
+#: templates/scenario_editor/list.html:197
+msgid "All Users"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:242
+#, python-format
+msgid ""
+"\n"
+"                Instances (%(v1)s)\n"
+"            "
+msgstr ""
+
+#: templates/scenario_editor/detail.html:271
+msgid "OS Type"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:278
+msgid "XDR Agent"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:285
+msgid "Domain"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:312
+msgid "DC"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:314
+msgid "Joined"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:329
+#, python-format
+msgid ""
+"\n"
+"                    Subnets (%(v1)s)\n"
+"                "
+msgstr ""
+
+#: templates/scenario_editor/detail.html:358
+msgid "Connected To"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:388
+msgid "YAML Definition"
+msgstr ""
+
+#: templates/scenario_editor/detail.html:402
+#: templates/scenario_editor/error.html:20
+#: templates/scenario_editor/not_found.html:20
+msgid "Back to Scenarios"
+msgstr ""
+
+#: templates/scenario_editor/form.html:17
+#: templates/scenario_editor/form.html:160
+#: templates/scenario_editor/yaml_create.html:52
+msgid "Create Scenario"
+msgstr ""
+
+#: templates/scenario_editor/form.html:19
+msgid "Edit:"
+msgstr ""
+
+#: templates/scenario_editor/form.html:24
+msgid "Define a new scenario template"
+msgstr ""
+
+#: templates/scenario_editor/form.html:26
+msgid "Modify scenario definition"
+msgstr ""
+
+#: templates/scenario_editor/form.html:50
+msgid "Scenario ID"
+msgstr ""
+
+#: templates/scenario_editor/form.html:60
+msgid "my-custom-scenario"
+msgstr ""
+
+#: templates/scenario_editor/form.html:62
+msgid "URL-safe identifier. Lowercase letters, numbers, hyphens, underscores."
+msgstr ""
+
+#: templates/scenario_editor/form.html:77
+msgid "My Custom Scenario"
+msgstr ""
+
+#: templates/scenario_editor/form.html:87
+msgid "Describe what this scenario does..."
+msgstr ""
+
+#: templates/scenario_editor/form.html:100
+msgid "Requires NGFW (Next-Gen Firewall)"
+msgstr ""
+
+#: templates/scenario_editor/form.html:119
+msgid "+ Add Instance"
+msgstr ""
+
+#: templates/scenario_editor/form.html:140
+msgid "+ Add Subnet"
+msgstr ""
+
+#: templates/scenario_editor/form.html:144
+msgid ""
+"Define network segments. If no subnets are defined, all instances are placed "
+"in a single default subnet."
+msgstr ""
+
+#: templates/scenario_editor/list.html:15
+msgid "Manage scenario templates for the cyber range"
+msgstr ""
+
+#: templates/scenario_editor/list.html:20
+msgid "+ New Scenario"
+msgstr ""
+
+#: templates/scenario_editor/list.html:22
+msgid "Import YAML"
+msgstr ""
+
+#: templates/scenario_editor/list.html:46
+msgid "ID"
+msgstr ""
+
+#: templates/scenario_editor/list.html:226
+msgid "YAML"
+msgstr ""
+
+#: templates/scenario_editor/list.html:257
+msgid "No scenarios found."
+msgstr ""
+
+#: templates/scenario_editor/list.html:260
+msgid "Create First Scenario"
+msgstr ""
+
+#: templates/scenario_editor/not_found.html:11
+msgid "Scenario Not Found"
+msgstr ""
+
+#: templates/scenario_editor/not_found.html:16
+msgid "No scenario found with ID"
+msgstr ""
+
+#: templates/scenario_editor/yaml_create.html:12
+msgid "Create from YAML"
+msgstr ""
+
+#: templates/scenario_editor/yaml_create.html:15
+msgid "Write or paste a YAML scenario definition"
+msgstr ""
+
+#: templates/scenario_editor/yaml_create.html:22
+#: templates/scenario_editor/yaml_editor.html:24
+msgid "Validate"
+msgstr ""
+
+#: templates/scenario_editor/yaml_create.html:25
+#: templates/scenario_editor/yaml_editor.html:27
+msgid "Form Editor"
+msgstr ""
+
+#: templates/scenario_editor/yaml_create.html:42
+#: templates/scenario_editor/yaml_editor.html:44
+msgid "Scenario YAML"
+msgstr ""

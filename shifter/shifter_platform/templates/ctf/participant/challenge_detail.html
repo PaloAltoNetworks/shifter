@@ -1,334 +1,450 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "ctf/base.html" %}
-{% block ctf_title %}{{ challenge.name }}{% endblock %}
-
+{% load i18n %}
+{% block ctf_title %}
+    {{ challenge.name }}
+{% endblock %}
 {% block ctf_content %}
-<div class="container-fluid py-4">
-    <div class="mb-3">
-        <a href="{% url 'ctf:challenges' %}" class="btn btn-sm btn-outline-primary">&larr; Back to Challenges</a>
-    </div>
-
-    <div class="row">
-        <!-- Main Content -->
-        <div class="col-md-8 mb-4">
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h4 class="mb-0">{{ challenge.name }}</h4>
-                    <div>
-                        {% if challenge.category == 'web' %}
-                        <span class="badge bg-info">Web Exploitation</span>
-                        {% elif challenge.category == 'forensics' %}
-                        <span class="badge bg-info">Forensics</span>
-                        {% elif challenge.category == 'crypto' %}
-                        <span class="badge bg-info">Cryptography</span>
-                        {% elif challenge.category == 'reverse' %}
-                        <span class="badge bg-info">Reverse Engineering</span>
-                        {% elif challenge.category == 'pwn' %}
-                        <span class="badge bg-info">Binary Exploitation</span>
-                        {% elif challenge.category == 'misc' %}
-                        <span class="badge bg-info">Miscellaneous</span>
-                        {% elif challenge.category == 'osint' %}
-                        <span class="badge bg-info">OSINT</span>
-                        {% elif challenge.category == 'hardware' %}
-                        <span class="badge bg-info">Hardware</span>
-                        {% elif challenge.category == 'network' %}
-                        <span class="badge bg-info">Network</span>
-                        {% endif %}
-
-                        {% if challenge.difficulty == 'easy' %}
-                        <span class="badge bg-success">Easy</span>
-                        {% elif challenge.difficulty == 'medium' %}
-                        <span class="badge bg-warning">Medium</span>
-                        {% elif challenge.difficulty == 'hard' %}
-                        <span class="badge bg-danger">Hard</span>
-                        {% elif challenge.difficulty == 'expert' %}
-                        <span class="badge bg-dark">Expert</span>
-                        {% endif %}
-
-                        <span class="badge bg-primary">{{ challenge.points }} pts</span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    {% if is_solved %}
-                    <div class="alert alert-success mb-3">
-                        You have solved this challenge!
-                        {% if first_blood and first_blood.participant.pk == participant.pk %}
-                        <strong>First Blood!</strong>
-                        {% endif %}
-                        {% if challenge.next_challenge %}
-                        <div class="mt-2">
-                            Next: <a
-                            href="{% url 'ctf:challenge_detail' challenge_id=challenge.next_challenge.pk %}"
-                            class="alert-link">{{ challenge.next_challenge.name }} &rarr;</a>
+    <div class="container-fluid py-4">
+        <div class="mb-3">
+            <a href="{% url 'ctf:challenges' %}"
+               class="btn btn-sm btn-outline-primary">{% trans "&larr; Back to Challenges" %}</a>
+        </div>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-md-8 mb-4">
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h4 class="mb-0">
+                            {{ challenge.name }}
+                        </h4>
+                        <div>
+                            {% if challenge.category == 'web' %}
+                                <span class="badge bg-info">{% trans "Web Exploitation" %}</span>
+                            {% elif challenge.category == 'forensics' %}
+                                <span class="badge bg-info">{% trans "Forensics" %}</span>
+                            {% elif challenge.category == 'crypto' %}
+                                <span class="badge bg-info">{% trans "Cryptography" %}</span>
+                            {% elif challenge.category == 'reverse' %}
+                                <span class="badge bg-info">{% trans "Reverse Engineering" %}</span>
+                            {% elif challenge.category == 'pwn' %}
+                                <span class="badge bg-info">{% trans "Binary Exploitation" %}</span>
+                            {% elif challenge.category == 'misc' %}
+                                <span class="badge bg-info">{% trans "Miscellaneous" %}</span>
+                            {% elif challenge.category == 'osint' %}
+                                <span class="badge bg-info">{% trans "OSINT" %}</span>
+                            {% elif challenge.category == 'hardware' %}
+                                <span class="badge bg-info">{% trans "Hardware" %}</span>
+                            {% elif challenge.category == 'network' %}
+                                <span class="badge bg-info">{% trans "Network" %}</span>
+                            {% endif %}
+                            {% if challenge.difficulty == 'easy' %}
+                                <span class="badge bg-success">{% trans "Easy" %}</span>
+                            {% elif challenge.difficulty == 'medium' %}
+                                <span class="badge bg-warning">{% trans "Medium" %}</span>
+                            {% elif challenge.difficulty == 'hard' %}
+                                <span class="badge bg-danger">{% trans "Hard" %}</span>
+                            {% elif challenge.difficulty == 'expert' %}
+                                <span class="badge bg-dark">{% trans "Expert" %}</span>
+                            {% endif %}
+                            <span class="badge bg-primary">
+                                {% blocktrans with v1=challenge.points %}
+                                    {{ v1 }} pts
+                                {% endblocktrans %}
+                            </span>
                         </div>
+                    </div>
+                    <div class="card-body">
+                        {% if is_solved %}
+                            <div class="alert alert-success mb-3">
+                                {% trans "You have solved this challenge!" %}
+                                {% if first_blood and first_blood.participant.pk == participant.pk %}
+                                    <strong>{% trans "First Blood!" %}</strong>
+                                {% endif %}
+                                {% if challenge.next_challenge %}
+                                {% url 'ctf:challenge_detail' challenge_id=challenge.next_challenge.pk as next_url %}
+                                    <div class="mt-2">
+                                        {% trans "Next:" %}
+                                        <a href="{{ next_url }}" class="alert-link">
+                                            {% blocktrans with next_name=challenge.next_challenge.name %}
+                                                {{ next_name }} &rarr;
+                                            {% endblocktrans %}
+                                        </a>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        {% if first_blood and not is_solved %}
+                            <div class="mb-3">
+                                <small class="text-muted">{% trans "First blood:" %}
+                                    <strong>{{ first_blood.participant.name }}</strong></small>
+                            </div>
+                        {% endif %}
+                        <div class="mb-4">
+                            {{ challenge.description|linebreaksbr }}
+                        </div>
+                        {% if connection_info %}
+                            <div class="alert alert-info mb-3">
+                                <strong>{% trans "Target:" %}</strong>
+                                {% if connection_info.port %}
+                                    <code>
+                                        {% blocktrans with host=connection_info.host port=connection_info.port %}
+                                            {{ host }}:{{ port }}
+                                        {% endblocktrans %}
+                                    </code>
+                                {% else %}
+                                    <code>{{ connection_info.host }}</code>
+                                {% endif %}
+                                <small class="text-muted ms-2">
+                                    {% blocktrans with instance_name=connection_info.instance_name %}
+                                        ({{ instance_name }})
+                                    {% endblocktrans %}
+                                </small>
+                            </div>
+                        {% endif %}
+                        {% if challenge.flag_format %}
+                            <div class="mb-3">
+                                <strong>{% trans "Flag format:" %}</strong> <code>{{ challenge.flag_format }}</code>
+                            </div>
+                        {% endif %}
+                        {% if challenge_files %}
+                            <div class="mb-3">
+                                <strong>{% trans "Files:" %}</strong>
+                                <ul class="list-unstyled mt-1">
+                                    {% for file in challenge_files %}
+                                        <li class="mb-1">
+                                            <a href="#"
+                                               class="btn btn-sm btn-outline-primary"
+                                               data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
+                                                {% blocktrans with v1=file.display %}
+                                                    &#128196; {{ v1 }}
+                                                {% endblocktrans %}
+                                            </a>
+                                            <small class="text-muted ms-1">{{ file.file_size_display }}</small>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
                         {% endif %}
                     </div>
-                    {% endif %}
-
-                    {% if first_blood and not is_solved %}
-                    <div class="mb-3">
-                        <small class="text-muted">First blood:
-                            <strong>{{ first_blood.participant.name }}</strong></small>
+                </div>
+                {% if not prereqs_met %}
+                    <!-- Prerequisites Not Met -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-warning bg-opacity-10">
+                            <h5 class="mb-0">
+                                {% trans "&#128274; Prerequisites Required" %}
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <p>
+                                {% blocktrans trimmed %}
+                                    You must complete the following challenges before you can submit flags for this one:
+                                {% endblocktrans %}
+                            </p>
+                            <ul>
+                                {% for req in unmet_challenges %}
+                                    <li>
+                                        <a href="{% url 'ctf:challenge_detail' challenge_id=req.pk %}">
+                                        {{ req.name }}
+                                        </a>
+                                        <span class="text-muted">
+                                            {% blocktrans with v1=req.points %}
+                                                ({{ v1 }} pts)
+                                            {% endblocktrans %}
+                                        </span>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
                     </div>
-                    {% endif %}
-
-                    <div class="mb-4">
-                        {{ challenge.description|linebreaksbr }}
+                {% endif %}
+                <!-- Flag Submission -->
+                {% if not is_solved and prereqs_met %}
+                    <div class="card mb-4" id="submit-section">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                {% trans "Submit Flag" %}
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                        {% if max_attempts > 0 and attempt_count >= max_attempts and attempt_limit_mode != "timeout" %}
+                                <div class="alert alert-danger mb-0">
+                                    {% blocktrans trimmed %}
+                                        Maximum attempts reached ({{ attempt_count }}/{{ max_attempts }}).
+                                        You can no longer submit flags for this challenge.
+                                    {% endblocktrans %}
+                                </div>
+                            {% elif max_attempts > 0 and attempt_count >= max_attempts and timeout_retry_after %}
+                                <div class="alert alert-warning mb-0">
+                                    {% blocktrans trimmed %}
+                                        Maximum attempts reached ({{ attempt_count }}/{{ max_attempts }}).
+                                        Try again in {{ timeout_retry_after }} seconds.
+                                    {% endblocktrans %}
+                                </div>
+                            {% else %}
+                                <div id="submit-result" class="mb-3 d-none">
+                                </div>
+                                <form id="flag-form" onsubmit="return submitFlag(event)">
+                                    <div class="input-group">
+                                        <input type="text"
+                                               class="form-control"
+                                               id="flag-input"
+                                               name="flag"
+                                               aria-label='{% trans "Flag" %}'
+                                               placeholder='{% trans "Enter flag..." %}'
+                                               required
+                                               autocomplete="off">
+                                        <button type="submit" class="btn btn-primary" id="submit-btn">
+                                            {% trans "Submit" %}
+                                        </button>
+                                    </div>
+                                    {% if max_attempts > 0 %}
+                                        <small class="text-muted mt-1 d-block">
+                                            {% blocktrans %}
+                                                Attempts: {{ attempt_count }}/{{ max_attempts }}
+                                            {% endblocktrans %}
+                                        </small>
+                                    {% endif %}
+                                </form>
+                            {% endif %}
+                        </div>
                     </div>
-
-                    {% if connection_info %}
-                    <div class="alert alert-info mb-3">
-                        <strong>Target:</strong>
-                        {% if connection_info.port %}
-                        <code>{{ connection_info.host }}:{{ connection_info.port }}</code>
-                        {% else %}
-                        <code>{{ connection_info.host }}</code>
-                        {% endif %}
-                        <small class="text-muted ms-2">({{ connection_info.instance_name }})</small>
+                {% endif %}
+                <!-- Previous Attempts -->
+                {% if submissions %}
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                {% trans "Previous Attempts" %}
+                            </h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>
+                                                #
+                                            </th>
+                                            <th>
+                                                {% trans "Submitted Flag" %}
+                                            </th>
+                                            <th>
+                                                {% trans "Result" %}
+                                            </th>
+                                            <th>
+                                                {% trans "Points" %}
+                                            </th>
+                                            <th>
+                                                {% trans "Time" %}
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for sub in submissions %}
+                                            <tr>
+                                                <td>
+                                                    {{ sub.attempt_number }}
+                                                </td>
+                                                <td>
+                                                    <code>{{ sub.submitted_flag }}</code>
+                                                </td>
+                                                <td>
+                                                    {% if sub.is_correct %}
+                                                        <span class="badge bg-success">{% trans "Correct" %}</span>
+                                                    {% else %}
+                                                        <span class="badge bg-danger">{% trans "Incorrect" %}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {{ sub.points_awarded }}
+                                                </td>
+                                                <td>
+                                                    {{ sub.submitted_at|date:"M d, H:i:s" }}
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
-                    {% endif %}
-
-                    {% if challenge.flag_format %}
-                    <div class="mb-3">
-                        <strong>Flag format:</strong> <code>{{ challenge.flag_format }}</code>
-                    </div>
-                    {% endif %}
-
-                    {% if challenge_files %}
-                    <div class="mb-3">
-                        <strong>Files:</strong>
-                        <ul class="list-unstyled mt-1">
-                            {% for file in challenge_files %}
-                            <li class="mb-1">
-                                <a href="#" class="btn btn-sm btn-outline-primary"
-                                data-download-url="{% url 'ctf:api_file_download' file_id=file.pk %}">
-                                    &#128196; {{ file.display }}
-                                </a>
-                                <small class="text-muted ms-1">{{ file.file_size_display }}</small>
-                            </li>
+                {% endif %}
+            </div>
+            <!-- Sidebar -->
+            <div class="col-md-4 mb-4">
+                <!-- Progressive Hints -->
+                {% if hints %}
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                {% blocktrans with v1=hints|length %}
+                                    Hints ({{ v1 }})
+                                {% endblocktrans %}
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            {% if total_hint_penalty > 0 %}
+                                <small class="text-warning d-block mb-2">
+                                    {% blocktrans %}
+                                        Hint penalty applied: {{ total_hint_penalty }}%
+                                    {% endblocktrans %}
+                                </small>
+                            {% endif %}
+                            {% for hint in hints %}
+                                <div class="{% if not forloop.last %}
+                                                mb-2 pb-2 border-bottom
+                                            {% endif %}">
+                                    {% if hint.id in unlocked_hint_ids %}
+                                        <div class="alert alert-info mb-0 py-2">
+                                            <strong>
+                                            {% blocktrans with v1=forloop.counter %}
+                                                Hint {{ v1 }}:
+                                            {% endblocktrans %}
+                                            </strong> {{ hint.text }}
+                                        </div>
+                                    {% elif hint.id == next_hint.id %}
+                                        <div id="hint-result-{{ hint.id }}" class="d-none">
+                                        </div>
+                                        <p class="text-muted mb-1">
+                                            {% blocktrans with v1=forloop.counter %}
+                                                Hint {{ v1 }} available
+                                            {% endblocktrans %}
+                                        </p>
+                                        {% if hint.penalty > 0 %}
+                                            <small class="text-warning d-block mb-1">
+                                                {% blocktrans with v1=hint.penalty %}
+                                                    Penalty: {{ v1 }}% of points (-{{ next_hint_cost }} pts)
+                                                {% endblocktrans %}
+                                            </small>
+                                            <small class="text-muted d-block mb-1">
+                                                {% blocktrans with v1=challenge.points %}
+                                                    Challenge value after: {{ points_after_next_hint }} / {{ v1 }} pts
+                                                {% endblocktrans %}
+                                            </small>
+                                        {% endif %}
+                                        {% if penalty_warning %}
+<small class="text-danger d-block mb-1">
+    {% blocktrans trimmed %}
+        Warning: This hint will reduce the challenge to its minimum value!
+    {% endblocktrans %}
+</small>
+                                        {% endif %}
+                                        <button type="button"
+                                                class="btn btn-outline-warning btn-sm"
+                                                onclick="useHint('{{ hint.id }}', {{ hint.penalty }})">
+                                            {% blocktrans with v1=forloop.counter %}
+                                                Reveal Hint {{ v1 }}
+                                            {% endblocktrans %}
+                                        </button>
+                                    {% else %}
+                                        <p class="text-muted mb-0">
+                                            <small>
+                                                {% blocktrans with v1=forloop.counter %}
+                                                    Hint {{ v1 }} — locked (unlock previous hints first)
+                                                {% endblocktrans %}
+                                            </small>
+                                        </p>
+                                    {% endif %}
+                                </div>
                             {% endfor %}
-                        </ul>
+                        </div>
                     </div>
-                    {% endif %}
-                </div>
-            </div>
-
-            {% if not prereqs_met %}
-            <!-- Prerequisites Not Met -->
-            <div class="card mb-4">
-                <div class="card-header bg-warning bg-opacity-10">
-                    <h5 class="mb-0">&#128274; Prerequisites Required</h5>
-                </div>
-                <div class="card-body">
-                    <p>You must complete the following challenges before you can submit flags for this one:</p>
-                    <ul>
-                        {% for req in unmet_challenges %}
-                        <li>
-                            <a href="{% url 'ctf:challenge_detail' challenge_id=req.pk %}">{{ req.name }}</a>
-                            <span class="text-muted">({{ req.points }} pts)</span>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Flag Submission -->
-            {% if not is_solved and prereqs_met %}
-            <div class="card mb-4" id="submit-section">
-                <div class="card-header">
-                    <h5 class="mb-0">Submit Flag</h5>
-                </div>
-                <div class="card-body">
-                    {% if max_attempts > 0 and attempt_count >= max_attempts and attempt_limit_mode != "timeout" %}
-                    <div class="alert alert-danger mb-0">
-                        Maximum attempts reached ({{ attempt_count }}/{{ max_attempts }}).
-                        You can no longer submit flags for this challenge.
+                {% endif %}
+                <!-- Solution (visible after event ends) -->
+                {% if show_solution %}
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                {% trans "Official Solution" %}
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="challenge-description">
+                                {{ challenge.solution|linebreaks }}
+                            </div>
+                        </div>
                     </div>
-                    {% elif max_attempts > 0 and attempt_count >= max_attempts and timeout_retry_after %}
-                    <div class="alert alert-warning mb-0">
-                        Maximum attempts reached ({{ attempt_count }}/{{ max_attempts }}).
-                        Try again in {{ timeout_retry_after }} seconds.
+                {% endif %}
+                <!-- Challenge Stats -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            {% trans "Stats" %}
+                        </h5>
                     </div>
-                    {% else %}
-                    <div id="submit-result" class="mb-3 d-none"></div>
-                    <form id="flag-form" onsubmit="return submitFlag(event)">
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="flag-input" name="flag"
-                                   aria-label="Flag" placeholder="Enter flag..." required autocomplete="off">
-                            <button type="submit" class="btn btn-primary" id="submit-btn">Submit</button>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <strong>{% trans "Solves:" %}</strong> {{ challenge.solve_count }}
+                        </div>
+                        <div class="mb-2">
+                            <strong>{% trans "Points:" %}</strong> {{ challenge.points }}
                         </div>
                         {% if max_attempts > 0 %}
-                        <small class="text-muted mt-1 d-block">
-                            Attempts: {{ attempt_count }}/{{ max_attempts }}
-                        </small>
+                            <div class="mb-2">
+                                <strong>{% trans "Max attempts:" %}</strong> {{ max_attempts }}
+                            </div>
                         {% endif %}
-                    </form>
-                    {% endif %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Previous Attempts -->
-            {% if submissions %}
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Previous Attempts</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Submitted Flag</th>
-                                    <th>Result</th>
-                                    <th>Points</th>
-                                    <th>Time</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for sub in submissions %}
-                                <tr>
-                                    <td>{{ sub.attempt_number }}</td>
-                                    <td><code>{{ sub.submitted_flag }}</code></td>
-                                    <td>
-                                        {% if sub.is_correct %}
-                                        <span class="badge bg-success">Correct</span>
-                                        {% else %}
-                                        <span class="badge bg-danger">Incorrect</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ sub.points_awarded }}</td>
-                                    <td>{{ sub.submitted_at|date:"M d, H:i:s" }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Sidebar -->
-        <div class="col-md-4 mb-4">
-            <!-- Progressive Hints -->
-            {% if hints %}
-            <div class="card mb-3">
-                <div class="card-header">
-                    <h5 class="mb-0">Hints ({{ hints|length }})</h5>
-                </div>
-                <div class="card-body">
-                    {% if total_hint_penalty > 0 %}
-                    <small class="text-warning d-block mb-2">Hint penalty applied: {{ total_hint_penalty }}%</small>
-                    {% endif %}
-                    {% for hint in hints %}
-                    <div class="{% if not forloop.last %}mb-2 pb-2 border-bottom{% endif %}">
-                        {% if hint.id in unlocked_hint_ids %}
-                        <div class="alert alert-info mb-0 py-2">
-                            <strong>Hint {{ forloop.counter }}:</strong> {{ hint.text }}
+                        <div>
+                            <strong>{% trans "Your attempts:" %}</strong> {{ attempt_count }}
                         </div>
-                        {% elif hint.id == next_hint.id %}
-                        <div id="hint-result-{{ hint.id }}" class="d-none"></div>
-                        <p class="text-muted mb-1">Hint {{ forloop.counter }} available</p>
-                        {% if hint.penalty > 0 %}
-                        <small class="text-warning d-block mb-1">Penalty: {{ hint.penalty }}% of
-                        points (-{{ next_hint_cost }} pts)</small>
-                        <small class="text-muted d-block mb-1">Challenge value after:
-                        {{ points_after_next_hint }} / {{ challenge.points }} pts</small>
-                        {% endif %}
-                        {% if penalty_warning %}
-                        <small class="text-danger d-block mb-1">Warning: This hint will reduce
-                        the challenge to its minimum value!</small>
-                        {% endif %}
-                        <button type="button" class="btn btn-outline-warning btn-sm"
-                                onclick="useHint('{{ hint.id }}', {{ hint.penalty }})">
-                            Reveal Hint {{ forloop.counter }}
-                        </button>
-                        {% else %}
-                        <p class="text-muted mb-0"><small>Hint {{ forloop.counter }} — locked
-                        (unlock previous hints first)</small></p>
+                        {% if show_ratings and rating %}
+                            <div class="mt-2">
+                                <strong>{% trans "Rating:" %}</strong>
+                                {% if rating.average %}
+                                    {{ rating.average }}/5 ({{ rating.count }}
+                                    {% trans "rating" %}{{ rating.count|pluralize }})
+                                {% else %}
+                                    {% trans "No ratings yet" %}
+                                {% endif %}
+                            </div>
                         {% endif %}
                     </div>
-                    {% endfor %}
                 </div>
+                <!-- Rate Challenge (after solving, if ratings enabled) -->
+                {% if is_solved and event.rating_visibility != "disabled" %}
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                {% trans "Rate This Challenge" %}
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="rating-result" class="d-none">
+                            </div>
+                            <div class="btn-group" role="group">
+                                {% for btn in rating_buttons %}
+                                    <button type="button"
+                                            class="btn
+                                                   {% if btn.active %}
+                                                       btn-warning
+                                                   {% else %}
+                                                       btn-outline-warning
+                                                   {% endif %}
+                                                   btn-sm"
+                                            onclick="rateChallenge({{ btn.value }})">
+                                        {{ btn.value }}
+                                    </button>
+                                {% endfor %}
+                            </div>
+                            <small class="text-muted d-block mt-1">
+                                {% if own_rating %}
+                                    {% trans "Your rating:" %} {{ own_rating }}/5
+                                {% else %}
+                                    {% trans "Rate from 1 (poor) to 5 (excellent)" %}
+                                {% endif %}
+                            </small>
+                        </div>
+                    </div>
+                {% endif %}
             </div>
-            {% endif %}
-
-            <!-- Solution (visible after event ends) -->
-            {% if show_solution %}
-            <div class="card mb-3">
-                <div class="card-header">
-                    <h5 class="mb-0">Official Solution</h5>
-                </div>
-                <div class="card-body">
-                    <div class="challenge-description">{{ challenge.solution|linebreaks }}</div>
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Challenge Stats -->
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Stats</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-2">
-                        <strong>Solves:</strong> {{ challenge.solve_count }}
-                    </div>
-                    <div class="mb-2">
-                        <strong>Points:</strong> {{ challenge.points }}
-                    </div>
-                    {% if max_attempts > 0 %}
-                    <div class="mb-2">
-                        <strong>Max attempts:</strong> {{ max_attempts }}
-                    </div>
-                    {% endif %}
-                    <div>
-                        <strong>Your attempts:</strong> {{ attempt_count }}
-                    </div>
-                    {% if show_ratings and rating %}
-                    <div class="mt-2">
-                        <strong>Rating:</strong>
-                        {% if rating.average %}{{ rating.average }}/5 ({{ rating.count }}
-                        rating{{ rating.count|pluralize }}){% else %}No ratings yet{% endif %}
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-
-            <!-- Rate Challenge (after solving, if ratings enabled) -->
-            {% if is_solved and event.rating_visibility != "disabled" %}
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Rate This Challenge</h5>
-                </div>
-                <div class="card-body">
-                    <div id="rating-result" class="d-none"></div>
-                    <div class="btn-group" role="group">
-                        {% for btn in rating_buttons %}
-                        <button type="button"
-                                class="btn {% if btn.active %}btn-warning{% else %}btn-outline-warning{% endif %}
-                                btn-sm"
-                                onclick="rateChallenge({{ btn.value }})">{{ btn.value }}</button>
-                        {% endfor %}
-                    </div>
-                    <small class="text-muted d-block mt-1">
-                        {% if own_rating %}Your rating: {{ own_rating }}/5{% else %}Rate from 1
-                        (poor) to 5 (excellent){% endif %}
-                    </small>
-                </div>
-            </div>
-            {% endif %}
         </div>
     </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script>
+    <script>
 function getCookie(name) {
     let value = null;
     if (document.cookie && document.cookie !== '') {
@@ -487,5 +603,5 @@ function rateChallenge(value) {
         resultDiv.textContent = 'Rating failed. Please try again.';
     });
 }
-</script>
+    </script>
 {% endblock %}

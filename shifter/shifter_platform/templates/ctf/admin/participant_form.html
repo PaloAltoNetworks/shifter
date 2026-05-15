@@ -1,10 +1,17 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% block title %}{% if is_add %}Add{% else %}Edit{% endif %} Participant - {{ event.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    {% if is_add %}
+        Add
+    {% else %}
+        Edit
+    {% endif %}
+    Participant - {{ event.name }}
+{% endblock %}
 {% block extra_css %}
-<style>
+    <style>
 .participant-form-layout {
     display: grid;
     grid-template-columns: 1fr 320px;
@@ -104,100 +111,163 @@
         grid-template-columns: 1fr;
     }
 }
-</style>
+    </style>
 {% endblock %}
-
 {% block content %}
-<!-- Header -->
-<div class="page-header">
-    <nav>
-        <ol class="breadcrumb">
-            <li><a href="{% url 'ctf:admin_event_list' %}">Events</a></li>
-            <li><a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a></li>
-            <li><a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">Participants</a></li>
-            <li>{% if is_add %}Add{% else %}Edit{% endif %}</li>
-        </ol>
-    </nav>
-    <h1 class="page-title">{% if is_add %}Add Participant{% else %}Edit Participant{% endif %}</h1>
-</div>
-
-<div class="participant-form-layout">
-    <!-- Form Column -->
-    <div>
-        <div class="card">
-            {% if form.non_field_errors %}
-            <div class="form-alert">
-                {% for error in form.non_field_errors %}
-                {{ error }}
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            <form method="post">
-                {% csrf_token %}
-
-                <div class="form-group">
-                    <label class="form-label" for="id_name">Name *</label>
-                    <input type="text" id="id_name" name="{{ form.name.html_name }}" class="form-input" required value="{{ form.name.value|default_if_none:'' }}">
-                    {% if form.name.errors %}
-                    <div class="field-error">
-                        {% for error in form.name.errors %}{{ error }}{% endfor %}
-                    </div>
+    <!-- Header -->
+    <div class="page-header">
+        <nav>
+            <ol class="breadcrumb">
+                <li>
+                    <a href="{% url 'ctf:admin_event_list' %}">{% trans "Events" %}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_event_detail' event_id=event.pk %}">{{ event.name }}</a>
+                </li>
+                <li>
+                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}">{% trans "Participants" %}</a>
+                </li>
+                <li>
+                    {% if is_add %}
+                        {% trans "Add" %}
+                    {% else %}
+                        {% trans "Edit" %}
                     {% endif %}
-                    <div class="form-help">Display name for the participant</div>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="id_email">Email *</label>
-                    <input type="email" id="id_email" name="{{ form.email.html_name }}" class="form-input" required value="{{ form.email.value|default_if_none:'' }}">
-                    {% if form.email.errors %}
-                    <div class="field-error">
-                        {% for error in form.email.errors %}{{ error }}{% endfor %}
-                    </div>
-                    {% endif %}
-                    <div class="form-help">Email address for sending invitation</div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">
-                        {% if is_add %}Add Participant{% else %}Save Changes{% endif %}
-                    </button>
-                    <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}" class="btn btn-cancel">
-                        Cancel
-                    </a>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Sidebar Column -->
-    <div>
-        <div class="card">
-            <div class="card-title">Information</div>
+                </li>
+            </ol>
+        </nav>
+        <h1 class="page-title">
             {% if is_add %}
-            <p style="margin: 0; font-size: 13px; color: var(--theme-text);">Adding a participant will:</p>
-            <ul class="info-list">
-                <li>Create a participant record</li>
-                <li>Generate an invitation token</li>
-                <li>Set status to "Invited"</li>
-            </ul>
-            <div class="info-note">
-                To actually send the invitation email, you will need to use the notification system after adding participants.
-            </div>
+                {% trans "Add Participant" %}
             {% else %}
-            <p style="margin: 0; font-size: 13px; color: var(--theme-text);">Update the participant's profile information.</p>
+                {% trans "Edit Participant" %}
+            {% endif %}
+        </h1>
+    </div>
+    <div class="participant-form-layout">
+        <!-- Form Column -->
+        <div>
+            <div class="card">
+                {% if form.non_field_errors %}
+                    <div class="form-alert">
+                        {% for error in form.non_field_errors %}
+                            {{ error }}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <label class="form-label" for="id_name">
+                            {% trans "Name *" %}
+                        </label>
+                        <input type="text"
+                               id="id_name"
+                               name="{{ form.name.html_name }}"
+                               class="form-input"
+                               required
+                               value="{{ form.name.value|default_if_none:'' }}">
+                        {% if form.name.errors %}
+                            <div class="field-error">
+                                {% for error in form.name.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="form-help">
+                            {% trans "Display name for the participant" %}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="id_email">
+                            {% trans "Email *" %}
+                        </label>
+                        <input type="email"
+                               id="id_email"
+                               name="{{ form.email.html_name }}"
+                               class="form-input"
+                               required
+                               value="{{ form.email.value|default_if_none:'' }}">
+                        {% if form.email.errors %}
+                            <div class="field-error">
+                                {% for error in form.email.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="form-help">
+                            {% trans "Email address for sending invitation" %}
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            {% if is_add %}
+                                {% trans "Add Participant" %}
+                            {% else %}
+                                {% trans "Save Changes" %}
+                            {% endif %}
+                        </button>
+                        <a href="{% url 'ctf:admin_participant_list' event_id=event.pk %}"
+                           class="btn btn-cancel">{% trans "Cancel" %}</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <!-- Sidebar Column -->
+        <div>
+            <div class="card">
+                <div class="card-title">
+                    {% trans "Information" %}
+                </div>
+                {% if is_add %}
+                    <p style="margin: 0;
+                              font-size: 13px;
+                              color: var(--theme-text)">
+                        {% trans "Adding a participant will:" %}
+                    </p>
+                    <ul class="info-list">
+                        <li>
+                            {% trans "Create a participant record" %}
+                        </li>
+                        <li>
+                            {% trans "Generate an invitation token" %}
+                        </li>
+                        <li>
+                            {% trans "Set status to \"Invited\"" %}
+                        </li>
+                    </ul>
+                    <div class="info-note">
+                        {% blocktrans trimmed %}
+                            To actually send the invitation email, you will need to use the notification system
+                            after adding participants.
+                        {% endblocktrans %}
+                    </div>
+                {% else %}
+                    <p style="margin: 0;
+                              font-size: 13px;
+                              color: var(--theme-text)">
+                        {% trans "Update the participant's profile information." %}
+                    </p>
+                {% endif %}
+            </div>
+            {% if is_add %}
+                <div class="card">
+                    <div class="card-title">
+                        {% trans "Bulk Import" %}
+                    </div>
+                    <p style="margin: 0 0 12px;
+                              font-size: 13px;
+                              color: var(--theme-text-secondary)">
+                        {% trans "Need to add many participants at once?" %}
+                    </p>
+                    <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}"
+                       class="btn btn-secondary"
+                       style="font-size: 11px;
+                              height: 24px;
+                              min-width: 70px;
+                              padding: 0 16px">{% trans "Import from CSV" %}</a>
+                </div>
             {% endif %}
         </div>
-
-        {% if is_add %}
-        <div class="card">
-            <div class="card-title">Bulk Import</div>
-            <p style="margin: 0 0 12px; font-size: 13px; color: var(--theme-text-secondary);">Need to add many participants at once?</p>
-            <a href="{% url 'ctf:admin_participant_import' event_id=event.pk %}" class="btn btn-secondary" style="font-size: 11px; height: 24px; min-width: 70px; padding: 0 16px;">
-                Import from CSV
-            </a>
-        </div>
-        {% endif %}
     </div>
-</div>
 {% endblock %}

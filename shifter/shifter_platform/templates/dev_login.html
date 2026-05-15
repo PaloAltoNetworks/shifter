@@ -1,15 +1,12 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
-{% load static %}
+{% load static i18n %}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <title>Dev Login</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@100;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
-    <style>
+    <head>
+        <title>{% trans "Dev Login" %}</title>
+        <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+        <style>
         body {
             font-family: Lato, "Assistant", sans-serif;
             background: #1f1f1f;
@@ -98,25 +95,47 @@
         button:hover {
             background: #f4f5f5;
         }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="warning">⚠ DEV MODE ONLY</div>
-        <h1>Development Login</h1>
-        <p>This bypasses OIDC for local testing.</p>
-        <form method="post">
-            {% csrf_token %}
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" value="dev@example.com" placeholder="Email">
-            <label for="user_type">User Type</label>
-            <select name="user_type" id="user_type">
-                <option value="standard">Standard (Mission Control)</option>
-                <option value="ctf_organizer">CTF Organizer</option>
-                <option value="ctf_participant">CTF Participant</option>
-            </select>
-            <button type="submit">Login as Dev User</button>
-        </form>
-    </div>
-</body>
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="warning">
+                {% trans "\u26a0 DEV MODE ONLY" %}
+            </div>
+            <h1>
+                {% trans "Development Login" %}
+            </h1>
+            <p>
+                {% trans "This bypasses OIDC for local testing." %}
+            </p>
+            <form method="post">
+                {% csrf_token %}
+                <label for="email">
+                    {% trans "Email" %}
+                </label>
+                <input type="email"
+                       id="email"
+                       name="email"
+                       value='{% trans "dev@example.com" %}'
+                       placeholder='{% trans "Email" %}'>
+                <label for="user_type">
+                    {% trans "User Type" %}
+                </label>
+                <select name="user_type" id="user_type">
+                    <option value='{% trans "standard" %}'>
+                        {% trans "Standard (Mission Control)" %}
+                    </option>
+                    <option value='{% trans "ctf_organizer" %}'>
+                        {% trans "CTF Organizer" %}
+                    </option>
+                    <option value='{% trans "ctf_participant" %}'>
+                        {% trans "CTF Participant" %}
+                    </option>
+                </select>
+                <button type="submit">
+                    {% trans "Login as Dev User" %}
+                </button>
+            </form>
+        </div>
+    </body>
 </html>

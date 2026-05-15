@@ -1,15 +1,30 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
+{% load i18n %}
 <!DOCTYPE html>
 <html lang="en">
-<head><title>Event Started</title></head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-<h2>Event Started</h2>
-<p>Your event <strong>{{ event.name }}</strong> has automatically transitioned to <strong>active</strong>.</p>
-<p>Flag submissions are now enabled for participants.</p>
-<p style="margin-top: 16px;">
-<strong>Start Time:</strong> {{ event.event_start|date:"F j, Y g:i A" }}<br>
-<strong>End Time:</strong> {{ event.event_end|date:"F j, Y g:i A" }}
-</p>
-</body>
+    <head>
+        <title>{% trans "Event Started" %}</title>
+    </head>
+    <body style="font-family: Arial, sans-serif;
+                 max-width: 600px;
+                 margin: 0 auto">
+        <h2>
+            {% trans "Event Started" %}
+        </h2>
+        <p>
+            {% trans "Your event" %}
+            <strong>{{ event.name }}</strong>
+            {% trans "has automatically transitioned to" %}
+            <strong>{% trans "active" %}</strong>.
+        </p>
+        <p>
+            {% trans "Flag submissions are now enabled for participants." %}
+        </p>
+        <p style="margin-top: 16px;">
+            <strong>{% trans "Start Time:" %}</strong> {{ event.event_start|date:"F j, Y g:i A" }}
+            <br>
+            <strong>{% trans "End Time:" %}</strong> {{ event.event_end|date:"F j, Y g:i A" }}
+        </p>
+    </body>
 </html>

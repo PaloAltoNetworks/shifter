@@ -1,275 +1,344 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load static %}
-
+{% load static i18n %}
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/ngfw-wizard.css' %}">
+    <link rel="stylesheet" href="{% static 'css/ngfw-wizard.css' %}">
 {% endblock %}
-
 {% block content %}
-<a href="{% url 'mission_control:ngfw_list' %}" class="back-link">
-    <span>&larr;</span> Back to NGFWs
-</a>
-
-<div class="page-header">
-    <h1 class="page-title">Setup NGFW</h1>
-</div>
-
-<div class="wizard-container">
-    <!-- Step Indicator -->
-    <div class="wizard-steps">
-        <div class="wizard-step active" data-step="1">
-            <span class="step-number">1</span>
-            <span class="step-label">Name & Profile</span>
-        </div>
-        <div class="wizard-step" data-step="2">
-            <span class="step-number">2</span>
-            <span class="step-label">Registration</span>
-        </div>
-        <div class="wizard-step" data-step="3">
-            <span class="step-number">3</span>
-            <span class="step-label">Confirm</span>
-        </div>
-        <div class="wizard-step" data-step="4">
-            <span class="step-number">4</span>
-            <span class="step-label">Provision</span>
-        </div>
+    <a href="{% url 'mission_control:ngfw_list' %}"
+       class="back-link">
+        <span>{% trans "&larr;" %}</span> {% trans "Back to NGFWs" %}
+    </a>
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Setup NGFW" %}
+        </h1>
     </div>
-
-    <div class="card">
-        <!-- Step 1: Name & Deployment Profile -->
-        <div class="wizard-panel active" id="step-1">
-            <div class="card-title">Name & Deployment Profile</div>
-
-            <div class="form-group">
-                <label class="form-label" for="ngfw-name">
-                    NGFW Name <span class="required">*</span>
-                </label>
-                <input type="text" class="form-input" id="ngfw-name" placeholder="e.g., My Lab NGFW" maxlength="100" required>
-                <p class="form-hint">A friendly name to identify this NGFW</p>
-                <p class="form-error" id="name-error" style="display: none;"></p>
+    <div class="wizard-container">
+        <!-- Step Indicator -->
+        <div class="wizard-steps">
+            <div class="wizard-step active" data-step="1">
+                <span class="step-number">1</span>
+                <span class="step-label">{% trans "Name & Profile" %}</span>
             </div>
-
-            <div class="form-group">
-                <label class="form-label">
-                    Deployment Profile <span class="required">*</span>
-                </label>
-                <div class="shifter-dropdown full-width" id="profile-dropdown">
-                    <input type="hidden" name="deployment_profile" id="profile-select-value">
-                    <button type="button" class="shifter-dropdown-trigger">
-                        <span class="shifter-dropdown-value placeholder">-- Select a deployment profile --</span>
-                        <span class="shifter-dropdown-chevron"></span>
-                    </button>
-                    <div class="shifter-dropdown-panel">
-                        <ul class="shifter-dropdown-items" id="profile-items">
-                            {% for profile in deployment_profiles %}
-                            <li class="shifter-dropdown-item" data-value="{{ profile.credential_id }}" data-name="{{ profile.name }}">
-                                <span class="item-label">{{ profile.name }}</span>
-                            </li>
-                            {% empty %}
-                            <li class="shifter-dropdown-empty">No deployment profiles available</li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-                <p class="form-hint">
-                    The authcode from your Software NGFW Credits deployment profile.
-                    {% if not deployment_profiles %}
-                    <a href="{% url 'mission_control:settings' %}">Add a deployment profile</a> first.
-                    {% endif %}
-                </p>
-                <p class="form-error" id="profile-error" style="display: none;"></p>
+            <div class="wizard-step" data-step="2">
+                <span class="step-number">2</span>
+                <span class="step-label">{% trans "Registration" %}</span>
             </div>
-
-            <div class="wizard-nav">
-                <div class="wizard-nav-left">
-                    <a href="{% url 'mission_control:ngfw_list' %}" class="btn btn-secondary">Cancel</a>
-                </div>
-                <div class="wizard-nav-right">
-                    <button type="button" class="btn btn-primary" id="step1-next" {% if not deployment_profiles %}disabled{% endif %}>
-                        Next
-                    </button>
-                </div>
+            <div class="wizard-step" data-step="3">
+                <span class="step-number">3</span>
+                <span class="step-label">{% trans "Confirm" %}</span>
+            </div>
+            <div class="wizard-step" data-step="4">
+                <span class="step-number">4</span>
+                <span class="step-label">{% trans "Provision" %}</span>
             </div>
         </div>
-
-        <!-- Step 2: Registration Method -->
-        <div class="wizard-panel" id="step-2">
-            <div class="card-title">Registration Method</div>
-            <p style="color: var(--theme-text-secondary); margin: 0 0 20px; font-size: 13px;">
-                Choose how to register this NGFW with Strata Cloud Manager for device certificate and XDR integration.
-            </p>
-
-            <div class="radio-group">
-                <label class="radio-option selected" data-method="pin">
-                    <input type="radio" name="registration_method" value="pin" checked>
-                    <div class="radio-option-content">
-                        <h4 class="radio-option-title">Use Stored PIN</h4>
-                        <p class="radio-option-desc">
-                            Use an existing SCM credential with auto-registration PIN. Recommended for recurring use.
-                        </p>
-                    </div>
-                </label>
-
-                {% comment %}OTP method temporarily hidden - no backend flow implemented yet{% endcomment %}
-            </div>
-
-            <!-- PIN method fields -->
-            <div class="conditional-fields visible" id="pin-fields">
+        <div class="card">
+            <!-- Step 1: Name & Deployment Profile -->
+            <div class="wizard-panel active" id="step-1">
+                <div class="card-title">
+                    {% trans "Name & Deployment Profile" %}
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="ngfw-name">
+                        {% trans "NGFW Name" %} <span class="required">*</span>
+                    </label>
+                    <input type="text"
+                           class="form-input"
+                           id="ngfw-name"
+                           placeholder='{% trans "e.g., My Lab NGFW" %}'
+                           maxlength="100"
+                           required>
+                    <p class="form-hint">
+                        {% trans "A friendly name to identify this NGFW" %}
+                    </p>
+                    <p class="form-error" id="name-error" style="display: none;">
+                    </p>
+                </div>
                 <div class="form-group">
                     <label class="form-label">
-                        SCM Credential <span class="required">*</span>
+                        {% trans "Deployment Profile" %} <span class="required">*</span>
                     </label>
-                    <div class="shifter-dropdown full-width" id="scm-dropdown">
-                        <input type="hidden" name="scm_credential" id="scm-select-value">
+                    <div class="shifter-dropdown full-width" id="profile-dropdown">
+                        <input type="hidden"
+                               name="deployment_profile"
+                               id="profile-select-value">
                         <button type="button" class="shifter-dropdown-trigger">
-                            <span class="shifter-dropdown-value placeholder">-- Select an SCM credential --</span>
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select a deployment profile --
+    {% endblocktrans %}
+</span>
                             <span class="shifter-dropdown-chevron"></span>
                         </button>
                         <div class="shifter-dropdown-panel">
-                            <ul class="shifter-dropdown-items" id="scm-items">
-                                {% for cred in scm_credentials %}
-                                <li class="shifter-dropdown-item" data-value="{{ cred.credential_id }}" data-name="{{ cred.name }}" data-folder="{{ cred.scm_folder_name }}" data-region="{{ cred.sls_region }}">
-                                    <span class="item-label">{{ cred.name }}</span>
-                                    <span class="item-description">{{ cred.scm_folder_name }}</span>
-                                </li>
+                            <ul class="shifter-dropdown-items" id="profile-items">
+                                {% for profile in deployment_profiles %}
+                                    <li class="shifter-dropdown-item"
+                                        data-value="{{ profile.credential_id }}"
+                                        data-name="{{ profile.name }}">
+                                        <span class="item-label">{{ profile.name }}</span>
+                                    </li>
                                 {% empty %}
-                                <li class="shifter-dropdown-empty">No SCM credentials available</li>
+                                    <li class="shifter-dropdown-empty">
+                                        {% trans "No deployment profiles available" %}
+                                    </li>
                                 {% endfor %}
                             </ul>
                         </div>
                     </div>
                     <p class="form-hint">
-                        {% if not scm_credentials %}
-                        <a href="{% url 'mission_control:settings' %}">Add an SCM credential</a> first.
+                        {% trans "The authcode from your Software NGFW Credits deployment profile." %}
+                        {% if not deployment_profiles %}
+                            <a href="{% url 'mission_control:settings' %}">{% trans "Add a deployment profile" %}</a>
+                            {% trans "first." %}
                         {% endif %}
                     </p>
+                    <p class="form-error"
+                       id="profile-error"
+                       style="display: none">
+                    </p>
                 </div>
-            </div>
-
-            {% comment %}OTP method fields hidden - no backend flow yet{% endcomment %}
-
-            <div class="wizard-nav">
-                <div class="wizard-nav-left">
-                    <button type="button" class="btn btn-secondary" id="step2-back">Back</button>
-                </div>
-                <div class="wizard-nav-right">
-                    <button type="button" class="btn btn-primary" id="step2-next">Next</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Step 3: Confirm -->
-        <div class="wizard-panel" id="step-3">
-            <div class="card-title">Confirm Setup</div>
-            <p style="color: var(--theme-text-secondary); margin: 0 0 20px; font-size: 13px;">
-                Review your configuration before provisioning.
-            </p>
-
-            <div class="summary-section">
-                <h3 class="summary-title">NGFW Configuration</h3>
-                <div class="summary-grid">
-                    <div class="summary-item">
-                        <span class="summary-label">Name</span>
-                        <span class="summary-value" id="summary-name">—</span>
+                <div class="wizard-nav">
+                    <div class="wizard-nav-left">
+                        <a href="{% url 'mission_control:ngfw_list' %}"
+                           class="btn btn-secondary">{% trans "Cancel" %}</a>
                     </div>
-                    <div class="summary-item">
-                        <span class="summary-label">Deployment Profile</span>
-                        <span class="summary-value" id="summary-profile">—</span>
+                    <div class="wizard-nav-right">
+                        <button type="button"
+                                class="btn btn-primary"
+                                id="step1-next"
+                                {% if not deployment_profiles %}
+                                    disabled
+                                {% endif %}>
+                            {% trans "Next" %}
+                        </button>
                     </div>
                 </div>
             </div>
-
-            <div class="summary-section">
-                <h3 class="summary-title">Registration</h3>
-                <div class="summary-grid">
-                    <div class="summary-item">
-                        <span class="summary-label">Method</span>
-                        <span class="summary-value" id="summary-method">—</span>
-                    </div>
-                    <div class="summary-item" id="summary-credential-row">
-                        <span class="summary-label">SCM Credential</span>
-                        <span class="summary-value" id="summary-credential">—</span>
-                    </div>
-                    <div class="summary-item" id="summary-folder-row">
-                        <span class="summary-label">SCM Folder</span>
-                        <span class="summary-value" id="summary-folder">—</span>
-                    </div>
-                    <div class="summary-item">
-                        <span class="summary-label">SLS Region</span>
-                        <span class="summary-value" id="summary-region">—</span>
-                    </div>
+            <!-- Step 2: Registration Method -->
+            <div class="wizard-panel" id="step-2">
+                <div class="card-title">
+                    {% trans "Registration Method" %}
                 </div>
-            </div>
-
-            <div class="warning-callout">
-                <p class="warning-callout-text">
-                    <strong>Note:</strong> Provisioning takes approximately 15-30 minutes. The NGFW will consume credits from your deployment profile during this time.
+                <p style="color: var(--theme-text-secondary);
+                          margin: 0 0 20px;
+                          font-size: 13px">
+                    {% blocktrans trimmed %}
+                        Choose how to register this NGFW with Strata Cloud Manager for device certificate and
+                        XDR integration.
+                    {% endblocktrans %}
                 </p>
-            </div>
-
-            <div class="wizard-nav">
-                <div class="wizard-nav-left">
-                    <button type="button" class="btn btn-secondary" id="step3-back">Back</button>
+                <div class="radio-group">
+                    <label class="radio-option selected" data-method="pin">
+                        <input type="radio"
+                               name="registration_method"
+                               value='{% trans "pin" %}'
+                               checked>
+                        <div class="radio-option-content">
+                            <h4 class="radio-option-title">
+                                {% trans "Use Stored PIN" %}
+                            </h4>
+                            <p class="radio-option-desc">
+                                {% blocktrans trimmed %}
+                                    Use an existing SCM credential with auto-registration PIN. Recommended for recurring
+                                    use.
+                                {% endblocktrans %}
+                            </p>
+                        </div>
+                    </label>
+                        {% comment %}
+                            {% trans "OTP method temporarily hidden - no backend flow implemented yet" %}
+                        {% endcomment %}
                 </div>
-                <div class="wizard-nav-right">
-                    <button type="button" class="btn btn-primary" id="step3-provision">Provision NGFW</button>
+                <!-- PIN method fields -->
+                <div class="conditional-fields visible" id="pin-fields">
+                    <div class="form-group">
+                        <label class="form-label">
+                            {% trans "SCM Credential" %} <span class="required">*</span>
+                        </label>
+                        <div class="shifter-dropdown full-width" id="scm-dropdown">
+                            <input type="hidden" name="scm_credential" id="scm-select-value">
+                            <button type="button" class="shifter-dropdown-trigger">
+<span class="shifter-dropdown-value placeholder">
+    {% blocktrans trimmed %}
+        -- Select an SCM credential --
+    {% endblocktrans %}
+</span>
+                                <span class="shifter-dropdown-chevron"></span>
+                            </button>
+                            <div class="shifter-dropdown-panel">
+                                <ul class="shifter-dropdown-items" id="scm-items">
+                                    {% for cred in scm_credentials %}
+                                        <li class="shifter-dropdown-item"
+                                            data-value="{{ cred.credential_id }}"
+                                            data-name="{{ cred.name }}"
+                                            data-folder="{{ cred.scm_folder_name }}"
+                                            data-region="{{ cred.sls_region }}">
+                                            <span class="item-label">{{ cred.name }}</span>
+                                            <span class="item-description">{{ cred.scm_folder_name }}</span>
+                                        </li>
+                                    {% empty %}
+                                        <li class="shifter-dropdown-empty">
+                                            {% trans "No SCM credentials available" %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                        <p class="form-hint">
+                            {% if not scm_credentials %}
+                                <a href="{% url 'mission_control:settings' %}">{% trans "Add an SCM credential" %}</a>
+                                {% trans "first." %}
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                {% comment %}{% trans "OTP method fields hidden - no backend flow yet" %}{% endcomment %}
+                <div class="wizard-nav">
+                    <div class="wizard-nav-left">
+                        <button type="button" class="btn btn-secondary" id="step2-back">
+                            {% trans "Back" %}
+                        </button>
+                    </div>
+                    <div class="wizard-nav-right">
+                        <button type="button" class="btn btn-primary" id="step2-next">
+                            {% trans "Next" %}
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Step 4: Provisioning -->
-        <div class="wizard-panel" id="step-4">
-            <div class="provisioning-progress" id="provisioning-progress">
-                <div class="progress-spinner"></div>
-                <h2 class="progress-title">Provisioning NGFW</h2>
-                <p class="progress-subtitle">This may take 15-30 minutes. Please don't close this page.</p>
-
-                <div class="progress-steps">
-                    <div class="progress-step active" data-step="creating">
-                        <span class="progress-step-icon"></span>
-                        <span>Creating EC2 instance and ENIs...</span>
-                    </div>
-                    <div class="progress-step" data-step="bootstrap">
-                        <span class="progress-step-icon"></span>
-                        <span>Bootstrap and license activation...</span>
-                    </div>
-                    <div class="progress-step" data-step="registering">
-                        <span class="progress-step-icon"></span>
-                        <span>Registering with Strata Cloud Manager...</span>
-                    </div>
-                    <div class="progress-step" data-step="configuring">
-                        <span class="progress-step-icon"></span>
-                        <span>Configuring XDR logging...</span>
-                    </div>
-                    <div class="progress-step" data-step="gwlb">
-                        <span class="progress-step-icon"></span>
-                        <span>Creating Gateway Load Balancer...</span>
-                    </div>
+            <!-- Step 3: Confirm -->
+            <div class="wizard-panel" id="step-3">
+                <div class="card-title">
+                    {% trans "Confirm Setup" %}
                 </div>
-            </div>
-
-            <div class="success-state" id="success-state" style="display: none;">
-                <div class="success-icon">&#10003;</div>
-                <h2 class="success-title">NGFW Provisioned Successfully!</h2>
-                <p class="success-subtitle">
-                    Your NGFW is ready. Add it as a data source in your XDR/XSIAM tenant.
+                <p style="color: var(--theme-text-secondary);
+                          margin: 0 0 20px;
+                          font-size: 13px">
+                    {% trans "Review your configuration before provisioning." %}
                 </p>
-
-                <div style="display: flex; gap: 12px; justify-content: center;">
-                    <a href="{% url 'mission_control:ngfw_list' %}" class="btn btn-secondary">Back to NGFWs</a>
-                    <a href="#" class="btn btn-primary" id="view-ngfw-btn">View NGFW Details</a>
+                <div class="summary-section">
+                    <h3 class="summary-title">
+                        {% trans "NGFW Configuration" %}
+                    </h3>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <span class="summary-label">{% trans "Name" %}</span>
+                            <span class="summary-value" id="summary-name">—</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">{% trans "Deployment Profile" %}</span>
+                            <span class="summary-value" id="summary-profile">—</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="summary-section">
+                    <h3 class="summary-title">
+                        {% trans "Registration" %}
+                    </h3>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <span class="summary-label">{% trans "Method" %}</span>
+                            <span class="summary-value" id="summary-method">—</span>
+                        </div>
+                        <div class="summary-item" id="summary-credential-row">
+                            <span class="summary-label">{% trans "SCM Credential" %}</span>
+                            <span class="summary-value" id="summary-credential">—</span>
+                        </div>
+                        <div class="summary-item" id="summary-folder-row">
+                            <span class="summary-label">{% trans "SCM Folder" %}</span>
+                            <span class="summary-value" id="summary-folder">—</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">{% trans "SLS Region" %}</span>
+                            <span class="summary-value" id="summary-region">—</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="warning-callout">
+                    <p class="warning-callout-text">
+                        <strong>{% trans "Note:" %}</strong>
+                        {% blocktrans trimmed %}
+                            Provisioning takes approximately 15-30 minutes. The NGFW will consume credits from your
+                            deployment profile during this time.
+                        {% endblocktrans %}
+                    </p>
+                </div>
+                <div class="wizard-nav">
+                    <div class="wizard-nav-left">
+                        <button type="button" class="btn btn-secondary" id="step3-back">
+                            {% trans "Back" %}
+                        </button>
+                    </div>
+                    <div class="wizard-nav-right">
+                        <button type="button" class="btn btn-primary" id="step3-provision">
+                            {% trans "Provision NGFW" %}
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <!-- Step 4: Provisioning -->
+            <div class="wizard-panel" id="step-4">
+                <div class="provisioning-progress" id="provisioning-progress">
+                    <div class="progress-spinner">
+                    </div>
+                    <h2 class="progress-title">
+                        {% trans "Provisioning NGFW" %}
+                    </h2>
+                    <p class="progress-subtitle">
+                        {% trans "This may take 15-30 minutes. Please don't close this page." %}
+                    </p>
+                    <div class="progress-steps">
+                        <div class="progress-step active" data-step="creating">
+                            <span class="progress-step-icon"></span>
+                            <span>{% trans "Creating EC2 instance and ENIs..." %}</span>
+                        </div>
+                        <div class="progress-step" data-step="bootstrap">
+                            <span class="progress-step-icon"></span>
+                            <span>{% trans "Bootstrap and license activation..." %}</span>
+                        </div>
+                        <div class="progress-step" data-step="registering">
+                            <span class="progress-step-icon"></span>
+                            <span>{% trans "Registering with Strata Cloud Manager..." %}</span>
+                        </div>
+                        <div class="progress-step" data-step="configuring">
+                            <span class="progress-step-icon"></span>
+                            <span>{% trans "Configuring XDR logging..." %}</span>
+                        </div>
+                        <div class="progress-step" data-step="gwlb">
+                            <span class="progress-step-icon"></span>
+                            <span>{% trans "Creating Gateway Load Balancer..." %}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="success-state"
+                     id="success-state"
+                     style="display: none">
+                    <div class="success-icon">
+                        &#10003;
+                    </div>
+                    <h2 class="success-title">
+                        {% trans "NGFW Provisioned Successfully!" %}
+                    </h2>
+                    <p class="success-subtitle">
+                        {% trans "Your NGFW is ready. Add it as a data source in your XDR/XSIAM tenant." %}
+                    </p>
+                    <div style="display: flex; gap: 12px; justify-content: center;">
+                        <a href="{% url 'mission_control:ngfw_list' %}"
+                           class="btn btn-secondary">{% trans "Back to NGFWs" %}</a>
+                        <a href="#" class="btn btn-primary" id="view-ngfw-btn">{% trans "View NGFW Details" %}</a>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
-<script src="{% static 'js/ngfw.js' %}"></script>
-<script>
+    <script src="{% static 'js/ngfw.js' %}"></script>
+    <script>
 document.addEventListener('DOMContentLoaded', function() {
     const wizard = new NGFWWizardManager({
         csrfToken: '{{ csrf_token }}',
@@ -283,5 +352,5 @@ document.addEventListener('DOMContentLoaded', function() {
     globalThis.debugShowSuccess = function() { wizard.debugShowSuccess(); };
     globalThis.debugGoToStep = function(step) { wizard.debugGoToStep(step); };
 });
-</script>
+    </script>
 {% endblock %}

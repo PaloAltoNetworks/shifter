@@ -1,20 +1,23 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-
-{% block title %}Scenario Not Found{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    Scenario Not Found
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Scenario Not Found</h1>
-</div>
-
-<div class="card">
-    <p class="text-muted">
-        No scenario found with ID <span style="font-family: monospace;">{{ scenario_id }}</span>.
-    </p>
-    <div style="margin-top: 16px;">
-        <a href="{% url 'scenario_editor:list' %}" class="btn btn-secondary">Back to Scenarios</a>
+    <div class="page-header">
+        <h1 class="page-title">
+            {% trans "Scenario Not Found" %}
+        </h1>
     </div>
-</div>
+    <div class="card">
+        <p class="text-muted">
+            {% trans "No scenario found with ID" %} <span style="font-family: monospace;">{{ scenario_id }}</span>.
+        </p>
+        <div style="margin-top: 16px;">
+            <a href="{% url 'scenario_editor:list' %}"
+               class="btn btn-secondary">{% trans "Back to Scenarios" %}</a>
+        </div>
+    </div>
 {% endblock %}

@@ -1,174 +1,404 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-
-{% block title %}{{ scenario.name }}{% endblock %}
-
+{% load i18n %}
+{% block title %}
+    {{ scenario.name }}
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">{{ scenario.name }}</h1>
-        <p class="page-subtitle">
-            <span style="font-family: monospace;">{{ scenario.id }}</span>
-            {% if scenario.is_default %}
-                <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: rgba(100,100,255,0.15); color: #8888ff; margin-left: 8px;">Default</span>
-            {% else %}
-                <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: rgba(100,200,100,0.15); color: #88cc88; margin-left: 8px;">Custom</span>
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                {{ scenario.name }}
+            </h1>
+            <p class="page-subtitle">
+                <span style="font-family: monospace;">{{ scenario.id }}</span>
+                {% if scenario.is_default %}
+                    <span style="display: inline-block;
+                                 padding: 2px 8px;
+                                 border-radius: 10px;
+                                 font-size: 11px;
+                                 background: rgba(100,100,255,0.15);
+                                 color: #8888ff;
+                                 margin-left: 8px">{% trans "Default" %}</span>
+                {% else %}
+                    <span style="display: inline-block;
+                                 padding: 2px 8px;
+                                 border-radius: 10px;
+                                 font-size: 11px;
+                                 background: rgba(100,200,100,0.15);
+                                 color: #88cc88;
+                                 margin-left: 8px">{% trans "Custom" %}</span>
+                {% endif %}
+                {% if not scenario.enabled %}
+                    <span style="display: inline-block;
+                                 padding: 2px 8px;
+                                 border-radius: 10px;
+                                 font-size: 11px;
+                                 background: rgba(200,100,100,0.15);
+                                 color: #cc8888;
+                                 margin-left: 4px">{% trans "Disabled" %}</span>
+                {% endif %}
+                {% if scenario.staff_only %}
+                    <span style="display: inline-block;
+                                 padding: 2px 8px;
+                                 border-radius: 10px;
+                                 font-size: 11px;
+                                 background: rgba(255,180,50,0.15);
+                                 color: #ddaa44;
+                                 margin-left: 4px">{% trans "Staff Only" %}</span>
+                {% endif %}
+            </p>
+        </div>
+        <div class="flex-row gap-sm">
+            {% if not is_default %}
+                <a href="{% url 'scenario_editor:edit' scenario_id=scenario.id %}"
+                   class="btn btn-primary">{% trans "Edit Form" %}</a>
+                <a href="{% url 'scenario_editor:yaml_editor' scenario_id=scenario.id %}"
+                   class="btn btn-secondary">{% trans "YAML Editor" %}</a>
             {% endif %}
-            {% if not scenario.enabled %}
-                <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: rgba(200,100,100,0.15); color: #cc8888; margin-left: 4px;">Disabled</span>
+            <a href="{% url 'scenario_editor:clone' scenario_id=scenario.id %}"
+               class="btn btn-secondary">{% trans "Clone" %}</a>
+            <a href="{% url 'scenario_editor:export' scenario_id=scenario.id %}"
+               class="btn btn-secondary">{% trans "Export YAML" %}</a>
+            {% if not is_default %}
+                <form method="post"
+                      action="{% url 'scenario_editor:delete' scenario_id=scenario.id %}"
+                      style="display: inline"
+                      onsubmit="return confirm('Delete this scenario?');">
+                    {% csrf_token %}
+                    <button type="submit"
+                            class="btn"
+                            style="background: rgba(200,50,50,0.2);
+                                   color: #cc6666;
+                                   border: 1px solid rgba(200,50,50,0.3)">
+                        {% trans "Delete" %}
+                    </button>
+                </form>
             {% endif %}
-            {% if scenario.staff_only %}
-                <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: rgba(255,180,50,0.15); color: #ddaa44; margin-left: 4px;">Staff Only</span>
-            {% endif %}
+        </div>
+    </div>
+    <!-- Description -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "Description" %}
+        </div>
+        <p class="text-muted">
+            {{ scenario.description }}
         </p>
     </div>
-    <div class="flex-row gap-sm">
-        {% if not is_default %}
-        <a href="{% url 'scenario_editor:edit' scenario_id=scenario.id %}" class="btn btn-primary">Edit Form</a>
-        <a href="{% url 'scenario_editor:yaml_editor' scenario_id=scenario.id %}" class="btn btn-secondary">YAML Editor</a>
-        {% endif %}
-        <a href="{% url 'scenario_editor:clone' scenario_id=scenario.id %}" class="btn btn-secondary">Clone</a>
-        <a href="{% url 'scenario_editor:export' scenario_id=scenario.id %}" class="btn btn-secondary">Export YAML</a>
-        {% if not is_default %}
-        <form method="post" action="{% url 'scenario_editor:delete' scenario_id=scenario.id %}" style="display: inline;" onsubmit="return confirm('Delete this scenario?');">
-            {% csrf_token %}
-            <button type="submit" class="btn" style="background: rgba(200,50,50,0.2); color: #cc6666; border: 1px solid rgba(200,50,50,0.3);">Delete</button>
-        </form>
-        {% endif %}
-    </div>
-</div>
-
-<!-- Description -->
-<div class="card">
-    <div class="card-title">Description</div>
-    <p class="text-muted">{{ scenario.description }}</p>
-</div>
-
-<!-- Scenario Properties -->
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
-    <div class="card">
-        <div class="card-title">Properties</div>
-        <table style="width: 100%;">
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0; width: 140px;">NGFW Required</th>
-                <td style="padding: 4px 0;">{% if scenario.ngfw %}Yes{% else %}No{% endif %}</td>
-            </tr>
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">Total Instances</th>
-                <td style="padding: 4px 0;">{{ scenario.instances|length }}</td>
-            </tr>
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">Total Subnets</th>
-                <td style="padding: 4px 0;">{{ scenario.subnets|length }}</td>
-            </tr>
-            {% if scenario.agent_requirements %}
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">Requires Agent</th>
-                <td style="padding: 4px 0;">
-                    {% if scenario.agent_requirements.has_from_agent %}User selects OS{% endif %}
-                    {% if scenario.agent_requirements.requires_windows %}Windows{% endif %}
-                    {% if scenario.agent_requirements.requires_linux %}Linux{% endif %}
-                    {% if not scenario.agent_requirements.has_from_agent and not scenario.agent_requirements.requires_windows and not scenario.agent_requirements.requires_linux %}No{% endif %}
-                </td>
-            </tr>
-            {% endif %}
-        </table>
-    </div>
-    <div class="card">
-        <div class="card-title">Access Control</div>
-        <table style="width: 100%;">
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0; width: 140px;">Enabled</th>
-                <td style="padding: 4px 0;">
-                    <form method="post" action="{% url 'scenario_editor:toggle_enabled' scenario_id=scenario.id %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm" onclick="return confirm('Toggle this setting?')" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: 70px; {% if scenario.enabled %}background: rgba(100,200,100,0.2); color: #88cc88; border: 1px solid rgba(100,200,100,0.3);{% else %}background: rgba(200,100,100,0.2); color: #cc8888; border: 1px solid rgba(200,100,100,0.3);{% endif %}">
-                            {% if scenario.enabled %}Enabled{% else %}Disabled{% endif %}
-                        </button>
-                    </form>
-                </td>
-            </tr>
-            <tr>
-                <th scope="row" class="text-muted" style="padding: 4px 0;">Access</th>
-                <td style="padding: 4px 0;">
-                    <form method="post" action="{% url 'scenario_editor:toggle_staff_only' scenario_id=scenario.id %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm" onclick="return confirm('Toggle this setting?')" style="font-size: 12px; height: 24px; padding: 0 10px; border-radius: 12px; min-width: 70px; {% if scenario.staff_only %}background: rgba(255,180,50,0.2); color: #ddaa44; border: 1px solid rgba(255,180,50,0.3);{% else %}background: rgba(100,100,100,0.2); color: var(--theme-text-secondary); border: 1px solid rgba(100,100,100,0.3);{% endif %}">
-                            {% if scenario.staff_only %}Staff Only{% else %}All Users{% endif %}
-                        </button>
-                    </form>
-                </td>
-            </tr>
-        </table>
-    </div>
-</div>
-
-<!-- Instances -->
-<div class="card">
-    <div class="card-title">Instances ({{ scenario.instances|length }})</div>
-    <div style="overflow-x: auto;">
-        <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
-            <thead>
-                <tr style="border-bottom: 1px solid var(--theme-border);">
-                    <th style="padding: 8px 12px; text-align: left; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">Name</th>
-                    <th style="padding: 8px 12px; text-align: left; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">Role</th>
-                    <th style="padding: 8px 12px; text-align: left; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">OS Type</th>
-                    <th style="padding: 8px 12px; text-align: center; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">XDR Agent</th>
-                    <th style="padding: 8px 12px; text-align: center; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">Domain</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for inst in scenario.instances %}
-                <tr style="border-bottom: 1px solid var(--theme-border);">
-                    <td style="padding: 8px 12px; font-weight: 600;">{{ inst.name }}</td>
-                    <td style="padding: 8px 12px;">{{ inst.role }}</td>
-                    <td style="padding: 8px 12px; font-family: monospace; font-size: 13px;">{{ inst.os_type }}</td>
-                    <td style="padding: 8px 12px; text-align: center;">{% if inst.xdr_agent %}Yes{% else %}No{% endif %}</td>
-                    <td style="padding: 8px 12px; text-align: center;">
-                        {% if inst.domain_controller %}DC{% elif inst.join_domain %}Joined{% else %}-{% endif %}
+    <!-- Scenario Properties -->
+    <div style="display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-bottom: 16px">
+        <div class="card">
+            <div class="card-title">
+                {% trans "Properties" %}
+            </div>
+            <table style="width: 100%;">
+                <tr>
+                    <th scope="row"
+                        class="text-muted"
+                        style="padding: 4px 0;
+                               width: 140px">
+                        {% trans "NGFW Required" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {% if scenario.ngfw %}
+                            {% trans "Yes" %}
+                        {% else %}
+                            {% trans "No" %}
+                        {% endif %}
                     </td>
                 </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<!-- Subnets -->
-{% if scenario.subnets %}
-<div class="card">
-    <div class="card-title">Subnets ({{ scenario.subnets|length }})</div>
-    <div style="overflow-x: auto;">
-        <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
-            <thead>
-                <tr style="border-bottom: 1px solid var(--theme-border);">
-                    <th style="padding: 8px 12px; text-align: left; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">Name</th>
-                    <th style="padding: 8px 12px; text-align: left; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">Instances</th>
-                    <th style="padding: 8px 12px; text-align: left; font-size: 12px; color: var(--theme-text-secondary); text-transform: uppercase;">Connected To</th>
+                <tr>
+                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                        {% trans "Total Instances" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {{ scenario.instances|length }}
+                    </td>
                 </tr>
-            </thead>
-            <tbody>
-                {% for subnet in scenario.subnets %}
-                <tr style="border-bottom: 1px solid var(--theme-border);">
-                    <td style="padding: 8px 12px; font-weight: 600;">{{ subnet.name }}</td>
-                    <td style="padding: 8px 12px;">{{ subnet.instances|join:", " }}</td>
-                    <td style="padding: 8px 12px;">{% if subnet.connected_to %}{{ subnet.connected_to|join:", " }}{% else %}-{% endif %}</td>
+                <tr>
+                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                        {% trans "Total Subnets" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        {{ scenario.subnets|length }}
+                    </td>
                 </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                {% if scenario.agent_requirements %}
+                    <tr>
+                        <th scope="row" class="text-muted" style="padding: 4px 0;">
+                            {% trans "Requires Agent" %}
+                        </th>
+                        <td style="padding: 4px 0;">
+                            {% if scenario.agent_requirements.has_from_agent %}
+                                {% trans "User selects OS" %}
+                            {% endif %}
+                            {% if scenario.agent_requirements.requires_windows %}
+                                {% trans "Windows" %}
+                            {% endif %}
+                            {% if scenario.agent_requirements.requires_linux %}
+                                {% trans "Linux" %}
+                            {% endif %}
+                            {% if not scenario.agent_requirements.has_from_agent %}
+                                {% if not scenario.agent_requirements.requires_windows %}
+                                    {% if not scenario.agent_requirements.requires_linux %}
+                                        {% trans "No" %}
+                                    {% endif %}
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endif %}
+            </table>
+        </div>
+        <div class="card">
+            <div class="card-title">
+                {% trans "Access Control" %}
+            </div>
+            <table style="width: 100%;">
+                <tr>
+                    <th scope="row"
+                        class="text-muted"
+                        style="padding: 4px 0;
+                               width: 140px">
+                        {% trans "Enabled" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        <form method="post"
+                              action="{% url 'scenario_editor:toggle_enabled' scenario_id=scenario.id %}"
+                              style="display: inline">
+                            {% csrf_token %}
+                            <button type="submit"
+                                    class="btn btn-sm"
+                                    onclick="return confirm('Toggle this setting?')"
+                                    style="font-size: 12px;
+                                           height: 24px;
+                                           padding: 0 10px;
+                                           border-radius: 12px;
+                                           min-width: 70px;
+                                           {% if scenario.enabled %}
+                                               background: rgba(100,200,100,0.2);
+                                               color: #88cc88;
+                                               border: 1px solid rgba(100,200,100,0.3);
+                                           {% else %}
+                                               background: rgba(200,100,100,0.2);
+                                               color: #cc8888;
+                                               border: 1px solid rgba(200,100,100,0.3);
+                                           {% endif %}">
+                                {% if scenario.enabled %}
+                                    {% trans "Enabled" %}
+                                {% else %}
+                                    {% trans "Disabled" %}
+                                {% endif %}
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted" style="padding: 4px 0;">
+                        {% trans "Access" %}
+                    </th>
+                    <td style="padding: 4px 0;">
+                        <form method="post"
+                              action="{% url 'scenario_editor:toggle_staff_only' scenario_id=scenario.id %}"
+                              style="display: inline">
+                            {% csrf_token %}
+                            <button type="submit"
+                                    class="btn btn-sm"
+                                    onclick="return confirm('Toggle this setting?')"
+                                    style="font-size: 12px;
+                                           height: 24px;
+                                           padding: 0 10px;
+                                           border-radius: 12px;
+                                           min-width: 70px;
+                                           {% if scenario.staff_only %}
+                                               background: rgba(255,180,50,0.2);
+                                               color: #ddaa44;
+                                               border: 1px solid rgba(255,180,50,0.3);
+                                           {% else %}
+                                               background: rgba(100,100,100,0.2);
+                                               color: var(--theme-text-secondary);
+                                               border: 1px solid rgba(100,100,100,0.3);
+                                           {% endif %}">
+                                {% if scenario.staff_only %}
+                                    {% trans "Staff Only" %}
+                                {% else %}
+                                    {% trans "All Users" %}
+                                {% endif %}
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+            </table>
+        </div>
     </div>
-</div>
-{% endif %}
-
-<!-- YAML Preview -->
-<div class="card">
-    <div class="card-title">YAML Definition</div>
-    <pre style="background: var(--theme-surface); border: 1px solid var(--theme-border); border-radius: 4px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; color: var(--theme-text); white-space: pre-wrap;">{{ yaml_content }}</pre>
-</div>
-
-<div style="margin-top: 16px;">
-    <a href="{% url 'scenario_editor:list' %}" class="btn btn-secondary">Back to Scenarios</a>
-</div>
+    <!-- Instances -->
+    <div class="card">
+        <div class="card-title">
+            {% blocktrans with v1=scenario.instances|length %}
+                Instances ({{ v1 }})
+            {% endblocktrans %}
+        </div>
+        <div style="overflow-x: auto;">
+            <table style="width: 100%;
+                          border-collapse: collapse;
+                          margin-top: 8px">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--theme-border);">
+                        <th style="padding: 8px 12px;
+                                   text-align: left;
+                                   font-size: 12px;
+                                   color: var(--theme-text-secondary);
+                                   text-transform: uppercase">
+                            {% trans "Name" %}
+                        </th>
+                        <th style="padding: 8px 12px;
+                                   text-align: left;
+                                   font-size: 12px;
+                                   color: var(--theme-text-secondary);
+                                   text-transform: uppercase">
+                            {% trans "Role" %}
+                        </th>
+                        <th style="padding: 8px 12px;
+                                   text-align: left;
+                                   font-size: 12px;
+                                   color: var(--theme-text-secondary);
+                                   text-transform: uppercase">
+                            {% trans "OS Type" %}
+                        </th>
+                        <th style="padding: 8px 12px;
+                                   text-align: center;
+                                   font-size: 12px;
+                                   color: var(--theme-text-secondary);
+                                   text-transform: uppercase">
+                            {% trans "XDR Agent" %}
+                        </th>
+                        <th style="padding: 8px 12px;
+                                   text-align: center;
+                                   font-size: 12px;
+                                   color: var(--theme-text-secondary);
+                                   text-transform: uppercase">
+                            {% trans "Domain" %}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inst in scenario.instances %}
+                        <tr style="border-bottom: 1px solid var(--theme-border);">
+                            <td style="padding: 8px 12px; font-weight: 600;">
+                                {{ inst.name }}
+                            </td>
+                            <td style="padding: 8px 12px;">
+                                {{ inst.role }}
+                            </td>
+                            <td style="padding: 8px 12px;
+                                       font-family: monospace;
+                                       font-size: 13px">
+                                {{ inst.os_type }}
+                            </td>
+                            <td style="padding: 8px 12px; text-align: center;">
+                                {% if inst.xdr_agent %}
+                                    {% trans "Yes" %}
+                                {% else %}
+                                    {% trans "No" %}
+                                {% endif %}
+                            </td>
+                            <td style="padding: 8px 12px; text-align: center;">
+                                {% if inst.domain_controller %}
+                                    {% trans "DC" %}
+                                {% elif inst.join_domain %}
+                                    {% trans "Joined" %}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <!-- Subnets -->
+    {% if scenario.subnets %}
+        <div class="card">
+            <div class="card-title">
+                {% blocktrans with v1=scenario.subnets|length %}
+                    Subnets ({{ v1 }})
+                {% endblocktrans %}
+            </div>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%;
+                              border-collapse: collapse;
+                              margin-top: 8px">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--theme-border);">
+                            <th style="padding: 8px 12px;
+                                       text-align: left;
+                                       font-size: 12px;
+                                       color: var(--theme-text-secondary);
+                                       text-transform: uppercase">
+                                {% trans "Name" %}
+                            </th>
+                            <th style="padding: 8px 12px;
+                                       text-align: left;
+                                       font-size: 12px;
+                                       color: var(--theme-text-secondary);
+                                       text-transform: uppercase">
+                                {% trans "Instances" %}
+                            </th>
+                            <th style="padding: 8px 12px;
+                                       text-align: left;
+                                       font-size: 12px;
+                                       color: var(--theme-text-secondary);
+                                       text-transform: uppercase">
+                                {% trans "Connected To" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for subnet in scenario.subnets %}
+                            <tr style="border-bottom: 1px solid var(--theme-border);">
+                                <td style="padding: 8px 12px; font-weight: 600;">
+                                    {{ subnet.name }}
+                                </td>
+                                <td style="padding: 8px 12px;">
+                                    {{ subnet.instances|join:", " }}
+                                </td>
+                                <td style="padding: 8px 12px;">
+                                    {% if subnet.connected_to %}
+                                        {{ subnet.connected_to|join:", " }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+    <!-- YAML Preview -->
+    <div class="card">
+        <div class="card-title">
+            {% trans "YAML Definition" %}
+        </div>
+        <pre style="background: var(--theme-surface);
+                    border: 1px solid var(--theme-border);
+                    border-radius: 4px;
+                    padding: 16px;
+                    overflow-x: auto;
+                    font-size: 13px;
+                    line-height: 1.5;
+                    color: var(--theme-text);
+                    white-space: pre-wrap">{{ yaml_content }}</pre>
+    </div>
+    <div style="margin-top: 16px;">
+        <a href="{% url 'scenario_editor:list' %}"
+           class="btn btn-secondary">{% trans "Back to Scenarios" %}</a>
+    </div>
 {% endblock %}

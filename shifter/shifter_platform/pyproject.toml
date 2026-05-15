@@ -42,7 +42,7 @@ dev = [
     "mypy>=1.14.0",
     "django-stubs>=5.1.0",
     "types-requests>=2.32.0",
-    "types-bleach>=6.2.0",
+    "types-bleach>=6.3.0.20260508",
     "types-Markdown>=3.7.0",
 ]
 

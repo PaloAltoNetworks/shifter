@@ -889,7 +889,7 @@ requires-dist = [
     { name = "markupsafe", specifier = ">=3.0.3" },
     { name = "paramiko", specifier = ">=4.0.0" },
     { name = "parver", specifier = ">=0.5" },
-    { name = "protobuf", specifier = ">=5.29.6" },
+    { name = "protobuf", specifier = ">=7.34.1" },
     { name = "psycopg", specifier = ">=3.3.2" },
     { name = "psycopg-binary", specifier = ">=3.3.2" },
     { name = "pycparser", specifier = ">=2.23" },

@@ -13,7 +13,7 @@ jmespath==1.0.1
 paramiko==5.0.0
 MarkupSafe==3.0.3
 parver==0.5
-protobuf==5.29.6
+protobuf==7.34.1
 psycopg==3.3.2
 psycopg-binary==3.3.2
 pycparser==2.23
